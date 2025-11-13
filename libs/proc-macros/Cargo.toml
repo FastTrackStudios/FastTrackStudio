@@ -1,0 +1,25 @@
+[package]
+name = "proc-macros"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+# Proc macro utilities
+syn = { version = "2.0", features = ["full", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+
+# Convert case for method names
+convert_case = "0.6"
+
+# Serialization for generated code
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+# For testing the generated code
+trybuild = "1.0"

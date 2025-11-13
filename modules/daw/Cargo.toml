@@ -1,0 +1,60 @@
+[package]
+name = "daw"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Tower ecosystem
+tower = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Enum utilities
+strum = { version = "0.25", features = ["derive"] }
+
+# Async traits
+async-trait = { workspace = true }
+
+# Local macros
+proc-macros = { path = "../../libs/proc-macros" }
+macros = { path = "../../libs/macros" }
+
+# For macro hygiene
+paste = "1.0"
+
+# Example server dependencies
+axum = { version = "0.7", optional = true }
+tower-http = { version = "0.5", features = ["trace", "cors", "timeout"], optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
+rosc = { version = "0.10" }
+
+# Multi-protocol routing dependencies
+reqwest = { version = "0.11", features = ["json"] }
+rand = "0.8"
+
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+reqwest = { version = "0.11", features = ["json"] }
+
+[[example]]
+name = "simple_osc_example"
+required-features = ["osc-server"]
+
+[features]
+# Server examples
+http-server = ["axum", "tower-http", "tracing", "tracing-subscriber", "chrono"]
+osc-server = ["tracing", "tracing-subscriber"]
+multi-protocol = ["tracing", "tracing-subscriber"]
