@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "modules/daw",
     "modules/daw/transport",
     "modules/daw/project",
     "modules/daw/primitives",
     "modules/daw/marker-region",
     "modules/fts",
     "libs/macros",
+    "apps/server",
 ]
 
 [workspace.package]

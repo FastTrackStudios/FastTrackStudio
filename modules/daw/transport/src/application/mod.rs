@@ -25,16 +25,16 @@ pub mod mock;
 // pub mod web;
 
 // Re-export implementations
-pub use mock::MockTransport;
+pub use mock::MockTransportService;
 
 // Re-export for convenience
-pub use crate::transport::core::actions::TransportActions;
+pub use crate::core::TransportActions;
 
 /// Trait alias for transport implementations that can be used across the system
 pub trait ApplicationTransport: TransportActions + Send + Sync + 'static {}
 
 // Implement the trait alias for all concrete types
-impl ApplicationTransport for MockTransport {}
+impl ApplicationTransport for MockTransportService {}
 
 /// Helper function to create a transport implementation (removed boxed version due to async trait incompatibility)
 // Note: Async traits are not dyn-compatible, so we work with concrete types
@@ -108,10 +108,10 @@ impl TransportBuilder {
     }
 
     /// Build the transport implementation
-    pub fn build(self) -> Result<MockTransport, String> {
+    pub fn build(self) -> Result<MockTransportService, String> {
         match self.transport_type {
             TransportType::Mock => {
-                let transport = MockTransport::new();
+                let transport = MockTransportService::new();
                 Ok(transport)
             },
             // Future implementations would be handled here
@@ -130,14 +130,14 @@ impl Default for TransportBuilder {
 // ============================================================================
 
 /// Create a mock transport for testing
-pub fn mock_transport() -> MockTransport {
-    MockTransport::new()
+pub fn mock_transport() -> MockTransportService {
+    MockTransportService::new()
 }
 
 /// Create a mock transport with a specific node ID
-pub fn mock_transport_with_id(_node_id: String) -> MockTransport {
+pub fn mock_transport_with_id(_node_id: String) -> MockTransportService {
     // Note: MockTransport doesn't currently support node_id parameter
-    MockTransport::new()
+    MockTransportService::new()
 }
 
 // ============================================================================

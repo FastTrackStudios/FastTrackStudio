@@ -53,6 +53,9 @@
 // Core domain module
 pub mod core;
 
+// Application layer module
+pub mod application;
+
 // Infrastructure adapters module
 pub mod infra;
 
@@ -61,6 +64,9 @@ pub use core::{
     Transport, TransportActions, TransportError,
     Tempo, PlayState, RecordMode
 };
+
+// Re-export application types for convenience
+pub use application::mock::MockTransportService;
 
 // Re-export infrastructure adapters for convenience
 pub use infra::{

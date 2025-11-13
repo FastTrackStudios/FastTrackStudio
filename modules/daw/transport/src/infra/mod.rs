@@ -19,16 +19,16 @@
 
 pub mod http;
 pub mod websocket;
+pub mod osc;
 
 // Future protocol adapters
-// pub mod osc;
 // pub mod grpc;
 // pub mod midi;
 
 // Re-export all infrastructure adapters
 pub use http::create_transport_http_router;
 pub use websocket::{create_transport_ws_router, WebSocketHandler, TransportMessage, TransportCommand, TransportStatus};
+pub use osc::{create_transport_osc_server, OscTransportServer};
 
 // Future re-exports
-// pub use osc::create_transport_osc_handler;
 // pub use grpc::create_transport_grpc_service;

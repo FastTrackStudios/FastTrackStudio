@@ -474,13 +474,13 @@ mod tests {
 
         // Test sync methods
         assert!(transport.play().is_ok());
-        assert!(transport.is_playing().unwrap());
+        assert!(transport.is_playing());
 
         assert!(transport.pause().is_ok());
-        assert!(!transport.is_playing().unwrap());
+        assert!(!transport.is_playing());
 
         assert!(transport.stop().is_ok());
-        assert!(!transport.is_playing().unwrap());
+        assert!(!transport.is_playing());
 
         // Test configuration methods
         let tempo = Tempo::new(140.0);
