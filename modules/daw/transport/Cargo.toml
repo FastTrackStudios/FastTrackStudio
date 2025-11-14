@@ -50,3 +50,9 @@ name = "multi_protocol_server"
 
 [[example]]
 name = "test_osc_client"
+
+[[example]]
+name = "comprehensive_server"
+
+[[example]]
+name = "protocol_integration"

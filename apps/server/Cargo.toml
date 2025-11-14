@@ -6,6 +6,29 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+# Local dependencies
+transport = { path = "../../modules/daw/transport" }
+primitives = { path = "../../modules/daw/primitives" }
+
+# Core dependencies
+tokio = { version = "1.48.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+# HTTP server dependencies
+axum = { version = "0.8.6", features = ["default", "ws"] }
+tower = { version = "0.5.2", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors"] }
+
+# OSC protocol dependencies
+rosc = "0.11.4"
+matchit = "0.8.0"
+
+# WebSocket dependencies
+futures-util = { version = "0.3", features = ["sink", "std"] }
+
+# JSON handling
+serde_json = "1.0"
 
 [lints]
 workspace = true

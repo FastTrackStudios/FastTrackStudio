@@ -53,6 +53,35 @@ curl -X POST http://localhost:3000/set_tempo \
 curl http://localhost:3000/status
 ```
 
+### Multi-Protocol Server (Recommended)
+
+```bash
+cargo run --example comprehensive_server
+```
+
+This starts all three protocol servers simultaneously:
+- **HTTP REST API**: http://localhost:3000
+- **WebSocket**: ws://localhost:3001/ws  
+- **OSC Server**: UDP port 9000
+- **Web Interface**: http://localhost:3002
+
+Open http://localhost:3002 in your browser for an interactive testing interface!
+
+### Protocol Integration Pattern (Recommended for Learning)
+
+```bash
+cargo run --example protocol_integration
+```
+
+This focused example demonstrates the core integration pattern:
+- **HTTP REST API**: http://localhost:3000
+- **WebSocket**: ws://localhost:3001/ws  
+- **OSC Server**: UDP port 9000
+- **Shared State**: All protocols control the same transport instance
+- **Clean Architecture**: Shows separation between protocols and domain logic
+
+Perfect for understanding how to integrate multiple protocols with shared business logic!
+
 ### OSC Server
 
 ```bash
