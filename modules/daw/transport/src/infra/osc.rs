@@ -36,13 +36,13 @@
 //! - `/transport/get_record_mode` - Get record mode (string)
 //! - `/transport/is_ready` - Check if transport is ready (bool)
 
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::net::UdpSocket;
-use rosc::{OscPacket, OscMessage, OscType, encoder, decoder};
+use crate::core::{RecordMode, Tempo, TransportActions};
 use matchit::Router;
-use crate::core::{TransportActions, Tempo, RecordMode};
 use primitives::TimeSignature;
+use rosc::{OscMessage, OscPacket, OscType, decoder, encoder};
+use std::sync::Arc;
+use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
 
 /// Route identifiers for OSC handlers
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,7 +92,10 @@ where
     T: TransportActions + Send + Sync + 'static,
 {
     /// Create a new OSC transport server with matchit routing
-    pub async fn new(transport: Arc<Mutex<T>>, bind_addr: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn new(
+        transport: Arc<Mutex<T>>,
+        bind_addr: &str,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let socket = UdpSocket::bind(bind_addr).await?;
         println!("OSC Transport Server listening on {}", bind_addr);
 
@@ -165,7 +168,10 @@ where
     }
 
     /// Handle an incoming OSC packet
-    async fn handle_osc_packet(&mut self, packet: OscPacket) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_osc_packet(
+        &mut self,
+        packet: OscPacket,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match packet {
             OscPacket::Message(msg) => {
                 self.handle_osc_message(msg).await?;
@@ -181,7 +187,10 @@ where
     }
 
     /// Handle an individual OSC message using matchit router
-    async fn handle_osc_message(&mut self, msg: OscMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_osc_message(
+        &mut self,
+        msg: OscMessage,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let addr = msg.addr.as_str();
 
         match self.router.at(addr) {
@@ -190,7 +199,8 @@ where
                 self.handle_route(*matched.value, &msg.args).await?;
             }
             Err(_) => {
-                self.send_error_response(&format!("Unknown OSC address: {}", addr)).await;
+                self.send_error_response(&format!("Unknown OSC address: {}", addr))
+                    .await;
             }
         }
 
@@ -198,7 +208,11 @@ where
     }
 
     /// Dispatch to the appropriate handler based on route identifier
-    async fn handle_route(&mut self, route: OscRoute, args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_route(
+        &mut self,
+        route: OscRoute,
+        args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match route {
             // Transport control
             OscRoute::Play => self.handle_play(args).await,
@@ -231,7 +245,10 @@ where
     }
 
     // Transport control handlers
-    async fn handle_play(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_play(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.play()
@@ -243,7 +260,10 @@ where
         Ok(())
     }
 
-    async fn handle_pause(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_pause(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.pause()
@@ -255,7 +275,10 @@ where
         Ok(())
     }
 
-    async fn handle_stop(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_stop(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.stop()
@@ -267,7 +290,10 @@ where
         Ok(())
     }
 
-    async fn handle_play_pause(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_play_pause(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.play_pause()
@@ -279,7 +305,10 @@ where
         Ok(())
     }
 
-    async fn handle_play_stop(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_play_stop(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.play_stop()
@@ -292,7 +321,10 @@ where
     }
 
     // Recording control handlers
-    async fn handle_start_recording(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_start_recording(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.start_recording()
@@ -304,7 +336,10 @@ where
         Ok(())
     }
 
-    async fn handle_stop_recording(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_stop_recording(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.stop_recording()
@@ -316,7 +351,10 @@ where
         Ok(())
     }
 
-    async fn handle_toggle_recording(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_toggle_recording(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.toggle_recording()
@@ -329,7 +367,10 @@ where
     }
 
     // Configuration handlers
-    async fn handle_set_tempo(&mut self, args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_set_tempo(
+        &mut self,
+        args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(OscType::Float(bpm)) = args.first() {
             let result = {
                 let mut transport = self.transport.lock().await;
@@ -351,17 +392,22 @@ where
                 Err(e) => self.send_error_response(&e.to_string()).await,
             }
         } else {
-            self.send_error_response("Invalid tempo argument. Expected float BPM value.").await;
+            self.send_error_response("Invalid tempo argument. Expected float BPM value.")
+                .await;
         }
         Ok(())
     }
 
-    async fn handle_set_time_signature(&mut self, args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_set_time_signature(
+        &mut self,
+        args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if args.len() >= 2 {
             let numerator = match &args[0] {
                 OscType::Int(n) => *n,
                 _ => {
-                    self.send_error_response("Invalid numerator argument. Expected integer.").await;
+                    self.send_error_response("Invalid numerator argument. Expected integer.")
+                        .await;
                     return Ok(());
                 }
             };
@@ -369,7 +415,8 @@ where
             let denominator = match &args[1] {
                 OscType::Int(d) => *d,
                 _ => {
-                    self.send_error_response("Invalid denominator argument. Expected integer.").await;
+                    self.send_error_response("Invalid denominator argument. Expected integer.")
+                        .await;
                     return Ok(());
                 }
             };
@@ -384,18 +431,27 @@ where
                 Err(e) => self.send_error_response(&e.to_string()).await,
             }
         } else {
-            self.send_error_response("Invalid time signature arguments. Expected [int numerator, int denominator].").await;
+            self.send_error_response(
+                "Invalid time signature arguments. Expected [int numerator, int denominator].",
+            )
+            .await;
         }
         Ok(())
     }
 
-    async fn handle_set_position(&mut self, args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_set_position(
+        &mut self,
+        args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(seconds) = args.first() {
             let seconds_val = match seconds {
                 OscType::Float(s) => *s as f64,
                 OscType::Double(s) => *s,
                 _ => {
-                    self.send_error_response("Invalid position argument. Expected float seconds value.").await;
+                    self.send_error_response(
+                        "Invalid position argument. Expected float seconds value.",
+                    )
+                    .await;
                     return Ok(());
                 }
             };
@@ -409,19 +465,26 @@ where
                 Err(e) => self.send_error_response(&e.to_string()).await,
             }
         } else {
-            self.send_error_response("Missing position argument. Expected float seconds value.").await;
+            self.send_error_response("Missing position argument. Expected float seconds value.")
+                .await;
         }
         Ok(())
     }
 
-    async fn handle_set_record_mode(&mut self, args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_set_record_mode(
+        &mut self,
+        args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(OscType::String(mode_str)) = args.first() {
             let record_mode = match mode_str.to_lowercase().as_str() {
                 "normal" => RecordMode::Normal,
                 "time_selection" => RecordMode::TimeSelection,
                 "item" => RecordMode::Item,
                 _ => {
-                    self.send_error_response("Invalid record mode. Valid options: normal, time_selection, item").await;
+                    self.send_error_response(
+                        "Invalid record mode. Valid options: normal, time_selection, item",
+                    )
+                    .await;
                     return Ok(());
                 }
             };
@@ -435,13 +498,17 @@ where
                 Err(e) => self.send_error_response(&e.to_string()).await,
             }
         } else {
-            self.send_error_response("Invalid record mode argument. Expected string.").await;
+            self.send_error_response("Invalid record mode argument. Expected string.")
+                .await;
         }
         Ok(())
     }
 
     // Query handlers
-    async fn handle_get_status(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_get_status(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let status_result = {
             let transport = self.transport.lock().await;
             (
@@ -455,7 +522,14 @@ where
         };
 
         match status_result {
-            (Ok(is_playing), Ok(is_recording), Ok(tempo), Ok(position), Ok(time_sig), Ok(record_mode)) => {
+            (
+                Ok(is_playing),
+                Ok(is_recording),
+                Ok(tempo),
+                Ok(position),
+                Ok(time_sig),
+                Ok(record_mode),
+            ) => {
                 let record_mode_str = match record_mode {
                     RecordMode::Normal => "normal",
                     RecordMode::TimeSelection => "time_selection",
@@ -477,13 +551,17 @@ where
                 self.send_osc_message(msg).await;
             }
             _ => {
-                self.send_error_response("Failed to get transport status").await;
+                self.send_error_response("Failed to get transport status")
+                    .await;
             }
         }
         Ok(())
     }
 
-    async fn handle_is_playing(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_is_playing(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.is_playing()
@@ -501,7 +579,10 @@ where
         Ok(())
     }
 
-    async fn handle_is_recording(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_is_recording(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.is_recording()
@@ -519,7 +600,10 @@ where
         Ok(())
     }
 
-    async fn handle_get_tempo(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_get_tempo(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.get_tempo()
@@ -537,7 +621,10 @@ where
         Ok(())
     }
 
-    async fn handle_get_position(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_get_position(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.get_position()
@@ -555,7 +642,10 @@ where
         Ok(())
     }
 
-    async fn handle_get_time_signature(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_get_time_signature(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.get_time_signature()
@@ -576,7 +666,10 @@ where
         Ok(())
     }
 
-    async fn handle_get_record_mode(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_get_record_mode(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.get_record_mode()
@@ -600,7 +693,10 @@ where
         Ok(())
     }
 
-    async fn handle_is_ready(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_is_ready(
+        &mut self,
+        _args: &[OscType],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.is_ready()
@@ -687,8 +783,16 @@ mod tests {
         assert!(router.insert("/transport/play", OscRoute::Play).is_ok());
         assert!(router.insert("/transport/pause", OscRoute::Pause).is_ok());
         assert!(router.insert("/transport/stop", OscRoute::Stop).is_ok());
-        assert!(router.insert("/transport/tempo", OscRoute::SetTempo).is_ok());
-        assert!(router.insert("/transport/status", OscRoute::GetStatus).is_ok());
+        assert!(
+            router
+                .insert("/transport/tempo", OscRoute::SetTempo)
+                .is_ok()
+        );
+        assert!(
+            router
+                .insert("/transport/status", OscRoute::GetStatus)
+                .is_ok()
+        );
 
         // Test route matching
         let matched = router.at("/transport/play");
@@ -768,13 +872,26 @@ mod tests {
         for route in &all_routes {
             // Just verify they can be matched (we don't need to actually call handlers in tests)
             match route {
-                OscRoute::Play | OscRoute::Pause | OscRoute::Stop |
-                OscRoute::PlayPause | OscRoute::PlayStop |
-                OscRoute::StartRecording | OscRoute::StopRecording | OscRoute::ToggleRecording |
-                OscRoute::SetTempo | OscRoute::SetTimeSignature | OscRoute::SetPosition | OscRoute::SetRecordMode |
-                OscRoute::GetStatus | OscRoute::IsPlaying | OscRoute::IsRecording |
-                OscRoute::GetTempo | OscRoute::GetPosition | OscRoute::GetTimeSignature |
-                OscRoute::GetRecordMode | OscRoute::IsReady => {
+                OscRoute::Play
+                | OscRoute::Pause
+                | OscRoute::Stop
+                | OscRoute::PlayPause
+                | OscRoute::PlayStop
+                | OscRoute::StartRecording
+                | OscRoute::StopRecording
+                | OscRoute::ToggleRecording
+                | OscRoute::SetTempo
+                | OscRoute::SetTimeSignature
+                | OscRoute::SetPosition
+                | OscRoute::SetRecordMode
+                | OscRoute::GetStatus
+                | OscRoute::IsPlaying
+                | OscRoute::IsRecording
+                | OscRoute::GetTempo
+                | OscRoute::GetPosition
+                | OscRoute::GetTimeSignature
+                | OscRoute::GetRecordMode
+                | OscRoute::IsReady => {
                     // All routes are handled
                 }
             }

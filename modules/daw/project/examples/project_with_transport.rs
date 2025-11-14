@@ -5,11 +5,11 @@
 //! - Project composes transport functionality via trait bounds
 //! - The example implements both traits on a concrete type
 
-use project::{ProjectActions, create_project_http_router};
-use transport::{Transport, TransportActions, TransportError, Tempo, RecordMode};
 use primitives::TimeSignature;
+use project::{ProjectActions, create_project_http_router};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use transport::{RecordMode, Tempo, Transport, TransportActions, TransportError};
 
 /// A concrete DAW project that implements both project and transport actions
 #[derive(Clone)]
@@ -79,9 +79,15 @@ impl TransportActions for DawProject {
         }
     }
 
-    fn set_time_signature(&mut self, time_signature: TimeSignature) -> Result<String, TransportError> {
+    fn set_time_signature(
+        &mut self,
+        time_signature: TimeSignature,
+    ) -> Result<String, TransportError> {
         self.transport.time_signature = time_signature;
-        Ok(format!("Time signature set to {}/{}", time_signature.numerator, time_signature.denominator))
+        Ok(format!(
+            "Time signature set to {}/{}",
+            time_signature.numerator, time_signature.denominator
+        ))
     }
 
     fn set_record_mode(&mut self, record_mode: RecordMode) -> Result<String, TransportError> {
@@ -147,8 +153,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create the project HTTP router - this demonstrates the dependency relationship
     // The router requires both ProjectActions AND TransportActions to be implemented
-    let app = create_project_http_router::<DawProject>()
-        .with_state(project_state.clone());
+    let app = create_project_http_router::<DawProject>().with_state(project_state.clone());
 
     println!("\n🌐 Starting HTTP server on http://localhost:3001");
     println!("Available endpoints:");

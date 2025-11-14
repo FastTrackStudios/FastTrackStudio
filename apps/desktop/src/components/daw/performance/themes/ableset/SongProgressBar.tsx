@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { useWebSocket } from "../../../../../contexts/WebSocketContext";
+import type { SetlistState, SectionInfo, TempoChangeInfo } from "../../../../../types/placeholders";
+import type { Transport } from "../../../../../bindings";
 
 // Add CSS keyframes for flashing animation
 const flashKeyframes = `
@@ -23,68 +24,23 @@ if (typeof document !== "undefined") {
   document.head.appendChild(style);
 }
 
-interface TempoChangeInfo {
-  position_seconds: number;
-  position_beats: number;
-  tempo: number;
-  time_signature_numerator: number;
-  time_signature_denominator: number;
-  is_tempo_marker: boolean;
-  is_time_signature_marker: boolean;
-}
 
-interface SectionInfo {
-  index: number;
-  name: string;
-  start_position_beats: number;
-  end_position_beats: number;
-  length_measures: number;
-  length_time: number;
-  color?: number;
-}
-
-interface SongInfo {
-  index: number;
-  name: string;
-  start_position_seconds: number;
-  end_position_seconds: number;
-  start_position_beats: number;
-  end_position_beats: number;
-  length_measures: number;
-  length_time: number;
-  sections: SectionInfo[];
-  color?: number;
-  tempo_changes: TempoChangeInfo[];
-}
-
-interface SetlistState {
-  songs: SongInfo[];
-  current_song: SongInfo | null;
-  current_section: SectionInfo | null;
-  next_section: SectionInfo | null;
-  queued_name: [string, string]; // [song_name, section_name]
-  queued_index: [number, number]; // [song_index, section_index]
-  timestamp: number;
-}
-
-interface TransportState {
-  position_seconds: number;
-  timestamp: number;
-}
-
-interface WebSocketMessage {
-  type: "Setlist" | "Transport" | "MarkerRegions" | "Error";
-  data: SetlistState | TransportState | any;
-}
 
 interface SongProgressBarProps {
   className?: string;
+  setlistState: SetlistState | null;
+  transport: Transport | null;
+  connected: boolean;
+  onSectionClick?: (sectionIndex: number) => void;
 }
 
 export const SongProgressBar: React.FC<SongProgressBarProps> = ({
   className = "",
+  setlistState,
+  transport,
+  connected,
+  onSectionClick,
 }) => {
-  const { setlistState, transportState, connected, commands } = useWebSocket();
 
   // Track previous section to detect changes
   const [previousSectionIndex, setPreviousSectionIndex] = useState<
@@ -116,8 +72,9 @@ export const SongProgressBar: React.FC<SongProgressBarProps> = ({
 
   // Handle section click to jump to that section
   const handleSectionClick = (section: SectionInfo) => {
-    // Jump to the section by index
-    commands.jumpToSection(section.index);
+    if (onSectionClick) {
+      onSectionClick(section.index);
+    }
   };
 
   // Calculate section widths based on their length in measures
@@ -171,12 +128,12 @@ export const SongProgressBar: React.FC<SongProgressBarProps> = ({
 
   // Calculate overall song progress based on measures/beats
   const getSongProgress = (): number => {
-    if (!transportState || !setlistState?.current_song) return 0;
+    if (!transport || !setlistState?.current_song) return 0;
 
     const song = setlistState.current_song;
 
     // Use accurate beat position from transport state
-    const currentPositionBeats = transportState.position_beats;
+    const currentPositionBeats = transport.playhead_position?.musical?.beat || 0;
     const songStartBeats = song.start_position_beats;
     const songEndBeats = song.end_position_beats;
 
@@ -247,7 +204,7 @@ export const SongProgressBar: React.FC<SongProgressBarProps> = ({
   // Calculate progress within the current section (0-100%)
   const getSectionProgress = (): number => {
     if (
-      !transportState ||
+      !transport ||
       !setlistState?.current_section ||
       !setlistState?.current_song
     ) {
@@ -255,7 +212,7 @@ export const SongProgressBar: React.FC<SongProgressBarProps> = ({
     }
 
     // Use accurate beat position from transport state
-    const currentPositionBeats = transportState.position_beats;
+    const currentPositionBeats = transport.playhead_position?.musical?.beat || 0;
     const section = setlistState.current_section;
 
     const sectionStartBeats = section.start_position_beats;
@@ -310,7 +267,7 @@ export const SongProgressBar: React.FC<SongProgressBarProps> = ({
     });
 
     // Sort changes by position to track previous values
-    const sortedChanges = [...song.tempo_changes].sort(
+    const sortedChanges = [...(song.tempo_changes || [])].sort(
       (a, b) => a.position_beats - b.position_beats
     );
 

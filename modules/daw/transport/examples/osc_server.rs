@@ -69,9 +69,8 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use transport::{
-    application::mock::MockTransportService,
+    TransportActions, application::mock::MockTransportService,
     infra::osc::create_transport_osc_server,
-    TransportActions,
 };
 
 #[tokio::main]
@@ -92,10 +91,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 println!("🎼 Initial Transport State:");
                 println!("   - Play State: {:?}", transport_state.play_state);
                 println!("   - Tempo: {:.1} BPM", transport_state.tempo.bpm);
-                println!("   - Time Signature: {}/{}",
+                println!(
+                    "   - Time Signature: {}/{}",
                     transport_state.time_signature.numerator,
-                    transport_state.time_signature.denominator);
-                println!("   - Position: {:.2}s", transport_state.playhead_position.time.to_seconds());
+                    transport_state.time_signature.denominator
+                );
+                println!(
+                    "   - Position: {:.2}s",
+                    transport_state.playhead_position.time.to_seconds()
+                );
                 println!("   - Record Mode: {:?}", transport_state.record_mode);
             }
             Err(e) => println!("❌ Error getting initial state: {}", e),

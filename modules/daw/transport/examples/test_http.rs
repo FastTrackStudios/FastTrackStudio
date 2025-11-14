@@ -3,12 +3,12 @@
 //! This example creates a transport HTTP server and makes test requests
 //! to verify that POST endpoints are working correctly.
 
-use transport::{
-    core::{Transport, Tempo},
-    infra::create_transport_http_router,
-};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use transport::{
+    core::{Tempo, Transport},
+    infra::create_transport_http_router,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -47,59 +47,81 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 1: GET status (should work)
     println!("\n1. Testing GET /transport/status");
-    match client.get("http://localhost:3003/transport/status").send().await {
+    match client
+        .get("http://localhost:3003/transport/status")
+        .send()
+        .await
+    {
         Ok(response) => {
             println!("   ✅ Status: {}", response.status());
             if response.status().is_success() {
                 let body = response.text().await?;
                 println!("   📄 Response: {}", body);
             }
-        },
+        }
         Err(e) => println!("   ❌ Error: {}", e),
     }
 
     // Test 2: GET is_playing (should work)
     println!("\n2. Testing GET /transport/is_playing");
-    match client.get("http://localhost:3003/transport/is_playing").send().await {
+    match client
+        .get("http://localhost:3003/transport/is_playing")
+        .send()
+        .await
+    {
         Ok(response) => {
             println!("   ✅ Status: {}", response.status());
             if response.status().is_success() {
                 let body = response.text().await?;
                 println!("   📄 Response: {}", body);
             }
-        },
+        }
         Err(e) => println!("   ❌ Error: {}", e),
     }
 
     // Test 3: POST play (this should work but might be failing)
     println!("\n3. Testing POST /transport/play");
-    match client.post("http://localhost:3003/transport/play").send().await {
+    match client
+        .post("http://localhost:3003/transport/play")
+        .send()
+        .await
+    {
         Ok(response) => {
             println!("   ✅ Status: {}", response.status());
             if response.status().is_success() {
                 let body = response.text().await?;
                 println!("   📄 Response: {}", body);
             } else {
-                let body = response.text().await.unwrap_or_else(|_| "No body".to_string());
+                let body = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "No body".to_string());
                 println!("   ❌ Error body: {}", body);
             }
-        },
+        }
         Err(e) => println!("   ❌ Error: {}", e),
     }
 
     // Test 4: POST pause
     println!("\n4. Testing POST /transport/pause");
-    match client.post("http://localhost:3003/transport/pause").send().await {
+    match client
+        .post("http://localhost:3003/transport/pause")
+        .send()
+        .await
+    {
         Ok(response) => {
             println!("   ✅ Status: {}", response.status());
             if response.status().is_success() {
                 let body = response.text().await?;
                 println!("   📄 Response: {}", body);
             } else {
-                let body = response.text().await.unwrap_or_else(|_| "No body".to_string());
+                let body = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "No body".to_string());
                 println!("   ❌ Error body: {}", body);
             }
-        },
+        }
         Err(e) => println!("   ❌ Error: {}", e),
     }
 
@@ -119,36 +141,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let body = response.text().await?;
                 println!("   📄 Response: {}", body);
             } else {
-                let body = response.text().await.unwrap_or_else(|_| "No body".to_string());
+                let body = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "No body".to_string());
                 println!("   ❌ Error body: {}", body);
             }
-        },
+        }
         Err(e) => println!("   ❌ Error: {}", e),
     }
 
     // Test 6: Verify state changed by checking tempo
     println!("\n6. Testing GET /transport/tempo (should show 140 BPM)");
-    match client.get("http://localhost:3003/transport/tempo").send().await {
+    match client
+        .get("http://localhost:3003/transport/tempo")
+        .send()
+        .await
+    {
         Ok(response) => {
             println!("   ✅ Status: {}", response.status());
             if response.status().is_success() {
                 let body = response.text().await?;
                 println!("   📄 Response: {}", body);
             }
-        },
+        }
         Err(e) => println!("   ❌ Error: {}", e),
     }
 
     // Test 7: Check if playing status changed
     println!("\n7. Testing GET /transport/is_playing (should be true after play)");
-    match client.get("http://localhost:3003/transport/is_playing").send().await {
+    match client
+        .get("http://localhost:3003/transport/is_playing")
+        .send()
+        .await
+    {
         Ok(response) => {
             println!("   ✅ Status: {}", response.status());
             if response.status().is_success() {
                 let body = response.text().await?;
                 println!("   📄 Response: {}", body);
             }
-        },
+        }
         Err(e) => println!("   ❌ Error: {}", e),
     }
 

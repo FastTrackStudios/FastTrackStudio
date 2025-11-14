@@ -6,17 +6,17 @@
 
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         ConnectInfo, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::IntoResponse,
 };
 use futures_util::{sink::SinkExt, stream::StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{Mutex, broadcast, mpsc};
 
-use crate::core::{TransportActions, TransportError, Tempo, RecordMode};
+use crate::core::{RecordMode, Tempo, TransportActions, TransportError};
 use primitives::TimeSignature;
 
 /// WebSocket message types for transport communication
@@ -181,56 +181,47 @@ where
             TransportCommand::StopRecording => transport.stop_recording(),
             TransportCommand::ToggleRecording => transport.toggle_recording(),
 
-            TransportCommand::SetTempo { bpm } => {
-                transport.set_tempo(Tempo::new(*bpm))
-            },
-            TransportCommand::SetTimeSignature { numerator, denominator } => {
-                transport.set_time_signature(TimeSignature::new(*numerator, *denominator))
-            },
+            TransportCommand::SetTempo { bpm } => transport.set_tempo(Tempo::new(*bpm)),
+            TransportCommand::SetTimeSignature {
+                numerator,
+                denominator,
+            } => transport.set_time_signature(TimeSignature::new(*numerator, *denominator)),
             TransportCommand::SetRecordMode { mode } => {
                 let record_mode = match mode.to_lowercase().as_str() {
                     "normal" => RecordMode::Normal,
                     "time_selection" => RecordMode::TimeSelection,
                     "item" => RecordMode::Item,
-                    _ => return TransportResponse {
-                        success: false,
-                        message: "Invalid record mode".to_string(),
-                        data: None,
-                    },
+                    _ => {
+                        return TransportResponse {
+                            success: false,
+                            message: "Invalid record mode".to_string(),
+                            data: None,
+                        };
+                    }
                 };
                 transport.set_record_mode(record_mode)
-            },
-            TransportCommand::SetPosition { seconds } => {
-                transport.set_position(*seconds)
-            },
+            }
+            TransportCommand::SetPosition { seconds } => transport.set_position(*seconds),
 
             TransportCommand::GetStatus => {
                 // Handle this separately below
                 Ok("Status request".to_string())
+            }
+            TransportCommand::GetTempo => match transport.get_tempo() {
+                Ok(tempo) => Ok(format!("Current tempo: {} BPM", tempo.bpm)),
+                Err(e) => Err(e),
             },
-            TransportCommand::GetTempo => {
-                match transport.get_tempo() {
-                    Ok(tempo) => Ok(format!("Current tempo: {} BPM", tempo.bpm)),
-                    Err(e) => Err(e),
-                }
+            TransportCommand::GetPosition => match transport.get_position() {
+                Ok(pos) => Ok(format!("Current position: {} seconds", pos)),
+                Err(e) => Err(e),
             },
-            TransportCommand::GetPosition => {
-                match transport.get_position() {
-                    Ok(pos) => Ok(format!("Current position: {} seconds", pos)),
-                    Err(e) => Err(e),
-                }
+            TransportCommand::IsPlaying => match transport.is_playing() {
+                Ok(playing) => Ok(format!("Is playing: {}", playing)),
+                Err(e) => Err(e),
             },
-            TransportCommand::IsPlaying => {
-                match transport.is_playing() {
-                    Ok(playing) => Ok(format!("Is playing: {}", playing)),
-                    Err(e) => Err(e),
-                }
-            },
-            TransportCommand::IsRecording => {
-                match transport.is_recording() {
-                    Ok(recording) => Ok(format!("Is recording: {}", recording)),
-                    Err(e) => Err(e),
-                }
+            TransportCommand::IsRecording => match transport.is_recording() {
+                Ok(recording) => Ok(format!("Is recording: {}", recording)),
+                Err(e) => Err(e),
             },
         };
 
@@ -239,15 +230,21 @@ where
 
         // Broadcast status update after any state-changing command
         match &command {
-            TransportCommand::Play | TransportCommand::Pause | TransportCommand::Stop |
-            TransportCommand::PlayPause | TransportCommand::PlayStop |
-            TransportCommand::StartRecording | TransportCommand::StopRecording |
-            TransportCommand::ToggleRecording | TransportCommand::SetTempo { .. } |
-            TransportCommand::SetTimeSignature { .. } | TransportCommand::SetRecordMode { .. } |
-            TransportCommand::SetPosition { .. } => {
+            TransportCommand::Play
+            | TransportCommand::Pause
+            | TransportCommand::Stop
+            | TransportCommand::PlayPause
+            | TransportCommand::PlayStop
+            | TransportCommand::StartRecording
+            | TransportCommand::StopRecording
+            | TransportCommand::ToggleRecording
+            | TransportCommand::SetTempo { .. }
+            | TransportCommand::SetTimeSignature { .. }
+            | TransportCommand::SetRecordMode { .. }
+            | TransportCommand::SetPosition { .. } => {
                 let _ = self.broadcast_status().await;
-            },
-            _ => {}, // No broadcast for queries
+            }
+            _ => {} // No broadcast for queries
         }
 
         match result {
@@ -323,16 +320,16 @@ async fn handle_transport_socket<T>(
                             if let Ok(json) = serde_json::to_string(&response_msg) {
                                 let _ = tx_clone.send(Message::Text(json.into()));
                             }
-                        },
+                        }
                         Ok(TransportMessage::Ping) => {
                             let pong = TransportMessage::Pong;
                             if let Ok(json) = serde_json::to_string(&pong) {
                                 let _ = tx_clone.send(Message::Text(json.into()));
                             }
-                        },
+                        }
                         Ok(_) => {
                             // Ignore other message types from client
-                        },
+                        }
                         Err(e) => {
                             println!("Failed to parse message from {who}: {e}");
                             let error_msg = TransportMessage::Error {
@@ -343,14 +340,14 @@ async fn handle_transport_socket<T>(
                             }
                         }
                     }
-                },
+                }
                 Message::Close(_) => {
                     println!("WebSocket {who} disconnected");
                     break;
-                },
+                }
                 Message::Ping(data) => {
                     let _ = tx_clone.send(Message::Pong(data));
-                },
+                }
                 _ => {
                     // Handle other message types as needed
                 }
@@ -395,8 +392,7 @@ pub fn create_transport_ws_router<T>() -> axum::Router<WebSocketHandler<T>>
 where
     T: TransportActions + Send + Sync + 'static,
 {
-    axum::Router::new()
-        .route("/ws", axum::routing::get(ws_transport_handler::<T>))
+    axum::Router::new().route("/ws", axum::routing::get(ws_transport_handler::<T>))
 }
 
 #[cfg(test)]
@@ -441,7 +437,7 @@ mod tests {
         let parsed: TransportMessage = serde_json::from_str(&json).unwrap();
 
         match parsed {
-            TransportMessage::Command(TransportCommand::Play) => {},
+            TransportMessage::Command(TransportCommand::Play) => {}
             _ => panic!("Failed to serialize/deserialize correctly"),
         }
     }

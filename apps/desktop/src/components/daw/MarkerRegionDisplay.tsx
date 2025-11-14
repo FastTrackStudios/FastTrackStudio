@@ -2,16 +2,23 @@ import React from "react";
 import { MapPin, Square } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useWebSocket } from "../contexts/WebSocketContext";
+import type { MarkerRegionState } from "../../types/placeholders";
 
 interface MarkerRegionDisplayProps {
   className?: string;
+  markerRegionState: MarkerRegionState | null;
+  connected: boolean;
+  loading: boolean;
+  error: string | null;
 }
 
 export const MarkerRegionDisplay: React.FC<MarkerRegionDisplayProps> = ({
   className = "",
+  markerRegionState,
+  connected,
+  loading,
+  error,
 }) => {
-  const { markerRegionState, connected, connectionStatus } = useWebSocket();
 
   const formatTime = (seconds: number): string => {
     const minutes = Math.floor(seconds / 60);
@@ -25,11 +32,11 @@ export const MarkerRegionDisplay: React.FC<MarkerRegionDisplayProps> = ({
         <CardTitle className="flex items-center justify-between">
           <span>Markers & Regions</span>
           <Badge variant={connected ? "default" : "destructive"}>
-            {connectionStatus === "connecting"
-              ? "Connecting..."
-              : connectionStatus === "connected"
+            {loading
+              ? "Loading..."
+              : connected
               ? "Connected"
-              : connectionStatus === "error"
+              : error
               ? "Error"
               : "Disconnected"}
           </Badge>
@@ -142,9 +149,9 @@ export const MarkerRegionDisplay: React.FC<MarkerRegionDisplayProps> = ({
 
         {!connected && (
           <div className="text-center text-muted-foreground">
-            <p>Not connected to REAPER</p>
+            <p>Not connected to app state</p>
             <p className="text-xs">
-              Make sure REAPER is running with the FTS Extensions plugin loaded.
+              {error ? `Error: ${error}` : "Loading app state..."}
             </p>
           </div>
         )}

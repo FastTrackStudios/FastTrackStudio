@@ -3,6 +3,8 @@
 //! This module provides fundamental types for representing time and musical positions
 //! that can be reused across different domain modules (transport, marker_region, etc.)
 
+use ts_rs::TS;
+
 /// Musical position in measures.beats.subdivisions format
 ///
 /// Subdivisions are 0-999, where 1000 would equal a full beat.
@@ -11,7 +13,10 @@
 /// Examples:
 /// - `MusicalPosition { measure: 0, beat: 0, subdivision: 500 }` = 0.0.500 (eighth note in first beat)
 /// - `MusicalPosition { measure: 4, beat: 3, subdivision: 400 }` = 4.3.400 (measure 4, beat 3, 40% through the beat)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, TS,
+)]
+#[ts(export)]
 pub struct MusicalPosition {
     /// Measure number (0-indexed)
     pub measure: i32,
@@ -33,7 +38,11 @@ impl MusicalPosition {
             "Subdivision must be in range 0-999, got {}",
             subdivision
         );
-        Self { measure, beat, subdivision }
+        Self {
+            measure,
+            beat,
+            subdivision,
+        }
     }
 
     /// Create a new musical position with validation
@@ -41,14 +50,25 @@ impl MusicalPosition {
     /// Returns an error if subdivision is not in the range 0-999
     pub fn try_new(measure: i32, beat: i32, subdivision: i32) -> Result<Self, String> {
         if subdivision < 0 || subdivision > 999 {
-            return Err(format!("Subdivision must be in range 0-999, got {}", subdivision));
+            return Err(format!(
+                "Subdivision must be in range 0-999, got {}",
+                subdivision
+            ));
         }
-        Ok(Self { measure, beat, subdivision })
+        Ok(Self {
+            measure,
+            beat,
+            subdivision,
+        })
     }
 
     /// Get the position at the start (measure 0, beat 0, subdivision 0)
     pub fn start() -> Self {
-        Self { measure: 0, beat: 0, subdivision: 0 }
+        Self {
+            measure: 0,
+            beat: 0,
+            subdivision: 0,
+        }
     }
 }
 
@@ -65,7 +85,10 @@ impl Default for MusicalPosition {
 /// Examples:
 /// - `TimePosition { minutes: 0, seconds: 5, milliseconds: 250 }` = 0:05.250 (5.25 seconds)
 /// - `TimePosition { minutes: 2, seconds: 30, milliseconds: 500 }` = 2:30.500 (2 minutes, 30.5 seconds)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, TS,
+)]
+#[ts(export)]
 pub struct TimePosition {
     /// Minutes component
     pub minutes: i32,
@@ -92,7 +115,11 @@ impl TimePosition {
             "Milliseconds must be in range 0-999, got {}",
             milliseconds
         );
-        Self { minutes, seconds, milliseconds }
+        Self {
+            minutes,
+            seconds,
+            milliseconds,
+        }
     }
 
     /// Create a new time position with validation
@@ -103,9 +130,16 @@ impl TimePosition {
             return Err(format!("Seconds must be in range 0-59, got {}", seconds));
         }
         if milliseconds < 0 || milliseconds > 999 {
-            return Err(format!("Milliseconds must be in range 0-999, got {}", milliseconds));
+            return Err(format!(
+                "Milliseconds must be in range 0-999, got {}",
+                milliseconds
+            ));
         }
-        Ok(Self { minutes, seconds, milliseconds })
+        Ok(Self {
+            minutes,
+            seconds,
+            milliseconds,
+        })
     }
 
     /// Create a TimePosition from total seconds (as f64)
@@ -117,7 +151,11 @@ impl TimePosition {
         let remaining_ms = total_ms % 60_000;
         let seconds = (remaining_ms / 1000) as i32;
         let milliseconds = (remaining_ms % 1000) as i32;
-        Self { minutes, seconds, milliseconds }
+        Self {
+            minutes,
+            seconds,
+            milliseconds,
+        }
     }
 
     /// Convert to total seconds as f64
@@ -127,7 +165,11 @@ impl TimePosition {
 
     /// Get the position at the start (0:00.000)
     pub fn start() -> Self {
-        Self { minutes: 0, seconds: 0, milliseconds: 0 }
+        Self {
+            minutes: 0,
+            seconds: 0,
+            milliseconds: 0,
+        }
     }
 }
 
@@ -141,7 +183,10 @@ impl Default for TimePosition {
 ///
 /// This allows transport systems to provide position information in multiple formats,
 /// making it easier to integrate with different DAWs that may provide different position types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, TS,
+)]
+#[ts(export)]
 pub struct Position {
     /// Musical position (measure.beat.subdivision)
     pub musical: MusicalPosition,
@@ -186,6 +231,14 @@ impl Position {
             time: TimePosition::start(),
         }
     }
+
+    /// Get musical position as a string in REAPER format (measure.beat.subdivision)
+    pub fn musical_position_string(&self) -> String {
+        format!("{}.{}.{:03}",
+                self.musical.measure + 1,  // Convert to 1-based for display
+                self.musical.beat + 1,     // Convert to 1-based for display
+                self.musical.subdivision)
+    }
 }
 
 impl Default for Position {
@@ -198,7 +251,8 @@ impl Default for Position {
 ///
 /// Contains both start and end positions, each with musical and time representations.
 /// This is the base type used for time selections and loop selections in the transport.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, TS)]
+#[ts(export)]
 pub struct TimeRange {
     /// Start position of the range
     pub start: Position,
@@ -265,7 +319,8 @@ pub type LoopPoints = TimeRange;
 /// - `TimeSignature { numerator: 4, denominator: 4 }` for 4/4 time
 /// - `TimeSignature { numerator: 6, denominator: 8 }` for 6/8 time
 /// - `TimeSignature { numerator: 3, denominator: 4 }` for 3/4 time
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, TS)]
+#[ts(export)]
 pub struct TimeSignature {
     /// Numerator (e.g., 4 for 4/4, 6 for 6/8)
     pub numerator: i32,
@@ -276,12 +331,18 @@ pub struct TimeSignature {
 impl TimeSignature {
     /// Create a new time signature
     pub fn new(numerator: i32, denominator: i32) -> Self {
-        Self { numerator, denominator }
+        Self {
+            numerator,
+            denominator,
+        }
     }
 
     /// Get the default 4/4 time signature
     pub fn four_four() -> Self {
-        Self { numerator: 4, denominator: 4 }
+        Self {
+            numerator: 4,
+            denominator: 4,
+        }
     }
 }
 

@@ -55,19 +55,18 @@
 //! ws.send(JSON.stringify({command: 'play'}));
 //! ```
 
+use axum::routing::get;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use axum::routing::get;
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use transport::{
-    MockTransportService,
-    TransportActions,
+    MockTransportService, TransportActions,
     core::Tempo,
     infra::{
         http::create_transport_http_router,
-        websocket::{create_transport_ws_router, WebSocketHandler},
         osc::create_transport_osc_server,
+        websocket::{WebSocketHandler, create_transport_ws_router},
     },
 };
 
@@ -177,7 +176,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             print_transport_state(&demo_transport, "After direct changes").await;
 
             println!("\n💡 Now test the same operations via HTTP, WebSocket, or OSC!");
-            println!("   All protocols will reflect these changes because they share the same state.");
+            println!(
+                "   All protocols will reflect these changes because they share the same state."
+            );
         }
     });
 
@@ -202,10 +203,14 @@ async fn print_transport_state(transport: &Arc<Mutex<MockTransportService>>, lab
             println!("\n🎼 {} Transport State:", label);
             println!("   ▶️  Play State: {:?}", state.play_state);
             println!("   🎵 Tempo: {:.1} BPM", state.tempo.bpm);
-            println!("   🎶 Time Signature: {}/{}",
-                state.time_signature.numerator,
-                state.time_signature.denominator);
-            println!("   📍 Position: {:.2}s", state.playhead_position.time.to_seconds());
+            println!(
+                "   🎶 Time Signature: {}/{}",
+                state.time_signature.numerator, state.time_signature.denominator
+            );
+            println!(
+                "   📍 Position: {:.2}s",
+                state.playhead_position.time.to_seconds()
+            );
             println!("   🔴 Record Mode: {:?}", state.record_mode);
         }
         Err(e) => println!("❌ Error getting transport state: {}", e),

@@ -10,16 +10,29 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useWebSocket } from "../contexts/WebSocketContext";
+import type { Transport } from "../../bindings";
 
 interface TransportDisplayProps {
   className?: string;
+  transport: Transport | null;
+  connected: boolean;
+  loading: boolean;
+  error: string | null;
+  onPlayPause: () => void;
+  onStop: () => void;
+  onGoToStart: () => void;
 }
 
 export const TransportDisplay: React.FC<TransportDisplayProps> = ({
   className = "",
+  transport,
+  connected,
+  loading,
+  error,
+  onPlayPause,
+  onStop,
+  onGoToStart,
 }) => {
-  const { transportState, connected, connectionStatus } = useWebSocket();
 
   const formatTime = (seconds: number): string => {
     const minutes = Math.floor(seconds / 60);
@@ -36,11 +49,11 @@ export const TransportDisplay: React.FC<TransportDisplayProps> = ({
         <CardTitle className="flex items-center justify-between">
           <span>Transport</span>
           <Badge variant={connected ? "default" : "destructive"}>
-            {connectionStatus === "connecting"
-              ? "Connecting..."
-              : connectionStatus === "connected"
+            {loading
+              ? "Loading..."
+              : connected
               ? "Connected"
-              : connectionStatus === "error"
+              : error
               ? "Error"
               : "Disconnected"}
           </Badge>
@@ -49,23 +62,38 @@ export const TransportDisplay: React.FC<TransportDisplayProps> = ({
       <CardContent className="space-y-4">
         {/* Transport Controls */}
         <div className="flex items-center justify-center gap-2">
-          <Button variant="outline" size="sm">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onGoToStart}
+            disabled={loading}
+          >
             <SkipBack className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="sm">
-            {transportState?.is_playing ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onPlayPause}
+            disabled={loading}
+          >
+            {transport?.play_state === 'Playing' ? (
               <Pause className="h-4 w-4" />
             ) : (
               <Play className="h-4 w-4" />
             )}
           </Button>
-          <Button variant="outline" size="sm">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onStop}
+            disabled={loading}
+          >
             <Square className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" disabled>
             <SkipForward className="h-4 w-4" />
           </Button>
-          {transportState?.is_recording && (
+          {transport?.play_state === 'Recording' && (
             <Button variant="destructive" size="sm">
               <Circle className="h-4 w-4 fill-current" />
             </Button>
@@ -73,46 +101,46 @@ export const TransportDisplay: React.FC<TransportDisplayProps> = ({
         </div>
 
         {/* Transport Information */}
-        {transportState && (
+        {transport && (
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <span className="text-muted-foreground">Position:</span>
               <div className="font-mono text-lg">
-                {formatTime(transportState.position_seconds)}
+                {formatTime(transport.playhead_position?.time?.seconds || 0)}
               </div>
             </div>
             <div>
               <span className="text-muted-foreground">Tempo:</span>
               <div className="font-mono text-lg">
-                {transportState.tempo_bpm.toFixed(1)} BPM
+                {(transport.tempo?.bpm || 120).toFixed(1)} BPM
               </div>
             </div>
             <div>
               <span className="text-muted-foreground">Time Signature:</span>
               <div className="font-mono">
-                {transportState.time_signature_numerator}/
-                {transportState.time_signature_denominator}
+                {transport.time_signature?.numerator || 4}/
+                {transport.time_signature?.denominator || 4}
               </div>
             </div>
             <div>
               <span className="text-muted-foreground">Status:</span>
               <div className="flex items-center gap-2">
-                {transportState.is_playing && (
+                {transport.play_state === 'Playing' && (
                   <Badge variant="default" className="text-xs">
                     Playing
                   </Badge>
                 )}
-                {transportState.is_paused && (
+                {transport.play_state === 'Paused' && (
                   <Badge variant="secondary" className="text-xs">
                     Paused
                   </Badge>
                 )}
-                {transportState.is_recording && (
+                {transport.play_state === 'Recording' && (
                   <Badge variant="destructive" className="text-xs">
                     Recording
                   </Badge>
                 )}
-                {transportState.repeat_enabled && (
+                {transport.looping && (
                   <Badge variant="outline" className="text-xs">
                     Loop
                   </Badge>
@@ -124,9 +152,9 @@ export const TransportDisplay: React.FC<TransportDisplayProps> = ({
 
         {!connected && (
           <div className="text-center text-muted-foreground">
-            <p>Not connected to REAPER</p>
+            <p>Not connected to app state</p>
             <p className="text-xs">
-              Make sure REAPER is running with the FTS Extensions plugin loaded.
+              {error ? `Error: ${error}` : "Loading app state..."}
             </p>
           </div>
         )}

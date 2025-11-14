@@ -1,10 +1,7 @@
 import React from "react";
-import { SongTitle } from "./SongTitle";
-import { SongDescription } from "./SongDescription";
-import { StatusBar } from "./StatusBar";
+import { EnhancedStatusBar } from "./EnhancedStatusBar";
 import { TopControls } from "./TopControls";
-import { SongProgressBar } from "./SongProgressBar";
-import { DetailBadges } from "./DetailBadges";
+import { PerformanceContainer } from "../../../containers/PerformanceContainer";
 import { SettingsContext, SettingsDropdownProvider } from "./SettingsDropdown";
 
 interface AblesetProps {
@@ -43,22 +40,24 @@ const AblesetContent: React.FC<AblesetProps> = ({ className = "", onExit }) => {
       <div className="flex-1 w-full pb-48 flex flex-col px-24">
         <div className="w-full flex-1 flex flex-col justify-center space-y-8">
           <div className="w-full text-center space-y-4">
-            <SongTitle className="w-full" />
+            <PerformanceContainer component="songTitle" className="w-full" />
             {isSettingEnabled("songDescriptions") && (
-              <SongDescription className="w-full" />
+              <PerformanceContainer component="songDescription" className="w-full" />
             )}
           </div>
 
           {isSettingEnabled("songInformation") && (
-            <DetailBadges className="w-full justify-center" />
+            <PerformanceContainer component="detailBadges" className="w-full justify-center" />
           )}
 
-          {isSettingEnabled("songProgress") && <SongProgressBar />}
+          {isSettingEnabled("songProgress") && (
+            <PerformanceContainer component="songProgressBar" />
+          )}
         </div>
       </div>
 
       {/* Status Bar at Bottom */}
-      <StatusBar />
+      <EnhancedStatusBar />
     </div>
   );
 };

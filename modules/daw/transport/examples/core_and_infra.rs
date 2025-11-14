@@ -3,14 +3,14 @@
 //! This example demonstrates the clean separation between core domain logic
 //! and infrastructure adapters in the transport module.
 
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use transport::{
     // Core domain types and traits
-    core::{Transport, TransportActions, Tempo},
+    core::{Tempo, Transport, TransportActions},
     // Infrastructure HTTP adapter
     infra::create_transport_http_router,
 };
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

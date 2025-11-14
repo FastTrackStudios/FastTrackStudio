@@ -2,16 +2,29 @@ import React, { useState } from "react";
 import { Play, Pause, Square, SkipBack, SkipForward } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useWebSocket } from "../contexts/WebSocketContext";
+import type { Transport } from "../../bindings";
 
 interface TransportBarProps {
   className?: string;
+  transport: Transport | null;
+  connected: boolean;
+  loading: boolean;
+  error: string | null;
+  onPlayPause: () => void;
+  onStop: () => void;
+  onGoToStart: () => void;
 }
 
 export const TransportBar: React.FC<TransportBarProps> = ({
   className = "",
+  transport,
+  connected,
+  loading,
+  error,
+  onPlayPause,
+  onStop,
+  onGoToStart,
 }) => {
-  const { transportState, connected, connectionStatus } = useWebSocket();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
 
@@ -42,31 +55,46 @@ export const TransportBar: React.FC<TransportBarProps> = ({
           variant={connected ? "default" : "destructive"}
           className="text-xs"
         >
-          {connectionStatus === "connecting"
-            ? "Connecting..."
-            : connectionStatus === "connected"
+          {loading && !appState
+            ? "Loading..."
+            : connected
             ? "Connected"
-            : connectionStatus === "error"
+            : error
             ? "Error"
             : "Disconnected"}
         </Badge>
 
         {/* Transport Controls */}
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onGoToStart}
+            disabled={loading}
+          >
             <SkipBack className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="sm">
-            {transportState?.is_playing ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onPlayPause}
+            disabled={loading}
+          >
+            {transport?.play_state === 'Playing' ? (
               <Pause className="h-4 w-4" />
             ) : (
               <Play className="h-4 w-4" />
             )}
           </Button>
-          <Button variant="ghost" size="sm">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onStop}
+            disabled={loading}
+          >
             <Square className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="sm">
+          <Button variant="ghost" size="sm" disabled>
             <SkipForward className="h-4 w-4" />
           </Button>
         </div>
@@ -92,14 +120,14 @@ export const TransportBar: React.FC<TransportBarProps> = ({
       </div>
 
       {/* Expanded Content */}
-      {isExpanded && transportState && (
+      {isExpanded && transport && (
         <div className="mt-3 pt-3 border-t space-y-2 text-sm">
           <div className="grid grid-cols-2 gap-2">
             <div>
               <span className="text-muted-foreground">Position:</span>
               <div className="font-mono">
-                {Math.floor(transportState.position_seconds / 60)}:
-                {Math.floor(transportState.position_seconds % 60)
+                {Math.floor((transport.playhead_position?.time?.seconds || 0) / 60)}:
+                {Math.floor((transport.playhead_position?.time?.seconds || 0) % 60)
                   .toString()
                   .padStart(2, "0")}
               </div>
@@ -107,16 +135,16 @@ export const TransportBar: React.FC<TransportBarProps> = ({
             <div>
               <span className="text-muted-foreground">BPM:</span>
               <div className="font-mono">
-                {transportState.tempo_bpm.toFixed(1)}
+                {(transport.tempo?.bpm || 120).toFixed(1)}
               </div>
             </div>
             <div>
               <span className="text-muted-foreground">Playing:</span>
-              <div>{transportState.is_playing ? "Yes" : "No"}</div>
+              <div>{transport.play_state === 'Playing' ? "Yes" : "No"}</div>
             </div>
             <div>
               <span className="text-muted-foreground">Recording:</span>
-              <div>{transportState.is_recording ? "Yes" : "No"}</div>
+              <div>{transport.play_state === 'Recording' ? "Yes" : "No"}</div>
             </div>
           </div>
         </div>

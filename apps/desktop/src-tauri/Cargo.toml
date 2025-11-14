@@ -23,3 +23,9 @@ tauri.workspace = true
 tauri-plugin-opener.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+transport = { path = "../../../modules/daw/transport" }
+project = { path = "../../../modules/daw/project" }
+primitives = { path = "../../../modules/daw/primitives" }
+tokio = { workspace = true, features = ["full"] }
+ts-rs = { version = "11.1", features = ["serde-compat"] }
+chrono = { version = "0.4", features = ["serde"] }

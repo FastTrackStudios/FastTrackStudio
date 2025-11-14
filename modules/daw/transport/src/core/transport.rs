@@ -4,9 +4,11 @@
 //! playback state, recording, and transport control in a DAW.
 
 use primitives::{Position, TimeSelection, TimeSignature};
+use ts_rs::TS;
 
 /// Playback state enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, TS)]
+#[ts(export)]
 pub enum PlayState {
     /// Transport is stopped
     Stopped,
@@ -25,7 +27,8 @@ impl Default for PlayState {
 }
 
 /// Recording mode enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, TS)]
+#[ts(export)]
 pub enum RecordMode {
     /// Normal recording mode
     Normal,
@@ -42,7 +45,8 @@ impl Default for RecordMode {
 }
 
 /// Tempo structure
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, TS)]
+#[ts(export)]
 pub struct Tempo {
     /// Beats per minute
     pub bpm: f64,
@@ -70,8 +74,8 @@ impl Default for Tempo {
 ///
 /// This is the core state container for all transport-related information
 /// in the DAW. It manages playback state, position, timing, and recording.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[derive(PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, TS, PartialEq)]
+#[ts(export)]
 pub struct Transport {
     /// Current playback state
     pub play_state: PlayState,
@@ -228,10 +232,14 @@ pub trait TransportActions: Send + Sync {
     fn set_tempo(&mut self, tempo: Tempo) -> Result<String, crate::TransportError>;
 
     /// Set the time signature
-    fn set_time_signature(&mut self, time_signature: TimeSignature) -> Result<String, crate::TransportError>;
+    fn set_time_signature(
+        &mut self,
+        time_signature: TimeSignature,
+    ) -> Result<String, crate::TransportError>;
 
     /// Set the recording mode
-    fn set_record_mode(&mut self, record_mode: RecordMode) -> Result<String, crate::TransportError>;
+    fn set_record_mode(&mut self, record_mode: RecordMode)
+    -> Result<String, crate::TransportError>;
 
     /// Set playhead position in seconds
     fn set_position(&mut self, seconds: f64) -> Result<String, crate::TransportError>;
@@ -316,18 +324,30 @@ impl TransportActions for Transport {
 
     fn set_tempo(&mut self, tempo: Tempo) -> Result<String, crate::TransportError> {
         if !tempo.is_valid() {
-            return Err(crate::TransportError::InvalidTempo(format!("{} BPM", tempo.bpm)));
+            return Err(crate::TransportError::InvalidTempo(format!(
+                "{} BPM",
+                tempo.bpm
+            )));
         }
         self.tempo = tempo;
         Ok(format!("Tempo set to {} BPM", tempo.bpm))
     }
 
-    fn set_time_signature(&mut self, time_signature: TimeSignature) -> Result<String, crate::TransportError> {
+    fn set_time_signature(
+        &mut self,
+        time_signature: TimeSignature,
+    ) -> Result<String, crate::TransportError> {
         self.time_signature = time_signature;
-        Ok(format!("Time signature set to {}/{}", time_signature.numerator, time_signature.denominator))
+        Ok(format!(
+            "Time signature set to {}/{}",
+            time_signature.numerator, time_signature.denominator
+        ))
     }
 
-    fn set_record_mode(&mut self, record_mode: RecordMode) -> Result<String, crate::TransportError> {
+    fn set_record_mode(
+        &mut self,
+        record_mode: RecordMode,
+    ) -> Result<String, crate::TransportError> {
         self.record_mode = record_mode;
         Ok(format!("Record mode set to {:?}", record_mode))
     }

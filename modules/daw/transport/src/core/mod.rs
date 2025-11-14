@@ -4,12 +4,9 @@
 //! It defines the core types, traits, and business rules without any
 //! infrastructure dependencies.
 
-pub mod transport;
 pub mod error;
+pub mod transport;
 
 // Re-export core types for easy access
-pub use transport::{
-    Transport, TransportActions,
-    Tempo, PlayState, RecordMode
-};
 pub use error::TransportError;
+pub use transport::{PlayState, RecordMode, Tempo, Transport, TransportActions};

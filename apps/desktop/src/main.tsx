@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
 import { ThemeProvider } from '@/components/theme-provider';
-import { WebSocketProvider } from '@/contexts/WebSocketContext';
+
 import "./App.css";
 
 // Create a new router instance
@@ -19,9 +19,7 @@ declare module '@tanstack/react-router' {
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ThemeProvider defaultTheme="dark" storageKey="fasttrack-ui-theme">
-      <WebSocketProvider>
-        <RouterProvider router={router} />
-      </WebSocketProvider>
+      <RouterProvider router={router} />
     </ThemeProvider>
   </React.StrictMode>,
 );

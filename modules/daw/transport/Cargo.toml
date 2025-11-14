@@ -15,6 +15,14 @@ thiserror = "1.0"
 # HTTP server dependencies
 axum = { version = "0.8.6", features = ["default", "ws"] }
 tower = { version = "0.5.2", features = ["full"] }
+tower-http = { version = "0.5", features = ["trace", "timeout", "cors"] }
+
+# Utilities
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# TypeScript generation
+ts-rs = { version = "11.1", features = ["serde-compat", "chrono-impl"] }
 
 # OSC protocol dependencies
 rosc = "0.11.4"
@@ -23,8 +31,7 @@ matchit = "0.8.0"
 # WebSocket dependencies
 futures-util = { version = "0.3", features = ["sink", "std"] }
 
-# HTTP middleware
-tower-http = { version = "0.5", features = ["cors"] }
+# HTTP middleware (combined with above entry)
 
 # HTTP client for testing
 reqwest = { version = "0.11", features = ["json"] }

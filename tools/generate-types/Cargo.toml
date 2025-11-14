@@ -1,0 +1,21 @@
+[package]
+name = "generate-types"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "generate-types"
+path = "src/main.rs"
+
+[dependencies]
+# Local dependencies - import all modules that export types
+transport = { path = "../../modules/daw/transport" }
+project = { path = "../../modules/daw/project" }
+primitives = { path = "../../modules/daw/primitives" }
+desktop_lib = { package = "desktop", path = "../../apps/desktop/src-tauri" }
+
+# ts-rs for type generation
+ts-rs = { version = "11.1", features = ["serde-compat"] }
+
+# Utilities
+anyhow = "1.0"

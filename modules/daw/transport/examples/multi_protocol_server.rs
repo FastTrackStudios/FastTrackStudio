@@ -51,21 +51,17 @@
 //! ### WebSocket
 //! Connect to ws://localhost:3001/ws for real-time updates
 
+use axum::{Router, routing::get};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use axum::{
-    Router,
-    routing::get,
-};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use transport::{
-    MockTransportService,
-    TransportActions,
+    MockTransportService, TransportActions,
     infra::{
         http::create_transport_http_router,
-        websocket::{create_transport_ws_router, WebSocketHandler},
         osc::create_transport_osc_server,
+        websocket::{WebSocketHandler, create_transport_ws_router},
     },
 };
 
@@ -87,10 +83,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 println!("🎼 Initial Transport State:");
                 println!("   - Play State: {:?}", transport_state.play_state);
                 println!("   - Tempo: {:.1} BPM", transport_state.tempo.bpm);
-                println!("   - Time Signature: {}/{}",
+                println!(
+                    "   - Time Signature: {}/{}",
                     transport_state.time_signature.numerator,
-                    transport_state.time_signature.denominator);
-                println!("   - Position: {:.2}s", transport_state.playhead_position.time.to_seconds());
+                    transport_state.time_signature.denominator
+                );
+                println!(
+                    "   - Position: {:.2}s",
+                    transport_state.playhead_position.time.to_seconds()
+                );
                 println!("   - Record Mode: {:?}", transport_state.record_mode);
             }
             Err(e) => println!("❌ Error getting initial state: {}", e),
@@ -114,13 +115,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let app = Router::new()
             .nest("/", http_router)
             .route("/health", get(|| async { "OK" }))
-            .layer(
-                ServiceBuilder::new()
-                    .layer(CorsLayer::permissive())
-            )
+            .layer(ServiceBuilder::new().layer(CorsLayer::permissive()))
             .with_state(transport_http);
 
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await
+        let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+            .await
             .expect("Failed to bind HTTP server");
 
         println!("✅ HTTP server listening on http://localhost:3000");
@@ -143,7 +142,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .route("/health", get(|| async { "WebSocket OK" }))
             .with_state(ws_handler);
 
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await
+        let listener = tokio::net::TcpListener::bind("0.0.0.0:3001")
+            .await
             .expect("Failed to bind WebSocket server");
 
         println!("✅ WebSocket server listening on ws://localhost:3001");

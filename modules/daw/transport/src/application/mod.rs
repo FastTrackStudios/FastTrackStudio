@@ -113,8 +113,7 @@ impl TransportBuilder {
             TransportType::Mock => {
                 let transport = MockTransportService::new();
                 Ok(transport)
-            },
-            // Future implementations would be handled here
+            } // Future implementations would be handled here
         }
     }
 }

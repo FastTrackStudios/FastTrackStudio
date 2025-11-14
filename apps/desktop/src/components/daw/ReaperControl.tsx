@@ -30,9 +30,7 @@ import { OverviewTab } from "./OverviewTab";
 import { KeymapsTab } from "./KeymapsTab";
 import { RawEntriesTab } from "./RawEntriesTab";
 import { TestingTab } from "./TestingTab";
-import { TransportBar } from "./TransportBar";
-import { MarkerRegionDisplay } from "./MarkerRegionDisplay";
-import { SetlistSongView } from "./SetlistSongView";
+import { TransportContainer, SetlistContainer, PerformanceContainer, MarkerRegionContainer } from "./containers";
 import { BottomNavigation } from "./BottomNavigation";
 import { SideNavigation } from "./SideNavigation";
 import { Ableset } from "./performance/themes/ableset";
@@ -292,11 +290,11 @@ export const ReaperControl: React.FC = () => {
                   </CardHeader>
                   <CardContent className="space-y-6">
                     {/* Main Row: Setlist and Song Sections side by side */}
-                    <SetlistSongView />
+                    <SetlistContainer view="songView" />
 
                     {/* Bottom Row: Markers and Regions */}
                     <div className="w-full">
-                      <MarkerRegionDisplay />
+                      <MarkerRegionContainer />
                     </div>
 
                     <p className="text-muted-foreground text-sm">
@@ -392,7 +390,7 @@ export const ReaperControl: React.FC = () => {
       </div>
 
       {/* Transport Bar (appears globally in top right) */}
-      <TransportBar />
+      <TransportContainer />
 
       {/* Side Navigation (appears at left edge) */}
       <SideNavigation

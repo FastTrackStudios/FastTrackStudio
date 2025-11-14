@@ -9,7 +9,6 @@ import {
   CircleDot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useWebSocket } from "../../../../../contexts/WebSocketContext";
 
 interface StatusBarProps {
   className?: string;
@@ -57,43 +56,29 @@ const TransportButton: React.FC<TransportButtonProps> = ({
 };
 
 export const StatusBar: React.FC<StatusBarProps> = ({ className = "" }) => {
-  const { transportState, setlistState, connected, commands } = useWebSocket();
+  // This StatusBar is deprecated - use EnhancedStatusBar instead
+  // Keeping minimal implementation to avoid breaking existing code
 
   const handleGoToStart = () => {
-    // Jump to the beginning of the current song
-    if (setlistState?.current_song) {
-      commands.jumpToSong(setlistState.current_song.index);
-    } else {
-      // Fallback: jump to time 0
-      commands.jumpToTime(0);
-    }
+    console.log('StatusBar: GoToStart clicked - use EnhancedStatusBar instead');
   };
 
   const handleTogglePlayPause = () => {
-    // If recording, toggle recording instead of play/pause
-    if (transportState?.is_recording) {
-      commands.toggleRecording();
-    } else {
-      commands.playPause();
-    }
+    console.log('StatusBar: PlayPause clicked - use EnhancedStatusBar instead');
   };
 
   const handleToggleLoop = () => {
-    commands.toggleLoop();
+    console.log('StatusBar: Loop clicked - use EnhancedStatusBar instead');
   };
 
   const handleNext = () => {
-    // Jump to next section, or next song if at the end of current song
-    if (setlistState?.next_section) {
-      commands.jumpBySections(1);
-    } else if (setlistState?.next_song) {
-      commands.jumpBySongs(1);
-    }
+    console.log('StatusBar: Next clicked - use EnhancedStatusBar instead');
   };
 
-  const isPlaying = transportState?.is_playing || false;
-  const isRecording = transportState?.is_recording || false;
-  const isLooping = transportState?.repeat_enabled || false;
+  // Deprecated component - use EnhancedStatusBar instead
+  const isPlaying = false;
+  const isRecording = false;
+  const isLooping = false;
 
   return (
     <div className={`fixed bottom-0 left-0 right-0 ${className}`}>

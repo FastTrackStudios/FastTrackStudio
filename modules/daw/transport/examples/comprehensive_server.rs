@@ -66,22 +66,17 @@
 //! ws.send(JSON.stringify({command: 'play'}));
 //! ```
 
+use axum::{Router, response::Html, routing::get};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use axum::{
-    Router,
-    routing::get,
-    response::Html,
-};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use transport::{
-    MockTransportService,
-    TransportActions,
+    MockTransportService, TransportActions,
     infra::{
         http::create_transport_http_router,
-        websocket::{create_transport_ws_router, WebSocketHandler},
         osc::create_transport_osc_server,
+        websocket::{WebSocketHandler, create_transport_ws_router},
     },
 };
 
@@ -151,10 +146,14 @@ async fn print_initial_status(transport: &Arc<Mutex<MockTransportService>>) {
             println!("🎼 Initial Transport State:");
             println!("   ▶️  Play State: {:?}", state.play_state);
             println!("   🎵 Tempo: {:.1} BPM", state.tempo.bpm);
-            println!("   🎶 Time Signature: {}/{}",
-                state.time_signature.numerator,
-                state.time_signature.denominator);
-            println!("   📍 Position: {:.2}s", state.playhead_position.time.to_seconds());
+            println!(
+                "   🎶 Time Signature: {}/{}",
+                state.time_signature.numerator, state.time_signature.denominator
+            );
+            println!(
+                "   📍 Position: {:.2}s",
+                state.playhead_position.time.to_seconds()
+            );
             println!("   🔴 Record Mode: {:?}", state.record_mode);
         }
         Err(e) => println!("❌ Error getting initial state: {}", e),
@@ -197,9 +196,12 @@ async fn start_websocket_server(transport: Arc<Mutex<MockTransportService>>) {
 
     let app = ws_router
         .route("/health", get(|| async { "WebSocket Server OK" }))
-        .route("/info", get(|| async {
-            "FastTrackStudio Transport WebSocket API v1.0\nConnect to /ws for real-time updates"
-        }))
+        .route(
+            "/info",
+            get(|| async {
+                "FastTrackStudio Transport WebSocket API v1.0\nConnect to /ws for real-time updates"
+            }),
+        )
         .layer(ServiceBuilder::new().layer(CorsLayer::permissive()))
         .with_state(ws_handler);
 

@@ -3,17 +3,26 @@ import { Music, Hash, Clock, Play, SkipForward } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { useWebSocket } from "../contexts/WebSocketContext";
+import type { SetlistState } from "../../types/placeholders";
+import type { Transport } from "../../bindings";
 
 interface SetlistSongViewProps {
   className?: string;
+  setlistState: SetlistState | null;
+  transport: Transport | null;
+  connected: boolean;
+  loading: boolean;
+  error: string | null;
 }
 
 export const SetlistSongView: React.FC<SetlistSongViewProps> = ({
   className = "",
+  setlistState,
+  transport,
+  connected,
+  loading,
+  error,
 }) => {
-  const { setlistState, transportState, connected, connectionStatus } =
-    useWebSocket();
 
   const formatTime = (seconds: number): string => {
     const minutes = Math.floor(seconds / 60);
@@ -22,9 +31,9 @@ export const SetlistSongView: React.FC<SetlistSongViewProps> = ({
   };
 
   const calculateSongProgress = (): number => {
-    if (!transportState || !setlistState?.current_song) return 0;
+    if (!transport || !setlistState?.current_song) return 0;
 
-    const currentPosition = transportState.position_seconds;
+    const currentPosition = transport.playhead_position?.time?.seconds || 0;
     const songStart = setlistState.current_song.start_position_seconds;
     const songEnd = setlistState.current_song.end_position_seconds;
 
@@ -42,11 +51,11 @@ export const SetlistSongView: React.FC<SetlistSongViewProps> = ({
         <CardTitle className="flex items-center justify-between">
           <span>Song Overview</span>
           <Badge variant={connected ? "default" : "destructive"}>
-            {connectionStatus === "connecting"
-              ? "Connecting..."
-              : connectionStatus === "connected"
+            {loading
+              ? "Loading..."
+              : connected
               ? "Connected"
-              : connectionStatus === "error"
+              : error
               ? "Error"
               : "Disconnected"}
           </Badge>
@@ -201,9 +210,9 @@ export const SetlistSongView: React.FC<SetlistSongViewProps> = ({
 
         {!connected && (
           <div className="text-center text-muted-foreground">
-            <p>Not connected to REAPER</p>
+            <p>Not connected to app state</p>
             <p className="text-xs">
-              Make sure REAPER is running with the FTS Extensions plugin loaded.
+              {error ? `Error: ${error}` : "Loading app state..."}
             </p>
           </div>
         )}

@@ -1,43 +1,28 @@
 import React from "react";
 import { Music } from "lucide-react";
-import { useWebSocket } from "../../../../../contexts/WebSocketContext";
-
-interface SongInfo {
-  index: number;
-  name: string;
-  start_position_seconds: number;
-  end_position_seconds: number;
-  start_position_beats: number;
-  end_position_beats: number;
-  length_measures: number;
-  length_time: number;
-  sections: any[];
-  color?: number;
-}
-
-interface SetlistState {
-  songs: SongInfo[];
-  current_song: SongInfo | null;
-  timestamp: number;
-}
-
-interface WebSocketMessage {
-  type: "Setlist" | "Transport" | "MarkerRegions" | "Error";
-  data: SetlistState | any;
-}
+import type { SetlistState } from "../../../../../types/placeholders";
 
 interface SongTitleProps {
   className?: string;
+  setlistState: SetlistState | null;
+  connected: boolean;
+  loading: boolean;
+  error: string | null;
 }
 
-export const SongTitle: React.FC<SongTitleProps> = ({ className = "" }) => {
-  const { setlistState, connected, connectionStatus } = useWebSocket();
+export const SongTitle: React.FC<SongTitleProps> = ({
+  className = "",
+  setlistState,
+  connected,
+  loading,
+  error
+}) => {
 
   // Get current song title
   const getCurrentSongTitle = (): string => {
-    if (connectionStatus === "connecting") return "Connecting...";
-    if (connectionStatus === "error") return "Connection Error";
-    if (!connected) return "Disconnected from REAPER";
+    if (loading) return "Loading...";
+    if (error) return "Connection Error";
+    if (!connected) return "Disconnected from App State";
     if (!setlistState?.current_song) return "No Song Playing";
     return setlistState.current_song.name;
   };

@@ -4,17 +4,13 @@
 //! WebSocket real-time API, and a comprehensive HTML interface with buttons
 //! to test both REST and WebSocket endpoints.
 
-use transport::{
-    core::Transport,
-    infra::{create_transport_http_router, create_transport_ws_router, WebSocketHandler},
-};
-use axum::{
-    response::Html,
-    routing::get,
-    Router,
-};
+use axum::{Router, response::Html, routing::get};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use transport::{
+    core::Transport,
+    infra::{WebSocketHandler, create_transport_http_router, create_transport_ws_router},
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,13 +29,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Serve the HTML test page
         .route("/", get(serve_test_page))
         // Mount the HTTP transport API
-        .nest("/api/transport", create_transport_http_router::<Transport>())
+        .nest(
+            "/api/transport",
+            create_transport_http_router::<Transport>(),
+        )
         .with_state(transport_state.clone())
         // Mount the WebSocket transport API
-        .merge(
-            create_transport_ws_router::<Transport>()
-                .with_state(ws_handler)
-        );
+        .merge(create_transport_ws_router::<Transport>().with_state(ws_handler));
 
     println!("🚀 Starting server on http://localhost:3005");
     println!();

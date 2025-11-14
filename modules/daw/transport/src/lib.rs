@@ -60,26 +60,13 @@ pub mod application;
 pub mod infra;
 
 // Re-export core types for convenience
-pub use core::{
-    Transport, TransportActions, TransportError,
-    Tempo, PlayState, RecordMode
-};
+pub use core::{PlayState, RecordMode, Tempo, Transport, TransportActions, TransportError};
 
 // Re-export application types for convenience
 pub use application::mock::MockTransportService;
 
 // Re-export infrastructure adapters for convenience
 pub use infra::{
-    create_transport_http_router,
-    create_transport_ws_router,
-    WebSocketHandler,
-    TransportMessage,
-    TransportCommand,
-    TransportStatus,
+    TransportCommand, TransportMessage, TransportStatus, WebSocketHandler,
+    create_transport_http_router, create_transport_ws_router,
 };
-
-// Future infrastructure exports
-// pub use infra::{
-//     create_transport_osc_handler,
-//     create_transport_grpc_service,
-// };

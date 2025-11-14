@@ -1,3 +1,5 @@
+use ts_rs::TS;
+
 /// Core project actions trait that any project implementation can use
 pub trait ProjectActions {
     fn get_name(&self) -> &str;
@@ -16,7 +18,8 @@ pub trait ProjectProvider {
 }
 
 /// Error type for project operations
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize, TS)]
+#[ts(export)]
 pub enum ProjectError {
     NotFound(String),
     AlreadyExists(String),

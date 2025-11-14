@@ -1,10 +1,21 @@
 import React from "react";
 import { ChevronRight, Pause, Play, RotateCcw, SkipBack } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useWebSocket } from "../../../../../contexts/WebSocketContext";
+import type { SetlistState } from "../../../../../types/placeholders";
+import type { Transport } from "../../../../../bindings";
 
 interface TransportBarProps {
   className?: string;
+  setlistState: SetlistState | null;
+  transport: Transport | null;
+  connected: boolean;
+  loading: boolean;
+  error: string | null;
+  onPlayPause: () => void;
+  onStop: () => void;
+  onGoToStart: () => void;
+  onToggleLoop: () => void;
+  onNext: () => void;
 }
 
 interface TransportButtonProps {
@@ -37,35 +48,19 @@ const TransportButton: React.FC<TransportButtonProps> = ({
   );
 };
 
-export const TransportBar: React.FC<TransportBarProps> = ({ className }) => {
-  const { transportState, setlistState, connected, commands } = useWebSocket();
-
-  const handleGoToStart = () => {
-    // Jump to the beginning of the current song
-    if (setlistState?.current_song) {
-      commands.jumpToSong(setlistState.current_song.index);
-    } else {
-      // Fallback: jump to time 0
-      commands.jumpToTime(0);
-    }
-  };
-
-  const handleTogglePlayPause = () => {
-    commands.playPause();
-  };
-
-  const handleToggleLoop = () => {
-    commands.toggleLoop();
-  };
-
-  const handleNext = () => {
-    // Jump to next section, or next song if at the end of current song
-    if (setlistState?.next_section) {
-      commands.jumpBySections(1);
-    } else if (setlistState?.next_song) {
-      commands.jumpBySongs(1);
-    }
-  };
+export const TransportBar: React.FC<TransportBarProps> = ({
+  className,
+  setlistState,
+  transport,
+  connected,
+  loading,
+  error,
+  onPlayPause,
+  onStop,
+  onGoToStart,
+  onToggleLoop,
+  onNext
+}) => {
 
   return (
     <div
@@ -79,7 +74,7 @@ export const TransportBar: React.FC<TransportBarProps> = ({ className }) => {
       )}
     >
       {/* Go to Song Start */}
-      <TransportButton onClick={handleGoToStart}>
+      <TransportButton onClick={onGoToStart}>
         <div className="flex items-center justify-center">
           <SkipBack
             className="mr-2 h-6 w-6 text-[var(--ableset-color-text)]"
@@ -93,11 +88,11 @@ export const TransportBar: React.FC<TransportBarProps> = ({ className }) => {
 
       {/* Play/Pause Button */}
       <TransportButton
-        onClick={handleTogglePlayPause}
-        isActive={transportState?.is_playing || false}
+        onClick={onPlayPause}
+        isActive={transport?.play_state === 'Playing' || false}
       >
         <div className="relative flex items-center justify-center">
-          {transportState?.is_playing ? (
+          {transport?.play_state === 'Playing' ? (
             <Pause
               className="h-12 w-12 text-[var(--ableset-color-text)]"
               strokeWidth={1.5}
@@ -116,7 +111,7 @@ export const TransportBar: React.FC<TransportBarProps> = ({ className }) => {
               connected ? "bg-green-500" : "bg-red-500"
             )}
             title={
-              connected ? "Connected to REAPER" : "Not connected to REAPER"
+              connected ? "Connected to App State" : "Not connected to App State"
             }
           />
         </div>
@@ -124,8 +119,8 @@ export const TransportBar: React.FC<TransportBarProps> = ({ className }) => {
 
       {/* Loop Button */}
       <TransportButton
-        onClick={handleToggleLoop}
-        isActive={transportState?.repeat_enabled || false}
+        onClick={onToggleLoop}
+        isActive={transport?.looping || false}
       >
         <div className="flex items-center justify-center">
           <RotateCcw
@@ -139,7 +134,7 @@ export const TransportBar: React.FC<TransportBarProps> = ({ className }) => {
       </TransportButton>
 
       {/* Next Button */}
-      <TransportButton onClick={handleNext}>
+      <TransportButton onClick={onNext}>
         <div className="flex items-center justify-center">
           <span className="text-lg font-medium text-[var(--ableset-color-text)] mr-2">
             Next

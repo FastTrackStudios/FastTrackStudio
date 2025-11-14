@@ -5,10 +5,13 @@ members = [
     "modules/daw/project",
     "modules/daw/primitives",
     "modules/daw/marker-region",
-    "modules/fts",
+    "modules/fts/setlist",
+    "modules/keyflow",
     "libs/macros",
     "apps/server",
     "apps/desktop/src-tauri",
+    "tools/generate-types",
+    "xtask", "modules/fts/setlist", "modules/daw/instruments",
 ]
 
 [workspace.package]

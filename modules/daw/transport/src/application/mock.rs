@@ -3,9 +3,8 @@
 //! This provides a testing implementation that simulates transport behavior
 //! without requiring actual DAW integration.
 
-use crate::core::{TransportActions, TransportError, Transport, Tempo, RecordMode, PlayState};
-use primitives::{TimeSignature, Position};
-
+use crate::core::{PlayState, RecordMode, Tempo, Transport, TransportActions, TransportError};
+use primitives::{Position, TimeSignature};
 
 /// Mock transport service implementation for testing
 #[derive(Debug)]
@@ -23,9 +22,7 @@ impl MockTransportService {
 
     /// Create a mock transport with custom initial state
     pub fn with_state(transport: Transport) -> Self {
-        Self {
-            transport,
-        }
+        Self { transport }
     }
 }
 
@@ -59,7 +56,11 @@ impl TransportActions for MockTransportService {
         } else {
             self.transport.play_state = PlayState::Playing;
         }
-        let action = if self.transport.is_playing() { "started" } else { "paused" };
+        let action = if self.transport.is_playing() {
+            "started"
+        } else {
+            "paused"
+        };
         Ok(format!("Mock: Playback {}", action))
     }
 
@@ -89,7 +90,11 @@ impl TransportActions for MockTransportService {
         } else {
             self.transport.play_state = PlayState::Recording;
         }
-        let action = if self.transport.is_recording() { "started" } else { "stopped" };
+        let action = if self.transport.is_recording() {
+            "started"
+        } else {
+            "stopped"
+        };
         Ok(format!("Mock: Recording {}", action))
     }
 
@@ -100,9 +105,15 @@ impl TransportActions for MockTransportService {
         Ok(format!("Mock: Tempo set to {} BPM", tempo.bpm))
     }
 
-    fn set_time_signature(&mut self, time_signature: TimeSignature) -> Result<String, TransportError> {
+    fn set_time_signature(
+        &mut self,
+        time_signature: TimeSignature,
+    ) -> Result<String, TransportError> {
         self.transport.time_signature = time_signature;
-        Ok(format!("Mock: Time signature set to {}/{}", time_signature.numerator, time_signature.denominator))
+        Ok(format!(
+            "Mock: Time signature set to {}/{}",
+            time_signature.numerator, time_signature.denominator
+        ))
     }
 
     fn set_record_mode(&mut self, record_mode: RecordMode) -> Result<String, TransportError> {
@@ -114,8 +125,6 @@ impl TransportActions for MockTransportService {
         self.transport.playhead_position = Position::from_seconds(seconds);
         Ok(format!("Mock: Position set to {} seconds", seconds))
     }
-
-
 
     // Query methods
 
@@ -214,7 +223,10 @@ mod tests {
     async fn test_mock_transport_time_signature() {
         let mut transport = MockTransportService::new();
 
-        let new_time_sig = TimeSignature { numerator: 3, denominator: 4 };
+        let new_time_sig = TimeSignature {
+            numerator: 3,
+            denominator: 4,
+        };
         let result = transport.set_time_signature(new_time_sig).unwrap();
         assert!(result.contains("3/4"));
 
@@ -254,12 +266,23 @@ mod tests {
 
         // Test different record modes
         transport.set_record_mode(RecordMode::Normal).unwrap();
-        assert!(matches!(transport.get_record_mode().unwrap(), RecordMode::Normal));
+        assert!(matches!(
+            transport.get_record_mode().unwrap(),
+            RecordMode::Normal
+        ));
 
-        transport.set_record_mode(RecordMode::TimeSelection).unwrap();
-        assert!(matches!(transport.get_record_mode().unwrap(), RecordMode::TimeSelection));
+        transport
+            .set_record_mode(RecordMode::TimeSelection)
+            .unwrap();
+        assert!(matches!(
+            transport.get_record_mode().unwrap(),
+            RecordMode::TimeSelection
+        ));
 
         transport.set_record_mode(RecordMode::Item).unwrap();
-        assert!(matches!(transport.get_record_mode().unwrap(), RecordMode::Item));
+        assert!(matches!(
+            transport.get_record_mode().unwrap(),
+            RecordMode::Item
+        ));
     }
 }

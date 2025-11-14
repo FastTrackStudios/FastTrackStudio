@@ -28,6 +28,7 @@ tower = { version = "0.5.2", features = ["full"] }
 tower-layer = "0.3.3"
 tower-service = "0.3.3"
 uuid = { version = "1.18.1", features = ["v4"] }
+ts-rs = { version = "11.1", features = ["serde-compat"] }
 
 [[example]]
 name = "project_with_transport"

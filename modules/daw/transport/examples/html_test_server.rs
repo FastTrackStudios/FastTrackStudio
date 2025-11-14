@@ -3,17 +3,10 @@
 //! This example creates a web server that serves both the transport API
 //! and a simple HTML interface with buttons to test POST requests.
 
-use transport::{
-    core::Transport,
-    infra::create_transport_http_router,
-};
-use axum::{
-    response::Html,
-    routing::get,
-    Router,
-};
+use axum::{Router, response::Html, routing::get};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use transport::{core::Transport, infra::create_transport_http_router};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -1,19 +1,26 @@
 import React from "react";
 import { cn } from "@/lib/utils";
-import { useWebSocket } from "../../../../../contexts/WebSocketContext";
+import type { SetlistState } from "../../../../../types/placeholders";
 
 interface SongDescriptionProps {
   className?: string;
+  setlistState: SetlistState | null;
+  connected: boolean;
+  loading: boolean;
+  error: string | null;
 }
 
 export const SongDescription: React.FC<SongDescriptionProps> = ({
   className = "",
+  setlistState,
+  connected,
+  loading,
+  error,
 }) => {
-  const { setlistState, connected } = useWebSocket();
 
   // Get song description - this would come from song metadata
   const getSongDescription = (): string => {
-    if (!connected) return "Disconnected from REAPER";
+    if (!connected) return "Disconnected from App State";
     if (!setlistState?.current_song) return "No song playing";
 
     // TODO: Get actual description from song metadata

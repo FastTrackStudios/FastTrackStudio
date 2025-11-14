@@ -1,10 +1,16 @@
 import React from "react";
 import { cn } from "@/lib/utils";
-import { useWebSocket } from "../../../../../contexts/WebSocketContext";
+import type { SetlistState } from "../../../../../types/placeholders";
+import type { Transport } from "../../../../../bindings";
 import { SettingsContext } from "./SettingsDropdown";
 
 interface DetailBadgesProps {
   className?: string;
+  setlistState: SetlistState | null;
+  transport: Transport | null;
+  connected: boolean;
+  loading: boolean;
+  error: string | null;
 }
 
 interface BadgeProps {
@@ -65,8 +71,12 @@ const Badge: React.FC<BadgeProps> = ({
 
 export const DetailBadges: React.FC<DetailBadgesProps> = ({
   className = "",
+  setlistState,
+  transport,
+  connected,
+  loading,
+  error,
 }) => {
-  const { setlistState, transportState, connected } = useWebSocket();
   const { settings } = React.useContext(SettingsContext);
 
   // Helper function to check if a setting is enabled
@@ -77,18 +87,18 @@ export const DetailBadges: React.FC<DetailBadgesProps> = ({
 
   // Helper functions to get badge data
   const getTempo = (): string => {
-    if (!transportState?.tempo_bpm) return "-- BPM";
-    return `${Math.round(transportState.tempo_bpm)} BPM`;
+    if (!transport?.tempo?.bpm) return "-- BPM";
+    return `${Math.round(transport.tempo.bpm)} BPM`;
   };
 
   const getTimeSignature = (): string => {
     if (
-      !transportState?.time_signature_numerator ||
-      !transportState?.time_signature_denominator
+      !transport?.time_signature?.numerator ||
+      !transport?.time_signature?.denominator
     ) {
       return "--/--";
     }
-    return `${transportState.time_signature_numerator}/${transportState.time_signature_denominator}`;
+    return `${transport.time_signature.numerator}/${transport.time_signature.denominator}`;
   };
 
   const getCurrentSection = (): string => {

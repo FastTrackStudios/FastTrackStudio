@@ -1,0 +1,19 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Local dependencies - import all modules that export types
+transport = { path = "../modules/daw/transport" }
+project = { path = "../modules/daw/project" }
+primitives = { path = "../modules/daw/primitives" }
+
+# ts-rs for type generation
+ts-rs = { version = "11.1", features = ["serde-compat"] }
+
+# Utilities
+anyhow = "1.0"
+clap = { version = "4.0", features = ["derive"] }

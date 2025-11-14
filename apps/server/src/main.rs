@@ -38,24 +38,19 @@
 //! - WebSocket: ws://localhost:8001/ws
 //! - OSC: UDP port 9000
 
+use axum::{response::Html, routing::get, Router};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use axum::{
-    Router,
-    routing::get,
-    response::Html,
-};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use transport::{
-    MockTransportService,
-    TransportActions,
     core::Tempo,
     infra::{
         http::create_transport_http_router,
-        websocket::{create_transport_ws_router, WebSocketHandler},
         osc::create_transport_osc_server,
+        websocket::{create_transport_ws_router, WebSocketHandler},
     },
+    MockTransportService, TransportActions,
 };
 
 /// FastTrackStudio server configuration
@@ -189,10 +184,14 @@ impl FastTrackStudioServer {
                 println!("🎼 Initial Transport State:");
                 println!("   ▶️  Play State: {:?}", state.play_state);
                 println!("   🎵 Tempo: {:.1} BPM", state.tempo.bpm);
-                println!("   🎶 Time Signature: {}/{}",
-                    state.time_signature.numerator,
-                    state.time_signature.denominator);
-                println!("   📍 Position: {:.2}s", state.playhead_position.time.to_seconds());
+                println!(
+                    "   🎶 Time Signature: {}/{}",
+                    state.time_signature.numerator, state.time_signature.denominator
+                );
+                println!(
+                    "   📍 Position: {:.2}s",
+                    state.playhead_position.time.to_seconds()
+                );
                 println!("   🔴 Record Mode: {:?}", state.record_mode);
             }
             Err(e) => println!("❌ Error getting initial state: {}", e),
@@ -208,22 +207,46 @@ impl FastTrackStudioServer {
         println!("📋 Available Endpoints:");
         println!("┌─────────────────────────────────────────────────────────────┐");
         println!("│ 🖥️  Web Interface (Interactive Testing)                    │");
-        println!("│   http://{}:{}                                   │",
-            if config.host == "0.0.0.0" { "localhost" } else { &config.host }, config.web_interface_port);
+        println!(
+            "│   http://{}:{}                                   │",
+            if config.host == "0.0.0.0" {
+                "localhost"
+            } else {
+                &config.host
+            },
+            config.web_interface_port
+        );
         println!("├─────────────────────────────────────────────────────────────┤");
         println!("│ 🌐 HTTP REST API                                          │");
-        println!("│   http://{}:{}/*                              │",
-            if config.host == "0.0.0.0" { "localhost" } else { &config.host }, config.http_port);
+        println!(
+            "│   http://{}:{}/*                              │",
+            if config.host == "0.0.0.0" {
+                "localhost"
+            } else {
+                &config.host
+            },
+            config.http_port
+        );
         println!("│   GET  /status, /health, /tempo, /position                 │");
         println!("│   POST /play, /pause, /stop, /set_tempo                    │");
         println!("├─────────────────────────────────────────────────────────────┤");
         println!("│ 🔌 WebSocket Real-time                                    │");
-        println!("│   ws://{}:{}/ws                               │",
-            if config.host == "0.0.0.0" { "localhost" } else { &config.host }, config.websocket_port);
+        println!(
+            "│   ws://{}:{}/ws                               │",
+            if config.host == "0.0.0.0" {
+                "localhost"
+            } else {
+                &config.host
+            },
+            config.websocket_port
+        );
         println!("│   Real-time bidirectional transport control               │");
         println!("├─────────────────────────────────────────────────────────────┤");
         println!("│ 📡 OSC Protocol (Professional Audio Integration)          │");
-        println!("│   UDP port {}                                             │", config.osc_port);
+        println!(
+            "│   UDP port {}                                             │",
+            config.osc_port
+        );
         println!("│   /transport/play, /transport/pause, /transport/stop       │");
         println!("│   /transport/tempo [float], /transport/status              │");
         println!("└─────────────────────────────────────────────────────────────┘");
@@ -236,9 +259,15 @@ impl FastTrackStudioServer {
         println!();
         println!("   OSC Commands:");
         println!("   oscsend localhost {} /transport/play", config.osc_port);
-        println!("   oscsend localhost {} /transport/tempo f 140.0", config.osc_port);
+        println!(
+            "   oscsend localhost {} /transport/tempo f 140.0",
+            config.osc_port
+        );
         println!();
-        println!("🌟 Open http://localhost:{} for interactive testing!", config.web_interface_port);
+        println!(
+            "🌟 Open http://localhost:{} for interactive testing!",
+            config.web_interface_port
+        );
         println!("🔧 Press Ctrl+C to shutdown gracefully");
         println!("========================================");
     }
@@ -282,7 +311,10 @@ impl FastTrackStudioServer {
                     println!("🎼 [Demo] Current state after changes:");
                     println!("   ▶️  Play State: {:?}", state.play_state);
                     println!("   🎵 Tempo: {:.1} BPM", state.tempo.bpm);
-                    println!("   📍 Position: {:.2}s", state.playhead_position.time.to_seconds());
+                    println!(
+                        "   📍 Position: {:.2}s",
+                        state.playhead_position.time.to_seconds()
+                    );
                 }
             }
 
@@ -326,7 +358,10 @@ async fn start_http_server(transport: Arc<Mutex<MockTransportService>>, config: 
     let addr = format!("{}:{}", config.host, config.http_port);
     match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => {
-            println!("✅ HTTP REST API listening on http://localhost:{}", config.http_port);
+            println!(
+                "✅ HTTP REST API listening on http://localhost:{}",
+                config.http_port
+            );
             if let Err(e) = axum::serve(listener, app).await {
                 eprintln!("❌ HTTP server error: {}", e);
             }
@@ -336,7 +371,10 @@ async fn start_http_server(transport: Arc<Mutex<MockTransportService>>, config: 
 }
 
 /// Start WebSocket server
-async fn start_websocket_server(transport: Arc<Mutex<MockTransportService>>, config: &ServerConfig) {
+async fn start_websocket_server(
+    transport: Arc<Mutex<MockTransportService>>,
+    config: &ServerConfig,
+) {
     println!("🔌 Starting WebSocket server...");
 
     let ws_handler = WebSocketHandler::new(transport);
@@ -344,16 +382,22 @@ async fn start_websocket_server(transport: Arc<Mutex<MockTransportService>>, con
 
     let app = ws_router
         .route("/health", get(|| async { "FastTrackStudio WebSocket OK" }))
-        .route("/info", get(|| async {
-            "FastTrackStudio WebSocket API v1.0\nConnect to /ws for real-time transport control"
-        }))
+        .route(
+            "/info",
+            get(|| async {
+                "FastTrackStudio WebSocket API v1.0\nConnect to /ws for real-time transport control"
+            }),
+        )
         .layer(ServiceBuilder::new().layer(CorsLayer::permissive()))
         .with_state(ws_handler);
 
     let addr = format!("{}:{}", config.host, config.websocket_port);
     match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => {
-            println!("✅ WebSocket server listening on ws://localhost:{}/ws", config.websocket_port);
+            println!(
+                "✅ WebSocket server listening on ws://localhost:{}/ws",
+                config.websocket_port
+            );
             if let Err(e) = axum::serve(listener, app).await {
                 eprintln!("❌ WebSocket server error: {}", e);
             }
@@ -377,19 +421,28 @@ async fn start_osc_server(transport: Arc<Mutex<MockTransportService>>, config: &
 }
 
 /// Start web interface server
-async fn start_web_interface_server(transport: Arc<Mutex<MockTransportService>>, config: &ServerConfig) {
+async fn start_web_interface_server(
+    transport: Arc<Mutex<MockTransportService>>,
+    config: &ServerConfig,
+) {
     println!("🖥️  Starting web interface server...");
 
     let app = Router::new()
         .route("/", get(serve_web_interface))
-        .route("/health", get(|| async { "FastTrackStudio Web Interface OK" }))
+        .route(
+            "/health",
+            get(|| async { "FastTrackStudio Web Interface OK" }),
+        )
         .layer(ServiceBuilder::new().layer(CorsLayer::permissive()))
         .with_state(transport);
 
     let addr = format!("{}:{}", config.host, config.web_interface_port);
     match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => {
-            println!("✅ Web interface listening on http://localhost:{}", config.web_interface_port);
+            println!(
+                "✅ Web interface listening on http://localhost:{}",
+                config.web_interface_port
+            );
             if let Err(e) = axum::serve(listener, app).await {
                 eprintln!("❌ Web interface server error: {}", e);
             }
