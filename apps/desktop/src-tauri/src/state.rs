@@ -407,6 +407,25 @@ impl AppState {
         // Trim to max items
         self.recent_projects.projects.truncate(self.recent_projects.max_items);
     }
+
+    /// Create a snapshot of the current state
+    pub fn snapshot(&self) -> AppStateSnapshot {
+        AppStateSnapshot::from(self)
+    }
+
+    /// Update preferences from a JSON value
+    pub fn update_preferences(&mut self, preferences: serde_json::Value) {
+        if let Ok(prefs) = serde_json::from_value::<AppPreferences>(preferences) {
+            self.preferences = prefs;
+        }
+    }
+
+    /// Update UI state from a JSON value
+    pub fn update_ui_state(&mut self, ui_state: serde_json::Value) {
+        if let Ok(ui) = serde_json::from_value::<UIState>(ui_state) {
+            self.ui = ui;
+        }
+    }
 }
 
 /// Serializable version of the app state for sending to frontend

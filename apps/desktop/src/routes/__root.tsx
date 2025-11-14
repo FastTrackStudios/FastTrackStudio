@@ -1,6 +1,5 @@
-import { createRootRoute } from '@tanstack/react-router'
+import { createRootRoute, Outlet } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/router-devtools'
-import { MainApp } from '@/components/MainApp'
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -8,10 +7,10 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   return (
-    <>
-      <MainApp />
+    <div className="min-h-screen bg-background text-foreground">
+      <Outlet />
       {/* Router DevTools - only in development */}
       {process.env.NODE_ENV === 'development' && <TanStackRouterDevtools />}
-    </>
+    </div>
   )
 }

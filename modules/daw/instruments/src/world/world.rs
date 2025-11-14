@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// World and ethnic instruments from various cultures
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum WorldInstrument {
     // Asian Instruments
@@ -175,6 +175,11 @@ impl fmt::Display for WorldInstrument {
 }
 
 impl WorldInstrument {
+    /// Get the orchestral ordering index (0-based)
+    pub fn orchestral_index(&self) -> usize {
+        *self as usize
+    }
+
     /// Get all world instruments
     pub fn all() -> Vec<Self> {
         vec![

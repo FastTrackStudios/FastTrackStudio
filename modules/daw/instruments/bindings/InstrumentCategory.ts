@@ -2,5 +2,6 @@
 
 /**
  * Instrument categories for organization and color coding
+ * Order matches standard orchestral score layout
  */
-export type InstrumentCategory = "Strings" | "Woodwinds" | "Brass" | "Percussion" | "Keyboard" | "Harp" | "RhythmSection" | "Choir" | "Solo" | "World" | "Other";
+export type InstrumentCategory = "Woodwinds" | "Brass" | "Percussion" | "Keyboard" | "Harp" | "Strings" | "Choir" | "Solo" | "RhythmSection" | "World" | "Other";

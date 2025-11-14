@@ -118,6 +118,73 @@ pub enum PercussionInstrument {
 }
 
 impl PercussionInstrument {
+    /// Get the orchestral ordering index (0-based)
+    pub fn orchestral_index(&self) -> usize {
+        match self {
+            // Drum kit components (0-6)
+            PercussionInstrument::DrumSet => 0,
+            PercussionInstrument::SnareDrum => 1,
+            PercussionInstrument::BassDrum => 2,
+            PercussionInstrument::TomToms => 3,
+            PercussionInstrument::HiHat => 4,
+            PercussionInstrument::Ride => 5,
+            PercussionInstrument::Crash => 6,
+
+            // Orchestral percussion (10-19)
+            PercussionInstrument::Timpani => 10,
+            PercussionInstrument::ConcertBassDrum => 11,
+            PercussionInstrument::ConcertSnareDrum => 12,
+            PercussionInstrument::Splash => 13,
+            PercussionInstrument::China => 14,
+
+            // Mallet percussion (20-29)
+            PercussionInstrument::Glockenspiel => 20,
+            PercussionInstrument::Vibraphone => 21,
+            PercussionInstrument::Marimba => 22,
+            PercussionInstrument::Xylophone => 23,
+            PercussionInstrument::TubularBells => 24,
+            PercussionInstrument::Crotales => 25,
+
+            // Latin/world percussion (30-49)
+            PercussionInstrument::Congas => 30,
+            PercussionInstrument::Bongos => 31,
+            PercussionInstrument::Timbales => 32,
+            PercussionInstrument::Cowbell => 33,
+            PercussionInstrument::Claves => 34,
+            PercussionInstrument::Maracas => 35,
+            PercussionInstrument::Guiro => 36,
+            PercussionInstrument::Cabasa => 37,
+
+            // Asian percussion (50-59)
+            PercussionInstrument::TaikoDrums => 50,
+            PercussionInstrument::Gong => 51,
+            PercussionInstrument::TamTam => 52,
+
+            // Auxiliary percussion (60-79)
+            PercussionInstrument::Tambourine => 60,
+            PercussionInstrument::Triangle => 61,
+            PercussionInstrument::Woodblock => 62,
+            PercussionInstrument::TempleBlocks => 63,
+            PercussionInstrument::SleighBells => 64,
+            PercussionInstrument::WindChimes => 65,
+            PercussionInstrument::FingerCymbals => 66,
+            PercussionInstrument::Castanets => 67,
+            PercussionInstrument::Whip => 68,
+            PercussionInstrument::Ratchet => 69,
+            PercussionInstrument::Thundersheet => 70,
+
+            // Electronic (80-89)
+            PercussionInstrument::ElectronicPad => 80,
+            PercussionInstrument::DrumMachine => 81,
+
+            // Generic (90-98)
+            PercussionInstrument::Percussion => 90,
+
+            // Custom (999)
+            PercussionInstrument::Other(_) => 999,
+        }
+    }
+
     /// Get all common percussion instruments
     pub fn all() -> Vec<Self> {
         vec![

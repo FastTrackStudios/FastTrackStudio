@@ -70,56 +70,96 @@ export function useProjectManager(options: UseProjectManagerOptions = {}): UsePr
   // Helper to handle errors
   const handleError = useCallback((err: any, operation: string) => {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`Error in ${operation}:`, message);
+    console.error(`❌ Error in ${operation}:`, message);
     setError(`${operation}: ${message}`);
   }, []);
 
   // Load projects list
   const refreshProjects = useCallback(async () => {
-    if (!mountedRef.current) return;
+    console.log('🔄 RefreshProjects - Starting...');
+    console.log('🔍 RefreshProjects - Current state before API calls:', { projects, activeProject });
+    if (!mountedRef.current) {
+      console.log('⚠️ RefreshProjects - Component not mounted, aborting');
+      return;
+    }
 
     try {
+      console.log('📦 RefreshProjects - Setting loading state...');
       setProjectsLoading(true);
       setError(null);
 
+      console.log('📡 Making API calls to list_projects and get_active_project...');
       const [projectsList, currentActive] = await Promise.all([
         api.projects.list_projects(),
         api.projects.get_active_project(),
       ]);
 
+      console.log('✅ RefreshProjects - API results:', { projectsList, currentActive });
+      console.log('✅ RefreshProjects - Type check - projectsList:', typeof projectsList, Array.isArray(projectsList));
+      console.log('✅ RefreshProjects - Type check - currentActive:', typeof currentActive, currentActive);
+
       if (mountedRef.current) {
+        console.log('📦 RefreshProjects - Component still mounted, updating state...');
+
+        // Update state and log each step
+        console.log('📦 RefreshProjects - Calling setProjects with:', projectsList);
         setProjects(projectsList);
+
+        console.log('📦 RefreshProjects - Calling setActiveProjectState with:', currentActive);
         setActiveProjectState(currentActive);
+
+        console.log('✅ RefreshProjects - State update calls completed');
+
+        // Add a timeout to check if state actually updated
+        setTimeout(() => {
+          console.log('🔍 RefreshProjects - State after timeout:', { projects, activeProject });
+        }, 100);
+      } else {
+        console.log('❌ RefreshProjects - Component unmounted during API call');
       }
     } catch (err) {
+      console.error('❌ RefreshProjects - Error occurred:', err);
+      console.error('❌ RefreshProjects - Error type:', typeof err);
+      console.error('❌ RefreshProjects - Error details:', JSON.stringify(err, null, 2));
       if (mountedRef.current) {
         handleError(err, 'Loading projects');
       }
     } finally {
       if (mountedRef.current) {
         setProjectsLoading(false);
+        console.log('🔄 RefreshProjects - Completed, loading set to false');
       }
     }
-  }, [handleError]);
+  }, [handleError, projects, activeProject]);
 
   // Load transport state for active project
   const refreshTransportState = useCallback(async () => {
-    if (!mountedRef.current || !activeProject) return;
+    console.log('🎵 RefreshTransportState - Active project:', activeProject);
+    if (!mountedRef.current || !activeProject) {
+      console.log('⏭️  RefreshTransportState - Skipping (no mounted ref or active project)');
+      return;
+    }
 
     try {
       setTransportLoading(true);
+      console.log('📡 Making API call to transport.get_state...');
       const state = await api.transport.get_state();
+      console.log('✅ RefreshTransportState - Got state:', state);
 
       if (mountedRef.current) {
         setTransportState(state);
+        console.log('✅ RefreshTransportState - Transport state updated successfully');
+        console.log('🔍 RefreshTransportState - Updated state:', state);
       }
     } catch (err) {
+      console.error('❌ RefreshTransportState - Error:', err);
       if (mountedRef.current) {
         handleError(err, 'Loading transport state');
       }
     } finally {
       if (mountedRef.current) {
         setTransportLoading(false);
+        console.log('🔄 RefreshTransportState - Completed');
       }
     }
   }, [activeProject, handleError]);
@@ -287,20 +327,41 @@ export function useProjectManager(options: UseProjectManagerOptions = {}): UsePr
 
   // Auto-load projects on mount
   useEffect(() => {
+    console.log('🚀 useProjectManager - Mount effect triggered');
+    console.log('🚀 useProjectManager - autoLoadProjects:', autoLoadProjects);
+    console.log('🚀 useProjectManager - mountedRef.current:', mountedRef.current);
+
     if (autoLoadProjects) {
-      refreshProjects();
+      console.log('📡 Starting initial project refresh...');
+      refreshProjects().then(() => {
+        console.log('📡 Initial project refresh completed');
+      }).catch((err) => {
+        console.error('📡 Initial project refresh failed:', err);
+      });
     }
 
     return () => {
+      console.log('🔌 useProjectManager - Unmounting, setting mounted to false');
       mountedRef.current = false;
     };
   }, [autoLoadProjects, refreshProjects]);
 
   // Load transport state when active project changes
   useEffect(() => {
+    console.log('🔄 Active project changed effect triggered');
+    console.log('🔄 Active project value:', activeProject);
+    console.log('🔄 Active project type:', typeof activeProject);
+    console.log('🔄 Active project truthy:', !!activeProject);
+
     if (activeProject) {
-      refreshTransportState();
+      console.log('🎵 Active project exists, refreshing transport state...');
+      refreshTransportState().then(() => {
+        console.log('🎵 Transport state refresh completed');
+      }).catch((err) => {
+        console.error('🎵 Transport state refresh failed:', err);
+      });
     } else {
+      console.log('❌ No active project, clearing transport state');
       setTransportState(null);
     }
   }, [activeProject, refreshTransportState]);
@@ -323,9 +384,32 @@ export function useProjectManager(options: UseProjectManagerOptions = {}): UsePr
   // Derived state
   const isPlaying = transportState?.play_state === 'Playing' || false;
   const isRecording = transportState?.play_state === 'Recording' || false;
-  const currentTempo = transportState?.tempo.bpm || 120;
-  const currentPosition = transportState?.playhead_position.time.seconds || 0;
+  const currentTempo = transportState?.tempo?.bpm || 120;
+  const currentPosition = transportState?.playhead_position?.time ?
+    (transportState.playhead_position.time.minutes * 60 +
+     transportState.playhead_position.time.seconds +
+     transportState.playhead_position.time.milliseconds / 1000) : 0;
   const timeSignature = transportState?.time_signature || { numerator: 4, denominator: 4 };
+
+  // Debug logging for state - runs on every render
+  React.useEffect(() => {
+    console.log('📊 useProjectManager state update:', {
+      projects: { value: projects, type: typeof projects, isArray: Array.isArray(projects), length: projects?.length },
+      activeProject: { value: activeProject, type: typeof activeProject, truthy: !!activeProject },
+      projectsLoading,
+      transportLoading,
+      error,
+      transportState: transportState ? {
+        play_state: transportState.play_state,
+        tempo: currentTempo,
+        position: currentPosition
+      } : 'NO TRANSPORT STATE',
+      isPlaying,
+      isRecording,
+      currentTempo,
+      currentPosition
+    });
+  });
 
   return {
     // Project state

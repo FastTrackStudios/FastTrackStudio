@@ -26,6 +26,12 @@ pub enum TransportError {
     #[error("State lock error: {0}")]
     LockError(String),
 
+    #[error("Invalid state: {0}")]
+    InvalidState(String),
+
+    #[error("Event broadcast error: {0}")]
+    EventBroadcast(String),
+
     #[error("Internal error: {0}")]
     Internal(String),
 }

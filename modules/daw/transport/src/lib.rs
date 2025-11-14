@@ -63,7 +63,11 @@ pub mod infra;
 pub use core::{PlayState, RecordMode, Tempo, Transport, TransportActions, TransportError};
 
 // Re-export application types for convenience
-pub use application::mock::MockTransportService;
+pub use application::{
+    mock::MockTransportService,
+    app::{TransportApp, TransportConfig, TransportEvent, TransportStats},
+    app_transport, app_transport_with_config,
+};
 
 // Re-export infrastructure adapters for convenience
 pub use infra::{

@@ -7,12 +7,17 @@ pub use core::{
 };
 
 pub use application::{
-    AppSetlistSource, MockSetlistService, ReaperSetlistSource, RppSetlistSource,
-    ApplicationSetlistSource, SourceType,
+    AppSetlistSource, MockSetlistService, ApplicationSetlistSource, SourceType,
     app_source, app_source_with_default, app_source_with_sample_data,
-    mock_source, mock_source_with_data, reaper_source,
+    mock_source, mock_source_with_data,
     validate_setlist_data, get_setlist_source_summary
 };
+
+#[cfg(feature = "reaper")]
+pub use application::{ReaperSetlistSource, reaper_source};
+
+#[cfg(feature = "rpp")]
+pub use application::RppSetlistSource;
 
 pub type DefaultSetlistSource = AppSetlistSource;
 

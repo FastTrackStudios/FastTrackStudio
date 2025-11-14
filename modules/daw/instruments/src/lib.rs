@@ -223,9 +223,6 @@ impl Instrument {
                 WoodwindInstrument::Clarinet => {
                     instruments.push(Instrument::Woodwind(inst.clone(), Transposition::A));
                 },
-                WoodwindInstrument::Saxophone => {
-                    instruments.push(Instrument::Woodwind(inst.clone(), Transposition::Bb));
-                },
                 _ => {}
             }
         }
@@ -423,16 +420,18 @@ impl Part {
             // Within category, sort by instrument type and part number
             match (a, b) {
                 (Part::Instrument(inst_a, num_a), Part::Instrument(inst_b, num_b)) => {
-                    // Compare instruments, then part numbers
-                    let inst_cmp = std::mem::discriminant(inst_a).cmp(&std::mem::discriminant(inst_b));
+                    // Compare instruments by their orchestral index, then part numbers
+                    let idx_a = inst_a.orchestral_index();
+                    let idx_b = inst_b.orchestral_index();
+                    let inst_cmp = idx_a.cmp(&idx_b);
                     if inst_cmp != std::cmp::Ordering::Equal {
                         return inst_cmp;
                     }
                     num_a.cmp(num_b)
                 },
                 (Part::Vocal(vocal_a), Part::Vocal(vocal_b)) => {
-                    // Sort vocals in SATB order
-                    vocal_a.cmp(vocal_b)
+                    // Sort vocals in SATB order using orchestral index
+                    vocal_a.orchestral_index().cmp(&vocal_b.orchestral_index())
                 },
                 _ => std::cmp::Ordering::Equal,
             }

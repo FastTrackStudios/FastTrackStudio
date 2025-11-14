@@ -9,17 +9,16 @@ use std::sync::{Arc, Mutex};
 use crate::core::{
     Setlist, SetlistSource, SetlistError, Song, Section, SectionType, SourceInfo
 };
+use primitives::Position;
 use crate::application::{ApplicationSetlistSource, SourceType};
 
-use marker_region::{Marker, Region, MarkerRegionSource, MockMarkerRegionService};
+use marker_region::{Marker, Region, MarkerRegionSource, MockMarkerRegionService, MarkerSource, RegionSource};
 
 /// Mock implementation of setlist service for testing and development
-#[derive(Debug, Clone)]
 pub struct MockSetlistService {
     inner: Arc<Mutex<MockSetlistServiceInner>>,
 }
 
-#[derive(Debug)]
 struct MockSetlistServiceInner {
     setlist: Option<Setlist>,
     marker_region_source: MockMarkerRegionService,
@@ -66,21 +65,21 @@ impl MockSetlistService {
 
         // Song 1: "Opening Song"
         let mut song1 = Song::new("Opening Song".to_string()).unwrap();
-        song1.count_in_position = Some(-4.0);
-        song1.start_position = Some(0.0);
-        song1.song_end_position = Some(180.0);
-        song1.end_position = Some(190.0);
+        song1.count_in_position = Some(Position::from_seconds(-4.0));
+        song1.start_position = Some(Position::from_seconds(0.0));
+        song1.song_end_position = Some(Position::from_seconds(180.0));
+        song1.end_position = Some(Position::from_seconds(190.0));
         song1.set_metadata("key", "C major");
         song1.set_metadata("tempo", "120");
 
         // Add sections to song1
-        let intro = Section::new(SectionType::Intro, 0.0, 15.0, "Intro".to_string(), None).unwrap();
-        let verse1 = Section::new(SectionType::Verse, 15.0, 45.0, "Verse 1".to_string(), Some(1)).unwrap();
-        let chorus1 = Section::new(SectionType::Chorus, 45.0, 75.0, "Chorus 1".to_string(), Some(1)).unwrap();
-        let verse2 = Section::new(SectionType::Verse, 75.0, 105.0, "Verse 2".to_string(), Some(2)).unwrap();
-        let chorus2 = Section::new(SectionType::Chorus, 105.0, 135.0, "Chorus 2".to_string(), Some(2)).unwrap();
-        let bridge = Section::new(SectionType::Bridge, 135.0, 150.0, "Bridge".to_string(), None).unwrap();
-        let chorus3 = Section::new(SectionType::Chorus, 150.0, 180.0, "Chorus 3".to_string(), Some(3)).unwrap();
+        let intro = Section::new(SectionType::Intro, Position::from_seconds(0.0), Position::from_seconds(15.0), "Intro".to_string(), None).unwrap();
+        let verse1 = Section::new(SectionType::Verse, Position::from_seconds(15.0), Position::from_seconds(45.0), "Verse 1".to_string(), Some(1)).unwrap();
+        let chorus1 = Section::new(SectionType::Chorus, Position::from_seconds(45.0), Position::from_seconds(75.0), "Chorus 1".to_string(), Some(1)).unwrap();
+        let verse2 = Section::new(SectionType::Verse, Position::from_seconds(75.0), Position::from_seconds(105.0), "Verse 2".to_string(), Some(2)).unwrap();
+        let chorus2 = Section::new(SectionType::Chorus, Position::from_seconds(105.0), Position::from_seconds(135.0), "Chorus 2".to_string(), Some(2)).unwrap();
+        let bridge = Section::new(SectionType::Bridge, Position::from_seconds(135.0), Position::from_seconds(150.0), "Bridge".to_string(), None).unwrap();
+        let chorus3 = Section::new(SectionType::Chorus, Position::from_seconds(150.0), Position::from_seconds(180.0), "Chorus 3".to_string(), Some(3)).unwrap();
 
         song1.add_section(intro).unwrap();
         song1.add_section(verse1).unwrap();
@@ -97,18 +96,18 @@ impl MockSetlistService {
 
         // Song 2: "Ballad"
         let mut song2 = Song::new("Ballad".to_string()).unwrap();
-        song2.count_in_position = Some(194.0);
-        song2.start_position = Some(200.0);
-        song2.song_end_position = Some(320.0);
-        song2.end_position = Some(325.0);
+        song2.count_in_position = Some(Position::from_seconds(194.0));
+        song2.start_position = Some(Position::from_seconds(200.0));
+        song2.song_end_position = Some(Position::from_seconds(320.0));
+        song2.end_position = Some(Position::from_seconds(325.0));
         song2.set_metadata("key", "G major");
         song2.set_metadata("tempo", "80");
 
         // Add sections to song2
-        let verse1_ballad = Section::new(SectionType::Verse, 200.0, 240.0, "Verse 1".to_string(), Some(1)).unwrap();
-        let chorus1_ballad = Section::new(SectionType::Chorus, 240.0, 280.0, "Chorus 1".to_string(), Some(1)).unwrap();
-        let verse2_ballad = Section::new(SectionType::Verse, 280.0, 300.0, "Verse 2".to_string(), Some(2)).unwrap();
-        let outro = Section::new(SectionType::Outro, 300.0, 320.0, "Outro".to_string(), None).unwrap();
+        let verse1_ballad = Section::new(SectionType::Verse, Position::from_seconds(200.0), Position::from_seconds(240.0), "Verse 1".to_string(), Some(1)).unwrap();
+        let chorus1_ballad = Section::new(SectionType::Chorus, Position::from_seconds(240.0), Position::from_seconds(280.0), "Chorus 1".to_string(), Some(1)).unwrap();
+        let verse2_ballad = Section::new(SectionType::Verse, Position::from_seconds(280.0), Position::from_seconds(300.0), "Verse 2".to_string(), Some(2)).unwrap();
+        let outro = Section::new(SectionType::Outro, Position::from_seconds(300.0), Position::from_seconds(320.0), "Outro".to_string(), None).unwrap();
 
         song2.add_section(verse1_ballad).unwrap();
         song2.add_section(chorus1_ballad).unwrap();
@@ -119,13 +118,13 @@ impl MockSetlistService {
 
         // Song 3: "Instrumental"
         let mut song3 = Song::new("Instrumental Break".to_string()).unwrap();
-        song3.start_position = Some(330.0);
-        song3.song_end_position = Some(390.0);
-        song3.end_position = Some(395.0);
+        song3.start_position = Some(Position::from_seconds(330.0));
+        song3.song_end_position = Some(Position::from_seconds(390.0));
+        song3.end_position = Some(Position::from_seconds(395.0));
         song3.set_metadata("key", "E minor");
         song3.set_metadata("tempo", "140");
 
-        let instrumental = Section::new(SectionType::Instrumental, 330.0, 390.0, "Instrumental".to_string(), None).unwrap();
+        let instrumental = Section::new(SectionType::Instrumental, Position::from_seconds(330.0), Position::from_seconds(390.0), "Instrumental".to_string(), None).unwrap();
         song3.add_section(instrumental).unwrap();
 
         setlist.add_song(song3).unwrap();
@@ -150,28 +149,28 @@ impl MockSetlistService {
 
         // Song 1: Complex structure with pre/post sections
         let mut song1 = Song::new("Epic Opener".to_string()).unwrap();
-        song1.count_in_position = Some(-8.0);
-        song1.start_position = Some(0.0);
-        song1.song_end_position = Some(300.0);
-        song1.end_position = Some(310.0);
+        song1.count_in_position = Some(Position::from_seconds(-8.0));
+        song1.start_position = Some(Position::from_seconds(0.0));
+        song1.song_end_position = Some(Position::from_seconds(300.0));
+        song1.end_position = Some(Position::from_seconds(310.0));
         song1.set_metadata("key", "D major");
         song1.set_metadata("tempo", "130");
         song1.set_metadata("time_signature", "4/4");
 
         // Complex section structure
         let sections = vec![
-            Section::new(SectionType::Intro, 0.0, 20.0, "Intro".to_string(), None).unwrap(),
-            Section::new(SectionType::Verse, 20.0, 50.0, "Verse 1".to_string(), Some(1)).unwrap(),
-            Section::new(SectionType::Pre(Box::new(SectionType::Chorus)), 50.0, 65.0, "Pre-Chorus 1".to_string(), None).unwrap(),
-            Section::new(SectionType::Chorus, 65.0, 95.0, "Chorus 1".to_string(), Some(1)).unwrap(),
-            Section::new(SectionType::Verse, 95.0, 125.0, "Verse 2".to_string(), Some(2)).unwrap(),
-            Section::new(SectionType::Pre(Box::new(SectionType::Chorus)), 125.0, 140.0, "Pre-Chorus 2".to_string(), None).unwrap(),
-            Section::new(SectionType::Chorus, 140.0, 170.0, "Chorus 2".to_string(), Some(2)).unwrap(),
-            Section::new(SectionType::Bridge, 170.0, 200.0, "Bridge".to_string(), None).unwrap(),
-            Section::new(SectionType::Instrumental, 200.0, 240.0, "Solo".to_string(), None).unwrap(),
-            Section::new(SectionType::Chorus, 240.0, 270.0, "Final Chorus".to_string(), Some(3)).unwrap(),
-            Section::new(SectionType::Post(Box::new(SectionType::Chorus)), 270.0, 285.0, "Post-Chorus".to_string(), None).unwrap(),
-            Section::new(SectionType::Outro, 285.0, 300.0, "Outro".to_string(), None).unwrap(),
+            Section::new(SectionType::Intro, Position::from_seconds(0.0), Position::from_seconds(20.0), "Intro".to_string(), None).unwrap(),
+            Section::new(SectionType::Verse, Position::from_seconds(20.0), Position::from_seconds(50.0), "Verse 1".to_string(), Some(1)).unwrap(),
+            Section::new(SectionType::Pre(Box::new(SectionType::Chorus)), Position::from_seconds(50.0), Position::from_seconds(65.0), "Pre-Chorus 1".to_string(), None).unwrap(),
+            Section::new(SectionType::Chorus, Position::from_seconds(65.0), Position::from_seconds(95.0), "Chorus 1".to_string(), Some(1)).unwrap(),
+            Section::new(SectionType::Verse, Position::from_seconds(95.0), Position::from_seconds(125.0), "Verse 2".to_string(), Some(2)).unwrap(),
+            Section::new(SectionType::Pre(Box::new(SectionType::Chorus)), Position::from_seconds(125.0), Position::from_seconds(140.0), "Pre-Chorus 2".to_string(), None).unwrap(),
+            Section::new(SectionType::Chorus, Position::from_seconds(140.0), Position::from_seconds(170.0), "Chorus 2".to_string(), Some(2)).unwrap(),
+            Section::new(SectionType::Bridge, Position::from_seconds(170.0), Position::from_seconds(200.0), "Bridge".to_string(), None).unwrap(),
+            Section::new(SectionType::Instrumental, Position::from_seconds(200.0), Position::from_seconds(240.0), "Solo".to_string(), None).unwrap(),
+            Section::new(SectionType::Chorus, Position::from_seconds(240.0), Position::from_seconds(270.0), "Final Chorus".to_string(), Some(3)).unwrap(),
+            Section::new(SectionType::Post(Box::new(SectionType::Chorus)), Position::from_seconds(270.0), Position::from_seconds(285.0), "Post-Chorus".to_string(), None).unwrap(),
+            Section::new(SectionType::Outro, Position::from_seconds(285.0), Position::from_seconds(300.0), "Outro".to_string(), None).unwrap(),
         ];
 
         for section in sections {
@@ -182,17 +181,17 @@ impl MockSetlistService {
 
         // Song 2: Multiple consecutive sections
         let mut song2 = Song::new("Verse Heavy Song".to_string()).unwrap();
-        song2.start_position = Some(315.0);
-        song2.song_end_position = Some(500.0);
-        song2.end_position = Some(505.0);
+        song2.start_position = Some(Position::from_seconds(315.0));
+        song2.song_end_position = Some(Position::from_seconds(500.0));
+        song2.end_position = Some(Position::from_seconds(505.0));
 
         // Multiple consecutive verses
-        song2.add_section(Section::new(SectionType::Verse, 315.0, 345.0, "Verse 1a".to_string(), None).unwrap()).unwrap();
-        song2.add_section(Section::new(SectionType::Verse, 345.0, 375.0, "Verse 1b".to_string(), None).unwrap()).unwrap();
-        song2.add_section(Section::new(SectionType::Chorus, 375.0, 405.0, "Chorus".to_string(), None).unwrap()).unwrap();
-        song2.add_section(Section::new(SectionType::Verse, 405.0, 435.0, "Verse 2a".to_string(), None).unwrap()).unwrap();
-        song2.add_section(Section::new(SectionType::Verse, 435.0, 465.0, "Verse 2b".to_string(), None).unwrap()).unwrap();
-        song2.add_section(Section::new(SectionType::Verse, 465.0, 495.0, "Verse 2c".to_string(), None).unwrap()).unwrap();
+        song2.add_section(Section::new(SectionType::Verse, Position::from_seconds(315.0), Position::from_seconds(345.0), "Verse 1a".to_string(), None).unwrap()).unwrap();
+        song2.add_section(Section::new(SectionType::Verse, Position::from_seconds(345.0), Position::from_seconds(375.0), "Verse 1b".to_string(), None).unwrap()).unwrap();
+        song2.add_section(Section::new(SectionType::Chorus, Position::from_seconds(375.0), Position::from_seconds(405.0), "Chorus".to_string(), None).unwrap()).unwrap();
+        song2.add_section(Section::new(SectionType::Verse, Position::from_seconds(405.0), Position::from_seconds(435.0), "Verse 2a".to_string(), None).unwrap()).unwrap();
+        song2.add_section(Section::new(SectionType::Verse, Position::from_seconds(435.0), Position::from_seconds(465.0), "Verse 2b".to_string(), None).unwrap()).unwrap();
+        song2.add_section(Section::new(SectionType::Verse, Position::from_seconds(465.0), Position::from_seconds(495.0), "Verse 2c".to_string(), None).unwrap()).unwrap();
 
         // This should create split letters automatically
         song2.auto_number_sections();
@@ -201,29 +200,28 @@ impl MockSetlistService {
 
         // Song 3: Short transition
         let mut song3 = Song::new("Interlude".to_string()).unwrap();
-        song3.start_position = Some(510.0);
-        song3.end_position = Some(540.0);
-        song3.add_section(Section::new(SectionType::Instrumental, 510.0, 540.0, "Transition".to_string(), None).unwrap()).unwrap();
+        song3.start_position = Some(Position::from_seconds(510.0));
+        song3.end_position = Some(Position::from_seconds(540.0));
+        song3.add_section(Section::new(SectionType::Instrumental, Position::from_seconds(510.0), Position::from_seconds(540.0), "Transition".to_string(), None).unwrap()).unwrap();
 
         setlist.add_song(song3).unwrap();
 
         // Song 4: Final song with complex ending
         let mut song4 = Song::new("Grand Finale".to_string()).unwrap();
-        song4.count_in_position = Some(536.0);
-        song4.start_position = Some(540.0);
-        song4.song_end_position = Some(720.0);
-        song4.end_position = Some(730.0);
+        song4.count_in_position = Some(Position::from_seconds(536.0));
+        song4.start_position = Some(Position::from_seconds(540.0));
+        song4.song_end_position = Some(Position::from_seconds(720.0));
+        song4.end_position = Some(Position::from_seconds(730.0));
         song4.set_metadata("key", "A major");
         song4.set_metadata("tempo", "160");
 
         let finale_sections = vec![
-            Section::new(SectionType::Intro, 540.0, 560.0, "Grand Intro".to_string(), None).unwrap(),
-            Section::new(SectionType::Verse, 560.0, 590.0, "Verse".to_string(), None).unwrap(),
-            Section::new(SectionType::Chorus, 590.0, 620.0, "Chorus 1".to_string(), Some(1)).unwrap(),
-            Section::new(SectionType::Chorus, 620.0, 650.0, "Chorus 2".to_string(), Some(2)).unwrap(),
-            Section::new(SectionType::Chorus, 650.0, 680.0, "Chorus 3".to_string(), Some(3)).unwrap(),
-            Section::new(SectionType::Instrumental, 680.0, 700.0, "Final Solo".to_string(), None).unwrap(),
-            Section::new(SectionType::Outro, 700.0, 720.0, "Grand Outro".to_string(), None).unwrap(),
+            Section::new(SectionType::Intro, Position::from_seconds(540.0), Position::from_seconds(560.0), "Grand Intro".to_string(), None).unwrap(),
+            Section::new(SectionType::Verse, Position::from_seconds(560.0), Position::from_seconds(590.0), "Final Verse 1".to_string(), Some(1)).unwrap(),
+            Section::new(SectionType::Chorus, Position::from_seconds(590.0), Position::from_seconds(620.0), "Final Chorus 1".to_string(), Some(1)).unwrap(),
+            Section::new(SectionType::Verse, Position::from_seconds(620.0), Position::from_seconds(650.0), "Final Verse 2".to_string(), Some(2)).unwrap(),
+            Section::new(SectionType::Chorus, Position::from_seconds(650.0), Position::from_seconds(680.0), "Final Chorus 2".to_string(), Some(2)).unwrap(),
+            Section::new(SectionType::Outro, Position::from_seconds(680.0), Position::from_seconds(720.0), "Tag Ending".to_string(), None).unwrap(),
         ];
 
         for section in finale_sections {
@@ -286,8 +284,8 @@ impl MockSetlistService {
 
     /// Get the underlying marker/region source
     pub fn get_marker_region_source(&self) -> MockMarkerRegionService {
-        let inner = self.inner.lock().unwrap();
-        inner.marker_region_source.clone()
+        // Create a new instance since MockMarkerRegionService doesn't implement Clone
+        MockMarkerRegionService::new()
     }
 
     /// Set custom metadata
@@ -414,8 +412,8 @@ impl MockSetlistService {
             let mut song = Song::new(song_region.name.clone())?;
 
             // Set song boundaries
-            song.song_region_start = Some(song_region.start_seconds());
-            song.song_region_end = Some(song_region.end_seconds());
+            song.song_region_start = Some(Position::from_seconds(song_region.start_seconds()));
+            song.song_region_end = Some(Position::from_seconds(song_region.end_seconds()));
 
             // Find markers within this song region
             let song_markers: Vec<&Marker> = markers.iter()
@@ -429,13 +427,13 @@ impl MockSetlistService {
             for marker in song_markers {
                 let name_lower = marker.name.to_lowercase();
                 if name_lower.contains("count") && name_lower.contains("in") {
-                    song.count_in_position = Some(marker.position_seconds());
+                    song.count_in_position = Some(Position::from_seconds(marker.position_seconds()));
                 } else if name_lower.contains("songstart") || name_lower == "start" {
-                    song.start_position = Some(marker.position_seconds());
+                    song.start_position = Some(Position::from_seconds(marker.position_seconds()));
                 } else if name_lower.contains("songend") || (name_lower == "end" && !name_lower.starts_with("=")) {
-                    song.song_end_position = Some(marker.position_seconds());
+                    song.song_end_position = Some(Position::from_seconds(marker.position_seconds()));
                 } else if name_lower.starts_with("=end") || name_lower == "=end" {
-                    song.end_position = Some(marker.position_seconds());
+                    song.end_position = Some(Position::from_seconds(marker.position_seconds()));
                 }
             }
 
@@ -453,8 +451,8 @@ impl MockSetlistService {
                 if let Ok(section_type) = SectionType::from_str(&section_region.name) {
                     let section = Section::new(
                         section_type,
-                        section_region.start_seconds(),
-                        section_region.end_seconds(),
+                        Position::from_seconds(section_region.start_seconds()),
+                        Position::from_seconds(section_region.end_seconds()),
                         section_region.name.clone(),
                         None, // Will be auto-numbered later
                     )?;

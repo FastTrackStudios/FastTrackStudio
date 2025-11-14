@@ -69,7 +69,7 @@ export interface TransportController {
   set_tempo: (bpm: number) => Promise<string>;
   set_position: (seconds: number) => Promise<string>;
   set_time_signature: (numerator: number, denominator: number) => Promise<string>;
-  get_state: () => Promise<Transport | null>;
+  get_state: () => Promise<import('../bindings').Transport | null>;
 }
 
 /**

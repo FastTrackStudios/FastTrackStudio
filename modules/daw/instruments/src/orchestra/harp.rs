@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// Harp instrument (separate from bowed strings due to unique characteristics)
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum HarpInstrument {
     /// Concert harp (pedal harp)
@@ -37,6 +37,12 @@ impl HarpInstrument {
             HarpInstrument::CelticHarp,
             HarpInstrument::ElectricHarp,
         ]
+    }
+
+    /// Get the orchestral ordering index (0-based)
+    /// Order: Harp (0), CelticHarp (1), ElectricHarp (2)
+    pub fn orchestral_index(&self) -> usize {
+        *self as usize
     }
 
     /// Get the typical range in semitones above C0

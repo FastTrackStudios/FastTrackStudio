@@ -8,7 +8,7 @@ use ts_rs::TS;
 use crate::Transposition;
 
 /// Orchestral woodwind instruments with transposition support
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum WoodwindInstrument {
     /// Piccolo (concert pitch)
@@ -125,6 +125,7 @@ impl fmt::Display for WoodwindInstrument {
             WoodwindInstrument::Bassoon => write!(f, "Bassoon"),
             WoodwindInstrument::Contrabassoon => write!(f, "Contrabassoon"),
         }
+    }
 }
 
 #[cfg(test)]

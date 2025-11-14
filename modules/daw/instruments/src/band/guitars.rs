@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// Guitar family instruments
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum GuitarInstrument {
     /// Acoustic guitar with steel strings
@@ -50,6 +50,11 @@ impl fmt::Display for GuitarInstrument {
 }
 
 impl GuitarInstrument {
+    /// Get the orchestral ordering index (0-based)
+    pub fn orchestral_index(&self) -> usize {
+        *self as usize
+    }
+
     /// Get all guitar instruments
     pub fn all() -> Vec<Self> {
         vec![

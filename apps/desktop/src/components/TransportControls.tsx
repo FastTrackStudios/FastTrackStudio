@@ -17,6 +17,7 @@ import {
   Plus
 } from 'lucide-react';
 import { useProjectManager } from '@/hooks/useProjectManager';
+import { api } from '@/lib/tauri-api';
 
 interface TransportControlsProps {
   className?: string;
@@ -27,6 +28,110 @@ export function TransportControls({ className = '' }: TransportControlsProps) {
     autoLoadProjects: true,
     pollInterval: 1000,
   });
+
+  // Debug logging for TransportControls
+  React.useEffect(() => {
+    console.log('🎛️ TransportControls - Component mounted/updated');
+    console.log('🎛️ TransportControls - projectManager state:', {
+      projects: projectManager.projects,
+      activeProject: projectManager.activeProject,
+      projectsLoading: projectManager.projectsLoading,
+      transportLoading: projectManager.transportLoading,
+      error: projectManager.error,
+      isPlaying: projectManager.isPlaying,
+      isRecording: projectManager.isRecording,
+      currentTempo: projectManager.currentTempo,
+      currentPosition: projectManager.currentPosition,
+      transportState: projectManager.transportState
+    });
+  }, [projectManager]);
+
+  // Debug logging for button state specifically
+  React.useEffect(() => {
+    console.log('🎛️ TransportControls - Button state debug:', {
+      activeProject: projectManager.activeProject,
+      activeProjectType: typeof projectManager.activeProject,
+      activeProjectTruthy: !!projectManager.activeProject,
+      transportLoading: projectManager.transportLoading,
+      buttonsShouldBeDisabled: !projectManager.activeProject || projectManager.transportLoading,
+      projects: projectManager.projects,
+      projectsLength: projectManager.projects?.length,
+      error: projectManager.error
+    });
+  }, [projectManager.activeProject, projectManager.transportLoading, projectManager.projects, projectManager.error]);
+
+  // Direct API test functions
+  const [apiTestResults, setApiTestResults] = useState<string[]>([]);
+
+  const addTestResult = (result: string) => {
+    setApiTestResults(prev => [...prev.slice(-10), result]); // Keep last 11 results
+  };
+
+  const testDirectAPI = async () => {
+    addTestResult('🧪 Testing direct API calls...');
+    try {
+      const projects = await api.projects.list_projects();
+      addTestResult(`✅ Projects: ${JSON.stringify(projects)}`);
+
+      const activeProject = await api.projects.get_active_project();
+      addTestResult(`✅ Active Project: ${activeProject || 'null'}`);
+
+      if (activeProject) {
+        const transportState = await api.transport.get_state();
+        addTestResult(`✅ Transport State: play_state=${transportState?.play_state}, tempo=${transportState?.tempo?.bpm}`);
+      }
+    } catch (error) {
+      addTestResult(`❌ API Error: ${error}`);
+    }
+  };
+
+  const testGreetCommand = async () => {
+    addTestResult('🧪 Testing greet command...');
+    try {
+      const result = await api.greet('Frontend Test');
+      addTestResult(`✅ Greet result: ${result}`);
+    } catch (error) {
+      addTestResultconsole.error('🧪 Greet error:', error);
+    }
+  };
+
+  const testTransportObject = async () => {
+    console.log('🧪 Testing transport object...');
+    setApiTestResults(prev => [...prev, '🧪 Testing transport object...']);
+    try {
+      const result = await api.test_transport_object();
+      console.log('🧪 Transport object result:', result);
+      setApiTestResults(prev => [...prev, `Transport object: ${JSON.stringify(result, null, 2)}`]);
+    } catch (error) {
+      console.error('🧪 Transport object error:', error);
+      setApiTestResults(prev => [...prev, `Transport object error: ${error}`]);
+    }
+  };
+
+  const testManualStateUpdate = async () => {
+    console.log('🧪 Testing manual state update...');
+    setApiTestResults(prev => [...prev, '🧪 Testing manual state update...']);
+    try {
+      const projects = await api.projects.list_projects();
+      const activeProject = await api.projects.get_active_project();
+      console.log('🧪 Manual test - projects:', projects);
+      console.log('🧪 Manual test - activeProject:', activeProject);
+      console.log('🧪 Manual test - Expected activeProject to be:', 'Default Project');
+      console.log('🧪 Manual test - Are they equal?', activeProject === 'Default Project');
+
+      setApiTestResults(prev => [...prev,
+        `Manual API projects: ${JSON.stringify(projects)}`,
+        `Manual API activeProject: ${JSON.stringify(activeProject)}`,
+        `Expected: "Default Project"`,
+        `Match: ${activeProject === 'Default Project'}`,
+        `Current hook activeProject: ${JSON.stringify(projectManager.activeProject)}`,
+        `Hook vs API match: ${projectManager.activeProject === activeProject}`
+      ]);
+    } catch (error) {
+      console.error('🧪 Manual state test error:', error);
+      setApiTestResults(prev => [...prev, `Manual state test error: ${error}`]);
+    }
+  };
 
   const [newProjectName, setNewProjectName] = useState('');
   const [tempoInput, setTempoInput] = useState('');
@@ -190,6 +295,92 @@ export function TransportControls({ className = '' }: TransportControlsProps) {
         </CardContent>
       </Card>
 
+      {/* Real-time State Display */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            🔍 Real-time State Display
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <strong>Projects Array:</strong>
+              <pre className="text-xs bg-gray-100 p-2 rounded mt-1">
+                {JSON.stringify(projectManager.projects, null, 2)}
+              </pre>
+            </div>
+            <div>
+              <strong>Active Project:</strong>
+              <pre className="text-xs bg-gray-100 p-2 rounded mt-1">
+                Value: {JSON.stringify(projectManager.activeProject)}
+                Type: {typeof projectManager.activeProject}
+                Truthy: {String(!!projectManager.activeProject)}
+                Length: {projectManager.activeProject?.length || 'N/A'}
+              </pre>
+            </div>
+            <div>
+              <strong>Button State:</strong>
+              <pre className="text-xs bg-gray-100 p-2 rounded mt-1">
+                Should be disabled: {String(!projectManager.activeProject || projectManager.transportLoading)}
+                No active project: {String(!projectManager.activeProject)}
+                Transport loading: {String(projectManager.transportLoading)}
+              </pre>
+            </div>
+            <div>
+              <strong>Loading States:</strong>
+              <pre className="text-xs bg-gray-100 p-2 rounded mt-1">
+                Projects Loading: {String(projectManager.projectsLoading)}
+                Transport Loading: {String(projectManager.transportLoading)}
+                Error: {projectManager.error || 'None'}
+              </pre>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* API Debug Testing */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            🧪 API Debug Testing
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2 flex-wrap">
+            <Button onClick={testGreetCommand} variant="outline" size="sm">
+              Test Greet Command
+            </Button>
+            <Button onClick={testDirectAPI} variant="outline" size="sm">
+              Test Direct API Calls
+            </Button>
+            <Button onClick={() => projectManager.refreshProjects()} variant="outline" size="sm">
+              Refresh Projects
+            </Button>
+            <Button onClick={() => projectManager.refreshTransportState()} variant="outline" size="sm">
+              Refresh Transport State
+            </Button>
+            <Button onClick={testTransportObject} variant="outline" size="sm">
+              Test Transport Object
+            </Button>
+            <Button onClick={testManualStateUpdate} variant="outline" size="sm">
+              Manual State Test
+            </Button>
+            <Button onClick={() => setApiTestResults([])} variant="outline" size="sm">
+              Clear Results
+            </Button>
+          </div>
+          {apiTestResults.length > 0 && (
+            <div className="mt-4">
+              <strong>Test Results:</strong>
+              <pre className="text-xs bg-gray-100 p-2 rounded mt-1 max-h-32 overflow-auto">
+                {apiTestResults.join('\n')}
+              </pre>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Transport State Display */}
       <Card>
         <CardHeader>
@@ -245,70 +436,94 @@ export function TransportControls({ className = '' }: TransportControlsProps) {
           <div className="flex flex-wrap gap-2 justify-center">
             {/* Playback Controls */}
             <Button
-              onClick={projectManager.stop}
+              onClick={() => {
+                console.log('🎛️ Stop button clicked, activeProject:', projectManager.activeProject);
+                projectManager.stop();
+              }}
               disabled={!projectManager.activeProject || projectManager.transportLoading}
               variant="outline"
               size="lg"
+              title={`Disabled: ${!projectManager.activeProject ? 'No active project' : projectManager.transportLoading ? 'Transport loading' : 'Ready'}`}
             >
               <Square className="w-4 h-4 mr-2" />
-              Stop
+              Stop {!projectManager.activeProject && '(No Project)'}
             </Button>
 
             <Button
-              onClick={projectManager.play}
+              onClick={() => {
+                console.log('🎛️ Play button clicked, activeProject:', projectManager.activeProject);
+                projectManager.play();
+              }}
               disabled={!projectManager.activeProject || projectManager.isPlaying || projectManager.transportLoading}
               variant={projectManager.isPlaying ? "default" : "outline"}
               size="lg"
+              title={`Disabled: ${!projectManager.activeProject ? 'No active project' : projectManager.isPlaying ? 'Already playing' : projectManager.transportLoading ? 'Transport loading' : 'Ready'}`}
             >
               <Play className="w-4 h-4 mr-2" />
-              Play
+              Play {!projectManager.activeProject && '(No Project)'}
             </Button>
 
             <Button
-              onClick={projectManager.pause}
+              onClick={() => {
+                console.log('🎛️ Pause button clicked, activeProject:', projectManager.activeProject);
+                projectManager.pause();
+              }}
               disabled={!projectManager.activeProject || !projectManager.isPlaying || projectManager.transportLoading}
               variant="outline"
               size="lg"
+              title={`Disabled: ${!projectManager.activeProject ? 'No active project' : !projectManager.isPlaying ? 'Not playing' : projectManager.transportLoading ? 'Transport loading' : 'Ready'}`}
             >
               <Pause className="w-4 h-4 mr-2" />
-              Pause
+              Pause {!projectManager.activeProject && '(No Project)'}
             </Button>
 
             <Button
-              onClick={projectManager.playPause}
+              onClick={() => {
+                console.log('🎛️ Play/Pause button clicked, activeProject:', projectManager.activeProject);
+                projectManager.playPause();
+              }}
               disabled={!projectManager.activeProject || projectManager.transportLoading}
               variant="outline"
               size="lg"
+              title={`Disabled: ${!projectManager.activeProject ? 'No active project' : projectManager.transportLoading ? 'Transport loading' : 'Ready'}`}
             >
               {projectManager.isPlaying ? (
                 <Pause className="w-4 h-4 mr-2" />
               ) : (
                 <Play className="w-4 h-4 mr-2" />
               )}
-              Play/Pause
+              Play/Pause {!projectManager.activeProject && '(No Project)'}
             </Button>
 
             <Separator orientation="vertical" className="h-10" />
 
             {/* Recording Controls */}
             <Button
-              onClick={projectManager.startRecording}
+              onClick={() => {
+                console.log('🎛️ Record button clicked, activeProject:', projectManager.activeProject);
+                projectManager.startRecording();
+              }}
               disabled={!projectManager.activeProject || projectManager.isRecording || projectManager.transportLoading}
               variant={projectManager.isRecording ? "destructive" : "outline"}
               size="lg"
+              title={`Disabled: ${!projectManager.activeProject ? 'No active project' : projectManager.isRecording ? 'Already recording' : projectManager.transportLoading ? 'Transport loading' : 'Ready'}`}
             >
               <Circle className={`w-4 h-4 mr-2 ${projectManager.isRecording ? 'fill-current' : ''}`} />
-              Record
+              Record {!projectManager.activeProject && '(No Project)'}
             </Button>
 
             <Button
-              onClick={projectManager.stopRecording}
+              onClick={() => {
+                console.log('🎛️ Stop recording button clicked, activeProject:', projectManager.activeProject);
+                projectManager.stopRecording();
+              }}
               disabled={!projectManager.activeProject || !projectManager.isRecording || projectManager.transportLoading}
               variant="outline"
               size="lg"
+              title={`Disabled: ${!projectManager.activeProject ? 'No active project' : !projectManager.isRecording ? 'Not recording' : projectManager.transportLoading ? 'Transport loading' : 'Ready'}`}
             >
               <Square className="w-4 h-4 mr-2" />
-              Stop Rec
+              Stop Rec {!projectManager.activeProject && '(No Project)'}
             </Button>
           </div>
         </CardContent>

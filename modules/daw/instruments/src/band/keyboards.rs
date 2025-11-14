@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// Keyboard instruments
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum KeyboardInstrument {
     /// Acoustic piano
@@ -56,6 +56,11 @@ impl fmt::Display for KeyboardInstrument {
 }
 
 impl KeyboardInstrument {
+    /// Get the orchestral ordering index (0-based)
+    pub fn orchestral_index(&self) -> usize {
+        *self as usize
+    }
+
     /// Get all keyboard instruments
     pub fn all() -> Vec<Self> {
         vec![

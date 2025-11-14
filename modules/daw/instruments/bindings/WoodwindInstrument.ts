@@ -3,4 +3,4 @@
 /**
  * Orchestral woodwind instruments with transposition support
  */
-export type WoodwindInstrument = "Piccolo" | "Flute" | "Oboe" | "EnglishHorn" | "Clarinet" | "BassClarinet" | "Bassoon" | "Contrabassoon" | "Saxophone" | "Recorder";
+export type WoodwindInstrument = "Piccolo" | "Flute" | "Oboe" | "EnglishHorn" | "Clarinet" | "BassClarinet" | "Bassoon" | "Contrabassoon";

@@ -8,7 +8,7 @@ use ts_rs::TS;
 use crate::Transposition;
 
 /// Orchestral brass instruments
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum BrassInstrument {
     /// French horn (typically in F)

@@ -3,4 +3,4 @@
 /**
  * Orchestral brass instruments
  */
-export type BrassInstrument = "Horn" | "Trumpet" | "Trombone" | "BassTrombone" | "Tuba" | "Cornet" | "Flugelhorn" | "Euphonium";
+export type BrassInstrument = "Horn" | "Trumpet" | "Trombone" | "BassTrombone" | "Tuba";
