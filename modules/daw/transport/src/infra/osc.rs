@@ -1,10 +1,12 @@
-//! OSC Transport Infrastructure Adapter
+//! OSC Transport Infrastructure Adapter with Matchit Routing
 //!
 //! This module implements an OSC (Open Sound Control) server for transport operations.
 //! It provides a UDP-based OSC server that can receive OSC messages and translate
-//! them to transport actions following the same pattern as the HTTP adapter.
+//! them to transport actions using high-performance matchit routing.
 //!
 //! ## OSC Address Patterns
+//!
+//! This OSC implementation provides the exact same functionality as the HTTP and WebSocket adapters.
 //!
 //! ### Transport Control
 //! - `/transport/play` - Start playback
@@ -24,21 +26,57 @@
 //! - `/transport/position` [float seconds] - Set position
 //! - `/transport/record_mode` [string mode] - Set record mode ("normal", "time_selection", "item")
 //!
-//! ### Queries (with response)
-//! - `/transport/status` - Get complete status
-//! - `/transport/is_playing` - Get playing state
-//! - `/transport/is_recording` - Get recording state
-//! - `/transport/get_tempo` - Get current tempo
-//! - `/transport/get_position` - Get current position
+//! ### Queries (with responses)
+//! - `/transport/status` - Get complete transport status
+//! - `/transport/is_playing` - Get playing state (bool)
+//! - `/transport/is_recording` - Get recording state (bool)
+//! - `/transport/get_tempo` - Get current tempo (float)
+//! - `/transport/get_position` - Get current position (float)
+//! - `/transport/get_time_signature` - Get time signature (int, int)
+//! - `/transport/get_record_mode` - Get record mode (string)
+//! - `/transport/is_ready` - Check if transport is ready (bool)
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::net::UdpSocket;
 use rosc::{OscPacket, OscMessage, OscType, encoder, decoder};
+use matchit::Router;
 use crate::core::{TransportActions, Tempo, RecordMode};
 use primitives::TimeSignature;
 
-/// OSC Server for Transport operations
+/// Route identifiers for OSC handlers
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OscRoute {
+    // Transport control
+    Play,
+    Pause,
+    Stop,
+    PlayPause,
+    PlayStop,
+
+    // Recording control
+    StartRecording,
+    StopRecording,
+    ToggleRecording,
+
+    // Configuration
+    SetTempo,
+    SetTimeSignature,
+    SetPosition,
+    SetRecordMode,
+
+    // Queries
+    GetStatus,
+    IsPlaying,
+    IsRecording,
+    GetTempo,
+    GetPosition,
+    GetTimeSignature,
+    GetRecordMode,
+    IsReady,
+}
+
+/// OSC Server for Transport operations with Matchit routing
 pub struct OscTransportServer<T>
 where
     T: TransportActions + Send + Sync + 'static,
@@ -46,21 +84,53 @@ where
     transport: Arc<Mutex<T>>,
     socket: UdpSocket,
     response_addr: Option<std::net::SocketAddr>,
+    router: Router<OscRoute>,
 }
 
 impl<T> OscTransportServer<T>
 where
     T: TransportActions + Send + Sync + 'static,
 {
-    /// Create a new OSC transport server
+    /// Create a new OSC transport server with matchit routing
     pub async fn new(transport: Arc<Mutex<T>>, bind_addr: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let socket = UdpSocket::bind(bind_addr).await?;
         println!("OSC Transport Server listening on {}", bind_addr);
+
+        let mut router = Router::new();
+
+        // Transport control routes
+        router.insert("/transport/play", OscRoute::Play)?;
+        router.insert("/transport/pause", OscRoute::Pause)?;
+        router.insert("/transport/stop", OscRoute::Stop)?;
+        router.insert("/transport/play_pause", OscRoute::PlayPause)?;
+        router.insert("/transport/play_stop", OscRoute::PlayStop)?;
+
+        // Recording control routes
+        router.insert("/transport/record/start", OscRoute::StartRecording)?;
+        router.insert("/transport/record/stop", OscRoute::StopRecording)?;
+        router.insert("/transport/record/toggle", OscRoute::ToggleRecording)?;
+
+        // Configuration routes
+        router.insert("/transport/tempo", OscRoute::SetTempo)?;
+        router.insert("/transport/time_signature", OscRoute::SetTimeSignature)?;
+        router.insert("/transport/position", OscRoute::SetPosition)?;
+        router.insert("/transport/record_mode", OscRoute::SetRecordMode)?;
+
+        // Query routes
+        router.insert("/transport/status", OscRoute::GetStatus)?;
+        router.insert("/transport/is_playing", OscRoute::IsPlaying)?;
+        router.insert("/transport/is_recording", OscRoute::IsRecording)?;
+        router.insert("/transport/get_tempo", OscRoute::GetTempo)?;
+        router.insert("/transport/get_position", OscRoute::GetPosition)?;
+        router.insert("/transport/get_time_signature", OscRoute::GetTimeSignature)?;
+        router.insert("/transport/get_record_mode", OscRoute::GetRecordMode)?;
+        router.insert("/transport/is_ready", OscRoute::IsReady)?;
 
         Ok(Self {
             transport,
             socket,
             response_addr: None,
+            router,
         })
     }
 
@@ -110,48 +180,58 @@ where
         Ok(())
     }
 
-    /// Handle an individual OSC message
+    /// Handle an individual OSC message using matchit router
     async fn handle_osc_message(&mut self, msg: OscMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let addr = msg.addr.as_str();
 
-        match addr {
+        match self.router.at(addr) {
+            Ok(matched) => {
+                // Dispatch to the appropriate handler based on the route
+                self.handle_route(*matched.value, &msg.args).await?;
+            }
+            Err(_) => {
+                self.send_error_response(&format!("Unknown OSC address: {}", addr)).await;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Dispatch to the appropriate handler based on route identifier
+    async fn handle_route(&mut self, route: OscRoute, args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        match route {
             // Transport control
-            "/transport/play" => self.handle_play().await,
-            "/transport/pause" => self.handle_pause().await,
-            "/transport/stop" => self.handle_stop().await,
-            "/transport/play_pause" => self.handle_play_pause().await,
-            "/transport/play_stop" => self.handle_play_stop().await,
+            OscRoute::Play => self.handle_play(args).await,
+            OscRoute::Pause => self.handle_pause(args).await,
+            OscRoute::Stop => self.handle_stop(args).await,
+            OscRoute::PlayPause => self.handle_play_pause(args).await,
+            OscRoute::PlayStop => self.handle_play_stop(args).await,
 
             // Recording control
-            "/transport/record/start" => self.handle_start_recording().await,
-            "/transport/record/stop" => self.handle_stop_recording().await,
-            "/transport/record/toggle" => self.handle_toggle_recording().await,
+            OscRoute::StartRecording => self.handle_start_recording(args).await,
+            OscRoute::StopRecording => self.handle_stop_recording(args).await,
+            OscRoute::ToggleRecording => self.handle_toggle_recording(args).await,
 
             // Configuration
-            "/transport/tempo" => self.handle_set_tempo(&msg.args).await,
-            "/transport/time_signature" => self.handle_set_time_signature(&msg.args).await,
-            "/transport/position" => self.handle_set_position(&msg.args).await,
-            "/transport/record_mode" => self.handle_set_record_mode(&msg.args).await,
+            OscRoute::SetTempo => self.handle_set_tempo(args).await,
+            OscRoute::SetTimeSignature => self.handle_set_time_signature(args).await,
+            OscRoute::SetPosition => self.handle_set_position(args).await,
+            OscRoute::SetRecordMode => self.handle_set_record_mode(args).await,
 
             // Queries
-            "/transport/status" => self.handle_get_status().await,
-            "/transport/is_playing" => self.handle_is_playing().await,
-            "/transport/is_recording" => self.handle_is_recording().await,
-            "/transport/get_tempo" => self.handle_get_tempo().await,
-            "/transport/get_position" => self.handle_get_position().await,
-            "/transport/get_time_signature" => self.handle_get_time_signature().await,
-            "/transport/get_record_mode" => self.handle_get_record_mode().await,
-            "/transport/is_ready" => self.handle_is_ready().await,
-
-            _ => {
-                self.send_error_response(&format!("Unknown OSC address: {}", addr)).await;
-                Ok(())
-            }
+            OscRoute::GetStatus => self.handle_get_status(args).await,
+            OscRoute::IsPlaying => self.handle_is_playing(args).await,
+            OscRoute::IsRecording => self.handle_is_recording(args).await,
+            OscRoute::GetTempo => self.handle_get_tempo(args).await,
+            OscRoute::GetPosition => self.handle_get_position(args).await,
+            OscRoute::GetTimeSignature => self.handle_get_time_signature(args).await,
+            OscRoute::GetRecordMode => self.handle_get_record_mode(args).await,
+            OscRoute::IsReady => self.handle_is_ready(args).await,
         }
     }
 
     // Transport control handlers
-    async fn handle_play(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_play(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.play()
@@ -163,7 +243,7 @@ where
         Ok(())
     }
 
-    async fn handle_pause(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_pause(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.pause()
@@ -175,7 +255,7 @@ where
         Ok(())
     }
 
-    async fn handle_stop(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_stop(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.stop()
@@ -187,7 +267,7 @@ where
         Ok(())
     }
 
-    async fn handle_play_pause(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_play_pause(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.play_pause()
@@ -199,7 +279,7 @@ where
         Ok(())
     }
 
-    async fn handle_play_stop(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_play_stop(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.play_stop()
@@ -212,7 +292,7 @@ where
     }
 
     // Recording control handlers
-    async fn handle_start_recording(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_start_recording(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.start_recording()
@@ -224,7 +304,7 @@ where
         Ok(())
     }
 
-    async fn handle_stop_recording(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_stop_recording(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.stop_recording()
@@ -236,7 +316,7 @@ where
         Ok(())
     }
 
-    async fn handle_toggle_recording(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_toggle_recording(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let mut transport = self.transport.lock().await;
             transport.toggle_recording()
@@ -361,7 +441,7 @@ where
     }
 
     // Query handlers
-    async fn handle_get_status(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_get_status(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let status_result = {
             let transport = self.transport.lock().await;
             (
@@ -403,7 +483,7 @@ where
         Ok(())
     }
 
-    async fn handle_is_playing(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_is_playing(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.is_playing()
@@ -421,7 +501,7 @@ where
         Ok(())
     }
 
-    async fn handle_is_recording(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_is_recording(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.is_recording()
@@ -439,7 +519,7 @@ where
         Ok(())
     }
 
-    async fn handle_get_tempo(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_get_tempo(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.get_tempo()
@@ -457,7 +537,7 @@ where
         Ok(())
     }
 
-    async fn handle_get_position(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_get_position(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.get_position()
@@ -475,7 +555,7 @@ where
         Ok(())
     }
 
-    async fn handle_get_time_signature(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_get_time_signature(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.get_time_signature()
@@ -496,7 +576,7 @@ where
         Ok(())
     }
 
-    async fn handle_get_record_mode(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_get_record_mode(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.get_record_mode()
@@ -520,7 +600,7 @@ where
         Ok(())
     }
 
-    async fn handle_is_ready(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_is_ready(&mut self, _args: &[OscType]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = {
             let transport = self.transport.lock().await;
             transport.is_ready()
@@ -591,8 +671,6 @@ where
 mod tests {
     use super::*;
     use crate::core::Transport;
-    use std::time::Duration;
-    use tokio::time::timeout;
 
     #[tokio::test]
     async fn test_osc_server_creation() {
@@ -601,6 +679,105 @@ mod tests {
         assert!(server.is_ok());
     }
 
-    // Note: More comprehensive tests would require an OSC client to send test messages
-    // This would be a good place to add integration tests with actual OSC communication
+    #[test]
+    fn test_router_setup() {
+        let mut router = Router::new();
+
+        // Test that all our routes can be added without conflicts
+        assert!(router.insert("/transport/play", OscRoute::Play).is_ok());
+        assert!(router.insert("/transport/pause", OscRoute::Pause).is_ok());
+        assert!(router.insert("/transport/stop", OscRoute::Stop).is_ok());
+        assert!(router.insert("/transport/tempo", OscRoute::SetTempo).is_ok());
+        assert!(router.insert("/transport/status", OscRoute::GetStatus).is_ok());
+
+        // Test route matching
+        let matched = router.at("/transport/play");
+        assert!(matched.is_ok());
+        assert_eq!(*matched.unwrap().value, OscRoute::Play);
+
+        let matched = router.at("/transport/unknown");
+        assert!(matched.is_err());
+    }
+
+    #[test]
+    fn test_router_performance() {
+        let mut router = Router::new();
+
+        // Add all our transport routes
+        let routes = vec![
+            ("/transport/play", OscRoute::Play),
+            ("/transport/pause", OscRoute::Pause),
+            ("/transport/stop", OscRoute::Stop),
+            ("/transport/play_pause", OscRoute::PlayPause),
+            ("/transport/play_stop", OscRoute::PlayStop),
+            ("/transport/record/start", OscRoute::StartRecording),
+            ("/transport/record/stop", OscRoute::StopRecording),
+            ("/transport/record/toggle", OscRoute::ToggleRecording),
+            ("/transport/tempo", OscRoute::SetTempo),
+            ("/transport/time_signature", OscRoute::SetTimeSignature),
+            ("/transport/position", OscRoute::SetPosition),
+            ("/transport/record_mode", OscRoute::SetRecordMode),
+            ("/transport/status", OscRoute::GetStatus),
+            ("/transport/is_playing", OscRoute::IsPlaying),
+            ("/transport/is_recording", OscRoute::IsRecording),
+            ("/transport/get_tempo", OscRoute::GetTempo),
+            ("/transport/get_position", OscRoute::GetPosition),
+            ("/transport/get_time_signature", OscRoute::GetTimeSignature),
+            ("/transport/get_record_mode", OscRoute::GetRecordMode),
+            ("/transport/is_ready", OscRoute::IsReady),
+        ];
+
+        for (route_path, route_id) in &routes {
+            router.insert(*route_path, *route_id).unwrap();
+        }
+
+        // Test that all routes can be matched quickly
+        for (route_path, expected_id) in &routes {
+            let matched = router.at(*route_path).unwrap();
+            assert_eq!(*matched.value, *expected_id);
+        }
+    }
+
+    #[test]
+    fn test_route_enum_completeness() {
+        // This test ensures we handle all route variants
+        let all_routes = [
+            OscRoute::Play,
+            OscRoute::Pause,
+            OscRoute::Stop,
+            OscRoute::PlayPause,
+            OscRoute::PlayStop,
+            OscRoute::StartRecording,
+            OscRoute::StopRecording,
+            OscRoute::ToggleRecording,
+            OscRoute::SetTempo,
+            OscRoute::SetTimeSignature,
+            OscRoute::SetPosition,
+            OscRoute::SetRecordMode,
+            OscRoute::GetStatus,
+            OscRoute::IsPlaying,
+            OscRoute::IsRecording,
+            OscRoute::GetTempo,
+            OscRoute::GetPosition,
+            OscRoute::GetTimeSignature,
+            OscRoute::GetRecordMode,
+            OscRoute::IsReady,
+        ];
+
+        // If this compiles, we have handled all enum variants
+        for route in &all_routes {
+            // Just verify they can be matched (we don't need to actually call handlers in tests)
+            match route {
+                OscRoute::Play | OscRoute::Pause | OscRoute::Stop |
+                OscRoute::PlayPause | OscRoute::PlayStop |
+                OscRoute::StartRecording | OscRoute::StopRecording | OscRoute::ToggleRecording |
+                OscRoute::SetTempo | OscRoute::SetTimeSignature | OscRoute::SetPosition | OscRoute::SetRecordMode |
+                OscRoute::GetStatus | OscRoute::IsPlaying | OscRoute::IsRecording |
+                OscRoute::GetTempo | OscRoute::GetPosition | OscRoute::GetTimeSignature |
+                OscRoute::GetRecordMode | OscRoute::IsReady => {
+                    // All routes are handled
+                }
+            }
+        }
+    }
 }

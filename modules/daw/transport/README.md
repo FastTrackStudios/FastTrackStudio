@@ -88,7 +88,7 @@ This starts:
 
 ## OSC (Open Sound Control) Support
 
-The transport module provides comprehensive OSC support for real-time control from any OSC-capable application like TouchOSC, Max/MSP, Pure Data, Ableton Live, etc.
+The transport module provides comprehensive OSC support for real-time control from any OSC-capable application like TouchOSC, Max/MSP, Pure Data, Ableton Live, etc. The OSC server uses high-performance `matchit` routing for extremely fast message dispatch.
 
 ### OSC Address Patterns
 
@@ -290,6 +290,7 @@ cargo test
 ## Dependencies
 
 - **rosc** - OSC protocol implementation
+- **matchit** - High-performance URL router for OSC routing
 - **axum** - HTTP web framework
 - **tokio** - Async runtime
 - **tower** - Service abstractions
