@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use transport::{RecordMode, Tempo, Transport, TransportActions, TransportApp, TransportConfig, TransportError};
 use primitives::TimeSignature;
+use setlist::{AppSetlistSource, Setlist, Song};
 
 /// A concrete DAW project that uses TransportApp for real transport functionality
 #[derive(Serialize, Deserialize)]
@@ -12,6 +13,8 @@ pub struct DawProject {
     name: String,
     #[serde(skip)]
     transport_app: Option<Arc<RwLock<TransportApp>>>,
+    #[serde(skip)]
+    setlist_source: Arc<RwLock<AppSetlistSource>>,
 }
 
 impl DawProject {
@@ -29,7 +32,210 @@ impl DawProject {
         Self {
             name,
             transport_app: Some(Arc::new(RwLock::new(transport_app))),
+            setlist_source: Arc::new(RwLock::new(Self::create_initial_setlist())),
         }
+    }
+
+    /// Create initial setlist with 3 songs: Praise (fast), Never Gonna Stop (medium), Build My Life (slow)
+    fn create_initial_setlist() -> AppSetlistSource {
+        use setlist::{Section, SectionType};
+        use primitives::{Position, TimePosition};
+
+        let source = AppSetlistSource::new();
+
+        // Create setlist with our 3 songs
+        let mut setlist = setlist::Setlist::new("Sunday Morning Worship".to_string()).unwrap();
+        setlist.set_metadata("created_by", "FastTrack Studio");
+        setlist.set_metadata("venue", "Main Sanctuary");
+        setlist.set_metadata("tempo_flow", "Fast → Medium → Slow");
+
+        // Song 1: Praise (Fast - 140 BPM)
+        let mut praise = Song::new("Praise".to_string()).unwrap();
+        praise.metadata.insert("tempo".to_string(), "140".to_string());
+        praise.metadata.insert("key".to_string(), "G".to_string());
+        praise.metadata.insert("style".to_string(), "Fast Worship".to_string());
+
+        // Add sections to Praise
+        let praise_sections = vec![
+            Section::new(
+                SectionType::Intro,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 0, seconds: 0, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 0, seconds: 15, milliseconds: 0 }),
+                "Intro".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Verse,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 0, seconds: 15, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 0, seconds: 45, milliseconds: 0 }),
+                "Verse 1".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Chorus,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 0, seconds: 45, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 1, seconds: 15, milliseconds: 0 }),
+                "Chorus 1".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Verse,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 1, seconds: 15, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 1, seconds: 45, milliseconds: 0 }),
+                "Verse 2".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Chorus,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 1, seconds: 45, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 2, seconds: 15, milliseconds: 0 }),
+                "Chorus 2".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Bridge,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 2, seconds: 15, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 2, seconds: 45, milliseconds: 0 }),
+                "Bridge".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Chorus,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 2, seconds: 45, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 3, seconds: 30, milliseconds: 0 }),
+                "Final Chorus".to_string(),
+                None
+            ).unwrap(),
+        ];
+
+        praise.sections = praise_sections;
+        setlist.add_song(praise).unwrap();
+
+        // Song 2: Never Gonna Stop (Medium - 120 BPM)
+        let mut never_gonna_stop = Song::new("Never Gonna Stop".to_string()).unwrap();
+        never_gonna_stop.metadata.insert("tempo".to_string(), "120".to_string());
+        never_gonna_stop.metadata.insert("key".to_string(), "D".to_string());
+        never_gonna_stop.metadata.insert("style".to_string(), "Medium Worship".to_string());
+
+        let ngs_sections = vec![
+            Section::new(
+                SectionType::Intro,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 0, seconds: 0, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 0, seconds: 20, milliseconds: 0 }),
+                "Intro".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Verse,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 0, seconds: 20, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 1, seconds: 0, milliseconds: 0 }),
+                "Verse 1".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Chorus,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 1, seconds: 0, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 1, seconds: 40, milliseconds: 0 }),
+                "Chorus".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Verse,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 1, seconds: 40, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 2, seconds: 20, milliseconds: 0 }),
+                "Verse 2".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Chorus,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 2, seconds: 20, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 3, seconds: 20, milliseconds: 0 }),
+                "Chorus x2".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Outro,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 3, seconds: 20, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 4, seconds: 0, milliseconds: 0 }),
+                "Outro".to_string(),
+                None
+            ).unwrap(),
+        ];
+
+        never_gonna_stop.sections = ngs_sections;
+        setlist.add_song(never_gonna_stop).unwrap();
+
+        // Song 3: Build My Life (Slow - 85 BPM)
+        let mut build_my_life = Song::new("Build My Life".to_string()).unwrap();
+        build_my_life.metadata.insert("tempo".to_string(), "85".to_string());
+        build_my_life.metadata.insert("key".to_string(), "C".to_string());
+        build_my_life.metadata.insert("style".to_string(), "Slow Worship".to_string());
+
+        let bml_sections = vec![
+            Section::new(
+                SectionType::Intro,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 0, seconds: 0, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 0, seconds: 25, milliseconds: 0 }),
+                "Intro".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Verse,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 0, seconds: 25, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 1, seconds: 15, milliseconds: 0 }),
+                "Verse 1".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Chorus,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 1, seconds: 15, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 2, seconds: 5, milliseconds: 0 }),
+                "Chorus".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Verse,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 2, seconds: 5, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 2, seconds: 55, milliseconds: 0 }),
+                "Verse 2".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Chorus,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 2, seconds: 55, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 3, seconds: 45, milliseconds: 0 }),
+                "Chorus".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Bridge,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 3, seconds: 45, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 4, seconds: 35, milliseconds: 0 }),
+                "Bridge".to_string(),
+                None
+            ).unwrap(),
+            Section::new(
+                SectionType::Chorus,
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 4, seconds: 35, milliseconds: 0 }),
+                Position::new(primitives::MusicalPosition::default(), TimePosition { minutes: 6, seconds: 15, milliseconds: 0 }),
+                "Final Chorus".to_string(),
+                None
+            ).unwrap(),
+        ];
+
+        build_my_life.sections = bml_sections;
+        setlist.add_song(build_my_life).unwrap();
+
+        // Set the setlist in the source
+        source.set_current_setlist(setlist).unwrap();
+
+        println!("🎵 Created initial worship setlist with 3 songs:");
+        println!("   1. Praise (Fast - 140 BPM, G major) - 3:30");
+        println!("   2. Never Gonna Stop (Medium - 120 BPM, D major) - 4:00");
+        println!("   3. Build My Life (Slow - 85 BPM, C major) - 6:15");
+        println!("🎵 Total setlist duration: ~13:45");
+
+        source
     }
 
     /// Initialize the transport engine (start the update loop)
@@ -47,8 +253,39 @@ impl DawProject {
     }
 
     /// Get a reference to the transport app for direct access
-    pub fn transport_app(&self) -> Option<Arc<RwLock<TransportApp>>> {
-        self.transport_app.clone()
+    pub fn transport_app(&self) -> Option<&Arc<RwLock<TransportApp>>> {
+        self.transport_app.as_ref()
+    }
+
+    /// Get the setlist source for this project
+    pub fn setlist_source(&self) -> &Arc<RwLock<AppSetlistSource>> {
+        &self.setlist_source
+    }
+
+    /// Get the current setlist for this project
+    pub async fn get_setlist(&self) -> Result<Option<Setlist>, ProjectError> {
+        let source = self.setlist_source.read().await;
+        Ok(source.get_current_setlist())
+    }
+
+    /// Set a new setlist for this project
+    pub async fn set_setlist(&self, setlist: Setlist) -> Result<(), ProjectError> {
+        let source = self.setlist_source.read().await;
+        source.set_current_setlist(setlist).map_err(|e| ProjectError::Other(e.to_string()))
+    }
+
+    /// Add a song to the current setlist
+    pub async fn add_song_to_setlist(&self, song: Song) -> Result<(), ProjectError> {
+        let source = self.setlist_source.read().await;
+        if let Some(mut setlist) = source.get_current_setlist() {
+            setlist.add_song(song).map_err(|e| ProjectError::Other(e.to_string()))?;
+            source.set_current_setlist(setlist).map_err(|e| ProjectError::Other(e.to_string()))
+        } else {
+            // Create new setlist with the song
+            let mut new_setlist = Setlist::new("New Setlist".to_string()).map_err(|e| ProjectError::Other(e.to_string()))?;
+            new_setlist.add_song(song).map_err(|e| ProjectError::Other(e.to_string()))?;
+            source.set_current_setlist(new_setlist).map_err(|e| ProjectError::Other(e.to_string()))
+        }
     }
 
     /// Async play method for use in Tauri commands
@@ -144,7 +381,7 @@ impl DawProject {
     /// Async get transport method for use in Tauri commands
     pub async fn async_get_transport(&self) -> Result<Transport, TransportError> {
         if let Some(transport_arc) = &self.transport_app {
-            let mut transport = transport_arc.write().await;
+            let transport = transport_arc.read().await;
             transport.async_get_transport().await
         } else {
             Err(TransportError::InvalidState("Transport not initialized".to_string()))
@@ -440,6 +677,13 @@ impl DesktopProjectManager {
 
         println!("✓ Default project created and set as active: {}", default_name);
         println!("✓ {}", self.get_active_project_status());
+
+        // Log setlist information
+        if let Ok(project) = self.get_project(&default_name) {
+            if let Ok(Some(setlist)) = project.get_setlist().await {
+                println!("🎵 Initial setlist '{}' loaded with {} songs", setlist.name, setlist.songs.len());
+            }
+        }
         Ok(())
     }
 

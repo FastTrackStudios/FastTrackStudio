@@ -5,14 +5,16 @@
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+#[cfg(feature = "tauri")]
+use specta::Type;
 use primitives::{Position, TimePosition, TimeRange};
 
 use super::{Section, SectionType, SetlistError};
 
 /// Represents a song in the setlist
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(Type))]
+#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
 pub struct Song {
     /// Unique identifier for this song
     pub id: Option<uuid::Uuid>,
@@ -411,8 +413,9 @@ impl std::fmt::Display for Song {
 }
 
 /// Summary information about a song
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(Type))]
+#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
 pub struct SongSummary {
     pub name: String,
     pub duration: f64,

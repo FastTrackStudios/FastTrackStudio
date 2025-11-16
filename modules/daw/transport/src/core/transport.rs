@@ -4,11 +4,9 @@
 //! playback state, recording, and transport control in a DAW.
 
 use primitives::{Position, TimeSelection, TimeSignature};
-use ts_rs::TS;
 
 /// Playback state enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize )]
 pub enum PlayState {
     /// Transport is stopped
     Stopped,
@@ -27,14 +25,10 @@ impl Default for PlayState {
 }
 
 /// Recording mode enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize )]
 pub enum RecordMode {
-    /// Normal recording mode
     Normal,
-    /// Record only within time selection
     TimeSelection,
-    /// Record into selected item/take
     Item,
 }
 
@@ -45,20 +39,15 @@ impl Default for RecordMode {
 }
 
 /// Tempo structure
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize )]
 pub struct Tempo {
-    /// Beats per minute
     pub bpm: f64,
 }
 
 impl Tempo {
-    /// Create a new tempo
     pub fn new(bpm: f64) -> Self {
         Self { bpm }
     }
-
-    /// Validate tempo is within reasonable range
     pub fn is_valid(&self) -> bool {
         self.bpm > 0.0 && self.bpm <= 999.0
     }
@@ -70,55 +59,24 @@ impl Default for Tempo {
     }
 }
 
-/// Main Transport state structure
-///
-/// This is the core state container for all transport-related information
-/// in the DAW. It manages playback state, position, timing, and recording.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, TS, PartialEq)]
-#[ts(export)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize,  PartialEq)]
 pub struct Transport {
-    /// Current playback state
     pub play_state: PlayState,
-
-    /// Current recording mode
     pub record_mode: RecordMode,
-
-    /// Whether transport is looping
     pub looping: bool,
-
-    /// Current tempo (BPM)
     pub tempo: Tempo,
-
-    /// Playback rate multiplier (1.0 = normal speed)
     pub playrate: f64,
-
-    /// Current time signature
     pub time_signature: TimeSignature,
-
-    /// Current playhead position
     pub playhead_position: Position,
-
-    /// Edit cursor position (where edits will be inserted)
     pub edit_position: Position,
-
-    /// Time selection range (if any)
     pub time_selection: Option<TimeSelection>,
-
-    /// Loop points (if looping is enabled)
     pub loop_selection: Option<TimeSelection>,
-
-    /// Whether input monitoring is enabled
     pub input_monitoring: bool,
-
-    /// Pre-roll time in seconds
     pub preroll: f64,
-
-    /// Post-roll time in seconds
     pub postroll: f64,
 }
 
 impl Transport {
-    /// Create a new transport with default settings
     pub fn new() -> Self {
         Self {
             play_state: PlayState::default(),
@@ -137,27 +95,22 @@ impl Transport {
         }
     }
 
-    /// Check if transport is currently playing
     pub fn is_playing(&self) -> bool {
         matches!(self.play_state, PlayState::Playing | PlayState::Recording)
     }
 
-    /// Check if transport is currently recording
     pub fn is_recording(&self) -> bool {
         matches!(self.play_state, PlayState::Recording)
     }
 
-    /// Check if transport is stopped
     pub fn is_stopped(&self) -> bool {
         matches!(self.play_state, PlayState::Stopped)
     }
 
-    /// Check if transport is paused
     pub fn is_paused(&self) -> bool {
         matches!(self.play_state, PlayState::Paused)
     }
 
-    /// Set the tempo, validating it's within acceptable range
     pub fn set_tempo(&mut self, tempo: Tempo) -> Result<(), String> {
         if !tempo.is_valid() {
             return Err(format!("Invalid tempo: {} BPM", tempo.bpm));
@@ -166,7 +119,6 @@ impl Transport {
         Ok(())
     }
 
-    /// Set the playback rate
     pub fn set_playrate(&mut self, rate: f64) -> Result<(), String> {
         if rate <= 0.0 || rate > 4.0 {
             return Err(format!("Invalid playrate: {}", rate));
@@ -175,12 +127,10 @@ impl Transport {
         Ok(())
     }
 
-    /// Get the effective BPM (accounting for playrate)
     pub fn effective_bpm(&self) -> f64 {
         self.tempo.bpm * self.playrate
     }
 
-    /// Reset transport to initial state
     pub fn reset(&mut self) {
         self.play_state = PlayState::Stopped;
         self.playhead_position = Position::start();
@@ -195,79 +145,30 @@ impl Default for Transport {
     }
 }
 
-/// Transport actions trait with rich domain methods
-///
-/// This trait defines the complete transport interface for any DAW implementation.
-/// Uses native async trait methods supported in modern Rust.
 pub trait TransportActions: Send + Sync {
-    // Transport control commands (sync - immediate state changes)
-
-    /// Start playback
     fn play(&mut self) -> Result<String, crate::TransportError>;
-
-    /// Pause playback
     fn pause(&mut self) -> Result<String, crate::TransportError>;
-
-    /// Stop playback and return to edit position
     fn stop(&mut self) -> Result<String, crate::TransportError>;
-
-    /// Toggle between play and pause
     fn play_pause(&mut self) -> Result<String, crate::TransportError>;
-
-    /// Toggle between play and stop
     fn play_stop(&mut self) -> Result<String, crate::TransportError>;
-
-    /// Start recording
     fn start_recording(&mut self) -> Result<String, crate::TransportError>;
-
-    /// Stop recording
     fn stop_recording(&mut self) -> Result<String, crate::TransportError>;
-
-    /// Toggle recording on/off
     fn toggle_recording(&mut self) -> Result<String, crate::TransportError>;
-
-    // Configuration commands (sync - immediate setting changes)
-
-    /// Set the tempo in BPM
     fn set_tempo(&mut self, tempo: Tempo) -> Result<String, crate::TransportError>;
-
-    /// Set the time signature
     fn set_time_signature(
         &mut self,
         time_signature: TimeSignature,
     ) -> Result<String, crate::TransportError>;
-
-    /// Set the recording mode
     fn set_record_mode(&mut self, record_mode: RecordMode)
     -> Result<String, crate::TransportError>;
-
-    /// Set playhead position in seconds
     fn set_position(&mut self, seconds: f64) -> Result<String, crate::TransportError>;
-
-    // Query methods (sync - immediate state reads)
-
-    /// Get current tempo
     fn get_tempo(&self) -> Result<Tempo, crate::TransportError>;
-
-    /// Get current time signature
     fn get_time_signature(&self) -> Result<TimeSignature, crate::TransportError>;
-
-    /// Get current record mode
     fn get_record_mode(&self) -> Result<RecordMode, crate::TransportError>;
-
-    /// Get current playhead position in seconds
     fn get_position(&self) -> Result<f64, crate::TransportError>;
-
-    /// Check if currently playing
     fn is_playing(&self) -> Result<bool, crate::TransportError>;
-
-    /// Check if currently recording
     fn is_recording(&self) -> Result<bool, crate::TransportError>;
-
-    /// Get complete transport state
     fn get_transport(&self) -> Result<Transport, crate::TransportError>;
-
-    /// Check if transport is ready for operations
     fn is_ready(&self) -> Result<bool, crate::TransportError>;
 }
 

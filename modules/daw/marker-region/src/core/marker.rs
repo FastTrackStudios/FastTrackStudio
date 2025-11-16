@@ -5,12 +5,10 @@
 //! that can be used for navigation, arrangement, and workflow organization.
 
 use primitives::Position;
-use ts_rs::TS;
 use crate::core::MarkerRegionError;
 
 /// A marker represents a named point in time on the timeline
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Marker {
     /// Unique identifier for this marker (if supported by the source)
     pub id: Option<u32>,

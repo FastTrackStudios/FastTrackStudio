@@ -5,14 +5,16 @@
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+#[cfg(feature = "tauri")]
+use specta::Type;
 use primitives::Position;
 
 use super::{Song, SectionType, SetlistError};
 
 /// Represents a complete setlist
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(Type))]
+#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
 pub struct Setlist {
     /// Unique identifier for this setlist
     pub id: Option<uuid::Uuid>,
@@ -319,8 +321,9 @@ impl std::fmt::Display for Setlist {
 }
 
 /// Summary information about a setlist
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(Type))]
+#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
 pub struct SetlistSummary {
     pub name: String,
     pub song_count: usize,
@@ -364,8 +367,9 @@ pub trait SetlistSource {
 }
 
 /// Information about a setlist source
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(Type))]
+#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
 pub struct SourceInfo {
     pub name: String,
     pub is_available: bool,
@@ -375,8 +379,9 @@ pub struct SourceInfo {
 
 /// Setlist order management for live performance
 /// This represents the sequence of songs across multiple project tabs
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(Type))]
+#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
 pub struct SetlistOrder {
     /// Ordered list of songs/tabs in the setlist
     pub entries: Vec<SetlistEntry>,
@@ -491,8 +496,9 @@ impl Default for SetlistOrder {
 
 /// Represents a song entry in the setlist order
 /// This maps to a specific project tab and contains playback position information
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(Type))]
+#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
 pub struct SetlistEntry {
     /// Tab index (0-based) - identifies which project tab this song is in
     pub tab_index: usize,

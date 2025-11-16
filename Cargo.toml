@@ -10,9 +10,8 @@ members = [
     "libs/macros",
     "apps/server",
     "apps/desktop/src-tauri",
-    "tools/generate-types",
-    "xtask", "modules/fts/setlist", "modules/daw/instruments",
-]
+    "xtask"
+, "apps/tarpc-demo"]
 
 [workspace.package]
 version = "0.1.0"
@@ -41,6 +40,20 @@ async-trait = "0.1"
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+tauri-plugin-shell = "2"
+
+# TauRPC dependencies
+taurpc = "0.5.2"
+specta = { version = "2.0.0-rc.22", features = ["derive"] }
+specta-typescript = "0.0.9"
+
+# Additional RPC dependencies
+tarpc = { version = "0.37", features = ["full"] }
+futures = "0.3"
+anyhow = "1.0"
+rand = "0.8"
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

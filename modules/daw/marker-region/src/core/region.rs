@@ -5,12 +5,10 @@
 //! used for arrangement sections, loop ranges, and workflow organization.
 
 use primitives::TimeRange;
-use ts_rs::TS;
 use crate::core::MarkerRegionError;
 
 /// A region represents a named span of time on the timeline
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Region {
     /// Unique identifier for this region (if supported by the source)
     pub id: Option<u32>,

@@ -7,6 +7,7 @@ edition = "2024"
 # Local dependencies
 transport = { path = "../transport" }
 primitives = { path = "../primitives" }
+setlist = { path = "../../fts/setlist" }
 
 # External dependencies
 anyhow = "1.0.100"

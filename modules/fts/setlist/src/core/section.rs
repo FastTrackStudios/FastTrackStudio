@@ -5,14 +5,16 @@
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+#[cfg(feature = "tauri")]
+use specta::Type;
 use primitives::{Position, TimePosition, TimeRange};
 
 use super::error::SetlistError;
 
 /// Represents different types of song sections with their full names and abbreviations
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(Type))]
+#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
 pub enum SectionType {
     Verse,
     Chorus,
@@ -198,8 +200,9 @@ impl std::fmt::Display for SectionType {
 }
 
 /// Represents a section within a song
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(Type))]
+#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
 pub struct Section {
     /// Unique identifier for this section
     pub id: Option<uuid::Uuid>,

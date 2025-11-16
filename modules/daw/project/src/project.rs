@@ -24,6 +24,7 @@ pub enum ProjectError {
     NotFound(String),
     AlreadyExists(String),
     InvalidName(String),
+    Other(String),
 }
 
 impl std::fmt::Display for ProjectError {
@@ -32,6 +33,7 @@ impl std::fmt::Display for ProjectError {
             ProjectError::NotFound(name) => write!(f, "Project '{}' not found", name),
             ProjectError::AlreadyExists(name) => write!(f, "Project '{}' already exists", name),
             ProjectError::InvalidName(name) => write!(f, "Invalid project name: '{}'", name),
+            ProjectError::Other(msg) => write!(f, "Project error: {}", msg),
         }
     }
 }
