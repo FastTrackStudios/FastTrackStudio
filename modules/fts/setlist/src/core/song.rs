@@ -3,7 +3,7 @@
 //! This module contains the core domain types for managing songs within a setlist,
 //! including song metadata, sections, and marker positions.
 
-use marker_region::core::Marker;
+use marker_region::{application::TempoTimePoint, core::Marker};
 use primitives::{Position, TimePosition, TimeRange, TimeSignature};
 use project::Project;
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,9 @@ pub struct Song {
     pub song_region_end_marker: Option<Marker>,
     /// List of sections in the song (from regions between SONGSTART and SONGEND)
     pub sections: Vec<Section>,
+    /// Tempo and time signature changes within this song
+    /// These are song-relative positions (0.0 = start of song)
+    pub tempo_time_sig_changes: Vec<TempoTimePoint>,
     /// Optional metadata (key, tempo, etc.)
     pub metadata: HashMap<String, String>,
     /// Embedded project used to control transport (any type implementing TransportActions)
@@ -71,6 +74,7 @@ impl Song {
             song_region_start_marker: None,
             song_region_end_marker: None,
             sections: Vec::new(),
+            tempo_time_sig_changes: Vec::new(),
             metadata: HashMap::new(),
             project: None,
         })
@@ -81,6 +85,45 @@ impl Song {
         let mut song = Self::new(name)?;
         song.id = Some(id);
         Ok(song)
+    }
+
+    /// Create a new song from parts (for deserialization/internal use)
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        id: Option<uuid::Uuid>,
+        name: String,
+        count_in_marker: Option<Marker>,
+        start_marker: Option<Marker>,
+        song_end_marker: Option<Marker>,
+        end_marker: Option<Marker>,
+        render_start_marker: Option<Marker>,
+        render_end_marker: Option<Marker>,
+        song_region_start_marker: Option<Marker>,
+        song_region_end_marker: Option<Marker>,
+        sections: Vec<Section>,
+        tempo_time_sig_changes: Vec<TempoTimePoint>,
+        metadata: HashMap<String, String>,
+    ) -> Result<Self, SetlistError> {
+        if name.trim().is_empty() {
+            return Err(SetlistError::invalid_song("Song name cannot be empty"));
+        }
+
+        Ok(Self {
+            id,
+            name: name.trim().to_string(),
+            count_in_marker,
+            start_marker,
+            song_end_marker,
+            end_marker,
+            render_start_marker,
+            render_end_marker,
+            song_region_start_marker,
+            song_region_end_marker,
+            sections,
+            tempo_time_sig_changes,
+            metadata,
+            project: None,
+        })
     }
 
     fn store_marker(marker_slot: &mut Option<Marker>, marker: Marker) {
@@ -438,6 +481,25 @@ impl Song {
         self.metadata.remove(key)
     }
 
+    /// Add a tempo/time signature change point
+    /// Position should be song-relative (0.0 = start of song)
+    pub fn add_tempo_time_sig_change(&mut self, change: TempoTimePoint) {
+        self.tempo_time_sig_changes.push(change);
+        // Keep sorted by position
+        self.tempo_time_sig_changes.sort_by(|a, b| {
+            a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    /// Set tempo/time signature changes (replaces existing)
+    pub fn set_tempo_time_sig_changes(&mut self, changes: Vec<TempoTimePoint>) {
+        self.tempo_time_sig_changes = changes;
+        // Keep sorted by position
+        self.tempo_time_sig_changes.sort_by(|a, b| {
+            a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
     /// Validate song data
     pub fn validate(&self) -> Result<(), SetlistError> {
         if self.name.trim().is_empty() {
@@ -669,6 +731,7 @@ impl Clone for Song {
             song_region_start_marker: self.song_region_start_marker.clone(),
             song_region_end_marker: self.song_region_end_marker.clone(),
             sections: self.sections.clone(),
+            tempo_time_sig_changes: self.tempo_time_sig_changes.clone(),
             metadata: self.metadata.clone(),
             project: self.project.clone(), // Arc clones the pointer, not the inner value
         }
@@ -689,6 +752,7 @@ impl std::fmt::Debug for Song {
             .field("song_region_start_marker", &self.song_region_start_marker)
             .field("song_region_end_marker", &self.song_region_end_marker)
             .field("sections", &self.sections)
+            .field("tempo_time_sig_changes", &self.tempo_time_sig_changes)
             .field("metadata", &self.metadata)
             .field("project", &self.project.as_ref().map(|_| "Some(TransportProject)"))
             .finish()
@@ -708,6 +772,7 @@ impl PartialEq for Song {
             && self.song_region_start_marker == other.song_region_start_marker
             && self.song_region_end_marker == other.song_region_end_marker
             && self.sections == other.sections
+            && self.tempo_time_sig_changes == other.tempo_time_sig_changes
             && self.metadata == other.metadata
             // Compare projects by Arc pointer equality
             && match (&self.project, &other.project) {

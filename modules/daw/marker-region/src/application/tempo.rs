@@ -3,10 +3,12 @@
 //! This module provides a unified interface for accessing tempo and time signature information
 //! from different sources (REAPER API, RPP files, etc.)
 
+use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::fmt;
 
 /// A tempo/time signature change point
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct TempoTimePoint {
     /// Position in seconds when this change occurs
     pub position: f64,

@@ -10,6 +10,57 @@ use tracing::{debug, info, warn};
 
 use crate::reaper_markers::{read_markers_from_project, read_regions_from_project};
 use crate::reaper_project::create_reaper_project_wrapper;
+use marker_region::application::TempoTimePoint;
+
+/// Read all tempo/time signature markers from a REAPER project
+/// Returns Vec<(time_position_seconds, tempo_bpm, time_signature_option)>
+#[allow(unsafe_code)] // Required for low-level REAPER API
+fn read_tempo_time_sig_markers_from_project(project: &Project) -> Vec<(f64, f64, Option<(i32, i32)>)> {
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+    let project_context = project.context();
+    
+    let marker_count = medium_reaper.count_tempo_time_sig_markers(project_context) as i32;
+    let mut markers = Vec::new();
+    
+    for i in 0..marker_count {
+        let mut timepos_out: f64 = 0.0;
+        let mut _measurepos_out: i32 = 0;
+        let mut _beatpos_out: f64 = 0.0;
+        let mut bpm_out: f64 = 0.0;
+        let mut timesig_num_out: i32 = 0;
+        let mut timesig_denom_out: i32 = 0;
+        let mut _lineartempo_out: bool = false;
+        
+        let success = unsafe {
+            medium_reaper.low().GetTempoTimeSigMarker(
+                project_context.to_raw(),
+                i,
+                &mut timepos_out,
+                &mut _measurepos_out,
+                &mut _beatpos_out,
+                &mut bpm_out,
+                &mut timesig_num_out,
+                &mut timesig_denom_out,
+                &mut _lineartempo_out,
+            )
+        };
+        
+        if success {
+            let time_sig = if timesig_num_out > 0 && timesig_denom_out > 0 {
+                Some((timesig_num_out, timesig_denom_out))
+            } else {
+                None
+            };
+            markers.push((timepos_out, bpm_out, time_sig));
+        }
+    }
+    
+    // Sort by time position
+    markers.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    
+    markers
+}
 
 /// Parse a song name that may be in the format "Song Name" - Artist or Song Name - Artist
 /// Returns (song_name, artist_option)
@@ -647,6 +698,38 @@ fn build_song_from_region(
     
     // Auto-number sections
     song.auto_number_sections();
+    
+    // Get song start position for calculating song-relative tempo change positions
+    let song_start_seconds = song.start_position()
+        .map(|p| p.time.to_seconds())
+        .or_else(|| song.song_region_start().map(|p| p.time.to_seconds()))
+        .unwrap_or(song_region.start_seconds());
+    
+    // Read tempo/time signature changes from the project and filter to song range
+    let all_tempo_changes = read_tempo_time_sig_markers_from_project(project);
+    let song_tempo_changes: Vec<TempoTimePoint> = all_tempo_changes
+        .into_iter()
+        .filter_map(|(time_pos, tempo, time_sig)| {
+            // Only include changes within the song region
+            if time_pos >= song_region.start_seconds() && time_pos <= song_region.end_seconds() {
+                // Convert to song-relative position (0.0 = start of song)
+                let song_relative_pos = time_pos - song_start_seconds;
+                Some(TempoTimePoint::new_full(
+                    song_relative_pos,
+                    tempo,
+                    None, // shape
+                    time_sig,
+                    None, // selected
+                    None, // bezier_tension
+                    None, // metronome_pattern
+                ))
+            } else {
+                None
+            }
+        })
+        .collect();
+    
+    song.set_tempo_time_sig_changes(song_tempo_changes);
     
     // Attach project to song (Project<ReaperTransport> implements TransportActions)
     let project_wrapper = create_reaper_project_wrapper(project.clone(), project_path);
