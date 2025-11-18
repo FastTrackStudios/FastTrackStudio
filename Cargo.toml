@@ -12,7 +12,7 @@ members = [
     "apps/desktop/src-tauri",
     "apps/cli",
     "apps/reaper_extension",
-    "xtask",
+    "xtask", "modules/fts/smart-template",
 ]
 
 [workspace.package]

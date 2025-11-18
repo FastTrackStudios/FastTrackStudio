@@ -15,11 +15,16 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 swell-ui = { path = "../../libs/swell-ui" }
 anyhow = "1.0"
+transport = { path = "../../modules/daw/transport" }
+project = { path = "../../modules/daw/project" }
+primitives = { path = "../../modules/daw/primitives" }
+marker-region = { path = "../../modules/daw/marker-region" }
+setlist = { path = "../../modules/fts/setlist" }
 
 [lib]
 name = "reaper_extension"
 crate-type = ["cdylib"]
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "allow"  # Required for low-level REAPER API calls
 

@@ -19,6 +19,7 @@ pub enum SectionType {
     Intro,
     Outro,
     Instrumental,
+    Custom, // Custom section type for unrecognized section names
     #[specta(skip)]
     Pre(Box<SectionType>), // Pre-Chorus, Pre-Verse, etc.
     #[specta(skip)]
@@ -35,6 +36,7 @@ impl SectionType {
             SectionType::Intro => "Intro".to_string(),
             SectionType::Outro => "Outro".to_string(),
             SectionType::Instrumental => "Instrumental".to_string(),
+            SectionType::Custom => "Custom".to_string(),
             SectionType::Pre(inner) => format!("Pre-{}", inner.full_name()),
             SectionType::Post(inner) => format!("Post-{}", inner.full_name()),
         }
@@ -49,6 +51,7 @@ impl SectionType {
     /// - Intro -> "IN"
     /// - Outro -> "OUT"
     /// - Instrumental -> "INST"
+    /// - Custom -> "CUSTOM" (but typically the section name is used directly)
     /// - Pre-Chorus -> "PRE-CH"
     /// - Post-Verse -> "POST-VS"
     pub fn abbreviation(&self) -> String {
@@ -59,6 +62,7 @@ impl SectionType {
             SectionType::Intro => "IN".to_string(),
             SectionType::Outro => "OUT".to_string(),
             SectionType::Instrumental => "INST".to_string(),
+            SectionType::Custom => "CUSTOM".to_string(),
             SectionType::Pre(inner) => format!("PRE-{}", inner.abbreviation()),
             SectionType::Post(inner) => format!("POST-{}", inner.abbreviation()),
         }
@@ -195,6 +199,7 @@ impl SectionType {
         match self {
             SectionType::Intro | SectionType::Outro => false,
             SectionType::Pre(_) | SectionType::Post(_) => false,
+            SectionType::Custom => false, // Custom sections should not be auto-numbered
             _ => true,
         }
     }
@@ -383,24 +388,68 @@ impl Section {
     /// - Everything else: Use abbreviations ("VS 1", "CH 2", "BR")
     /// - Include number and split letter if present
     pub fn display_name(&self) -> String {
-        let base_name = if self.section_type.prefers_full_name() {
-            self.section_type.full_name()
+        // Custom sections always use the exact original name with no modifications
+        if matches!(self.section_type, SectionType::Custom) {
+            // Custom sections should never have numbers or split letters added
+            // Just return the original name as-is
+            self.name.clone()
+        } else if matches!(self.section_type, SectionType::Instrumental) {
+            // Instrumental sections - check if the name looks like a standard instrumental pattern
+            let name_lower = self.name.to_lowercase();
+            let is_standard_inst = name_lower.starts_with("inst") 
+                || name_lower.starts_with("instrumental")
+                || name_lower == "inst";
+            
+            // If it's not a standard instrumental name, use the original name
+            if !is_standard_inst {
+                // Return the original name, but add number/split letter if present
+                let with_number = if let Some(num) = self.number {
+                    format!("{} {}", self.name, num)
+                } else {
+                    self.name.clone()
+                };
+                
+                if let Some(letter) = self.split_letter {
+                    format!("{}{}", with_number, letter)
+                } else {
+                    with_number
+                }
+            } else {
+                // Standard instrumental - use abbreviation
+                let base_name = self.section_type.abbreviation();
+                let with_number = if let Some(num) = self.number {
+                    format!("{} {}", base_name, num)
+                } else {
+                    base_name
+                };
+                
+                if let Some(letter) = self.split_letter {
+                    format!("{}{}", with_number, letter)
+                } else {
+                    with_number
+                }
+            }
         } else {
-            self.section_type.abbreviation()
-        };
+            // Normal section type - use standard display logic
+            let base_name = if self.section_type.prefers_full_name() {
+                self.section_type.full_name()
+            } else {
+                self.section_type.abbreviation()
+            };
 
-        // Add number if present
-        let with_number = if let Some(num) = self.number {
-            format!("{} {}", base_name, num)
-        } else {
-            base_name
-        };
+            // Add number if present
+            let with_number = if let Some(num) = self.number {
+                format!("{} {}", base_name, num)
+            } else {
+                base_name
+            };
 
-        // Add split letter if present
-        if let Some(letter) = self.split_letter {
-            format!("{}{}", with_number, letter)
-        } else {
-            with_number
+            // Add split letter if present
+            if let Some(letter) = self.split_letter {
+                format!("{}{}", with_number, letter)
+            } else {
+                with_number
+            }
         }
     }
 

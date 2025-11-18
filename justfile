@@ -226,7 +226,7 @@ show-reaper-path:
         echo "⚠️  UserPlugins directory does not exist"
     fi
 
-# Launch REAPER (macOS)
+# Launch REAPER (macOS) - runs in foreground to show logs
 launch-reaper:
     #!/usr/bin/env bash
     # Load .env file if it exists
@@ -235,7 +235,41 @@ launch-reaper:
     REAPER_EXECUTABLE="${REAPER_EXECUTABLE:-/Users/codywright/Music/FTS-REAPER/FTS-LIVE.app/Contents/MacOS/REAPER}"
     if [[ -f "$REAPER_EXECUTABLE" ]]; then
         echo "🚀 Launching REAPER: $REAPER_EXECUTABLE"
-        open "$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
+        echo "📋 Logs will appear below. Press Ctrl+C to stop REAPER."
+        echo ""
+        # Run the executable directly to see stdout/stderr in terminal
+        # Change to the app's Resources directory so REAPER can find its resources
+        APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
+        cd "$APP_DIR/Contents/Resources" || exit 1
+        exec "$REAPER_EXECUTABLE"
+    else
+        echo "❌ REAPER executable not found: $REAPER_EXECUTABLE"
+        echo "💡 Set REAPER_EXECUTABLE environment variable to the correct path"
+        exit 1
+    fi
+
+# Build extension, link it, and launch REAPER in foreground for testing
+test-reaper: link-extension
+    #!/usr/bin/env bash
+    set -euo pipefail
+    
+    # Load .env file if it exists
+    if [ -f .env ]; then set -a; source .env; set +a; fi
+    
+    echo "✅ Extension built and linked"
+    echo "🚀 Launching REAPER..."
+    echo ""
+    
+    # Launch REAPER in foreground (this will show logs)
+    REAPER_EXECUTABLE="${REAPER_EXECUTABLE:-/Users/codywright/Music/FTS-REAPER/FTS-LIVE.app/Contents/MacOS/REAPER}"
+    if [[ -f "$REAPER_EXECUTABLE" ]]; then
+        echo "📋 Logs will appear below. Press Ctrl+C to stop REAPER."
+        echo ""
+        # Run the executable directly to see stdout/stderr in terminal
+        # Change to the app's Resources directory so REAPER can find its resources
+        APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
+        cd "$APP_DIR/Contents/Resources" || exit 1
+        exec "$REAPER_EXECUTABLE"
     else
         echo "❌ REAPER executable not found: $REAPER_EXECUTABLE"
         echo "💡 Set REAPER_EXECUTABLE environment variable to the correct path"

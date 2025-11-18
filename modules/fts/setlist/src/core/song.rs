@@ -9,14 +9,19 @@ use project::Project;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use transport::{RecordMode, Tempo, Transport, TransportActions, TransportError};
 
-type SongProject = Project<Transport>;
+// Type alias for default project type (for backward compatibility)
+pub type SongProject = Project<Transport>;
+
+// Trait object type for any transport implementation
+type TransportProject = Arc<Mutex<dyn TransportActions + Send + Sync>>;
 
 use super::{Section, SectionType, SetlistError};
 
 /// Represents a song in the setlist
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Serialize, Deserialize, Type)]
 pub struct Song {
     /// Unique identifier for this song
     pub id: Option<uuid::Uuid>,
@@ -28,8 +33,12 @@ pub struct Song {
     pub start_marker: Option<Marker>,
     /// Full marker metadata for SONGEND (optional)
     pub song_end_marker: Option<Marker>,
-    /// Full marker metadata for =END (optional)
+    /// Full marker metadata for =END (RENDEREND) (optional)
     pub end_marker: Option<Marker>,
+    /// Full marker metadata for =START (RENDERSTART) (optional)
+    pub render_start_marker: Option<Marker>,
+    /// Full marker metadata for =END (RENDEREND) (optional) - alias for end_marker
+    pub render_end_marker: Option<Marker>,
     /// Marker metadata for region start/end
     pub song_region_start_marker: Option<Marker>,
     pub song_region_end_marker: Option<Marker>,
@@ -37,8 +46,10 @@ pub struct Song {
     pub sections: Vec<Section>,
     /// Optional metadata (key, tempo, etc.)
     pub metadata: HashMap<String, String>,
-    /// Embedded project used to control transport
-    pub project: Option<SongProject>,
+    /// Embedded project used to control transport (any type implementing TransportActions)
+    #[serde(skip)]
+    #[specta(skip)]
+    pub project: Option<TransportProject>,
 }
 
 impl Song {
@@ -55,6 +66,8 @@ impl Song {
             start_marker: None,
             song_end_marker: None,
             end_marker: None,
+            render_start_marker: None,
+            render_end_marker: None,
             song_region_start_marker: None,
             song_region_end_marker: None,
             sections: Vec::new(),
@@ -87,7 +100,21 @@ impl Song {
     }
 
     pub fn set_end_marker(&mut self, marker: Marker) {
+        let marker_clone = marker.clone();
         Self::store_marker(&mut self.end_marker, marker);
+        // Also set render_end_marker as alias
+        Self::store_marker(&mut self.render_end_marker, marker_clone);
+    }
+
+    pub fn set_render_start_marker(&mut self, marker: Marker) {
+        Self::store_marker(&mut self.render_start_marker, marker);
+    }
+
+    pub fn set_render_end_marker(&mut self, marker: Marker) {
+        let marker_clone = marker.clone();
+        Self::store_marker(&mut self.render_end_marker, marker);
+        // Also set end_marker as alias
+        Self::store_marker(&mut self.end_marker, marker_clone);
     }
 
     pub fn set_song_region_start_marker(&mut self, marker: Marker) {
@@ -130,53 +157,74 @@ impl Song {
         Self::marker_position(&self.song_region_end_marker)
     }
 
-    /// Attach a project to this song by value.
-    pub fn set_project(&mut self, project: SongProject) {
-        self.project = Some(project);
+    /// Attach a project to this song (any type implementing TransportActions).
+    pub fn set_project<T: TransportActions + Send + Sync + 'static>(&mut self, project: T) {
+        self.project = Some(Arc::new(Mutex::new(project)));
     }
 
-    /// Borrow the embedded project.
-    pub fn project(&self) -> Option<&SongProject> {
+    /// Attach a Project<T> to this song (convenience method).
+    pub fn set_project_wrapper<T: TransportActions + Send + Sync + 'static>(
+        &mut self,
+        project: Project<T>,
+    ) {
+        self.project = Some(Arc::new(Mutex::new(project)));
+    }
+
+    /// Get the attached project as a trait object (for transport operations).
+    pub fn project(&self) -> Option<&TransportProject> {
         self.project.as_ref()
     }
 
-    /// Borrow the embedded project mutably.
-    pub fn project_mut(&mut self) -> Option<&mut SongProject> {
-        self.project.as_mut()
-    }
-
     /// Get the attached project ID (if any).
+    /// Note: This requires the project to be a Project<T> type, not a raw TransportActions.
     pub fn project_id(&self) -> Option<uuid::Uuid> {
-        self.project().map(|project| project.id())
+        // Try to downcast to Project<T> to get ID
+        // For now, return None as we can't easily extract ID from trait object
+        // TODO: Add a method to TransportActions trait to get project metadata
+        None
     }
 
     /// Get the attached project name (if any).
+    /// Note: This requires the project to be a Project<T> type, not a raw TransportActions.
     pub fn project_name(&self) -> Option<String> {
-        self.project().map(|project| project.name().to_string())
+        // Try to downcast to Project<T> to get name
+        // For now, return None as we can't easily extract name from trait object
+        // TODO: Add a method to TransportActions trait to get project metadata
+        None
     }
 
     fn with_project_mut<F, R>(&mut self, action: F) -> Result<R, TransportError>
     where
-        F: FnOnce(&mut SongProject) -> Result<R, TransportError>,
-    {
-        let project = self
-            .project
-            .as_mut()
-            .ok_or_else(|| TransportError::NotReady("Song has no project attached".into()))?;
-
-        action(project)
-    }
-
-    fn with_project_ref<F, R>(&self, action: F) -> Result<R, TransportError>
-    where
-        F: FnOnce(&SongProject) -> Result<R, TransportError>,
+        F: FnOnce(&mut dyn TransportActions) -> Result<R, TransportError>,
     {
         let project = self
             .project
             .as_ref()
             .ok_or_else(|| TransportError::NotReady("Song has no project attached".into()))?;
 
-        action(project)
+        let mut project_guard = project
+            .lock()
+            .map_err(|e| TransportError::NotReady(format!("Failed to lock project: {}", e)))?;
+
+        // Dereference MutexGuard to get &mut dyn TransportActions
+        action(&mut *project_guard)
+    }
+
+    fn with_project_ref<F, R>(&self, action: F) -> Result<R, TransportError>
+    where
+        F: FnOnce(&dyn TransportActions) -> Result<R, TransportError>,
+    {
+        let project = self
+            .project
+            .as_ref()
+            .ok_or_else(|| TransportError::NotReady("Song has no project attached".into()))?;
+
+        let project_guard = project
+            .lock()
+            .map_err(|e| TransportError::NotReady(format!("Failed to lock project: {}", e)))?;
+
+        // Dereference MutexGuard to get &dyn TransportActions
+        action(&*project_guard)
     }
 
     /// Get the effective start position (either SONGSTART or song region start)
@@ -607,6 +655,46 @@ impl TransportActions for Song {
     }
 }
 
+impl Clone for Song {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            name: self.name.clone(),
+            count_in_marker: self.count_in_marker.clone(),
+            start_marker: self.start_marker.clone(),
+            song_end_marker: self.song_end_marker.clone(),
+            end_marker: self.end_marker.clone(),
+            render_start_marker: self.render_start_marker.clone(),
+            render_end_marker: self.render_end_marker.clone(),
+            song_region_start_marker: self.song_region_start_marker.clone(),
+            song_region_end_marker: self.song_region_end_marker.clone(),
+            sections: self.sections.clone(),
+            metadata: self.metadata.clone(),
+            project: self.project.clone(), // Arc clones the pointer, not the inner value
+        }
+    }
+}
+
+impl std::fmt::Debug for Song {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Song")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("count_in_marker", &self.count_in_marker)
+            .field("start_marker", &self.start_marker)
+            .field("song_end_marker", &self.song_end_marker)
+            .field("end_marker", &self.end_marker)
+            .field("render_start_marker", &self.render_start_marker)
+            .field("render_end_marker", &self.render_end_marker)
+            .field("song_region_start_marker", &self.song_region_start_marker)
+            .field("song_region_end_marker", &self.song_region_end_marker)
+            .field("sections", &self.sections)
+            .field("metadata", &self.metadata)
+            .field("project", &self.project.as_ref().map(|_| "Some(TransportProject)"))
+            .finish()
+    }
+}
+
 impl PartialEq for Song {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -615,10 +703,18 @@ impl PartialEq for Song {
             && self.start_marker == other.start_marker
             && self.song_end_marker == other.song_end_marker
             && self.end_marker == other.end_marker
+            && self.render_start_marker == other.render_start_marker
+            && self.render_end_marker == other.render_end_marker
             && self.song_region_start_marker == other.song_region_start_marker
             && self.song_region_end_marker == other.song_region_end_marker
             && self.sections == other.sections
             && self.metadata == other.metadata
+            // Compare projects by Arc pointer equality
+            && match (&self.project, &other.project) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
     }
 }
 
