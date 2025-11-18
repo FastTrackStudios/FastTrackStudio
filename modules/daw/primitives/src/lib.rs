@@ -43,6 +43,34 @@ impl MusicalPosition {
             subdivision: 0,
         }
     }
+
+    /// Convert musical position to time position using BPM and time signature
+    ///
+    /// Formula:
+    /// - Total beats = measure * beats_per_measure + beat + subdivision/1000
+    /// - Seconds = total_beats * (60 / BPM)
+    ///
+    /// # Arguments
+    /// * `bpm` - Beats per minute (tempo)
+    /// * `time_signature` - Time signature (numerator/denominator)
+    ///
+    /// # Returns
+    /// A `TimePosition` representing the equivalent time position
+    pub fn to_time_position(&self, bpm: f64, time_signature: TimeSignature) -> TimePosition {
+        // Calculate beats per measure from time signature
+        let beats_per_measure = time_signature.numerator as f64;
+        
+        // Calculate total beats
+        // Subdivision is in thousandths (0-999), so divide by 1000 to get fractional beats
+        let total_beats = self.measure as f64 * beats_per_measure
+            + self.beat as f64
+            + self.subdivision as f64 / 1000.0;
+        
+        // Convert beats to seconds: seconds = beats * (60 / BPM)
+        let total_seconds = total_beats * (60.0 / bpm);
+        
+        TimePosition::from_seconds(total_seconds)
+    }
 }
 
 impl Default for MusicalPosition {
@@ -117,6 +145,41 @@ impl TimePosition {
             seconds: 0,
             milliseconds: 0,
         }
+    }
+
+    /// Convert time position to musical position using BPM and time signature
+    ///
+    /// Formula (reverse of musical to time):
+    /// - Total beats = seconds * (BPM / 60)
+    /// - Measure = floor(total_beats / beats_per_measure)
+    /// - Beat = floor(total_beats % beats_per_measure)
+    /// - Subdivision = ((total_beats % beats_per_measure) - beat) * 1000
+    ///
+    /// # Arguments
+    /// * `bpm` - Beats per minute (tempo)
+    /// * `time_signature` - Time signature (numerator/denominator)
+    ///
+    /// # Returns
+    /// A `MusicalPosition` representing the equivalent musical position
+    pub fn to_musical_position(&self, bpm: f64, time_signature: TimeSignature) -> MusicalPosition {
+        let total_seconds = self.to_seconds();
+        let beats_per_measure = time_signature.numerator as f64;
+        
+        // Calculate total beats from seconds
+        let total_beats = total_seconds * (bpm / 60.0);
+        
+        // Calculate measure (floor division)
+        let measure = (total_beats / beats_per_measure).floor() as i32;
+        
+        // Calculate beat within the measure
+        let beats_in_measure = total_beats % beats_per_measure;
+        let beat = beats_in_measure.floor() as i32;
+        
+        // Calculate subdivision (thousandths of a beat)
+        let subdivision = ((beats_in_measure - beat as f64) * 1000.0).round() as i32;
+        
+        MusicalPosition::try_new(measure, beat, subdivision.clamp(0, 999))
+            .unwrap_or_else(|_| MusicalPosition::start())
     }
 }
 

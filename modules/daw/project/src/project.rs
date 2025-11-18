@@ -159,10 +159,7 @@ where
         self.transport.set_time_signature(time_signature)
     }
 
-    fn set_record_mode(
-        &mut self,
-        record_mode: RecordMode,
-    ) -> Result<String, TransportError> {
+    fn set_record_mode(&mut self, record_mode: RecordMode) -> Result<String, TransportError> {
         self.transport.set_record_mode(record_mode)
     }
 

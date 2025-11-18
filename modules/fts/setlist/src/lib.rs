@@ -14,9 +14,7 @@ pub fn sample_setlist() -> Result<Setlist, SetlistError> {
     Setlist::sample_concert_setlist()
 }
 
-pub fn load_setlist_from_path<P: AsRef<std::path::Path>>(
-    path: P,
-) -> Result<Setlist, SetlistError> {
+pub fn load_setlist_from_path<P: AsRef<std::path::Path>>(path: P) -> Result<Setlist, SetlistError> {
     Setlist::load_from_path(path)
 }
 

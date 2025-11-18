@@ -144,4 +144,3 @@ impl Setlist {
         Ok(song)
     }
 }
-

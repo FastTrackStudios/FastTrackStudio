@@ -1,6 +1,6 @@
 use crate::{
-    core::{RecordMode, Tempo, TransportActions, TransportError},
     core::transport::{PlayState, Transport},
+    core::{RecordMode, Tempo, TransportActions, TransportError},
 };
 use primitives::{Position, TimeSignature};
 
@@ -155,10 +155,7 @@ impl TransportActions for Transport {
         ))
     }
 
-    fn set_record_mode(
-        &mut self,
-        record_mode: RecordMode,
-    ) -> Result<String, TransportError> {
+    fn set_record_mode(&mut self, record_mode: RecordMode) -> Result<String, TransportError> {
         self.record_mode = record_mode;
         Ok(format!("Record mode set to {:?}", record_mode))
     }
@@ -248,12 +245,14 @@ mod tests {
     fn validates_time_signature_and_position() {
         let mut transport = Transport::new();
 
-        assert!(transport
-            .set_time_signature(TimeSignature {
-                numerator: 7,
-                denominator: 8
-            })
-            .is_ok());
+        assert!(
+            transport
+                .set_time_signature(TimeSignature {
+                    numerator: 7,
+                    denominator: 8
+                })
+                .is_ok()
+        );
 
         let invalid_sig = transport.set_time_signature(TimeSignature {
             numerator: 0,
@@ -271,4 +270,3 @@ mod tests {
         ));
     }
 }
-

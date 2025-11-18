@@ -278,9 +278,7 @@ impl Setlist {
             .songs
             .iter()
             .filter(|s| {
-                s.start_marker.is_some()
-                    || s.song_end_marker.is_some()
-                    || s.end_marker.is_some()
+                s.start_marker.is_some() || s.song_end_marker.is_some() || s.end_marker.is_some()
             })
             .count();
 

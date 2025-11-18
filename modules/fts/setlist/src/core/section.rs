@@ -3,7 +3,7 @@
 //! This module contains the core domain types for managing song sections,
 //! including section types, section metadata, and section validation.
 
-use primitives::{Position, TimePosition, TimeRange};
+use primitives::{MusicalPosition, Position, TimePosition, TimeRange, TimeSignature};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ pub enum SectionType {
     Outro,
     Instrumental,
     #[specta(skip)]
-    Pre(Box<SectionType>),  // Pre-Chorus, Pre-Verse, etc.
+    Pre(Box<SectionType>), // Pre-Chorus, Pre-Verse, etc.
     #[specta(skip)]
     Post(Box<SectionType>), // Post-Chorus, Post-Verse, etc.
 }
@@ -225,6 +225,8 @@ pub struct Section {
     pub number: Option<u32>,
     /// Split letter for consecutive sections (e.g., 'a', 'b', 'c')
     pub split_letter: Option<char>,
+    /// Musical position (measure.beat.subdivision) - primary position for navigation
+    pub musical_position: Option<MusicalPosition>,
     /// Start position
     pub start_position: Position,
     /// End position
@@ -262,6 +264,7 @@ impl Section {
             section_type,
             number,
             split_letter: None,
+            musical_position: Some(start_position.musical.clone()),
             start_position,
             end_position,
             name,
@@ -299,6 +302,7 @@ impl Section {
     }
 
     /// Create a section from seconds (for compatibility)
+    /// Uses default BPM (120) and time signature (4/4) to calculate musical positions
     pub fn from_seconds(
         section_type: SectionType,
         start_seconds: f64,
@@ -306,13 +310,49 @@ impl Section {
         name: String,
         number: Option<u32>,
     ) -> Result<Self, SetlistError> {
-        Self::new(
+        Self::from_seconds_with_tempo(
             section_type,
-            Position::from_seconds(start_seconds),
-            Position::from_seconds(end_seconds),
+            start_seconds,
+            end_seconds,
             name,
             number,
+            120.0, // Default BPM
+            TimeSignature::new(4, 4), // Default time signature
         )
+    }
+
+    /// Create a section from seconds with specified BPM and time signature
+    pub fn from_seconds_with_tempo(
+        section_type: SectionType,
+        start_seconds: f64,
+        end_seconds: f64,
+        name: String,
+        number: Option<u32>,
+        bpm: f64,
+        time_signature: primitives::TimeSignature,
+    ) -> Result<Self, SetlistError> {
+        let start_time = primitives::TimePosition::from_seconds(start_seconds);
+        let end_time = primitives::TimePosition::from_seconds(end_seconds);
+        
+        // Calculate musical positions from time positions
+        let start_musical = start_time.to_musical_position(bpm, time_signature);
+        let end_musical = end_time.to_musical_position(bpm, time_signature);
+        
+        let start_position = primitives::Position::new(start_musical.clone(), start_time);
+        let end_position = primitives::Position::new(end_musical, end_time);
+        
+        let mut section = Self::new(
+            section_type,
+            start_position,
+            end_position,
+            name,
+            number,
+        )?;
+        
+        // Ensure musical_position is set
+        section.musical_position = Some(start_musical);
+        
+        Ok(section)
     }
 
     /// Check if a time position is within this section
@@ -421,12 +461,14 @@ impl Section {
             return Err(SetlistError::invalid_time_range(start_seconds, end_seconds));
         }
 
+        let start_pos = Position::from_seconds(start_seconds);
         Ok(Self {
             id: None, // New section gets new ID
             section_type: self.section_type.clone(),
             number: self.number,
             split_letter: self.split_letter,
-            start_position: Position::from_seconds(start_seconds),
+            musical_position: Some(start_pos.musical.clone()),
+            start_position: start_pos,
             end_position: Position::from_seconds(end_seconds),
             name: self.name.clone(),
             metadata: self.metadata.clone(),
@@ -440,6 +482,7 @@ impl Section {
             section_type,
             number: self.number,
             split_letter: self.split_letter,
+            musical_position: self.musical_position.clone(),
             start_position: self.start_position.clone(),
             end_position: self.end_position.clone(),
             name: self.name.clone(),

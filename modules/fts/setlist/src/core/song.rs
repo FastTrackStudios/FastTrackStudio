@@ -103,9 +103,7 @@ impl Song {
     }
 
     fn marker_seconds(marker: &Option<Marker>) -> Option<f64> {
-        marker
-            .as_ref()
-            .map(|m| m.position.time.to_seconds())
+        marker.as_ref().map(|m| m.position.time.to_seconds())
     }
 
     pub fn count_in_position(&self) -> Option<Position> {
@@ -562,10 +560,7 @@ impl TransportActions for Song {
         self.with_project_mut(|project| project.set_time_signature(time_signature))
     }
 
-    fn set_record_mode(
-        &mut self,
-        record_mode: RecordMode,
-    ) -> Result<String, TransportError> {
+    fn set_record_mode(&mut self, record_mode: RecordMode) -> Result<String, TransportError> {
         self.with_project_mut(|project| project.set_record_mode(record_mode))
     }
 

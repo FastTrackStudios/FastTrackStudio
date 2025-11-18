@@ -8,9 +8,12 @@ members = [
     "modules/fts/setlist",
     "modules/keyflow",
     "libs/macros",
+    "libs/swell-ui",
     "apps/desktop/src-tauri",
-    "xtask"
-, "apps/cli",]
+    "apps/cli",
+    "apps/reaper_extension",
+    "xtask",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -53,6 +56,25 @@ anyhow = "1.0"
 rand = "0.8"
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
+fragile = "2.0.1"
+
+# REAPER dependencies
+reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+reaper-common-types = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", package = "reaper-common-types", features = ["palette"] }
+libloading = "0.8"
+
+# Reactive programming (for swell-ui)
+rxrust = { git = "https://github.com/rxRust/rxRust", rev = "349e50b3197e05926e2378ef8fc45cb67ad43b83" }
+
+# UI libraries (for swell-ui)
+scopeguard = "1.1.0"
+raw-window-handle = "0.4.2"
+palette = "0.7.3"
+winapi = { version = "0.3", features = ["winuser", "uxtheme"] }
+# Use exact version for vizia compatibility (vizia requires >=0.3.0-beta.3, <0.3.0-beta.4)
+objc2 = "=0.3.0-beta.3"
+objc2-foundation = "0.2.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -1,0 +1,25 @@
+[package]
+name = "reaper_extension"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+reaper-macros = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+reaper-high = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+fragile = "2.0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+swell-ui = { path = "../../libs/swell-ui" }
+anyhow = "1.0"
+
+[lib]
+name = "reaper_extension"
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+

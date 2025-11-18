@@ -1,0 +1,212 @@
+//! Menu registration for FastTrackStudio REAPER Extension
+//!
+//! Registers a custom menu in REAPER's Extensions menu and populates it with registered actions.
+
+use reaper_high::Reaper;
+use reaper_medium::{HookCustomMenu, Hmenu, MenuHookFlag, ReaperStr};
+use swell_ui::{Menu, menu_tree::{anonymous_menu, menu, item, Entry}};
+use tracing::{debug, error, info, warn};
+
+use crate::action_registry::get_all_registered_actions;
+
+/// Register the extension menu with REAPER
+/// Must be called after actions are registered and REAPER is woken up
+pub fn register_extension_menu() -> anyhow::Result<()> {
+    info!("Starting extension menu registration");
+    
+    // Safely get Reaper instance - if it panics, return an error
+    let reaper = std::panic::catch_unwind(|| Reaper::get())
+        .map_err(|_| anyhow::anyhow!("Reaper::get() panicked - Reaper not available globally yet"))?;
+    
+    info!("Adding Extensions main menu entry");
+    reaper.medium_reaper().add_extensions_main_menu();
+    
+    info!("Registering custom menu hook");
+    reaper
+        .medium_session()
+        .plugin_register_add_hook_custom_menu::<FastTrackStudioMenuHook>()?;
+    
+    info!("✅ Extension menu hook registered successfully");
+    Ok(())
+}
+
+/// Hook implementation for FastTrackStudio menu
+pub struct FastTrackStudioMenuHook;
+
+impl HookCustomMenu for FastTrackStudioMenuHook {
+    fn call(menuidstr: &ReaperStr, menu: Hmenu, flag: MenuHookFlag) {
+        // Wrap the entire callback in panic handling to prevent crashes
+        let result = std::panic::catch_unwind(|| {
+            info!(
+                menu_id = %menuidstr.to_str(),
+                flag = ?flag,
+                "Menu hook called"
+            );
+            
+            if flag != MenuHookFlag::Init || menuidstr.to_str() != "Main extensions" {
+                debug!(
+                    menu_id = %menuidstr.to_str(),
+                    flag = ?flag,
+                    "Skipping menu hook (wrong menu or flag)"
+                );
+                return;
+            }
+            
+            info!("Building FastTrackStudio menu");
+            
+            // Build the pure menu structure using swell-ui's menu_tree
+            let mut pure_menu = extension_menu();
+            
+            // Count menu items for logging (before assigning IDs)
+            let item_count = count_menu_items(&pure_menu);
+            
+            info!(
+                item_count = item_count,
+                "Built menu structure, assigning command IDs"
+            );
+            
+            // Assign command IDs recursively (this is where Reaper::get() is called,
+            // but it's safe here because we're in the hook callback)
+            for entry in &mut pure_menu.entries {
+                assign_command_ids_recursively(entry);
+            }
+            
+            info!("Command IDs assigned, adding entries to SWELL menu");
+            
+            // Add the menu entries to the SWELL menu
+            let swell_menu = Menu::new(menu.as_ptr());
+            swell_ui::menu_tree::add_all_entries_of_menu(swell_menu, &pure_menu);
+            
+            info!(
+                menu_items = item_count,
+                "✅ FastTrackStudio menu populated successfully"
+            );
+        });
+        
+        if let Err(e) = result {
+            error!(
+                error = ?e,
+                "❌ Panic in menu hook callback - menu population failed"
+            );
+        }
+    }
+}
+
+/// Creates the pure menu structure for FastTrackStudio
+fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
+    // Get all registered actions that should appear in menu
+    let actions = get_all_registered_actions();
+    info!(total_actions = actions.len(), "Building menu from registered actions");
+    
+    let menu_actions: Vec<_> = actions
+        .iter()
+        .filter(|action| {
+            let should_include = action.appears_in_menu;
+            if !should_include {
+                debug!(
+                    command_id = %action.command_id,
+                    appears_in_menu = action.appears_in_menu,
+                    "Action filtered out from menu"
+                );
+            }
+            should_include
+        })
+        .collect();
+    
+    info!(menu_action_count = menu_actions.len(), "Actions to include in menu");
+    
+    if menu_actions.is_empty() {
+        warn!("No actions marked for menu display");
+        return anonymous_menu(vec![]);
+    }
+    
+    // Build menu items from actions
+    let mut menu_entries = Vec::new();
+    
+    for action in menu_actions {
+        // Use owned strings for menu items
+        // Store the command_id as the result - assign_command_ids_recursively will look it up
+        let entry = item(
+            action.display_name.clone(),
+            action.command_id.to_string(),
+        );
+        
+        debug!(
+            command_id = %action.command_id,
+            "Adding action to menu"
+        );
+        
+        menu_entries.push(entry);
+    }
+    
+    if menu_entries.is_empty() {
+        warn!("No menu entries after filtering - returning empty menu");
+        return anonymous_menu(vec![]);
+    }
+    
+    // Wrap in "FastTrackStudio" menu
+    let root_menu = anonymous_menu(vec![menu("FastTrackStudio".to_string(), menu_entries)]);
+    
+    root_menu
+}
+
+/// Assign command IDs to menu items by looking them up in REAPER
+/// This is called from the menu hook when Reaper is guaranteed to be available
+fn assign_command_ids_recursively(entry: &mut Entry<String>) {
+    match entry {
+        Entry::Menu(m) => {
+            m.id = 0;
+            for e in &mut m.entries {
+                assign_command_ids_recursively(e);
+            }
+        }
+        Entry::Item(i) => {
+            // Use std::panic::catch_unwind to safely handle Reaper::get() failures
+            let command_id = std::panic::catch_unwind(|| {
+                let reaper = Reaper::get();
+                let lookup_name = format!("_{}", i.result);
+                reaper
+                    .medium_reaper()
+                    .named_command_lookup(lookup_name)
+            });
+            
+            match command_id {
+                Ok(Some(cmd_id)) => {
+                    i.id = cmd_id.get();
+                    debug!(
+                        command_id = %i.result,
+                        reaper_cmd_id = cmd_id.get(),
+                        "Found REAPER command ID for menu item"
+                    );
+                }
+                Ok(None) => {
+                    warn!(
+                        command_id = %i.result,
+                        "Could not find REAPER command ID for menu item"
+                    );
+                    i.id = 0;
+                }
+                Err(_) => {
+                    warn!(
+                        command_id = %i.result,
+                        "Panic when looking up REAPER command ID (Reaper not available?)"
+                    );
+                    i.id = 0;
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Count the number of menu items recursively
+fn count_menu_items(menu: &swell_ui::menu_tree::Menu<String>) -> usize {
+    menu.entries.iter().fold(0, |acc, entry| {
+        acc + match entry {
+            Entry::Menu(m) => count_menu_items(m),
+            Entry::Item(_) => 1,
+            _ => 0,
+        }
+    })
+}
+
