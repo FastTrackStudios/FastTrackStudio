@@ -4,7 +4,9 @@
 //! Currently implemented as a stub that returns "not supported" errors until
 //! REAPER dependencies are available.
 
-use crate::core::{Marker, Region, MarkerSource, RegionSource, MarkerRegionSource, MarkerRegionError};
+use crate::core::{
+    Marker, MarkerRegionError, MarkerRegionSource, MarkerSource, Region, RegionSource,
+};
 
 /// REAPER API implementation of MarkerRegionSource (stub)
 pub struct ReaperMarkerRegionSource;
@@ -18,7 +20,9 @@ impl ReaperMarkerRegionSource {
 
 impl MarkerSource for ReaperMarkerRegionSource {
     fn get_markers(&self) -> Result<Vec<Marker>, MarkerRegionError> {
-        Err(MarkerRegionError::NotSupported("REAPER integration not yet implemented".to_string()))
+        Err(MarkerRegionError::NotSupported(
+            "REAPER integration not yet implemented".to_string(),
+        ))
     }
 
     fn source_name(&self) -> &'static str {
@@ -32,7 +36,9 @@ impl MarkerSource for ReaperMarkerRegionSource {
 
 impl RegionSource for ReaperMarkerRegionSource {
     fn get_regions(&self) -> Result<Vec<Region>, MarkerRegionError> {
-        Err(MarkerRegionError::NotSupported("REAPER integration not yet implemented".to_string()))
+        Err(MarkerRegionError::NotSupported(
+            "REAPER integration not yet implemented".to_string(),
+        ))
     }
 
     fn source_name(&self) -> &'static str {
@@ -68,9 +74,15 @@ mod tests {
         let source = ReaperMarkerRegionSource::new();
 
         let markers_result = source.get_markers();
-        assert!(matches!(markers_result, Err(MarkerRegionError::NotSupported(_))));
+        assert!(matches!(
+            markers_result,
+            Err(MarkerRegionError::NotSupported(_))
+        ));
 
         let regions_result = source.get_regions();
-        assert!(matches!(regions_result, Err(MarkerRegionError::NotSupported(_))));
+        assert!(matches!(
+            regions_result,
+            Err(MarkerRegionError::NotSupported(_))
+        ));
     }
 }

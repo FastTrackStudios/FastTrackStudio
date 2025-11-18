@@ -3,18 +3,16 @@
 //! This module contains the core domain types and traits for managing complete setlists,
 //! including setlist metadata, song ordering, and setlist sources.
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
-#[cfg(feature = "tauri")]
-use specta::Type;
+use marker_region::core::Marker;
 use primitives::Position;
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use std::collections::HashMap;
 
-use super::{Song, SectionType, SetlistError};
+use super::{SectionType, SetlistError, Song};
 
 /// Represents a complete setlist
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "tauri", derive(Type))]
-#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Setlist {
     /// Unique identifier for this setlist
     pub id: Option<uuid::Uuid>,
@@ -30,7 +28,9 @@ impl Setlist {
     /// Create a new empty setlist
     pub fn new(name: String) -> Result<Self, SetlistError> {
         if name.trim().is_empty() {
-            return Err(SetlistError::invalid_setlist("Setlist name cannot be empty"));
+            return Err(SetlistError::invalid_setlist(
+                "Setlist name cannot be empty",
+            ));
         }
 
         Ok(Self {
@@ -65,9 +65,11 @@ impl Setlist {
     /// Insert a song at a specific position
     pub fn insert_song(&mut self, index: usize, song: Song) -> Result<(), SetlistError> {
         if index > self.songs.len() {
-            return Err(SetlistError::validation_error(
-                format!("Index {} is out of bounds (max {})", index, self.songs.len())
-            ));
+            return Err(SetlistError::validation_error(format!(
+                "Index {} is out of bounds (max {})",
+                index,
+                self.songs.len()
+            )));
         }
 
         song.validate()?;
@@ -92,7 +94,8 @@ impl Setlist {
 
     /// Remove a song by name
     pub fn remove_song_by_name(&mut self, name: &str) -> Result<Song, SetlistError> {
-        let index = self.songs
+        let index = self
+            .songs
             .iter()
             .position(|s| s.name == name)
             .ok_or_else(|| SetlistError::not_found("song", name))?;
@@ -137,9 +140,11 @@ impl Setlist {
         }
 
         if to_index > self.songs.len() {
-            return Err(SetlistError::validation_error(
-                format!("Target index {} is out of bounds (max {})", to_index, self.songs.len())
-            ));
+            return Err(SetlistError::validation_error(format!(
+                "Target index {} is out of bounds (max {})",
+                to_index,
+                self.songs.len()
+            )));
         }
 
         if from_index == to_index {
@@ -147,7 +152,11 @@ impl Setlist {
         }
 
         let song = self.songs.remove(from_index);
-        let adjusted_to = if to_index > from_index { to_index - 1 } else { to_index };
+        let adjusted_to = if to_index > from_index {
+            to_index - 1
+        } else {
+            to_index
+        };
         self.songs.insert(adjusted_to, song);
 
         Ok(())
@@ -190,9 +199,14 @@ impl Setlist {
 
     /// Get all unique section types across all songs
     pub fn all_section_types(&self) -> Vec<SectionType> {
-        let mut types: Vec<SectionType> = self.songs
+        let mut types: Vec<SectionType> = self
+            .songs
             .iter()
-            .flat_map(|song| song.sections.iter().map(|section| section.section_type.clone()))
+            .flat_map(|song| {
+                song.sections
+                    .iter()
+                    .map(|section| section.section_type.clone())
+            })
             .collect();
 
         types.sort_by(|a, b| a.full_name().cmp(&b.full_name()));
@@ -218,7 +232,9 @@ impl Setlist {
     /// Validate setlist data
     pub fn validate(&self) -> Result<(), SetlistError> {
         if self.name.trim().is_empty() {
-            return Err(SetlistError::invalid_setlist("Setlist name cannot be empty"));
+            return Err(SetlistError::invalid_setlist(
+                "Setlist name cannot be empty",
+            ));
         }
 
         // Check for duplicate song names
@@ -232,7 +248,10 @@ impl Setlist {
         // Validate all songs
         for (i, song) in self.songs.iter().enumerate() {
             song.validate().map_err(|e| {
-                SetlistError::invalid_setlist(format!("Song {} ('{}') is invalid: {}", i, song.name, e))
+                SetlistError::invalid_setlist(format!(
+                    "Song {} ('{}') is invalid: {}",
+                    i, song.name, e
+                ))
             })?;
         }
 
@@ -241,7 +260,8 @@ impl Setlist {
 
     /// Get a summary of the setlist
     pub fn summary(&self) -> SetlistSummary {
-        let section_counts = self.songs
+        let section_counts = self
+            .songs
             .iter()
             .flat_map(|song| song.sections.iter())
             .fold(HashMap::new(), |mut acc, section| {
@@ -249,10 +269,20 @@ impl Setlist {
                 acc
             });
 
-        let songs_with_count_in = self.songs.iter().filter(|s| s.count_in_position.is_some()).count();
-        let songs_with_markers = self.songs.iter().filter(|s|
-            s.start_position.is_some() || s.song_end_position.is_some() || s.end_position.is_some()
-        ).count();
+        let songs_with_count_in = self
+            .songs
+            .iter()
+            .filter(|s| s.count_in_marker.is_some())
+            .count();
+        let songs_with_markers = self
+            .songs
+            .iter()
+            .filter(|s| {
+                s.start_marker.is_some()
+                    || s.song_end_marker.is_some()
+                    || s.end_marker.is_some()
+            })
+            .count();
 
         SetlistSummary {
             name: self.name.clone(),
@@ -321,9 +351,7 @@ impl std::fmt::Display for Setlist {
 }
 
 /// Summary information about a setlist
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "tauri", derive(Type))]
-#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct SetlistSummary {
     pub name: String,
     pub song_count: usize,
@@ -332,49 +360,6 @@ pub struct SetlistSummary {
     pub section_types: HashMap<SectionType, u32>,
     pub songs_with_count_in: usize,
     pub songs_with_markers: usize,
-}
-
-/// Trait for sources that can provide setlist information
-pub trait SetlistSource {
-    /// Build a setlist from markers and regions
-    fn build_setlist(&self) -> Result<Setlist, SetlistError>;
-
-    /// Get the name of this source (for debugging/logging)
-    fn source_name(&self) -> &'static str;
-
-    /// Check if this source is available/functional
-    fn is_available(&self) -> bool {
-        true
-    }
-
-    /// Validate that the source can be used
-    fn validate_source(&self) -> Result<(), SetlistError> {
-        if !self.is_available() {
-            return Err(SetlistError::source_error("Source is not available"));
-        }
-        Ok(())
-    }
-
-    /// Get metadata about the source
-    fn get_source_info(&self) -> SourceInfo {
-        SourceInfo {
-            name: self.source_name().to_string(),
-            is_available: self.is_available(),
-            source_type: "unknown".to_string(),
-            metadata: HashMap::new(),
-        }
-    }
-}
-
-/// Information about a setlist source
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "tauri", derive(Type))]
-#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
-pub struct SourceInfo {
-    pub name: String,
-    pub is_available: bool,
-    pub source_type: String,
-    pub metadata: HashMap<String, String>,
 }
 
 /// Setlist order management for live performance
@@ -438,8 +423,7 @@ impl SetlistOrder {
 
     /// Get entry index by tab index
     pub fn index_by_tab(&self, tab_index: usize) -> Option<usize> {
-        self.entries.iter()
-            .position(|e| e.tab_index == tab_index)
+        self.entries.iter().position(|e| e.tab_index == tab_index)
     }
 
     /// Advance to next song (wraps around)
@@ -496,9 +480,7 @@ impl Default for SetlistOrder {
 
 /// Represents a song entry in the setlist order
 /// This maps to a specific project tab and contains playback position information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "tauri", derive(Type))]
-#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct SetlistEntry {
     /// Tab index (0-based) - identifies which project tab this song is in
     pub tab_index: usize,
@@ -506,10 +488,12 @@ pub struct SetlistEntry {
     pub project_path: Option<String>,
     /// Song name for display purposes
     pub song_name: Option<String>,
-    /// Count-in position (if "Count-In" marker exists)
+    /// Count-in marker (if "Count-In" marker exists)
     pub count_in_position: Option<Position>,
-    /// Start position (if "SONGSTART" marker exists)
+    pub count_in_marker: Option<Marker>,
+    /// Start marker (if "SONGSTART" marker exists)
     pub start_position: Option<Position>,
+    pub start_marker: Option<Marker>,
     /// Optional metadata
     pub metadata: HashMap<String, String>,
 }
@@ -522,7 +506,9 @@ impl SetlistEntry {
             project_path: None,
             song_name: None,
             count_in_position: None,
+            count_in_marker: None,
             start_position: None,
+            start_marker: None,
             metadata: HashMap::new(),
         }
     }
@@ -540,19 +526,19 @@ impl SetlistEntry {
             project_path,
             song_name,
             count_in_position,
+            count_in_marker: None,
             start_position,
+            start_marker: None,
             metadata: HashMap::new(),
         }
     }
 
-    /// Get the effective start position (count-in if available, otherwise start position)
-    pub fn effective_start_position(&self) -> Option<Position> {
-        self.count_in_position.or(self.start_position)
-    }
-
-    /// Get the effective start position in seconds
+    /// Get the effective start marker (count-in if available, otherwise start marker)
     pub fn effective_start_seconds(&self) -> Option<f64> {
-        self.effective_start_position().map(|p| p.time.to_seconds())
+        self.count_in_position
+            .clone()
+            .or(self.start_position.clone())
+            .map(|p| p.time.to_seconds())
     }
 
     /// Get display name for this entry
@@ -568,6 +554,12 @@ impl SetlistEntry {
 mod tests {
     use super::*;
     use crate::core::{Section, SectionType, Song};
+    use marker_region::core::Marker;
+    use primitives::Position;
+
+    fn marker(seconds: f64, name: &str) -> Marker {
+        Marker::from_seconds(seconds, name.to_string())
+    }
 
     #[test]
     fn test_setlist_creation() {
@@ -615,8 +607,12 @@ mod tests {
 
         // Test duplicate detection in validation
         let mut duplicate_setlist = Setlist::new("Test".to_string()).unwrap();
-        duplicate_setlist.songs.push(Song::new("Duplicate".to_string()).unwrap());
-        duplicate_setlist.songs.push(Song::new("Duplicate".to_string()).unwrap());
+        duplicate_setlist
+            .songs
+            .push(Song::new("Duplicate".to_string()).unwrap());
+        duplicate_setlist
+            .songs
+            .push(Song::new("Duplicate".to_string()).unwrap());
 
         assert!(duplicate_setlist.validate().is_err());
     }
@@ -626,12 +622,15 @@ mod tests {
         let mut setlist = Setlist::new("Test Setlist".to_string()).unwrap();
 
         let mut song1 = Song::new("Song 1".to_string()).unwrap();
-        song1.start_position = Some(Position::from_seconds(0.0));
-        song1.end_position = Some(Position::from_seconds(180.0));
-        song1.count_in_position = Some(Position::from_seconds(-4.0));
+        song1.set_start_marker(Marker::from_seconds(0.0, "SONGSTART".to_string()));
+        song1.set_end_marker(Marker::from_seconds(180.0, "=END".to_string()));
+        song1.set_count_in_marker(Marker::from_seconds(-4.0, "COUNT_IN".to_string()));
 
-        let verse = Section::from_seconds(SectionType::Verse, 0.0, 60.0, "Verse".to_string(), None).unwrap();
-        let chorus = Section::from_seconds(SectionType::Chorus, 60.0, 120.0, "Chorus".to_string(), None).unwrap();
+        let verse = Section::from_seconds(SectionType::Verse, 0.0, 60.0, "Verse".to_string(), None)
+            .unwrap();
+        let chorus =
+            Section::from_seconds(SectionType::Chorus, 60.0, 120.0, "Chorus".to_string(), None)
+                .unwrap();
         song1.add_section(verse).unwrap();
         song1.add_section(chorus).unwrap();
 

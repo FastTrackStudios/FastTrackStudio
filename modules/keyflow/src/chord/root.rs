@@ -2,8 +2,8 @@
 //!
 //! Handles parsing of chord roots from tokens (note names, scale degrees, roman numerals)
 
-use crate::primitives::{RootNotation, MusicalNoteToken, RomanNumeralToken, ScaleDegreeToken};
-use crate::parsing::{Token, TokenType, ParseError};
+use crate::parsing::{ParseError, Token, TokenType};
+use crate::primitives::{MusicalNoteToken, RomanNumeralToken, RootNotation, ScaleDegreeToken};
 
 /// Result of parsing a root notation with token consumption info
 #[derive(Debug, Clone, PartialEq)]
@@ -31,13 +31,13 @@ pub fn parse_root(tokens: &[Token]) -> Result<RootParseResult, ParseError> {
     if tokens.is_empty() {
         return Err(ParseError::EmptyInput);
     }
-    
+
     // Skip whitespace
     let tokens = skip_whitespace(tokens);
     if tokens.is_empty() {
         return Err(ParseError::EmptyInput);
     }
-    
+
     // Try to determine which parser to use based on token pattern
     let parse_order = detect_parser_order(tokens);
 
@@ -65,20 +65,27 @@ pub fn parse_root(tokens: &[Token]) -> Result<RootParseResult, ParseError> {
             }
         }
     }
-    
+
     Err(ParseError::NoValidParser {
-        context: format!("Unable to parse root from tokens starting with: {:?}", tokens.get(0)),
+        context: format!(
+            "Unable to parse root from tokens starting with: {:?}",
+            tokens.get(0)
+        ),
     })
 }
 
 /// Detect the order in which to try parsers based on token patterns
 fn detect_parser_order(tokens: &[Token]) -> Vec<ParserType> {
     if tokens.is_empty() {
-        return vec![ParserType::NoteName, ParserType::Roman, ParserType::ScaleDegree];
+        return vec![
+            ParserType::NoteName,
+            ParserType::Roman,
+            ParserType::ScaleDegree,
+        ];
     }
-    
+
     let first_token = &tokens[0].token_type;
-    
+
     match first_token {
         // Accidental followed by...
         TokenType::Sharp | TokenType::Flat => {
@@ -86,37 +93,69 @@ fn detect_parser_order(tokens: &[Token]) -> Vec<ParserType> {
                 match &second.token_type {
                     // Accidental + Number -> Scale Degree first
                     TokenType::Number(s) if is_scale_degree_number(s) => {
-                        vec![ParserType::ScaleDegree, ParserType::NoteName, ParserType::Roman]
+                        vec![
+                            ParserType::ScaleDegree,
+                            ParserType::NoteName,
+                            ParserType::Roman,
+                        ]
                     }
                     // Accidental + Letter -> Note Name first (could be Roman too)
                     TokenType::Letter(_) => {
-                        vec![ParserType::NoteName, ParserType::Roman, ParserType::ScaleDegree]
+                        vec![
+                            ParserType::NoteName,
+                            ParserType::Roman,
+                            ParserType::ScaleDegree,
+                        ]
                     }
-                    _ => vec![ParserType::NoteName, ParserType::Roman, ParserType::ScaleDegree],
+                    _ => vec![
+                        ParserType::NoteName,
+                        ParserType::Roman,
+                        ParserType::ScaleDegree,
+                    ],
                 }
             } else {
-                vec![ParserType::NoteName, ParserType::Roman, ParserType::ScaleDegree]
+                vec![
+                    ParserType::NoteName,
+                    ParserType::Roman,
+                    ParserType::ScaleDegree,
+                ]
             }
         }
-        
+
         // Number -> Scale Degree first
         TokenType::Number(s) if is_scale_degree_number(s) => {
-            vec![ParserType::ScaleDegree, ParserType::NoteName, ParserType::Roman]
+            vec![
+                ParserType::ScaleDegree,
+                ParserType::NoteName,
+                ParserType::Roman,
+            ]
         }
-        
+
         // Letter -> Could be Note Name or Roman Numeral
         TokenType::Letter(c) => {
             if is_roman_numeral_letter(*c) {
                 // Try Roman first, then Note Name
-                vec![ParserType::Roman, ParserType::NoteName, ParserType::ScaleDegree]
+                vec![
+                    ParserType::Roman,
+                    ParserType::NoteName,
+                    ParserType::ScaleDegree,
+                ]
             } else {
                 // Try Note Name first
-                vec![ParserType::NoteName, ParserType::Roman, ParserType::ScaleDegree]
+                vec![
+                    ParserType::NoteName,
+                    ParserType::Roman,
+                    ParserType::ScaleDegree,
+                ]
             }
         }
-        
+
         // Default order
-        _ => vec![ParserType::NoteName, ParserType::Roman, ParserType::ScaleDegree],
+        _ => vec![
+            ParserType::NoteName,
+            ParserType::Roman,
+            ParserType::ScaleDegree,
+        ],
     }
 }
 
@@ -155,68 +194,67 @@ enum ParserType {
 mod tests {
     use super::*;
     use crate::parsing::Lexer;
-    
+
     #[test]
     fn test_parse_note_name() {
         let mut lexer = Lexer::new("C".to_string());
         let tokens = lexer.tokenize();
         let result = parse_root(&tokens).unwrap();
-        
+
         assert_eq!(result.tokens_consumed, 1);
     }
-    
+
     #[test]
     fn test_parse_sharp_note() {
         let mut lexer = Lexer::new("F#".to_string());
         let tokens = lexer.tokenize();
         let result = parse_root(&tokens).unwrap();
-        
+
         assert_eq!(result.tokens_consumed, 2);
     }
-    
+
     #[test]
     fn test_parse_scale_degree() {
         let mut lexer = Lexer::new("4".to_string());
         let tokens = lexer.tokenize();
         let result = parse_root(&tokens).unwrap();
-        
+
         assert_eq!(result.tokens_consumed, 1);
     }
-    
+
     #[test]
     fn test_parse_sharp_scale_degree() {
         let mut lexer = Lexer::new("#4".to_string());
         let tokens = lexer.tokenize();
         let result = parse_root(&tokens).unwrap();
-        
+
         assert_eq!(result.tokens_consumed, 2);
     }
-    
+
     #[test]
     fn test_parse_roman_numeral() {
         let mut lexer = Lexer::new("IV".to_string());
         let tokens = lexer.tokenize();
         let result = parse_root(&tokens).unwrap();
-        
+
         assert_eq!(result.tokens_consumed, 2);
     }
-    
+
     #[test]
     fn test_parse_lowercase_roman() {
         let mut lexer = Lexer::new("vi".to_string());
         let tokens = lexer.tokenize();
         let result = parse_root(&tokens).unwrap();
-        
+
         assert_eq!(result.tokens_consumed, 2);
     }
-    
+
     #[test]
     fn test_skip_whitespace() {
         let mut lexer = Lexer::new("  C".to_string());
         let tokens = lexer.tokenize();
         let result = parse_root(&tokens).unwrap();
-        
+
         assert_eq!(result.tokens_consumed, 1);
     }
 }
-

@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
-import React, { useState, useEffect, useCallback } from 'react';
-import { createTauRPCProxy, type AppStatus, type User, type TaskProgress, type ProcessingResult, type ApiError } from '../../bindings';
+import { useState, useEffect, useCallback } from 'react';
+import { createTauRPCProxy, type AppStatus, type User, type TaskProgress, type ApiError } from '../../bindings';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';

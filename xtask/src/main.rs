@@ -122,8 +122,7 @@ fn generate_types(output: Option<String>, no_index: bool) -> Result<(), DynError
         cmd.env("NO_INDEX_FILE", "true");
     }
 
-    let status = cmd.status()
-        .context("Failed to run generate-types tool")?;
+    let status = cmd.status().context("Failed to run generate-types tool")?;
 
     if !status.success() {
         return Err("TypeScript type generation failed".into());

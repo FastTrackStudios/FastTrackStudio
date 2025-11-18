@@ -1,56 +1,34 @@
-pub mod core;
 pub mod application;
+pub mod core;
 
 pub use core::{
-    Setlist, Song, Section, SectionType, SetlistError, SetlistSource,
-    SetlistOrder, SetlistEntry, SourceInfo, SetlistSummary, SongSummary
+    Section, SectionType, Setlist, SetlistEntry, SetlistError, SetlistOrder, SetlistSummary, Song,
+    SongSummary,
 };
 
-pub use application::{
-    AppSetlistSource, MockSetlistService, ApplicationSetlistSource, SourceType,
-    app_source, app_source_with_default, app_source_with_sample_data,
-    mock_source, mock_source_with_data,
-    validate_setlist_data, get_setlist_source_summary
-};
-
-#[cfg(feature = "reaper")]
-pub use application::{ReaperSetlistSource, reaper_source};
-
-#[cfg(feature = "rpp")]
-pub use application::RppSetlistSource;
-
-pub type DefaultSetlistSource = AppSetlistSource;
-
-pub fn default_source() -> DefaultSetlistSource {
-    AppSetlistSource::with_default_setlist()
+pub fn default_setlist() -> Result<Setlist, SetlistError> {
+    Setlist::default_app_setlist()
 }
 
-pub fn sample_source() -> DefaultSetlistSource {
-    AppSetlistSource::with_sample_data()
+pub fn sample_setlist() -> Result<Setlist, SetlistError> {
+    Setlist::sample_concert_setlist()
 }
 
-#[cfg(feature = "reaper")]
-pub fn reaper_current_project() -> ReaperSetlistSource {
-    ReaperSetlistSource::new()
+pub fn load_setlist_from_path<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Result<Setlist, SetlistError> {
+    Setlist::load_from_path(path)
 }
 
-#[cfg(feature = "rpp")]
-pub fn from_rpp_file<P: AsRef<std::path::Path>>(
-    path: P
-) -> Result<RppSetlistSource, SetlistError> {
-    RppSetlistSource::from_file(path)
+pub fn save_setlist_to_path<P: AsRef<std::path::Path>>(
+    setlist: &Setlist,
+    path: P,
+) -> Result<(), SetlistError> {
+    setlist.save_to_path(path)
 }
 
-pub fn validate_setlist<T: SetlistSource>(
-    source: &T
-) -> Result<Vec<String>, SetlistError> {
-    validate_setlist_data(source)
-}
-
-pub fn get_source_summary<T: SetlistSource>(
-    source: &T
-) -> Result<String, SetlistError> {
-    get_setlist_source_summary(source)
+pub fn validate_setlist(setlist: &Setlist) -> Result<(), SetlistError> {
+    setlist.validate()
 }
 
 pub fn parse_section_type(input: &str) -> Result<SectionType, SetlistError> {
@@ -71,7 +49,13 @@ pub fn create_section(
     end_seconds: f64,
     name: &str,
 ) -> Result<Section, SetlistError> {
-    Section::from_seconds(section_type, start_seconds, end_seconds, name.to_string(), None)
+    Section::from_seconds(
+        section_type,
+        start_seconds,
+        end_seconds,
+        name.to_string(),
+        None,
+    )
 }
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -102,26 +86,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default_source() {
-        let source = default_source();
-        let setlist = source.build_setlist().unwrap();
+    fn test_default_setlist_helper() {
+        let setlist = default_setlist().unwrap();
         assert_eq!(setlist.name, "New Setlist");
+        assert!(setlist.get_metadata("created_with").is_some());
     }
 
     #[test]
-    fn test_sample_source() {
-        let source = sample_source();
-        let setlist = source.build_setlist().unwrap();
+    fn test_sample_setlist_helper() {
+        let setlist = sample_setlist().unwrap();
         assert!(setlist.song_count() > 0);
+        assert_eq!(setlist.name, "Sample Concert Setlist");
     }
 
     #[test]
     fn test_convenience_functions() {
-        let source = sample_source();
-        let summary = get_source_summary(&source).unwrap();
-        assert!(summary.contains("songs"));
-
-        let _validation_errors = validate_setlist(&source).unwrap();
+        let mut setlist = create_setlist("Convenience").unwrap();
+        let song = create_song("Test").unwrap();
+        setlist.add_song(song).unwrap();
+        assert!(validate_setlist(&setlist).is_ok());
     }
 
     #[test]
@@ -139,12 +122,7 @@ mod tests {
         let song = create_song("Test Song").unwrap();
         assert_eq!(song.name, "Test Song");
 
-        let section = create_section(
-            SectionType::Verse,
-            0.0,
-            30.0,
-            "Test Section",
-        ).unwrap();
+        let section = create_section(SectionType::Verse, 0.0, 30.0, "Test Section").unwrap();
         assert_eq!(section.name, "Test Section");
         assert_eq!(section.duration(), 30.0);
     }
@@ -169,40 +147,24 @@ mod tests {
         assert_eq!(song.name, "Test Song");
         assert_eq!(song.sections.len(), 0);
 
-        let section = Section::from_seconds(
-            SectionType::Verse,
-            10.0,
-            40.0,
-            "Verse".to_string(),
-            None,
-        ).unwrap();
+        let section =
+            Section::from_seconds(SectionType::Verse, 10.0, 40.0, "Verse".to_string(), None)
+                .unwrap();
         assert_eq!(section.duration(), 30.0);
         assert!(section.contains_position(25.0));
     }
 
     #[test]
     fn test_application_layer_integration() {
-        let app_source = AppSetlistSource::new();
-        assert_eq!(app_source.source_name(), "FastTrackStudio App");
-        assert!(app_source.is_available());
-
-        let empty_setlist = app_source.build_setlist().unwrap();
-        assert_eq!(empty_setlist.name, "Empty Setlist");
-
-        let sample_source = AppSetlistSource::with_sample_data();
-        let setlist = sample_source.build_setlist().unwrap();
+        let setlist = sample_setlist().unwrap();
         assert!(setlist.song_count() > 0);
+        assert!(setlist.get_metadata("venue").is_some());
     }
 
     #[test]
     fn test_error_handling() {
-        let result = Section::from_seconds(
-            SectionType::Verse,
-            40.0,
-            10.0,
-            "Invalid".to_string(),
-            None,
-        );
+        let result =
+            Section::from_seconds(SectionType::Verse, 40.0, 10.0, "Invalid".to_string(), None);
         assert!(result.is_err());
 
         let result = Song::new("".to_string());
@@ -222,7 +184,8 @@ mod tests {
             Position::from_seconds(60.0),
             "Chorus".to_string(),
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(section.start_seconds(), 30.0);
         assert_eq!(section.end_seconds(), 60.0);

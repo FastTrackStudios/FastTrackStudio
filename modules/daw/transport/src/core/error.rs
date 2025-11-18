@@ -1,53 +1,49 @@
-//! Transport Error Types
-//!
-//! This module defines all error types that can occur during transport operations.
-
-/// Transport service error
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TransportError {
-    #[error("Invalid tempo: {0}")]
     InvalidTempo(String),
 
-    #[error("Invalid time signature: {0}")]
     InvalidTimeSignature(String),
 
-    #[error("Transport is not ready: {0}")]
     NotReady(String),
 
-    #[error("Recording error: {0}")]
     RecordingError(String),
 
-    #[error("Invalid position: {0}")]
     InvalidPosition(String),
 
-    #[error("Invalid playrate: {0}")]
     InvalidPlayrate(String),
 
-    #[error("State lock error: {0}")]
     LockError(String),
 
-    #[error("Invalid state: {0}")]
     InvalidState(String),
 
-    #[error("Event broadcast error: {0}")]
     EventBroadcast(String),
 
-    #[error("Internal error: {0}")]
     Internal(String),
 }
+
+impl std::fmt::Display for TransportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TransportError::InvalidTempo(msg) => write!(f, "Invalid tempo: {}", msg),
+            TransportError::InvalidTimeSignature(msg) => {
+                write!(f, "Invalid time signature: {}", msg)
+            }
+            TransportError::NotReady(msg) => write!(f, "Not ready: {}", msg),
+            TransportError::RecordingError(msg) => write!(f, "Recording error: {}", msg),
+            TransportError::InvalidPosition(msg) => write!(f, "Invalid position: {}", msg),
+            TransportError::InvalidPlayrate(msg) => write!(f, "Invalid playrate: {}", msg),
+            TransportError::LockError(msg) => write!(f, "Lock error: {}", msg),
+            TransportError::InvalidState(msg) => write!(f, "Invalid state: {}", msg),
+            TransportError::EventBroadcast(msg) => write!(f, "Event broadcast error: {}", msg),
+            TransportError::Internal(msg) => write!(f, "Internal error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for TransportError {}
 
 impl From<std::io::Error> for TransportError {
     fn from(err: std::io::Error) -> Self {
         TransportError::Internal(err.to_string())
-    }
-}
-
-// Serde support for protocol serialization
-impl serde::Serialize for TransportError {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
     }
 }

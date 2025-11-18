@@ -15,11 +15,11 @@ pub enum ScaleType {
 impl ScaleType {
     /// Get the base interval pattern for this scale family
     pub fn base_pattern(&self) -> Vec<u8> {
-        use super::trait_module::ScaleFamily;
         use super::diatonic::DiatonicFamily;
         use super::harmonic_minor::HarmonicMinorFamily;
         use super::melodic_minor::MelodicMinorFamily;
-        
+        use super::trait_module::ScaleFamily;
+
         match self {
             ScaleType::Diatonic => DiatonicFamily::base_pattern(),
             ScaleType::HarmonicMinor => HarmonicMinorFamily::base_pattern(),
@@ -45,7 +45,7 @@ impl ScaleMode {
             ScaleMode::MelodicMinor(_) => ScaleType::MelodicMinor,
         }
     }
-    
+
     /// Get the rotation index within the family
     pub fn rotation(&self) -> usize {
         match self {
@@ -54,7 +54,7 @@ impl ScaleMode {
             ScaleMode::MelodicMinor(mode) => mode.rotation(),
         }
     }
-    
+
     /// Get the interval pattern for this mode
     pub fn interval_pattern(&self) -> Vec<u8> {
         match self {
@@ -63,7 +63,7 @@ impl ScaleMode {
             ScaleMode::MelodicMinor(mode) => mode.interval_pattern(),
         }
     }
-    
+
     /// Get the full name of this mode
     pub fn name(&self) -> &'static str {
         match self {
@@ -72,7 +72,7 @@ impl ScaleMode {
             ScaleMode::MelodicMinor(mode) => mode.name(),
         }
     }
-    
+
     /// Get a short name for this mode
     pub fn short_name(&self) -> &'static str {
         match self {
@@ -81,7 +81,7 @@ impl ScaleMode {
             ScaleMode::MelodicMinor(mode) => mode.short_name(),
         }
     }
-    
+
     // Convenience constructors for Diatonic modes
     pub fn ionian() -> Self {
         ScaleMode::Diatonic(DiatonicMode::Ionian)
@@ -104,7 +104,7 @@ impl ScaleMode {
     pub fn locrian() -> Self {
         ScaleMode::Diatonic(DiatonicMode::Locrian)
     }
-    
+
     // Convenience constructors for Harmonic Minor modes
     pub fn harmonic_minor() -> Self {
         ScaleMode::HarmonicMinor(HarmonicMinorMode::HarmonicMinor)
@@ -127,7 +127,7 @@ impl ScaleMode {
     pub fn super_locrian_double_flat_7() -> Self {
         ScaleMode::HarmonicMinor(HarmonicMinorMode::SuperLocrianDoubleFlatSeven)
     }
-    
+
     // Convenience constructors for Melodic Minor modes
     pub fn melodic_minor() -> Self {
         ScaleMode::MelodicMinor(MelodicMinorMode::MelodicMinor)
@@ -151,4 +151,3 @@ impl ScaleMode {
         ScaleMode::MelodicMinor(MelodicMinorMode::Altered)
     }
 }
-

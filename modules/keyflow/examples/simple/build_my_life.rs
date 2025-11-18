@@ -30,14 +30,14 @@ fn main() {
     ch
 
     "};
-   // Display the chart
-   match result {
-    Ok(chart) => {
-        println!("{}", chart);
+    // Display the chart
+    match result {
+        Ok(chart) => {
+            println!("{}", chart);
+        }
+        Err(e) => {
+            eprintln!("Error parsing chart: {}", e);
+            std::process::exit(1);
+        }
     }
-    Err(e) => {
-        eprintln!("Error parsing chart: {}", e);
-        std::process::exit(1);
-    }
-}
 }

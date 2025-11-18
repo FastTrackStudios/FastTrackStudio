@@ -8,43 +8,43 @@ use std::fmt::{self, Display};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenType {
     // Basic character tokens
-    Letter(char),         // Single alphabetic character (a-z, A-Z)
-    Number(String),       // Consecutive digits
-    
+    Letter(char),   // Single alphabetic character (a-z, A-Z)
+    Number(String), // Consecutive digits
+
     // Symbol tokens
-    Sharp,                // # or ♯
-    Flat,                 // b or ♭
-    Slash,                // /
-    Plus,                 // +
-    Minus,                // -
-    Underscore,           // _
-    Apostrophe,           // '
-    Dot,                  // .
-    Tilde,                // ~
-    Asterisk,             // *
-    
+    Sharp,      // # or ♯
+    Flat,       // b or ♭
+    Slash,      // /
+    Plus,       // +
+    Minus,      // -
+    Underscore, // _
+    Apostrophe, // '
+    Dot,        // .
+    Tilde,      // ~
+    Asterisk,   // *
+
     // Special symbols for chord notation
-    Triangle,             // △ or ^
-    Circle,               // ° (diminished)
-    HalfDiminished,       // ø (half-diminished)
-    
+    Triangle,       // △ or ^
+    Circle,         // ° (diminished)
+    HalfDiminished, // ø (half-diminished)
+
     // Delimiters
-    LParen,               // (
-    RParen,               // )
-    Comma,                // ,
-    
+    LParen, // (
+    RParen, // )
+    Comma,  // ,
+
     // Text cue marker
-    At,                   // @ (for instrument cues)
-    
+    At, // @ (for instrument cues)
+
     // Comment marker
-    Semicolon,            // ; (for comments)
-    
+    Semicolon, // ; (for comments)
+
     // Repeat marker
-    GreaterThan,          // > (for accent shorthand ->)
-    
+    GreaterThan, // > (for accent shorthand ->)
+
     // Whitespace
-    Space,                // space or tab
-    
+    Space, // space or tab
+
     // Special markers
     Illegal,
     Eof,
@@ -104,4 +104,3 @@ impl Display for Token {
         write!(f, "{}", self.token_type)
     }
 }
-

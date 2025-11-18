@@ -1,0 +1,17 @@
+[package]
+name = "cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+ratatui = { version = "0.27", default-features = false, features = ["crossterm"] }
+crossterm = "0.29"
+color-eyre = "0.6"
+transport = { path = "../../modules/daw/transport" }
+project = { path = "../../modules/daw/project" }
+setlist = { path = "../../modules/fts/setlist" }
+
+[lints]
+workspace = true

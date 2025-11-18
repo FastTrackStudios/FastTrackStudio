@@ -29,7 +29,11 @@ pub enum MarkerRegionError {
     PositionOutOfBounds { position: f64, max_position: f64 },
 
     /// Overlapping region conflict
-    OverlappingRegion { existing_id: u32, new_start: f64, new_end: f64 },
+    OverlappingRegion {
+        existing_id: u32,
+        new_start: f64,
+        new_end: f64,
+    },
 
     /// Source implementation error
     SourceError(String),
@@ -57,7 +61,11 @@ impl fmt::Display for MarkerRegionError {
                 write!(f, "Invalid marker position: {} seconds", pos)
             }
             Self::InvalidRegion { start, end } => {
-                write!(f, "Invalid region: start ({}) must be before end ({})", start, end)
+                write!(
+                    f,
+                    "Invalid region: start ({}) must be before end ({})",
+                    start, end
+                )
             }
             Self::MarkerNotFound(id) => {
                 write!(f, "Marker with ID {} not found", id)
@@ -71,12 +79,26 @@ impl fmt::Display for MarkerRegionError {
             Self::InvalidRegionName(name) => {
                 write!(f, "Invalid region name: '{}'", name)
             }
-            Self::PositionOutOfBounds { position, max_position } => {
-                write!(f, "Position {} is out of bounds (max: {})", position, max_position)
+            Self::PositionOutOfBounds {
+                position,
+                max_position,
+            } => {
+                write!(
+                    f,
+                    "Position {} is out of bounds (max: {})",
+                    position, max_position
+                )
             }
-            Self::OverlappingRegion { existing_id, new_start, new_end } => {
-                write!(f, "New region ({}-{}) overlaps with existing region ID {}",
-                       new_start, new_end, existing_id)
+            Self::OverlappingRegion {
+                existing_id,
+                new_start,
+                new_end,
+            } => {
+                write!(
+                    f,
+                    "New region ({}-{}) overlaps with existing region ID {}",
+                    new_start, new_end, existing_id
+                )
             }
             Self::SourceError(msg) => {
                 write!(f, "Source error: {}", msg)
@@ -136,8 +158,14 @@ mod tests {
         let error = MarkerRegionError::InvalidMarkerPosition(-1.0);
         assert_eq!(error.to_string(), "Invalid marker position: -1 seconds");
 
-        let error = MarkerRegionError::InvalidRegion { start: 10.0, end: 5.0 };
-        assert_eq!(error.to_string(), "Invalid region: start (10) must be before end (5)");
+        let error = MarkerRegionError::InvalidRegion {
+            start: 10.0,
+            end: 5.0,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Invalid region: start (10) must be before end (5)"
+        );
     }
 
     #[test]

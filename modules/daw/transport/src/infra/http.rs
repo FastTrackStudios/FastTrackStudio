@@ -30,7 +30,7 @@ pub struct SetPositionRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct SetRecordModeRequest {
-    pub mode: String, // "normal", "time_selection", "item"
+    pub mode: String,
 }
 
 #[derive(Debug, Serialize)]

@@ -3,11 +3,13 @@
 //! This module provides an RPP file-based implementation of MarkerRegionSource
 //! using the rpp-parser crate.
 
-use crate::core::{Marker, Region, MarkerSource, RegionSource, MarkerRegionSource, MarkerRegionError};
+use crate::core::{
+    Marker, MarkerRegionError, MarkerRegionSource, MarkerSource, Region, RegionSource,
+};
 use std::path::Path;
 
 #[cfg(feature = "rpp")]
-use rpp_parser::{parse_rpp_file, ReaperProject};
+use rpp_parser::{ReaperProject, parse_rpp_file};
 
 /// RPP file-based implementation of MarkerRegionSource
 #[cfg(feature = "rpp")]
@@ -39,7 +41,11 @@ impl RppMarkerRegionSource {
             Some(mr.color),
             Some(mr.flags),
             Some(mr.locked != 0),
-            if mr.guid.is_empty() { None } else { Some(mr.guid.clone()) },
+            if mr.guid.is_empty() {
+                None
+            } else {
+                Some(mr.guid.clone())
+            },
         )
     }
 
@@ -56,11 +62,14 @@ impl RppMarkerRegionSource {
             Some(mr.color),
             Some(mr.flags),
             Some(mr.locked != 0),
-            if mr.guid.is_empty() { None } else { Some(mr.guid.clone()) },
-        ).ok()
+            if mr.guid.is_empty() {
+                None
+            } else {
+                Some(mr.guid.clone())
+            },
+        )
+        .ok()
     }
-
-
 }
 
 #[cfg(feature = "rpp")]
@@ -117,18 +126,24 @@ pub struct RppMarkerRegionSource;
 #[cfg(not(feature = "rpp"))]
 impl RppMarkerRegionSource {
     pub fn from_file<P: AsRef<Path>>(_path: P) -> Result<Self, MarkerRegionError> {
-        Err(MarkerRegionError::NotSupported("rpp feature not enabled".to_string()))
+        Err(MarkerRegionError::NotSupported(
+            "rpp feature not enabled".to_string(),
+        ))
     }
 
     pub fn from_string(_content: &str) -> Result<Self, MarkerRegionError> {
-        Err(MarkerRegionError::NotSupported("rpp feature not enabled".to_string()))
+        Err(MarkerRegionError::NotSupported(
+            "rpp feature not enabled".to_string(),
+        ))
     }
 }
 
 #[cfg(not(feature = "rpp"))]
 impl MarkerSource for RppMarkerRegionSource {
     fn get_markers(&self) -> Result<Vec<Marker>, MarkerRegionError> {
-        Err(MarkerRegionError::NotSupported("rpp feature not enabled".to_string()))
+        Err(MarkerRegionError::NotSupported(
+            "rpp feature not enabled".to_string(),
+        ))
     }
 
     fn source_name(&self) -> &'static str {
@@ -139,7 +154,9 @@ impl MarkerSource for RppMarkerRegionSource {
 #[cfg(not(feature = "rpp"))]
 impl RegionSource for RppMarkerRegionSource {
     fn get_regions(&self) -> Result<Vec<Region>, MarkerRegionError> {
-        Err(MarkerRegionError::NotSupported("rpp feature not enabled".to_string()))
+        Err(MarkerRegionError::NotSupported(
+            "rpp feature not enabled".to_string(),
+        ))
     }
 
     fn source_name(&self) -> &'static str {

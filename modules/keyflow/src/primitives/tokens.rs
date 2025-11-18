@@ -10,37 +10,37 @@ use super::root_notation::RomanCase;
 pub enum MusicalToken {
     /// Scale degree (1-7)
     ScaleDegree(u8),
-    
+
     /// Roman numeral (I-VII or i-vii)
     RomanNumeral(u8, RomanCase),
-    
+
     /// Note name (C, D, E, F, G, A, B)
     NoteName(String),
-    
+
     /// Accidental modifier
     Accidental(Accidental),
-    
+
     /// Chord quality (maj7, m7, sus4, add9, etc.)
     Quality(String),
-    
+
     /// Slash for bass notes
     Slash,
-    
+
     /// Duration notation (2, 4., /2, //)
     Duration(String),
-    
+
     /// Space/rest marker
     Space,
-    
+
     /// Rest marker
     Rest,
-    
+
     /// Hash/pound for key signature
     Hash,
-    
+
     /// Comma separator
     Comma,
-    
+
     /// Number (for measures, etc.)
     Number(u32),
 }
@@ -55,12 +55,12 @@ impl MusicalToken {
                 | MusicalToken::NoteName(_)
         )
     }
-    
+
     /// Check if this token is an accidental
     pub fn is_accidental(&self) -> bool {
         matches!(self, MusicalToken::Accidental(_))
     }
-    
+
     /// Check if this token is a quality modifier
     pub fn is_quality(&self) -> bool {
         matches!(self, MusicalToken::Quality(_))
@@ -110,7 +110,7 @@ impl std::fmt::Display for MusicalToken {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_is_root_note() {
         assert!(MusicalToken::ScaleDegree(4).is_root_note());
@@ -118,13 +118,13 @@ mod tests {
         assert!(MusicalToken::NoteName("C".to_string()).is_root_note());
         assert!(!MusicalToken::Quality("maj7".to_string()).is_root_note());
     }
-    
+
     #[test]
     fn test_is_accidental() {
         assert!(MusicalToken::Accidental(Accidental::Sharp).is_accidental());
         assert!(!MusicalToken::NoteName("C".to_string()).is_accidental());
     }
-    
+
     #[test]
     fn test_display() {
         assert_eq!(MusicalToken::ScaleDegree(4).to_string(), "4");
@@ -140,4 +140,3 @@ mod tests {
         assert_eq!(MusicalToken::Accidental(Accidental::Sharp).to_string(), "#");
     }
 }
-

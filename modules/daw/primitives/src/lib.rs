@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct MusicalPosition {
     pub measure: i32,
     pub beat: i32,
@@ -50,7 +51,7 @@ impl Default for MusicalPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Type, Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TimePosition {
     pub minutes: i32,
     pub seconds: i32,
@@ -125,8 +126,7 @@ impl Default for TimePosition {
     }
 }
 
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Position {
     pub musical: MusicalPosition,
     pub time: TimePosition,
@@ -166,10 +166,12 @@ impl Position {
     }
 
     pub fn musical_position_string(&self) -> String {
-        format!("{}.{}.{:03}",
-                self.musical.measure + 1,  // Convert to 1-based for display
-                self.musical.beat + 1,     // Convert to 1-based for display
-                self.musical.subdivision)
+        format!(
+            "{}.{}.{:03}",
+            self.musical.measure + 1, // Convert to 1-based for display
+            self.musical.beat + 1,    // Convert to 1-based for display
+            self.musical.subdivision
+        )
     }
 }
 
@@ -179,7 +181,7 @@ impl Default for Position {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct TimeRange {
     pub start: Position,
     pub end: Position,
@@ -220,13 +222,11 @@ impl TimeRange {
     }
 }
 
-
 pub type TimeSelection = TimeRange;
 
 pub type LoopPoints = TimeRange;
 
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Type, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TimeSignature {
     pub numerator: i32,
     pub denominator: i32,

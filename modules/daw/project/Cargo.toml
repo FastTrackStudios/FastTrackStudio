@@ -7,7 +7,7 @@ edition = "2024"
 # Local dependencies
 transport = { path = "../transport" }
 primitives = { path = "../primitives" }
-setlist = { path = "../../fts/setlist" }
+marker-region = { path = "../marker-region" }
 
 # External dependencies
 anyhow = "1.0.100"
@@ -23,6 +23,7 @@ rosc = "0.11.4"
 serde = {version = "1.0.228", features = ["derive"]}
 serde_derive = "1.0.228"
 serde_json = "1.0.145"
+specta = { workspace = true }
 tokio = { version = "1.48.0", features = ["full"] }
 tonic = "0.14.2"
 tower = { version = "0.5.2", features = ["full"] }
@@ -30,6 +31,3 @@ tower-layer = "0.3.3"
 tower-service = "0.3.3"
 uuid = { version = "1.18.1", features = ["v4"] }
 ts-rs = { version = "11.1", features = ["serde-compat"] }
-
-[[example]]
-name = "project_with_transport"

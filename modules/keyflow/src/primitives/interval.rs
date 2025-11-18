@@ -295,8 +295,14 @@ mod tests {
 
     #[test]
     fn test_semantic_interval() {
-        assert_eq!(Interval::MinorThird.to_semantic_interval(), SemInterval::Third);
-        assert_eq!(Interval::MajorThird.to_semantic_interval(), SemInterval::Third);
+        assert_eq!(
+            Interval::MinorThird.to_semantic_interval(),
+            SemInterval::Third
+        );
+        assert_eq!(
+            Interval::MajorThird.to_semantic_interval(),
+            SemInterval::Third
+        );
         assert_eq!(
             Interval::AugmentedThird.to_semantic_interval(),
             SemInterval::Third

@@ -8,10 +8,9 @@ members = [
     "modules/fts/setlist",
     "modules/keyflow",
     "libs/macros",
-    "apps/server",
     "apps/desktop/src-tauri",
     "xtask"
-, "apps/tarpc-demo"]
+, "apps/cli",]
 
 [workspace.package]
 version = "0.1.0"
@@ -44,7 +43,7 @@ tauri-plugin-shell = "2"
 
 # TauRPC dependencies
 taurpc = "0.5.2"
-specta = { version = "2.0.0-rc.22", features = ["derive"] }
+specta = { version = "2.0.0-rc.22", features = ["derive", "uuid"] }
 specta-typescript = "0.0.9"
 
 # Additional RPC dependencies

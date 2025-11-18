@@ -2,13 +2,13 @@
 //!
 //! Parses tokens into scale degrees (1-7 with optional accidentals)
 
-use super::accidental::{WithAccidental, Accidental};
+use super::accidental::{Accidental, WithAccidental};
 use crate::parsing::token::{Token, TokenType};
 
 /// Result of parsing a scale degree from tokens
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScaleDegreeToken {
-    pub degree: u8,                        // 1-7
+    pub degree: u8,                     // 1-7
     pub accidental: Option<Accidental>, // Optional accidental modifier
     pub tokens_consumed: usize,
 }
@@ -20,10 +20,10 @@ impl ScaleDegreeToken {
         if tokens.is_empty() {
             return None;
         }
-        
+
         let mut consumed = 0;
         let mut accidental: Option<Accidental> = None;
-        
+
         // Handle leading accidentals
         while consumed < tokens.len() {
             match &tokens[consumed].token_type {
@@ -46,12 +46,12 @@ impl ScaleDegreeToken {
                 _ => break,
             }
         }
-        
+
         // Expect a number for the scale degree
         if consumed >= tokens.len() {
             return None;
         }
-        
+
         let degree = match &tokens[consumed].token_type {
             TokenType::Number(n) => {
                 let d: u8 = n.parse().ok()?;
@@ -63,9 +63,9 @@ impl ScaleDegreeToken {
             }
             _ => return None,
         };
-        
+
         consumed += 1;
-        
+
         Some(ScaleDegreeToken {
             degree,
             accidental,
@@ -86,7 +86,7 @@ impl WithAccidental for ScaleDegreeToken {
         });
         self
     }
-    
+
     fn flat(mut self) -> Self {
         self.accidental = Some(match self.accidental {
             None | Some(Accidental::Natural) => Accidental::Flat,
@@ -97,17 +97,17 @@ impl WithAccidental for ScaleDegreeToken {
         });
         self
     }
-    
+
     fn double_sharp(mut self) -> Self {
         self.accidental = Some(Accidental::DoubleSharp);
         self
     }
-    
+
     fn double_flat(mut self) -> Self {
         self.accidental = Some(Accidental::DoubleFlat);
         self
     }
-    
+
     fn natural(mut self) -> Self {
         self.accidental = Some(Accidental::Natural);
         self
@@ -118,26 +118,25 @@ impl WithAccidental for ScaleDegreeToken {
 mod tests {
     use super::*;
     use crate::parsing::Lexer;
-    
+
     #[test]
     fn test_parse_scale_degree() {
         let mut lexer = Lexer::new("4".to_string());
         let tokens = lexer.tokenize();
         let result = ScaleDegreeToken::parse(&tokens).unwrap();
-        
+
         assert_eq!(result.degree, 4);
         assert_eq!(result.accidental, None);
     }
-    
+
     #[test]
     fn test_apply_sharp() {
         let mut lexer = Lexer::new("4".to_string());
         let tokens = lexer.tokenize();
         let result = ScaleDegreeToken::parse(&tokens).unwrap();
         let sharp_result = result.sharp();
-        
+
         assert_eq!(sharp_result.degree, 4);
         assert_eq!(sharp_result.accidental, Some(Accidental::Sharp));
     }
 }
-

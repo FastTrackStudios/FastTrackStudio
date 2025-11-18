@@ -6,24 +6,28 @@ use super::metadata::SongMetadata;
 
 impl SongMetadata {
     /// Parse a title/artist line
-    /// 
+    ///
     /// Format: "Song Title - Artist Name"
     /// or just: "Song Title"
     pub fn parse_title_artist(input: &str) -> (Option<String>, Option<String>) {
         let input = input.trim();
-        
+
         if input.is_empty() {
             return (None, None);
         }
-        
+
         // Check for " - " separator
         if let Some(dash_pos) = input.find(" - ") {
             let title = input[..dash_pos].trim().to_string();
             let artist = input[dash_pos + 3..].trim().to_string();
-            
+
             (
                 if title.is_empty() { None } else { Some(title) },
-                if artist.is_empty() { None } else { Some(artist) },
+                if artist.is_empty() {
+                    None
+                } else {
+                    Some(artist)
+                },
             )
         } else {
             // No artist, just title
@@ -80,4 +84,3 @@ mod tests {
         assert_eq!(artist, None);
     }
 }
-

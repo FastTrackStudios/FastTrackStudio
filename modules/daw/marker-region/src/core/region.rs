@@ -4,11 +4,12 @@
 //! timeline regions in a DAW. Regions represent spans of time that can be
 //! used for arrangement sections, loop ranges, and workflow organization.
 
-use primitives::TimeRange;
 use crate::core::MarkerRegionError;
+use primitives::TimeRange;
+use specta::Type;
 
 /// A region represents a named span of time on the timeline
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Type)]
 pub struct Region {
     /// Unique identifier for this region (if supported by the source)
     pub id: Option<u32>,
@@ -54,7 +55,11 @@ impl Region {
     }
 
     /// Create a region from start and end times in seconds
-    pub fn from_seconds(start_seconds: f64, end_seconds: f64, name: String) -> Result<Self, MarkerRegionError> {
+    pub fn from_seconds(
+        start_seconds: f64,
+        end_seconds: f64,
+        name: String,
+    ) -> Result<Self, MarkerRegionError> {
         if start_seconds >= end_seconds {
             return Err(MarkerRegionError::InvalidRegion {
                 start: start_seconds,
@@ -170,7 +175,9 @@ impl Region {
 
         // Check positions are not negative
         if self.start_seconds() < 0.0 {
-            return Err(MarkerRegionError::InvalidMarkerPosition(self.start_seconds()));
+            return Err(MarkerRegionError::InvalidMarkerPosition(
+                self.start_seconds(),
+            ));
         }
 
         // Check name is not empty
@@ -230,13 +237,15 @@ impl Region {
 
     /// Get a display string for this region
     pub fn display_string(&self) -> String {
-        format!("{} [{:.3}s - {:.3}s] ({} - {}) [Δ{:.3}s]",
-                self.name,
-                self.start_seconds(),
-                self.end_seconds(),
-                self.musical_start_position(),
-                self.musical_end_position(),
-                self.duration_seconds())
+        format!(
+            "{} [{:.3}s - {:.3}s] ({} - {}) [Δ{:.3}s]",
+            self.name,
+            self.start_seconds(),
+            self.end_seconds(),
+            self.musical_start_position(),
+            self.musical_end_position(),
+            self.duration_seconds()
+        )
     }
 
     /// Get color as RGB components (if available)
@@ -298,11 +307,16 @@ pub trait RegionSource: Send + Sync {
     }
 
     /// Get regions that intersect with a time range
-    fn get_regions_in_range(&self, start_seconds: f64, end_seconds: f64) -> Result<Vec<Region>, MarkerRegionError> {
+    fn get_regions_in_range(
+        &self,
+        start_seconds: f64,
+        end_seconds: f64,
+    ) -> Result<Vec<Region>, MarkerRegionError> {
         let regions = self.get_regions()?;
-        Ok(regions.into_iter()
-           .filter(|r| r.intersects_range(start_seconds, end_seconds))
-           .collect())
+        Ok(regions
+            .into_iter()
+            .filter(|r| r.intersects_range(start_seconds, end_seconds))
+            .collect())
     }
 
     /// Get the region that contains a specific time position
@@ -314,9 +328,10 @@ pub trait RegionSource: Send + Sync {
     /// Get all regions that overlap with a given region
     fn get_overlapping_regions(&self, region: &Region) -> Result<Vec<Region>, MarkerRegionError> {
         let regions = self.get_regions()?;
-        Ok(regions.into_iter()
-           .filter(|r| r.overlaps_with(region))
-           .collect())
+        Ok(regions
+            .into_iter()
+            .filter(|r| r.overlaps_with(region))
+            .collect())
     }
 
     /// Get a human-readable name for this region source

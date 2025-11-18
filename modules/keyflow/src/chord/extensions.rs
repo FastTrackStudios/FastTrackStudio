@@ -2,10 +2,10 @@
 //!
 //! Represents extended harmony beyond the seventh
 
-use crate::primitives::Interval;
 use crate::chord::degree::ChordDegree;
-use crate::parsing::{Token, TokenType, ParseError};
-use tracing::{debug, trace, instrument};
+use crate::parsing::{ParseError, Token, TokenType};
+use crate::primitives::Interval;
+use tracing::{debug, instrument, trace};
 
 /// Type of extension quality
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -38,7 +38,7 @@ impl Extensions {
             thirteenth: None,
         }
     }
-    
+
     /// Create extensions with just a ninth
     pub fn with_ninth(quality: ExtensionQuality) -> Self {
         Self {
@@ -47,7 +47,7 @@ impl Extensions {
             thirteenth: None,
         }
     }
-    
+
     /// Create extensions with ninth and eleventh
     pub fn with_eleventh(ninth: ExtensionQuality, eleventh: ExtensionQuality) -> Self {
         Self {
@@ -56,7 +56,7 @@ impl Extensions {
             thirteenth: None,
         }
     }
-    
+
     /// Create extensions with ninth, eleventh, and thirteenth
     pub fn with_thirteenth(
         ninth: ExtensionQuality,
@@ -69,17 +69,17 @@ impl Extensions {
             thirteenth: Some(thirteenth),
         }
     }
-    
+
     /// Check if there are any extensions
     pub fn has_any(&self) -> bool {
         self.ninth.is_some() || self.eleventh.is_some() || self.thirteenth.is_some()
     }
-    
+
     /// Check if there is any natural (unaltered) extension
     /// Returns true if at least one extension is natural
-    /// 
+    ///
     /// The highest natural extension masks the seventh in chord notation.
-    /// 
+    ///
     /// Examples:
     /// - Dm9 (natural 9) → true (has natural extension, masks 7)
     /// - Dm9#11 (natural 9, sharp 11) → true (has natural 9, masks 7 at 9)
@@ -91,7 +91,7 @@ impl Extensions {
             || matches!(self.eleventh, Some(ExtensionQuality::Natural))
             || matches!(self.thirteenth, Some(ExtensionQuality::Natural))
     }
-    
+
     /// Get the interval for the ninth (if present)
     pub fn ninth_interval(&self) -> Option<Interval> {
         self.ninth.map(|q| match q {
@@ -100,7 +100,7 @@ impl Extensions {
             ExtensionQuality::Sharp => Interval::SharpNinth,
         })
     }
-    
+
     /// Get the interval for the eleventh (if present)
     pub fn eleventh_interval(&self) -> Option<Interval> {
         self.eleventh.map(|q| match q {
@@ -112,7 +112,7 @@ impl Extensions {
             }
         })
     }
-    
+
     /// Get the interval for the thirteenth (if present)
     pub fn thirteenth_interval(&self) -> Option<Interval> {
         self.thirteenth.map(|q| match q {
@@ -124,7 +124,7 @@ impl Extensions {
             }
         })
     }
-    
+
     /// Get all extension degrees present
     pub fn degrees(&self) -> Vec<ChordDegree> {
         let mut degrees = Vec::new();
@@ -139,7 +139,7 @@ impl Extensions {
         }
         degrees
     }
-    
+
     /// Get all extension intervals
     pub fn intervals(&self) -> Vec<Interval> {
         let mut intervals = Vec::new();
@@ -154,7 +154,7 @@ impl Extensions {
         }
         intervals
     }
-    
+
     /// Get the highest extension present (for display purposes)
     /// Returns None if no extensions
     pub fn highest(&self) -> Option<ChordDegree> {
@@ -168,11 +168,11 @@ impl Extensions {
             None
         }
     }
-    
+
     /// Build a symbol string for these extensions
     pub fn symbol(&self) -> String {
         let mut parts = Vec::new();
-        
+
         if let Some(quality) = self.ninth {
             parts.push(match quality {
                 ExtensionQuality::Natural => "9".to_string(),
@@ -180,7 +180,7 @@ impl Extensions {
                 ExtensionQuality::Sharp => "#9".to_string(),
             });
         }
-        
+
         if let Some(quality) = self.eleventh {
             parts.push(match quality {
                 ExtensionQuality::Natural => "11".to_string(),
@@ -188,7 +188,7 @@ impl Extensions {
                 ExtensionQuality::Flat => "11".to_string(),
             });
         }
-        
+
         if let Some(quality) = self.thirteenth {
             parts.push(match quality {
                 ExtensionQuality::Natural => "13".to_string(),
@@ -196,13 +196,13 @@ impl Extensions {
                 ExtensionQuality::Sharp => "13".to_string(),
             });
         }
-        
+
         parts.join(" ")
     }
-    
+
     /// Parse extensions from tokens
     /// Returns (Extensions, tokens_consumed)
-    /// 
+    ///
     /// Handles: 9, b9, #9, 11, #11, 13, b13, maj9, maj11, maj13
     /// When a higher extension is found (e.g., 13), it implies all lower extensions (9, 11)
     /// "maj9", "maj11", "maj13" indicate major seventh with extensions
@@ -211,17 +211,22 @@ impl Extensions {
         if tokens.is_empty() {
             return Ok((Extensions::none(), 0));
         }
-        
+
         let mut consumed = 0;
         let mut ninth = None;
         let mut eleventh = None;
         let mut thirteenth = None;
-        
+
         trace!("Starting extension parsing with {} tokens", tokens.len());
-        
+
         while consumed < tokens.len() {
-            trace!("Loop iteration: consumed={}, tokens[{}]={:?}", consumed, consumed, tokens[consumed].token_type);
-            
+            trace!(
+                "Loop iteration: consumed={}, tokens[{}]={:?}",
+                consumed,
+                consumed,
+                tokens[consumed].token_type
+            );
+
             // Check for accidental (b or #)
             let quality_mod = if consumed < tokens.len() {
                 match tokens[consumed].token_type {
@@ -235,15 +240,19 @@ impl Extensions {
                         consumed += 1;
                         Some(ExtensionQuality::Sharp)
                     }
-                    _ => Some(ExtensionQuality::Natural)
+                    _ => Some(ExtensionQuality::Natural),
                 }
             } else {
                 Some(ExtensionQuality::Natural)
             };
-            
+
             // Check for number
             if consumed < tokens.len() {
-                trace!("Checking for number at position {}: {:?}", consumed, tokens[consumed].token_type);
+                trace!(
+                    "Checking for number at position {}: {:?}",
+                    consumed,
+                    tokens[consumed].token_type
+                );
                 if let TokenType::Number(n) = &tokens[consumed].token_type {
                     let quality = quality_mod.unwrap();
                     trace!("Found number '{}' with quality {:?}", n, quality);
@@ -301,16 +310,18 @@ impl Extensions {
                 break;
             }
         }
-        
-        debug!("Extension parsing complete: ninth={:?}, eleventh={:?}, thirteenth={:?}, consumed={}", 
-               ninth, eleventh, thirteenth, consumed);
-        
+
+        debug!(
+            "Extension parsing complete: ninth={:?}, eleventh={:?}, thirteenth={:?}, consumed={}",
+            ninth, eleventh, thirteenth, consumed
+        );
+
         let extensions = Extensions {
             ninth,
             eleventh,
             thirteenth,
         };
-        
+
         Ok((extensions, consumed))
     }
 }
@@ -320,7 +331,7 @@ impl std::fmt::Display for Extensions {
         // In standard chord notation, we show altered extensions inline
         // e.g., "C7b9", "C13#11", etc.
         // We display from lowest to highest so alterations appear in order
-        
+
         if let Some(quality) = self.ninth {
             match quality {
                 ExtensionQuality::Natural => write!(f, "9")?,
@@ -328,7 +339,7 @@ impl std::fmt::Display for Extensions {
                 ExtensionQuality::Sharp => write!(f, "#9")?,
             }
         }
-        
+
         if let Some(quality) = self.eleventh {
             match quality {
                 ExtensionQuality::Natural => write!(f, "11")?,
@@ -336,7 +347,7 @@ impl std::fmt::Display for Extensions {
                 ExtensionQuality::Sharp => write!(f, "#11")?,
             }
         }
-        
+
         if let Some(quality) = self.thirteenth {
             match quality {
                 ExtensionQuality::Natural => write!(f, "13")?,
@@ -344,7 +355,7 @@ impl std::fmt::Display for Extensions {
                 ExtensionQuality::Sharp => write!(f, "#13")?,
             }
         }
-        
+
         Ok(())
     }
 }
@@ -352,14 +363,14 @@ impl std::fmt::Display for Extensions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_none() {
         let ext = Extensions::none();
         assert!(!ext.has_any());
         assert_eq!(ext.degrees(), Vec::<ChordDegree>::new());
     }
-    
+
     #[test]
     fn test_with_ninth() {
         let ext = Extensions::with_ninth(ExtensionQuality::Natural);
@@ -369,31 +380,28 @@ mod tests {
         assert_eq!(ext.thirteenth, None);
         assert_eq!(ext.ninth_interval(), Some(Interval::Ninth));
     }
-    
+
     #[test]
     fn test_with_flat_ninth() {
         let ext = Extensions::with_ninth(ExtensionQuality::Flat);
         assert_eq!(ext.ninth_interval(), Some(Interval::FlatNinth));
     }
-    
+
     #[test]
     fn test_with_sharp_ninth() {
         let ext = Extensions::with_ninth(ExtensionQuality::Sharp);
         assert_eq!(ext.ninth_interval(), Some(Interval::SharpNinth));
     }
-    
+
     #[test]
     fn test_with_eleventh() {
-        let ext = Extensions::with_eleventh(
-            ExtensionQuality::Natural,
-            ExtensionQuality::Natural,
-        );
+        let ext = Extensions::with_eleventh(ExtensionQuality::Natural, ExtensionQuality::Natural);
         assert!(ext.has_any());
         assert_eq!(ext.ninth, Some(ExtensionQuality::Natural));
         assert_eq!(ext.eleventh, Some(ExtensionQuality::Natural));
         assert_eq!(ext.thirteenth, None);
     }
-    
+
     #[test]
     fn test_with_thirteenth() {
         let ext = Extensions::with_thirteenth(
@@ -406,7 +414,7 @@ mod tests {
         assert_eq!(ext.eleventh, Some(ExtensionQuality::Natural));
         assert_eq!(ext.thirteenth, Some(ExtensionQuality::Natural));
     }
-    
+
     #[test]
     fn test_degrees() {
         let ext = Extensions::with_thirteenth(
@@ -420,15 +428,15 @@ mod tests {
         assert!(degrees.contains(&ChordDegree::Eleventh));
         assert!(degrees.contains(&ChordDegree::Thirteenth));
     }
-    
+
     #[test]
     fn test_highest() {
         let ext_none = Extensions::none();
         assert_eq!(ext_none.highest(), None);
-        
+
         let ext_ninth = Extensions::with_ninth(ExtensionQuality::Natural);
         assert_eq!(ext_ninth.highest(), Some(ChordDegree::Ninth));
-        
+
         let ext_thirteenth = Extensions::with_thirteenth(
             ExtensionQuality::Natural,
             ExtensionQuality::Natural,
@@ -436,7 +444,7 @@ mod tests {
         );
         assert_eq!(ext_thirteenth.highest(), Some(ChordDegree::Thirteenth));
     }
-    
+
     #[test]
     fn test_intervals() {
         let ext = Extensions::with_thirteenth(
@@ -451,4 +459,3 @@ mod tests {
         assert!(intervals.contains(&Interval::FlatThirteenth));
     }
 }
-

@@ -9,10 +9,10 @@ use std::fmt;
 pub trait Position: fmt::Debug + fmt::Display {
     /// Get the duration from the start of the song to this position
     fn duration(&self) -> &dyn Duration;
-    
+
     /// Get the section index this position is in
     fn section_index(&self) -> usize;
-    
+
     /// Clone as a boxed trait object
     fn clone_box(&self) -> Box<dyn Position>;
 }
@@ -33,7 +33,7 @@ impl AbsolutePosition {
             section_index,
         }
     }
-    
+
     /// Create a position at the start of a section
     pub fn at_section_start(total_duration: MusicalDuration, section_index: usize) -> Self {
         Self {
@@ -41,7 +41,7 @@ impl AbsolutePosition {
             section_index,
         }
     }
-    
+
     /// Create a position at the very beginning of the song
     pub fn at_beginning() -> Self {
         Self {
@@ -55,11 +55,11 @@ impl Position for AbsolutePosition {
     fn duration(&self) -> &dyn Duration {
         &self.total_duration
     }
-    
+
     fn section_index(&self) -> usize {
         self.section_index
     }
-    
+
     fn clone_box(&self) -> Box<dyn Position> {
         Box::new(self.clone())
     }
@@ -70,8 +70,7 @@ impl fmt::Display for AbsolutePosition {
         write!(
             f,
             "Section {} @ {}",
-            self.section_index,
-            self.total_duration
+            self.section_index, self.total_duration
         )
     }
 }
@@ -79,17 +78,17 @@ impl fmt::Display for AbsolutePosition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_absolute_position_creation() {
         let dur = MusicalDuration::new(2, 1, 0);
         let pos = AbsolutePosition::new(dur, 3);
-        
+
         assert_eq!(pos.section_index(), 3);
         assert_eq!(pos.duration().measures(), 2);
         assert_eq!(pos.duration().beats(), 1);
     }
-    
+
     #[test]
     fn test_position_at_beginning() {
         let pos = AbsolutePosition::at_beginning();
@@ -97,16 +96,16 @@ mod tests {
         assert_eq!(pos.duration().measures(), 0);
         assert_eq!(pos.duration().beats(), 0);
     }
-    
+
     #[test]
     fn test_position_at_section_start() {
         let dur = MusicalDuration::new(8, 0, 0);
         let pos = AbsolutePosition::at_section_start(dur, 2);
-        
+
         assert_eq!(pos.section_index(), 2);
         assert_eq!(pos.duration().measures(), 8);
     }
-    
+
     #[test]
     fn test_position_display() {
         let dur = MusicalDuration::new(2, 1, 50);
@@ -114,4 +113,3 @@ mod tests {
         assert_eq!(format!("{}", pos), "Section 3 @ 2.1.50");
     }
 }
-

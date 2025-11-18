@@ -4,7 +4,7 @@
 //! and regions. This is the primary interface for accessing timeline navigation
 //! data from different DAW implementations.
 
-use crate::core::{Marker, Region, MarkerRegionError, MarkerSource, RegionSource};
+use crate::core::{Marker, MarkerRegionError, MarkerSource, Region, RegionSource};
 
 /// Combined trait for sources that provide both markers and regions
 pub trait MarkerRegionSource: MarkerSource + RegionSource + Send + Sync {
@@ -44,22 +44,34 @@ pub trait MarkerRegionSource: MarkerSource + RegionSource + Send + Sync {
     }
 
     /// Find the next navigation point after the given time
-    fn get_next_navigation_point(&self, after_seconds: f64) -> Result<Option<NavigationPoint>, MarkerRegionError> {
+    fn get_next_navigation_point(
+        &self,
+        after_seconds: f64,
+    ) -> Result<Option<NavigationPoint>, MarkerRegionError> {
         let points = self.get_navigation_points()?;
-        Ok(points.into_iter()
-           .find(|p| p.position_seconds() > after_seconds))
+        Ok(points
+            .into_iter()
+            .find(|p| p.position_seconds() > after_seconds))
     }
 
     /// Find the previous navigation point before the given time
-    fn get_previous_navigation_point(&self, before_seconds: f64) -> Result<Option<NavigationPoint>, MarkerRegionError> {
+    fn get_previous_navigation_point(
+        &self,
+        before_seconds: f64,
+    ) -> Result<Option<NavigationPoint>, MarkerRegionError> {
         let points = self.get_navigation_points()?;
-        Ok(points.into_iter()
-           .filter(|p| p.position_seconds() < before_seconds)
-           .last())
+        Ok(points
+            .into_iter()
+            .filter(|p| p.position_seconds() < before_seconds)
+            .last())
     }
 
     /// Get markers and regions within a specific time range
-    fn get_all_in_range(&self, start_seconds: f64, end_seconds: f64) -> Result<(Vec<Marker>, Vec<Region>), MarkerRegionError> {
+    fn get_all_in_range(
+        &self,
+        start_seconds: f64,
+        end_seconds: f64,
+    ) -> Result<(Vec<Marker>, Vec<Region>), MarkerRegionError> {
         let markers = self.get_markers_in_range(start_seconds, end_seconds)?;
         let regions = self.get_regions_in_range(start_seconds, end_seconds)?;
         Ok((markers, regions))
@@ -126,9 +138,12 @@ pub trait MarkerRegionSource: MarkerSource + RegionSource + Send + Sync {
                 if region1.overlaps_with(region2) {
                     validation_errors.push(format!(
                         "Regions '{}' and '{}' overlap: [{}-{}] and [{}-{}]",
-                        region1.name, region2.name,
-                        region1.start_seconds(), region1.end_seconds(),
-                        region2.start_seconds(), region2.end_seconds()
+                        region1.name,
+                        region2.name,
+                        region1.start_seconds(),
+                        region1.end_seconds(),
+                        region2.start_seconds(),
+                        region2.end_seconds()
                     ));
                 }
             }
@@ -172,8 +187,14 @@ impl NavigationPoint {
     pub fn display_string(&self) -> String {
         match self {
             NavigationPoint::Marker(marker) => format!("Marker: {}", marker.display_string()),
-            NavigationPoint::RegionStart(region) => format!("Region Start: {} @ {:.3}s", region.name, region.start_seconds()),
-            NavigationPoint::RegionEnd(region) => format!("Region End: {} @ {:.3}s", region.name, region.end_seconds()),
+            NavigationPoint::RegionStart(region) => format!(
+                "Region Start: {} @ {:.3}s",
+                region.name,
+                region.start_seconds()
+            ),
+            NavigationPoint::RegionEnd(region) => {
+                format!("Region End: {} @ {:.3}s", region.name, region.end_seconds())
+            }
         }
     }
 
@@ -184,7 +205,10 @@ impl NavigationPoint {
 
     /// Check if this navigation point is a region boundary
     pub fn is_region_boundary(&self) -> bool {
-        matches!(self, NavigationPoint::RegionStart(_) | NavigationPoint::RegionEnd(_))
+        matches!(
+            self,
+            NavigationPoint::RegionStart(_) | NavigationPoint::RegionEnd(_)
+        )
     }
 
     /// Get the marker if this is a marker navigation point
@@ -198,7 +222,9 @@ impl NavigationPoint {
     /// Get the region if this is a region navigation point
     pub fn as_region(&self) -> Option<&Region> {
         match self {
-            NavigationPoint::RegionStart(region) | NavigationPoint::RegionEnd(region) => Some(region),
+            NavigationPoint::RegionStart(region) | NavigationPoint::RegionEnd(region) => {
+                Some(region)
+            }
             _ => None,
         }
     }
@@ -295,7 +321,7 @@ mod tests {
 
         // Check that they're sorted by time
         for i in 1..points.len() {
-            assert!(points[i-1].position_seconds() <= points[i].position_seconds());
+            assert!(points[i - 1].position_seconds() <= points[i].position_seconds());
         }
 
         // First point should be region start at 5.0s

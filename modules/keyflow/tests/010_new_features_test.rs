@@ -19,7 +19,7 @@ intro, 1/ 4/ 5/ 1/  ; inline comment
 "#;
 
     let chart = Chart::parse(input).unwrap();
-    
+
     assert_eq!(chart.metadata.title, Some("Test Song".to_string()));
     assert_eq!(chart.sections.len(), 1);
 }
@@ -35,9 +35,9 @@ intro, 1/ 4/ 5/ 1/
 "#;
 
     let chart = Chart::parse(input).unwrap();
-    
+
     assert_eq!(chart.sections.len(), 2);
-    
+
     // Both sections should be Intro type
     // The numbering system should handle splitting them (e.g., Intro 1a, Intro 1b)
 }
@@ -51,16 +51,23 @@ intro, 1/ 4->/ 5/ 1/
 "#;
 
     let chart = Chart::parse(input).unwrap();
-    
+
     assert_eq!(chart.sections.len(), 1);
     let measure = &chart.sections[0].measures[0];
-    
+
     // Should have 4 chords
-    assert!(measure.chords.len() >= 4, "Expected at least 4 chords, found {}", measure.chords.len());
-    
+    assert!(
+        measure.chords.len() >= 4,
+        "Expected at least 4 chords, found {}",
+        measure.chords.len()
+    );
+
     // Second chord should have accent from shorthand
     if measure.chords.len() >= 2 {
-        assert!(measure.chords[1].commands.len() > 0, "Second chord should have commands");
+        assert!(
+            measure.chords[1].commands.len() > 0,
+            "Second chord should have commands"
+        );
         assert_eq!(measure.chords[1].commands[0], Command::Accent);
     }
 }
@@ -74,17 +81,24 @@ intro, 1/ 4/ 5/ 1/ /fermata
 "#;
 
     let chart = Chart::parse(input).unwrap();
-    
+
     assert_eq!(chart.sections.len(), 1);
     let measure = &chart.sections[0].measures[0];
-    
+
     // Should have 4 chords
-    assert!(measure.chords.len() >= 4, "Expected at least 4 chords, found {}", measure.chords.len());
-    
+    assert!(
+        measure.chords.len() >= 4,
+        "Expected at least 4 chords, found {}",
+        measure.chords.len()
+    );
+
     // Last chord should have fermata
     let last_idx = measure.chords.len() - 1;
     let last_chord = &measure.chords[last_idx];
-    assert!(last_chord.commands.len() > 0, "Last chord should have commands");
+    assert!(
+        last_chord.commands.len() > 0,
+        "Last chord should have commands"
+    );
     assert_eq!(last_chord.commands[0], Command::Fermata);
 }
 
@@ -97,16 +111,23 @@ intro, 1/ 4/ /accent 5/ 1/
 "#;
 
     let chart = Chart::parse(input).unwrap();
-    
+
     assert_eq!(chart.sections.len(), 1);
     let measure = &chart.sections[0].measures[0];
-    
+
     // Should have 4 chords
-    assert!(measure.chords.len() >= 4, "Expected at least 4 chords, found {}", measure.chords.len());
-    
+    assert!(
+        measure.chords.len() >= 4,
+        "Expected at least 4 chords, found {}",
+        measure.chords.len()
+    );
+
     // Second chord should have accent from /accent command
     if measure.chords.len() >= 2 {
-        assert!(measure.chords[1].commands.len() > 0, "Second chord should have commands");
+        assert!(
+            measure.chords[1].commands.len() > 0,
+            "Second chord should have commands"
+        );
         assert_eq!(measure.chords[1].commands[0], Command::Accent);
     }
 }
@@ -122,7 +143,7 @@ intro, 1/ 4/ 5/ 1/
 "#;
 
     let chart = Chart::parse(input).unwrap();
-    
+
     assert!(chart.settings.smart_repeats());
 }
 
@@ -137,7 +158,7 @@ intro, 1/ 4/ 5/ 1/
 "#;
 
     let chart = Chart::parse(input).unwrap();
-    
+
     assert!(!chart.settings.smart_repeats());
 }
 
@@ -156,10 +177,10 @@ intro, 1/ 4/ 5->/ 1/
 "#;
 
     let chart = Chart::parse(input).unwrap();
-    
+
     // Check settings
     assert!(chart.settings.smart_repeats());
-    
+
     // Check sections
     assert_eq!(chart.sections.len(), 2);
 }

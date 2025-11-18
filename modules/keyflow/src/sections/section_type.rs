@@ -11,8 +11,8 @@ pub enum SectionType {
     Bridge,
     Outro,
     Instrumental,
-    Pre(Box<SectionType>),   // Pre-Chorus, Pre-Verse, etc.
-    Post(Box<SectionType>),  // Post-Chorus, Post-Verse, etc.
+    Pre(Box<SectionType>),  // Pre-Chorus, Pre-Verse, etc.
+    Post(Box<SectionType>), // Post-Chorus, Post-Verse, etc.
 }
 
 impl SectionType {
@@ -57,19 +57,19 @@ impl SectionType {
     pub fn parse(input: &str) -> Option<(Self, Option<usize>)> {
         let input = input.trim().to_lowercase();
         let parts: Vec<&str> = input.split_whitespace().collect();
-        
+
         if parts.is_empty() {
             return None;
         }
 
         let section_str = parts[0];
-        
+
         // Section markers should be alone or followed by only a measure count (number)
         // This prevents "c d g" from being parsed as a section marker
         if parts.len() > 2 {
             return None; // Too many tokens, not a section marker
         }
-        
+
         let measure_count = if parts.len() > 1 {
             // If there's a second token, it must be a number (measure count)
             // Otherwise, this isn't a valid section marker
@@ -123,7 +123,7 @@ mod tests {
         let pre_chorus = SectionType::Pre(Box::new(SectionType::Chorus));
         assert_eq!(pre_chorus.full_name(), "Pre-Chorus");
         assert_eq!(pre_chorus.abbreviation(), "PRE-CH");
-        
+
         let post_chorus = SectionType::Post(Box::new(SectionType::Chorus));
         assert_eq!(post_chorus.full_name(), "Post-Chorus");
         assert_eq!(post_chorus.abbreviation(), "POST-CH");
@@ -134,7 +134,7 @@ mod tests {
         assert!(SectionType::Verse.should_number());
         assert!(SectionType::Chorus.should_number());
         assert!(SectionType::Bridge.should_number());
-        
+
         assert!(!SectionType::Intro.should_number());
         assert!(!SectionType::Outro.should_number());
         assert!(!SectionType::Instrumental.should_number());
@@ -156,10 +156,7 @@ mod tests {
             SectionType::parse("intro 2"),
             Some((SectionType::Intro, Some(2)))
         );
-        assert_eq!(
-            SectionType::parse("br"),
-            Some((SectionType::Bridge, None))
-        );
+        assert_eq!(SectionType::parse("br"), Some((SectionType::Bridge, None)));
     }
 
     #[test]
@@ -168,4 +165,3 @@ mod tests {
         assert_eq!(SectionType::parse(""), None);
     }
 }
-

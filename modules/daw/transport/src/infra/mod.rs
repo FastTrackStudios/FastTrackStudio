@@ -18,19 +18,12 @@
 //! - `grpc.rs` - gRPC adapter (future)
 
 pub mod http;
-pub mod osc;
-pub mod websocket;
 
 // Future protocol adapters
 // pub mod midi;
 
 // Re-export all infrastructure adapters
 pub use http::create_transport_http_router;
-pub use osc::{OscTransportServer, create_transport_osc_server};
-pub use websocket::{
-    TransportCommand, TransportMessage, TransportStatus, WebSocketHandler,
-    create_transport_ws_router,
-};
 
 // Future re-exports
 // pub use midi::create_transport_midi_service;

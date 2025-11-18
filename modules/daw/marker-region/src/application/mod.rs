@@ -118,7 +118,10 @@ impl MarkerRegionSourceBuilder {
     }
 
     /// Build an RPP file marker/region source
-    pub fn build_rpp(self, path: &str) -> Result<RppMarkerRegionSource, crate::core::MarkerRegionError> {
+    pub fn build_rpp(
+        self,
+        path: &str,
+    ) -> Result<RppMarkerRegionSource, crate::core::MarkerRegionError> {
         RppMarkerRegionSource::from_file(path).map_err(|e| e.into())
     }
 }
@@ -149,7 +152,9 @@ pub fn reaper_source() -> ReaperMarkerRegionSource {
 }
 
 /// Create an RPP file marker/region source
-pub fn rpp_source_from_file(path: &str) -> Result<RppMarkerRegionSource, crate::core::MarkerRegionError> {
+pub fn rpp_source_from_file(
+    path: &str,
+) -> Result<RppMarkerRegionSource, crate::core::MarkerRegionError> {
     RppMarkerRegionSource::from_file(path).map_err(|e| e.into())
 }
 

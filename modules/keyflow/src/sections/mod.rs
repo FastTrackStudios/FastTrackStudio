@@ -2,11 +2,10 @@
 //!
 //! Song section management and numbering
 
-pub mod section_type;
-pub mod section;
 pub mod numbering;
+pub mod section;
+pub mod section_type;
 
-pub use section_type::SectionType;
-pub use section::Section;
 pub use numbering::SectionNumberer;
-
+pub use section::Section;
+pub use section_type::SectionType;

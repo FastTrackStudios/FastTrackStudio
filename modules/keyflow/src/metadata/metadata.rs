@@ -50,7 +50,7 @@ mod tests {
         metadata.artist = Some("Test Artist".to_string());
         metadata.tempo = Some(120);
         metadata.year = Some(2024);
-        
+
         assert_eq!(metadata.title, Some("Test Song".to_string()));
         assert_eq!(metadata.artist, Some("Test Artist".to_string()));
         assert_eq!(metadata.tempo, Some(120));
@@ -61,9 +61,8 @@ mod tests {
     fn test_metadata_clone() {
         let mut metadata1 = SongMetadata::new();
         metadata1.title = Some("Original".to_string());
-        
+
         let metadata2 = metadata1.clone();
         assert_eq!(metadata1, metadata2);
     }
 }
-

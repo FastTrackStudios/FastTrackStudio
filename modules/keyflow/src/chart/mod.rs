@@ -2,24 +2,23 @@
 //!
 //! Complete chart parsing and representation
 
-pub mod types;
 pub mod chart;
-pub mod memory;
-pub mod templates;
-pub mod parser;
-pub mod display;
-pub mod cues;
-pub mod settings;
 pub mod commands;
+pub mod cues;
+pub mod display;
+pub mod memory;
+pub mod parser;
+pub mod settings;
+pub mod templates;
+pub mod types;
 
 #[macro_use]
 pub mod r#macro;
 
-pub use types::{ChordInstance, Measure, ChartSection, KeyChange, TimeSignatureChange};
 pub use chart::Chart;
-pub use memory::ChordMemory;
-pub use templates::TemplateManager;
-pub use cues::{TextCue, InstrumentGroup};
-pub use settings::{ChartSettings, ChartSetting, SettingValue};
 pub use commands::Command;
-
+pub use cues::{InstrumentGroup, TextCue};
+pub use memory::ChordMemory;
+pub use settings::{ChartSetting, ChartSettings, SettingValue};
+pub use templates::TemplateManager;
+pub use types::{ChartSection, ChordInstance, KeyChange, Measure, TimeSignatureChange};

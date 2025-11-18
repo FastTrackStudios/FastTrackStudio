@@ -3,38 +3,42 @@
 //! This module contains the core domain types for managing songs within a setlist,
 //! including song metadata, sections, and marker positions.
 
-use std::collections::HashMap;
+use marker_region::core::Marker;
+use primitives::{Position, TimePosition, TimeRange, TimeSignature};
+use project::Project;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "tauri")]
 use specta::Type;
-use primitives::{Position, TimePosition, TimeRange};
+use std::collections::HashMap;
+use transport::{RecordMode, Tempo, Transport, TransportActions, TransportError};
+
+type SongProject = Project<Transport>;
 
 use super::{Section, SectionType, SetlistError};
 
 /// Represents a song in the setlist
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "tauri", derive(Type))]
-#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct Song {
     /// Unique identifier for this song
     pub id: Option<uuid::Uuid>,
     /// Song name (from the song region name)
     pub name: String,
-    /// Count-In marker position (marker named "Count-In")
-    pub count_in_position: Option<Position>,
-    /// SONGSTART marker position (render start, where real song content begins)
-    pub start_position: Option<Position>,
-    /// SONGEND marker position (last hit of song, but may have audio after)
-    pub song_end_position: Option<Position>,
-    /// =END marker position (hard cut, no more audio)
-    pub end_position: Option<Position>,
-    /// Song region boundaries (start and end of the entire song region)
-    pub song_region_start: Option<Position>,
-    pub song_region_end: Option<Position>,
+    /// Full marker metadata for count-in (optional)
+    pub count_in_marker: Option<Marker>,
+    /// Full marker metadata for SONGSTART (optional)
+    pub start_marker: Option<Marker>,
+    /// Full marker metadata for SONGEND (optional)
+    pub song_end_marker: Option<Marker>,
+    /// Full marker metadata for =END (optional)
+    pub end_marker: Option<Marker>,
+    /// Marker metadata for region start/end
+    pub song_region_start_marker: Option<Marker>,
+    pub song_region_end_marker: Option<Marker>,
     /// List of sections in the song (from regions between SONGSTART and SONGEND)
     pub sections: Vec<Section>,
     /// Optional metadata (key, tempo, etc.)
     pub metadata: HashMap<String, String>,
+    /// Embedded project used to control transport
+    pub project: Option<SongProject>,
 }
 
 impl Song {
@@ -47,14 +51,15 @@ impl Song {
         Ok(Self {
             id: None,
             name: name.trim().to_string(),
-            count_in_position: None,
-            start_position: None,
-            song_end_position: None,
-            end_position: None,
-            song_region_start: None,
-            song_region_end: None,
+            count_in_marker: None,
+            start_marker: None,
+            song_end_marker: None,
+            end_marker: None,
+            song_region_start_marker: None,
+            song_region_end_marker: None,
             sections: Vec::new(),
             metadata: HashMap::new(),
+            project: None,
         })
     }
 
@@ -65,44 +70,150 @@ impl Song {
         Ok(song)
     }
 
+    fn store_marker(marker_slot: &mut Option<Marker>, marker: Marker) {
+        *marker_slot = Some(marker);
+    }
+
+    pub fn set_count_in_marker(&mut self, marker: Marker) {
+        Self::store_marker(&mut self.count_in_marker, marker);
+    }
+
+    pub fn set_start_marker(&mut self, marker: Marker) {
+        Self::store_marker(&mut self.start_marker, marker);
+    }
+
+    pub fn set_song_end_marker(&mut self, marker: Marker) {
+        Self::store_marker(&mut self.song_end_marker, marker);
+    }
+
+    pub fn set_end_marker(&mut self, marker: Marker) {
+        Self::store_marker(&mut self.end_marker, marker);
+    }
+
+    pub fn set_song_region_start_marker(&mut self, marker: Marker) {
+        Self::store_marker(&mut self.song_region_start_marker, marker);
+    }
+
+    pub fn set_song_region_end_marker(&mut self, marker: Marker) {
+        Self::store_marker(&mut self.song_region_end_marker, marker);
+    }
+
+    fn marker_position(marker: &Option<Marker>) -> Option<Position> {
+        marker.as_ref().map(|m| m.position.clone())
+    }
+
+    fn marker_seconds(marker: &Option<Marker>) -> Option<f64> {
+        marker
+            .as_ref()
+            .map(|m| m.position.time.to_seconds())
+    }
+
+    pub fn count_in_position(&self) -> Option<Position> {
+        Self::marker_position(&self.count_in_marker)
+    }
+
+    pub fn start_position(&self) -> Option<Position> {
+        Self::marker_position(&self.start_marker)
+    }
+
+    pub fn song_end_position(&self) -> Option<Position> {
+        Self::marker_position(&self.song_end_marker)
+    }
+
+    pub fn end_position(&self) -> Option<Position> {
+        Self::marker_position(&self.end_marker)
+    }
+
+    pub fn song_region_start(&self) -> Option<Position> {
+        Self::marker_position(&self.song_region_start_marker)
+    }
+
+    pub fn song_region_end(&self) -> Option<Position> {
+        Self::marker_position(&self.song_region_end_marker)
+    }
+
+    /// Attach a project to this song by value.
+    pub fn set_project(&mut self, project: SongProject) {
+        self.project = Some(project);
+    }
+
+    /// Borrow the embedded project.
+    pub fn project(&self) -> Option<&SongProject> {
+        self.project.as_ref()
+    }
+
+    /// Borrow the embedded project mutably.
+    pub fn project_mut(&mut self) -> Option<&mut SongProject> {
+        self.project.as_mut()
+    }
+
+    /// Get the attached project ID (if any).
+    pub fn project_id(&self) -> Option<uuid::Uuid> {
+        self.project().map(|project| project.id())
+    }
+
+    /// Get the attached project name (if any).
+    pub fn project_name(&self) -> Option<String> {
+        self.project().map(|project| project.name().to_string())
+    }
+
+    fn with_project_mut<F, R>(&mut self, action: F) -> Result<R, TransportError>
+    where
+        F: FnOnce(&mut SongProject) -> Result<R, TransportError>,
+    {
+        let project = self
+            .project
+            .as_mut()
+            .ok_or_else(|| TransportError::NotReady("Song has no project attached".into()))?;
+
+        action(project)
+    }
+
+    fn with_project_ref<F, R>(&self, action: F) -> Result<R, TransportError>
+    where
+        F: FnOnce(&SongProject) -> Result<R, TransportError>,
+    {
+        let project = self
+            .project
+            .as_ref()
+            .ok_or_else(|| TransportError::NotReady("Song has no project attached".into()))?;
+
+        action(project)
+    }
+
     /// Get the effective start position (either SONGSTART or song region start)
     pub fn effective_start(&self) -> f64 {
-        self.start_position
-            .or(self.song_region_start)
-            .map(|p| p.time.to_seconds())
+        Self::marker_seconds(&self.start_marker)
+            .or_else(|| Self::marker_seconds(&self.song_region_start_marker))
             .unwrap_or(0.0)
     }
 
     /// Get the effective end position (either =END or SONGEND or song region end)
     pub fn effective_end(&self) -> f64 {
-        self.end_position
-            .or(self.song_end_position)
-            .or(self.song_region_end)
-            .map(|p| p.time.to_seconds())
+        Self::marker_seconds(&self.end_marker)
+            .or_else(|| Self::marker_seconds(&self.song_end_marker))
+            .or_else(|| Self::marker_seconds(&self.song_region_end_marker))
             .unwrap_or(0.0)
     }
 
     /// Get the render start position (SONGSTART or song region start if no SONGSTART)
     pub fn render_start(&self) -> f64 {
-        self.start_position
-            .or(self.song_region_start)
-            .map(|p| p.time.to_seconds())
+        Self::marker_seconds(&self.start_marker)
+            .or_else(|| Self::marker_seconds(&self.song_region_start_marker))
             .unwrap_or(0.0)
     }
 
     /// Get the render end position (SONGEND or song region end if no SONGEND)
     pub fn render_end(&self) -> f64 {
-        self.song_end_position
-            .or(self.song_region_end)
-            .map(|p| p.time.to_seconds())
+        Self::marker_seconds(&self.song_end_marker)
+            .or_else(|| Self::marker_seconds(&self.song_region_end_marker))
             .unwrap_or(0.0)
     }
 
     /// Get the hard cut position (=END or song region end if no =END)
     pub fn hard_cut(&self) -> f64 {
-        self.end_position
-            .or(self.song_region_end)
-            .map(|p| p.time.to_seconds())
+        Self::marker_seconds(&self.end_marker)
+            .or_else(|| Self::marker_seconds(&self.song_region_end_marker))
             .unwrap_or(0.0)
     }
 
@@ -127,9 +238,10 @@ impl Song {
 
         // Check for overlapping sections if needed
         if self.has_overlapping_sections_with(&section) {
-            return Err(SetlistError::validation_error(
-                format!("Section '{}' overlaps with existing sections", section.name)
-            ));
+            return Err(SetlistError::validation_error(format!(
+                "Section '{}' overlaps with existing sections",
+                section.name
+            )));
         }
 
         self.sections.push(section);
@@ -165,9 +277,7 @@ impl Song {
 
     /// Find section at a specific time position
     pub fn section_at_position(&self, seconds: f64) -> Option<&Section> {
-        self.sections
-            .iter()
-            .find(|s| s.contains_position(seconds))
+        self.sections.iter().find(|s| s.contains_position(seconds))
     }
 
     /// Get all sections in time order
@@ -192,7 +302,8 @@ impl Song {
     /// - If there are consecutive sections of the same type, they get split letters (a, b, c)
     pub fn auto_number_sections(&mut self) {
         // Sort sections by start time first
-        self.sections.sort_by(|a, b| a.start_seconds().partial_cmp(&b.start_seconds()).unwrap());
+        self.sections
+            .sort_by(|a, b| a.start_seconds().partial_cmp(&b.start_seconds()).unwrap());
 
         // Count occurrences of each section type that should be numbered
         let mut type_counts: HashMap<SectionType, u32> = HashMap::new();
@@ -288,44 +399,48 @@ impl Song {
         }
 
         // Validate that marker positions make sense
-        if let (Some(start), Some(end)) = (self.start_position, self.end_position) {
+        if let (Some(start), Some(end)) = (self.start_position(), self.end_position()) {
             let start_seconds = start.time.to_seconds();
             let end_seconds = end.time.to_seconds();
             if start_seconds >= end_seconds {
-                return Err(SetlistError::invalid_song(
-                    format!("Song start position ({}) must be before end position ({})", start_seconds, end_seconds)
-                ));
+                return Err(SetlistError::invalid_song(format!(
+                    "Song start position ({}) must be before end position ({})",
+                    start_seconds, end_seconds
+                )));
             }
         }
 
-        if let (Some(start), Some(song_end)) = (self.start_position, self.song_end_position) {
+        if let (Some(start), Some(song_end)) = (self.start_position(), self.song_end_position()) {
             let start_seconds = start.time.to_seconds();
             let song_end_seconds = song_end.time.to_seconds();
             if start_seconds >= song_end_seconds {
-                return Err(SetlistError::invalid_song(
-                    format!("Song start position ({}) must be before song end position ({})", start_seconds, song_end_seconds)
-                ));
+                return Err(SetlistError::invalid_song(format!(
+                    "Song start position ({}) must be before song end position ({})",
+                    start_seconds, song_end_seconds
+                )));
             }
         }
 
-        if let (Some(song_end), Some(end)) = (self.song_end_position, self.end_position) {
+        if let (Some(song_end), Some(end)) = (self.song_end_position(), self.end_position()) {
             let song_end_seconds = song_end.time.to_seconds();
             let end_seconds = end.time.to_seconds();
             if song_end_seconds > end_seconds {
-                return Err(SetlistError::invalid_song(
-                    format!("Song end position ({}) must be before or equal to end position ({})", song_end_seconds, end_seconds)
-                ));
+                return Err(SetlistError::invalid_song(format!(
+                    "Song end position ({}) must be before or equal to end position ({})",
+                    song_end_seconds, end_seconds
+                )));
             }
         }
 
         // Validate count-in position
-        if let (Some(count_in), Some(start)) = (self.count_in_position, self.start_position) {
+        if let (Some(count_in), Some(start)) = (self.count_in_position(), self.start_position()) {
             let count_in_seconds = count_in.time.to_seconds();
             let start_seconds = start.time.to_seconds();
             if count_in_seconds >= start_seconds {
-                return Err(SetlistError::invalid_song(
-                    format!("Count-in position ({}) must be before start position ({})", count_in_seconds, start_seconds)
-                ));
+                return Err(SetlistError::invalid_song(format!(
+                    "Count-in position ({}) must be before start position ({})",
+                    count_in_seconds, start_seconds
+                )));
             }
         }
 
@@ -340,10 +455,10 @@ impl Song {
         for i in 0..self.sections.len() {
             for j in (i + 1)..self.sections.len() {
                 if self.sections[i].overlaps_with_section(&self.sections[j]) {
-                    return Err(SetlistError::invalid_song(
-                        format!("Sections '{}' and '{}' overlap",
-                            self.sections[i].name, self.sections[j].name)
-                    ));
+                    return Err(SetlistError::invalid_song(format!(
+                        "Sections '{}' and '{}' overlap",
+                        self.sections[i].name, self.sections[j].name
+                    )));
                 }
             }
         }
@@ -353,7 +468,8 @@ impl Song {
 
     /// Get a summary of the song structure
     pub fn summary(&self) -> SongSummary {
-        let section_counts = self.sections
+        let section_counts = self
+            .sections
             .iter()
             .fold(HashMap::new(), |mut acc, section| {
                 *acc.entry(section.section_type.clone()).or_insert(0) += 1;
@@ -366,8 +482,10 @@ impl Song {
             render_duration: self.render_duration(),
             section_count: self.sections.len(),
             section_types: section_counts,
-            has_count_in: self.count_in_position.is_some(),
-            has_markers: self.start_position.is_some() || self.song_end_position.is_some() || self.end_position.is_some(),
+            has_count_in: self.count_in_marker.is_some(),
+            has_markers: self.start_marker.is_some()
+                || self.song_end_marker.is_some()
+                || self.end_marker.is_some(),
         }
     }
 
@@ -387,16 +505,125 @@ impl Song {
         for i in 0..sections.len() {
             for j in (i + 1)..sections.len() {
                 if sections[i].overlaps_with_section(&sections[j]) {
-                    return Err(SetlistError::invalid_song(
-                        format!("Sections '{}' and '{}' overlap",
-                            sections[i].name, sections[j].name)
-                    ));
+                    return Err(SetlistError::invalid_song(format!(
+                        "Sections '{}' and '{}' overlap",
+                        sections[i].name, sections[j].name
+                    )));
                 }
             }
         }
 
         self.sections = sections;
         Ok(())
+    }
+}
+
+impl TransportActions for Song {
+    fn play(&mut self) -> Result<String, TransportError> {
+        self.with_project_mut(|project| project.play())
+    }
+
+    fn pause(&mut self) -> Result<String, TransportError> {
+        self.with_project_mut(|project| project.pause())
+    }
+
+    fn stop(&mut self) -> Result<String, TransportError> {
+        self.with_project_mut(|project| project.stop())
+    }
+
+    fn play_pause(&mut self) -> Result<String, TransportError> {
+        self.with_project_mut(|project| project.play_pause())
+    }
+
+    fn play_stop(&mut self) -> Result<String, TransportError> {
+        self.with_project_mut(|project| project.play_stop())
+    }
+
+    fn start_recording(&mut self) -> Result<String, TransportError> {
+        self.with_project_mut(|project| project.start_recording())
+    }
+
+    fn stop_recording(&mut self) -> Result<String, TransportError> {
+        self.with_project_mut(|project| project.stop_recording())
+    }
+
+    fn toggle_recording(&mut self) -> Result<String, TransportError> {
+        self.with_project_mut(|project| project.toggle_recording())
+    }
+
+    fn set_tempo(&mut self, tempo: Tempo) -> Result<String, TransportError> {
+        self.with_project_mut(|project| project.set_tempo(tempo))
+    }
+
+    fn set_time_signature(
+        &mut self,
+        time_signature: TimeSignature,
+    ) -> Result<String, TransportError> {
+        self.with_project_mut(|project| project.set_time_signature(time_signature))
+    }
+
+    fn set_record_mode(
+        &mut self,
+        record_mode: RecordMode,
+    ) -> Result<String, TransportError> {
+        self.with_project_mut(|project| project.set_record_mode(record_mode))
+    }
+
+    fn set_position(&mut self, seconds: f64) -> Result<String, TransportError> {
+        self.with_project_mut(|project| project.set_position(seconds))
+    }
+
+    fn get_tempo(&self) -> Result<Tempo, TransportError> {
+        self.with_project_ref(|project| project.get_tempo())
+    }
+
+    fn get_time_signature(&self) -> Result<TimeSignature, TransportError> {
+        self.with_project_ref(|project| project.get_time_signature())
+    }
+
+    fn get_record_mode(&self) -> Result<RecordMode, TransportError> {
+        self.with_project_ref(|project| project.get_record_mode())
+    }
+
+    fn get_position(&self) -> Result<f64, TransportError> {
+        self.with_project_ref(|project| project.get_position())
+    }
+
+    fn is_playing(&self) -> Result<bool, TransportError> {
+        self.with_project_ref(|project| project.is_playing())
+    }
+
+    fn is_recording(&self) -> Result<bool, TransportError> {
+        self.with_project_ref(|project| project.is_recording())
+    }
+
+    fn get_transport(&self) -> Result<Transport, TransportError> {
+        self.with_project_ref(|project| project.get_transport())
+    }
+
+    fn is_ready(&self) -> Result<bool, TransportError> {
+        if self.project.is_some() {
+            Ok(true)
+        } else {
+            Err(TransportError::NotReady(
+                "Song has no project attached".into(),
+            ))
+        }
+    }
+}
+
+impl PartialEq for Song {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.name == other.name
+            && self.count_in_marker == other.count_in_marker
+            && self.start_marker == other.start_marker
+            && self.song_end_marker == other.song_end_marker
+            && self.end_marker == other.end_marker
+            && self.song_region_start_marker == other.song_region_start_marker
+            && self.song_region_end_marker == other.song_region_end_marker
+            && self.sections == other.sections
+            && self.metadata == other.metadata
     }
 }
 
@@ -413,9 +640,7 @@ impl std::fmt::Display for Song {
 }
 
 /// Summary information about a song
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "tauri", derive(Type))]
-#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct SongSummary {
     pub name: String,
     pub duration: f64,
@@ -430,6 +655,12 @@ pub struct SongSummary {
 mod tests {
     use super::*;
     use crate::core::Section;
+    use marker_region::core::Marker;
+    use transport::TransportActions as _;
+
+    fn marker(seconds: f64, name: &str) -> Marker {
+        Marker::from_seconds(seconds, name.to_string())
+    }
 
     #[test]
     fn test_song_creation() {
@@ -446,11 +677,11 @@ mod tests {
     #[test]
     fn test_song_positions() {
         let mut song = Song::new("Test Song".to_string()).unwrap();
-        song.start_position = Some(Position::from_seconds(10.0));
-        song.song_end_position = Some(Position::from_seconds(180.0));
-        song.end_position = Some(Position::from_seconds(200.0));
-        song.song_region_start = Some(Position::from_seconds(5.0));
-        song.song_region_end = Some(Position::from_seconds(220.0));
+        song.set_start_marker(marker(10.0, "SONGSTART"));
+        song.set_song_end_marker(marker(180.0, "SONGEND"));
+        song.set_end_marker(marker(200.0, "=END"));
+        song.set_song_region_start_marker(marker(5.0, "REGION_START"));
+        song.set_song_region_end_marker(marker(220.0, "REGION_END"));
 
         assert_eq!(song.render_start(), 10.0); // Uses SONGSTART
         assert_eq!(song.render_end(), 180.0); // Uses SONGEND
@@ -470,7 +701,8 @@ mod tests {
             40.0,
             "Verse 1".to_string(),
             Some(1),
-        ).unwrap();
+        )
+        .unwrap();
 
         let chorus = Section::from_seconds(
             SectionType::Chorus,
@@ -478,7 +710,8 @@ mod tests {
             80.0,
             "Chorus 1".to_string(),
             Some(1),
-        ).unwrap();
+        )
+        .unwrap();
 
         song.add_section(verse).unwrap();
         song.add_section(chorus).unwrap();
@@ -501,7 +734,8 @@ mod tests {
             30.0,
             "Verse 1".to_string(),
             Some(1),
-        ).unwrap();
+        )
+        .unwrap();
 
         let section2 = Section::from_seconds(
             SectionType::Chorus,
@@ -509,7 +743,8 @@ mod tests {
             45.0,
             "Chorus 1".to_string(),
             Some(1),
-        ).unwrap();
+        )
+        .unwrap();
 
         song.add_section(section1).unwrap();
 
@@ -526,15 +761,15 @@ mod tests {
         let mut song = Song::new("Test Song".to_string()).unwrap();
 
         // Valid song with proper marker positions
-        song.start_position = Some(Position::from_seconds(10.0));
-        song.song_end_position = Some(Position::from_seconds(100.0));
-        song.end_position = Some(Position::from_seconds(110.0));
+        song.set_start_marker(marker(10.0, "SONGSTART"));
+        song.set_song_end_marker(marker(100.0, "SONGEND"));
+        song.set_end_marker(marker(110.0, "=END"));
 
         assert!(song.validate().is_ok());
 
         // Invalid: start after end
-        song.start_position = Some(Position::from_seconds(100.0));
-        song.end_position = Some(Position::from_seconds(50.0));
+        song.set_start_marker(marker(100.0, "SONGSTART"));
+        song.set_end_marker(marker(50.0, "=END"));
         assert!(song.validate().is_err());
     }
 
@@ -558,12 +793,15 @@ mod tests {
     #[test]
     fn test_song_summary() {
         let mut song = Song::new("Test Song".to_string()).unwrap();
-        song.start_position = Some(Position::from_seconds(0.0));
-        song.end_position = Some(Position::from_seconds(180.0));
-        song.count_in_position = Some(Position::from_seconds(-4.0));
+        song.set_start_marker(marker(0.0, "SONGSTART"));
+        song.set_end_marker(marker(180.0, "=END"));
+        song.set_count_in_marker(marker(-4.0, "COUNT_IN"));
 
-        let verse = Section::from_seconds(SectionType::Verse, 0.0, 60.0, "Verse".to_string(), None).unwrap();
-        let chorus = Section::from_seconds(SectionType::Chorus, 60.0, 120.0, "Chorus".to_string(), None).unwrap();
+        let verse = Section::from_seconds(SectionType::Verse, 0.0, 60.0, "Verse".to_string(), None)
+            .unwrap();
+        let chorus =
+            Section::from_seconds(SectionType::Chorus, 60.0, 120.0, "Chorus".to_string(), None)
+                .unwrap();
 
         song.add_section(verse).unwrap();
         song.add_section(chorus).unwrap();
@@ -576,5 +814,19 @@ mod tests {
         assert_eq!(summary.section_types.get(&SectionType::Chorus), Some(&1));
         assert!(summary.has_count_in);
         assert!(summary.has_markers);
+    }
+
+    #[test]
+    fn test_song_transport_delegation() {
+        let mut song = Song::new("Transport Song".to_string()).unwrap();
+        let project = Project::with_default_transport("Demo Project");
+
+        song.set_project(project);
+
+        song.play().unwrap();
+        assert!(song.is_playing().unwrap());
+
+        song.stop().unwrap();
+        assert!(!song.is_playing().unwrap());
     }
 }

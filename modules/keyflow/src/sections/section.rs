@@ -9,9 +9,9 @@ use super::section_type::SectionType;
 pub struct Section {
     pub section_type: SectionType,
     pub number: Option<u32>,
-    pub split_letter: Option<char>,  // For consecutive same sections (1a, 1b, etc.)
+    pub split_letter: Option<char>, // For consecutive same sections (1a, 1b, etc.)
     pub measure_count: Option<usize>, // Specified measure count
-    pub is_subsection: bool,          // True if prefixed with ^ (e.g., ^Band-In)
+    pub is_subsection: bool,        // True if prefixed with ^ (e.g., ^Band-In)
 }
 
 impl Section {
@@ -24,7 +24,7 @@ impl Section {
             is_subsection: false,
         }
     }
-    
+
     pub fn with_subsection(mut self, is_subsection: bool) -> Self {
         self.is_subsection = is_subsection;
         self
@@ -39,7 +39,7 @@ impl Section {
     pub fn display_name(&self) -> String {
         let base = self.section_type.full_name();
         let prefix = if self.is_subsection { "^" } else { "" };
-        
+
         match (self.number, self.split_letter) {
             (Some(n), Some(l)) => format!("{}{} {}{}", prefix, base, n, l),
             (Some(n), None) => format!("{}{} {}", prefix, base, n),
@@ -95,4 +95,3 @@ mod tests {
         assert_eq!(section1, section2);
     }
 }
-

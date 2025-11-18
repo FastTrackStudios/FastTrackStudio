@@ -100,10 +100,7 @@ impl SetlistError {
     }
 
     /// Create a section parsing error
-    pub fn section_parse_error<S1: Into<String>, S2: Into<String>>(
-        input: S1,
-        reason: S2,
-    ) -> Self {
+    pub fn section_parse_error<S1: Into<String>, S2: Into<String>>(input: S1, reason: S2) -> Self {
         Self::SectionParseError {
             input: input.into(),
             reason: reason.into(),
@@ -151,10 +148,7 @@ impl SetlistError {
     }
 
     /// Create a not found error
-    pub fn not_found<S1: Into<String>, S2: Into<String>>(
-        item_type: S1,
-        identifier: S2,
-    ) -> Self {
+    pub fn not_found<S1: Into<String>, S2: Into<String>>(item_type: S1, identifier: S2) -> Self {
         Self::NotFound {
             item_type: item_type.into(),
             identifier: identifier.into(),
@@ -162,10 +156,7 @@ impl SetlistError {
     }
 
     /// Create a duplicate error
-    pub fn duplicate<S1: Into<String>, S2: Into<String>>(
-        item_type: S1,
-        identifier: S2,
-    ) -> Self {
+    pub fn duplicate<S1: Into<String>, S2: Into<String>>(item_type: S1, identifier: S2) -> Self {
         Self::Duplicate {
             item_type: item_type.into(),
             identifier: identifier.into(),
@@ -215,8 +206,7 @@ impl SetlistError {
             | Self::InvalidTimeRange { .. }
             | Self::ValidationError { .. } => "validation",
 
-            Self::SectionParseError { .. }
-            | Self::SongParseError { .. } => "parsing",
+            Self::SectionParseError { .. } | Self::SongParseError { .. } => "parsing",
 
             Self::SourceError { .. } => "source",
 
@@ -296,12 +286,24 @@ mod tests {
 
     #[test]
     fn test_error_categories() {
-        assert_eq!(SetlistError::invalid_section("test").category(), "validation");
-        assert_eq!(SetlistError::section_parse_error("test", "reason").category(), "parsing");
+        assert_eq!(
+            SetlistError::invalid_section("test").category(),
+            "validation"
+        );
+        assert_eq!(
+            SetlistError::section_parse_error("test", "reason").category(),
+            "parsing"
+        );
         assert_eq!(SetlistError::source_error("test").category(), "source");
         assert_eq!(SetlistError::io_error("test").category(), "io");
-        assert_eq!(SetlistError::not_found("type", "id").category(), "not_found");
-        assert_eq!(SetlistError::duplicate("type", "id").category(), "duplicate");
+        assert_eq!(
+            SetlistError::not_found("type", "id").category(),
+            "not_found"
+        );
+        assert_eq!(
+            SetlistError::duplicate("type", "id").category(),
+            "duplicate"
+        );
     }
 
     #[test]

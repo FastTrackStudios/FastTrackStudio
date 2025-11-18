@@ -3,18 +3,15 @@
 //! This module contains the core domain types for managing song sections,
 //! including section types, section metadata, and section validation.
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
-#[cfg(feature = "tauri")]
-use specta::Type;
 use primitives::{Position, TimePosition, TimeRange};
+use serde::{Deserialize, Serialize};
+use specta::Type;
+use std::collections::HashMap;
 
 use super::error::SetlistError;
 
 /// Represents different types of song sections with their full names and abbreviations
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "tauri", derive(Type))]
-#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub enum SectionType {
     Verse,
     Chorus,
@@ -22,8 +19,10 @@ pub enum SectionType {
     Intro,
     Outro,
     Instrumental,
-    Pre(Box<SectionType>),   // Pre-Chorus, Pre-Verse, etc.
-    Post(Box<SectionType>),  // Post-Chorus, Post-Verse, etc.
+    #[specta(skip)]
+    Pre(Box<SectionType>),  // Pre-Chorus, Pre-Verse, etc.
+    #[specta(skip)]
+    Post(Box<SectionType>), // Post-Chorus, Post-Verse, etc.
 }
 
 impl SectionType {
@@ -93,7 +92,11 @@ impl SectionType {
         }
 
         // Chorus variations
-        if Self::fuzzy_match(&s_lower, "chorus", &["chorous", "corus", "chrous", "chors", "chor"]) {
+        if Self::fuzzy_match(
+            &s_lower,
+            "chorus",
+            &["chorous", "corus", "chrous", "chors", "chor"],
+        ) {
             return Ok(SectionType::Chorus);
         }
 
@@ -103,7 +106,11 @@ impl SectionType {
         }
 
         // Intro variations - handle "introduction", "intro", etc.
-        if Self::fuzzy_match(&s_lower, "intro", &["intr", "int", "introo", "introduction"]) {
+        if Self::fuzzy_match(
+            &s_lower,
+            "intro",
+            &["intr", "int", "introo", "introduction"],
+        ) {
             return Ok(SectionType::Intro);
         }
         // Also check if it starts with "introduction"
@@ -112,7 +119,11 @@ impl SectionType {
         }
 
         // Outro variations - handle "outroduction", "outro", etc.
-        if Self::fuzzy_match(&s_lower, "outro", &["outr", "out", "outroo", "outroduction"]) {
+        if Self::fuzzy_match(
+            &s_lower,
+            "outro",
+            &["outr", "out", "outroo", "outroduction"],
+        ) {
             return Ok(SectionType::Outro);
         }
         // Also check if it starts with "outroduction"
@@ -121,7 +132,11 @@ impl SectionType {
         }
 
         // Instrumental variations
-        if Self::fuzzy_match(&s_lower, "instrumental", &["instumental", "instrumantal", "instrument"]) {
+        if Self::fuzzy_match(
+            &s_lower,
+            "instrumental",
+            &["instumental", "instrumantal", "instrument"],
+        ) {
             return Ok(SectionType::Instrumental);
         }
 
@@ -139,7 +154,7 @@ impl SectionType {
 
         Err(SetlistError::section_parse_error(
             s,
-            "Unknown section type - supported types: verse, chorus, bridge, intro, outro, instrumental, pre-*, post-*"
+            "Unknown section type - supported types: verse, chorus, bridge, intro, outro, instrumental, pre-*, post-*",
         ))
     }
 
@@ -200,9 +215,7 @@ impl std::fmt::Display for SectionType {
 }
 
 /// Represents a section within a song
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "tauri", derive(Type))]
-#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Section {
     /// Unique identifier for this section
     pub id: Option<uuid::Uuid>,
@@ -232,11 +245,16 @@ impl Section {
         number: Option<u32>,
     ) -> Result<Self, SetlistError> {
         if start_position.time.to_seconds() >= end_position.time.to_seconds() {
-            return Err(SetlistError::invalid_time_range(start_position.time.to_seconds(), end_position.time.to_seconds()));
+            return Err(SetlistError::invalid_time_range(
+                start_position.time.to_seconds(),
+                end_position.time.to_seconds(),
+            ));
         }
 
         if name.trim().is_empty() {
-            return Err(SetlistError::invalid_section("Section name cannot be empty"));
+            return Err(SetlistError::invalid_section(
+                "Section name cannot be empty",
+            ));
         }
 
         Ok(Self {
@@ -304,7 +322,8 @@ impl Section {
 
     /// Check if a Position is within this section
     pub fn contains_position_exact(&self, position: Position) -> bool {
-        position.time.to_seconds() >= self.start_seconds() && position.time.to_seconds() < self.end_seconds()
+        position.time.to_seconds() >= self.start_seconds()
+            && position.time.to_seconds() < self.end_seconds()
     }
 
     /// Check if this section overlaps with another time range
@@ -363,20 +382,29 @@ impl Section {
     /// Validate section data
     pub fn validate(&self) -> Result<(), SetlistError> {
         if self.start_seconds() >= self.end_seconds() {
-            return Err(SetlistError::invalid_time_range(self.start_seconds(), self.end_seconds()));
+            return Err(SetlistError::invalid_time_range(
+                self.start_seconds(),
+                self.end_seconds(),
+            ));
         }
 
         if self.name.trim().is_empty() {
-            return Err(SetlistError::invalid_section("Section name cannot be empty"));
+            return Err(SetlistError::invalid_section(
+                "Section name cannot be empty",
+            ));
         }
 
         if self.start_seconds() < 0.0 {
-            return Err(SetlistError::invalid_section("Section start time cannot be negative"));
+            return Err(SetlistError::invalid_section(
+                "Section start time cannot be negative",
+            ));
         }
 
         if let Some(num) = self.number {
             if num == 0 {
-                return Err(SetlistError::invalid_section("Section number must be greater than 0"));
+                return Err(SetlistError::invalid_section(
+                    "Section number must be greater than 0",
+                ));
             }
         }
 
@@ -384,7 +412,11 @@ impl Section {
     }
 
     /// Clone this section with a new time range
-    pub fn with_time_range(&self, start_seconds: f64, end_seconds: f64) -> Result<Self, SetlistError> {
+    pub fn with_time_range(
+        &self,
+        start_seconds: f64,
+        end_seconds: f64,
+    ) -> Result<Self, SetlistError> {
         if start_seconds >= end_seconds {
             return Err(SetlistError::invalid_time_range(start_seconds, end_seconds));
         }
@@ -408,8 +440,8 @@ impl Section {
             section_type,
             number: self.number,
             split_letter: self.split_letter,
-            start_position: self.start_position,
-            end_position: self.end_position,
+            start_position: self.start_position.clone(),
+            end_position: self.end_position.clone(),
             name: self.name.clone(),
             metadata: self.metadata.clone(),
         }
@@ -436,19 +468,31 @@ mod tests {
     fn test_section_type_creation() {
         assert_eq!(SectionType::Verse.full_name(), "Verse");
         assert_eq!(SectionType::Chorus.abbreviation(), "CH");
-        assert_eq!(SectionType::Pre(Box::new(SectionType::Chorus)).full_name(), "Pre-Chorus");
-        assert_eq!(SectionType::Post(Box::new(SectionType::Verse)).abbreviation(), "POST-VS");
+        assert_eq!(
+            SectionType::Pre(Box::new(SectionType::Chorus)).full_name(),
+            "Pre-Chorus"
+        );
+        assert_eq!(
+            SectionType::Post(Box::new(SectionType::Verse)).abbreviation(),
+            "POST-VS"
+        );
     }
 
     #[test]
     fn test_section_type_parsing() {
         assert_eq!(SectionType::from_str("verse").unwrap(), SectionType::Verse);
         assert_eq!(SectionType::from_str("CH").unwrap(), SectionType::Chorus);
-        assert_eq!(SectionType::from_str("pre-chorus").unwrap(), SectionType::Pre(Box::new(SectionType::Chorus)));
+        assert_eq!(
+            SectionType::from_str("pre-chorus").unwrap(),
+            SectionType::Pre(Box::new(SectionType::Chorus))
+        );
 
         // Test fuzzy matching
         assert_eq!(SectionType::from_str("vrse").unwrap(), SectionType::Verse);
-        assert_eq!(SectionType::from_str("chorous").unwrap(), SectionType::Chorus);
+        assert_eq!(
+            SectionType::from_str("chorous").unwrap(),
+            SectionType::Chorus
+        );
 
         // Test error case
         assert!(SectionType::from_str("invalid").is_err());
@@ -462,7 +506,8 @@ mod tests {
             40.0,
             "Verse 1".to_string(),
             Some(1),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(section.section_type, SectionType::Verse);
         assert_eq!(section.duration(), 30.0);
@@ -475,44 +520,56 @@ mod tests {
     #[test]
     fn test_section_validation() {
         // Valid section
-        let section = Section::from_seconds(
-            SectionType::Chorus,
-            10.0,
-            20.0,
-            "Chorus".to_string(),
-            None,
-        ).unwrap();
+        let section =
+            Section::from_seconds(SectionType::Chorus, 10.0, 20.0, "Chorus".to_string(), None)
+                .unwrap();
         assert!(section.validate().is_ok());
 
         // Invalid time range
-        let invalid_section = Section::from_seconds(
-            SectionType::Verse,
-            20.0,
-            10.0,
-            "Invalid".to_string(),
-            None,
-        );
+        let invalid_section =
+            Section::from_seconds(SectionType::Verse, 20.0, 10.0, "Invalid".to_string(), None);
         assert!(invalid_section.is_err());
     }
 
     #[test]
     fn test_display_names() {
-        let verse = Section::from_seconds(SectionType::Verse, 0.0, 30.0, "Verse 1".to_string(), Some(1)).unwrap();
+        let verse = Section::from_seconds(
+            SectionType::Verse,
+            0.0,
+            30.0,
+            "Verse 1".to_string(),
+            Some(1),
+        )
+        .unwrap();
         assert_eq!(verse.display_name(), "VS 1");
 
-        let intro = Section::from_seconds(SectionType::Intro, 0.0, 10.0, "Intro".to_string(), None).unwrap();
+        let intro = Section::from_seconds(SectionType::Intro, 0.0, 10.0, "Intro".to_string(), None)
+            .unwrap();
         assert_eq!(intro.display_name(), "Intro");
 
-        let mut chorus_split = Section::from_seconds(SectionType::Chorus, 30.0, 60.0, "Chorus 1a".to_string(), Some(1)).unwrap();
+        let mut chorus_split = Section::from_seconds(
+            SectionType::Chorus,
+            30.0,
+            60.0,
+            "Chorus 1a".to_string(),
+            Some(1),
+        )
+        .unwrap();
         chorus_split.split_letter = Some('a');
         assert_eq!(chorus_split.display_name(), "CH 1a");
     }
 
     #[test]
     fn test_section_overlaps() {
-        let section1 = Section::from_seconds(SectionType::Verse, 10.0, 30.0, "Verse".to_string(), None).unwrap();
-        let section2 = Section::from_seconds(SectionType::Chorus, 25.0, 45.0, "Chorus".to_string(), None).unwrap();
-        let section3 = Section::from_seconds(SectionType::Bridge, 50.0, 70.0, "Bridge".to_string(), None).unwrap();
+        let section1 =
+            Section::from_seconds(SectionType::Verse, 10.0, 30.0, "Verse".to_string(), None)
+                .unwrap();
+        let section2 =
+            Section::from_seconds(SectionType::Chorus, 25.0, 45.0, "Chorus".to_string(), None)
+                .unwrap();
+        let section3 =
+            Section::from_seconds(SectionType::Bridge, 50.0, 70.0, "Bridge".to_string(), None)
+                .unwrap();
 
         assert!(section1.overlaps_with_section(&section2));
         assert!(section2.overlaps_with_section(&section1));
@@ -521,7 +578,9 @@ mod tests {
 
     #[test]
     fn test_metadata() {
-        let mut section = Section::from_seconds(SectionType::Verse, 0.0, 30.0, "Verse".to_string(), None).unwrap();
+        let mut section =
+            Section::from_seconds(SectionType::Verse, 0.0, 30.0, "Verse".to_string(), None)
+                .unwrap();
 
         section.set_metadata("key", "C major");
         section.set_metadata("tempo", "120");
@@ -537,7 +596,14 @@ mod tests {
 
     #[test]
     fn test_section_cloning_operations() {
-        let section = Section::from_seconds(SectionType::Verse, 10.0, 30.0, "Original".to_string(), Some(1)).unwrap();
+        let section = Section::from_seconds(
+            SectionType::Verse,
+            10.0,
+            30.0,
+            "Original".to_string(),
+            Some(1),
+        )
+        .unwrap();
 
         let moved = section.with_time_range(40.0, 60.0).unwrap();
         assert_eq!(moved.start_seconds(), 40.0);

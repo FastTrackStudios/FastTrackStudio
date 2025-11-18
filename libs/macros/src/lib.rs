@@ -541,15 +541,6 @@ pub use paste;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    // Mock action enum for testing
-    #[derive(Debug, Clone)]
-    enum TestAction {
-        Play,
-        SetTempo(f64),
-        GetTempo,
-    }
 
     #[test]
     fn test_macro_compilation() {

@@ -5,7 +5,7 @@
 //! and regions that can be manipulated for testing scenarios.
 
 use crate::core::{
-    Marker, Region, MarkerRegionError, MarkerSource, RegionSource, MarkerRegionSource
+    Marker, MarkerRegionError, MarkerRegionSource, MarkerSource, Region, RegionSource,
 };
 use std::sync::{Arc, Mutex};
 
@@ -45,21 +45,47 @@ impl MockMarkerRegionService {
         let service = Self::new();
 
         // Add sample markers
-        service.add_marker(Marker::from_seconds(0.0, "Song Start".to_string())).ok();
-        service.add_marker(Marker::from_seconds(30.0, "Verse 1".to_string())).ok();
-        service.add_marker(Marker::from_seconds(60.0, "Chorus 1".to_string())).ok();
-        service.add_marker(Marker::from_seconds(90.0, "Verse 2".to_string())).ok();
-        service.add_marker(Marker::from_seconds(120.0, "Chorus 2".to_string())).ok();
-        service.add_marker(Marker::from_seconds(150.0, "Bridge".to_string())).ok();
-        service.add_marker(Marker::from_seconds(180.0, "Final Chorus".to_string())).ok();
-        service.add_marker(Marker::from_seconds(210.0, "Outro".to_string())).ok();
+        service
+            .add_marker(Marker::from_seconds(0.0, "Song Start".to_string()))
+            .ok();
+        service
+            .add_marker(Marker::from_seconds(30.0, "Verse 1".to_string()))
+            .ok();
+        service
+            .add_marker(Marker::from_seconds(60.0, "Chorus 1".to_string()))
+            .ok();
+        service
+            .add_marker(Marker::from_seconds(90.0, "Verse 2".to_string()))
+            .ok();
+        service
+            .add_marker(Marker::from_seconds(120.0, "Chorus 2".to_string()))
+            .ok();
+        service
+            .add_marker(Marker::from_seconds(150.0, "Bridge".to_string()))
+            .ok();
+        service
+            .add_marker(Marker::from_seconds(180.0, "Final Chorus".to_string()))
+            .ok();
+        service
+            .add_marker(Marker::from_seconds(210.0, "Outro".to_string()))
+            .ok();
 
         // Add sample regions
-        service.add_region(Region::from_seconds(0.0, 30.0, "Intro".to_string()).unwrap()).ok();
-        service.add_region(Region::from_seconds(30.0, 90.0, "Verse Section".to_string()).unwrap()).ok();
-        service.add_region(Region::from_seconds(90.0, 150.0, "Chorus Section".to_string()).unwrap()).ok();
-        service.add_region(Region::from_seconds(150.0, 180.0, "Bridge Section".to_string()).unwrap()).ok();
-        service.add_region(Region::from_seconds(180.0, 240.0, "Outro Section".to_string()).unwrap()).ok();
+        service
+            .add_region(Region::from_seconds(0.0, 30.0, "Intro".to_string()).unwrap())
+            .ok();
+        service
+            .add_region(Region::from_seconds(30.0, 90.0, "Verse Section".to_string()).unwrap())
+            .ok();
+        service
+            .add_region(Region::from_seconds(90.0, 150.0, "Chorus Section".to_string()).unwrap())
+            .ok();
+        service
+            .add_region(Region::from_seconds(150.0, 180.0, "Bridge Section".to_string()).unwrap())
+            .ok();
+        service
+            .add_region(Region::from_seconds(180.0, 240.0, "Outro Section".to_string()).unwrap())
+            .ok();
 
         service
     }
@@ -69,16 +95,32 @@ impl MockMarkerRegionService {
         let service = Self::new();
 
         // Add markers with some close together
-        service.add_marker(Marker::from_seconds(10.0, "A".to_string())).ok();
-        service.add_marker(Marker::from_seconds(10.1, "B".to_string())).ok();
-        service.add_marker(Marker::from_seconds(25.0, "C".to_string())).ok();
-        service.add_marker(Marker::from_seconds(50.0, "D".to_string())).ok();
-        service.add_marker(Marker::from_seconds(75.0, "E".to_string())).ok();
+        service
+            .add_marker(Marker::from_seconds(10.0, "A".to_string()))
+            .ok();
+        service
+            .add_marker(Marker::from_seconds(10.1, "B".to_string()))
+            .ok();
+        service
+            .add_marker(Marker::from_seconds(25.0, "C".to_string()))
+            .ok();
+        service
+            .add_marker(Marker::from_seconds(50.0, "D".to_string()))
+            .ok();
+        service
+            .add_marker(Marker::from_seconds(75.0, "E".to_string()))
+            .ok();
 
         // Add overlapping regions
-        service.add_region(Region::from_seconds(0.0, 30.0, "Region 1".to_string()).unwrap()).ok();
-        service.add_region(Region::from_seconds(20.0, 60.0, "Region 2".to_string()).unwrap()).ok();
-        service.add_region(Region::from_seconds(40.0, 80.0, "Region 3".to_string()).unwrap()).ok();
+        service
+            .add_region(Region::from_seconds(0.0, 30.0, "Region 1".to_string()).unwrap())
+            .ok();
+        service
+            .add_region(Region::from_seconds(20.0, 60.0, "Region 2".to_string()).unwrap())
+            .ok();
+        service
+            .add_region(Region::from_seconds(40.0, 80.0, "Region 3".to_string()).unwrap())
+            .ok();
 
         service
     }
@@ -88,7 +130,9 @@ impl MockMarkerRegionService {
         let mut state = self.state.lock().unwrap();
 
         if state.simulate_errors {
-            return Err(MarkerRegionError::OperationError("Simulated error".to_string()));
+            return Err(MarkerRegionError::OperationError(
+                "Simulated error".to_string(),
+            ));
         }
 
         marker.validate()?;
@@ -117,7 +161,9 @@ impl MockMarkerRegionService {
         let mut state = self.state.lock().unwrap();
 
         if state.simulate_errors {
-            return Err(MarkerRegionError::OperationError("Simulated error".to_string()));
+            return Err(MarkerRegionError::OperationError(
+                "Simulated error".to_string(),
+            ));
         }
 
         region.validate()?;
@@ -146,7 +192,9 @@ impl MockMarkerRegionService {
         let mut state = self.state.lock().unwrap();
 
         if state.simulate_errors {
-            return Err(MarkerRegionError::OperationError("Simulated error".to_string()));
+            return Err(MarkerRegionError::OperationError(
+                "Simulated error".to_string(),
+            ));
         }
 
         let initial_len = state.markers.len();
@@ -159,7 +207,9 @@ impl MockMarkerRegionService {
         let mut state = self.state.lock().unwrap();
 
         if state.simulate_errors {
-            return Err(MarkerRegionError::OperationError("Simulated error".to_string()));
+            return Err(MarkerRegionError::OperationError(
+                "Simulated error".to_string(),
+            ));
         }
 
         let initial_len = state.regions.len();
@@ -172,7 +222,9 @@ impl MockMarkerRegionService {
         let mut state = self.state.lock().unwrap();
 
         if state.simulate_errors {
-            return Err(MarkerRegionError::OperationError("Simulated error".to_string()));
+            return Err(MarkerRegionError::OperationError(
+                "Simulated error".to_string(),
+            ));
         }
 
         state.markers.clear();
@@ -208,11 +260,17 @@ impl MockMarkerRegionService {
     }
 
     /// Update a marker by ID
-    pub fn update_marker(&self, id: u32, updated_marker: Marker) -> Result<bool, MarkerRegionError> {
+    pub fn update_marker(
+        &self,
+        id: u32,
+        updated_marker: Marker,
+    ) -> Result<bool, MarkerRegionError> {
         let mut state = self.state.lock().unwrap();
 
         if state.simulate_errors {
-            return Err(MarkerRegionError::OperationError("Simulated error".to_string()));
+            return Err(MarkerRegionError::OperationError(
+                "Simulated error".to_string(),
+            ));
         }
 
         updated_marker.validate()?;
@@ -235,11 +293,17 @@ impl MockMarkerRegionService {
     }
 
     /// Update a region by ID
-    pub fn update_region(&self, id: u32, updated_region: Region) -> Result<bool, MarkerRegionError> {
+    pub fn update_region(
+        &self,
+        id: u32,
+        updated_region: Region,
+    ) -> Result<bool, MarkerRegionError> {
         let mut state = self.state.lock().unwrap();
 
         if state.simulate_errors {
-            return Err(MarkerRegionError::OperationError("Simulated error".to_string()));
+            return Err(MarkerRegionError::OperationError(
+                "Simulated error".to_string(),
+            ));
         }
 
         updated_region.validate()?;
@@ -273,7 +337,9 @@ impl MarkerSource for MockMarkerRegionService {
         let state = self.state.lock().unwrap();
 
         if state.simulate_errors {
-            return Err(MarkerRegionError::SourceError("Simulated marker fetch error".to_string()));
+            return Err(MarkerRegionError::SourceError(
+                "Simulated marker fetch error".to_string(),
+            ));
         }
 
         Ok(state.markers.clone())
@@ -294,7 +360,9 @@ impl RegionSource for MockMarkerRegionService {
         let state = self.state.lock().unwrap();
 
         if state.simulate_errors {
-            return Err(MarkerRegionError::SourceError("Simulated region fetch error".to_string()));
+            return Err(MarkerRegionError::SourceError(
+                "Simulated region fetch error".to_string(),
+            ));
         }
 
         Ok(state.regions.clone())
@@ -358,9 +426,15 @@ mod tests {
         let service = MockMarkerRegionService::new();
 
         // Add markers out of order
-        service.add_marker(Marker::from_seconds(60.0, "Third".to_string())).unwrap();
-        service.add_marker(Marker::from_seconds(20.0, "First".to_string())).unwrap();
-        service.add_marker(Marker::from_seconds(40.0, "Second".to_string())).unwrap();
+        service
+            .add_marker(Marker::from_seconds(60.0, "Third".to_string()))
+            .unwrap();
+        service
+            .add_marker(Marker::from_seconds(20.0, "First".to_string()))
+            .unwrap();
+        service
+            .add_marker(Marker::from_seconds(40.0, "Second".to_string()))
+            .unwrap();
 
         let markers = service.get_markers().unwrap();
         assert_eq!(markers[0].name, "First");
@@ -407,7 +481,7 @@ mod tests {
 
         // Navigation points should be sorted
         for i in 1..nav_points.len() {
-            assert!(nav_points[i-1].position_seconds() <= nav_points[i].position_seconds());
+            assert!(nav_points[i - 1].position_seconds() <= nav_points[i].position_seconds());
         }
     }
 

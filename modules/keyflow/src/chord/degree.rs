@@ -3,8 +3,8 @@
 //! Represents the semantic function of each note in a chord (e.g., 3rd, 7th, 9th)
 //! independent of the actual interval quality (major vs minor, etc.)
 
-use crate::primitives::Interval;
 use crate::chord::quality::ChordQuality;
+use crate::primitives::Interval;
 
 /// Semantic degree within a chord
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -27,14 +27,14 @@ impl ChordDegree {
     pub fn value(&self) -> u8 {
         *self as u8
     }
-    
+
     /// Get the semantic interval (1-7) for letter name calculation
-    /// 
+    ///
     /// This maps extended degrees (9th, 11th, 13th) back to their base scale degree:
     /// - 9th -> 2nd
     /// - 11th -> 4th
     /// - 13th -> 6th
-    /// 
+    ///
     /// This is used for determining the correct letter name in enharmonic spelling.
     pub fn semantic_interval(&self) -> u8 {
         match self {
@@ -47,9 +47,9 @@ impl ChordDegree {
             ChordDegree::Seventh => 7,
         }
     }
-    
+
     /// Get the expected "natural" interval for this degree in a given quality
-    /// 
+    ///
     /// For example:
     /// - 3rd in Major quality -> MajorThird
     /// - 3rd in Minor quality -> MinorThird
@@ -58,9 +58,9 @@ impl ChordDegree {
     pub fn to_expected_interval(&self, quality: ChordQuality) -> Interval {
         match self {
             ChordDegree::Root => Interval::Unison,
-            
+
             ChordDegree::Second => Interval::MajorSecond,
-            
+
             ChordDegree::Third => match quality {
                 ChordQuality::Major | ChordQuality::Augmented => Interval::MajorThird,
                 ChordQuality::Minor | ChordQuality::Diminished => Interval::MinorThird,
@@ -70,33 +70,33 @@ impl ChordDegree {
                     Interval::MajorThird
                 }
             },
-            
+
             ChordDegree::Fourth => Interval::PerfectFourth,
-            
+
             ChordDegree::Fifth => match quality {
                 ChordQuality::Diminished => Interval::DiminishedFifth,
                 ChordQuality::Augmented => Interval::AugmentedFifth,
                 _ => Interval::PerfectFifth,
             },
-            
+
             ChordDegree::Sixth => Interval::MajorSixth,
-            
+
             ChordDegree::Seventh => {
                 // Default to dominant 7th (MinorSeventh)
                 // ChordFamily will override this for maj7, dim7, etc.
                 Interval::MinorSeventh
-            },
-            
+            }
+
             ChordDegree::Ninth => Interval::Ninth,
-            
+
             ChordDegree::Eleventh => Interval::Eleventh,
-            
+
             ChordDegree::Thirteenth => Interval::Thirteenth,
         }
     }
-    
+
     /// Extract the semantic degree from any interval
-    /// 
+    ///
     /// Examples:
     /// - MajorThird -> Third
     /// - MinorThird -> Third
@@ -106,29 +106,29 @@ impl ChordDegree {
         use Interval::*;
         match interval {
             Unison | PerfectOctave | Octave => ChordDegree::Root,
-            
+
             MinorSecond | MajorSecond | AugmentedSecond => ChordDegree::Second,
-            
+
             MinorThird | MajorThird | AugmentedThird => ChordDegree::Third,
-            
+
             PerfectFourth | AugmentedFourth => ChordDegree::Fourth,
-            
+
             DiminishedFifth | PerfectFifth | AugmentedFifth => ChordDegree::Fifth,
-            
+
             MinorSixth | MajorSixth | AugmentedSixth => ChordDegree::Sixth,
-            
+
             DiminishedSeventh | MinorSeventh | MajorSeventh | AugmentedSeventh => {
                 ChordDegree::Seventh
-            },
-            
+            }
+
             FlatNinth | Ninth | SharpNinth => ChordDegree::Ninth,
-            
+
             Eleventh | SharpEleventh => ChordDegree::Eleventh,
-            
+
             FlatThirteenth | Thirteenth => ChordDegree::Thirteenth,
         }
     }
-    
+
     /// Parse a degree from a number string
     pub fn from_number(n: u8) -> Option<ChordDegree> {
         match n {
@@ -145,7 +145,7 @@ impl ChordDegree {
             _ => None,
         }
     }
-    
+
     /// Get all degrees as a sorted vec
     pub fn all() -> Vec<ChordDegree> {
         vec![
@@ -172,7 +172,7 @@ impl std::fmt::Display for ChordDegree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_degree_values() {
         assert_eq!(ChordDegree::Root.value(), 1);
@@ -180,7 +180,7 @@ mod tests {
         assert_eq!(ChordDegree::Seventh.value(), 7);
         assert_eq!(ChordDegree::Ninth.value(), 9);
     }
-    
+
     #[test]
     fn test_expected_interval_major() {
         let quality = ChordQuality::Major;
@@ -193,7 +193,7 @@ mod tests {
             Interval::PerfectFifth
         );
     }
-    
+
     #[test]
     fn test_expected_interval_minor() {
         let quality = ChordQuality::Minor;
@@ -206,7 +206,7 @@ mod tests {
             Interval::PerfectFifth
         );
     }
-    
+
     #[test]
     fn test_expected_interval_diminished() {
         let quality = ChordQuality::Diminished;
@@ -219,7 +219,7 @@ mod tests {
             Interval::DiminishedFifth
         );
     }
-    
+
     #[test]
     fn test_expected_interval_augmented() {
         let quality = ChordQuality::Augmented;
@@ -232,7 +232,7 @@ mod tests {
             Interval::AugmentedFifth
         );
     }
-    
+
     #[test]
     fn test_from_interval() {
         assert_eq!(
@@ -252,7 +252,7 @@ mod tests {
             ChordDegree::Seventh
         );
     }
-    
+
     #[test]
     fn test_from_number() {
         assert_eq!(ChordDegree::from_number(1), Some(ChordDegree::Root));
@@ -262,7 +262,7 @@ mod tests {
         assert_eq!(ChordDegree::from_number(8), None);
         assert_eq!(ChordDegree::from_number(10), None);
     }
-    
+
     #[test]
     fn test_ordering() {
         assert!(ChordDegree::Root < ChordDegree::Third);
@@ -270,4 +270,3 @@ mod tests {
         assert!(ChordDegree::Seventh < ChordDegree::Ninth);
     }
 }
-

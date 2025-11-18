@@ -4,11 +4,12 @@
 //! timeline markers in a DAW. Markers represent specific points in time
 //! that can be used for navigation, arrangement, and workflow organization.
 
-use primitives::Position;
 use crate::core::MarkerRegionError;
+use primitives::Position;
+use specta::Type;
 
 /// A marker represents a named point in time on the timeline
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Type)]
 pub struct Marker {
     /// Unique identifier for this marker (if supported by the source)
     pub id: Option<u32>,
@@ -97,7 +98,9 @@ impl Marker {
     pub fn validate(&self) -> Result<(), MarkerRegionError> {
         // Check position is not negative
         if self.position_seconds() < 0.0 {
-            return Err(MarkerRegionError::InvalidMarkerPosition(self.position_seconds()));
+            return Err(MarkerRegionError::InvalidMarkerPosition(
+                self.position_seconds(),
+            ));
         }
 
         // Check name is not empty
@@ -111,7 +114,9 @@ impl Marker {
     /// Update the marker's position
     pub fn set_position(&mut self, position: Position) -> Result<(), MarkerRegionError> {
         if position.time.to_seconds() < 0.0 {
-            return Err(MarkerRegionError::InvalidMarkerPosition(position.time.to_seconds()));
+            return Err(MarkerRegionError::InvalidMarkerPosition(
+                position.time.to_seconds(),
+            ));
         }
         self.position = position;
         Ok(())
@@ -128,10 +133,12 @@ impl Marker {
 
     /// Get a display string for this marker
     pub fn display_string(&self) -> String {
-        format!("{} @ {:.3}s ({})",
-                self.name,
-                self.position_seconds(),
-                self.musical_position())
+        format!(
+            "{} @ {:.3}s ({})",
+            self.name,
+            self.position_seconds(),
+            self.musical_position()
+        )
     }
 
     /// Check if this marker has the same position as another (within tolerance)
@@ -179,38 +186,57 @@ pub trait MarkerSource: Send + Sync {
     }
 
     /// Get markers within a time range
-    fn get_markers_in_range(&self, start_seconds: f64, end_seconds: f64) -> Result<Vec<Marker>, MarkerRegionError> {
+    fn get_markers_in_range(
+        &self,
+        start_seconds: f64,
+        end_seconds: f64,
+    ) -> Result<Vec<Marker>, MarkerRegionError> {
         let markers = self.get_markers()?;
-        Ok(markers.into_iter()
-           .filter(|m| m.is_in_range(start_seconds, end_seconds))
-           .collect())
+        Ok(markers
+            .into_iter()
+            .filter(|m| m.is_in_range(start_seconds, end_seconds))
+            .collect())
     }
 
     /// Get the marker closest to a given time position
     fn get_nearest_marker(&self, seconds: f64) -> Result<Option<Marker>, MarkerRegionError> {
         let markers = self.get_markers()?;
-        Ok(markers.into_iter()
-           .min_by(|a, b| {
-               let diff_a = (a.position_seconds() - seconds).abs();
-               let diff_b = (b.position_seconds() - seconds).abs();
-               diff_a.partial_cmp(&diff_b).unwrap_or(std::cmp::Ordering::Equal)
-           }))
+        Ok(markers.into_iter().min_by(|a, b| {
+            let diff_a = (a.position_seconds() - seconds).abs();
+            let diff_b = (b.position_seconds() - seconds).abs();
+            diff_a
+                .partial_cmp(&diff_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }))
     }
 
     /// Get the next marker after the given position
     fn get_next_marker(&self, after_seconds: f64) -> Result<Option<Marker>, MarkerRegionError> {
         let markers = self.get_markers()?;
-        Ok(markers.into_iter()
-           .filter(|m| m.position_seconds() > after_seconds)
-           .min_by(|a, b| a.position_seconds().partial_cmp(&b.position_seconds()).unwrap_or(std::cmp::Ordering::Equal)))
+        Ok(markers
+            .into_iter()
+            .filter(|m| m.position_seconds() > after_seconds)
+            .min_by(|a, b| {
+                a.position_seconds()
+                    .partial_cmp(&b.position_seconds())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }))
     }
 
     /// Get the previous marker before the given position
-    fn get_previous_marker(&self, before_seconds: f64) -> Result<Option<Marker>, MarkerRegionError> {
+    fn get_previous_marker(
+        &self,
+        before_seconds: f64,
+    ) -> Result<Option<Marker>, MarkerRegionError> {
         let markers = self.get_markers()?;
-        Ok(markers.into_iter()
-           .filter(|m| m.position_seconds() < before_seconds)
-           .max_by(|a, b| a.position_seconds().partial_cmp(&b.position_seconds()).unwrap_or(std::cmp::Ordering::Equal)))
+        Ok(markers
+            .into_iter()
+            .filter(|m| m.position_seconds() < before_seconds)
+            .max_by(|a, b| {
+                a.position_seconds()
+                    .partial_cmp(&b.position_seconds())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }))
     }
 
     /// Get a human-readable name for this marker source

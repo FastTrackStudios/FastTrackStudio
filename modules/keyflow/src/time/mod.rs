@@ -7,5 +7,5 @@ pub mod position;
 pub mod tempo;
 
 pub use duration::{Duration, MusicalDuration, TimeSignature};
-pub use position::{Position, AbsolutePosition};
+pub use position::{AbsolutePosition, Position};
 pub use tempo::Tempo;

@@ -118,7 +118,11 @@ impl TempoTimeEnvelope {
     pub fn add_point(&mut self, point: TempoTimePoint) {
         self.points.push(point);
         // Keep points sorted by position
-        self.points.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
+        self.points.sort_by(|a, b| {
+            a.position
+                .partial_cmp(&b.position)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 
     /// Get the tempo and time signature at a given time position
@@ -195,7 +199,9 @@ impl TempoTimeEnvelope {
             let beats_per_measure = self.default_time_signature.0 as f64;
             let measure = (total_beats / beats_per_measure).floor() as i32 + 1;
             let beat_in_measure = ((total_beats - 1.0) % beats_per_measure + 1.0) as i32;
-            let beat_fraction = total_beats - (measure - 1) as f64 * beats_per_measure - (beat_in_measure - 1) as f64;
+            let beat_fraction = total_beats
+                - (measure - 1) as f64 * beats_per_measure
+                - (beat_in_measure - 1) as f64;
             return (measure, beat_in_measure, beat_fraction);
         }
 
@@ -262,7 +268,8 @@ impl TempoTimeEnvelope {
 
                 // Calculate final position with bounds checking
                 let measure = (current_measure.floor() as i32 + 1).max(1).min(1000);
-                let beat_in_measure = ((current_measure - current_measure.floor()) * beats_per_measure + 1.0) as i32;
+                let beat_in_measure =
+                    ((current_measure - current_measure.floor()) * beats_per_measure + 1.0) as i32;
                 let beat_in_measure = beat_in_measure.max(1).min(beats_per_measure as i32);
                 let beat_fraction = (current_measure - current_measure.floor()) * beats_per_measure;
 
@@ -293,7 +300,8 @@ impl TempoTimeEnvelope {
 
         // Calculate final position with bounds checking
         let measure = (current_measure.floor() as i32 + 1).max(1).min(1000);
-        let beat_in_measure = ((current_measure - current_measure.floor()) * current_time_sig.0 as f64 + 1.0) as i32;
+        let beat_in_measure =
+            ((current_measure - current_measure.floor()) * current_time_sig.0 as f64 + 1.0) as i32;
         let beat_in_measure = beat_in_measure.max(1).min(current_time_sig.0);
         let beat_fraction = (current_measure - current_measure.floor()) * current_time_sig.0 as f64;
 
@@ -321,7 +329,11 @@ impl Default for TempoTimeEnvelope {
 impl fmt::Display for TempoTimeEnvelope {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Tempo/Time Signature Envelope")?;
-        writeln!(f, "  Default: {} BPM, {}/{}", self.default_tempo, self.default_time_signature.0, self.default_time_signature.1)?;
+        writeln!(
+            f,
+            "  Default: {} BPM, {}/{}",
+            self.default_tempo, self.default_time_signature.0, self.default_time_signature.1
+        )?;
         writeln!(f, "  Changes: {} points", self.points.len())?;
 
         if !self.points.is_empty() {
@@ -334,4 +346,3 @@ impl fmt::Display for TempoTimeEnvelope {
         Ok(())
     }
 }
-

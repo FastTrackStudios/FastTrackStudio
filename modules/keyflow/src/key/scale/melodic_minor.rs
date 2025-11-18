@@ -27,7 +27,7 @@ impl MelodicMinorMode {
             MelodicMinorMode::Altered => 6,
         }
     }
-    
+
     pub fn from_rotation(rotation: usize) -> Option<Self> {
         match rotation {
             0 => Some(MelodicMinorMode::MelodicMinor),
@@ -40,15 +40,15 @@ impl MelodicMinorMode {
             _ => None,
         }
     }
-    
+
     pub fn name(&self) -> &'static str {
         MelodicMinorFamily::mode_name(self.rotation())
     }
-    
+
     pub fn short_name(&self) -> &'static str {
         MelodicMinorFamily::mode_short_name(self.rotation())
     }
-    
+
     pub fn interval_pattern(&self) -> Vec<u8> {
         MelodicMinorFamily::pattern_for_mode(self.rotation())
     }
@@ -58,11 +58,11 @@ pub struct MelodicMinorFamily;
 
 impl ScaleFamily for MelodicMinorFamily {
     type Mode = MelodicMinorMode;
-    
+
     fn base_pattern() -> Vec<u8> {
         vec![0, 2, 3, 5, 7, 9, 11] // Melodic Minor (ascending)
     }
-    
+
     fn mode_name(rotation: usize) -> &'static str {
         match rotation {
             0 => "Melodic Minor",
@@ -75,7 +75,7 @@ impl ScaleFamily for MelodicMinorFamily {
             _ => "Unknown",
         }
     }
-    
+
     fn mode_short_name(rotation: usize) -> &'static str {
         match rotation {
             0 => "MMin",
@@ -89,4 +89,3 @@ impl ScaleFamily for MelodicMinorFamily {
         }
     }
 }
-

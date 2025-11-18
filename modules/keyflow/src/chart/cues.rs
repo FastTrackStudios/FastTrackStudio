@@ -59,29 +59,29 @@ impl TextCue {
     }
 
     /// Parse a text cue from a line starting with @
-    /// 
+    ///
     /// Format: @<group> "<text>"
     /// Example: @keys "synth here"
     pub fn parse(line: &str) -> Result<Self, String> {
         let line = line.trim();
-        
+
         if !line.starts_with('@') {
             return Err("Text cue must start with @".to_string());
         }
-        
+
         // Remove @ symbol
         let content = line[1..].trim();
-        
+
         // Find the start of the quoted text
         if let Some(quote_start) = content.find('"') {
             let group_str = content[..quote_start].trim();
             let rest = &content[quote_start + 1..];
-            
+
             // Find the closing quote
             if let Some(quote_end) = rest.find('"') {
                 let text = rest[..quote_end].to_string();
                 let group = InstrumentGroup::from_str(group_str);
-                
+
                 Ok(TextCue::new(group, text))
             } else {
                 Err("Missing closing quote for text cue".to_string())
@@ -110,7 +110,7 @@ mod tests {
         assert_eq!(InstrumentGroup::from_str("guitar"), InstrumentGroup::Guitar);
         assert_eq!(InstrumentGroup::from_str("vocals"), InstrumentGroup::Vocals);
         assert_eq!(InstrumentGroup::from_str("all"), InstrumentGroup::All);
-        
+
         match InstrumentGroup::from_str("synth") {
             InstrumentGroup::Custom(name) => assert_eq!(name, "synth"),
             _ => panic!("Expected Custom variant"),
@@ -145,4 +145,3 @@ mod tests {
         assert_eq!(format!("{}", cue), "@keys \"synth here\"");
     }
 }
-

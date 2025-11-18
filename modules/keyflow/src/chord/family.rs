@@ -2,10 +2,10 @@
 //!
 //! Defines what kind of seventh (if any) the chord has
 
-use crate::primitives::Interval;
 use crate::chord::degree::ChordDegree;
 use crate::chord::quality::ChordQuality;
-use crate::parsing::{Token, TokenType, ParseError};
+use crate::parsing::{ParseError, Token, TokenType};
+use crate::primitives::Interval;
 
 /// Chord family - represents the seventh type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -35,55 +35,57 @@ impl ChordFamily {
             ChordFamily::HalfDiminished => Interval::MinorSeventh,
             ChordFamily::FullyDiminished => Interval::DiminishedSeventh,
         }
-
     }
-    
+
     /// Get all degrees present in this family (just the seventh)
     pub fn degrees(&self) -> Vec<ChordDegree> {
         vec![ChordDegree::Seventh]
     }
-    
+
     /// Get a symbol for this family's seventh
     pub fn symbol(&self) -> &'static str {
         match self {
             ChordFamily::Major7 => "maj7",
             ChordFamily::Dominant7 => "7",
-            ChordFamily::Minor7 => "7",  // Combined with quality "m" -> "m7"
-            ChordFamily::MinorMajor7 => "maj7",  // Combined with quality "m" -> "mM7" or "m(maj7)"
-            ChordFamily::HalfDiminished => "7",  // Combined with dim quality and b5
+            ChordFamily::Minor7 => "7", // Combined with quality "m" -> "m7"
+            ChordFamily::MinorMajor7 => "maj7", // Combined with quality "m" -> "mM7" or "m(maj7)"
+            ChordFamily::HalfDiminished => "7", // Combined with dim quality and b5
             ChordFamily::FullyDiminished => "dim7",
         }
     }
-    
+
     /// Parse a chord family (seventh type) from tokens
     /// Returns (Option<family>, tokens_consumed)
-    /// 
+    ///
     /// Handles: maj7, M7, Maj7, ma7, 7, m7, mM7, mMaj7, ø7, dim7, o7, etc.
-    /// 
+    ///
     /// The family is determined by explicit notation in the tokens, not by inferring from quality.
     /// For example:
     /// - "maj7" or "M7" -> Major (or MinorMajor if preceded by minor quality)
     /// - "7" -> Dominant (unless quality is minor/dim, then Minor/HalfDim)
     /// - "dim7" or "o7" -> FullyDiminished
     /// - "ø" or "ø7" -> HalfDiminished
-    pub fn parse(tokens: &[Token], quality: ChordQuality) -> Result<(Option<ChordFamily>, usize), ParseError> {
+    pub fn parse(
+        tokens: &[Token],
+        quality: ChordQuality,
+    ) -> Result<(Option<ChordFamily>, usize), ParseError> {
         if tokens.is_empty() {
             return Ok((None, 0));
         }
-        
+
         let mut consumed = 0;
-        
+
         // Check for "maj7", "M7", "Maj7", "Ma7", etc. (explicit major seventh)
         if consumed < tokens.len() {
             if let TokenType::Letter('m') | TokenType::Letter('M') = tokens[consumed].token_type {
                 let is_upper = matches!(tokens[consumed].token_type, TokenType::Letter('M'));
-                
+
                 // Look for "maj" followed by a number (maj6, maj7, maj9, maj11, maj13)
                 if consumed + 2 < tokens.len() {
                     if let TokenType::Letter('a') = tokens[consumed + 1].token_type {
                         if let TokenType::Letter('j') = tokens[consumed + 2].token_type {
                             consumed += 3; // "maj" or "Maj"
-                            
+
                             // Look for a number (6, 7, 9, 11, 13)
                             if consumed < tokens.len() {
                                 if let TokenType::Number(n) = &tokens[consumed].token_type {
@@ -118,7 +120,7 @@ impl ChordFamily {
                         }
                     }
                 }
-                
+
                 // Just "M7" (shorthand for maj7)
                 if is_upper && consumed + 1 < tokens.len() {
                     if let TokenType::Number(n) = &tokens[consumed + 1].token_type {
@@ -131,12 +133,12 @@ impl ChordFamily {
                         }
                     }
                 }
-                
+
                 // Reset if we didn't find maj7/M7
                 consumed = 0;
             }
         }
-        
+
         // Check for "dim7" or "o7" (fully diminished seventh)
         if consumed < tokens.len() {
             if let TokenType::Letter('d') = tokens[consumed].token_type {
@@ -152,7 +154,7 @@ impl ChordFamily {
                     }
                 }
             }
-            
+
             if let TokenType::Letter('o') | TokenType::Circle = tokens[consumed].token_type {
                 if consumed + 1 < tokens.len() {
                     if let TokenType::Number(n) = &tokens[consumed + 1].token_type {
@@ -163,7 +165,7 @@ impl ChordFamily {
                 }
             }
         }
-        
+
         // Check for "ø7" or "ø" (half-diminished seventh)
         if consumed < tokens.len() {
             if let TokenType::HalfDiminished = tokens[consumed].token_type {
@@ -178,7 +180,7 @@ impl ChordFamily {
                 return Ok((Some(ChordFamily::HalfDiminished), 1));
             }
         }
-        
+
         // Check for plain "7" (context-dependent seventh)
         // The family depends on the base quality:
         // - Major quality -> Dominant seventh
@@ -197,12 +199,11 @@ impl ChordFamily {
                 }
             }
         }
-        
+
         // No seventh found
         Ok((None, 0))
     }
 }
-
 
 impl std::fmt::Display for ChordFamily {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -214,7 +215,7 @@ impl std::fmt::Display for ChordFamily {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_seventh_intervals() {
         assert_eq!(
@@ -242,13 +243,13 @@ mod tests {
             Interval::DiminishedSeventh
         );
     }
-    
+
     #[test]
     fn test_degrees() {
         assert_eq!(ChordFamily::Major7.degrees(), vec![ChordDegree::Seventh]);
         assert_eq!(ChordFamily::Dominant7.degrees(), vec![ChordDegree::Seventh]);
     }
-    
+
     #[test]
     fn test_symbols() {
         assert_eq!(ChordFamily::Major7.symbol(), "maj7");
@@ -257,5 +258,3 @@ mod tests {
         assert_eq!(ChordFamily::FullyDiminished.symbol(), "dim7");
     }
 }
-
-

@@ -6,8 +6,8 @@
 //! - Push/Pull notation ('C, C')
 //! - Ties and rests (r, s, ~)
 
+use crate::parsing::{ParseError, Token, TokenType};
 use crate::time::{MusicalDuration, TimeSignature};
-use crate::parsing::{Token, TokenType, ParseError};
 use tracing::instrument;
 
 /// Rhythm notation for a chord
@@ -45,11 +45,11 @@ pub enum ChordRhythm {
 /// Lily-inspired duration values
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LilySyntax {
-    Whole,      // 1
-    Half,       // 2
-    Quarter,    // 4
-    Eighth,     // 8
-    Sixteenth,  // 16
+    Whole,        // 1
+    Half,         // 2
+    Quarter,      // 4
+    Eighth,       // 8
+    Sixteenth,    // 16
     ThirtySecond, // 32
 }
 
@@ -65,7 +65,7 @@ impl LilySyntax {
             LilySyntax::ThirtySecond => 32,
         }
     }
-    
+
     /// Parse from number string ("1", "2", "4", "8", "16", "32")
     pub fn from_number(s: &str) -> Option<Self> {
         match s {
@@ -83,8 +83,8 @@ impl LilySyntax {
 /// Push/Pull amount (number of apostrophes)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PushPullAmount {
-    Eighth,      // ' - one apostrophe
-    Sixteenth,   // '' - two apostrophes
+    Eighth,       // ' - one apostrophe
+    Sixteenth,    // '' - two apostrophes
     ThirtySecond, // ''' - three apostrophes
 }
 
@@ -110,7 +110,7 @@ impl ChordRhythm {
                 context: "No rhythm tokens found".to_string(),
             });
         }
-        
+
         // Check for push notation (leading apostrophes before we get here are handled by chord parser)
         // This handles trailing apostrophes for pull notation
         if let TokenType::Apostrophe = tokens[0].token_type {
@@ -119,7 +119,7 @@ impl ChordRhythm {
                 return Ok((ChordRhythm::Pull(amount), count));
             }
         }
-        
+
         // Check for underscore (Lily syntax) or slash syntax
         match &tokens[0].token_type {
             TokenType::Underscore => {
@@ -128,18 +128,18 @@ impl ChordRhythm {
                 let (rhythm, tokens_used) = Self::parse_lily_duration(&tokens[consumed..])?;
                 Ok((rhythm, consumed + tokens_used))
             }
-            
+
             TokenType::Slash => {
                 // Slash notation: /, //, ///, ////, or with dots: /., //., etc.
                 let slash_count = Self::count_slashes(tokens);
-                
+
                 // Check if there's a dot after the slashes for dotted rhythm
                 let has_dot = if slash_count < tokens.len() {
                     matches!(tokens[slash_count].token_type, TokenType::Dot)
                 } else {
                     false
                 };
-                
+
                 if has_dot {
                     // Convert dotted slashes to Lily notation
                     // / = quarter note, so /. = dotted quarter
@@ -165,12 +165,12 @@ impl ChordRhythm {
                     Ok((ChordRhythm::Slashes(slash_count as u8), slash_count))
                 }
             }
-            
+
             TokenType::Letter('r') | TokenType::Letter('s') => {
                 // Rest or Space: r4, s8, r_4., s1*8
                 Self::parse_rest_or_space(tokens)
             }
-            
+
             _ => {
                 // No rhythm tokens recognized
                 Err(ParseError::NoValidParser {
@@ -179,18 +179,18 @@ impl ChordRhythm {
             }
         }
     }
-    
+
     /// Parse Lily duration after underscore: _4, _8., _2~, etc.
     /// `tokens` should be the slice starting AFTER the underscore
     fn parse_lily_duration(tokens: &[Token]) -> Result<(Self, usize), ParseError> {
         let mut consumed = 0;
-        
+
         if tokens.is_empty() {
             return Err(ParseError::NoValidParser {
                 context: "Expected duration after underscore".to_string(),
             });
         }
-        
+
         // Parse the duration number
         let duration = match &tokens[consumed].token_type {
             TokenType::Number(n) => {
@@ -205,7 +205,7 @@ impl ChordRhythm {
             }
         };
         consumed += 1;
-        
+
         // Check for dot
         let dotted = if consumed < tokens.len() {
             if matches!(tokens[consumed].token_type, TokenType::Dot) {
@@ -217,7 +217,7 @@ impl ChordRhythm {
         } else {
             false
         };
-        
+
         // Check for tie (~)
         let tied = if consumed < tokens.len() {
             if matches!(tokens[consumed].token_type, TokenType::Tilde) {
@@ -229,7 +229,7 @@ impl ChordRhythm {
         } else {
             false
         };
-        
+
         // Check for multiplier (*8)
         let multiplier = if consumed < tokens.len() {
             if matches!(tokens[consumed].token_type, TokenType::Asterisk) {
@@ -250,7 +250,7 @@ impl ChordRhythm {
         } else {
             None
         };
-        
+
         Ok((
             ChordRhythm::Lily {
                 duration,
@@ -261,32 +261,32 @@ impl ChordRhythm {
             consumed,
         ))
     }
-    
+
     /// Parse rest (r) or space (s): r4, s8, r_4., s1*8
     fn parse_rest_or_space(tokens: &[Token]) -> Result<(Self, usize), ParseError> {
         let mut consumed = 0;
-        
+
         let is_rest = matches!(tokens[0].token_type, TokenType::Letter('r'));
         consumed += 1;
-        
+
         // Check for underscore (optional)
         let has_underscore = if consumed < tokens.len() {
             matches!(tokens[consumed].token_type, TokenType::Underscore)
         } else {
             false
         };
-        
+
         if has_underscore {
             consumed += 1;
         }
-        
+
         // Parse duration number
         if consumed >= tokens.len() {
             return Err(ParseError::NoValidParser {
                 context: "Expected duration after rest/space".to_string(),
             });
         }
-        
+
         let duration = match &tokens[consumed].token_type {
             TokenType::Number(n) => {
                 LilySyntax::from_number(n).ok_or(ParseError::NoValidParser {
@@ -300,7 +300,7 @@ impl ChordRhythm {
             }
         };
         consumed += 1;
-        
+
         // Check for dot
         let dotted = if consumed < tokens.len() {
             if matches!(tokens[consumed].token_type, TokenType::Dot) {
@@ -312,7 +312,7 @@ impl ChordRhythm {
         } else {
             false
         };
-        
+
         // Check for multiplier (*8)
         let multiplier = if consumed < tokens.len() {
             if matches!(tokens[consumed].token_type, TokenType::Asterisk) {
@@ -333,7 +333,7 @@ impl ChordRhythm {
         } else {
             None
         };
-        
+
         if is_rest {
             Ok((
                 ChordRhythm::Rest {
@@ -354,7 +354,7 @@ impl ChordRhythm {
             ))
         }
     }
-    
+
     /// Count consecutive slashes
     fn count_slashes(tokens: &[Token]) -> usize {
         let mut count = 0;
@@ -367,7 +367,7 @@ impl ChordRhythm {
         }
         count
     }
-    
+
     /// Count consecutive apostrophes
     fn count_apostrophes(tokens: &[Token]) -> usize {
         let mut count = 0;
@@ -380,7 +380,7 @@ impl ChordRhythm {
         }
         count
     }
-    
+
     /// Convert to MusicalDuration based on time signature
     pub fn to_duration(&self, time_sig: TimeSignature) -> MusicalDuration {
         match self {
@@ -392,19 +392,32 @@ impl ChordRhythm {
                 // Each slash is one beat (in the time signature denominator)
                 MusicalDuration::from_beats(*count as f64, time_sig)
             }
-            ChordRhythm::Lily { duration, dotted, multiplier, .. } => {
+            ChordRhythm::Lily {
+                duration,
+                dotted,
+                multiplier,
+                ..
+            } => {
                 let base_beats = Self::lily_to_beats(*duration, *dotted, time_sig);
                 let mult = multiplier.unwrap_or(1) as f64;
                 let total_beats = base_beats * mult;
                 MusicalDuration::from_beats(total_beats, time_sig)
             }
-            ChordRhythm::Rest { duration, dotted, multiplier } => {
+            ChordRhythm::Rest {
+                duration,
+                dotted,
+                multiplier,
+            } => {
                 let base_beats = Self::lily_to_beats(*duration, *dotted, time_sig);
                 let mult = multiplier.unwrap_or(1) as f64;
                 let total_beats = base_beats * mult;
                 MusicalDuration::from_beats(total_beats, time_sig)
             }
-            ChordRhythm::Space { duration, dotted, multiplier } => {
+            ChordRhythm::Space {
+                duration,
+                dotted,
+                multiplier,
+            } => {
                 let base_beats = Self::lily_to_beats(*duration, *dotted, time_sig);
                 let mult = multiplier.unwrap_or(1) as f64;
                 let total_beats = base_beats * mult;
@@ -423,13 +436,13 @@ impl ChordRhythm {
             }
         }
     }
-    
+
     /// Convert Lily syntax duration to beats
     fn lily_to_beats(duration: LilySyntax, dotted: bool, time_sig: TimeSignature) -> f64 {
         // The denominator tells us what note value gets one beat
         // For 4/4: quarter note = 1 beat
         // For 6/8: eighth note = 1 beat
-        
+
         // First, calculate how many 32nd notes this duration has
         let thirty_seconds = match duration {
             LilySyntax::Whole => 32.0,
@@ -439,18 +452,18 @@ impl ChordRhythm {
             LilySyntax::Sixteenth => 2.0,
             LilySyntax::ThirtySecond => 1.0,
         };
-        
+
         let actual_thirty_seconds = if dotted {
             thirty_seconds * 1.5
         } else {
             thirty_seconds
         };
-        
+
         // Now convert to beats based on the time signature denominator
         // denominator = 4 means quarter note = 1 beat (8 thirty-seconds)
         // denominator = 8 means eighth note = 1 beat (4 thirty-seconds)
         let thirty_seconds_per_beat = 32.0 / time_sig.denominator as f64;
-        
+
         actual_thirty_seconds / thirty_seconds_per_beat
     }
 }
@@ -459,25 +472,27 @@ impl ChordRhythm {
 mod tests {
     use super::*;
     use crate::parsing::Lexer;
-    
+
     #[test]
     fn test_parse_slash_rhythm() {
         let mut lexer = Lexer::new("////".to_string());
         let tokens = lexer.tokenize();
         let (rhythm, consumed) = ChordRhythm::parse(&tokens).unwrap();
-        
+
         assert_eq!(rhythm, ChordRhythm::Slashes(4));
         assert_eq!(consumed, 4);
     }
-    
+
     #[test]
     fn test_parse_lilypond_quarter() {
         let mut lexer = Lexer::new("_4".to_string());
         let tokens = lexer.tokenize();
         let (rhythm, consumed) = ChordRhythm::parse(&tokens).unwrap();
-        
+
         match rhythm {
-            ChordRhythm::Lily { duration, dotted, .. } => {
+            ChordRhythm::Lily {
+                duration, dotted, ..
+            } => {
                 assert_eq!(duration, LilySyntax::Quarter);
                 assert!(!dotted);
             }
@@ -485,28 +500,30 @@ mod tests {
         }
         assert_eq!(consumed, 2);
     }
-    
+
     #[test]
     fn test_parse_lilypond_dotted() {
         let mut lexer = Lexer::new("_4.".to_string());
         let tokens = lexer.tokenize();
         let (rhythm, _consumed) = ChordRhythm::parse(&tokens).unwrap();
-        
+
         match rhythm {
-            ChordRhythm::Lily { duration, dotted, .. } => {
+            ChordRhythm::Lily {
+                duration, dotted, ..
+            } => {
                 assert_eq!(duration, LilySyntax::Quarter);
                 assert!(dotted);
             }
             _ => panic!("Expected Lily rhythm"),
         }
     }
-    
+
     #[test]
     fn test_parse_rest() {
         let mut lexer = Lexer::new("r4".to_string());
         let tokens = lexer.tokenize();
         let (rhythm, _) = ChordRhythm::parse(&tokens).unwrap();
-        
+
         match rhythm {
             ChordRhythm::Rest { duration, .. } => {
                 assert_eq!(duration, LilySyntax::Quarter);
@@ -514,28 +531,31 @@ mod tests {
             _ => panic!("Expected Rest rhythm"),
         }
     }
-    
+
     #[test]
     fn test_parse_space_with_multiplier() {
         let mut lexer = Lexer::new("s1*8".to_string());
         let tokens = lexer.tokenize();
         let (rhythm, _) = ChordRhythm::parse(&tokens).unwrap();
-        
+
         match rhythm {
-            ChordRhythm::Space { duration, multiplier, .. } => {
+            ChordRhythm::Space {
+                duration,
+                multiplier,
+                ..
+            } => {
                 assert_eq!(duration, LilySyntax::Whole);
                 assert_eq!(multiplier, Some(8));
             }
             _ => panic!("Expected Space rhythm with multiplier"),
         }
     }
-    
+
     #[test]
     fn test_no_rhythm_returns_error() {
         let tokens = vec![];
         let result = ChordRhythm::parse(&tokens);
-        
+
         assert!(result.is_err());
     }
 }
-

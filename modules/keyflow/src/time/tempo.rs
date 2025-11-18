@@ -10,12 +10,12 @@ impl Tempo {
     pub fn new(bpm: u32) -> Self {
         Self { bpm }
     }
-    
+
     /// Parse tempo from string (e.g., "120bpm", "120")
     pub fn parse(s: &str) -> Option<Self> {
         let s = s.trim().to_lowercase();
         let s = s.strip_suffix("bpm").unwrap_or(&s).trim();
-        
+
         s.parse::<u32>().ok().map(|bpm| Tempo { bpm })
     }
 }

@@ -10,16 +10,16 @@ use std::fmt;
 pub trait Note: fmt::Debug + fmt::Display {
     /// Get the note name (e.g., "C#", "Eb", "F")
     fn name(&self) -> String;
-    
+
     /// Get the semitone value (0-11, where C=0)
     fn semitone(&self) -> u8;
-    
+
     /// Transpose by a number of semitones
     fn transpose(&self, semitones: i8) -> Box<dyn Note>;
-    
+
     /// Get possible enharmonic spellings
     fn enharmonic_spellings(&self) -> Vec<String>;
-    
+
     /// Clone as a boxed trait object
     fn clone_box(&self) -> Box<dyn Note>;
 }
@@ -46,7 +46,7 @@ impl MusicalNote {
         } else {
             'C' // Default
         };
-        
+
         let accidental = if name.contains("##") {
             Some(Accidental::DoubleSharp)
         } else if name.contains("bb") {
@@ -58,7 +58,7 @@ impl MusicalNote {
         } else {
             None
         };
-        
+
         Self {
             name,
             letter,
@@ -66,16 +66,16 @@ impl MusicalNote {
             semitone: semitone % 12,
         }
     }
-    
+
     /// Parse a note from a string
     pub fn from_string(s: &str) -> Option<Self> {
         if s.is_empty() {
             return None;
         }
-        
+
         let chars: Vec<char> = s.chars().collect();
         let base_note = chars[0].to_uppercase().next()?;
-        
+
         // Get base semitone
         let base_semitone = match base_note {
             'C' => 0,
@@ -87,7 +87,7 @@ impl MusicalNote {
             'B' => 11,
             _ => return None,
         };
-        
+
         // Handle accidentals
         let mut semitone: i32 = base_semitone as i32;
         let mut i = 1;
@@ -100,10 +100,10 @@ impl MusicalNote {
             i += 1;
         }
         let semitone = ((semitone % 12 + 12) % 12) as u8;
-        
+
         Some(Self::new(s.to_string(), semitone))
     }
-    
+
     /// Create note from semitone with preferred sharp/flat spelling
     pub fn from_semitone(semitone: u8, prefer_sharp: bool) -> Self {
         let semitone = semitone % 12;
@@ -142,7 +142,7 @@ impl MusicalNote {
         };
         Self::new(name.to_string(), semitone)
     }
-    
+
     /// Create a note from a letter and optional accidental
     pub fn from_letter_and_accidental(letter: char, accidental: Option<Accidental>) -> Self {
         let base_semitone = match letter.to_ascii_uppercase() {
@@ -155,7 +155,7 @@ impl MusicalNote {
             'B' => 11,
             _ => panic!("Invalid note letter: {}", letter),
         };
-        
+
         let semitone = match accidental {
             None | Some(Accidental::Natural) => base_semitone,
             Some(Accidental::Sharp) => (base_semitone + 1) % 12,
@@ -163,7 +163,7 @@ impl MusicalNote {
             Some(Accidental::DoubleSharp) => (base_semitone + 2) % 12,
             Some(Accidental::DoubleFlat) => (base_semitone + 10) % 12,
         };
-        
+
         let name = format!(
             "{}{}",
             letter.to_ascii_uppercase(),
@@ -175,35 +175,49 @@ impl MusicalNote {
                 _ => "",
             }
         );
-        
+
         Self::new(name, semitone)
     }
-    
+
     /// Convenience constructors for common notes
-    pub fn c() -> Self { Self::new("C".to_string(), 0) }
-    pub fn d() -> Self { Self::new("D".to_string(), 2) }
-    pub fn e() -> Self { Self::new("E".to_string(), 4) }
-    pub fn f() -> Self { Self::new("F".to_string(), 5) }
-    pub fn g() -> Self { Self::new("G".to_string(), 7) }
-    pub fn a() -> Self { Self::new("A".to_string(), 9) }
-    pub fn b() -> Self { Self::new("B".to_string(), 11) }
+    pub fn c() -> Self {
+        Self::new("C".to_string(), 0)
+    }
+    pub fn d() -> Self {
+        Self::new("D".to_string(), 2)
+    }
+    pub fn e() -> Self {
+        Self::new("E".to_string(), 4)
+    }
+    pub fn f() -> Self {
+        Self::new("F".to_string(), 5)
+    }
+    pub fn g() -> Self {
+        Self::new("G".to_string(), 7)
+    }
+    pub fn a() -> Self {
+        Self::new("A".to_string(), 9)
+    }
+    pub fn b() -> Self {
+        Self::new("B".to_string(), 11)
+    }
 }
 
 impl Note for MusicalNote {
     fn name(&self) -> String {
         self.name.clone()
     }
-    
+
     fn semitone(&self) -> u8 {
         self.semitone
     }
-    
+
     fn transpose(&self, semitones: i8) -> Box<dyn Note> {
         let new_semitone = ((self.semitone as i16 + semitones as i16 + 120) % 12) as u8;
         let prefer_sharp = self.name.contains('#');
         Box::new(MusicalNote::from_semitone(new_semitone, prefer_sharp))
     }
-    
+
     fn enharmonic_spellings(&self) -> Vec<String> {
         match self.semitone {
             0 => vec!["C".to_string(), "B#".to_string()],
@@ -221,7 +235,7 @@ impl Note for MusicalNote {
             _ => vec![],
         }
     }
-    
+
     fn clone_box(&self) -> Box<dyn Note> {
         Box::new(self.clone())
     }
@@ -232,7 +246,7 @@ impl MusicalNote {
     pub fn letter(&self) -> char {
         self.name.chars().next().unwrap_or('C')
     }
-    
+
     /// Get the numeric index of a letter (C=0, D=1, E=2, F=3, G=4, A=5, B=6)
     pub fn letter_index(letter: char) -> u8 {
         match letter.to_ascii_uppercase() {
@@ -246,7 +260,7 @@ impl MusicalNote {
             _ => 0,
         }
     }
-    
+
     /// Get a letter from a numeric index (0=C, 1=D, 2=E, 3=F, 4=G, 5=A, 6=B)
     pub fn letter_from_index(index: u8) -> char {
         match index % 7 {
@@ -260,45 +274,49 @@ impl MusicalNote {
             _ => 'C',
         }
     }
-    
+
     /// Generate an enharmonically correct note from a root and semantic interval
-    /// 
+    ///
     /// This ensures the note uses the correct letter name based on the interval.
     /// For example, a major third above C should be "E" not "Fb", even though they
     /// sound the same.
-    /// 
+    ///
     /// # Arguments
     /// * `root` - The root note
     /// * `semitones` - The actual semitone distance from root (can be > 12 for voicings)
     /// * `semantic_interval` - The scale degree (1=unison, 2=second, 3=third, etc.)
-    /// 
+    ///
     /// # Returns
     /// A MusicalNote with the correct enharmonic spelling
-    /// 
+    ///
     /// # Example
     /// ```
     /// use keyflow::primitives::{MusicalNote, Note};
-    /// 
+    ///
     /// // C + major third (4 semitones, semantic interval 3) = E
     /// let c = MusicalNote::c();
     /// let e = MusicalNote::enharmonic_from_root(&c, 4, 3);
     /// assert_eq!(e.name(), "E");
-    /// 
+    ///
     /// // C + minor third (3 semitones, semantic interval 3) = Eb
     /// let eb = MusicalNote::enharmonic_from_root(&c, 3, 3);
     /// assert_eq!(eb.name(), "Eb");
     /// ```
-    pub fn enharmonic_from_root(root: &MusicalNote, semitones: u8, semantic_interval: u8) -> MusicalNote {
+    pub fn enharmonic_from_root(
+        root: &MusicalNote,
+        semitones: u8,
+        semantic_interval: u8,
+    ) -> MusicalNote {
         use crate::primitives::Accidental;
-        
+
         // Calculate the target letter based on the semantic interval
         let root_letter_index = Self::letter_index(root.letter());
         let target_letter_index = (root_letter_index + (semantic_interval - 1)) % 7;
         let target_letter = Self::letter_from_index(target_letter_index);
-        
+
         // Calculate the target semitone
         let target_semitone = (root.semitone + (semitones % 12)) % 12;
-        
+
         // Get the base semitone for the target letter
         let base_semitone = match target_letter {
             'C' => 0,
@@ -310,7 +328,7 @@ impl MusicalNote {
             'B' => 11,
             _ => 0,
         };
-        
+
         // Calculate the accidental needed
         let semitone_diff = (target_semitone + 12 - base_semitone) % 12;
         let accidental = match semitone_diff {
@@ -329,7 +347,7 @@ impl MusicalNote {
                 }
             }
         };
-        
+
         Self::from_letter_and_accidental(target_letter, accidental)
     }
 }
@@ -355,16 +373,16 @@ impl MusicalNoteToken {
         if tokens.is_empty() {
             return None;
         }
-        
+
         // First token must be a letter (A-G or a-g)
         let letter = match &tokens[0].token_type {
             TokenType::Letter(c) if Self::is_note_letter(*c) => c.to_ascii_uppercase(),
             _ => return None,
         };
-        
+
         let mut consumed = 1;
         let mut accidental = None;
-        
+
         // Check for accidentals (can have multiple)
         while consumed < tokens.len() {
             match &tokens[consumed].token_type {
@@ -397,16 +415,19 @@ impl MusicalNoteToken {
                 _ => break,
             }
         }
-        
+
         Some(MusicalNoteToken {
             letter,
             accidental,
             tokens_consumed: consumed,
         })
     }
-    
+
     fn is_note_letter(c: char) -> bool {
-        matches!(c.to_ascii_uppercase(), 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G')
+        matches!(
+            c.to_ascii_uppercase(),
+            'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G'
+        )
     }
 }
 
@@ -421,7 +442,7 @@ impl WithAccidental for MusicalNoteToken {
         });
         self
     }
-    
+
     fn flat(mut self) -> Self {
         self.accidental = Some(match self.accidental {
             None | Some(Accidental::Natural) => Accidental::Flat,
@@ -432,17 +453,17 @@ impl WithAccidental for MusicalNoteToken {
         });
         self
     }
-    
+
     fn double_sharp(mut self) -> Self {
         self.accidental = Some(Accidental::DoubleSharp);
         self
     }
-    
+
     fn double_flat(mut self) -> Self {
         self.accidental = Some(Accidental::DoubleFlat);
         self
     }
-    
+
     fn natural(mut self) -> Self {
         self.accidental = Some(Accidental::Natural);
         self
@@ -452,33 +473,33 @@ impl WithAccidental for MusicalNoteToken {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_note_from_string() {
         let note = MusicalNote::from_string("C").unwrap();
         assert_eq!(note.semitone(), 0);
         assert_eq!(note.name(), "C");
-        
+
         let note = MusicalNote::from_string("C#").unwrap();
         assert_eq!(note.semitone(), 1);
-        
+
         let note = MusicalNote::from_string("Db").unwrap();
         assert_eq!(note.semitone(), 1);
-        
+
         let note = MusicalNote::from_string("F#").unwrap();
         assert_eq!(note.semitone(), 6);
     }
-    
+
     #[test]
     fn test_note_transpose() {
         let c = MusicalNote::c();
         let d = c.transpose(2);
         assert_eq!(d.semitone(), 2);
-        
+
         let b = c.transpose(-1);
         assert_eq!(b.semitone(), 11);
     }
-    
+
     #[test]
     fn test_enharmonic_spellings() {
         let note = MusicalNote::from_string("C#").unwrap();
@@ -486,74 +507,73 @@ mod tests {
         assert!(spellings.contains(&"C#".to_string()));
         assert!(spellings.contains(&"Db".to_string()));
     }
-    
+
     #[test]
     fn test_from_semitone() {
         let note = MusicalNote::from_semitone(1, true);
         assert_eq!(note.name(), "C#");
-        
+
         let note = MusicalNote::from_semitone(1, false);
         assert_eq!(note.name(), "Db");
     }
-    
+
     #[test]
     fn test_parse_note_token_simple() {
         use crate::parsing::Lexer;
         let mut lexer = Lexer::new("C".to_string());
         let tokens = lexer.tokenize();
         let result = MusicalNoteToken::parse(&tokens).unwrap();
-        
+
         assert_eq!(result.letter, 'C');
         assert_eq!(result.accidental, None);
         assert_eq!(result.tokens_consumed, 1);
     }
-    
+
     #[test]
     fn test_parse_note_token_sharp() {
         use crate::parsing::Lexer;
         let mut lexer = Lexer::new("C#".to_string());
         let tokens = lexer.tokenize();
         let result = MusicalNoteToken::parse(&tokens).unwrap();
-        
+
         assert_eq!(result.letter, 'C');
         assert_eq!(result.accidental, Some(Accidental::Sharp));
         assert_eq!(result.tokens_consumed, 2);
     }
-    
+
     #[test]
     fn test_parse_note_token_flat() {
         use crate::parsing::Lexer;
         let mut lexer = Lexer::new("Eb".to_string());
         let tokens = lexer.tokenize();
         let result = MusicalNoteToken::parse(&tokens).unwrap();
-        
+
         assert_eq!(result.letter, 'E');
         assert_eq!(result.accidental, Some(Accidental::Flat));
         assert_eq!(result.tokens_consumed, 2);
     }
-    
+
     #[test]
     fn test_parse_note_token_double_sharp() {
         use crate::parsing::Lexer;
         let mut lexer = Lexer::new("F##".to_string());
         let tokens = lexer.tokenize();
         let result = MusicalNoteToken::parse(&tokens).unwrap();
-        
+
         assert_eq!(result.letter, 'F');
         assert_eq!(result.accidental, Some(Accidental::DoubleSharp));
         assert_eq!(result.tokens_consumed, 3);
     }
-    
+
     #[test]
     fn test_note_b_not_flat() {
         use crate::parsing::Lexer;
         let mut lexer = Lexer::new("B".to_string());
         let tokens = lexer.tokenize();
         let result = MusicalNoteToken::parse(&tokens).unwrap();
-        
+
         assert_eq!(result.letter, 'B');
         assert_eq!(result.accidental, None);
         assert_eq!(result.tokens_consumed, 1);
     }
 }
-

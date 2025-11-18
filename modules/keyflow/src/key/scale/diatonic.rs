@@ -6,12 +6,12 @@ use super::trait_module::ScaleFamily;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DiatonicMode {
-    Ionian,     // Major
+    Ionian, // Major
     Dorian,
     Phrygian,
     Lydian,
     Mixolydian,
-    Aeolian,    // Natural Minor
+    Aeolian, // Natural Minor
     Locrian,
 }
 
@@ -27,7 +27,7 @@ impl DiatonicMode {
             DiatonicMode::Locrian => 6,
         }
     }
-    
+
     pub fn from_rotation(rotation: usize) -> Option<Self> {
         match rotation {
             0 => Some(DiatonicMode::Ionian),
@@ -40,15 +40,15 @@ impl DiatonicMode {
             _ => None,
         }
     }
-    
+
     pub fn name(&self) -> &'static str {
         DiatonicFamily::mode_name(self.rotation())
     }
-    
+
     pub fn short_name(&self) -> &'static str {
         DiatonicFamily::mode_short_name(self.rotation())
     }
-    
+
     pub fn interval_pattern(&self) -> Vec<u8> {
         DiatonicFamily::pattern_for_mode(self.rotation())
     }
@@ -58,11 +58,11 @@ pub struct DiatonicFamily;
 
 impl ScaleFamily for DiatonicFamily {
     type Mode = DiatonicMode;
-    
+
     fn base_pattern() -> Vec<u8> {
         vec![0, 2, 4, 5, 7, 9, 11] // Ionian (Major)
     }
-    
+
     fn mode_name(rotation: usize) -> &'static str {
         match rotation {
             0 => "Ionian",
@@ -75,7 +75,7 @@ impl ScaleFamily for DiatonicFamily {
             _ => "Unknown",
         }
     }
-    
+
     fn mode_short_name(rotation: usize) -> &'static str {
         match rotation {
             0 => "Maj",
@@ -89,4 +89,3 @@ impl ScaleFamily for DiatonicFamily {
         }
     }
 }
-

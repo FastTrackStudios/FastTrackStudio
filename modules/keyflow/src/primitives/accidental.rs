@@ -6,16 +6,16 @@
 pub trait WithAccidental {
     /// Apply a sharp to this element
     fn sharp(self) -> Self;
-    
+
     /// Apply a flat to this element
     fn flat(self) -> Self;
-    
+
     /// Apply a double sharp to this element
     fn double_sharp(self) -> Self;
-    
+
     /// Apply a double flat to this element
     fn double_flat(self) -> Self;
-    
+
     /// Reset to natural (no accidental)
     fn natural(self) -> Self;
 }
@@ -41,7 +41,7 @@ impl Accidental {
             Accidental::DoubleSharp => 2,
         }
     }
-    
+
     /// Get the string representation
     pub fn to_str(&self) -> &'static str {
         match self {
@@ -56,4 +56,3 @@ impl Accidental {
 
 // Re-export for cleaner imports
 pub use self::Accidental as AccidentalType;
-

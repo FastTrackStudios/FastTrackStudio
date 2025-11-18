@@ -3,11 +3,11 @@
 //! Provides a convenient `chart!` macro for defining charts inline
 
 /// Define a chart using a natural text-based syntax
-/// 
+///
 /// # Example
 /// ```
 /// use keyflow::chart;
-/// 
+///
 /// let my_chart = chart! {"
 ///     Reckless Love - Cory Asbury
 ///     68bpm 6/8 #G
@@ -28,10 +28,9 @@ macro_rules! chart {
     ($chart_text:expr) => {{
         $crate::chart::Chart::parse($chart_text)
     }};
-    
+
     // Or accept raw content and stringify it (for multi-line without quotes)
     ($($tt:tt)*) => {{
         $crate::chart::Chart::parse(stringify!($($tt)*))
     }};
 }
-

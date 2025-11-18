@@ -43,30 +43,3 @@ futures-util = { version = "0.3", features = ["sink", "std"] }
 # HTTP client for testing
 reqwest = { version = "0.11", features = ["json"] }
 serde_json = "1.0"
-
-[[example]]
-name = "core_and_infra"
-
-[[example]]
-name = "test_http"
-
-[[example]]
-name = "html_test_server"
-
-[[example]]
-name = "websocket_server"
-
-[[example]]
-name = "osc_server"
-
-[[example]]
-name = "multi_protocol_server"
-
-[[example]]
-name = "test_osc_client"
-
-[[example]]
-name = "comprehensive_server"
-
-[[example]]
-name = "protocol_integration"

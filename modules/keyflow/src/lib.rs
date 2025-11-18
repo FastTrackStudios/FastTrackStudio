@@ -3,32 +3,28 @@
 //! A trait-based system for parsing and manipulating musical charts
 
 // Core modules - new trait-based architecture
-pub mod time;
-pub mod primitives;
-pub mod key;
-pub mod chord;
-pub mod parsing;
-pub mod metadata;
-pub mod sections;
 pub mod chart;
+pub mod chord;
+pub mod key;
+pub mod metadata;
+pub mod parsing;
+pub mod primitives;
+pub mod sections;
+pub mod time;
 
 // Re-exports for convenience
-pub use time::{Duration, MusicalDuration, Position, AbsolutePosition, TimeSignature, Tempo};
-pub use primitives::{
-    Note, MusicalNote, MusicalNoteToken, 
-    RomanNumeralToken, ScaleDegreeToken,
-    RootNotation, RootFormat, RomanCase, Interval
-};
-pub use key::{Key, ScaleType, ScaleMode};
+pub use chart::{Chart, ChartSection, ChordInstance, KeyChange, Measure};
 pub use chord::{
-    Chord, ChordQuality, SuspendedType, ChordFamily, ChordDegree, 
-    Alteration, Extensions, ExtensionQuality,
-    ChordRhythm, LilySyntax, PushPullAmount, 
-    parse_root, RootParseResult,
-    ChordParseError, ChordParseErrors
+    parse_root, Alteration, Chord, ChordDegree, ChordFamily, ChordParseError, ChordParseErrors,
+    ChordQuality, ChordRhythm, ExtensionQuality, Extensions, LilySyntax, PushPullAmount,
+    RootParseResult, SuspendedType,
 };
-pub use parsing::{Lexer, Token, TokenType, ParseError};
+pub use key::{Key, ScaleMode, ScaleType};
 pub use metadata::SongMetadata;
-pub use sections::{Section, SectionType, SectionNumberer};
-pub use chart::{Chart, ChordInstance, Measure, ChartSection, KeyChange};
-
+pub use parsing::{Lexer, ParseError, Token, TokenType};
+pub use primitives::{
+    Interval, MusicalNote, MusicalNoteToken, Note, RomanCase, RomanNumeralToken, RootFormat,
+    RootNotation, ScaleDegreeToken,
+};
+pub use sections::{Section, SectionNumberer, SectionType};
+pub use time::{AbsolutePosition, Duration, MusicalDuration, Position, Tempo, TimeSignature};

@@ -224,15 +224,15 @@ pub mod application;
 
 // Re-export core types for convenience
 pub use core::{
-    Marker, Region, MarkerRegionError, MarkerSource, RegionSource,
-    MarkerRegionSource, NavigationPoint, SourceSummary
+    Marker, MarkerRegionError, MarkerRegionSource, MarkerSource, NavigationPoint, Region,
+    RegionSource, SourceSummary,
 };
 
 // Re-export application types for convenience
 pub use application::{
-    MockMarkerRegionService, ReaperMarkerRegionSource, RppMarkerRegionSource,
-    TempoTimeEnvelope, TempoTimePoint, MarkerRegionSourceBuilder, SourceType,
-    mock_source, mock_source_with_data, reaper_source
+    MarkerRegionSourceBuilder, MockMarkerRegionService, ReaperMarkerRegionSource,
+    RppMarkerRegionSource, SourceType, TempoTimeEnvelope, TempoTimePoint, mock_source,
+    mock_source_with_data, reaper_source,
 };
 
 // Re-export infrastructure adapters for convenience (to be implemented later)
@@ -270,22 +270,20 @@ pub fn reaper_current_project() -> ReaperMarkerRegionSource {
 /// Create a marker/region source from an RPP file
 #[cfg(feature = "rpp")]
 pub fn from_rpp_file<P: AsRef<std::path::Path>>(
-    path: P
+    path: P,
 ) -> Result<RppMarkerRegionSource, MarkerRegionError> {
     RppMarkerRegionSource::from_file(path).map_err(|e| e.into())
 }
 
 /// Quick validation helper for marker/region data
 pub fn validate_marker_region_data<T: MarkerRegionSource>(
-    source: &T
+    source: &T,
 ) -> Result<Vec<String>, MarkerRegionError> {
     source.validate_all()
 }
 
 /// Helper to get a summary string for any marker/region source
-pub fn get_source_info<T: MarkerRegionSource>(
-    source: &T
-) -> Result<String, MarkerRegionError> {
+pub fn get_source_info<T: MarkerRegionSource>(source: &T) -> Result<String, MarkerRegionError> {
     let summary = source.get_summary()?;
     Ok(format!(
         "{}: {} markers, {} regions, {:.1}s duration {}",
@@ -293,7 +291,11 @@ pub fn get_source_info<T: MarkerRegionSource>(
         summary.marker_count,
         summary.region_count,
         summary.total_duration,
-        if summary.is_writable { "(writable)" } else { "(read-only)" }
+        if summary.is_writable {
+            "(writable)"
+        } else {
+            "(read-only)"
+        }
     ))
 }
 
@@ -387,7 +389,7 @@ mod tests {
 
         // Should be sorted by time
         for i in 1..nav_points.len() {
-            assert!(nav_points[i-1].position_seconds() <= nav_points[i].position_seconds());
+            assert!(nav_points[i - 1].position_seconds() <= nav_points[i].position_seconds());
         }
     }
 }
