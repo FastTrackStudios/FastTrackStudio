@@ -20,6 +20,14 @@ project = { path = "../../modules/daw/project" }
 primitives = { path = "../../modules/daw/primitives" }
 marker-region = { path = "../../modules/daw/marker-region" }
 setlist = { path = "../../modules/fts/setlist" }
+tokio = { version = "1.0", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+futures-util = { version = "0.3", features = ["sink", "std"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+axum = { version = "0.8.6", features = ["macros", "tokio", "http1", "ws"] }
+tower = "0.5"
+tower-http = { version = "0.6.6", features = ["cors", "trace"] }
 
 [lib]
 name = "reaper_extension"

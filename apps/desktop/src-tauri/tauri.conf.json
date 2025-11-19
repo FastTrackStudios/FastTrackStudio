@@ -4,16 +4,17 @@
   "version": "0.1.0",
   "identifier": "com.fasttrackstudio.desktop",
   "build": {
-    "beforeDevCommand": "pnpm build",
+    "beforeDevCommand": "pnpm dev",
     "beforeBuildCommand": "pnpm build",
-    "frontendDist": "../dist"
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:3000"
   },
   "app": {
     "windows": [
       {
         "label": "main",
         "title": "FastTrackStudio",
-        "url": "http://localhost:8080",
+        "url": "$TAURI_DEV_URL",
         "width": 1200,
         "height": 800,
         "minWidth": 800,

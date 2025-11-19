@@ -4,8 +4,9 @@ use crate::action_registry::{ActionDef, register_actions};
 use crate::reaper_project::create_reaper_project_wrapper;
 use crate::reaper_markers::{read_markers_from_project, read_regions_from_project};
 use crate::reaper_setlist::{build_setlist_from_open_projects, build_song_from_current_project};
-use reaper_high::{Project, Reaper};
-use reaper_medium::{ProjectContext, ProjectRef};
+use crate::websocket_state::{broadcast_setlist, determine_active_song_index, poll_and_broadcast_transport, poll_and_broadcast_setlist};
+use reaper_high::{Project, Reaper, BookmarkType};
+use reaper_medium::ProjectRef;
 use tracing::{info, warn};
 use transport::TransportActions;
 
@@ -220,18 +221,123 @@ fn log_current_project_regions_handler() {
     reaper.show_console_msg("=====================================\n\n");
 }
 
+/// Log colors of all regions in the current project
+fn log_region_colors_handler() {
+    let reaper = Reaper::get();
+    let current_project = reaper.current_project();
+    let medium_reaper = reaper.medium_reaper();
+    
+    info!("Reading region colors from current REAPER project...");
+    reaper.show_console_msg("\n=== FastTrackStudio: Region Colors Debug ===\n");
+    
+    let bookmark_count = current_project.bookmark_count();
+    reaper.show_console_msg(format!("Total bookmarks: {}\n\n", bookmark_count.total_count).as_str());
+    
+    let mut region_count = 0;
+    
+    // Enumerate all bookmarks and extract regions
+    for i in 0..bookmark_count.total_count {
+        if let Some(bookmark) = current_project.find_bookmark_by_index(i) {
+            let info = bookmark.basic_info();
+            
+            // Only include regions (BookmarkType::Region)
+            if info.bookmark_type() == BookmarkType::Region {
+                region_count += 1;
+                let name = bookmark.name().to_string().trim_matches('"').trim().to_string();
+                
+                // Get native color from REAPER
+                let native_color = info.color;
+                let native_color_raw = native_color.to_raw();
+                
+                // Convert to RGB
+                let rgb = medium_reaper.color_from_native(native_color);
+                
+                // Convert to packed u32
+                let packed_color = (rgb.r as u32) << 16 | (rgb.g as u32) << 8 | rgb.b as u32;
+                
+                // Format color info
+                let color_info = format!(
+                    "Region {}: \"{}\"\n",
+                    region_count, name
+                );
+                reaper.show_console_msg(color_info.as_str());
+                
+                let color_details = format!(
+                    "  Native Color (raw): {}\n",
+                    native_color_raw
+                );
+                reaper.show_console_msg(color_details.as_str());
+                
+                let rgb_details = format!(
+                    "  RGB: R={}, G={}, B={}\n",
+                    rgb.r, rgb.g, rgb.b
+                );
+                reaper.show_console_msg(rgb_details.as_str());
+                
+                let packed_details = format!(
+                    "  Packed u32: {} (0x{:08X})\n",
+                    packed_color, packed_color
+                );
+                reaper.show_console_msg(packed_details.as_str());
+                
+                // Show hex color
+                let hex_color = format!(
+                    "#{:02X}{:02X}{:02X}\n",
+                    rgb.r, rgb.g, rgb.b
+                );
+                let hex_details = format!("  Hex: {}\n", hex_color.trim());
+                reaper.show_console_msg(hex_details.as_str());
+                
+                reaper.show_console_msg("\n");
+                
+                info!(
+                    region_index = region_count,
+                    name = %name,
+                    native_color_raw = native_color_raw,
+                    r = rgb.r,
+                    g = rgb.g,
+                    b = rgb.b,
+                    packed_color = packed_color,
+                    hex = %hex_color.trim(),
+                    "Region color"
+                );
+            }
+        }
+    }
+    
+    if region_count == 0 {
+        reaper.show_console_msg("No regions found in current project.\n");
+        info!("No regions found");
+    } else {
+        reaper.show_console_msg(format!("Found {} region(s) with color information.\n", region_count).as_str());
+    }
+    
+    reaper.show_console_msg("=====================================\n\n");
+}
+
 /// Build and log setlist from all open projects
-fn build_setlist_from_projects_handler() {
+/// This can be called from any context, but REAPER APIs will only work from main thread
+pub fn build_setlist_from_projects_handler() {
     let reaper = Reaper::get();
     
     info!("Building setlist from open REAPER projects...");
     reaper.show_console_msg("\n=== FastTrackStudio: Building Setlist from Open Projects ===\n");
     
-    match build_setlist_from_open_projects() {
+    match build_setlist_from_open_projects(None) {
         Ok(setlist) => {
             let song_count = setlist.song_count();
             reaper.show_console_msg(format!("Built setlist with {} song(s):\n\n", song_count).as_str());
             info!(song_count, "Built setlist with {} songs", song_count);
+            
+            // Broadcast setlist update to WebSocket clients
+            // Call directly - broadcast_setlist handles the async runtime internally
+            info!("Calling broadcast_setlist with {} songs", song_count);
+            let active_song_index = determine_active_song_index(&setlist);
+            broadcast_setlist(setlist.clone(), active_song_index);
+            info!("broadcast_setlist call completed");
+            
+            // Also poll and broadcast current transport state
+            crate::websocket_state::poll_and_broadcast_transport();
             
             for (idx, song) in setlist.songs.iter().enumerate() {
                 // Calculate song duration in minutes:seconds format
@@ -332,7 +438,7 @@ fn log_setlist_songs_handler() {
     info!("Building and logging setlist songs...");
     reaper.show_console_msg("\n=== FastTrackStudio: Setlist Songs ===\n");
     
-    match build_setlist_from_open_projects() {
+    match build_setlist_from_open_projects(None) {
         Ok(setlist) => {
             let song_count = setlist.song_count();
             if song_count == 0 {
@@ -341,6 +447,11 @@ fn log_setlist_songs_handler() {
             } else {
                 reaper.show_console_msg(format!("Found {} song(s) in setlist:\n\n", song_count).as_str());
                 info!(song_count, "Found {} songs in setlist", song_count);
+                
+                // Broadcast setlist update to WebSocket clients
+                // Call directly - broadcast_setlist handles the async runtime internally
+                let active_song_index = determine_active_song_index(&setlist);
+                broadcast_setlist(setlist.clone(), active_song_index);
                 
                     for (idx, song) in setlist.songs.iter().enumerate() {
                         let duration = song.duration();
@@ -742,6 +853,12 @@ pub fn register_all_actions() {
             appears_in_menu: true, // Show in menu
         },
         ActionDef {
+            command_id: "FTS_LOG_REGION_COLORS",
+            display_name: "Log Region Colors (Debug)".to_string(),
+            handler: log_region_colors_handler,
+            appears_in_menu: true, // Show in menu
+        },
+        ActionDef {
             command_id: "FTS_BUILD_SETLIST",
             display_name: "Build Setlist from Open Projects".to_string(),
             handler: build_setlist_from_projects_handler,
@@ -765,8 +882,46 @@ pub fn register_all_actions() {
             handler: log_tempo_time_sig_changes_handler,
             appears_in_menu: true, // Show in menu
         },
+        ActionDef {
+            command_id: "FTS_POLL_TRANSPORT",
+            display_name: "Poll Transport State".to_string(),
+            handler: poll_transport_handler,
+            appears_in_menu: false, // Hidden action for internal use
+        },
     ];
     
     register_actions(&actions, "FastTrackStudio");
+}
+
+/// Poll transport and setlist state and broadcast them (internal action for 30Hz timer)
+fn poll_transport_handler() {
+    // Log that we're in the handler - ALWAYS log this
+    tracing::info!("🔄 poll_transport_handler() called - starting 30Hz polling cycle");
+    
+    // Process any pending action execution requests from background threads
+    crate::websocket_state::process_action_execution_requests();
+    
+    // Poll and broadcast transport state
+    tracing::info!("📊 Calling poll_and_broadcast_transport()");
+    poll_and_broadcast_transport();
+    tracing::info!("✅ poll_and_broadcast_transport() completed");
+    
+    // Also poll and broadcast setlist state
+    tracing::info!("🎵 Calling poll_and_broadcast_setlist()");
+    match std::panic::catch_unwind(|| {
+        poll_and_broadcast_setlist();
+    }) {
+        Ok(_) => {
+            tracing::info!("✅ poll_and_broadcast_setlist() completed successfully");
+        }
+        Err(e) => {
+            tracing::error!(
+                panic = ?e,
+                "❌ poll_and_broadcast_setlist() panicked!"
+            );
+        }
+    }
+    
+    tracing::info!("✅ poll_transport_handler() finished");
 }
 

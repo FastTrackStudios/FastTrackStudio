@@ -238,6 +238,8 @@ pub struct Section {
     pub end_position: Position,
     /// Section name (from region name)
     pub name: String,
+    /// Color from the region (optional, for display purposes)
+    pub color: Option<u32>,
     /// Optional metadata
     pub metadata: HashMap<String, String>,
 }
@@ -273,6 +275,7 @@ impl Section {
             start_position,
             end_position,
             name,
+            color: None,
             metadata: HashMap::new(),
         })
     }
@@ -520,6 +523,7 @@ impl Section {
             start_position: start_pos,
             end_position: Position::from_seconds(end_seconds),
             name: self.name.clone(),
+            color: self.color,
             metadata: self.metadata.clone(),
         })
     }
@@ -535,6 +539,7 @@ impl Section {
             start_position: self.start_position.clone(),
             end_position: self.end_position.clone(),
             name: self.name.clone(),
+            color: self.color,
             metadata: self.metadata.clone(),
         }
     }

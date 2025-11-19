@@ -541,12 +541,13 @@ impl Song {
         }
 
         // Validate count-in position
+        // Count-in can be at the same time as start, but not after
         if let (Some(count_in), Some(start)) = (self.count_in_position(), self.start_position()) {
             let count_in_seconds = count_in.time.to_seconds();
             let start_seconds = start.time.to_seconds();
-            if count_in_seconds >= start_seconds {
+            if count_in_seconds > start_seconds {
                 return Err(SetlistError::invalid_song(format!(
-                    "Count-in position ({}) must be before start position ({})",
+                    "Count-in position ({}) must be before or equal to start position ({})",
                     count_in_seconds, start_seconds
                 )));
             }

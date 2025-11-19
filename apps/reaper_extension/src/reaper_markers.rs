@@ -3,9 +3,28 @@
 //! Reads markers and regions from REAPER projects and converts them to marker-region structs.
 
 use marker_region::core::{Marker, Region};
-use reaper_high::{Project, BookmarkType};
-use reaper_medium::PositionInSeconds;
+use reaper_high::{Project, BookmarkType, Reaper};
+use reaper_medium::{PositionInSeconds, RgbColor, NativeColor};
 use primitives::{Position, TimePosition, MusicalPosition, TimeRange};
+
+/// Pack an RgbColor into a u32 for storage/serialization
+/// Format: (r << 16) | (g << 8) | b
+fn pack_rgb_to_u32(rgb: RgbColor) -> u32 {
+    (rgb.r as u32) << 16 | (rgb.g as u32) << 8 | rgb.b as u32
+}
+
+/// Extract color from REAPER native color, returning packed u32 or None if black
+fn extract_color_from_native(native_color: NativeColor) -> Option<u32> {
+    let reaper = Reaper::get();
+    let rgb = reaper.medium_reaper().color_from_native(native_color);
+    let packed = pack_rgb_to_u32(rgb);
+    // Only store if not black (0x000000), as black typically means "no color" in REAPER
+    if packed == 0 {
+        None
+    } else {
+        Some(packed)
+    }
+}
 
 /// Read all markers from a REAPER project
 pub fn read_markers_from_project(project: &Project) -> Result<Vec<Marker>, String> {
@@ -25,10 +44,8 @@ pub fn read_markers_from_project(project: &Project) -> Result<Vec<Marker>, Strin
                 // Get name - convert ReaperString to String and clean it up
                 let name = bookmark.name().to_string().trim_matches('"').trim().to_string();
 
-                // Get color if available
-                // NativeColor is a newtype wrapper - we'll skip color for now
-                // TODO: Figure out how to extract color value from NativeColor
-                let color = None;
+                // Get color if available - convert NativeColor to RGB and then to u32
+                let color = extract_color_from_native(info.color);
 
                 // Get ID if available (convert BookmarkId to Option<u32>)
                 let id = Some(info.id.get() as u32);
@@ -97,9 +114,8 @@ pub fn read_regions_from_project(project: &Project) -> Result<Vec<Region>, Strin
                     // Get name - convert ReaperString to String and clean it up
                     let name = bookmark.name().to_string().trim_matches('"').trim().to_string();
 
-                    // Get color if available
-                    // NativeColor is a newtype wrapper - we'll skip color for now
-                    let color = None;
+                    // Get color if available - convert NativeColor to RGB and then to u32
+                    let color = extract_color_from_native(info.color);
 
                     // Get ID if available (convert BookmarkId to Option<u32>)
                     let id = Some(info.id.get() as u32);

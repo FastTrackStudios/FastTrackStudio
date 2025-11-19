@@ -26,20 +26,6 @@ serde_json.workspace = true
 taurpc.workspace = true
 specta.workspace = true
 specta-typescript.workspace = true
-tokio = { workspace = true, features = ["full"] }
-chrono.workspace = true
-anyhow.workspace = true
-transport = { path = "../../../modules/daw/transport" }
-project = { path = "../../../modules/daw/project" }
-primitives = { path = "../../../modules/daw/primitives" }
-axum = { version = "0.8.6", features = ["macros", "tokio", "http1"] }
-portpicker = "0.1"
-tauri-plugin-localhost = "2.0.0"
-tower.workspace = true
-tower-http = { version = "0.6.6", features = ["fs", "cors", "trace"] }
-mime_guess = "2.0"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 
 # Additional dependencies for tarpc integration (already included via world-api)

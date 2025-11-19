@@ -3,14 +3,19 @@
 //! Provides a unified way to register actions with REAPER.
 
 use reaper_high::{ActionKind, Reaper, RegisteredAction};
+use reaper_medium::CommandId;
 use tracing::{debug, info};
 use std::sync::{OnceLock, Mutex};
+use std::collections::HashMap;
 
 /// Global storage for registered actions (keeps them alive)
 static REGISTERED_ACTIONS: OnceLock<Mutex<Vec<RegisteredAction>>> = OnceLock::new();
 
 /// Global storage for action definitions (for menu building)
 static ACTION_DEFS: OnceLock<Mutex<Vec<ActionDef>>> = OnceLock::new();
+
+/// Global storage for command IDs (looked up on main thread, safe to use from any thread)
+static COMMAND_IDS: OnceLock<Mutex<HashMap<&'static str, CommandId>>> = OnceLock::new();
 
 /// Get the storage for registered actions
 pub fn get_registered_actions_storage() -> &'static Mutex<Vec<RegisteredAction>> {
@@ -27,6 +32,16 @@ pub fn get_all_registered_actions() -> Vec<ActionDef> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
+}
+
+/// Get command ID for an action by its command_id string
+/// Returns None if not found or not yet registered
+/// Safe to call from any thread (reads from static storage)
+pub fn get_command_id(command_id_str: &str) -> Option<CommandId> {
+    COMMAND_IDS
+        .get()
+        .and_then(|map| map.lock().ok())
+        .and_then(|map| map.get(command_id_str).copied())
 }
 
 /// Simple action definition for FastTrackStudio
@@ -164,6 +179,34 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
         );
     } else {
         debug!(module = %module_name, "REAPER woken up after action registration");
+    }
+    
+    // Look up and store command IDs for all registered actions (must be done on main thread)
+    // This allows background threads to trigger actions without calling REAPER APIs
+    let medium_reaper = Reaper::get().medium_reaper();
+    let mut command_ids = COMMAND_IDS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(mut map) = command_ids.lock() {
+        for action in actions {
+            // Try both with and without underscore prefix
+            let lookup_names = [action.command_id, &format!("_{}", action.command_id)];
+            for lookup_name in &lookup_names {
+                if let Some(cmd_id) = medium_reaper.named_command_lookup(*lookup_name) {
+                    map.insert(action.command_id, cmd_id);
+                    debug!(
+                        command_id = %action.command_id,
+                        lookup_name = %lookup_name,
+                        "Stored command ID for action"
+                    );
+                    break;
+                }
+            }
+        }
+        info!(
+            module = %module_name,
+            stored_count = map.len(),
+            "Stored {} command IDs for background thread access",
+            map.len()
+        );
     }
 }
 

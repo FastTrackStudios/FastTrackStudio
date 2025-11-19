@@ -30,9 +30,9 @@ pub fn init_tracing() {
             // User specified RUST_LOG - use it directly
             EnvFilter::from_default_env()
         } else {
-            // Default to warn level, then override extension to info
+            // Default to warn level, allow debug for extension
             EnvFilter::new("warn")
-                .add_directive("reaper_extension=info".parse().unwrap())
+                .add_directive("reaper_extension=debug".parse().unwrap())
         };
         
         // Initialize the subscriber with formatted output

@@ -7,10 +7,79 @@ use reaper_high::{Project, Reaper};
 use reaper_medium::ProjectRef;
 use setlist::core::{Section, SectionType, Setlist, SetlistError, Song};
 use tracing::{debug, info, warn};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::reaper_markers::{read_markers_from_project, read_regions_from_project};
 use crate::reaper_project::create_reaper_project_wrapper;
 use marker_region::application::TempoTimePoint;
+
+/// Batched logging stats for setlist building
+struct BuildStats {
+    sections_created: usize,
+    songs_built: usize,
+    songs_reused: usize,
+    last_log_time: Instant,
+}
+
+impl Default for BuildStats {
+    fn default() -> Self {
+        Self {
+            sections_created: 0,
+            songs_built: 0,
+            songs_reused: 0,
+            last_log_time: Instant::now(),
+        }
+    }
+}
+
+static BUILD_STATS: OnceLock<Mutex<BuildStats>> = OnceLock::new();
+
+/// Record a section creation (batched logging)
+fn record_section_created() {
+    let stats = BUILD_STATS.get_or_init(|| Mutex::new(BuildStats::default()));
+    if let Ok(mut s) = stats.lock() {
+        s.sections_created += 1;
+    }
+}
+
+/// Record a song being built (batched logging)
+fn record_song_built() {
+    let stats = BUILD_STATS.get_or_init(|| Mutex::new(BuildStats::default()));
+    if let Ok(mut s) = stats.lock() {
+        s.songs_built += 1;
+    }
+}
+
+/// Record a song being reused from cache (batched logging)
+fn record_song_reused() {
+    let stats = BUILD_STATS.get_or_init(|| Mutex::new(BuildStats::default()));
+    if let Ok(mut s) = stats.lock() {
+        s.songs_reused += 1;
+    }
+}
+
+/// Flush batched stats if enough time has passed (every 5 seconds)
+fn flush_build_stats_if_needed() {
+    let stats = BUILD_STATS.get_or_init(|| Mutex::new(BuildStats::default()));
+    if let Ok(mut s) = stats.lock() {
+        let now = Instant::now();
+        if s.last_log_time.elapsed() >= Duration::from_secs(5) {
+            if s.sections_created > 0 || s.songs_built > 0 || s.songs_reused > 0 {
+                info!(
+                    sections_created = s.sections_created,
+                    songs_built = s.songs_built,
+                    songs_reused = s.songs_reused,
+                    "Setlist build stats (last 5s)"
+                );
+            }
+            s.sections_created = 0;
+            s.songs_built = 0;
+            s.songs_reused = 0;
+            s.last_log_time = now;
+        }
+    }
+}
 
 /// Read all tempo/time signature markers from a REAPER project
 /// Returns Vec<(time_position_seconds, tempo_bpm, time_signature_option)>
@@ -148,12 +217,17 @@ pub fn build_song_from_current_project() -> Result<Song, SetlistError> {
 }
 
 /// Build a setlist from all open REAPER projects
-pub fn build_setlist_from_open_projects() -> Result<Setlist, SetlistError> {
+/// 
+/// If `existing_setlist` is provided, checks for existing songs before building new ones
+/// to avoid redundant work when rebuilding unchanged projects.
+pub fn build_setlist_from_open_projects(existing_setlist: Option<&Setlist>) -> Result<Setlist, SetlistError> {
     let reaper = Reaper::get();
     let medium_reaper = reaper.medium_reaper();
     let mut setlist = Setlist::new("REAPER Setlist".to_string())?;
 
-    info!("Building setlist from open REAPER projects...");
+    // Track projects processed for batched logging
+    let mut projects_processed = 0;
+    let mut projects_skipped = 0;
 
     // Enumerate all project tabs
     for i in 0..128u32 {
@@ -173,13 +247,12 @@ pub fn build_setlist_from_open_projects() -> Result<Setlist, SetlistError> {
             // Skip FTS-ROUTING tab (case-insensitive, check both file name and project name)
             let normalized_name = project_name.to_uppercase().replace('_', "-");
             if normalized_name == "FTS-ROUTING" {
-                debug!(tab_index = i, project_name = %project_name, "Skipping FTS-ROUTING tab");
+                projects_skipped += 1;
                 continue;
             }
 
             let project = Project::new(result.project);
-
-            debug!(tab_index = i, project_name = %project_name, "Processing project");
+            projects_processed += 1;
 
             // Read markers and regions from this project
             let markers = read_markers_from_project(&project)
@@ -188,20 +261,24 @@ pub fn build_setlist_from_open_projects() -> Result<Setlist, SetlistError> {
                 .map_err(|e| SetlistError::validation_error(format!("Failed to read regions: {}", e)))?;
 
             // Build songs from this project (can have multiple songs if multiple song regions)
-            let songs = build_songs_from_project(
+            // Pass the existing setlist to avoid rebuilding unchanged songs
+            let songs = build_songs_from_project_with_cache(
                 &project_name,
                 &markers,
                 &regions,
                 &project,
                 result.file_path.as_ref().map(|p| p.as_std_path()),
+                existing_setlist,
             );
             
             for song_result in songs {
                 match song_result {
                     Ok(song) => {
-                        debug!(song_name = %song.name, project_name = %project_name, "Built song from project");
+                        record_song_built();
                         if let Err(e) = setlist.add_song(song) {
-                            warn!(error = %e, project_name = %project_name, "Failed to add song to setlist");
+                            // Duplicate songs can happen if a project has multiple songs with the same name
+                            // This is expected during rebuilds, so log at debug level
+                            debug!(error = %e, project_name = %project_name, "Song already exists in setlist (skipping duplicate)");
                         }
                     }
                     Err(e) => {
@@ -214,7 +291,22 @@ pub fn build_setlist_from_open_projects() -> Result<Setlist, SetlistError> {
         }
     }
 
-    info!(song_count = setlist.song_count(), "Built setlist with {} songs", setlist.song_count());
+    // Log batched summary instead of individual project logs
+    if projects_processed > 0 || projects_skipped > 0 {
+        info!(
+            projects_processed = projects_processed,
+            projects_skipped = projects_skipped,
+            song_count = setlist.song_count(),
+            "Built setlist: {} songs from {} projects ({} skipped)",
+            setlist.song_count(),
+            projects_processed,
+            projects_skipped
+        );
+    }
+    
+    // Flush batched stats
+    flush_build_stats_if_needed();
+    
     Ok(setlist)
 }
 
@@ -226,6 +318,19 @@ fn build_songs_from_project(
     regions: &[Region],
     project: &Project,
     project_path: Option<&std::path::Path>,
+) -> Vec<Result<Song, SetlistError>> {
+    build_songs_from_project_with_cache(project_name, markers, regions, project, project_path, None)
+}
+
+/// Build multiple songs from markers and regions in a project, with caching support
+/// If `existing_setlist` is provided, reuses existing songs instead of rebuilding them
+fn build_songs_from_project_with_cache(
+    project_name: &str,
+    markers: &[Marker],
+    regions: &[Region],
+    project: &Project,
+    project_path: Option<&std::path::Path>,
+    existing_setlist: Option<&Setlist>,
 ) -> Vec<Result<Song, SetlistError>> {
     let mut songs = Vec::new();
     
@@ -260,6 +365,33 @@ fn build_songs_from_project(
             
             match song_region {
                 Some(region) => {
+                    // Debug: Log the found song region and its color
+                    debug!(
+                        region_name = %region.name,
+                        region_color = ?region.color,
+                        start_marker_pos = start_marker.position_seconds(),
+                        "Found song region for SONGSTART marker"
+                    );
+                    
+                    // Extract song name from region name before building
+                    let (song_name, _) = parse_song_name(&region.name);
+                    
+                    // Check if song already exists in cached setlist
+                    if let Some(existing) = existing_setlist {
+                        if let Some(existing_song) = existing.songs.iter().find(|s| {
+                            s.name == song_name && 
+                            s.metadata.get("project_name").map(|s| s.as_str()) == Some(project_name)
+                        }) {
+                            debug!(
+                                song_name = %song_name,
+                                project_name = %project_name,
+                                "Song already exists in cached setlist, reusing without rebuild"
+                            );
+                            songs.push(Ok(existing_song.clone()));
+                            continue;
+                        }
+                    }
+                    
                     // Build song from this region
                     match build_song_from_region(
                         &region.name,
@@ -290,10 +422,29 @@ fn build_songs_from_project(
                         .unwrap_or_else(|| start_marker.position_seconds() + 120.0); // Default 2 minutes
                     
                     // Create a synthetic region for this song
+                    let synthetic_region_name = format!("{} (Song)", project_name);
+                    let (song_name, _) = parse_song_name(&synthetic_region_name);
+                    
+                    // Check if song already exists in cached setlist
+                    if let Some(existing) = existing_setlist {
+                        if let Some(existing_song) = existing.songs.iter().find(|s| {
+                            s.name == song_name && 
+                            s.metadata.get("project_name").map(|s| s.as_str()) == Some(project_name)
+                        }) {
+                            debug!(
+                                song_name = %song_name,
+                                project_name = %project_name,
+                                "Song already exists in cached setlist, reusing without rebuild"
+                            );
+                            songs.push(Ok(existing_song.clone()));
+                            continue;
+                        }
+                    }
+                    
                     let synthetic_region = Region::from_seconds(
                         start_marker.position_seconds() - 4.0, // Assume 4 seconds before SONGSTART for song start
                         end_pos,
-                        format!("{} (Song)", project_name),
+                        synthetic_region_name,
                     ).unwrap();
                     
                     match build_song_from_region(
@@ -558,8 +709,16 @@ fn build_song_from_region(
         song.metadata.insert("artist".to_string(), artist_name);
     }
     
-    // Set SONGSTART marker
+    // Store project name in metadata
+    if let Some(proj_name) = project_name {
+        song.metadata.insert("project_name".to_string(), proj_name.to_string());
+    }
+    
+    // Set SONGSTART marker (color is already stored in the marker struct)
     song.set_start_marker(start_marker.clone());
+    
+    // Store start marker position for potential count-in section creation
+    let start_marker_position = start_marker.position.clone();
     
     // Find special markers within this song region
     // Count-In marker
@@ -599,11 +758,43 @@ fn build_song_from_region(
     }
     
     // Create markers for song region boundaries
+    // Preserve the color from the song region, or fall back to start_marker color
     let start_pos = song_region.time_range.start.clone();
     let end_pos = song_region.time_range.end.clone();
     
-    let start_marker = Marker::new(start_pos, format!("{}_REGION_START", song_name));
-    let end_marker = Marker::new(end_pos, format!("{}_REGION_END", song_name));
+    // Determine color: prefer song region color, fall back to start_marker color
+    let region_color = song_region.color
+        .or_else(|| start_marker.color);
+    
+    // Debug: Log the color determination
+    debug!(
+        song_name = %parsed_song_name,
+        region_color = ?song_region.color,
+        start_marker_color = ?start_marker.color,
+        final_color = ?region_color,
+        region_name = %song_region.name,
+        "Song region color determination"
+    );
+    
+    // Create markers with the determined color
+    let start_marker = Marker::new_full(
+        None, // id
+        start_pos,
+        format!("{}_REGION_START", song_name),
+        region_color, // Use region color or fall back to start_marker color
+        None, // flags
+        None, // locked
+        None, // guid
+    );
+    let end_marker = Marker::new_full(
+        None, // id
+        end_pos,
+        format!("{}_REGION_END", song_name),
+        region_color, // Use region color or fall back to start_marker color
+        None, // flags
+        None, // locked
+        None, // guid
+    );
     
     song.set_song_region_start_marker(start_marker);
     song.set_song_region_end_marker(end_marker);
@@ -655,8 +846,6 @@ fn build_song_from_region(
             let start_pos = region.time_range.start.clone();
             let end_pos = region.time_range.end.clone();
             
-            // Clone section_type for debug logging (it will be moved into Section::new)
-            let section_type_debug = section_type.clone();
             match Section::new(
                 section_type,
                 start_pos,
@@ -664,14 +853,19 @@ fn build_song_from_region(
                 region.name.clone(),
                 number,
             ) {
-                Ok(section) => {
-                    debug!(
-                        name = %region.name,
-                        section_type = ?section_type_debug,
-                        start = region.start_seconds(),
-                        end = region.end_seconds(),
-                        "Created section"
-                    );
+                Ok(mut section) => {
+                    // Store color from region directly in section
+                    section.color = region.color;
+                    // Log color for debugging
+                    if let Some(color_val) = region.color {
+                        debug!(
+                            section_name = %section.name,
+                            region_name = %region.name,
+                            color = color_val,
+                            "Stored color in section"
+                        );
+                    }
+                    record_section_created();
                     Some(section)
                 }
                 Err(e) => {
@@ -682,6 +876,69 @@ fn build_song_from_region(
         })
         .collect();
     
+    // Add count-in section if count-in marker exists and is before song start
+    if let Some(ref count_in_marker) = song.count_in_marker {
+        let count_in_start = count_in_marker.position.time.to_seconds();
+        let song_start_pos = song.start_position()
+            .map(|p| p.time.to_seconds())
+            .or_else(|| song.song_region_start().map(|p| p.time.to_seconds()))
+            .unwrap_or(song_start);
+        
+        if count_in_start < song_start_pos {
+            // Create count-in section from count-in marker to song start
+            let count_in_start_pos = count_in_marker.position.clone();
+            // Get song start position - we just set start_marker above, so it should exist
+            let song_start_pos_clone = song.start_marker.as_ref()
+                .map(|m| m.position.clone())
+                .or_else(|| song.song_region_start_marker.as_ref().map(|m| m.position.clone()))
+                .unwrap_or_else(|| start_marker_position.clone());
+            
+            match Section::new(
+                SectionType::Custom,
+                count_in_start_pos,
+                song_start_pos_clone,
+                "Count-In".to_string(),
+                None,
+            ) {
+                Ok(count_in_section) => {
+                    record_section_created();
+                    sections.push(count_in_section);
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to create count-in section");
+                }
+            }
+        }
+    }
+    
+    // Add end section (from SONGEND to =END) if both exist
+    if let Some(ref song_end_marker) = song.song_end_marker {
+        let end_marker = song.end_marker.as_ref().or_else(|| song.render_end_marker.as_ref());
+        if let Some(end_marker) = end_marker {
+            let song_end_pos = song_end_marker.position.time.to_seconds();
+            let end_pos = end_marker.position.time.to_seconds();
+            
+            if song_end_pos < end_pos {
+                // Create end section from SONGEND to =END
+                match Section::new(
+                    SectionType::Custom,
+                    song_end_marker.position.clone(),
+                    end_marker.position.clone(),
+                    "End".to_string(),
+                    None,
+                ) {
+                    Ok(end_section) => {
+                        record_section_created();
+                        sections.push(end_section);
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to create end section");
+                    }
+                }
+            }
+        }
+    }
+    
     // Sort sections by start position
     sections.sort_by(|a, b| {
         a.start_seconds()
@@ -691,8 +948,11 @@ fn build_song_from_region(
     
     // Add sections to song
     for section in sections {
+        let section_name = section.name.clone();
         if let Err(e) = song.add_section(section) {
-            warn!(error = %e, "Failed to add section to song");
+            // Section overlaps can happen if regions overlap in REAPER
+            // This is expected during rebuilds, so log at debug level
+            debug!(error = %e, section_name = %section_name, "Section overlaps with existing sections (skipping)");
         }
     }
     
@@ -755,6 +1015,9 @@ fn build_song_from_project_simple(
     if let Some(artist_name) = artist {
         song.metadata.insert("artist".to_string(), artist_name);
     }
+    
+    // Store project name in metadata
+    song.metadata.insert("project_name".to_string(), project_name.to_string());
 
     // Find special markers
     // Count-In marker
@@ -791,11 +1054,34 @@ fn build_song_from_project_simple(
     let song_region = find_song_region(markers, regions);
     if let Some(region) = song_region {
         // Create markers for song region boundaries
+        // Preserve the color from the song region, or fall back to start_marker color
         let start_pos = region.time_range.start.clone();
         let end_pos = region.time_range.end.clone();
         
-        let start_marker = Marker::new(start_pos, format!("{}_REGION_START", project_name));
-        let end_marker = Marker::new(end_pos, format!("{}_REGION_END", project_name));
+        // Determine color: prefer song region color, fall back to start_marker color
+        let start_marker_color = song.start_marker.as_ref().and_then(|m| m.color);
+        let region_color = region.color
+            .or(start_marker_color);
+        
+        // Create markers with the determined color
+        let start_marker = Marker::new_full(
+            None, // id
+            start_pos,
+            format!("{}_REGION_START", project_name),
+            region_color, // Use region color or fall back to start_marker color
+            None, // flags
+            None, // locked
+            None, // guid
+        );
+        let end_marker = Marker::new_full(
+            None, // id
+            end_pos,
+            format!("{}_REGION_END", project_name),
+            region_color, // Use region color or fall back to start_marker color
+            None, // flags
+            None, // locked
+            None, // guid
+        );
         
         song.set_song_region_start_marker(start_marker);
         song.set_song_region_end_marker(end_marker);
@@ -803,6 +1089,9 @@ fn build_song_from_project_simple(
         debug!(
             start = region.start_seconds(),
             end = region.end_seconds(),
+            region_color = ?region.color,
+            start_marker_color = ?start_marker_color,
+            final_color = ?region_color,
             "Found song region"
         );
     }
@@ -848,8 +1137,6 @@ fn build_song_from_project_simple(
             // If we couldn't parse a section type, use Custom to indicate it's an unrecognized section
             let section_type = section_type.unwrap_or(SectionType::Custom);
 
-            // Clone section_type for debug logging (it will be moved into Section::new)
-            let section_type_debug = section_type.clone();
             match Section::new(
                 section_type,
                 start_pos,
@@ -857,14 +1144,19 @@ fn build_song_from_project_simple(
                 region.name.clone(),
                 number,
             ) {
-                Ok(section) => {
-                    debug!(
-                        name = %region.name,
-                        section_type = ?section_type_debug,
-                        start = region.start_seconds(),
-                        end = region.end_seconds(),
-                        "Created section"
-                    );
+                Ok(mut section) => {
+                    // Store color from region directly in section
+                    section.color = region.color;
+                    // Log color for debugging
+                    if let Some(color_val) = region.color {
+                        debug!(
+                            section_name = %section.name,
+                            region_name = %region.name,
+                            color = color_val,
+                            "Stored color in section"
+                        );
+                    }
+                    record_section_created();
                     Some(section)
                 }
                 Err(e) => {
@@ -875,6 +1167,72 @@ fn build_song_from_project_simple(
         })
         .collect();
 
+    // Add count-in section if count-in marker exists and is before song start
+    if let Some(ref count_in_marker) = song.count_in_marker {
+        let count_in_start = count_in_marker.position.time.to_seconds();
+        let song_start_pos = song.start_position()
+            .map(|p| p.time.to_seconds())
+            .or_else(|| song.song_region_start().map(|p| p.time.to_seconds()))
+            .unwrap_or(0.0);
+        
+        if count_in_start < song_start_pos {
+            // Create count-in section from count-in marker to song start
+            let count_in_start_pos = count_in_marker.position.clone();
+            let song_start_pos_clone = song.start_marker.as_ref()
+                .map(|m| m.position.clone())
+                .or_else(|| song.song_region_start_marker.as_ref().map(|m| m.position.clone()))
+                .unwrap_or_else(|| {
+                    // Fallback: create a marker from seconds and use its position
+                    // This ensures we have a valid Position with musical time
+                    Marker::from_seconds(song_start_pos, "SONGSTART".to_string()).position
+                });
+            
+            match Section::new(
+                SectionType::Custom,
+                count_in_start_pos,
+                song_start_pos_clone,
+                "Count-In".to_string(),
+                None,
+            ) {
+                Ok(count_in_section) => {
+                    record_section_created();
+                    sections.push(count_in_section);
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to create count-in section");
+                }
+            }
+        }
+    }
+    
+    // Add end section (from SONGEND to =END) if both exist
+    if let Some(ref song_end_marker) = song.song_end_marker {
+        let end_marker = song.end_marker.as_ref().or_else(|| song.render_end_marker.as_ref());
+        if let Some(end_marker) = end_marker {
+            let song_end_pos = song_end_marker.position.time.to_seconds();
+            let end_pos = end_marker.position.time.to_seconds();
+            
+            if song_end_pos < end_pos {
+                // Create end section from SONGEND to =END
+                match Section::new(
+                    SectionType::Custom,
+                    song_end_marker.position.clone(),
+                    end_marker.position.clone(),
+                    "End".to_string(),
+                    None,
+                ) {
+                    Ok(end_section) => {
+                        record_section_created();
+                        sections.push(end_section);
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to create end section");
+                    }
+                }
+            }
+        }
+    }
+
     // Sort sections by start position
     sections.sort_by(|a, b| {
         a.start_seconds()
@@ -884,8 +1242,11 @@ fn build_song_from_project_simple(
 
     // Add sections to song
     for section in sections {
+        let section_name = section.name.clone();
         if let Err(e) = song.add_section(section) {
-            warn!(error = %e, "Failed to add section to song");
+            // Section overlaps can happen if regions overlap in REAPER
+            // This is expected during rebuilds, so log at debug level
+            debug!(error = %e, section_name = %section_name, "Section overlaps with existing sections (skipping)");
         }
     }
 
@@ -967,13 +1328,36 @@ fn find_song_region_for_marker<'a>(
         })
         .collect();
     
+    // Debug: Log all containing regions and their colors
+    debug!(
+        marker_pos = start_marker.position_seconds(),
+        containing_count = containing_regions.len(),
+        "Finding song region for marker"
+    );
+    for (idx, region) in containing_regions.iter().enumerate() {
+        debug!(
+            idx = idx,
+            region_name = %region.name,
+            region_color = ?region.color,
+            start = region.start_seconds(),
+            end = region.end_seconds(),
+            "Containing region candidate"
+        );
+    }
+    
     if containing_regions.is_empty() {
         return None;
     }
     
     // If only one, use it
     if containing_regions.len() == 1 {
-        return Some(containing_regions[0].clone());
+        let selected = containing_regions[0].clone();
+        debug!(
+            region_name = %selected.name,
+            region_color = ?selected.color,
+            "Selected single containing region as song region"
+        );
+        return Some(selected);
     }
     
     // If multiple, find the one that contains the most other regions (sections)
@@ -1011,7 +1395,18 @@ fn find_song_region_for_marker<'a>(
         }
     }
     
-    best_region.map(|r| r.clone())
+    if let Some(selected) = best_region {
+        let cloned = selected.clone();
+        debug!(
+            region_name = %cloned.name,
+            region_color = ?cloned.color,
+            contained_sections = max_contained_count,
+            "Selected best containing region as song region"
+        );
+        Some(cloned)
+    } else {
+        None
+    }
 }
 
 /// Find the song region (largest region that contains SONGSTART or contains multiple sections)
