@@ -1,40 +1,152 @@
 use dioxus::prelude::*;
-use lucide_dioxus::{SkipBack, Play, Pause, Repeat2, SkipForward, CircleCheck, CircleX};
+use lucide_dioxus::{SkipBack, Play, Pause, Repeat2, SkipForward, CircleCheck, CircleX, ChevronDown};
 use lumen_blocks::components::button::{Button, ButtonVariant, ButtonSize};
 use crate::utils::navigation::{navigate_to_next_section, navigate_to_previous_section};
+use crate::config::WebSocketMode;
 
-/// Connection status badge component
+/// Simple connection state enum
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConnectionState {
+    Connected,
+    Disconnected,
+}
+
+/// Connection mode dropdown component
 #[component]
-pub fn ConnectionStatus() -> Element {
-    // For now, using a signal to track connection status
-    // Later this can be connected to actual WebSocket state
-    let is_connected = use_signal(|| true);
+pub fn ConnectionStatus(mut connection_mode: Signal<WebSocketMode>, connection_state: Signal<ConnectionState>) -> Element {
+    let mut is_open = use_signal(|| false);
+    let is_connected = matches!(connection_state(), ConnectionState::Connected);
+    
+    let mode_display = match connection_mode() {
+        WebSocketMode::Local => "Local",
+        WebSocketMode::Server => "Server",
+        WebSocketMode::Reaper { .. } => "REAPER",
+        WebSocketMode::Custom { .. } => "Custom",
+    };
+    
+    // Close dropdown when clicking outside
+    use_effect(move || {
+        if is_open() {
+            spawn(async move {
+                // This will be handled by the onclick handler on the document
+            });
+        }
+    });
     
     rsx! {
         div {
-            class: "flex items-center gap-2",
-            Button {
-                variant: if is_connected() {
-                    ButtonVariant::Primary
-                } else {
-                    ButtonVariant::Destructive
+            class: "relative",
+            // Dropdown trigger button
+            div {
+                class: "cursor-pointer",
+                onclick: move |e| {
+                    e.stop_propagation();
+                    is_open.set(!is_open());
                 },
-                size: ButtonSize::Small,
-                disabled: true,
-                icon_left: rsx! {
-                    if is_connected() {
-                        CircleCheck {
+                Button {
+                    variant: if is_connected {
+                        ButtonVariant::Primary
+                    } else {
+                        ButtonVariant::Destructive
+                    },
+                    size: ButtonSize::Small,
+                    icon_left: rsx! {
+                        if is_connected {
+                            CircleCheck {
+                                size: 16,
+                                color: "currentColor",
+                            }
+                        } else {
+                            CircleX {
+                                size: 16,
+                                color: "currentColor",
+                            }
+                        }
+                    },
+                    icon_right: rsx! {
+                        ChevronDown {
                             size: 16,
                             color: "currentColor",
                         }
-                    } else {
-                        CircleX {
-                            size: 16,
-                            color: "currentColor",
+                    },
+                    "{mode_display}"
+                }
+            }
+            
+            // Backdrop to close dropdown when clicking outside
+            if is_open() {
+                div {
+                    class: "fixed inset-0 z-40",
+                    onclick: move |_| {
+                        is_open.set(false);
+                    },
+                }
+            }
+            
+            // Dropdown menu
+            if is_open() {
+                div {
+                    class: "absolute right-0 top-full mt-1 z-50 min-w-[120px] bg-card border border-border rounded-md shadow-lg",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                    },
+                    div {
+                        class: "py-1",
+                        // Local option
+                        div {
+                            class: "px-3 py-2 text-sm cursor-pointer hover:bg-accent transition-colors flex items-center gap-2",
+                            onclick: move |_| {
+                                connection_mode.set(WebSocketMode::Local);
+                                is_open.set(false);
+                            },
+                            if matches!(connection_mode(), WebSocketMode::Local) {
+                                CircleCheck {
+                                    size: 14,
+                                    color: "currentColor",
+                                }
+                            } else {
+                                div { class: "w-[14px]" }
+                            }
+                            "Local"
+                        }
+                        // Server option (native Dioxus server)
+                        div {
+                            class: "px-3 py-2 text-sm cursor-pointer hover:bg-accent transition-colors flex items-center gap-2",
+                            onclick: move |_| {
+                                connection_mode.set(WebSocketMode::Server);
+                                is_open.set(false);
+                            },
+                            if matches!(connection_mode(), WebSocketMode::Server) {
+                                CircleCheck {
+                                    size: 14,
+                                    color: "currentColor",
+                                }
+                            } else {
+                                div { class: "w-[14px]" }
+                            }
+                            "Server"
+                        }
+                        // REAPER option
+                        div {
+                            class: "px-3 py-2 text-sm cursor-pointer hover:bg-accent transition-colors flex items-center gap-2",
+                            onclick: move |_| {
+                                connection_mode.set(WebSocketMode::Reaper { 
+                                    url: "ws://localhost:8081".to_string() 
+                                });
+                                is_open.set(false);
+                            },
+                            if matches!(connection_mode(), WebSocketMode::Reaper { .. }) {
+                                CircleCheck {
+                                    size: 14,
+                                    color: "currentColor",
+                                }
+                            } else {
+                                div { class: "w-[14px]" }
+                            }
+                            "REAPER"
                         }
                     }
-                },
-                if is_connected() { "Connected" } else { "Disconnected" }
+                }
             }
         }
     }

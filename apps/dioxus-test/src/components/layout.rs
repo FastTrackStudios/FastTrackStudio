@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 /// Top bar component
 #[component]
-pub fn TopBar() -> Element {
+pub fn TopBar(connection_mode: Signal<crate::config::WebSocketMode>, connection_state: Signal<crate::components::transport::ConnectionState>) -> Element {
     rsx! {
         div {
             class: "h-12 flex-shrink-0 border-b border-border bg-card flex items-center justify-between px-4",
@@ -20,7 +20,10 @@ pub fn TopBar() -> Element {
                 class: "text-lg font-semibold text-card-foreground",
                 "FastTrackStudio"
             }
-            ConnectionStatus {}
+            ConnectionStatus {
+                connection_mode: connection_mode,
+                connection_state: connection_state,
+            }
         }
     }
 }

@@ -48,3 +48,18 @@ To run for a different platform, use the `--platform platform` flag. E.g.
 dx serve --platform desktop
 ```
 
+#### Port Configuration
+
+By default, the server uses port 3000. If you need to use a different port (e.g., if port 3000 is already in use), you can set the `DEVSERVER_PORT` environment variable:
+
+```bash
+# macOS/Linux
+export DEVSERVER_PORT=8080
+dx serve --platform desktop
+
+# Or in one command
+DEVSERVER_PORT=8080 dx serve --platform desktop
+```
+
+**Note:** Make sure to update the `local_port` in `src/main.rs` and `src/config.rs` to match your `DEVSERVER_PORT` setting, as the WebSocket client needs to know which port to connect to.
+

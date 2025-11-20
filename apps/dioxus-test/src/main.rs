@@ -8,6 +8,7 @@ use std::collections::HashMap;
 
 mod components;
 mod utils;
+mod config;
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
@@ -28,7 +29,7 @@ fn App() -> Element {
     // Key: song index (as string), Value: position in seconds
     let mut song_positions = use_signal(|| HashMap::<String, f64>::new());
     
-    // Setlist state - using a sample setlist with sections
+    // Setlist state - using sample setlist
     let setlist = use_signal(|| {
         let mut setlist = Setlist::new("Sample Setlist".to_string()).unwrap();
         let measure_duration = 2.0; // 2 seconds per measure at 120 BPM
@@ -371,10 +372,13 @@ fn App() -> Element {
     // Current active section index (within the current song)
     let mut current_section_index = use_signal(|| Some(0));
     
+    // Play state - local only for now
+    let mut is_playing = use_signal(|| false);
+    
     // Initialize transport positions for each project to the first section of their first song
     // Also initialize per-song positions
     use_effect(move || {
-        let setlist_ref = setlist.read();
+        let setlist_ref = setlist();
         let mut project_positions = HashMap::new();
         let mut song_pos = HashMap::new();
         
@@ -399,13 +403,13 @@ fn App() -> Element {
             song_pos.insert(idx.to_string(), song_start);
         }
         
+        // Initialize transport positions
         transport_positions.set(project_positions);
         song_positions.set(song_pos);
     });
     
     
     // Transport control state
-    let mut is_playing = use_signal(|| false);
     let mut is_looping = use_signal(|| false);
     
     rsx! {
@@ -417,7 +421,7 @@ fn App() -> Element {
             class: "h-screen w-screen flex flex-col overflow-hidden bg-background",
             tabindex: "0",
             onkeydown: move |e| {
-                let setlist_ref = setlist.read();
+                let setlist_ref = setlist();
                 let song_count = setlist_ref.songs.len();
                 
                 // Only handle section navigation when not playing
@@ -464,7 +468,8 @@ fn App() -> Element {
                         // Reset previous song's progress if not playing
                         // We need to store the reset position before setting the new song's position
                         // because if they're in the same project, the new position will overwrite
-                        let prev_reset_position = if !is_playing() {
+                        let playing = is_playing();
+                        let prev_reset_position = if !playing {
                             if let Some(prev_idx) = prev_song_idx {
                                 if let Some(prev_song) = setlist_ref.songs.get(prev_idx) {
                                     // Calculate reset position (same logic as calculate_song_progress)
@@ -500,9 +505,9 @@ fn App() -> Element {
                                 song_positions.with_mut(|positions| {
                                     positions.insert(next_index.unwrap_or(0).to_string(), new_position);
                                 });
-                            }
-                        }
-                    }
+        }
+    }
+}
                     Key::ArrowUp => {
                         if song_count == 0 {
                             return;
@@ -518,7 +523,8 @@ fn App() -> Element {
                         };
                         
                         // Reset previous song's position if not playing
-                        if !is_playing() {
+                        let playing = is_playing();
+                        if !playing {
                             if let Some(prev_idx) = prev_song_idx {
                                 if let Some(prev_song) = setlist_ref.songs.get(prev_idx) {
                                     // Reset song position to its start
@@ -568,7 +574,10 @@ fn App() -> Element {
             },
             
             // Top Bar
-            TopBar {}
+            TopBar {
+                connection_mode: use_signal(|| crate::config::WebSocketMode::Local),
+                connection_state: use_signal(|| crate::components::transport::ConnectionState::Disconnected),
+            }
             
             // Main Content Area (Sidebar + Content)
             div {
@@ -576,7 +585,7 @@ fn App() -> Element {
                 
                 // Left Sidebar (1/3 width)
                 Sidebar {
-                    setlist: setlist.read().clone(),
+                    setlist: setlist(),
                     current_song_index,
                     current_section_index,
                     transport_positions,
@@ -586,7 +595,7 @@ fn App() -> Element {
                 
                 // Main Content Area (2/3 width)
                 MainContent {
-                    setlist: setlist.read().clone(),
+                    setlist: setlist(),
                     current_song_index: current_song_index(),
                     current_song_index_signal: current_song_index,
                     is_playing: is_playing,
