@@ -1,5 +1,9 @@
 use setlist::{Song, Section, SectionType};
+use primitives::{Position, MusicalPosition, TimePosition, TimeSignature};
 use std::collections::HashMap;
+
+pub mod navigation;
+pub mod sidebar_helpers;
 
 /// Helper function to get project name from song metadata
 pub fn get_project_name(song: &Song) -> Option<String> {
@@ -62,53 +66,154 @@ pub fn calculate_section_progress(section: &Section, transport_position: f64) ->
     progress * 100.0
 }
 
-// Color palette: [brightest, bright, medium, dark, darkest]
-const COLOR_PALETTE: &[&[&str]] = &[
-    &["rgb(239, 68, 68)", "rgb(220, 38, 38)", "rgb(185, 28, 28)", "rgb(153, 27, 27)", "rgb(127, 29, 29)"], // Red
-    &["rgb(34, 197, 94)", "rgb(22, 163, 74)", "rgb(21, 128, 61)", "rgb(20, 83, 45)", "rgb(22, 101, 52)"], // Green
-    &["rgb(59, 130, 246)", "rgb(37, 99, 235)", "rgb(29, 78, 216)", "rgb(30, 64, 175)", "rgb(30, 58, 138)"], // Blue
-    &["rgb(168, 85, 247)", "rgb(147, 51, 234)", "rgb(126, 34, 206)", "rgb(107, 33, 168)", "rgb(88, 28, 135)"], // Purple
-    &["rgb(251, 191, 36)", "rgb(245, 158, 11)", "rgb(217, 119, 6)", "rgb(180, 83, 9)", "rgb(146, 64, 14)"], // Yellow
-    &["rgb(236, 72, 153)", "rgb(219, 39, 119)", "rgb(190, 24, 93)", "rgb(157, 23, 77)", "rgb(131, 24, 67)"], // Pink
-    &["rgb(20, 184, 166)", "rgb(15, 118, 110)", "rgb(17, 94, 89)", "rgb(19, 78, 74)", "rgb(19, 78, 74)"], // Teal
-];
-
-/// Get song color (bright) for progress bars
-pub fn get_song_color_bright(index: usize) -> String {
-    let palette_idx = index % COLOR_PALETTE.len();
-    COLOR_PALETTE[palette_idx][1].to_string() // Bright shade
+/// Convert u32 color (RGB format: (r << 16) | (g << 8) | b) to RGB string
+fn color_u32_to_rgb(color: u32) -> (u8, u8, u8) {
+    let r = ((color >> 16) & 0xFF) as u8;
+    let g = ((color >> 8) & 0xFF) as u8;
+    let b = (color & 0xFF) as u8;
+    (r, g, b)
 }
 
-/// Get song color (muted) for background
-pub fn get_song_color_muted(index: usize) -> String {
-    let palette_idx = index % COLOR_PALETTE.len();
-    COLOR_PALETTE[palette_idx][4].to_string() // Darkest shade
+/// Convert RGB tuple to CSS rgb() string
+fn rgb_to_css_string(r: u8, g: u8, b: u8) -> String {
+    format!("rgb({}, {}, {})", r, g, b)
 }
 
-/// Get section color (bright) for progress bars
-pub fn get_section_color_bright(song_idx: usize, section_idx: usize) -> String {
-    let palette_idx = (song_idx * 10 + section_idx) % COLOR_PALETTE.len();
-    COLOR_PALETTE[palette_idx][1].to_string() // Bright shade
+/// Create a brighter variant of an RGB color
+fn brighten_color(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+    // Increase brightness by ~20%
+    let r = (r as f32 * 1.2).min(255.0) as u8;
+    let g = (g as f32 * 1.2).min(255.0) as u8;
+    let b = (b as f32 * 1.2).min(255.0) as u8;
+    (r, g, b)
 }
 
-/// Get section color (muted) for background
-pub fn get_section_color_muted(song_idx: usize, section_idx: usize) -> String {
-    let palette_idx = (song_idx * 10 + section_idx) % COLOR_PALETTE.len();
-    COLOR_PALETTE[palette_idx][4].to_string() // Darkest shade
+/// Create a muted/darker variant of an RGB color
+fn mute_color(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
+    // Reduce brightness by ~40%
+    let r = (r as f32 * 0.6) as u8;
+    let g = (g as f32 * 0.6) as u8;
+    let b = (b as f32 * 0.6) as u8;
+    (r, g, b)
 }
 
-/// Helper function to get color for section type (for main progress bar)
-pub fn get_section_type_color(section_type: &SectionType) -> String {
-    match section_type {
-        SectionType::Intro => "rgb(59, 130, 246)".to_string(),      // blue
-        SectionType::Verse => "rgb(34, 197, 94)".to_string(),        // green
-        SectionType::Chorus => "rgb(168, 85, 247)".to_string(),      // purple
-        SectionType::Bridge => "rgb(239, 68, 68)".to_string(),       // red
-        SectionType::Outro => "rgb(59, 130, 246)".to_string(),        // blue
-        SectionType::Instrumental => "rgb(251, 191, 36)".to_string(), // yellow
-        SectionType::Custom => "rgb(100, 100, 100)".to_string(),      // gray
-        SectionType::Pre(_) => "rgb(34, 197, 94)".to_string(),        // green
-        SectionType::Post(_) => "rgb(34, 197, 94)".to_string(),      // green
+/// Get song color from the song struct (from markers)
+/// Returns bright variant for progress bars
+pub fn get_song_color_bright(song: &Song) -> String {
+    // Get color from song_region_start_marker first (preserves song region color)
+    let color = song.song_region_start_marker.as_ref()
+        .and_then(|m| m.color)
+        .filter(|&c| c != 0)
+        .or_else(|| {
+            // Fallback to start_marker if available
+            song.start_marker.as_ref()
+                .and_then(|m| m.color)
+                .filter(|&c| c != 0)
+        });
+    
+    if let Some(color_u32) = color {
+        let (r, g, b) = color_u32_to_rgb(color_u32);
+        let (r, g, b) = brighten_color(r, g, b);
+        rgb_to_css_string(r, g, b)
+    } else {
+        // Default gray if no color found
+        "rgb(128, 128, 128)".to_string()
     }
+}
+
+/// Get song color from the song struct (from markers)
+/// Returns muted variant for backgrounds
+pub fn get_song_color_muted(song: &Song) -> String {
+    // Get color from song_region_start_marker first (preserves song region color)
+    let color = song.song_region_start_marker.as_ref()
+        .and_then(|m| m.color)
+        .filter(|&c| c != 0)
+        .or_else(|| {
+            // Fallback to start_marker if available
+            song.start_marker.as_ref()
+                .and_then(|m| m.color)
+                .filter(|&c| c != 0)
+        });
+    
+    if let Some(color_u32) = color {
+        let (r, g, b) = color_u32_to_rgb(color_u32);
+        let (r, g, b) = mute_color(r, g, b);
+        rgb_to_css_string(r, g, b)
+    } else {
+        // Default dark gray if no color found
+        "rgb(80, 80, 80)".to_string()
+    }
+}
+
+/// Get section color from the section struct
+/// Returns bright variant for progress bars
+pub fn get_section_color_bright(section: &Section) -> String {
+    if let Some(color_u32) = section.color.filter(|&c| c != 0) {
+        let (r, g, b) = color_u32_to_rgb(color_u32);
+        let (r, g, b) = brighten_color(r, g, b);
+        rgb_to_css_string(r, g, b)
+    } else {
+        // Default gray if no color found
+        "rgb(128, 128, 128)".to_string()
+    }
+}
+
+/// Get section color from the section struct
+/// Returns muted variant for backgrounds
+pub fn get_section_color_muted(section: &Section) -> String {
+    if let Some(color_u32) = section.color.filter(|&c| c != 0) {
+        let (r, g, b) = color_u32_to_rgb(color_u32);
+        let (r, g, b) = mute_color(r, g, b);
+        rgb_to_css_string(r, g, b)
+    } else {
+        // Default dark gray if no color found
+        "rgb(80, 80, 80)".to_string()
+    }
+}
+
+/// Get tempo at a specific position from song's tempo_time_sig_changes
+/// Returns default tempo (120 BPM) if no tempo changes found
+pub fn get_tempo_at_position(song: &Song, position_seconds: f64) -> f64 {
+    // Find the last tempo change before or at this position
+    let mut current_tempo = 120.0; // Default tempo
+    
+    for change in &song.tempo_time_sig_changes {
+        if change.position <= position_seconds {
+            current_tempo = change.tempo;
+        } else {
+            break;
+        }
+    }
+    
+    current_tempo
+}
+
+/// Get time signature at a specific position from song's tempo_time_sig_changes
+/// Returns default time signature (4/4) if no time signature changes found
+pub fn get_time_signature_at_position(song: &Song, position_seconds: f64) -> TimeSignature {
+    // Find the last time signature change before or at this position
+    let mut current_time_sig = TimeSignature::new(4, 4); // Default 4/4
+    
+    for change in &song.tempo_time_sig_changes {
+        if change.position <= position_seconds {
+            if let Some((num, den)) = change.time_signature {
+                current_time_sig = TimeSignature::new(num, den);
+            }
+        } else {
+            break;
+        }
+    }
+    
+    current_time_sig
+}
+
+/// Format musical position as string (e.g., "1.1.000")
+pub fn format_musical_position(musical: &MusicalPosition) -> String {
+    format!("{}.{}.{:03}", musical.measure + 1, musical.beat + 1, musical.subdivision)
+}
+
+/// Format time position as string (e.g., "1:23.456")
+pub fn format_time_position(time: &TimePosition) -> String {
+    format!("{}:{:02}.{:03}", time.minutes, time.seconds, time.milliseconds)
 }
 

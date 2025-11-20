@@ -2,6 +2,7 @@ pub mod layout;
 pub mod transport;
 pub mod progress;
 pub mod song;
+pub mod sidebar_items;
 
 // Re-export commonly used components
 pub use layout::{TopBar, Sidebar, MainContent};

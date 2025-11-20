@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use setlist::Setlist;
-use crate::utils::{calculate_song_progress, calculate_section_progress, get_section_type_color, get_project_name};
+use primitives::{Position, MusicalPosition, TimePosition, TimeSignature};
+use marker_region::application::TempoTimePoint;
+use crate::utils::{calculate_song_progress, calculate_section_progress, get_section_color_bright, get_project_name, get_tempo_at_position, get_time_signature_at_position, format_musical_position, format_time_position};
 use std::collections::HashMap;
 
 /// Progress bar section definition
@@ -313,7 +315,7 @@ pub fn SongProgressBar(setlist: Setlist, current_song_index: Option<usize>, tran
         ProgressSection {
             start_percent: start_percent.max(0.0),
             end_percent: end_percent.min(100.0),
-            color: get_section_type_color(&section.section_type),
+            color: get_section_color_bright(section),
             name: abbreviation,
         }
     }).collect();
@@ -326,13 +328,114 @@ pub fn SongProgressBar(setlist: Setlist, current_song_index: Option<usize>, tran
     };
 
     let active_color = if let Some(active_section) = song.sections.iter().find(|s| s.contains_position(current_position)) {
-        get_section_type_color(&active_section.section_type)
+        get_section_color_bright(active_section)
     } else {
         "rgb(100, 100, 100)".to_string() // Default gray if no active section
     };
     
     // Pre-calculate section rendering data for visual overlays
     let song_idx_str = current_song_index.map(|i| i.to_string()).unwrap_or_else(|| "none".to_string());
+    
+    // Filter and prepare tempo/time signature markers (remove redundant ones)
+    // Similar to TypeScript: track previous values and only show actual changes
+    let mut tempo_markers: Vec<&TempoTimePoint> = Vec::new();
+    let mut prev_tempo: Option<f64> = None;
+    let mut prev_time_sig: Option<(i32, i32)> = None;
+    
+    // Sort tempo changes by position to ensure correct order
+    let mut sorted_changes: Vec<&TempoTimePoint> = song.tempo_time_sig_changes.iter().collect();
+    sorted_changes.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
+    
+    // Establish baseline from first marker (for label building)
+    let mut baseline_tempo: Option<f64> = None;
+    let mut baseline_time_sig: Option<(i32, i32)> = None;
+    if let Some(first_point) = sorted_changes.first() {
+        if first_point.tempo > 0.0 {
+            baseline_tempo = Some(first_point.tempo);
+        }
+        if let Some(time_sig) = first_point.time_signature {
+            baseline_time_sig = Some(time_sig);
+        }
+    }
+    
+    for point in sorted_changes.iter() {
+        // Check what actually changed
+        let current_tempo = if point.tempo > 0.0 { Some(point.tempo) } else { None };
+        let current_time_sig = point.time_signature;
+        
+        let tempo_changed = match (prev_tempo, current_tempo) {
+            (Some(prev), Some(curr)) => (prev - curr).abs() > 0.01,
+            (None, Some(_)) => false, // First marker establishes baseline, don't show it
+            (Some(_), None) => false, // Can't change to None
+            (None, None) => false,
+        };
+        
+        let time_sig_changed = match (prev_time_sig, current_time_sig) {
+            (Some(prev), Some(curr)) => prev != curr,
+            (None, Some(_)) => false, // First marker establishes baseline, don't show it
+            (Some(_), None) => false, // Can't change to None
+            (None, None) => false,
+        };
+        
+        // Only include if tempo or time signature actually changed from previous
+        if tempo_changed || time_sig_changed {
+            tempo_markers.push(point);
+        }
+        
+        // Update previous values for next iteration
+        if let Some(tempo) = current_tempo {
+            prev_tempo = Some(tempo);
+        }
+        if let Some(time_sig) = current_time_sig {
+            prev_time_sig = Some(time_sig);
+        }
+    }
+    
+    // Convert tempo markers to percentage positions and format badge text
+    // Track previous values starting from baseline
+    let mut prev_tempo_for_label = baseline_tempo;
+    let mut prev_time_sig_for_label = baseline_time_sig;
+    
+    let tempo_marker_data: Vec<_> = tempo_markers.iter().enumerate().map(|(idx, point)| {
+        let marker_position_seconds = point.position; // Already song-relative
+        let marker_percent = ((marker_position_seconds - song_start) / song_duration * 100.0).max(0.0).min(100.0);
+        
+        // Build label based on what changed from previous marker
+        let mut label_parts = Vec::new();
+        
+        let current_tempo = if point.tempo > 0.0 { Some(point.tempo) } else { None };
+        let current_time_sig = point.time_signature;
+        
+        // Check if time signature changed (add first)
+        if let Some((n, d)) = current_time_sig {
+            if let Some(prev_sig) = prev_time_sig_for_label {
+                if prev_sig != (n, d) {
+                    label_parts.push(format!("{}/{}", n, d));
+                }
+            }
+        }
+        
+        // Check if tempo changed (add second)
+        if let Some(tempo) = current_tempo {
+            if let Some(prev) = prev_tempo_for_label {
+                if (prev - tempo).abs() > 0.01 {
+                    label_parts.push(format!("{:.0} bpm", tempo));
+                }
+            }
+        }
+        
+        // Update previous values for next iteration
+        if let Some(tempo) = current_tempo {
+            prev_tempo_for_label = Some(tempo);
+        }
+        if let Some(time_sig) = current_time_sig {
+            prev_time_sig_for_label = Some(time_sig);
+        }
+        
+        let badge_text = label_parts.join(" ");
+        let marker_key = format!("tempo-marker-{}-{}", song_idx_str, idx);
+        (marker_key, marker_percent, badge_text)
+    }).filter(|(_, _, badge_text)| !badge_text.is_empty()).collect();
     let section_render_data: Vec<_> = sections.iter().enumerate().map(|(index, section)| {
         let section_start = section.start_percent;
         let section_end = section.end_percent;
@@ -347,9 +450,26 @@ pub fn SongProgressBar(setlist: Setlist, current_song_index: Option<usize>, tran
     rsx! {
         div {
             class: "flex flex-col items-center justify-center h-24 w-full px-4",
+            // Tempo/Time Signature labels (above progress bar, like TypeScript)
+            if !tempo_marker_data.is_empty() {
+                div {
+                    class: "relative mb-6 h-6 w-full",
+                    for (marker_key, marker_percent, badge_text) in tempo_marker_data.iter() {
+                        div {
+                            key: "{marker_key}",
+                            class: "absolute",
+                            style: format!("left: {}%; transform: translateX(-50%); top: 0;", marker_percent),
+                            div {
+                                class: "text-xs font-medium text-center whitespace-nowrap px-1 py-0.5 rounded bg-accent text-accent-foreground border border-border",
+                                "{badge_text}"
+                            }
+                        }
+                    }
+                }
+            }
             // Main segmented progress bar
             div {
-                class: "relative w-full h-16 rounded-lg overflow-hidden bg-secondary",
+                class: "relative w-full h-16 rounded-lg overflow-visible bg-secondary",
                 // Render sections as background layers (visual only, no individual progress bars)
                 for (section_key, _text_key, section_idx, section_start, section_width, section_color, _section_name) in section_render_data.iter() {
                     div {
@@ -413,6 +533,17 @@ pub fn SongProgressBar(setlist: Setlist, current_song_index: Option<usize>, tran
                         }
                     }
                 }
+                // Tempo/Time Signature markers (vertical lines extending above and through progress bar)
+                for (marker_key, marker_percent, _badge_text) in tempo_marker_data.iter() {
+                    div {
+                        key: "{marker_key}",
+                        class: "absolute pointer-events-none",
+                        style: format!(
+                            "left: {}%; width: 2px; top: -1rem; bottom: 0; background-color: rgba(255, 255, 255, 0.7); z-index: 40;",
+                            marker_percent
+                        ),
+                    }
+                }
             }
             // Section progress bar (shows progress within current section)
             div {
@@ -434,6 +565,63 @@ pub fn SongProgressBar(setlist: Setlist, current_song_index: Option<usize>, tran
                         active_color
                     ),
                 }
+            }
+        }
+    }
+}
+
+/// Detail badges component showing musical position, time position, tempo, and time signature
+#[component]
+pub fn DetailBadges(song: setlist::Song, current_position: f64) -> Element {
+    // Calculate song-relative position
+    let song_start = if song.effective_start() > 0.0 {
+        song.effective_start()
+    } else {
+        song.sections.first()
+            .map(|s| s.start_seconds())
+            .unwrap_or(0.0)
+    };
+    
+    // Position relative to song start (for tempo/time sig lookup)
+    let song_relative_position = (current_position - song_start).max(0.0);
+    
+    // Get tempo and time signature at current position (relative to song start)
+    let tempo = get_tempo_at_position(&song, song_relative_position);
+    let time_sig = get_time_signature_at_position(&song, song_relative_position);
+    
+    // Calculate musical position from time position
+    // Convert the song-relative time position to musical position using tempo and time signature
+    let time_pos = TimePosition::from_seconds(song_relative_position);
+    let musical_pos = time_pos.to_musical_position(tempo, time_sig.clone());
+    
+    // Format the values
+    let musical_str = format_musical_position(&musical_pos);
+    let time_str = format_time_position(&time_pos);
+    let tempo_str = format!("{:.0} bpm", tempo);
+    let time_sig_str = format!("{}/{}", time_sig.numerator, time_sig.denominator);
+    
+    rsx! {
+        div {
+            class: "flex flex-wrap gap-2 justify-center",
+            // Musical Position badge (value only)
+            div {
+                class: "px-3 py-1 rounded-md bg-accent text-accent-foreground text-sm font-mono border border-border",
+                "{musical_str}"
+            }
+            // Time Position badge (value only)
+            div {
+                class: "px-3 py-1 rounded-md bg-accent text-accent-foreground text-sm font-mono border border-border",
+                "{time_str}"
+            }
+            // Tempo badge (value only)
+            div {
+                class: "px-3 py-1 rounded-md bg-accent text-accent-foreground text-sm font-mono border border-border",
+                "{tempo_str}"
+            }
+            // Time Signature badge (value only)
+            div {
+                class: "px-3 py-1 rounded-md bg-accent text-accent-foreground text-sm font-mono border border-border",
+                "{time_sig_str}"
             }
         }
     }
