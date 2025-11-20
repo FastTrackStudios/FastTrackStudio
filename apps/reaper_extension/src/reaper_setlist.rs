@@ -865,6 +865,10 @@ fn build_song_from_region(
                             "Stored color in section"
                         );
                     }
+                    // Calculate and store length_measures in metadata (computed field, not stored in struct)
+                    if let Some(length_measures) = section.length_measures() {
+                        section.metadata.insert("length_measures".to_string(), length_measures.to_string());
+                    }
                     record_section_created();
                     Some(section)
                 }
@@ -900,7 +904,11 @@ fn build_song_from_region(
                 "Count-In".to_string(),
                 None,
             ) {
-                Ok(count_in_section) => {
+                Ok(mut count_in_section) => {
+                    // Calculate and store length_measures in metadata
+                    if let Some(length_measures) = count_in_section.length_measures() {
+                        count_in_section.metadata.insert("length_measures".to_string(), length_measures.to_string());
+                    }
                     record_section_created();
                     sections.push(count_in_section);
                 }
@@ -927,7 +935,11 @@ fn build_song_from_region(
                     "End".to_string(),
                     None,
                 ) {
-                    Ok(end_section) => {
+                    Ok(mut end_section) => {
+                        // Calculate and store length_measures in metadata
+                        if let Some(length_measures) = end_section.length_measures() {
+                            end_section.metadata.insert("length_measures".to_string(), length_measures.to_string());
+                        }
                         record_section_created();
                         sections.push(end_section);
                     }
@@ -1156,6 +1168,10 @@ fn build_song_from_project_simple(
                             "Stored color in section"
                         );
                     }
+                    // Calculate and store length_measures in metadata (computed field, not stored in struct)
+                    if let Some(length_measures) = section.length_measures() {
+                        section.metadata.insert("length_measures".to_string(), length_measures.to_string());
+                    }
                     record_section_created();
                     Some(section)
                 }
@@ -1194,7 +1210,11 @@ fn build_song_from_project_simple(
                 "Count-In".to_string(),
                 None,
             ) {
-                Ok(count_in_section) => {
+                Ok(mut count_in_section) => {
+                    // Calculate and store length_measures in metadata
+                    if let Some(length_measures) = count_in_section.length_measures() {
+                        count_in_section.metadata.insert("length_measures".to_string(), length_measures.to_string());
+                    }
                     record_section_created();
                     sections.push(count_in_section);
                 }
@@ -1221,7 +1241,11 @@ fn build_song_from_project_simple(
                     "End".to_string(),
                     None,
                 ) {
-                    Ok(end_section) => {
+                    Ok(mut end_section) => {
+                        // Calculate and store length_measures in metadata
+                        if let Some(length_measures) = end_section.length_measures() {
+                            end_section.metadata.insert("length_measures".to_string(), length_measures.to_string());
+                        }
                         record_section_created();
                         sections.push(end_section);
                     }

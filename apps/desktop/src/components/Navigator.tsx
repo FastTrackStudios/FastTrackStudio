@@ -135,7 +135,21 @@ export const Navigator: React.FC<NavigatorProps> = ({
 }) => {
   const [expandedSongs, setExpandedSongs] = useState<Set<number>>(new Set());
 
+  // Automatically expand the active song and collapse others
+  React.useEffect(() => {
+    if (selectedSongIndex !== undefined && selectedSongIndex !== null) {
+      setExpandedSongs(new Set([selectedSongIndex]));
+    } else {
+      setExpandedSongs(new Set());
+    }
+  }, [selectedSongIndex]);
+
   const toggleSong = (songIdx: number) => {
+    // Don't allow collapsing the active song
+    if (selectedSongIndex === songIdx) {
+      return;
+    }
+    
     setExpandedSongs((prev) => {
       const next = new Set(prev);
       if (next.has(songIdx)) {
@@ -258,8 +272,8 @@ export const Navigator: React.FC<NavigatorProps> = ({
                     const isSectionSelected =
                       isSelected && selectedSectionIndex === sectionIdx;
                     const sectionProgress = getSectionProgress(songIdx, sectionIdx);
-                    const sectionColorBright = getSectionColor(songIdx, sectionIdx, 'bright');
-                    const sectionColorMuted = getSectionColor(songIdx, sectionIdx, 'muted');
+                    const sectionColorBright = getSectionColor(section, 'bright');
+                    const sectionColorMuted = getSectionColor(section, 'muted');
 
                     return (
                       <div

@@ -110,6 +110,12 @@ importers:
       '@tauri-apps/plugin-opener':
         specifier: ^2
         version: 2.5.2
+      '@wasmer/sdk':
+        specifier: ^0.9.0
+        version: 0.9.0
+      '@wasmer/wasi':
+        specifier: ^1.2.2
+        version: 1.2.2
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -1785,6 +1791,12 @@ packages:
     peerDependencies:
       vite: ^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0
 
+  '@wasmer/sdk@0.9.0':
+    resolution: {integrity: sha512-k/CY19NfeLCjA9ZpX69JAoZKiuMT3hKjDFJYWdRGkCdfig9NtC9Op7Gpg2LeezuuQKd4WaSSq8bpSMdHw1BMgg==}
+
+  '@wasmer/wasi@1.2.2':
+    resolution: {integrity: sha512-39ZB3gefOVhBmkhf7Ta79RRSV/emIV8LhdvcWhP/MOZEjMmtzoZWMzt7phdKj8CUXOze+AwbvGK60lKaKldn1w==}
+
   acorn@8.15.0:
     resolution: {integrity: sha512-NZyJarBfL7nWwIq+FDL6Zp/yHEhePMNnnJ0y3qfieCrmNvYct8uvtiV41UvlSe6apAfk0fY1FbWx+NwfmpvtTg==}
     engines: {node: '>=0.4.0'}
@@ -2538,6 +2550,9 @@ packages:
         optional: true
       yaml:
         optional: true
+
+  web-worker@1.5.0:
+    resolution: {integrity: sha512-RiMReJrTAiA+mBjGONMnjVDP2u3p9R1vkcGz6gDIrOMT3oGuYwX2WRMYI9ipkphSuE5XKEhydbhNEJh4NY9mlw==}
 
   webpack-virtual-modules@0.6.2:
     resolution: {integrity: sha512-66/V2i5hQanC51vBQKPH4aI8NMAcBW59FVBs+rC7eGHupMyfn34q7rZIE+ETlJ+XTevqfUhVVBgSUNSW2flEUQ==}
@@ -4133,6 +4148,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@wasmer/sdk@0.9.0':
+    dependencies:
+      web-worker: 1.5.0
+
+  '@wasmer/wasi@1.2.2': {}
+
   acorn@8.15.0: {}
 
   ansis@4.2.0: {}
@@ -4850,6 +4871,8 @@ snapshots:
       jiti: 2.6.1
       lightningcss: 1.30.2
       tsx: 4.20.6
+
+  web-worker@1.5.0: {}
 
   webpack-virtual-modules@0.6.2: {}
 

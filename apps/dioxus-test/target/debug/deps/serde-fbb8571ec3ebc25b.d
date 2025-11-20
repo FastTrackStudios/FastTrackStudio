@@ -1,0 +1,14 @@
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/debug/deps/serde-fbb8571ec3ebc25b.d: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/codywright/Documents/Development/Rust/dioxus-test/target/debug/build/serde-58f6ecb54161f09d/out/private.rs
+
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/debug/deps/libserde-fbb8571ec3ebc25b.rlib: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/codywright/Documents/Development/Rust/dioxus-test/target/debug/build/serde-58f6ecb54161f09d/out/private.rs
+
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/debug/deps/libserde-fbb8571ec3ebc25b.rmeta: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/codywright/Documents/Development/Rust/dioxus-test/target/debug/build/serde-58f6ecb54161f09d/out/private.rs
+
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/debug/build/serde-58f6ecb54161f09d/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/codywright/Documents/Development/Rust/dioxus-test/target/debug/build/serde-58f6ecb54161f09d/out

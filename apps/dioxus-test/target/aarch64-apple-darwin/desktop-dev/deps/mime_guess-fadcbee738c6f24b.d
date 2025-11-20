@@ -1,0 +1,12 @@
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/desktop-dev/deps/mime_guess-fadcbee738c6f24b.d: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/impl_bin_search.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/mime_types.rs /Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/desktop-dev/build/mime_guess-930cb52c7b8ef0de/out/mime_types_generated.rs
+
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/desktop-dev/deps/libmime_guess-fadcbee738c6f24b.rlib: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/impl_bin_search.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/mime_types.rs /Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/desktop-dev/build/mime_guess-930cb52c7b8ef0de/out/mime_types_generated.rs
+
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/desktop-dev/deps/libmime_guess-fadcbee738c6f24b.rmeta: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/impl_bin_search.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/mime_types.rs /Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/desktop-dev/build/mime_guess-930cb52c7b8ef0de/out/mime_types_generated.rs
+
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/lib.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/impl_bin_search.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mime_guess-2.0.5/src/mime_types.rs:
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/desktop-dev/build/mime_guess-930cb52c7b8ef0de/out/mime_types_generated.rs:
+
+# env-dep:MIME_TYPES_GENERATED_PATH=/Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/desktop-dev/build/mime_guess-930cb52c7b8ef0de/out/mime_types_generated.rs

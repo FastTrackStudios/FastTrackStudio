@@ -1,0 +1,9 @@
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/desktop-dev/deps/wasm_bindgen_futures-f0a6d43250033497.d: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasm-bindgen-futures-0.4.55/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasm-bindgen-futures-0.4.55/src/queue.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasm-bindgen-futures-0.4.55/src/task/singlethread.rs
+
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/desktop-dev/deps/libwasm_bindgen_futures-f0a6d43250033497.rlib: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasm-bindgen-futures-0.4.55/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasm-bindgen-futures-0.4.55/src/queue.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasm-bindgen-futures-0.4.55/src/task/singlethread.rs
+
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/desktop-dev/deps/libwasm_bindgen_futures-f0a6d43250033497.rmeta: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasm-bindgen-futures-0.4.55/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasm-bindgen-futures-0.4.55/src/queue.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasm-bindgen-futures-0.4.55/src/task/singlethread.rs
+
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasm-bindgen-futures-0.4.55/src/lib.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasm-bindgen-futures-0.4.55/src/queue.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wasm-bindgen-futures-0.4.55/src/task/singlethread.rs:

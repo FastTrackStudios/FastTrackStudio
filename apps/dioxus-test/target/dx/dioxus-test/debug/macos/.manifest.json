@@ -1,0 +1,48 @@
+{
+  "cli_version": "0.7.1 (was built without git repository)",
+  "rust_version": "rustc 1.91.0 (f8297e351 2025-10-28)",
+  "assets": {
+    "assets": {
+      "/Users/codywright/Documents/Development/Rust/dioxus-test/assets/favicon.ico": [
+        {
+          "absolute_source_path": "/Users/codywright/Documents/Development/Rust/dioxus-test/assets/favicon.ico",
+          "bundled_path": "favicon-dxhdc9bce886dd2b3b.ico",
+          "options": {
+            "add_hash": true,
+            "variant": "Unknown"
+          }
+        }
+      ],
+      "/Users/codywright/Documents/Development/Rust/dioxus-test/assets/header.svg": [
+        {
+          "absolute_source_path": "/Users/codywright/Documents/Development/Rust/dioxus-test/assets/header.svg",
+          "bundled_path": "header-dxh5a82ce56a09e4d78.svg",
+          "options": {
+            "add_hash": true,
+            "variant": "Unknown"
+          }
+        }
+      ],
+      "/Users/codywright/Documents/Development/Rust/dioxus-test/assets/main.css": [
+        {
+          "absolute_source_path": "/Users/codywright/Documents/Development/Rust/dioxus-test/assets/main.css",
+          "bundled_path": "main-dxh7503a2a776ae510.css",
+          "options": {
+            "add_hash": true,
+            "variant": "Unknown"
+          }
+        }
+      ],
+      "/Users/codywright/Documents/Development/Rust/dioxus-test/assets/tailwind.css": [
+        {
+          "absolute_source_path": "/Users/codywright/Documents/Development/Rust/dioxus-test/assets/tailwind.css",
+          "bundled_path": "tailwind-dxhae66e76f4f5f6c70.css",
+          "options": {
+            "add_hash": true,
+            "variant": "Unknown"
+          }
+        }
+      ]
+    }
+  }
+}

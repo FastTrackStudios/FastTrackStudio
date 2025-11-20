@@ -111,45 +111,183 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({ song, songIndex, trans
     return transportStates.get(projectName) || null;
   }, [song, transportStates]);
 
-  // Calculate section widths and info (similar to SongProgressBar)
+  // Calculate section widths and info based on musical positions (measures)
   const sectionWidths = useMemo(() => {
     if (!song || !transport || song.sections.length === 0) return [];
 
-    // Backend now includes count-in and end sections as regular sections
-    // Just use the sections as-is from the backend (they're already sorted)
-    const sectionsWithIndices = song.sections.map((section, idx) => ({
-      section,
-      name: section.name || section.section_type,
-      start: section.start_position?.time?.seconds ?? 0,
-      end: section.end_position?.time?.seconds ?? 0,
-      originalIdx: idx,
-      displayIdx: idx, // Index for color calculation
-    }));
+    // Helper function to convert musical position to total measures (including fractional beats/subdivisions)
+    // subdivision is 0-999, where 1000 = full beat
+    const musicalPositionToMeasures = (pos: { measure?: number; beat?: number; subdivision?: number; tick?: number } | null | undefined, beatsPerMeasure: number = 4): number => {
+      if (!pos || pos.measure === undefined) return 0;
+      const measure = pos.measure ?? 0;
+      const beat = pos.beat ?? 0;
+      // Use subdivision if available (0-999), otherwise fallback to tick (0-960)
+      const subdivision = pos.subdivision ?? pos.tick ?? 0;
+      // Subdivision is in thousandths (0-999), so divide by 1000 to get fractional beats
+      const fractionalBeat = subdivision / 1000.0;
+      return measure + ((beat + fractionalBeat) / beatsPerMeasure);
+    };
 
-    // Calculate song boundaries from all sections (including synthetic ones)
-    const firstSection = sectionsWithIndices[0];
-    const lastSection = sectionsWithIndices[sectionsWithIndices.length - 1];
+    // Assume 4/4 time signature (4 beats per measure) - TODO: get from song metadata
+    const beatsPerMeasure = 4;
+
+    // Calculate absolute measure positions for each section
+    const sectionsWithMeasures = song.sections.map((section, idx) => {
+      // Try to get length_measures from metadata (calculated on Rust side)
+      let lengthMeasures: number | null = null;
+      if (section.metadata?.length_measures) {
+        const parsed = parseFloat(section.metadata.length_measures);
+        if (!isNaN(parsed) && parsed > 0) {
+          lengthMeasures = parsed;
+        }
+      }
+      
+      // Use musical_position from start_position and end_position (musical_position field is redundant)
+      const startMusical = section.start_position?.musical_position;
+      const endMusical = section.end_position?.musical_position;
+      
+      const startMeasures = musicalPositionToMeasures(startMusical, beatsPerMeasure);
+      const endMeasures = musicalPositionToMeasures(endMusical, beatsPerMeasure);
+      
+      // Use Rust-calculated length_measures if available, otherwise calculate from positions
+      if (lengthMeasures === null) {
+        lengthMeasures = Math.max(0, endMeasures - startMeasures);
+      }
+      
+      return {
+        section,
+        name: section.name || section.section_type,
+        start: section.start_position?.time?.seconds ?? 0,
+        end: section.end_position?.time?.seconds ?? 0,
+        startMeasures,
+        endMeasures,
+        lengthMeasures,
+        originalIdx: idx,
+        displayIdx: idx,
+      };
+    });
+
+    // Find the first and last sections to get song boundaries
+    const sortedSections = [...sectionsWithMeasures].sort((a, b) => a.startMeasures - b.startMeasures);
+    const firstSection = sortedSections[0];
+    const lastSection = sortedSections[sortedSections.length - 1];
     
-    const calculatedSongStart = firstSection ? firstSection.start : 
-                                 song.song_region_start_marker?.position.time.seconds ?? 
-                                 song.start_marker?.position.time.seconds ?? 0;
-    const calculatedSongEnd = lastSection ? lastSection.end :
-                              song.song_region_end_marker?.position.time.seconds ?? 
-                              song.end_marker?.position.time.seconds ??
-                              song.render_end_marker?.position.time.seconds ??
-                              song.song_end_marker?.position.time.seconds ?? calculatedSongStart;
-    const songLength = calculatedSongEnd - calculatedSongStart;
+    if (!firstSection || !lastSection) {
+      // Fallback to time-based calculation
+      const sectionsWithIndices = song.sections.map((section, idx) => ({
+        section,
+        name: section.name || section.section_type,
+        start: section.start_position?.time?.seconds ?? 0,
+        end: section.end_position?.time?.seconds ?? 0,
+        originalIdx: idx,
+        displayIdx: idx,
+      }));
+
+      const firstSectionTime = sectionsWithIndices[0];
+      const lastSectionTime = sectionsWithIndices[sectionsWithIndices.length - 1];
+      
+      const calculatedSongStart = firstSectionTime ? firstSectionTime.start : 
+                                   song.song_region_start_marker?.position.time.seconds ?? 
+                                   song.start_marker?.position.time.seconds ?? 0;
+      const calculatedSongEnd = lastSectionTime ? lastSectionTime.end :
+                                song.song_region_end_marker?.position.time.seconds ?? 
+                                song.end_marker?.position.time.seconds ??
+                                song.render_end_marker?.position.time.seconds ??
+                                song.song_end_marker?.position.time.seconds ?? calculatedSongStart;
+      const songLength = calculatedSongEnd - calculatedSongStart;
+      
+      if (songLength <= 0) return [];
+
+      return sectionsWithIndices.map(({ section, name, start, end, originalIdx, displayIdx }) => {
+        const sectionStartRel = Math.max(0, start - calculatedSongStart);
+        const sectionEndRel = Math.max(0, end - calculatedSongStart);
+        const sectionWidth = ((sectionEndRel - sectionStartRel) / songLength) * 100;
+        const sectionLeft = (sectionStartRel / songLength) * 100;
+
+        const sectionColorBright = getSectionColor(section, songIndex, displayIdx, 'bright');
+        const sectionColorMuted = getSectionColor(section, songIndex, displayIdx, 'muted');
+
+        return {
+          section,
+          name,
+          start,
+          end,
+          originalIdx,
+          displayIdx,
+          widthPercent: sectionWidth,
+          leftPercent: sectionLeft,
+          brightColor: sectionColorBright,
+          mutedColor: sectionColorMuted,
+        };
+      });
+    }
+
+    // Calculate total song length in measures (from first section start to last section end)
+    const songStartMeasures = firstSection.startMeasures;
+    const songEndMeasures = lastSection.endMeasures;
+    const totalSongMeasures = Math.max(0, songEndMeasures - songStartMeasures);
     
-    if (songLength <= 0) return [];
+    // If measures calculation fails (all zeros or invalid), fallback to time-based
+    if (totalSongMeasures <= 0 || !sectionsWithMeasures.some(s => s.lengthMeasures > 0)) {
+      // Fallback to time-based calculation
+      const sectionsWithIndices = song.sections.map((section, idx) => ({
+        section,
+        name: section.name || section.section_type,
+        start: section.start_position?.time?.seconds ?? 0,
+        end: section.end_position?.time?.seconds ?? 0,
+        originalIdx: idx,
+        displayIdx: idx,
+      }));
 
-    // Calculate widths based on time
-    return sectionsWithIndices.map(({ section, name, start, end, originalIdx, displayIdx }) => {
-      const sectionStartRel = Math.max(0, start - calculatedSongStart);
-      const sectionEndRel = Math.max(0, end - calculatedSongStart);
-      const sectionWidth = ((sectionEndRel - sectionStartRel) / songLength) * 100;
-      const sectionLeft = (sectionStartRel / songLength) * 100;
+      const firstSectionTime = sectionsWithIndices[0];
+      const lastSectionTime = sectionsWithIndices[sectionsWithIndices.length - 1];
+      
+      const calculatedSongStart = firstSectionTime ? firstSectionTime.start : 
+                                   song.song_region_start_marker?.position.time.seconds ?? 
+                                   song.start_marker?.position.time.seconds ?? 0;
+      const calculatedSongEnd = lastSectionTime ? lastSectionTime.end :
+                                song.song_region_end_marker?.position.time.seconds ?? 
+                                song.end_marker?.position.time.seconds ??
+                                song.render_end_marker?.position.time.seconds ??
+                                song.song_end_marker?.position.time.seconds ?? calculatedSongStart;
+      const songLength = calculatedSongEnd - calculatedSongStart;
+      
+      if (songLength <= 0) return [];
 
-      // Use section metadata color if available, otherwise fallback to palette
+      return sectionsWithIndices.map(({ section, name, start, end, originalIdx, displayIdx }) => {
+        const sectionStartRel = Math.max(0, start - calculatedSongStart);
+        const sectionEndRel = Math.max(0, end - calculatedSongStart);
+        const sectionWidth = ((sectionEndRel - sectionStartRel) / songLength) * 100;
+        const sectionLeft = (sectionStartRel / songLength) * 100;
+
+        const sectionColorBright = getSectionColor(section, songIndex, displayIdx, 'bright');
+        const sectionColorMuted = getSectionColor(section, songIndex, displayIdx, 'muted');
+
+        return {
+          section,
+          name,
+          start,
+          end,
+          originalIdx,
+          displayIdx,
+          widthPercent: sectionWidth,
+          leftPercent: sectionLeft,
+          brightColor: sectionColorBright,
+          mutedColor: sectionColorMuted,
+        };
+      });
+    }
+
+    // Calculate widths and positions based on absolute measure positions relative to song start
+    return sectionsWithMeasures.map(({ section, name, start, end, startMeasures, lengthMeasures, originalIdx, displayIdx }) => {
+      // Calculate position relative to song start
+      const sectionStartRel = Math.max(0, startMeasures - songStartMeasures);
+      
+      // Width is the section's length as percentage of total song length
+      const widthPercent = (lengthMeasures / totalSongMeasures) * 100;
+      // Left position is where the section starts relative to song start
+      const leftPercent = (sectionStartRel / totalSongMeasures) * 100;
+
       const sectionColorBright = getSectionColor(section, songIndex, displayIdx, 'bright');
       const sectionColorMuted = getSectionColor(section, songIndex, displayIdx, 'muted');
 
@@ -160,8 +298,8 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({ song, songIndex, trans
         end,
         originalIdx,
         displayIdx,
-        widthPercent: sectionWidth,
-        leftPercent: sectionLeft,
+        widthPercent,
+        leftPercent,
         brightColor: sectionColorBright,
         mutedColor: sectionColorMuted,
       };

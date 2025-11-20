@@ -1,81 +1,111 @@
 [workspace]
-resolver = "2"
 members = [
-    "modules/daw/transport",
-    "modules/daw/project",
-    "modules/daw/primitives",
-    "modules/daw/marker-region",
-    "modules/fts/setlist",
-    "modules/keyflow",
+    "apps/cli",
+    "apps/desktop/src-tauri",
+    "apps/dioxus-test",
+    "apps/reaper_extension",
     "libs/macros",
     "libs/swell-ui",
-    "apps/desktop/src-tauri",
-    "apps/cli",
-    "apps/reaper_extension",
-    "xtask", "modules/fts/smart-template",
+    "modules/daw/marker-region",
+    "modules/daw/primitives",
+    "modules/daw/project",
+    "modules/daw/transport",
+    "modules/fts/setlist",
+    "modules/fts/smart-template",
+    "modules/keyflow",
+    "xtask",
 ]
+resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
 authors = ["Cody Wright"]
 license = "MIT OR Apache-2.0"
+edition = "2021"
 
 [workspace.dependencies]
-# Async runtime
-tokio = { version = "1.0", features = ["full"] }
-
-# Tower ecosystem
-tower = { version = "0.4", features = ["util"] }
-
-# Error handling
-thiserror = "1.0"
-
-# Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-
-# Async traits
-async-trait = "0.1"
-
-# Tauri dependencies
-tauri = { version = "2", features = [] }
-tauri-build = { version = "2", features = [] }
-tauri-plugin-opener = "2"
-tauri-plugin-shell = "2"
-
-# TauRPC dependencies
-taurpc = "0.5.2"
-specta = { version = "2.0.0-rc.22", features = ["derive", "uuid"] }
-specta-typescript = "0.0.9"
-
-# Additional RPC dependencies
-tarpc = { version = "0.37", features = ["full"] }
-futures = "0.3"
 anyhow = "1.0"
-rand = "0.8"
-tracing = "0.1"
-chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
 fragile = "2.0.1"
-
-# REAPER dependencies
-reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
-reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
-reaper-common-types = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", package = "reaper-common-types", features = ["palette"] }
+futures = "0.3"
 libloading = "0.8"
-
-# Reactive programming (for swell-ui)
-rxrust = { git = "https://github.com/rxRust/rxRust", rev = "349e50b3197e05926e2378ef8fc45cb67ad43b83" }
-
-# UI libraries (for swell-ui)
-scopeguard = "1.1.0"
-raw-window-handle = "0.4.2"
-palette = "0.7.3"
-winapi = { version = "0.3", features = ["winuser", "uxtheme"] }
-# Use exact version for vizia compatibility (vizia requires >=0.3.0-beta.3, <0.3.0-beta.4)
 objc2 = "=0.3.0-beta.3"
 objc2-foundation = "0.2.0"
+palette = "0.7.3"
+rand = "0.8"
+raw-window-handle = "0.4.2"
+scopeguard = "1.1.0"
+serde_json = "1.0"
+specta-typescript = "0.0.9"
+tauri-plugin-opener = "2"
+tauri-plugin-shell = "2"
+taurpc = "0.5.2"
+thiserror = "1.0"
+tracing = "0.1"
+
+[workspace.dependencies.chrono]
+version = "0.4"
+features = ["serde"]
+
+[workspace.dependencies.reaper-common-types]
+git = "https://github.com/helgoboss/reaper-rs.git"
+branch = "master"
+features = ["palette"]
+package = "reaper-common-types"
+
+[workspace.dependencies.reaper-low]
+git = "https://github.com/helgoboss/reaper-rs.git"
+branch = "master"
+
+[workspace.dependencies.reaper-medium]
+git = "https://github.com/helgoboss/reaper-rs.git"
+branch = "master"
+
+[workspace.dependencies.rxrust]
+git = "https://github.com/rxRust/rxRust"
+rev = "349e50b3197e05926e2378ef8fc45cb67ad43b83"
+
+[workspace.dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[workspace.dependencies.specta]
+version = "2.0.0-rc.22"
+features = [
+    "derive",
+    "uuid",
+]
+
+[workspace.dependencies.tarpc]
+version = "0.37"
+features = ["full"]
+
+[workspace.dependencies.tauri]
+version = "2"
+features = []
+
+[workspace.dependencies.tauri-build]
+version = "2"
+features = []
+
+[workspace.dependencies.tokio]
+version = "1.0"
+features = ["full"]
+
+[workspace.dependencies.tower]
+version = "0.4"
+features = ["util"]
+
+[workspace.dependencies.winapi]
+version = "0.3"
+features = [
+    "winuser",
+    "uxtheme",
+]
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
-unused ={ level = "allow", priority = -1 } #For exploratory Dev
+
+[workspace.lints.rust.unused]
+level = "allow"
+priority = -1

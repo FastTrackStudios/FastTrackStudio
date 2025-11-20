@@ -9,6 +9,7 @@ mod reaper_setlist;
 mod websocket_client;
 mod websocket_state;
 mod websocket_server;
+mod color_utils;
 
 use reaper_macros::reaper_extension_plugin;
 use std::error::Error;
@@ -199,13 +200,14 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let _ = crate::websocket_state::set_transport_update_sender(transport_tx);
     
     // Start transport polling task that receives updates from main thread and broadcasts them
+    // Process messages as fast as possible - spawn each broadcast as a separate task for parallelism
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime for transport polling");
         rt.block_on(async {
             loop {
                 match transport_rx.recv().await {
                     Some((project_name, is_active, playing, position, tempo, song_progress, section_progress)) => {
-                        // Broadcast transport update for this project using global state
+                        // Broadcast immediately - this is fast (just sends to broadcast channel)
                         if let Some(state) = crate::websocket_state::get_global_ws_state() {
                             crate::websocket_server::broadcast_transport(&state, &project_name, is_active, playing, position, tempo, song_progress, section_progress);
                         }

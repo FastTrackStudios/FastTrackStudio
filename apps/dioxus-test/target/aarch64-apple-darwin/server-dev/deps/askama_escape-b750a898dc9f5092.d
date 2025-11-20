@@ -1,0 +1,10 @@
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/server-dev/deps/askama_escape-b750a898dc9f5092.d: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/ascii_str.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/html.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/../README.md
+
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/server-dev/deps/libaskama_escape-b750a898dc9f5092.rlib: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/ascii_str.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/html.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/../README.md
+
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/aarch64-apple-darwin/server-dev/deps/libaskama_escape-b750a898dc9f5092.rmeta: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/ascii_str.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/html.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/../README.md
+
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/lib.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/ascii_str.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/html.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/askama_escape-0.13.0/src/../README.md:

@@ -249,11 +249,11 @@ fn log_region_colors_handler() {
                 let native_color = info.color;
                 let native_color_raw = native_color.to_raw();
                 
-                // Convert to RGB
+                // Convert to RGB using standardized color conversion
                 let rgb = medium_reaper.color_from_native(native_color);
                 
-                // Convert to packed u32
-                let packed_color = (rgb.r as u32) << 16 | (rgb.g as u32) << 8 | rgb.b as u32;
+                // Convert to packed u32 using standardized function
+                let packed_color = crate::color_utils::pack_rgb_to_u32(rgb);
                 
                 // Format color info
                 let color_info = format!(

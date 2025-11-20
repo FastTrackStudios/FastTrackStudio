@@ -36,5 +36,19 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+    // Required for SharedArrayBuffer support (needed by @wasmer/wasi)
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
+    // Allow serving files from parent directories (for WASM files)
+    fs: {
+      allow: [".."],
+    },
+  },
+  // Configure asset handling for WASM files
+  assetsInclude: ["**/*.wasm"],
+  optimizeDeps: {
+    exclude: ["*.wasm"],
   },
 }));

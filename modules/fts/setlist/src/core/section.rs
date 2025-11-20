@@ -230,11 +230,9 @@ pub struct Section {
     pub number: Option<u32>,
     /// Split letter for consecutive sections (e.g., 'a', 'b', 'c')
     pub split_letter: Option<char>,
-    /// Musical position (measure.beat.subdivision) - primary position for navigation
-    pub musical_position: Option<MusicalPosition>,
-    /// Start position
+    /// Start position (contains both musical and time position)
     pub start_position: Position,
-    /// End position
+    /// End position (contains both musical and time position)
     pub end_position: Position,
     /// Section name (from region name)
     pub name: String,
@@ -271,7 +269,6 @@ impl Section {
             section_type,
             number,
             split_letter: None,
-            musical_position: Some(start_position.musical.clone()),
             start_position,
             end_position,
             name,
@@ -307,6 +304,34 @@ impl Section {
     /// Get end time in seconds
     pub fn end_seconds(&self) -> f64 {
         self.end_position.time.to_seconds()
+    }
+
+    /// Calculate the length of the section in measures
+    /// Uses the musical positions from start_position and end_position
+    /// Assumes 4/4 time signature (4 beats per measure)
+    /// Returns None if musical positions are not available
+    pub fn length_measures(&self) -> Option<f64> {
+        let start_musical = &self.start_position.musical;
+        let end_musical = &self.end_position.musical;
+        
+        // Calculate beats per measure from time signature (default to 4/4)
+        // TODO: Get actual time signature from song/project metadata
+        let beats_per_measure = 4.0;
+        
+        // Convert musical positions to total measures
+        // measure + (beat + subdivision/1000) / beats_per_measure
+        let start_measures = start_musical.measure as f64 
+            + (start_musical.beat as f64 + start_musical.subdivision as f64 / 1000.0) / beats_per_measure;
+        
+        let end_measures = end_musical.measure as f64 
+            + (end_musical.beat as f64 + end_musical.subdivision as f64 / 1000.0) / beats_per_measure;
+        
+        let length = end_measures - start_measures;
+        if length > 0.0 {
+            Some(length)
+        } else {
+            None
+        }
     }
 
     /// Create a section from seconds (for compatibility)
@@ -349,18 +374,13 @@ impl Section {
         let start_position = primitives::Position::new(start_musical.clone(), start_time);
         let end_position = primitives::Position::new(end_musical, end_time);
         
-        let mut section = Self::new(
+        Ok(Self::new(
             section_type,
             start_position,
             end_position,
             name,
             number,
-        )?;
-        
-        // Ensure musical_position is set
-        section.musical_position = Some(start_musical);
-        
-        Ok(section)
+        )?)
     }
 
     /// Check if a time position is within this section
@@ -519,7 +539,6 @@ impl Section {
             section_type: self.section_type.clone(),
             number: self.number,
             split_letter: self.split_letter,
-            musical_position: Some(start_pos.musical.clone()),
             start_position: start_pos,
             end_position: Position::from_seconds(end_seconds),
             name: self.name.clone(),
@@ -535,7 +554,6 @@ impl Section {
             section_type,
             number: self.number,
             split_letter: self.split_letter,
-            musical_position: self.musical_position.clone(),
             start_position: self.start_position.clone(),
             end_position: self.end_position.clone(),
             name: self.name.clone(),

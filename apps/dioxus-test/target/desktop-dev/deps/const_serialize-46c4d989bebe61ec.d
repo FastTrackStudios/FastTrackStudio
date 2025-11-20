@@ -1,0 +1,10 @@
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/desktop-dev/deps/const_serialize-46c4d989bebe61ec.d: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/const_buffers.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/const_vec.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/../README.md
+
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/desktop-dev/deps/libconst_serialize-46c4d989bebe61ec.rlib: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/const_buffers.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/const_vec.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/../README.md
+
+/Users/codywright/Documents/Development/Rust/dioxus-test/target/desktop-dev/deps/libconst_serialize-46c4d989bebe61ec.rmeta: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/const_buffers.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/const_vec.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/../README.md
+
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/lib.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/const_buffers.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/const_vec.rs:
+/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-serialize-0.7.1/src/../README.md:

@@ -114,22 +114,19 @@ impl CliSetlistApp {
             // Get immutable data first
             let target_pos_opt = if let Some(song) = self.selected_song() {
                 if let Some(section) = song.sections.get(section_idx) {
-                    // Use musical position to calculate target time position
-                    if let Some(musical_pos) = &section.musical_position {
-                        if let Some(project) = &song.project {
-                            let transport = project.transport();
-                            let bpm = transport.tempo.bpm;
-                            let time_sig = transport.time_signature;
-                            
-                            // Convert musical position to time position
-                            let target_time = musical_pos.clone().to_time_position(bpm, time_sig);
-                            let target_pos = target_time.to_seconds();
-                            Some((target_pos, section.display_name()))
-                        } else {
-                            None
-                        }
+                    // Use musical position from start_position to calculate target time position
+                    let musical_pos = &section.start_position.musical;
+                    if let Some(project) = &song.project {
+                        let transport = project.transport();
+                        let bpm = transport.tempo.bpm;
+                        let time_sig = transport.time_signature;
+                        
+                        // Convert musical position to time position
+                        let target_time = musical_pos.clone().to_time_position(bpm, time_sig);
+                        let target_pos = target_time.to_seconds();
+                        Some((target_pos, section.display_name()))
                     } else {
-                        // Fallback to time position if musical position not available
+                        // Fallback to time position if project not available
                         let target_pos = section.start_position.time.to_seconds();
                         Some((target_pos, section.display_name()))
                     }

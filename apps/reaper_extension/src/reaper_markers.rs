@@ -3,28 +3,10 @@
 //! Reads markers and regions from REAPER projects and converts them to marker-region structs.
 
 use marker_region::core::{Marker, Region};
-use reaper_high::{Project, BookmarkType, Reaper};
-use reaper_medium::{PositionInSeconds, RgbColor, NativeColor};
+use reaper_high::{Project, BookmarkType};
+use reaper_medium::PositionInSeconds;
 use primitives::{Position, TimePosition, MusicalPosition, TimeRange};
-
-/// Pack an RgbColor into a u32 for storage/serialization
-/// Format: (r << 16) | (g << 8) | b
-fn pack_rgb_to_u32(rgb: RgbColor) -> u32 {
-    (rgb.r as u32) << 16 | (rgb.g as u32) << 8 | rgb.b as u32
-}
-
-/// Extract color from REAPER native color, returning packed u32 or None if black
-fn extract_color_from_native(native_color: NativeColor) -> Option<u32> {
-    let reaper = Reaper::get();
-    let rgb = reaper.medium_reaper().color_from_native(native_color);
-    let packed = pack_rgb_to_u32(rgb);
-    // Only store if not black (0x000000), as black typically means "no color" in REAPER
-    if packed == 0 {
-        None
-    } else {
-        Some(packed)
-    }
-}
+use crate::color_utils::extract_color_from_native;
 
 /// Read all markers from a REAPER project
 pub fn read_markers_from_project(project: &Project) -> Result<Vec<Marker>, String> {
