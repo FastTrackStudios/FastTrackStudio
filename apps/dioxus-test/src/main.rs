@@ -14,7 +14,20 @@ const MAIN_CSS: Asset = asset!("/assets/main.css");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 
 fn main() {
-    dioxus::launch(App);
+    // Initialize tracing subscriber for logging (only for desktop builds)
+    #[cfg(feature = "desktop")]
+    {
+        use tracing_subscriber::prelude::*;
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| "info".into())
+            )
+            .with(tracing_subscriber::fmt::layer())
+            .init();
+    }
+    
+;
 }
 
 #[component]

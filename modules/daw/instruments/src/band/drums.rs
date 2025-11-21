@@ -4,10 +4,9 @@
 
 use std::fmt;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 /// Band/popular percussion instruments
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize )]
 #[ts(export)]
 pub enum PercussionInstrument {
     // Drum kit components

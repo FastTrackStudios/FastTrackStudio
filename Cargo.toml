@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "apps/cli",
-    "apps/desktop/src-tauri",
     "apps/dioxus-test",
     "apps/reaper_extension",
     "libs/macros",
@@ -11,9 +10,9 @@ members = [
     "modules/daw/project",
     "modules/daw/transport",
     "modules/fts/setlist",
-    "modules/fts/smart-template",
-    "modules/keyflow",
-    "xtask",
+    "modules/fts/smart-template",  
+    "packages/keyflow",
+    "xtask", "apps/desktop", "apps/mobile", "apps/web", "modules/ui", "modules/api",
 ]
 resolver = "2"
 
@@ -26,6 +25,7 @@ edition = "2021"
 [workspace.dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
+dioxus = { version = "0.7.1", features = ["router"], default-features = false }
 fragile = "2.0.1"
 futures = "0.3"
 libloading = "0.8"
@@ -42,6 +42,7 @@ tauri-plugin-shell = "2"
 taurpc = "0.5.2"
 thiserror = "1.0"
 tracing = "0.1"
+ui = { path = "modules/ui" }
 
 [workspace.dependencies.chrono]
 version = "0.4"

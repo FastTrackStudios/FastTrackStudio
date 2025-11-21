@@ -12,34 +12,28 @@ primitives = { path = "../primitives" }
 
 # Core dependencies
 serde = { version = "1.0", features = ["derive"] }
-tokio = { version = "1.48.0", features = ["full"] }
-thiserror = "1.0"
+thiserror = "2.0.17"
 async-trait = "0.1"
-
-# HTTP server dependencies
-axum = { version = "0.8.6", features = ["default", "ws"] }
-tower = { version = "0.5.2", features = ["full"] }
-tower-http = { version = "0.5", features = ["trace", "timeout", "cors"] }
 
 # Utilities
 uuid = { version = "1.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-# TypeScript generation
-specta = { version = "=2.0.0-rc.22", features = ["chrono"] }
-taurpc = { version = "0.5.2" }
-tarpc = { workspace = true }
-tauri = { version = "2.2.5", features = ["default"] }
-
 # OSC protocol dependencies
 rosc = "0.11.4"
-matchit = "0.8.0"
+matchit = "0.9.0"
 
 # WebSocket dependencies
 futures-util = { version = "0.3", features = ["sink", "std"] }
 
-# HTTP middleware (combined with above entry)
-
-# HTTP client for testing
-reqwest = { version = "0.11", features = ["json"] }
 serde_json = "1.0"
+
+# Server dependencies (excluded for WASM builds)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.48.0", features = ["full"] }
+axum = { version = "0.8.6", features = ["default", "ws"] }
+tower = { version = "0.5.2", features = ["full"] }
+tower-http = { version = "0.6.6", features = ["trace", "timeout", "cors"] }
+# HTTP client for testing (excluded for WASM)
+reqwest = { version = "0.12.24", features = ["json"] }
+

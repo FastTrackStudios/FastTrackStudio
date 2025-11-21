@@ -1,25 +1,39 @@
 [package]
 name = "dioxus-test"
-version = "0.1.0"
-authors = ["Cody Wright <acodywright@gmail.com>"]
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
 
 [dependencies]
-dioxus = { version = "0.7.1", features = ["fullstack"] }
-serde = { version = "1.0", features = ["derive"] }
+dioxus = { workspace = true }
+serde = { workspace = true }
 lucide-dioxus = { version = "2.44", features = ["all-icons"] }
 setlist = { path = "../../modules/fts/setlist" }
-transport = { path = "../../modules/daw/transport" }
 marker-region = { path = "../../modules/daw/marker-region" }
 primitives = { path = "../../modules/daw/primitives" }
+transport = { path = "../../modules/daw/transport" }
 project = { path = "../../modules/daw/project" }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
+
+# Server-only dependencies (excluded for WASM builds)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8.7" }
+tower-http = { version = "0.6", features = ["fs"] }
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Web-only dependencies (WASM target)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Pin web-sys to avoid reference-types issues (workaround for wasm-bindgen externref errors)
+web-sys = "=0.3.78"
+# Enable wasm_js feature for getrandom (required for WASM builds)
+getrandom = { version = "0.3.4", features = ["wasm_js"] }
 
 [features]
 default = ["desktop"]
 web = ["dioxus/web"]
-desktop = ["dioxus/desktop"]
+desktop = ["dioxus/desktop", "dioxus/server", "dioxus/fullstack"]
 mobile = ["dioxus/mobile"]
-server = ["dioxus/server"]
+server = ["dioxus/server", "dioxus/fullstack"]

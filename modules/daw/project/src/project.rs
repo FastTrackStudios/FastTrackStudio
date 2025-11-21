@@ -1,12 +1,11 @@
 use marker_region::core::Marker;
 use primitives::TimeSignature;
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use std::collections::HashMap;
 use transport::{RecordMode, Tempo, Transport, TransportActions, TransportError};
 
 /// Embeddable project state that carries its own transport.
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project<T> {
     id: uuid::Uuid,
     name: String,

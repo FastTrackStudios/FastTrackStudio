@@ -1,0 +1,32 @@
+[package]
+name = "desktop"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["router", "fullstack"] }
+ui = { workspace = true }
+setlist = { path = "../../modules/fts/setlist" }
+marker-region = { path = "../../modules/daw/marker-region" }
+primitives = { path = "../../modules/daw/primitives" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = "0.1"
+
+# Server-only dependencies (excluded for WASM builds)
+# Commented out - will be re-added incrementally
+# [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# tokio = { workspace = true }
+# tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+# futures-util = "0.3"
+# tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# fastrand = "2.0"
+
+[features]
+default = ["desktop"]
+desktop = ["dioxus/desktop", "dioxus/fullstack"]
+# Server feature - defined but not enabled by default
+# Will be re-enabled incrementally when server features are added back
+server = []

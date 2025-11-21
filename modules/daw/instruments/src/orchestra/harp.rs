@@ -5,10 +5,9 @@
 
 use std::fmt;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 /// Harp instrument (separate from bowed strings due to unique characteristics)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize )]
 #[ts(export)]
 pub enum HarpInstrument {
     /// Concert harp (pedal harp)

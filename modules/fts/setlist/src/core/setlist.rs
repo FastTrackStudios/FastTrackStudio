@@ -363,8 +363,6 @@ pub struct SetlistSummary {
 /// Setlist order management for live performance
 /// This represents the sequence of songs across multiple project tabs
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "tauri", derive(Type))]
-#[cfg_attr(feature = "tauri", taurpc::ipc_type)]
 pub struct SetlistOrder {
     /// Ordered list of songs/tabs in the setlist
     pub entries: Vec<SetlistEntry>,

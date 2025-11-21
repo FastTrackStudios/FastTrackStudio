@@ -1,7 +1,6 @@
 use primitives::{Position, TimeSelection, TimeSignature};
-use specta::Type;
 
-#[derive(Type, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PlayState {
     Stopped,
     Playing,
@@ -15,7 +14,7 @@ impl Default for PlayState {
     }
 }
 
-#[derive(Type, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RecordMode {
     Normal,
     TimeSelection,
@@ -28,7 +27,7 @@ impl Default for RecordMode {
     }
 }
 
-#[derive(Type, Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Tempo {
     pub bpm: f64,
 }
@@ -48,7 +47,7 @@ impl Default for Tempo {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct Transport {
     pub play_state: PlayState,
     pub record_mode: RecordMode,
