@@ -15,6 +15,8 @@ use std::collections::HashMap;
 
 mod state;
 mod utils;
+#[cfg(not(target_arch = "wasm32"))]
+mod reaper_connection;
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
@@ -22,19 +24,28 @@ const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 
 fn main() {
     // Initialize tracing subscriber for logging (only for desktop builds)
-    // Note: tracing_subscriber is commented out in Cargo.toml - will be re-added with server features
-    // For now, tracing will use default output
     #[cfg(feature = "desktop")]
+    #[cfg(not(target_arch = "wasm32"))]
     {
-        // tracing_subscriber commented out - will be re-added incrementally
-        // use tracing_subscriber::prelude::*;
-        // tracing_subscriber::registry()
-        //     .with(
-        //         tracing_subscriber::EnvFilter::try_from_default_env()
-        //             .unwrap_or_else(|_| "info".into())
-        //     )
-        //     .with(tracing_subscriber::fmt::layer())
-        //     .init();
+        use tracing_subscriber::prelude::*;
+        use tracing_subscriber::EnvFilter;
+        
+        let filter = if std::env::var("RUST_LOG").is_ok() {
+            // User specified RUST_LOG - use it directly
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())
+        } else {
+            // Default filter with IROH warning suppression
+            EnvFilter::new("info")
+                // Suppress harmless IROH warnings about IPv6 relays and discovery pongs
+                .add_directive("iroh::magicsock=error".parse().unwrap())
+                .add_directive("iroh_quinn_udp=error".parse().unwrap())
+                .add_directive("iroh::protocol::router=error".parse().unwrap())
+        };
+        
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_subscriber::fmt::layer())
+            .init();
     }
     
     dioxus::launch(Root);
@@ -43,13 +54,8 @@ fn main() {
 /// Root component that wraps the app with state provider
 #[component]
 fn Root() -> Element {
-    let initial_setlist = create_sample_setlist();
-    let initial_mode = StateManagerMode::Local; // Can be swapped to Server, Reaper, Phone, etc.
-    
     rsx! {
         StateProvider {
-            initial_setlist: initial_setlist,
-            initial_mode: initial_mode,
             App {}
         }
     }
@@ -72,16 +78,25 @@ fn App() -> Element {
     let mode = state.mode;
     
     // Convert mode to boolean for UI
-    let is_server_mode = use_memo(move || {
-        matches!(mode(), StateManagerMode::Server { .. })
+    let is_reaper_mode = use_memo(move || {
+        matches!(mode(), StateManagerMode::Reaper)
     });
     
-    // Mode toggle callback - disabled for now (server features removed)
-    // Will be re-enabled when server features are re-added incrementally
+    // Mode toggle callback - toggle between Local and REAPER modes
+    let mut mode_signal = mode.clone();
     let on_toggle_mode = Callback::new(move |_| {
-        // Server mode switching disabled - local only for now
-        tracing::info!("Mode toggle disabled - local mode only");
+        let current = mode_signal();
+        let new_mode = match current {
+            StateManagerMode::Local => StateManagerMode::Reaper,
+            StateManagerMode::Reaper => StateManagerMode::Local,
+            StateManagerMode::Server { .. } => StateManagerMode::Reaper, // Switch to REAPER from server
+        };
+        tracing::info!("Toggling mode from {:?} to {:?}", current, new_mode);
+        mode_signal.set(new_mode);
     });
+    
+    // Create memoized version for TopBar
+    let is_reaper_mode_for_ui = is_reaper_mode();
     
     // Log current setlist for debugging
     {
@@ -231,8 +246,8 @@ fn App() -> Element {
                                     if (prev - tempo).abs() > 0.01 {
                                         label_parts.push(format!("{:.0} bpm", tempo));
                                     }
-                                }
-                            }
+            }
+        }
                             
                             let label = label_parts.join(" ");
                             if !label.is_empty() {
@@ -454,9 +469,9 @@ fn App() -> Element {
                             current_section_index.set(new_section_idx);
                         }
                         _ => {}
-                    }
-                }
-                
+    }
+}
+
                 // Song navigation (up/down arrows) - always available
                 match e.key() {
                     Key::ArrowDown => {
@@ -526,7 +541,7 @@ fn App() -> Element {
             
             TopBar {
                 is_connected: is_connected,
-                is_server_mode: is_server_mode(),
+                    is_server_mode: is_reaper_mode_for_ui,
                 on_toggle_mode: Some(on_toggle_mode),
             }
             

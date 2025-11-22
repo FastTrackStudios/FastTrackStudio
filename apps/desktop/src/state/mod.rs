@@ -44,6 +44,8 @@ pub enum StateManagerMode {
     Local,
     /// Server mode - state managed server-side, client is stateless
     Server { url: String },
+    /// REAPER mode - state managed by REAPER extension, desktop app receives updates
+    Reaper,
 }
 
 impl StateManager {
