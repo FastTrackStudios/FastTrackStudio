@@ -4,7 +4,8 @@
 //!
 //! Logging can be controlled via:
 //! 1. RUST_LOG environment variable (e.g., `RUST_LOG=reaper_extension=debug`)
-//! 2. Defaults to warn level with extension at info level
+//! 2. Defaults to warn level for everything
+//! 3. Local socket IPC logs are shown at info level for visibility
 
 use tracing_subscriber::{
     fmt,
@@ -30,9 +31,18 @@ pub fn init_tracing() {
             // User specified RUST_LOG - use it directly
             EnvFilter::from_default_env()
         } else {
-            // Default to warn level, allow debug for extension
+            // Default to warn level for everything
+            // Specifically allow info logs for IPC/RPC for visibility
             EnvFilter::new("warn")
-                .add_directive("reaper_extension=debug".parse().unwrap())
+                .add_directive("reaper_extension=warn".parse().unwrap())
+                .add_directive("reaper_extension::local_socket_server=info".parse().unwrap())
+                .add_directive("reaper_extension::reaper_rpc_server=info".parse().unwrap())
+                .add_directive("peer_2_peer::unix_socket=info".parse().unwrap())
+                .add_directive("peer_2_peer::iroh_connection=info".parse().unwrap())
+                // Suppress harmless IROH warnings about IPv6 relays and discovery pongs
+                .add_directive("iroh::magicsock=error".parse().unwrap())
+                .add_directive("iroh_quinn_udp=error".parse().unwrap())
+                .add_directive("iroh::protocol::router=error".parse().unwrap())
         };
         
         // Initialize the subscriber with formatted output

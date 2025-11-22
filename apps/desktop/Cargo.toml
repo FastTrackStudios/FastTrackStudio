@@ -1,0 +1,34 @@
+[package]
+name = "desktop"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["router", "fullstack"] }
+ui = { workspace = true }
+setlist = { path = "../../modules/fts/setlist" }
+marker-region = { path = "../../modules/daw/marker-region" }
+primitives = { path = "../../modules/daw/primitives" }
+peer-2-peer = { path = "../../modules/peer-2-peer" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = "0.1"
+anyhow = "1.0"
+
+# Server-only dependencies (excluded for WASM builds)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["full"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+irpc = { workspace = true }
+irpc-iroh = "0.11.0"
+iroh = { version = "0.95", features = ["discovery-local-network"] }
+n0-future = "0.3.0"
+
+[features]
+default = ["desktop"]
+desktop = ["dioxus/desktop" ]
+# Server feature - defined but not enabled by default
+# Will be re-enabled incrementally when server features are added back
+server = ["dioxus/server"]

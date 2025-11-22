@@ -4,11 +4,10 @@
 
 use std::fmt;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use crate::Transposition;
 
 /// Orchestral brass instruments
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[ts(export)]
 pub enum BrassInstrument {
     /// French horn (typically in F)

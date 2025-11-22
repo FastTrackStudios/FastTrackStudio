@@ -4,11 +4,11 @@ use crate::action_registry::{ActionDef, register_actions};
 use crate::reaper_project::create_reaper_project_wrapper;
 use crate::reaper_markers::{read_markers_from_project, read_regions_from_project};
 use crate::reaper_setlist::{build_setlist_from_open_projects, build_song_from_current_project};
-use crate::websocket_state::{broadcast_setlist, determine_active_song_index, poll_and_broadcast_transport, poll_and_broadcast_setlist};
 use reaper_high::{Project, Reaper, BookmarkType};
 use reaper_medium::ProjectRef;
 use tracing::{info, warn};
 use transport::TransportActions;
+use setlist::Setlist;
 
 /// Dummy action handler - shows a message in REAPER console
 fn dummy_action_handler() {
@@ -329,15 +329,6 @@ pub fn build_setlist_from_projects_handler() {
             reaper.show_console_msg(format!("Built setlist with {} song(s):\n\n", song_count).as_str());
             info!(song_count, "Built setlist with {} songs", song_count);
             
-            // Broadcast setlist update to WebSocket clients
-            // Call directly - broadcast_setlist handles the async runtime internally
-            info!("Calling broadcast_setlist with {} songs", song_count);
-            let active_song_index = determine_active_song_index(&setlist);
-            broadcast_setlist(setlist.clone(), active_song_index);
-            info!("broadcast_setlist call completed");
-            
-            // Also poll and broadcast current transport state
-            crate::websocket_state::poll_and_broadcast_transport();
             
             for (idx, song) in setlist.songs.iter().enumerate() {
                 // Calculate song duration in minutes:seconds format
@@ -448,10 +439,6 @@ fn log_setlist_songs_handler() {
                 reaper.show_console_msg(format!("Found {} song(s) in setlist:\n\n", song_count).as_str());
                 info!(song_count, "Found {} songs in setlist", song_count);
                 
-                // Broadcast setlist update to WebSocket clients
-                // Call directly - broadcast_setlist handles the async runtime internally
-                let active_song_index = determine_active_song_index(&setlist);
-                broadcast_setlist(setlist.clone(), active_song_index);
                 
                     for (idx, song) in setlist.songs.iter().enumerate() {
                         let duration = song.duration();
@@ -882,46 +869,8 @@ pub fn register_all_actions() {
             handler: log_tempo_time_sig_changes_handler,
             appears_in_menu: true, // Show in menu
         },
-        ActionDef {
-            command_id: "FTS_POLL_TRANSPORT",
-            display_name: "Poll Transport State".to_string(),
-            handler: poll_transport_handler,
-            appears_in_menu: false, // Hidden action for internal use
-        },
+       
     ];
     
     register_actions(&actions, "FastTrackStudio");
 }
-
-/// Poll transport and setlist state and broadcast them (internal action for 30Hz timer)
-fn poll_transport_handler() {
-    // Log that we're in the handler - ALWAYS log this
-    tracing::info!("🔄 poll_transport_handler() called - starting 30Hz polling cycle");
-    
-    // Process any pending action execution requests from background threads
-    crate::websocket_state::process_action_execution_requests();
-    
-    // Poll and broadcast transport state
-    tracing::info!("📊 Calling poll_and_broadcast_transport()");
-    poll_and_broadcast_transport();
-    tracing::info!("✅ poll_and_broadcast_transport() completed");
-    
-    // Also poll and broadcast setlist state
-    tracing::info!("🎵 Calling poll_and_broadcast_setlist()");
-    match std::panic::catch_unwind(|| {
-        poll_and_broadcast_setlist();
-    }) {
-        Ok(_) => {
-            tracing::info!("✅ poll_and_broadcast_setlist() completed successfully");
-        }
-        Err(e) => {
-            tracing::error!(
-                panic = ?e,
-                "❌ poll_and_broadcast_setlist() panicked!"
-            );
-        }
-    }
-    
-    tracing::info!("✅ poll_transport_handler() finished");
-}
-

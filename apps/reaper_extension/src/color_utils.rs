@@ -58,6 +58,40 @@ pub fn packed_to_hex(packed: u32) -> String {
     format!("#{:02X}{:02X}{:02X}", rgb.r, rgb.g, rgb.b)
 }
 
+/// Get color name and hex string from an optional packed color value
+/// Returns (color_name, color_hex) tuple
+/// Color name is a simple description (e.g., "Red", "Blue", "None")
+pub fn get_color_name_and_hex(color: Option<u32>) -> (String, String) {
+    match color {
+        Some(packed) => {
+            let hex = packed_to_hex(packed);
+            // Simple color name based on RGB values
+            let rgb = unpack_u32_to_rgb(packed);
+            let name = if rgb.r > 200 && rgb.g < 100 && rgb.b < 100 {
+                "Red"
+            } else if rgb.r < 100 && rgb.g > 200 && rgb.b < 100 {
+                "Green"
+            } else if rgb.r < 100 && rgb.g < 100 && rgb.b > 200 {
+                "Blue"
+            } else if rgb.r > 200 && rgb.g > 200 && rgb.b < 100 {
+                "Yellow"
+            } else if rgb.r < 100 && rgb.g > 200 && rgb.b > 200 {
+                "Cyan"
+            } else if rgb.r > 200 && rgb.g < 100 && rgb.b > 200 {
+                "Magenta"
+            } else if rgb.r > 200 && rgb.g > 200 && rgb.b > 200 {
+                "White"
+            } else if rgb.r < 50 && rgb.g < 50 && rgb.b < 50 {
+                "Black"
+            } else {
+                "Custom"
+            };
+            (name.to_string(), hex)
+        }
+        None => ("None".to_string(), "#000000".to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

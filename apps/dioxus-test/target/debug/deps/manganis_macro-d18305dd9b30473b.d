@@ -1,9 +1,0 @@
-/Users/codywright/Documents/Development/Rust/dioxus-test/target/debug/deps/manganis_macro-d18305dd9b30473b.d: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/asset.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/css_module.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/linker.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/../README.md
-
-/Users/codywright/Documents/Development/Rust/dioxus-test/target/debug/deps/libmanganis_macro-d18305dd9b30473b.dylib: /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/lib.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/asset.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/css_module.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/linker.rs /Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/../README.md
-
-/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/lib.rs:
-/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/asset.rs:
-/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/css_module.rs:
-/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/linker.rs:
-/Users/codywright/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manganis-macro-0.7.1/src/../README.md:

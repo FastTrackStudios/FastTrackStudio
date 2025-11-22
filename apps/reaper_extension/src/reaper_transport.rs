@@ -99,7 +99,7 @@ impl ReaperTransport {
     }
 
     /// Read current transport state from REAPER
-    fn read_transport(&self) -> Result<Transport, TransportError> {
+    pub fn read_transport(&self) -> Result<Transport, TransportError> {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
         let project_context = self.project.context();

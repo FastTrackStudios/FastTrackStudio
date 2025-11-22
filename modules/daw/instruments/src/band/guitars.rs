@@ -4,10 +4,9 @@
 
 use std::fmt;
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 /// Guitar family instruments
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize )]
 #[ts(export)]
 pub enum GuitarInstrument {
     /// Acoustic guitar with steel strings
