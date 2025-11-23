@@ -1,0 +1,15 @@
+//! Live Tracks Actions
+//!
+//! Defines and registers REAPER actions for the Live Tracks setlist management system.
+//! Uses the shared action registration infrastructure.
+
+mod static_actions;
+pub mod zoom;
+pub mod navigation;
+
+// Re-export for external use
+pub use static_actions::{register_all_actions, domain_actions};
+
+// Compatibility re-export (empty for now)
+pub use static_actions::ACTION_DEFS;
+

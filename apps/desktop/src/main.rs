@@ -3,10 +3,11 @@ use setlist::{Setlist, Song, Section, SectionType, SETLIST};
 use marker_region::{Marker, application::TempoTimePoint};
 use primitives::Position;
 use ui::components::*;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::reaper_connection::ReaperConnection;
-#[cfg(not(target_arch = "wasm32"))]
-use peer_2_peer::reaper_api::ReaperStateUpdate;
+// REAPER connection via REAPER_ALPN is disabled - all data comes through setlist stream
+// #[cfg(not(target_arch = "wasm32"))]
+// use crate::reaper_connection::ReaperConnection;
+// #[cfg(not(target_arch = "wasm32"))]
+// use peer_2_peer::reaper_api::ReaperStateUpdate;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{info, warn, error};
@@ -39,6 +40,8 @@ fn main() {
                 .add_directive("iroh::magicsock=error".parse().unwrap())
                 .add_directive("iroh_quinn_udp=error".parse().unwrap())
                 .add_directive("iroh::protocol::router=error".parse().unwrap())
+                // Suppress protocol mismatch warnings (error 120: peer doesn't support any known protocol)
+                .add_directive("iroh::protocol=error".parse().unwrap())
         };
         
         tracing_subscriber::registry()
@@ -64,7 +67,10 @@ fn App() -> Element {
         });
     }
     
-    // Set up REAPER connection (transport info is embedded in SETLIST)
+    // REAPER connection via REAPER_ALPN is disabled - all data comes through setlist stream
+    // The setlist stream includes both setlist and transport state, so no separate connection needed
+    // TODO: Re-enable if/when we need bidirectional REAPER commands (play/pause, etc.)
+    /*
     #[cfg(not(target_arch = "wasm32"))]
     {
         use_effect(move || {
@@ -111,6 +117,7 @@ fn App() -> Element {
             });
         });
     }
+    */
     
     // Derive current song and section index from SETLIST global signal
     let current_song_index = use_memo(move || {

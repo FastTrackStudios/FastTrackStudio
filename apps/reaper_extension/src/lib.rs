@@ -10,6 +10,8 @@ mod color_utils;
 mod command_handler;
 mod setlist_stream;
 
+mod live;
+
 /// Polling state management for continuous updates
 pub mod polling_state {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -77,6 +79,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     info!("Registering actions...");
     actions::register_all_actions();
     
+    // Register live tracks actions
+    info!("Registering live tracks actions...");
+    live::tracks::actions::register_all_actions();
+    
     // Wake up REAPER so actions are fully registered and available
     // This must be done before registering the menu so command IDs can be found
     match HighReaper::get().wake_up() {
@@ -136,9 +142,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
             };
             let endpoint_id = endpoint.id();
                     
-            // Build router with setlist stream protocol
+            // Build router with REAPER_ALPN - all protocols route through this single ALPN
             let _router = iroh::protocol::Router::builder(endpoint.clone())
-                .accept(setlist::SetlistStreamApi::ALPN.to_vec(), setlist_handler)
+                .accept(peer_2_peer::iroh_connection::REAPER_ALPN.to_vec(), setlist_handler)
                 .spawn();
             
             // Store endpoint ID for client discovery
@@ -148,7 +154,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
             
             info!("IROH router started successfully");
             info!("Router endpoint ID: {}", endpoint_id);
-            info!("Setlist stream ALPN: {:?}", String::from_utf8_lossy(setlist::SetlistStreamApi::ALPN));
+            info!("REAPER ALPN: {:?}", String::from_utf8_lossy(peer_2_peer::iroh_connection::REAPER_ALPN));
                     
                     // Keep router alive - it handles all connections
                     // The router will run until shutdown is called
@@ -162,8 +168,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Handle transport read requests in the timer callback
     // We'll integrate this into the existing timer callback
     
-    // Register REAPER timer callback for 30Hz polling (~33ms intervals)
+    // Register REAPER timer callback for 60Hz polling (~16.67ms intervals)
     // This runs on REAPER's main thread automatically, so we can safely call REAPER APIs
+    // Note: REAPER's timer may run at its own rate, but we'll update state on every call
     extern "C" fn polling_timer_callback() {
         use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::Instant;
@@ -179,22 +186,32 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         }
         
         // ALWAYS run - no polling state check
-        let tick_count = TICK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+        TICK_COUNT.fetch_add(1, Ordering::Relaxed);
         
-        // Update setlist state at 30Hz (every tick)
+        // Update setlist state on every tick (target: 60Hz)
         setlist_stream::update_setlist_state();
         
-        // Timer runs silently - no periodic logging
+        // Log performance metrics every 10 seconds
+        let last_log = LAST_LOG.get_or_init(|| std::sync::Mutex::new(Instant::now()));
+        if let Ok(mut last_log_guard) = last_log.lock() {
+            if last_log_guard.elapsed().as_secs() >= 10 {
+                let poll_rate = TICK_COUNT.swap(0, Ordering::Relaxed) / 10;
+                info!("[Performance] REAPER API polling: {} ticks/s (target: 60Hz)", poll_rate);
+                *last_log_guard = Instant::now();
+            }
+        }
     }
     
     // Register the timer callback with REAPER (runs on main thread automatically)
+    // REAPER typically calls this at ~30Hz, but we'll update on every call
+    // To achieve 60Hz, we may need to use a different approach or REAPER may call it faster
     info!("🔧 About to register timer callback with REAPER...");
     
     let timer_result = session_ptr.plugin_register_add_timer(polling_timer_callback);
     
     match timer_result {
         Ok(_) => {
-            info!("✅✅✅ SUCCESS: Registered 30Hz polling timer callback with REAPER");
+            info!("✅✅✅ SUCCESS: Registered polling timer callback with REAPER (target: 60Hz)");
             info!("⏰ Timer callback registered - waiting for REAPER to call it...");
             info!("📊 Timer will ALWAYS run - no polling state checks");
             info!("📊 If you don't see 'Timer callback FIRST CALL' logs, REAPER is not calling the timer");

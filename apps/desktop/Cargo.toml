@@ -6,7 +6,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-dioxus = { workspace = true, features = ["router", "fullstack"] }
+dioxus = { workspace = true, features = ["router" ] }
 ui = { workspace = true }
 setlist = { path = "../../modules/fts/setlist", features = ["dioxus"] }
 transport = { path = "../../modules/daw/transport" }

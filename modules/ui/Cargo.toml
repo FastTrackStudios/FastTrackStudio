@@ -12,6 +12,7 @@ lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag 
 setlist = { path = "../../modules/fts/setlist", features = ["dioxus"] }
 primitives = { path = "../../modules/daw/primitives" }
 transport = { path = "../../modules/daw/transport" }
+wasm-timer = "0.2"
 
 [features]
 default = []

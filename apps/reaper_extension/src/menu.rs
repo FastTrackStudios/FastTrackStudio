@@ -4,8 +4,9 @@
 
 use reaper_high::Reaper;
 use reaper_medium::{HookCustomMenu, Hmenu, MenuHookFlag, ReaperStr};
-use swell_ui::{Menu, menu_tree::{anonymous_menu, menu, item, Entry}};
+use swell_ui::{Menu, menu_tree::{anonymous_menu, menu, item, separator, Entry}};
 use tracing::{debug, error, info, warn};
+use std::collections::HashMap;
 
 use crate::action_registry::get_all_registered_actions;
 
@@ -92,7 +93,29 @@ impl HookCustomMenu for FastTrackStudioMenuHook {
     }
 }
 
+/// Extract category and subcategory from command ID
+/// Returns (category, subcategory) tuple
+/// Examples:
+///   "FTS_LIVE_SETLIST_PLAY" -> ("Live", "Tracks")
+///   "FTS_VM_CREATE_GROUP" -> ("Visibility Manager", None)
+///   "FTS_DEV_LOG_PROJECTS" -> ("Dev", None)
+///   "FTS_DEBUG_TEST" -> ("General", None)
+fn extract_category_from_command_id(command_id: &str) -> (String, Option<String>) {
+    if command_id.starts_with("FTS_LIVE_") {
+        // All FTS_LIVE_ actions are currently tracks-related
+        // In the future, we could parse FTS_LIVE_TRACKS_* vs FTS_LIVE_OTHER_* etc.
+        ("Live".to_string(), Some("Tracks".to_string()))
+    } else if command_id.starts_with("FTS_VM_") {
+        ("Visibility Manager".to_string(), None)
+    } else if command_id.starts_with("FTS_DEV_") {
+        ("Dev".to_string(), None)
+    } else {
+        ("General".to_string(), None)
+    }
+}
+
 /// Creates the pure menu structure for FastTrackStudio
+/// Groups actions into submenus based on their command ID prefixes
 fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
     // Get all registered actions that should appear in menu
     let actions = get_all_registered_actions();
@@ -120,23 +143,140 @@ fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
         return anonymous_menu(vec![]);
     }
     
-    // Build menu items from actions
+    // Group actions by category and subcategory
+    // Structure: category -> subcategory -> actions
+    let mut categorized: HashMap<String, HashMap<Option<String>, Vec<&crate::action_registry::ActionDef>>> = HashMap::new();
+    
+    for action in &menu_actions {
+        let (category, subcategory) = extract_category_from_command_id(action.command_id);
+        categorized
+            .entry(category)
+            .or_default()
+            .entry(subcategory)
+            .or_default()
+            .push(action);
+    }
+    
+    // Build menu entries: nested submenus for categories with subcategories, then General actions directly
     let mut menu_entries = Vec::new();
     
-    for action in menu_actions {
-        // Use owned strings for menu items
-        // Store the command_id as the result - assign_command_ids_recursively will look it up
-        let entry = item(
-            action.display_name.clone(),
-            action.command_id.to_string(),
-        );
+    // Define category order (non-General categories first, then General, then Dev)
+    let category_order = vec!["Live", "Visibility Manager", "Dev"];
+    
+    // Add categorized submenus
+    for category_name in &category_order {
+        if let Some(subcategories) = categorized.remove(*category_name) {
+            if !subcategories.is_empty() {
+                // If there's only one subcategory and it's not None, create nested structure
+                // Otherwise, flatten
+                let mut category_menu_entries = Vec::new();
+                
+                for (subcategory_opt, actions_in_subcategory) in subcategories {
+                    if !actions_in_subcategory.is_empty() {
+                        let mut subcategory_items = Vec::new();
+                        
+                        for action in actions_in_subcategory {
+                            let entry = item(
+                                action.display_name.clone(),
+                                action.command_id.to_string(),
+                            );
+                            
+                            debug!(
+                                command_id = %action.command_id,
+                                category = %category_name,
+                                subcategory = ?subcategory_opt,
+                                "Adding action to subcategory"
+                            );
+                            
+                            subcategory_items.push(entry);
+                        }
+                        
+                        // Sort items alphabetically by display name
+                        subcategory_items.sort_by(|a, b| {
+                            match (a, b) {
+                                (Entry::Item(ia), Entry::Item(ib)) => {
+                                    ia.text.cmp(&ib.text)
+                                }
+                                _ => std::cmp::Ordering::Equal
+                            }
+                        });
+                        
+                        // If there's a subcategory name, create a nested menu
+                        if let Some(subcategory_name) = subcategory_opt {
+                            category_menu_entries.push(menu(subcategory_name, subcategory_items));
+                        } else {
+                            // No subcategory, add items directly to category menu
+                            category_menu_entries.extend(subcategory_items);
+                        }
+                    }
+                }
+                
+                if !category_menu_entries.is_empty() {
+                    menu_entries.push(menu(category_name.to_string(), category_menu_entries));
+                }
+            }
+        }
+    }
+    
+    // Add separator if we have categorized menus and General actions
+    if !menu_entries.is_empty() && categorized.contains_key("General") {
+        menu_entries.push(separator());
+    }
+    
+    // Add General actions directly (not in a submenu)
+    if let Some(general_subcategories) = categorized.remove("General") {
+        for (_, general_actions) in general_subcategories {
+            for action in general_actions {
+                let entry = item(
+                    action.display_name.clone(),
+                    action.command_id.to_string(),
+                );
+                
+                debug!(
+                    command_id = %action.command_id,
+                    "Adding General action to menu"
+                );
+                
+                menu_entries.push(entry);
+            }
+        }
+    }
+    
+    // Add any remaining uncategorized actions
+    for (category_name, subcategories) in categorized {
+        let mut category_menu_entries = Vec::new();
         
-        debug!(
-            command_id = %action.command_id,
-            "Adding action to menu"
-        );
+        for (subcategory_opt, actions_in_subcategory) in subcategories {
+            if !actions_in_subcategory.is_empty() {
+                let mut subcategory_items = Vec::new();
+                
+                for action in actions_in_subcategory {
+                    let entry = item(
+                        action.display_name.clone(),
+                        action.command_id.to_string(),
+                    );
+                    
+                    debug!(
+                        command_id = %action.command_id,
+                        category = %category_name,
+                        subcategory = ?subcategory_opt,
+                        "Adding uncategorized action"
+                    );
+                    
+                    subcategory_items.push(entry);
+                }
+                
+                if let Some(subcategory_name) = subcategory_opt {
+                    category_menu_entries.push(menu(subcategory_name, subcategory_items));
+                } else {
+                    category_menu_entries.extend(subcategory_items);
+                }
+            }
+        }
         
-        menu_entries.push(entry);
+        if !category_menu_entries.is_empty() {
+            menu_entries.push(menu(category_name, category_menu_entries));
+        }
     }
     
     if menu_entries.is_empty() {

@@ -30,46 +30,42 @@ pub fn SegmentedProgressBar(
 ) -> Element {
     let current_progress = progress();
     
-    // Track song changes to disable animations on song switch
-    // Initialize to None so first render is detected as a change (disables animation)
+    // Track progress changes to detect jumps and disable animations
+    // Store previous values in signals
+    let mut prev_progress = use_signal(|| None::<f64>);
     let mut prev_song_key = use_signal(|| None::<String>);
-    let mut should_animate = use_signal(|| false);
     
-    // Check if song changed
-    let song_changed = prev_song_key() != song_key;
-    
-    if song_changed {
-        // Song changed - disable animations IMMEDIATELY for instant switch
-        should_animate.set(false);
-        prev_song_key.set(song_key.clone());
+    // Compute animation state using use_memo - reads signals but doesn't modify them
+    // Clone song_key to avoid move issues
+    let song_key_for_memo = song_key.clone();
+    let should_animate = use_memo(move || {
+        let prev = prev_progress();
+        let prev_key = prev_song_key();
         
-        // Re-enable animations after a brief delay for smooth updates within the same song
-        {
-            let mut should_animate = should_animate.clone();
-            spawn(async move {
-                #[cfg(target_arch = "wasm32")]
-                {
-                    use wasm_bindgen::prelude::*;
-                    use wasm_bindgen_futures::JsFuture;
-                    let promise = js_sys::Promise::new(&mut |resolve, _| {
-                        web_sys::window()
-                            .unwrap()
-                            .request_animation_frame(&resolve)
-                            .unwrap();
-                    });
-                    JsFuture::from(promise).await.ok();
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-                should_animate.set(true);
-            });
+        // Check if song changed
+        let song_changed = prev_key != song_key_for_memo;
+        
+        // Check if there's a large position jump (more than 5% change)
+        let large_jump = if let Some(prev_val) = prev {
+            (current_progress - prev_val).abs() > 5.0
+        } else {
+            false
+        };
+        
+        // Disable animations for song changes or large jumps (instant updates)
+        // Enable animations for small incremental changes (smooth updates)
+        !song_changed && !large_jump && prev.is_some()
+    });
+    
+    // Update tracking state in effect - clone values to avoid move issues
+    let current_progress_for_effect = current_progress;
+    let song_key_for_effect = song_key.clone();
+    use_effect(move || {
+        prev_progress.set(Some(current_progress_for_effect));
+        if prev_song_key() != song_key_for_effect {
+            prev_song_key.set(song_key_for_effect.clone());
         }
-    } else if !should_animate() && prev_song_key().is_some() {
-        // Same song and we've already initialized - enable animations for smooth updates
-        should_animate.set(true);
-    }
+    });
     
     // Pre-calculate section data
     let section_data: Vec<_> = sections.iter().enumerate().map(|(index, section)| {
@@ -88,22 +84,30 @@ pub fn SegmentedProgressBar(
             (progress_in_section / section_width) * 100.0
         };
         
-        (index, section_start, section_width, section.color.clone(), filled_percent, section.name.clone())
+        (index, section_start, section_end, section_width, section.color.clone(), filled_percent, section.name.clone())
     }).collect();
     
     // Find the active section (the one we're currently in)
-    let active_section = section_data.iter().find(|(_, start, end, _, _, _)| {
-        current_progress >= *start && current_progress <= *end
+    let active_section = section_data.iter().find(|(_, start, end, _, _, _, _)| {
+        current_progress >= *start && current_progress < *end
     }).or_else(|| {
-        // If we're past all sections, use the last one
-        section_data.last()
+        // If we're past all sections, check if we're at the very end of the last section
+        if let Some((_, start, end, _, _, _, _)) = section_data.last() {
+            if current_progress >= *start && current_progress <= *end {
+                section_data.last()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     });
     
     // Calculate section progress (0-100% within the active section)
-    let section_progress = if let Some((_, section_start, section_width, _, _, _)) = active_section {
+    let section_progress = if let Some((_, section_start, section_end, section_width, _, _, _)) = active_section {
         if current_progress <= *section_start {
             0.0
-        } else if current_progress >= *section_start + *section_width {
+        } else if current_progress >= *section_end {
             100.0
         } else {
             let progress_in_section = current_progress - section_start;
@@ -113,7 +117,7 @@ pub fn SegmentedProgressBar(
         0.0
     };
     
-    let active_color = active_section.map(|(_, _, _, color, _, _)| color.clone()).unwrap_or_else(|| "rgb(100, 100, 100)".to_string());
+    let active_color = active_section.map(|(_, _, _, _, color, _, _)| color.clone()).unwrap_or_else(|| "rgb(100, 100, 100)".to_string());
     
     rsx! {
         div {
@@ -139,7 +143,7 @@ pub fn SegmentedProgressBar(
             div {
                 class: "relative w-full h-16 rounded-lg overflow-hidden bg-secondary",
                 // Render sections as background layers (visual only, no individual progress bars)
-                for (index, section_start, section_width, section_color, _filled_percent, _section_name) in section_data.iter() {
+                for (index, section_start, _section_end, section_width, section_color, _filled_percent, _section_name) in section_data.iter() {
                     div {
                         key: "{index}",
                         class: if on_section_click.is_some() { 
@@ -173,10 +177,10 @@ pub fn SegmentedProgressBar(
                 }
                 // Dark overlay covering unfilled portion (reveals bright colors as progress increases)
                 // pointer-events-none so clicks pass through to sections
-                // Disable transition on initial render for instant switch between songs
+                // Disable transition on jumps for instant position updates
                 div {
                     class: if should_animate() {
-                        "absolute left-0 top-0 h-full transition-all duration-300 ease-in-out z-10 pointer-events-none"
+                        "absolute left-0 top-0 h-full transition-all duration-100 ease-linear z-10 pointer-events-none"
                     } else {
                         "absolute left-0 top-0 h-full z-10 pointer-events-none"
                     },
@@ -203,7 +207,7 @@ pub fn SegmentedProgressBar(
                     }
                 }
                 // Section name text (rendered separately above everything, never darkened)
-                for (index, section_start, section_width, _section_color, _filled_percent, section_name) in section_data.iter() {
+                for (index, section_start, _section_end, section_width, _section_color, _filled_percent, section_name) in section_data.iter() {
                     div {
                         key: "text-{index}",
                         class: "absolute h-full pointer-events-none z-30",
@@ -231,9 +235,13 @@ pub fn SegmentedProgressBar(
                         active_color
                     ),
                 }
-                // Filled portion
+                // Filled portion - disable transitions for instant updates
                 div {
-                    class: "absolute left-0 top-0 h-full transition-all duration-300 ease-in-out",
+                    class: if should_animate() {
+                        "absolute left-0 top-0 h-full transition-all duration-100 ease-linear"
+                    } else {
+                        "absolute left-0 top-0 h-full"
+                    },
                     style: format!(
                         "width: {}%; background-color: {}; opacity: 0.8;",
                         section_progress,
@@ -279,9 +287,10 @@ pub fn CompactProgressBar(
                 },
             }
             // Filled portion - only show if not inactive
+            // Use shorter transition for smoother updates without lag
             if !is_inactive {
                 div {
-                    class: "absolute left-0 top-0 h-full transition-all duration-300 ease-in-out",
+                    class: "absolute left-0 top-0 h-full transition-all duration-100 ease-linear",
                     style: format!(
                         "width: {}%; background-color: {}; opacity: 0.8;",
                         progress.max(0.0).min(100.0),

@@ -818,55 +818,55 @@ fn log_tempo_time_sig_changes_handler() {
 pub fn register_all_actions() {
     let actions = vec![
         ActionDef {
-            command_id: "FTS_DUMMY_ACTION",
+            command_id: "FTS_DEV_DUMMY_ACTION",
             display_name: "Dummy Action".to_string(),
             handler: dummy_action_handler,
             appears_in_menu: true, // Show in menu
         },
         ActionDef {
-            command_id: "FTS_LOG_OPEN_PROJECTS",
+            command_id: "FTS_DEV_LOG_OPEN_PROJECTS",
             display_name: "Log Open Projects".to_string(),
             handler: log_open_projects_handler,
             appears_in_menu: true, // Show in menu
         },
         ActionDef {
-            command_id: "FTS_LOG_CURRENT_MARKERS",
+            command_id: "FTS_DEV_LOG_CURRENT_MARKERS",
             display_name: "Log Current Project Markers".to_string(),
             handler: log_current_project_markers_handler,
             appears_in_menu: true, // Show in menu
         },
         ActionDef {
-            command_id: "FTS_LOG_CURRENT_REGIONS",
+            command_id: "FTS_DEV_LOG_CURRENT_REGIONS",
             display_name: "Log Current Project Regions".to_string(),
             handler: log_current_project_regions_handler,
             appears_in_menu: true, // Show in menu
         },
         ActionDef {
-            command_id: "FTS_LOG_REGION_COLORS",
+            command_id: "FTS_DEV_LOG_REGION_COLORS",
             display_name: "Log Region Colors (Debug)".to_string(),
             handler: log_region_colors_handler,
             appears_in_menu: true, // Show in menu
         },
         ActionDef {
-            command_id: "FTS_BUILD_SETLIST",
+            command_id: "FTS_DEV_BUILD_SETLIST",
             display_name: "Build Setlist from Open Projects".to_string(),
             handler: build_setlist_from_projects_handler,
             appears_in_menu: true, // Show in menu
         },
         ActionDef {
-            command_id: "FTS_LOG_SETLIST_SONGS",
+            command_id: "FTS_DEV_LOG_SETLIST_SONGS",
             display_name: "Log Setlist Songs".to_string(),
             handler: log_setlist_songs_handler,
             appears_in_menu: true, // Show in menu
         },
         ActionDef {
-            command_id: "FTS_LOG_CURRENT_SONG",
+            command_id: "FTS_DEV_LOG_CURRENT_SONG",
             display_name: "Log Current Song Details".to_string(),
             handler: log_current_song_details_handler,
             appears_in_menu: true, // Show in menu
         },
         ActionDef {
-            command_id: "FTS_LOG_TEMPO_TIME_SIG",
+            command_id: "FTS_DEV_LOG_TEMPO_TIME_SIG",
             display_name: "Log Tempo and Time Signature Changes".to_string(),
             handler: log_tempo_time_sig_changes_handler,
             appears_in_menu: true, // Show in menu

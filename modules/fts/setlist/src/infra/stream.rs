@@ -147,21 +147,42 @@ impl SetlistStreamActor {
         broadcast_tx: tokio::sync::broadcast::Sender<SetlistUpdateMessage>,
         state_provider: Arc<dyn SetlistStateProvider>,
     ) {
-        // Poll at 60Hz (~16.67ms intervals) for smoother UI updates
-        // REAPER updates at 30Hz, but we can poll more frequently for better responsiveness
-        let mut interval = time::interval(time::Duration::from_millis(16));
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::time::Instant;
+        use std::sync::OnceLock;
+        
+        static SEND_COUNT: AtomicU64 = AtomicU64::new(0);
+        static LAST_LOG: OnceLock<std::sync::Mutex<Instant>> = OnceLock::new();
+        
+        // Poll as fast as possible - update whenever state changes
+        // No rate limiting - update on every state change for maximum responsiveness
+        let mut interval = time::interval(time::Duration::from_millis(8)); // ~120Hz polling for immediate updates
 
         loop {
             interval.tick().await;
             
             // Get current setlist API state from the provider
             // Transport info is now embedded in each song's transport_info field
+            // Use try_get_setlist_api if available to avoid blocking on stale data
             if let Ok(setlist_api) = state_provider.get_setlist_api().await {
                 let update = SetlistUpdateMessage { 
                     setlist_api,
                 };
                 // Broadcast to all subscribers (non-blocking)
-                let _ = broadcast_tx.send(update);
+                // If channel is full, skip this update to avoid blocking
+                if broadcast_tx.send(update).is_ok() {
+                    SEND_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
+                
+                // Log performance metrics every 10 seconds
+                let last_log = LAST_LOG.get_or_init(|| std::sync::Mutex::new(Instant::now()));
+                if let Ok(mut last_log_guard) = last_log.lock() {
+                    if last_log_guard.elapsed().as_secs() >= 10 {
+                        let send_rate = SEND_COUNT.swap(0, Ordering::Relaxed) / 10;
+                        tracing::info!("[Performance] IRPC send: {} msg/s", send_rate);
+                        *last_log_guard = Instant::now();
+                    }
+                }
             }
         }
     }
@@ -174,7 +195,9 @@ pub struct SetlistStreamApi {
 }
 
 impl SetlistStreamApi {
-    pub const ALPN: &[u8] = b"irpc-iroh/setlist-stream/1";
+    // Use REAPER_ALPN for all connections - single ALPN for the entire app
+    // This matches the ALPN used by the REAPER extension router
+    pub const ALPN: &[u8] = b"fasttrackstudio/reaper/1";
 
     /// Create a new setlist stream API with a state provider
     /// 

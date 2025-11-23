@@ -9,7 +9,7 @@ use irpc::{
     Client, Request,
 };
 use irpc_iroh::client;
-use iroh::EndpointId;
+use iroh::{Endpoint, EndpointId};
 use peer_2_peer::{
     iroh_connection::{create_reaper_client, discover_reaper_endpoint, REAPER_ALPN},
     reaper_api::{
@@ -18,10 +18,11 @@ use peer_2_peer::{
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 /// Callback type for handling REAPER state updates
 pub type StateUpdateHandler = Arc<dyn Fn(ReaperStateUpdate) + Send + Sync>;
+
 
 /// REAPER connection manager
 #[derive(Clone)]
@@ -34,6 +35,10 @@ pub struct ReaperConnection {
     connected_tx: Arc<tokio::sync::watch::Sender<bool>>,
     /// Connection status receiver (for internal use)
     connected_rx: Arc<tokio::sync::watch::Receiver<bool>>,
+    /// Cached REAPER endpoint ID (discovered once, reused on retries)
+    endpoint_id: Arc<Mutex<Option<EndpointId>>>,
+    /// Cached client endpoint (created once, reused on retries)
+    client_endpoint: Arc<Mutex<Option<Endpoint>>>,
 }
 
 /// Command sender for REAPER commands
@@ -70,6 +75,8 @@ impl ReaperConnection {
             state_update_handler: Arc::new(Mutex::new(None)),
             connected_tx: Arc::new(connected_tx),
             connected_rx: Arc::new(connected_rx.clone()),
+            endpoint_id: Arc::new(Mutex::new(None)),
+            client_endpoint: Arc::new(Mutex::new(None)),
         };
         
         let command_sender_wrapper = ReaperCommandSender {
@@ -89,7 +96,17 @@ impl ReaperConnection {
     /// 
     /// Uses MDNS discovery to find the REAPER extension endpoint ID.
     /// Automatically retries connection with exponential backoff on failure.
+    /// 
+    /// Following iroh best practices: creates the endpoint once and reuses it
+    /// for all connection attempts, only creating new connections on retries.
     pub async fn start(&self) -> Result<()> {
+        // Create the endpoint once (iroh endpoints are long-lived)
+        let endpoint = create_reaper_client().await?;
+        {
+            let mut cached_endpoint = self.client_endpoint.lock().await;
+            *cached_endpoint = Some(endpoint);
+        }
+        
         let self_clone = self.clone();
         tokio::spawn(async move {
             self_clone.connect_with_retry().await;
@@ -98,10 +115,12 @@ impl ReaperConnection {
     }
     
     /// Connect with automatic retry logic
+    /// 
+    /// Reuses the cached endpoint for all connection attempts.
     async fn connect_with_retry(&self) {
         let mut retry_count = 0u32;
         
-            loop {
+        loop {
             retry_count += 1;
             
             match self.try_connect().await {
@@ -121,7 +140,14 @@ impl ReaperConnection {
                 }
                 Err(e) => {
                     if retry_count % 10 == 0 {
-                    warn!("[DESKTOP] Connection attempt {} failed: {}", retry_count, e);
+                        warn!("[DESKTOP] Connection attempt {} failed: {}", retry_count, e);
+                        // After many failures, clear endpoint ID cache to allow rediscovery
+                        // (in case REAPER restarted with a new endpoint ID)
+                        // Note: we keep the endpoint itself as it's long-lived
+                        if retry_count % 50 == 0 {
+                            info!("[DESKTOP] Clearing endpoint ID cache after {} failed attempts", retry_count);
+                            *self.endpoint_id.lock().await = None;
+                        }
                     }
                     
                     // Update connection status
@@ -135,17 +161,30 @@ impl ReaperConnection {
     }
     
     /// Attempt a single connection to REAPER
+    /// 
+    /// Reuses the cached endpoint and only creates a new connection.
     async fn try_connect(&self) -> Result<()> {
-        info!("[DESKTOP] Discovering REAPER extension via IROH...");
+        // Get the cached endpoint (should exist from start())
+        let client_endpoint = {
+            let cached_endpoint = self.client_endpoint.lock().await;
+            cached_endpoint.clone()
+                .ok_or_else(|| anyhow::anyhow!("Endpoint not initialized. Call start() first."))?
+        };
         
-        // Discover REAPER endpoint ID
-        let endpoint_id = discover_reaper_endpoint().await?
-            .ok_or_else(|| anyhow::anyhow!("Could not discover REAPER extension. Make sure REAPER extension is running."))?;
-        
-        info!("[DESKTOP] Found REAPER endpoint ID: {}", endpoint_id);
-        
-        // Create IROH client endpoint
-        let client_endpoint = create_reaper_client().await?;
+        // Get or discover REAPER endpoint ID (cache after first discovery)
+        let endpoint_id = {
+            let mut cached_id = self.endpoint_id.lock().await;
+            if let Some(id) = *cached_id {
+                id
+            } else {
+                info!("[DESKTOP] Discovering REAPER extension via IROH...");
+                let id = discover_reaper_endpoint().await?
+                    .ok_or_else(|| anyhow::anyhow!("Could not discover REAPER extension. Make sure REAPER extension is running."))?;
+                info!("[DESKTOP] Found REAPER endpoint ID: {}", id);
+                *cached_id = Some(id);
+                id
+            }
+        };
         
         // Create IROH client
         let client: Client<ReaperProtocol> = client(client_endpoint, endpoint_id, REAPER_ALPN);

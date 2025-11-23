@@ -26,7 +26,7 @@ pub fn init_setlist_state() -> Arc<std::sync::Mutex<Option<SetlistApi>>> {
 }
 
 /// Update setlist state from REAPER's main thread
-/// This is called from REAPER's timer callback at 30Hz
+/// This is called from REAPER's timer callback (target: 60Hz)
 pub fn update_setlist_state() {
     if let Some(state) = LATEST_SETLIST_API.get() {
         match build_setlist_from_open_projects(None) {

@@ -43,6 +43,8 @@ pub fn init_tracing() {
                 .add_directive("iroh::magicsock=error".parse().unwrap())
                 .add_directive("iroh_quinn_udp=error".parse().unwrap())
                 .add_directive("iroh::protocol::router=error".parse().unwrap())
+                // Suppress protocol mismatch warnings (error 120: peer doesn't support any known protocol)
+                .add_directive("iroh::protocol=error".parse().unwrap())
         };
         
         // Initialize the subscriber with formatted output
