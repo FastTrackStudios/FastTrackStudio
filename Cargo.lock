@@ -1687,6 +1687,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "transport",
  "ui",
 ]
 
@@ -7499,8 +7500,13 @@ dependencies = [
 name = "setlist"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
  "chrono",
  "dioxus",
+ "iroh",
+ "irpc",
+ "irpc-iroh",
  "marker-region",
  "primitives",
  "project",
@@ -7508,11 +7514,11 @@ dependencies = [
  "rpp-parser",
  "serde",
  "serde_json",
- "specta",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
  "tokio-test",
+ "tracing",
  "transport",
  "uuid",
 ]
@@ -7780,7 +7786,6 @@ checksum = "ab7f01e9310a820edd31c80fde3cae445295adde21a3f9416517d7d65015b971"
 dependencies = [
  "specta-macros",
  "thiserror 1.0.69",
- "uuid",
 ]
 
 [[package]]
@@ -8855,6 +8860,9 @@ dependencies = [
  "dioxus",
  "lucide-dioxus 2.44.0",
  "lumen-blocks",
+ "primitives",
+ "setlist",
+ "transport",
 ]
 
 [[package]]

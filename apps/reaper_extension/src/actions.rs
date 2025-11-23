@@ -8,7 +8,6 @@ use reaper_high::{Project, Reaper, BookmarkType};
 use reaper_medium::ProjectRef;
 use tracing::{info, warn};
 use transport::TransportActions;
-use setlist::Setlist;
 
 /// Dummy action handler - shows a message in REAPER console
 fn dummy_action_handler() {
@@ -451,10 +450,13 @@ fn log_setlist_songs_handler() {
                             song.name.clone()
                         };
                         
-                        // Try to get project name from song (if available)
-                        let project_info = song.project_name()
-                            .map(|name| format!(" [from: {}]", name))
-                            .unwrap_or_default();
+                        // Get project name from song metadata
+                        let project_name = song.project_name_from_metadata();
+                        let project_info = if project_name != "default" {
+                            format!(" [from: {}]", project_name)
+                        } else {
+                            String::new()
+                        };
                         
                         let song_info = format!(
                             "  {}. {} ({:.1}s, {} sections){}\n",

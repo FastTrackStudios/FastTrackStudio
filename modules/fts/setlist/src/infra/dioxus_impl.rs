@@ -15,11 +15,11 @@ mod dioxus_impl {
 
     impl SetlistDataSource for DioxusSetlistDataSource {
         fn get_setlist(&self) -> Option<Setlist> {
-            SETLIST().clone()
+            SETLIST().as_ref().map(|api| api.get_setlist().clone())
         }
 
         fn get_active_song_index(&self) -> Option<usize> {
-            ACTIVE_SONG_INDEX().clone()
+            SETLIST().as_ref().and_then(|api| api.active_song_index())
         }
 
         fn get_transport_state(&self) -> TransportState {

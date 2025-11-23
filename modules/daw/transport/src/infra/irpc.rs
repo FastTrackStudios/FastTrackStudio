@@ -19,6 +19,8 @@ use tracing::{info, warn};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransportUpdateMessage {
     pub transport: Transport,
+    /// The name of the active project (used to determine which song is active)
+    pub project_name: Option<String>,
 }
 
 impl From<TransportUpdateMessage> for crate::infra::stream::TransportUpdate {
@@ -33,6 +35,7 @@ impl From<crate::infra::stream::TransportUpdate> for TransportUpdateMessage {
     fn from(update: crate::infra::stream::TransportUpdate) -> Self {
         TransportUpdateMessage {
             transport: update.transport,
+            project_name: None, // Will be set by the backend implementation
         }
     }
 }
@@ -58,6 +61,11 @@ pub enum TransportStreamProtocol {
 pub trait TransportStateProvider: Send + Sync {
     /// Get the current transport state
     async fn get_transport(&self) -> Result<Transport, String>;
+    
+    /// Get the current project name (optional, for determining active song)
+    async fn get_project_name(&self) -> Result<Option<String>, String> {
+        Ok(None) // Default implementation returns None
+    }
 }
 
 /// Transport stream actor that handles client subscriptions and broadcasts updates
@@ -129,7 +137,11 @@ impl TransportStreamActor {
                     // Send an initial update immediately with current state
                     match state_provider_for_initial.get_transport().await {
                         Ok(transport) => {
-                            let initial_update = TransportUpdateMessage { transport };
+                            let project_name = state_provider_for_initial.get_project_name().await.ok().flatten();
+                            let initial_update = TransportUpdateMessage { 
+                                transport,
+                                project_name,
+                            };
                             match tx_for_initial.send(initial_update).await {
                                 Ok(_) => {
                                     info!("[Transport Stream] ✅ Sent initial transport update to new subscriber");
@@ -183,60 +195,20 @@ impl TransportStreamActor {
         broadcast_tx: tokio::sync::broadcast::Sender<TransportUpdateMessage>,
         state_provider: Arc<dyn TransportStateProvider>,
     ) {
-        info!("[Transport Stream] 🚀 Polling loop started!");
         let mut interval = time::interval(time::Duration::from_millis(33)); // ~30Hz
-        let mut tick_count = 0u64;
 
         loop {
             interval.tick().await;
-            tick_count += 1;
             
-            // Get current transport state from the provider
-            match state_provider.get_transport().await {
-                Ok(transport) => {
-                    let update = TransportUpdateMessage { transport: transport.clone() };
-                    
-                    // Get subscriber count from broadcast channel
-                    let subscriber_count = broadcast_tx.receiver_count();
-                    
-                    // Log every 30 ticks (once per second)
-                    if tick_count % 30 == 0 {
-                        if subscriber_count > 0 {
-                            let position_seconds = transport.playhead_position.time.to_seconds();
-                            let tempo_bpm = transport.tempo.bpm;
-                            info!(
-                                "[Transport Stream] 📤 Broadcasting to {} subscribers: {:?} | Position: {:.2}s | Tempo: {:.1} BPM | Rate: {:.2}x (tick #{})",
-                                subscriber_count,
-                                transport.play_state,
-                                position_seconds,
-                                tempo_bpm,
-                                transport.playrate,
-                                tick_count
-                            );
-                        } else {
-                            info!("[Transport Stream] 🔄 Polling tick #{} (subscribers: {})", tick_count, subscriber_count);
-                        }
-                    }
-                    
-                    // Broadcast to all subscribers via the broadcast channel
-                    // This is non-blocking - if receivers are slow, they'll lag but we keep sending
-                    match broadcast_tx.send(update) {
-                        Ok(_) => {
-                            // Successfully sent to broadcast channel
-                            // Individual subscriber tasks will forward to their clients
-                        }
-                        Err(_) => {
-                            // No subscribers currently listening
-                            // This is fine, we'll keep polling and they can subscribe later
-                        }
-                    }
-                }
-                Err(e) => {
-                    // Log errors occasionally, but don't spam
-                    if tick_count % 300 == 0 {
-                        warn!("[Transport Stream] Failed to read transport (tick #{}): {}", tick_count, e);
-                    }
-                }
+            // Get current transport state and project name from the provider
+            if let Ok(transport) = state_provider.get_transport().await {
+                let project_name = state_provider.get_project_name().await.ok().flatten();
+                let update = TransportUpdateMessage { 
+                    transport,
+                    project_name,
+                };
+                // Broadcast to all subscribers (non-blocking)
+                let _ = broadcast_tx.send(update);
             }
         }
     }

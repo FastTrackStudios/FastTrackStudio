@@ -4,10 +4,13 @@ mod navbar;
 mod counter;
 mod transport_display;
 mod reaper_connection;
+mod setlist_connection;
+mod setlist_display;
 use crate::blog::Blog;
 use crate::navbar::Navbar;
 use crate::counter::{CounterButton, start_auto_increment };
 use crate::transport_display::TransportDisplay;
+use crate::setlist_display::SetlistDisplay;
 
 #[derive(Debug, Clone, Routable, PartialEq)]
 #[rustfmt::skip]
@@ -59,7 +62,14 @@ fn App() -> Element {
             // Connect to REAPER extension and stream transport updates
             spawn(async move {
                 if let Err(e) = reaper_connection::connect_to_reaper().await {
-                    tracing::warn!("Failed to connect to REAPER: {}", e);
+                    tracing::warn!("Failed to connect to REAPER transport: {}", e);
+                }
+            });
+            
+            // Connect to REAPER extension and stream setlist updates
+            spawn(async move {
+                if let Err(e) = setlist_connection::connect_to_reaper_setlist().await {
+                    tracing::warn!("Failed to connect to REAPER setlist: {}", e);
                 }
             });
         }
@@ -82,6 +92,7 @@ fn Home() -> Element {
 
             CounterButton {  }
             TransportDisplay {}
+            SetlistDisplay {}
 
         }
 

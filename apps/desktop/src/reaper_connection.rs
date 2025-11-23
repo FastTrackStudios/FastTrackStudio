@@ -100,17 +100,14 @@ impl ReaperConnection {
     /// Connect with automatic retry logic
     async fn connect_with_retry(&self) {
         let mut retry_count = 0u32;
-        let mut backoff_seconds = 1u64;
-        const MAX_BACKOFF_SECONDS: u64 = 30;
         
             loop {
-            info!("[DESKTOP] Attempting to connect to REAPER (attempt {})...", retry_count + 1);
+            retry_count += 1;
             
             match self.try_connect().await {
                 Ok(()) => {
                     info!("[DESKTOP] Successfully connected to REAPER");
                     retry_count = 0;
-                    backoff_seconds = 1;
                     
                     // Wait for connection to close before retrying
                     // The connection tasks will update the status when they detect closure
@@ -123,17 +120,15 @@ impl ReaperConnection {
                     }
                 }
                 Err(e) => {
-                    retry_count += 1;
+                    if retry_count % 10 == 0 {
                     warn!("[DESKTOP] Connection attempt {} failed: {}", retry_count, e);
+                    }
                     
                     // Update connection status
                     self.connected_tx.send(false).ok();
                     
-                    // Exponential backoff with max limit
-                    info!("[DESKTOP] Retrying in {} seconds...", backoff_seconds);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(backoff_seconds)).await;
-                    
-                    backoff_seconds = (backoff_seconds * 2).min(MAX_BACKOFF_SECONDS);
+                    // Retry every 1 second
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             }
         }
@@ -324,9 +319,9 @@ fn handle_state_update_default(update: ReaperStateUpdate) {
         ReaperStateUpdate::Heartbeat => {
             info!("[DESKTOP] 💓 Heartbeat received");
         }
-        ReaperStateUpdate::SetlistState(state) => {
-            info!("[DESKTOP] SetlistState update - {} songs, active song idx: {}", 
-                state.setlist_json.len(), state.active_song_index);
+        // SetlistState is no longer used - setlist is now streamed via SETLIST global signal
+        ReaperStateUpdate::SetlistState(_) => {
+            // Ignored - setlist is now handled via SETLIST global signal
         }
         ReaperStateUpdate::TransportState(state) => {
             info!("[DESKTOP] TransportState update - playing: {}, position: {:.2}s", 

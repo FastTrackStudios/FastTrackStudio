@@ -1,22 +1,21 @@
 use dioxus::prelude::*;
-use setlist::{Setlist, Song, Section, SectionType};
+use setlist::{Setlist, Song, Section, SectionType, SETLIST};
 use marker_region::{Marker, application::TempoTimePoint};
 use primitives::Position;
 use ui::components::*;
-use ui::components::sidebar_items::{SongItemData, SectionItem};
-use ui::components::progress::{ProgressSection, TempoMarker};
-use ui::components::layout::DetailBadge;
-use crate::utils::{get_project_name, get_song_color_bright, get_song_color_muted, get_section_color_bright, get_section_color_muted, calculate_song_progress, get_tempo_at_position, format_time_position, get_time_signature_at_position, format_musical_position};
-use crate::utils::sidebar_helpers::{get_song_progress_for_sidebar, get_section_progress_for_sidebar};
-use crate::utils::navigation::handle_keyboard_navigation;
-use crate::state::provider::{StateProvider, use_app_state};
-use crate::state::StateManagerMode;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::reaper_connection::ReaperConnection;
+#[cfg(not(target_arch = "wasm32"))]
+use peer_2_peer::reaper_api::ReaperStateUpdate;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tracing::{info, warn, error};
 
-mod state;
 mod utils;
 #[cfg(not(target_arch = "wasm32"))]
 mod reaper_connection;
+#[cfg(not(target_arch = "wasm32"))]
+mod setlist_connection;
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
@@ -48,388 +47,109 @@ fn main() {
             .init();
     }
     
-    dioxus::launch(Root);
-}
-
-/// Root component that wraps the app with state provider
-#[component]
-fn Root() -> Element {
-    rsx! {
-        StateProvider {
-            App {}
-        }
-    }
+    dioxus::launch(App);
 }
 
 #[component]
 fn App() -> Element {
-    // Get all state from centralized provider
-    let state = use_app_state();
-    
-    // Extract individual signals for easier access
-    let setlist = state.setlist;
-    let mut transport_positions = state.transport_positions;
-    let mut song_positions = state.song_positions;
-    let mut current_song_index = state.current_song_index;
-    let mut current_section_index = state.current_section_index;
-    let mut is_playing = state.is_playing;
-    let mut is_looping = state.is_looping;
-    let is_connected = state.connection_status;
-    let mode = state.mode;
-    
-    // Convert mode to boolean for UI
-    let is_reaper_mode = use_memo(move || {
-        matches!(mode(), StateManagerMode::Reaper)
-    });
-    
-    // Mode toggle callback - toggle between Local and REAPER modes
-    let mut mode_signal = mode.clone();
-    let on_toggle_mode = Callback::new(move |_| {
-        let current = mode_signal();
-        let new_mode = match current {
-            StateManagerMode::Local => StateManagerMode::Reaper,
-            StateManagerMode::Reaper => StateManagerMode::Local,
-            StateManagerMode::Server { .. } => StateManagerMode::Reaper, // Switch to REAPER from server
-        };
-        tracing::info!("Toggling mode from {:?} to {:?}", current, new_mode);
-        mode_signal.set(new_mode);
-    });
-    
-    // Create memoized version for TopBar
-    let is_reaper_mode_for_ui = is_reaper_mode();
-    
-    // Log current setlist for debugging
+    // Connect to setlist stream when app starts
+    #[cfg(not(target_arch = "wasm32"))]
     {
-        let setlist_ref = setlist.read();
-        let song_names: Vec<_> = setlist_ref.songs.iter().map(|s| s.name.as_str()).collect();
-        tracing::debug!("📊 APP RENDER: Current setlist has {} songs: {:?}", setlist_ref.songs.len(), song_names);
-    }
-    
-    // Convert Setlist to UI component data
-    let sidebar_song_items: Vec<SongItemData> = setlist.read().songs.iter().enumerate().map(|(idx, song)| {
-        let current_song_idx = current_song_index();
-        let progress = get_song_progress_for_sidebar(song, idx, current_song_idx, &transport_positions.read());
-        
-        SongItemData {
-            label: song.name.clone(),
-            bright_color: get_song_color_bright(song),
-            muted_color: get_song_color_muted(song),
-            progress,
-            sections: song.sections.iter().enumerate().map(|(sec_idx, section)| {
-                let section_progress = get_section_progress_for_sidebar(section, song, idx, current_song_idx, &transport_positions.read());
-                SectionItem {
-                    label: section.display_name(),
-                    bright_color: get_section_color_bright(section),
-                    muted_color: get_section_color_muted(section),
-                    progress: section_progress,
-                }
-            }).collect(),
-        }
-    }).collect();
-    
-    // Get current song data for main content (reactive - recalculates when song index or transport positions change)
-    let current_song_data = use_memo(move || {
-        current_song_index().and_then(|idx| {
-            setlist.read().songs.get(idx).map(|song| {
-                let project_name = get_project_name(song).unwrap_or_else(|| "default".to_string());
-                let current_pos = transport_positions.read().get(&project_name).copied().unwrap_or(0.0);
-                (song.clone(), current_pos)
-            })
-        })
-    });
-    
-    let song_title = current_song_data().as_ref()
-        .map(|(song, _)| song.name.clone())
-        .unwrap_or_else(|| "No song selected".to_string());
-    
-    // Create progress sections and tempo markers from current song (reactive)
-    let mut progress_sections = use_signal(|| Vec::<ProgressSection>::new());
-    let mut tempo_markers = use_signal(|| Vec::<TempoMarker>::new());
-    {
-        let mut progress_sections = progress_sections.clone();
-        let mut tempo_markers = tempo_markers.clone();
         use_effect(move || {
-            if let Some((song, _current_pos)) = current_song_data().as_ref() {
-                let song_start = if song.effective_start() > 0.0 {
-                    song.effective_start()
-                } else {
-                    song.sections.first()
-                        .map(|s| s.start_seconds())
-                        .unwrap_or(0.0)
-                };
-                let song_end = if song.effective_end() > 0.0 {
-                    song.effective_end()
-                } else {
-                    song.sections.last()
-                        .map(|s| s.end_seconds())
-                        .unwrap_or(0.0)
-                };
-                let song_duration = song_end - song_start;
-                
-                // Calculate progress sections
-                let mut sections = Vec::new();
-                if song_duration > 0.0 {
-                    for section in &song.sections {
-                        let section_start = section.start_position.time.to_seconds();
-                        let section_end = section.end_position.time.to_seconds();
-                        let start_percent = ((section_start - song_start) / song_duration) * 100.0;
-                        let end_percent = ((section_end - song_start) / song_duration) * 100.0;
-                        
-                        sections.push(ProgressSection {
-                            start_percent: start_percent.max(0.0).min(100.0),
-                            end_percent: end_percent.max(0.0).min(100.0),
-                            color: get_section_color_bright(section),
-                            name: section.display_name(),
-                        });
-                    }
+            spawn(async move {
+                if let Err(e) = setlist_connection::connect_to_reaper_setlist().await {
+                    tracing::warn!("Failed to connect to REAPER setlist: {}", e);
                 }
-                progress_sections.set(sections);
-                
-                // Calculate tempo markers (filter redundant ones, similar to dioxus-test)
-                let mut markers = Vec::new();
-                if song_duration > 0.0 {
-                    // Sort tempo changes by position
-                    let mut sorted_changes: Vec<&TempoTimePoint> = song.tempo_time_sig_changes.iter().collect();
-                    sorted_changes.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
-                    
-                    // Track previous values to only show actual changes
-                    let mut prev_tempo: Option<f64> = None;
-                    let mut prev_time_sig: Option<(i32, i32)> = None;
-                    let mut prev_tempo_for_label: Option<f64> = None;
-                    let mut prev_time_sig_for_label: Option<(i32, i32)> = None;
-                    
-                    // Establish baseline from first marker
-                    if let Some(first_point) = sorted_changes.first() {
-                        if first_point.tempo > 0.0 {
-                            prev_tempo_for_label = Some(first_point.tempo);
-                        }
-                        if let Some(time_sig) = first_point.time_signature {
-                            prev_time_sig_for_label = Some(time_sig);
-                        }
-                    }
-                    
-                    for point in sorted_changes.iter() {
-                        let current_tempo = if point.tempo > 0.0 { Some(point.tempo) } else { None };
-                        let current_time_sig = point.time_signature;
-                        
-                        // Check if tempo or time signature changed from previous
-                        let tempo_changed = match (prev_tempo, current_tempo) {
-                            (Some(prev), Some(curr)) => (prev - curr).abs() > 0.01,
-                            _ => false,
-                        };
-                        
-                        let time_sig_changed = match (prev_time_sig, current_time_sig) {
-                            (Some(prev), Some(curr)) => prev != curr,
-                            _ => false,
-                        };
-                        
-                        // Only include if something actually changed
-                        if tempo_changed || time_sig_changed {
-                            let marker_position_seconds = point.position;
-                            let marker_percent = ((marker_position_seconds - song_start) / song_duration * 100.0).max(0.0).min(100.0);
-                            
-                            // Build label based on what changed
-                            let mut label_parts = Vec::new();
-                            
-                            // Check if time signature changed
-                            if let Some((n, d)) = current_time_sig {
-                                if let Some(prev_sig) = prev_time_sig_for_label {
-                                    if prev_sig != (n, d) {
-                                        label_parts.push(format!("{}/{}", n, d));
-                                    }
-                                }
-                            }
-                            
-                            // Check if tempo changed
-                            if let Some(tempo) = current_tempo {
-                                if let Some(prev) = prev_tempo_for_label {
-                                    if (prev - tempo).abs() > 0.01 {
-                                        label_parts.push(format!("{:.0} bpm", tempo));
-                                    }
-            }
-        }
-                            
-                            let label = label_parts.join(" ");
-                            if !label.is_empty() {
-                                markers.push(TempoMarker {
-                                    position_percent: marker_percent,
-                                    label,
-                                });
-                            }
-                            
-                            // Update previous values for next iteration
-                            if let Some(tempo) = current_tempo {
-                                prev_tempo_for_label = Some(tempo);
-                            }
-                            if let Some(time_sig) = current_time_sig {
-                                prev_time_sig_for_label = Some(time_sig);
-                            }
-                        }
-                        
-                        // Update previous values
-                        if let Some(tempo) = current_tempo {
-                            prev_tempo = Some(tempo);
-                        }
-                        if let Some(time_sig) = current_time_sig {
-                            prev_time_sig = Some(time_sig);
-                        }
-                    }
-                }
-                tempo_markers.set(markers);
-            } else {
-                progress_sections.set(Vec::new());
-                tempo_markers.set(Vec::new());
-            }
-        });
-    }
-    
-    // Calculate current progress percentage (reactive - updates when transport positions or song changes)
-    let mut current_progress = use_signal(|| 0.0);
-    {
-        let mut current_progress = current_progress.clone();
-        use_effect(move || {
-            let new_progress = current_song_data().as_ref()
-                .map(|(song, current_pos)| {
-                    calculate_song_progress(song, *current_pos)
-                })
-                .unwrap_or(0.0);
-            current_progress.set(new_progress);
-        });
-    }
-    
-    // Create detail badges (reactive - includes Musical Position and Time Signature)
-    let mut detail_badges = use_signal(|| None::<Vec<DetailBadge>>);
-    {
-        let mut detail_badges = detail_badges.clone();
-        use_effect(move || {
-            let badges = current_song_data().as_ref().map(|(song, current_pos)| {
-                // Calculate song-relative position for tempo/time sig lookup
-                let song_start = if song.effective_start() > 0.0 {
-                    song.effective_start()
-                } else {
-                    song.sections.first()
-                        .map(|s| s.start_seconds())
-                        .unwrap_or(0.0)
-                };
-                let song_relative_position = (*current_pos - song_start).max(0.0);
-                
-                // Get tempo and time signature at current position
-                let tempo = get_tempo_at_position(song, song_relative_position);
-                let time_sig = get_time_signature_at_position(song, song_relative_position);
-                
-                // Calculate musical position from time position
-                let time_pos = primitives::TimePosition::from_seconds(song_relative_position);
-                let musical_pos = time_pos.to_musical_position(tempo, time_sig.clone());
-                
-                // Format the values
-                let musical_str = format_musical_position(&musical_pos);
-                let time_str = format_time_position(&time_pos);
-                let tempo_str = format!("{:.0}", tempo);
-                let time_sig_str = format!("{}/{}", time_sig.numerator, time_sig.denominator);
-                
-                vec![
-                    DetailBadge {
-                        label: "Measure".to_string(),
-                        value: musical_str,
-                    },
-                    DetailBadge {
-                        label: "Time".to_string(),
-                        value: time_str,
-                    },
-                    DetailBadge {
-                        label: "BPM".to_string(),
-                        value: tempo_str,
-                    },
-                    DetailBadge {
-                        label: "Time Sig".to_string(),
-                        value: time_sig_str,
-                    },
-                ]
             });
-            detail_badges.set(badges);
         });
     }
+    
+    // Set up REAPER connection (transport info is embedded in SETLIST)
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use_effect(move || {
+            let (reaper_conn, _connected_rx, _command_sender) = ReaperConnection::new();
+            
+            // Set up handler for state updates
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ReaperStateUpdate>();
+            
+            let reaper_conn_for_handler = reaper_conn.clone();
+            let handler_tx = tx.clone();
+            spawn(async move {
+                reaper_conn_for_handler.set_state_update_handler(Arc::new(move |update| {
+                    if let Err(e) = handler_tx.send(update) {
+                        warn!("[DESKTOP] Failed to forward state update to channel: {}", e);
+                    }
+                })).await;
+    });
+    
+            // Start connection
+            spawn(async move {
+                if let Err(e) = reaper_conn.start().await {
+                    error!("[DESKTOP] Failed to start connection manager: {}", e);
+        }
+            });
+            
+            // Process state updates (transport info is embedded in SETLIST)
+            spawn(async move {
+                while let Some(update) = rx.recv().await {
+                    match update {
+                        ReaperStateUpdate::Heartbeat => {
+                            info!("[DESKTOP] 💓 Received heartbeat");
+                        }
+                        ReaperStateUpdate::SetlistState(_) => {
+                            // Ignored - setlist is handled via SETLIST global signal
+                        }
+                        ReaperStateUpdate::TransportState(state) => {
+                            info!("[DESKTOP] Received TransportState update - playing: {}, position: {:.2}s", 
+                                state.is_playing, state.position_seconds);
+                            // Transport state is now embedded in each song's transport_info via SETLIST
+                            // No need to update a separate TRANSPORT_INFO signal
+                        }
+                    }
+                }
+            });
+        });
+    }
+    
+    // Derive current song and section index from SETLIST global signal
+    let current_song_index = use_memo(move || {
+        SETLIST.read().as_ref().and_then(|api| api.active_song_index())
+    });
+    
+    let current_section_index = use_memo(move || {
+        SETLIST.read().as_ref().and_then(|api| api.active_section_index())
+    });
+    
+                
+    // Connection status - for now always true when REAPER connection exists
+    let is_connected = use_signal(|| false);
+    
+    // Mode toggle callback - simplified for now
+    let on_toggle_mode = Callback::new(move |_| {
+        // TODO: Implement mode toggle if needed
+    });
     
     // Callbacks
-    let on_song_click = Callback::new(move |idx: usize| {
-        let setlist_ref = setlist.read();
-        if let Some(song) = setlist_ref.songs.get(idx) {
-            if let Some(section) = song.sections.first() {
-                let project_name = get_project_name(song).unwrap_or_else(|| "default".to_string());
-                let new_position = section.start_seconds();
-                transport_positions.with_mut(|positions| {
-                    positions.insert(project_name.clone(), new_position);
-                });
-                song_positions.with_mut(|positions| {
-                    positions.insert(idx.to_string(), new_position);
-                });
-            }
-        }
-        current_song_index.set(Some(idx));
-        current_section_index.set(Some(0));
+    let on_song_click = Callback::new(move |_idx: usize| {
+        // No-op: song selection is automatic from REAPER state via setlist signal
     });
     
-    let on_section_click = Callback::new(move |(song_idx, section_idx): (usize, usize)| {
-        let setlist_ref = setlist.read();
-        if let Some(song) = setlist_ref.songs.get(song_idx) {
-            if let Some(section) = song.sections.get(section_idx) {
-                let project_name = get_project_name(song).unwrap_or_else(|| "default".to_string());
-                let new_position = section.start_seconds();
-                transport_positions.with_mut(|positions| {
-                    positions.insert(project_name.clone(), new_position);
-                });
-                song_positions.with_mut(|positions| {
-                    positions.insert(song_idx.to_string(), new_position);
-                });
-            }
-        }
-        current_song_index.set(Some(song_idx));
-        current_section_index.set(Some(section_idx));
+    let on_section_click = Callback::new(move |(_song_idx, _section_idx): (usize, usize)| {
+        // No-op: section selection is automatic from REAPER state via setlist signal
     });
     
     let on_transport_action = Callback::new(move |action: String| {
+        // TODO: Implement transport actions via REAPER connection
         match action.as_str() {
-            "back" => {
-                // Navigate to previous section
-                let setlist_ref = setlist.read();
-                let (new_song_idx, new_section_idx) = transport_positions.with_mut(|transport_pos| {
-                    song_positions.with_mut(|song_pos| {
-                        handle_keyboard_navigation(
-                            &setlist_ref,
-                            current_song_index(),
-                            current_section_index(),
-                            false, // is_right = false for back
-                            transport_pos,
-                            song_pos,
-                        )
-                    })
-                });
-                current_song_index.set(new_song_idx);
-                current_section_index.set(new_section_idx);
-            }
             "play_pause" => {
-                is_playing.set(!is_playing());
+                // TODO: Send play/pause command to REAPER
             }
             "loop_toggle" => {
-                is_looping.set(!is_looping());
+                // TODO: Send loop toggle command to REAPER
             }
-            "advance" => {
-                // Navigate to next section
-                let setlist_ref = setlist.read();
-                let (new_song_idx, new_section_idx) = transport_positions.with_mut(|transport_pos| {
-                    song_positions.with_mut(|song_pos| {
-                        handle_keyboard_navigation(
-                            &setlist_ref,
-                            current_song_index(),
-                            current_section_index(),
-                            true, // is_right = true for advance
-                            transport_pos,
-                            song_pos,
-                        )
-                    })
-                });
-                current_song_index.set(new_song_idx);
-                current_section_index.set(new_section_idx);
+            "back" | "advance" => {
+                // TODO: Implement navigation
             }
             _ => {}
         }
@@ -443,105 +163,9 @@ fn App() -> Element {
         div {
             class: "h-screen w-screen flex flex-col overflow-hidden bg-background",
             tabindex: "0",
-            onkeydown: move |e| {
-                let setlist_ref = setlist.read();
-                let song_count = setlist_ref.songs.len();
-                
-                // Only handle section navigation when not playing
-                if !is_playing() {
-                    match e.key() {
-                        Key::ArrowRight | Key::ArrowLeft => {
-                            let is_right = matches!(e.key(), Key::ArrowRight);
-                            let setlist_clone = setlist_ref.clone();
-                            let (new_song_idx, new_section_idx) = transport_positions.with_mut(|transport_pos| {
-                                song_positions.with_mut(|song_pos| {
-                                    handle_keyboard_navigation(
-                                        &setlist_clone,
-                                        current_song_index(),
-                                        current_section_index(),
-                                        is_right,
-                                        transport_pos,
-                                        song_pos,
-                                    )
-                                })
-                            });
-                            current_song_index.set(new_song_idx);
-                            current_section_index.set(new_section_idx);
-                        }
-                        _ => {}
-    }
-}
-
-                // Song navigation (up/down arrows) - always available
-                match e.key() {
-                    Key::ArrowDown => {
-                        if song_count == 0 {
-                            return;
-                        }
-                        let prev_song_idx = current_song_index();
-                        
-                        let next_index = match current_song_index() {
-                            Some(idx) if idx < song_count - 1 => Some(idx + 1),
-                            Some(_) => Some(song_count - 1),
-                            None => Some(0),
-                        };
-                        
-                        current_song_index.set(next_index);
-                        current_section_index.set(Some(0));
-                        
-                        if let Some(song) = setlist_ref.songs.get(next_index.unwrap_or(0)) {
-                            if let Some(section) = song.sections.first() {
-                                let project_name = get_project_name(song).unwrap_or_else(|| "default".to_string());
-                                let new_position = section.start_seconds();
-                                transport_positions.with_mut(|positions| {
-                                    positions.insert(project_name, new_position);
-                                });
-                                song_positions.with_mut(|positions| {
-                                    positions.insert(next_index.unwrap_or(0).to_string(), new_position);
-                                });
-                            }
-                        }
-                    }
-                    Key::ArrowUp => {
-                        if song_count == 0 {
-                            return;
-                        }
-                        let prev_index = match current_song_index() {
-                            Some(idx) if idx > 0 => Some(idx - 1),
-                            Some(_) => Some(0),
-                            None => Some(0),
-                        };
-                        
-                        current_song_index.set(prev_index);
-                        current_section_index.set(Some(0));
-                        
-                        if let Some(song) = setlist_ref.songs.get(prev_index.unwrap_or(0)) {
-                            if let Some(section) = song.sections.first() {
-                                let project_name = get_project_name(song).unwrap_or_else(|| "default".to_string());
-                                let new_position = section.start_seconds();
-                                transport_positions.with_mut(|positions| {
-                                    positions.insert(project_name, new_position);
-                                });
-                                song_positions.with_mut(|positions| {
-                                    positions.insert(prev_index.unwrap_or(0).to_string(), new_position);
-                                });
-                            }
-                        }
-                    }
-                    Key::Character(c) if c == "c" || c == "C" => {
-                        is_looping.set(!is_looping());
-                    }
-                    Key::Character(c) if c == " " => {
-                        e.prevent_default();
-                        is_playing.set(!is_playing());
-                    }
-                    _ => {}
-                }
-            },
-            
             TopBar {
                 is_connected: is_connected,
-                    is_server_mode: is_reaper_mode_for_ui,
+                is_server_mode: false,
                 on_toggle_mode: Some(on_toggle_mode),
             }
             
@@ -549,29 +173,23 @@ fn App() -> Element {
                 class: "flex-1 flex overflow-hidden",
                 
                 Sidebar {
-                    songs: sidebar_song_items,
-                    current_song_index: current_song_index,
-                    current_section_index: current_section_index,
-                    is_playing: is_playing,
+                    current_song_index: Signal::new(current_song_index()),
+                    current_section_index: Signal::new(current_section_index()),
+                    is_playing: Signal::new(false), // Will be derived from SETLIST in component
                     on_song_click: on_song_click,
                     on_section_click: on_section_click,
                 }
                 
                 MainContent {
-                    song_name: song_title,
-                    song_position: current_song_index(),
-                    song_total: Some(setlist.read().songs.len()),
-                    detail_badges: detail_badges(),
-                    progress: current_progress,
-                    sections: progress_sections(),
-                    tempo_markers: tempo_markers(),
+                    current_song_index: Signal::new(current_song_index()),
+                    current_section_index: Signal::new(current_section_index()),
                     on_section_click: Some(Callback::new(move |idx: usize| {
                         if let Some(song_idx) = current_song_index() {
                             on_section_click.call((song_idx, idx));
                         }
                     })),
-                    is_playing: is_playing,
-                    is_looping: is_looping,
+                    is_playing: Signal::new(false), // Will be derived from SETLIST in component
+                    is_looping: Signal::new(false), // Will be derived from SETLIST in component
                     on_play_pause: Callback::new(move |_| {
                         on_transport_action.call("play_pause".to_string());
                     }),

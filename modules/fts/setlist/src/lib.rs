@@ -2,8 +2,14 @@ pub mod application;
 pub mod core;
 pub mod infra;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use infra::stream::{SetlistStreamApi, SetlistStateProvider, SetlistUpdateMessage};
+
+#[cfg(feature = "dioxus")]
+pub use infra::dioxus::{SETLIST, TRANSPORT_INFO, ProjectTransportInfo};
+
 pub use core::{
-    Section, SectionType, Setlist, SetlistEntry, SetlistError, SetlistOrder, SetlistSummary, Song,
+    Section, SectionType, Setlist, SetlistApi, SetlistEntry, SetlistError, SetlistOrder, SetlistSummary, Song,
     SongSummary,
 };
 

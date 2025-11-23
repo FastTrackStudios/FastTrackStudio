@@ -65,14 +65,7 @@ fn flush_build_stats_if_needed() {
     if let Ok(mut s) = stats.lock() {
         let now = Instant::now();
         if s.last_log_time.elapsed() >= Duration::from_secs(5) {
-            if s.sections_created > 0 || s.songs_built > 0 || s.songs_reused > 0 {
-                info!(
-                    sections_created = s.sections_created,
-                    songs_built = s.songs_built,
-                    songs_reused = s.songs_reused,
-                    "Setlist build stats (last 5s)"
-                );
-            }
+            // Stats logging removed - too verbose
             s.sections_created = 0;
             s.songs_built = 0;
             s.songs_reused = 0;
@@ -291,18 +284,7 @@ pub fn build_setlist_from_open_projects(existing_setlist: Option<&Setlist>) -> R
         }
     }
 
-    // Log batched summary instead of individual project logs
-    if projects_processed > 0 || projects_skipped > 0 {
-        info!(
-            projects_processed = projects_processed,
-            projects_skipped = projects_skipped,
-            song_count = setlist.song_count(),
-            "Built setlist: {} songs from {} projects ({} skipped)",
-            setlist.song_count(),
-            projects_processed,
-            projects_skipped
-        );
-    }
+    // Setlist built silently - no logging
     
     // Flush batched stats
     flush_build_stats_if_needed();
@@ -1003,9 +985,8 @@ fn build_song_from_region(
     
     song.set_tempo_time_sig_changes(song_tempo_changes);
     
-    // Attach project to song (Project<ReaperTransport> implements TransportActions)
-    let project_wrapper = create_reaper_project_wrapper(project.clone(), project_path);
-    song.set_project_wrapper(project_wrapper);
+    // Transport info will be populated in update_setlist_state from the project
+    // We don't attach the project to the song anymore - just store transport_info
     
     Ok(song)
 }
@@ -1277,9 +1258,8 @@ fn build_song_from_project_simple(
     // Auto-number sections
     song.auto_number_sections();
 
-    // Attach project to song (Project<ReaperTransport> implements TransportActions)
-    let project_wrapper = create_reaper_project_wrapper(project.clone(), project_path);
-    song.set_project_wrapper(project_wrapper);
+    // Transport info will be populated in update_setlist_state from the project
+    // We don't attach the project to the song anymore - just store transport_info
 
     Ok(song)
 }

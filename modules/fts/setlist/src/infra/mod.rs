@@ -8,4 +8,6 @@ pub mod api_trait;
 pub mod dioxus;
 #[cfg(feature = "dioxus")]
 pub mod dioxus_impl;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod stream;
 

@@ -5,23 +5,14 @@
 
 use marker_region::{application::TempoTimePoint, core::Marker};
 use primitives::{Position, TimePosition, TimeRange, TimeSignature};
-use project::Project;
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use transport::{RecordMode, Tempo, Transport, TransportActions, TransportError};
-
-// Type alias for default project type (for backward compatibility)
-pub type SongProject = Project<Transport>;
-
-// Trait object type for any transport implementation
-type TransportProject = Arc<Mutex<dyn TransportActions + Send + Sync>>;
+use transport::{Transport, TransportActions, TransportError};
 
 use super::{Section, SectionType, SetlistError};
 
 /// Represents a song in the setlist
-#[derive(Serialize, Deserialize, Type)]
+#[derive(Serialize, Deserialize)]
 pub struct Song {
     /// Unique identifier for this song
     pub id: Option<uuid::Uuid>,
@@ -49,10 +40,9 @@ pub struct Song {
     pub tempo_time_sig_changes: Vec<TempoTimePoint>,
     /// Optional metadata (key, tempo, etc.)
     pub metadata: HashMap<String, String>,
-    /// Embedded project used to control transport (any type implementing TransportActions)
-    #[serde(skip)]
-    #[specta(skip)]
-    pub project: Option<TransportProject>,
+    /// Current transport state for this song's project (serialized)
+    /// This is the source of truth for transport state - projects can be looked up by name when needed for control
+    pub transport_info: Option<Transport>,
 }
 
 impl Song {
@@ -76,7 +66,7 @@ impl Song {
             sections: Vec::new(),
             tempo_time_sig_changes: Vec::new(),
             metadata: HashMap::new(),
-            project: None,
+            transport_info: None,
         })
     }
 
@@ -122,7 +112,7 @@ impl Song {
             sections,
             tempo_time_sig_changes,
             metadata,
-            project: None,
+            transport_info: None,
         })
     }
 
@@ -200,74 +190,10 @@ impl Song {
         Self::marker_position(&self.song_region_end_marker)
     }
 
-    /// Attach a project to this song (any type implementing TransportActions).
-    pub fn set_project<T: TransportActions + Send + Sync + 'static>(&mut self, project: T) {
-        self.project = Some(Arc::new(Mutex::new(project)));
-    }
-
-    /// Attach a Project<T> to this song (convenience method).
-    pub fn set_project_wrapper<T: TransportActions + Send + Sync + 'static>(
-        &mut self,
-        project: Project<T>,
-    ) {
-        self.project = Some(Arc::new(Mutex::new(project)));
-    }
-
-    /// Get the attached project as a trait object (for transport operations).
-    pub fn project(&self) -> Option<&TransportProject> {
-        self.project.as_ref()
-    }
-
-    /// Get the attached project ID (if any).
-    /// Note: This requires the project to be a Project<T> type, not a raw TransportActions.
-    pub fn project_id(&self) -> Option<uuid::Uuid> {
-        // Try to downcast to Project<T> to get ID
-        // For now, return None as we can't easily extract ID from trait object
-        // TODO: Add a method to TransportActions trait to get project metadata
-        None
-    }
-
-    /// Get the attached project name (if any).
-    /// Note: This requires the project to be a Project<T> type, not a raw TransportActions.
-    pub fn project_name(&self) -> Option<String> {
-        // Try to downcast to Project<T> to get name
-        // For now, return None as we can't easily extract name from trait object
-        // TODO: Add a method to TransportActions trait to get project metadata
-        None
-    }
-
-    fn with_project_mut<F, R>(&mut self, action: F) -> Result<R, TransportError>
-    where
-        F: FnOnce(&mut dyn TransportActions) -> Result<R, TransportError>,
-    {
-        let project = self
-            .project
-            .as_ref()
-            .ok_or_else(|| TransportError::NotReady("Song has no project attached".into()))?;
-
-        let mut project_guard = project
-            .lock()
-            .map_err(|e| TransportError::NotReady(format!("Failed to lock project: {}", e)))?;
-
-        // Dereference MutexGuard to get &mut dyn TransportActions
-        action(&mut *project_guard)
-    }
-
-    fn with_project_ref<F, R>(&self, action: F) -> Result<R, TransportError>
-    where
-        F: FnOnce(&dyn TransportActions) -> Result<R, TransportError>,
-    {
-        let project = self
-            .project
-            .as_ref()
-            .ok_or_else(|| TransportError::NotReady("Song has no project attached".into()))?;
-
-        let project_guard = project
-            .lock()
-            .map_err(|e| TransportError::NotReady(format!("Failed to lock project: {}", e)))?;
-
-        // Dereference MutexGuard to get &dyn TransportActions
-        action(&*project_guard)
+    /// Update transport info from a project (call this when you have access to the project)
+    pub fn update_transport_info<T: TransportActions>(&mut self, project: &T) -> Result<(), TransportError> {
+        self.transport_info = Some(project.get_transport()?);
+        Ok(())
     }
 
     /// Get the effective start position (either SONGSTART or song region start)
@@ -625,98 +551,120 @@ impl Song {
         self.sections = sections;
         Ok(())
     }
-}
 
-impl TransportActions for Song {
-    fn play(&mut self) -> Result<String, TransportError> {
-        self.with_project_mut(|project| project.play())
-    }
-
-    fn pause(&mut self) -> Result<String, TransportError> {
-        self.with_project_mut(|project| project.pause())
-    }
-
-    fn stop(&mut self) -> Result<String, TransportError> {
-        self.with_project_mut(|project| project.stop())
-    }
-
-    fn play_pause(&mut self) -> Result<String, TransportError> {
-        self.with_project_mut(|project| project.play_pause())
-    }
-
-    fn play_stop(&mut self) -> Result<String, TransportError> {
-        self.with_project_mut(|project| project.play_stop())
-    }
-
-    fn start_recording(&mut self) -> Result<String, TransportError> {
-        self.with_project_mut(|project| project.start_recording())
-    }
-
-    fn stop_recording(&mut self) -> Result<String, TransportError> {
-        self.with_project_mut(|project| project.stop_recording())
-    }
-
-    fn toggle_recording(&mut self) -> Result<String, TransportError> {
-        self.with_project_mut(|project| project.toggle_recording())
-    }
-
-    fn set_tempo(&mut self, tempo: Tempo) -> Result<String, TransportError> {
-        self.with_project_mut(|project| project.set_tempo(tempo))
-    }
-
-    fn set_time_signature(
-        &mut self,
-        time_signature: TimeSignature,
-    ) -> Result<String, TransportError> {
-        self.with_project_mut(|project| project.set_time_signature(time_signature))
-    }
-
-    fn set_record_mode(&mut self, record_mode: RecordMode) -> Result<String, TransportError> {
-        self.with_project_mut(|project| project.set_record_mode(record_mode))
-    }
-
-    fn set_position(&mut self, seconds: f64) -> Result<String, TransportError> {
-        self.with_project_mut(|project| project.set_position(seconds))
-    }
-
-    fn get_tempo(&self) -> Result<Tempo, TransportError> {
-        self.with_project_ref(|project| project.get_tempo())
-    }
-
-    fn get_time_signature(&self) -> Result<TimeSignature, TransportError> {
-        self.with_project_ref(|project| project.get_time_signature())
-    }
-
-    fn get_record_mode(&self) -> Result<RecordMode, TransportError> {
-        self.with_project_ref(|project| project.get_record_mode())
-    }
-
-    fn get_position(&self) -> Result<f64, TransportError> {
-        self.with_project_ref(|project| project.get_position())
-    }
-
-    fn is_playing(&self) -> Result<bool, TransportError> {
-        self.with_project_ref(|project| project.is_playing())
-    }
-
-    fn is_recording(&self) -> Result<bool, TransportError> {
-        self.with_project_ref(|project| project.is_recording())
-    }
-
-    fn get_transport(&self) -> Result<Transport, TransportError> {
-        self.with_project_ref(|project| project.get_transport())
-    }
-
-    fn is_ready(&self) -> Result<bool, TransportError> {
-        if self.project.is_some() {
-            Ok(true)
+    /// Get the song's color as RGB string (bright variant)
+    pub fn color_bright(&self) -> String {
+        let color = self.song_region_start_marker.as_ref()
+            .and_then(|m| m.color)
+            .filter(|&c| c != 0)
+            .or_else(|| self.start_marker.as_ref().and_then(|m| m.color).filter(|&c| c != 0));
+        
+        if let Some(color_u32) = color {
+            let r = ((color_u32 >> 16) & 0xFF) as u8;
+            let g = ((color_u32 >> 8) & 0xFF) as u8;
+            let b = (color_u32 & 0xFF) as u8;
+            let r = (r as f32 * 1.2).min(255.0) as u8;
+            let g = (g as f32 * 1.2).min(255.0) as u8;
+            let b = (b as f32 * 1.2).min(255.0) as u8;
+            format!("rgb({}, {}, {})", r, g, b)
         } else {
-            Err(TransportError::NotReady(
-                "Song has no project attached".into(),
-            ))
+            "rgb(128, 128, 128)".to_string()
         }
     }
+
+    /// Get the song's color as RGB string (muted variant)
+    pub fn color_muted(&self) -> String {
+        let color = self.song_region_start_marker.as_ref()
+            .and_then(|m| m.color)
+            .filter(|&c| c != 0)
+            .or_else(|| self.start_marker.as_ref().and_then(|m| m.color).filter(|&c| c != 0));
+        
+        if let Some(color_u32) = color {
+            let r = ((color_u32 >> 16) & 0xFF) as u8;
+            let g = ((color_u32 >> 8) & 0xFF) as u8;
+            let b = (color_u32 & 0xFF) as u8;
+            let r = (r as f32 * 0.6) as u8;
+            let g = (g as f32 * 0.6) as u8;
+            let b = (b as f32 * 0.6) as u8;
+            format!("rgb({}, {}, {})", r, g, b)
+        } else {
+            "rgb(80, 80, 80)".to_string()
+        }
+    }
+
+    /// Get the song's color (defaults to bright)
+    pub fn color(&self) -> String {
+        self.color_bright()
+    }
+
+    /// Calculate progress percentage (0-100) based on transport position
+    pub fn progress(&self, transport_position: f64) -> f64 {
+        let song_start = self.effective_start();
+        let song_end = self.effective_end();
+        let song_duration = song_end - song_start;
+        
+        if song_duration <= 0.0 {
+            return 0.0;
+        }
+        
+        let relative_position = (transport_position - song_start).max(0.0);
+        (relative_position / song_duration).min(1.0) * 100.0
+    }
+
+    /// Get the section at a given index
+    pub fn section(&self, index: usize) -> Option<&Section> {
+        self.sections.get(index)
+    }
+
+    /// Get the next section after the given index
+    pub fn next_section(&self, section_index: usize) -> Option<&Section> {
+        if section_index + 1 < self.sections.len() {
+            self.sections.get(section_index + 1)
+        } else {
+            None
+        }
+    }
+
+    /// Get the previous section before the given index
+    pub fn previous_section(&self, section_index: usize) -> Option<&Section> {
+        if section_index > 0 {
+            self.sections.get(section_index - 1)
+        } else {
+            None
+        }
+    }
+
+    /// Find the section containing the given transport position (returns index and section)
+    pub fn section_at_position_with_index(&self, transport_position: f64) -> Option<(usize, &Section)> {
+        self.sections.iter()
+            .enumerate()
+            .find(|(_, section)| {
+                let start = section.start_seconds();
+                let end = section.end_seconds();
+                transport_position >= start && transport_position < end
+            })
+            .map(|(idx, section)| (idx, section))
+    }
+
+    /// Get the current section index based on transport position
+    pub fn current_section_index(&self, transport_position: f64) -> Option<usize> {
+        self.section_at_position_with_index(transport_position).map(|(idx, _)| idx)
+    }
+
+    /// Get project name from metadata (returns default if not found)
+    pub fn project_name_from_metadata(&self) -> String {
+        self.metadata
+            .get("project_name")
+            .or_else(|| self.metadata.get("Project"))
+            .or_else(|| self.metadata.get("project"))
+            .cloned()
+            .unwrap_or_else(|| "default".to_string())
+    }
 }
+
+// Song no longer implements TransportActions directly
+// Transport control should be done by looking up the project by name
+// Transport state is available via transport_info field
 
 impl Clone for Song {
     fn clone(&self) -> Self {
@@ -734,7 +682,7 @@ impl Clone for Song {
             sections: self.sections.clone(),
             tempo_time_sig_changes: self.tempo_time_sig_changes.clone(),
             metadata: self.metadata.clone(),
-            project: self.project.clone(), // Arc clones the pointer, not the inner value
+            transport_info: self.transport_info.clone(),
         }
     }
 }
@@ -755,7 +703,7 @@ impl std::fmt::Debug for Song {
             .field("sections", &self.sections)
             .field("tempo_time_sig_changes", &self.tempo_time_sig_changes)
             .field("metadata", &self.metadata)
-            .field("project", &self.project.as_ref().map(|_| "Some(TransportProject)"))
+            .field("transport_info", &self.transport_info)
             .finish()
     }
 }
@@ -775,12 +723,7 @@ impl PartialEq for Song {
             && self.sections == other.sections
             && self.tempo_time_sig_changes == other.tempo_time_sig_changes
             && self.metadata == other.metadata
-            // Compare projects by Arc pointer equality
-            && match (&self.project, &other.project) {
-                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-                (None, None) => true,
-                _ => false,
-            }
+            && self.transport_info == other.transport_info
     }
 }
 
@@ -797,7 +740,7 @@ impl std::fmt::Display for Song {
 }
 
 /// Summary information about a song
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SongSummary {
     pub name: String,
     pub duration: f64,
@@ -974,16 +917,14 @@ mod tests {
     }
 
     #[test]
-    fn test_song_transport_delegation() {
+    fn test_song_transport_info() {
         let mut song = Song::new("Transport Song".to_string()).unwrap();
-        let project = Project::with_default_transport("Demo Project");
-
-        song.set_project(project);
-
-        song.play().unwrap();
-        assert!(song.is_playing().unwrap());
-
-        song.stop().unwrap();
-        assert!(!song.is_playing().unwrap());
+        // Transport info can be updated from a project
+        // For testing, we can create a Transport directly
+        use transport::Transport;
+        let transport = Transport::new();
+        song.transport_info = Some(transport);
+        
+        assert!(song.transport_info.is_some());
     }
 }

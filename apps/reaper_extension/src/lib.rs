@@ -8,9 +8,7 @@ mod reaper_markers;
 mod reaper_setlist;
 mod color_utils;
 mod command_handler;
-mod setlist_sync;
-mod reaper_rpc_server;
-pub mod transport_stream;
+mod setlist_stream;
 
 /// Polling state management for continuous updates
 pub mod polling_state {
@@ -98,50 +96,37 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         info!("FastTrackStudio menu registered successfully");
     }
     
-    // Initialize transport state storage for transport stream service
-    info!("🔧 About to initialize transport state storage...");
-    transport_stream::init_transport_state();
-    info!("🔧 Transport state storage initialized");
+    // Initialize setlist state storage for setlist stream service
+    info!("🔧 About to initialize setlist state storage...");
+    setlist_stream::init_setlist_state();
+    info!("🔧 Setlist state storage initialized");
     
     // Start irpc server for IPC with desktop app
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
         
         rt.block_on(async {
-            info!("Starting REAPER RPC server in tokio runtime...");
+            info!("Starting IROH router with setlist stream in tokio runtime...");
             
-            // Create REAPER API first
-            let api = reaper_rpc_server::ReaperActor::local();
-            reaper_rpc_server::set_global_api(api.clone());
-            
-            // Create transport stream service
-            let transport_api = match transport_stream::create_reaper_transport_stream_service() {
+            // Create setlist stream service
+            let setlist_api = match setlist_stream::create_reaper_setlist_stream_service() {
                 Ok(api) => api,
                 Err(e) => {
-                    warn!("Failed to create transport stream service: {}", e);
+                    warn!("Failed to create setlist stream service: {}", e);
                     return;
                 }
             };
             
-            // Get the local sender for REAPER protocol
-            let reaper_local = match api.get_local_sender() {
-                Ok(sender) => sender,
-                Err(e) => {
-                    error!("Failed to get local REAPER API: {}", e);
-                    return;
-                }
-            };
-            
-            // Expose transport stream handler
-            let transport_handler = match transport_api.expose() {
+            // Expose setlist stream handler
+            let setlist_handler = match setlist_api.expose() {
                 Ok(handler) => handler,
                 Err(e) => {
-                    warn!("Failed to expose transport stream service: {}", e);
+                    warn!("Failed to expose setlist stream service: {}", e);
                     return;
                 }
             };
             
-            // Create IROH endpoint and router with BOTH protocols
+            // Create IROH endpoint and router with ALL protocols
             let endpoint = match iroh::Endpoint::bind().await {
                 Ok(ep) => ep,
                 Err(e) => {
@@ -150,14 +135,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
                 }
             };
             let endpoint_id = endpoint.id();
-            
-            // Build router with both REAPER and transport stream protocols
-            use irpc_iroh::IrohProtocol;
-            use peer_2_peer::iroh_connection::REAPER_ALPN;
-            let reaper_protocol = IrohProtocol::with_sender(reaper_local);
-            let router = iroh::protocol::Router::builder(endpoint.clone())
-                .accept(REAPER_ALPN.to_vec(), reaper_protocol)
-                .accept(transport::TransportStreamApi::ALPN.to_vec(), transport_handler)
+                    
+            // Build router with setlist stream protocol
+            let _router = iroh::protocol::Router::builder(endpoint.clone())
+                .accept(setlist::SetlistStreamApi::ALPN.to_vec(), setlist_handler)
                 .spawn();
             
             // Store endpoint ID for client discovery
@@ -165,16 +146,15 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
                 warn!("Failed to store endpoint ID: {}", e);
             }
             
-            info!("REAPER RPC server started successfully with IROH");
+            info!("IROH router started successfully");
             info!("Router endpoint ID: {}", endpoint_id);
-            info!("REAPER protocol ALPN: {:?}", String::from_utf8_lossy(REAPER_ALPN));
-            info!("Transport stream ALPN: {:?}", String::from_utf8_lossy(transport::TransportStreamApi::ALPN));
-            
-            // Keep router alive - it handles all connections
-            // The router will run until shutdown is called
+            info!("Setlist stream ALPN: {:?}", String::from_utf8_lossy(setlist::SetlistStreamApi::ALPN));
+                    
+                    // Keep router alive - it handles all connections
+                    // The router will run until shutdown is called
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-                info!("REAPER RPC server runtime still active");
+                        info!("IROH router runtime still active");
             }
         });
     });
@@ -201,21 +181,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         // ALWAYS run - no polling state check
         let tick_count = TICK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
         
-        // Update transport state (runs on main thread, safe to call REAPER APIs)
-        transport_stream::update_transport_state();
+        // Update setlist state at 30Hz (every tick)
+        setlist_stream::update_setlist_state();
         
-        // Log every second (30 ticks) to avoid spam - timer runs at 30Hz but logs once per second
-        let last_log = LAST_LOG.get_or_init(|| std::sync::Mutex::new(Instant::now()));
-        if let Ok(mut last) = last_log.lock() {
-            if last.elapsed().as_secs() >= 1 {
-                info!(
-                    tick_count = tick_count,
-                    "🔄 Timer: {} ticks (30Hz, logging 1/sec)",
-                    tick_count
-                );
-                *last = Instant::now();
-            }
-        }
+        // Timer runs silently - no periodic logging
     }
     
     // Register the timer callback with REAPER (runs on main thread automatically)

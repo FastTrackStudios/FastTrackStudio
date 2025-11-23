@@ -5,40 +5,78 @@
 
 #[cfg(feature = "dioxus")]
 mod dioxus_impl {
-    use dioxus::prelude::*;
-    use crate::Setlist;
+use dioxus::prelude::*;
+    use crate::SetlistApi;
+    use std::collections::HashMap;
 
-    // ============================================================================
-    // Setlist - Full setlist struct
-    // ============================================================================
+// ============================================================================
+    // Setlist - Full setlist API with computed fields
+// ============================================================================
 
-    /// Full setlist struct - contains all setlist data
-    pub static SETLIST: GlobalSignal<Option<Setlist>> = Signal::global(|| None);
+    /// Full setlist API - contains setlist data and computed fields (active song, etc.)
+    pub static SETLIST: GlobalSignal<Option<SetlistApi>> = Signal::global(|| None);
 
-    // ============================================================================
+// ============================================================================
+    // Transport Info Per Project - Transport state for each project (multiple songs can play at once)
+// ============================================================================
+
+    /// Transport information for a specific project
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct ProjectTransportInfo {
+        pub position_seconds: f64,
+        pub tempo_bpm: f64,
+        pub time_sig_num: i32,
+        pub time_sig_den: i32,
+        pub is_playing: bool,
+        pub is_looping: bool,
+    }
+
+    impl ProjectTransportInfo {
+        pub fn new() -> Self {
+            Self {
+                position_seconds: 0.0,
+                tempo_bpm: 120.0,
+                time_sig_num: 4,
+                time_sig_den: 4,
+                is_playing: false,
+                is_looping: false,
+            }
+        }
+    }
+
+    impl Default for ProjectTransportInfo {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    /// Transport info per project name - allows multiple songs to have their own transport state
+    pub static TRANSPORT_INFO: GlobalSignal<HashMap<String, ProjectTransportInfo>> = Signal::global(|| HashMap::new());
+
+// ============================================================================
     // Transport State - Playback and recording state (needed for computing active song/section)
-    // ============================================================================
+// ============================================================================
 
-    /// Whether transport is currently playing
-    pub static IS_PLAYING: GlobalSignal<bool> = Signal::global(|| false);
+/// Whether transport is currently playing
+pub static IS_PLAYING: GlobalSignal<bool> = Signal::global(|| false);
 
-    /// Whether transport is currently recording
-    pub static IS_RECORDING: GlobalSignal<bool> = Signal::global(|| false);
+/// Whether transport is currently recording
+pub static IS_RECORDING: GlobalSignal<bool> = Signal::global(|| false);
 
-    /// Current transport position in seconds
-    pub static CURRENT_POSITION_SECONDS: GlobalSignal<f64> = Signal::global(|| 0.0);
+/// Current transport position in seconds
+pub static CURRENT_POSITION_SECONDS: GlobalSignal<f64> = Signal::global(|| 0.0);
 
-    /// Current transport position in beats
-    pub static CURRENT_POSITION_BEATS: GlobalSignal<f64> = Signal::global(|| 0.0);
+/// Current transport position in beats
+pub static CURRENT_POSITION_BEATS: GlobalSignal<f64> = Signal::global(|| 0.0);
 
-    /// Current tempo (BPM)
-    pub static CURRENT_TEMPO: GlobalSignal<f64> = Signal::global(|| 120.0);
+/// Current tempo (BPM)
+pub static CURRENT_TEMPO: GlobalSignal<f64> = Signal::global(|| 120.0);
 
-    /// Current time signature numerator (e.g., 4 for 4/4)
-    pub static CURRENT_TIME_SIG_NUMERATOR: GlobalSignal<i32> = Signal::global(|| 4);
+/// Current time signature numerator (e.g., 4 for 4/4)
+pub static CURRENT_TIME_SIG_NUMERATOR: GlobalSignal<i32> = Signal::global(|| 4);
 
-    /// Current time signature denominator (e.g., 4 for 4/4)
-    pub static CURRENT_TIME_SIG_DENOMINATOR: GlobalSignal<i32> = Signal::global(|| 4);
+/// Current time signature denominator (e.g., 4 for 4/4)
+pub static CURRENT_TIME_SIG_DENOMINATOR: GlobalSignal<i32> = Signal::global(|| 4);
 
     // ============================================================================
     // Active Song Index - Which song is currently active (needed for computation)

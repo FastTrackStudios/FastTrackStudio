@@ -8,7 +8,8 @@ edition.workspace = true
 [dependencies]
 dioxus = { workspace = true, features = ["router", "fullstack"] }
 ui = { workspace = true }
-setlist = { path = "../../modules/fts/setlist" }
+setlist = { path = "../../modules/fts/setlist", features = ["dioxus"] }
+transport = { path = "../../modules/daw/transport" }
 marker-region = { path = "../../modules/daw/marker-region" }
 primitives = { path = "../../modules/daw/primitives" }
 peer-2-peer = { path = "../../modules/peer-2-peer" }

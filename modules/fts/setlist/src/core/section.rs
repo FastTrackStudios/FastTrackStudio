@@ -5,13 +5,12 @@
 
 use primitives::{MusicalPosition, Position, TimePosition, TimeRange, TimeSignature};
 use serde::{Deserialize, Serialize};
-use specta::Type;
 use std::collections::HashMap;
 
 use super::error::SetlistError;
 
 /// Represents different types of song sections with their full names and abbreviations
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SectionType {
     Verse,
     Chorus,
@@ -20,9 +19,7 @@ pub enum SectionType {
     Outro,
     Instrumental,
     Custom, // Custom section type for unrecognized section names
-    #[specta(skip)]
     Pre(Box<SectionType>), // Pre-Chorus, Pre-Verse, etc.
-    #[specta(skip)]
     Post(Box<SectionType>), // Post-Chorus, Post-Verse, etc.
 }
 
@@ -220,7 +217,7 @@ impl std::fmt::Display for SectionType {
 }
 
 /// Represents a section within a song
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Section {
     /// Unique identifier for this section
     pub id: Option<uuid::Uuid>,
@@ -304,6 +301,60 @@ impl Section {
     /// Get end time in seconds
     pub fn end_seconds(&self) -> f64 {
         self.end_position.time.to_seconds()
+    }
+
+    /// Get the section's color as RGB string (bright variant)
+    pub fn color_bright(&self) -> String {
+        if let Some(color_u32) = self.color.filter(|&c| c != 0) {
+            let r = ((color_u32 >> 16) & 0xFF) as u8;
+            let g = ((color_u32 >> 8) & 0xFF) as u8;
+            let b = (color_u32 & 0xFF) as u8;
+            let r = (r as f32 * 1.2).min(255.0) as u8;
+            let g = (g as f32 * 1.2).min(255.0) as u8;
+            let b = (b as f32 * 1.2).min(255.0) as u8;
+            format!("rgb({}, {}, {})", r, g, b)
+        } else {
+            "rgb(128, 128, 128)".to_string()
+        }
+    }
+
+    /// Get the section's color as RGB string (muted variant)
+    pub fn color_muted(&self) -> String {
+        if let Some(color_u32) = self.color.filter(|&c| c != 0) {
+            let r = ((color_u32 >> 16) & 0xFF) as u8;
+            let g = ((color_u32 >> 8) & 0xFF) as u8;
+            let b = (color_u32 & 0xFF) as u8;
+            let r = (r as f32 * 0.6) as u8;
+            let g = (g as f32 * 0.6) as u8;
+            let b = (b as f32 * 0.6) as u8;
+            format!("rgb({}, {}, {})", r, g, b)
+        } else {
+            "rgb(80, 80, 80)".to_string()
+        }
+    }
+
+    /// Get the section's color (defaults to bright)
+    pub fn color(&self) -> String {
+        self.color_bright()
+    }
+
+    /// Calculate progress percentage (0-100) based on transport position
+    pub fn progress(&self, transport_position: f64) -> f64 {
+        let start = self.start_seconds();
+        let end = self.end_seconds();
+        
+        if end <= start {
+            return 0.0;
+        }
+        
+        if transport_position >= end {
+            return 100.0;
+        }
+        if transport_position < start {
+            return 0.0;
+        }
+        
+        ((transport_position - start) / (end - start) * 100.0).clamp(0.0, 100.0)
     }
 
     /// Calculate the length of the section in measures

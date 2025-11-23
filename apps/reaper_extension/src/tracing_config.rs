@@ -37,10 +37,8 @@ pub fn init_tracing() {
                 .add_directive("reaper_extension=info".parse().unwrap()) // Allow info logs from extension
                 .add_directive("reaper_extension::local_socket_server=info".parse().unwrap())
                 .add_directive("reaper_extension::reaper_rpc_server=info".parse().unwrap())
-                .add_directive("reaper_extension::transport_stream=info".parse().unwrap())
                 .add_directive("peer_2_peer::unix_socket=info".parse().unwrap())
                 .add_directive("peer_2_peer::iroh_connection=info".parse().unwrap())
-                .add_directive("transport=info".parse().unwrap()) // Allow info logs from transport crate
                 // Suppress harmless IROH warnings about IPv6 relays and discovery pongs
                 .add_directive("iroh::magicsock=error".parse().unwrap())
                 .add_directive("iroh_quinn_udp=error".parse().unwrap())

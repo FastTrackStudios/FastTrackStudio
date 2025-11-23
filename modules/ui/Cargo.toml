@@ -9,6 +9,9 @@ edition.workspace = true
 dioxus = { workspace = true }
 lucide-dioxus = { version = "2.44", features = ["all-icons"] }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
+setlist = { path = "../../modules/fts/setlist", features = ["dioxus"] }
+primitives = { path = "../../modules/daw/primitives" }
+transport = { path = "../../modules/daw/transport" }
 
 [features]
 default = []
