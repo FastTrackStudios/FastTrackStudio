@@ -11,6 +11,28 @@ use std::collections::HashMap;
 
 use super::{SectionType, SetlistError, Song};
 
+/// Color representation with name and hex string
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct Color {
+    pub name: String,
+    pub hex: String,
+}
+
+impl Color {
+    fn from_u32(color: Option<u32>) -> Self {
+        let (name, hex) = if let Some(c) = color {
+            let r = (c >> 16) & 0xFF;
+            let g = (c >> 8) & 0xFF;
+            let b = c & 0xFF;
+            let hex = format!("#{:02x}{:02x}{:02x}", r, g, b);
+            ("Custom".to_string(), hex)
+        } else {
+            ("Default".to_string(), "#808080".to_string())
+        };
+        Self { name, hex }
+    }
+}
+
 /// Represents a complete setlist
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Setlist {

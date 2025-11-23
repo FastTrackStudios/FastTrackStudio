@@ -17,7 +17,7 @@ members = [
     "apps/web", 
     "modules/ui", 
     "modules/api", 
-    "modules/daw/mix-fx",
+    "modules/daw/mix-fx", "apps/playground",
 ]
 resolver = "2"
 

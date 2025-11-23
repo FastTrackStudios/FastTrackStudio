@@ -12,3 +12,6 @@ pub use error::*;
 pub use section::*;
 pub use setlist::*;
 pub use song::*;
+
+// Re-export Color from setlist module
+pub use setlist::Color;

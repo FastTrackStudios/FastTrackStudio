@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::fmt;
 
 #[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct MusicalPosition {
@@ -59,16 +60,16 @@ impl MusicalPosition {
     pub fn to_time_position(&self, bpm: f64, time_signature: TimeSignature) -> TimePosition {
         // Calculate beats per measure from time signature
         let beats_per_measure = time_signature.numerator as f64;
-        
+
         // Calculate total beats
         // Subdivision is in thousandths (0-999), so divide by 1000 to get fractional beats
         let total_beats = self.measure as f64 * beats_per_measure
             + self.beat as f64
             + self.subdivision as f64 / 1000.0;
-        
+
         // Convert beats to seconds: seconds = beats * (60 / BPM)
         let total_seconds = total_beats * (60.0 / bpm);
-        
+
         TimePosition::from_seconds(total_seconds)
     }
 }
@@ -76,6 +77,18 @@ impl MusicalPosition {
 impl Default for MusicalPosition {
     fn default() -> Self {
         Self::start()
+    }
+}
+
+impl fmt::Display for MusicalPosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}.{}.{:03}",
+            self.measure + 1,
+            self.beat + 1,
+            self.subdivision
+        )
     }
 }
 
@@ -164,20 +177,20 @@ impl TimePosition {
     pub fn to_musical_position(&self, bpm: f64, time_signature: TimeSignature) -> MusicalPosition {
         let total_seconds = self.to_seconds();
         let beats_per_measure = time_signature.numerator as f64;
-        
+
         // Calculate total beats from seconds
         let total_beats = total_seconds * (bpm / 60.0);
-        
+
         // Calculate measure (floor division)
         let measure = (total_beats / beats_per_measure).floor() as i32;
-        
+
         // Calculate beat within the measure
         let beats_in_measure = total_beats % beats_per_measure;
         let beat = beats_in_measure.floor() as i32;
-        
+
         // Calculate subdivision (thousandths of a beat)
         let subdivision = ((beats_in_measure - beat as f64) * 1000.0).round() as i32;
-        
+
         MusicalPosition::try_new(measure, beat, subdivision.clamp(0, 999))
             .unwrap_or_else(|_| MusicalPosition::start())
     }
@@ -186,6 +199,16 @@ impl TimePosition {
 impl Default for TimePosition {
     fn default() -> Self {
         Self::start()
+    }
+}
+
+impl fmt::Display for TimePosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}:{:02}.{:03}",
+            self.minutes, self.seconds, self.milliseconds
+        )
     }
 }
 
@@ -241,6 +264,12 @@ impl Position {
 impl Default for Position {
     fn default() -> Self {
         Self::start()
+    }
+}
+
+impl fmt::Display for Position {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({})", self.musical_position_string(), self.time)
     }
 }
 
@@ -307,5 +336,11 @@ impl TimeSignature {
 impl Default for TimeSignature {
     fn default() -> Self {
         Self::new(4, 4)
+    }
+}
+
+impl fmt::Display for TimeSignature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.numerator, self.denominator)
     }
 }

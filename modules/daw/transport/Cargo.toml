@@ -14,6 +14,7 @@ primitives = { path = "../primitives" }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0.17"
 async-trait = "0.1"
+tracing = "0.1"
 
 # Utilities
 uuid = { version = "1.0", features = ["v4"] }
@@ -36,4 +37,9 @@ tower = { version = "0.5.2", features = ["full"] }
 tower-http = { version = "0.6.6", features = ["trace", "timeout", "cors"] }
 # HTTP client for testing (excluded for WASM)
 reqwest = { version = "0.12.24", features = ["json"] }
+# IRPC for transport stream protocol (required for irpc module)
+irpc = { workspace = true }
+irpc-iroh = { version = "0.11.0" }
+iroh = { version = "0.95", features = ["discovery-local-network"] }
+anyhow = { version = "1.0" }
 

@@ -163,14 +163,20 @@ pub struct ReaperApi {
 }
 
 impl ReaperApi {
+    /// Get the local sender for this API (for building custom routers)
+    pub fn get_local_sender(&self) -> Result<irpc::LocalSender<ReaperProtocol>> {
+        let Some(local) = self.inner.as_local() else {
+            bail!("cannot get local sender from a remote service");
+        };
+        Ok(local)
+    }
+    
     /// Create an IROH router for this API
     /// 
     /// This sets up the IROH endpoint with the REAPER protocol handler.
     /// Returns the router (which must be kept alive) and the endpoint ID.
     pub async fn create_iroh_router(&self) -> Result<(Router, iroh::EndpointId)> {
-        let Some(local) = self.inner.as_local() else {
-            bail!("cannot create router on a remote service");
-        };
+        let local = self.get_local_sender()?;
         create_reaper_server(local).await
     }
 

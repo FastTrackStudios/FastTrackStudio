@@ -75,3 +75,45 @@ pub fn store_endpoint_id(endpoint_id: EndpointId) -> Result<()> {
     Ok(())
 }
 
+/// Store both socket address and endpoint ID for client discovery
+pub fn store_socket_addr_and_endpoint_id(socket_addr: std::net::SocketAddr, endpoint_id: EndpointId) -> Result<()> {
+    let socket_addr_path = std::path::Path::new("/tmp/reaper_socket_addr.txt");
+    let endpoint_id_path = std::path::Path::new("/tmp/reaper_endpoint_id.txt");
+    
+    // Store socket address
+    std::fs::write(socket_addr_path, socket_addr.to_string())
+        .map_err(|e| anyhow::anyhow!("Failed to write socket address: {}", e))?;
+    
+    // Store endpoint ID (needed for EndpointAddr)
+    std::fs::write(endpoint_id_path, endpoint_id.to_string())
+        .map_err(|e| anyhow::anyhow!("Failed to write endpoint ID: {}", e))?;
+    
+    info!("[IROH] Stored socket address to {}: {}", socket_addr_path.display(), socket_addr);
+    info!("[IROH] Stored endpoint ID to {}: {}", endpoint_id_path.display(), endpoint_id);
+    Ok(())
+}
+
+/// Read socket address from file for client connection
+pub fn read_socket_addr() -> Result<Option<std::net::SocketAddr>> {
+    let socket_addr_path = std::path::Path::new("/tmp/reaper_socket_addr.txt");
+    if let Ok(content) = std::fs::read_to_string(socket_addr_path) {
+        if let Ok(socket_addr) = content.trim().parse::<std::net::SocketAddr>() {
+            info!("[IROH] Found REAPER socket address from file: {}", socket_addr);
+            return Ok(Some(socket_addr));
+        }
+    }
+    Ok(None)
+}
+
+/// Read endpoint ID from file (needed to create EndpointAddr)
+pub fn read_endpoint_id() -> Result<Option<EndpointId>> {
+    let endpoint_id_path = std::path::Path::new("/tmp/reaper_endpoint_id.txt");
+    if let Ok(content) = std::fs::read_to_string(endpoint_id_path) {
+        if let Ok(endpoint_id) = content.trim().parse::<EndpointId>() {
+            info!("[IROH] Found REAPER endpoint ID from file: {}", endpoint_id);
+            return Ok(Some(endpoint_id));
+        }
+    }
+    Ok(None)
+}
+

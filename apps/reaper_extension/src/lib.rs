@@ -10,6 +10,7 @@ mod color_utils;
 mod command_handler;
 mod setlist_sync;
 mod reaper_rpc_server;
+pub mod transport_stream;
 
 /// Polling state management for continuous updates
 pub mod polling_state {
@@ -90,11 +91,17 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     }
     
     // Register extension menu (must be after actions are registered and REAPER is woken up)
+    info!("🔧 About to register extension menu...");
     if let Err(e) = menu::register_extension_menu() {
         warn!("Failed to register extension menu: {:#}", e);
     } else {
         info!("FastTrackStudio menu registered successfully");
     }
+    
+    // Initialize transport state storage for transport stream service
+    info!("🔧 About to initialize transport state storage...");
+    transport_stream::init_transport_state();
+    info!("🔧 Transport state storage initialized");
     
     // Start irpc server for IPC with desktop app
     std::thread::spawn(move || {
@@ -102,27 +109,78 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         
         rt.block_on(async {
             info!("Starting REAPER RPC server in tokio runtime...");
-            match reaper_rpc_server::start_reaper_rpc_server().await {
-                Ok((api, router)) => {
-                    info!("REAPER RPC server started successfully with IROH");
-                    info!("Router endpoint ID: {}", router.endpoint().id());
-                    
-                    // Store API globally for polling handler
-                    reaper_rpc_server::set_global_api(api);
-                    
-                    // Keep router alive - it handles all connections
-                    // The router will run until shutdown is called
-                    loop {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-                        info!("REAPER RPC server runtime still active");
-                    }
-                }
+            
+            // Create REAPER API first
+            let api = reaper_rpc_server::ReaperActor::local();
+            reaper_rpc_server::set_global_api(api.clone());
+            
+            // Create transport stream service
+            let transport_api = match transport_stream::create_reaper_transport_stream_service() {
+                Ok(api) => api,
                 Err(e) => {
-                    error!(error = %e, "Failed to start REAPER RPC server");
+                    warn!("Failed to create transport stream service: {}", e);
+                    return;
                 }
+            };
+            
+            // Get the local sender for REAPER protocol
+            let reaper_local = match api.get_local_sender() {
+                Ok(sender) => sender,
+                Err(e) => {
+                    error!("Failed to get local REAPER API: {}", e);
+                    return;
+                }
+            };
+            
+            // Expose transport stream handler
+            let transport_handler = match transport_api.expose() {
+                Ok(handler) => handler,
+                Err(e) => {
+                    warn!("Failed to expose transport stream service: {}", e);
+                    return;
+                }
+            };
+            
+            // Create IROH endpoint and router with BOTH protocols
+            let endpoint = match iroh::Endpoint::bind().await {
+                Ok(ep) => ep,
+                Err(e) => {
+                    error!("Failed to create IROH endpoint: {}", e);
+                    return;
+                }
+            };
+            let endpoint_id = endpoint.id();
+            
+            // Build router with both REAPER and transport stream protocols
+            use irpc_iroh::IrohProtocol;
+            use peer_2_peer::iroh_connection::REAPER_ALPN;
+            let reaper_protocol = IrohProtocol::with_sender(reaper_local);
+            let router = iroh::protocol::Router::builder(endpoint.clone())
+                .accept(REAPER_ALPN.to_vec(), reaper_protocol)
+                .accept(transport::TransportStreamApi::ALPN.to_vec(), transport_handler)
+                .spawn();
+            
+            // Store endpoint ID for client discovery
+            if let Err(e) = peer_2_peer::iroh_connection::store_endpoint_id(endpoint_id) {
+                warn!("Failed to store endpoint ID: {}", e);
+            }
+            
+            info!("REAPER RPC server started successfully with IROH");
+            info!("Router endpoint ID: {}", endpoint_id);
+            info!("REAPER protocol ALPN: {:?}", String::from_utf8_lossy(REAPER_ALPN));
+            info!("Transport stream ALPN: {:?}", String::from_utf8_lossy(transport::TransportStreamApi::ALPN));
+            
+            // Keep router alive - it handles all connections
+            // The router will run until shutdown is called
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                info!("REAPER RPC server runtime still active");
             }
         });
     });
+    
+    // Handle transport read requests in the timer callback
+    // We'll integrate this into the existing timer callback
     
     // Register REAPER timer callback for 30Hz polling (~33ms intervals)
     // This runs on REAPER's main thread automatically, so we can safely call REAPER APIs
@@ -133,27 +191,26 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
         static LAST_LOG: std::sync::OnceLock<std::sync::Mutex<Instant>> = std::sync::OnceLock::new();
         static FIRST_CALL: std::sync::OnceLock<std::sync::atomic::AtomicBool> = std::sync::OnceLock::new();
-        // Check if polling is enabled (can be toggled via action)
-        if !polling_state::is_enabled() {
-            return; // Skip if disabled
-        }
         
-        let tick_count = TICK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-        
-        // Log first call immediately to confirm timer is working
+        // Always log first call to confirm timer is being called
         let first_call = FIRST_CALL.get_or_init(|| std::sync::atomic::AtomicBool::new(true));
         if first_call.swap(false, Ordering::Relaxed) {
             info!("⏰⏰⏰ Timer callback FIRST CALL - timer is working! ⏰⏰⏰");
         }
-        ;
         
-        // Log every second (30 ticks) to avoid spam
+        // ALWAYS run - no polling state check
+        let tick_count = TICK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+        
+        // Update transport state (runs on main thread, safe to call REAPER APIs)
+        transport_stream::update_transport_state();
+        
+        // Log every second (30 ticks) to avoid spam - timer runs at 30Hz but logs once per second
         let last_log = LAST_LOG.get_or_init(|| std::sync::Mutex::new(Instant::now()));
         if let Ok(mut last) = last_log.lock() {
             if last.elapsed().as_secs() >= 1 {
                 info!(
                     tick_count = tick_count,
-                    "🔄 30Hz timer polling active - {} ticks completed (transport + setlist)",
+                    "🔄 Timer: {} ticks (30Hz, logging 1/sec)",
                     tick_count
                 );
                 *last = Instant::now();
@@ -162,18 +219,25 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     }
     
     // Register the timer callback with REAPER (runs on main thread automatically)
-    info!("Attempting to register timer callback with REAPER...");
-    match session_ptr.plugin_register_add_timer(polling_timer_callback) {
+    info!("🔧 About to register timer callback with REAPER...");
+    
+    let timer_result = session_ptr.plugin_register_add_timer(polling_timer_callback);
+    
+    match timer_result {
         Ok(_) => {
-            info!("✅ Successfully registered 30Hz polling timer callback with REAPER - timer should start automatically");
+            info!("✅✅✅ SUCCESS: Registered 30Hz polling timer callback with REAPER");
             info!("⏰ Timer callback registered - waiting for REAPER to call it...");
+            info!("📊 Timer will ALWAYS run - no polling state checks");
+            info!("📊 If you don't see 'Timer callback FIRST CALL' logs, REAPER is not calling the timer");
         }
         Err(e) => {
-            error!(error = %e, "❌ Failed to register polling timer callback - timer will NOT work!");
+            error!("❌❌❌ FAILED to register polling timer callback: {}", e);
+            error!("❌ Timer will NOT work! Error details: {:?}", e);
         }
     }
     
     info!("✅ FastTrackStudio REAPER Extension initialized successfully");
+    info!("🔧 Final step: Returning from plugin_main");
     Ok(())
 }
 

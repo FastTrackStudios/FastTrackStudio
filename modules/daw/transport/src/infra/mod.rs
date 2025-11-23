@@ -18,6 +18,9 @@
 //! - `grpc.rs` - gRPC adapter (future)
 
 pub mod http;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod irpc;
+pub mod stream;
 
 // Future protocol adapters
 // pub mod midi;

@@ -12,13 +12,14 @@ categories = ["multimedia::audio", "development-tools"]
 default = []
 reaper = []
 rpp = ["rpp-parser"]
+dioxus = ["dep:dioxus"]
 full = ["reaper", "rpp"]
 
 [dependencies]
 # Core dependencies
 serde = { version = "1.0", features = ["derive"] }
 specta = { workspace = true }
-thiserror = "1.0"
+thiserror = "2.0.17"
 uuid = { version = "1.0", features = ["v4", "serde", "js"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
@@ -49,6 +50,12 @@ transport = { path = "../../daw/transport" }
 
 # RPP file parsing (optional)
 rpp-parser = { version = "0.1", optional = true }
+
+# Dioxus integration (optional)
+[dependencies.dioxus]
+workspace = true
+optional = true
+default-features = true
 
 [dev-dependencies]
 tokio-test = "0.4"

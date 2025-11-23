@@ -1,8 +1,7 @@
-pub mod api_state;
 pub mod application;
 pub mod core;
+pub mod infra;
 
-pub use api_state::SetlistApiState;
 pub use core::{
     Section, SectionType, Setlist, SetlistEntry, SetlistError, SetlistOrder, SetlistSummary, Song,
     SongSummary,

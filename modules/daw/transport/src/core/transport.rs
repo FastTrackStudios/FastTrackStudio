@@ -1,4 +1,5 @@
 use primitives::{Position, TimeSelection, TimeSignature};
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PlayState {
@@ -14,6 +15,17 @@ impl Default for PlayState {
     }
 }
 
+impl fmt::Display for PlayState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PlayState::Stopped => write!(f, "Stopped"),
+            PlayState::Playing => write!(f, "Playing"),
+            PlayState::Paused => write!(f, "Paused"),
+            PlayState::Recording => write!(f, "Recording"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RecordMode {
     Normal,
@@ -24,6 +36,16 @@ pub enum RecordMode {
 impl Default for RecordMode {
     fn default() -> Self {
         Self::Normal
+    }
+}
+
+impl fmt::Display for RecordMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RecordMode::Normal => write!(f, "Normal"),
+            RecordMode::TimeSelection => write!(f, "Time Selection"),
+            RecordMode::Item => write!(f, "Item"),
+        }
     }
 }
 
@@ -44,6 +66,12 @@ impl Tempo {
 impl Default for Tempo {
     fn default() -> Self {
         Self { bpm: 120.0 }
+    }
+}
+
+impl fmt::Display for Tempo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.1} BPM", self.bpm)
     }
 }
 
@@ -130,6 +158,16 @@ impl Transport {
 impl Default for Transport {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl fmt::Display for Transport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Transport {{ state: {}, record_mode: {}, looping: {}, tempo: {}, playrate: {:.2}x, time_sig: {} }}",
+            self.play_state, self.record_mode, self.looping, self.tempo, self.playrate, self.time_signature
+        )
     }
 }
 
