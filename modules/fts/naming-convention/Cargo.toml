@@ -1,0 +1,22 @@
+[package]
+name = "naming-convention"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "FTS naming convention domain model for track and file naming"
+
+[lib]
+name = "naming_convention"
+path = "src/lib.rs"
+
+[dependencies]
+regex = "1"
+splitty = "1"
+
+[features]
+default = []
+default-groups = []
+
+[lints]
+workspace = true

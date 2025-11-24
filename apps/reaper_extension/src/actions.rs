@@ -677,6 +677,115 @@ fn read_tempo_time_sig_markers(project: &Project) -> Vec<(f64, f64, Option<(i32,
     markers
 }
 
+
+/// Get the project measure offset for a project
+/// Returns the offset value, or 0 if not found
+fn get_project_measure_offset(project: &reaper_high::Project) -> i32 {
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+    
+    // Get the project measure offset using project_config_var_get_offs
+    if let Some(offs_result) = medium_reaper.project_config_var_get_offs("projmeasoffs") {
+        // Get the actual value using the offset
+        if let Some(addr) = medium_reaper.project_config_var_addr(project.context(), offs_result.offset) {
+            // Read the integer value directly from the pointer (it's a 32-bit integer)
+            unsafe { *(addr.as_ptr() as *const i32) }
+        } else {
+            0
+        }
+    } else {
+        0
+    }
+}
+
+/// Log current musical position (including measure offset)
+fn log_current_musical_position_handler() {
+    let reaper = Reaper::get();
+    let current_project = reaper.current_project();
+    
+    info!("Reading current musical position from REAPER...");
+    reaper.show_console_msg("\n=== FastTrackStudio: Current Musical Position ===\n");
+    
+    // Get transport info to get current playhead position
+    let transport_adapter = crate::reaper_transport::ReaperTransport::new(current_project.clone());
+    
+    match transport_adapter.read_transport() {
+        Ok(transport) => {
+            let playhead_pos = &transport.playhead_position;
+            
+            // Get the project measure offset
+            let measure_offset = get_project_measure_offset(&current_project);
+            
+            // The musical position already has the offset applied (from reaper_transport.rs)
+            // But let's also show the raw measure index for reference
+            let time_pos = playhead_pos.time.to_seconds();
+            let time_pos_obj = reaper_medium::PositionInSeconds::new(time_pos)
+                .unwrap_or(reaper_medium::PositionInSeconds::ZERO);
+            let beat_info = current_project.beat_info_at(time_pos_obj);
+            let raw_measure = beat_info.measure_index;
+            let adjusted_measure = playhead_pos.musical.measure;
+            
+            info!(
+                time_position = time_pos,
+                musical_position = %playhead_pos.musical_position_string(),
+                measure_offset = measure_offset,
+                raw_measure_index = raw_measure,
+                adjusted_measure_index = adjusted_measure,
+                "Current musical position"
+            );
+            
+            reaper.show_console_msg(format!("Time Position: {:.3}s\n", time_pos).as_str());
+            reaper.show_console_msg(format!("Musical Position: {}\n", playhead_pos.musical_position_string()).as_str());
+            reaper.show_console_msg(format!("Project Measure Offset: {}\n", measure_offset).as_str());
+            reaper.show_console_msg(format!("Raw Measure Index (from REAPER): {}\n", raw_measure).as_str());
+            reaper.show_console_msg(format!("Adjusted Measure Index (with offset): {}\n", adjusted_measure).as_str());
+            reaper.show_console_msg(format!("Beat: {}\n", playhead_pos.musical.beat + 1).as_str());
+            reaper.show_console_msg(format!("Subdivision: {:03}\n", playhead_pos.musical.subdivision).as_str());
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to read transport state");
+            reaper.show_console_msg(format!("Failed to read transport state: {}\n", e).as_str());
+        }
+    }
+}
+
+/// Log project measure offset
+fn log_project_measure_offset_handler() {
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+    let current_project = reaper.current_project();
+    
+    info!("Reading project measure offset from REAPER...");
+    reaper.show_console_msg("\n=== FastTrackStudio: Project Measure Offset ===\n");
+    
+    // Get the project measure offset using project_config_var_get_offs (proper way for project vars)
+    // The config var name is "projmeasoffs" (project measure offset)
+    if let Some(offs_result) = medium_reaper.project_config_var_get_offs("projmeasoffs") {
+        // Get the actual value using the offset
+        if let Some(addr) = medium_reaper.project_config_var_addr(current_project.context(), offs_result.offset) {
+            // Read the integer value directly from the pointer (it's a 32-bit integer)
+            let offset_value = unsafe { *(addr.as_ptr() as *const i32) };
+            
+            info!(project_measure_offset = offset_value, "Project measure offset read successfully");
+            reaper.show_console_msg(format!("Project Measure Offset: {}\n", offset_value).as_str());
+            reaper.show_console_msg(format!("Offset index: {}\n\n", offs_result.offset).as_str());
+            
+            // Calculate measure correction (same logic as Lua script)
+            // If offset is 0, correction is 1, otherwise 0
+            let measure_correction = if offset_value == 0 { 1 } else { 0 };
+            reaper.show_console_msg(format!("Measure Correction: {}\n", measure_correction).as_str());
+            reaper.show_console_msg("(Measure correction = 1 if offset is 0, otherwise 0)\n");
+        } else {
+            warn!("Failed to get project config var address");
+            reaper.show_console_msg("Failed to get project config var address.\n");
+        }
+    } else {
+        warn!("Failed to get project measure offset config var");
+        reaper.show_console_msg("Failed to get project measure offset config var.\n");
+        reaper.show_console_msg("This may indicate the config var doesn't exist.\n");
+    }
+}
+
 /// Log all tempo and time signature changes in the current project
 fn log_tempo_time_sig_changes_handler() {
     let reaper = Reaper::get();
@@ -753,7 +862,8 @@ fn log_tempo_time_sig_changes_handler() {
                 let time_pos_obj = reaper_medium::PositionInSeconds::new(*time_pos)
                     .unwrap_or(reaper_medium::PositionInSeconds::ZERO);
                 let beat_info = current_project.beat_info_at(time_pos_obj);
-                let measure = beat_info.measure_index;
+                let measure_offset = get_project_measure_offset(&current_project);
+                let measure = beat_info.measure_index + measure_offset; // Apply project measure offset
                 let beats_since_measure = beat_info.beats_since_measure.get();
                 let beat = beats_since_measure.floor() as i32;
                 let subdivision = ((beats_since_measure - beats_since_measure.floor()) * 1000.0).round() as i32;
@@ -869,6 +979,18 @@ pub fn register_all_actions() {
             command_id: "FTS_DEV_LOG_TEMPO_TIME_SIG",
             display_name: "Log Tempo and Time Signature Changes".to_string(),
             handler: log_tempo_time_sig_changes_handler,
+            appears_in_menu: true, // Show in menu
+        },
+        ActionDef {
+            command_id: "FTS_DEV_LOG_PROJECT_MEASURE_OFFSET",
+            display_name: "Log Project Measure Offset".to_string(),
+            handler: log_project_measure_offset_handler,
+            appears_in_menu: true, // Show in menu
+        },
+        ActionDef {
+            command_id: "FTS_DEV_LOG_CURRENT_MUSICAL_POSITION",
+            display_name: "Log Current Musical Position".to_string(),
+            handler: log_current_musical_position_handler,
             appears_in_menu: true, // Show in menu
         },
        

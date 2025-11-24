@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use setlist::{Setlist, Song, Section, SectionType, SETLIST};
+use setlist::{Setlist, Song, Section, SectionType, SETLIST, TransportCommand, NavigationCommand};
 use marker_region::{Marker, application::TempoTimePoint};
 use primitives::Position;
 use ui::components::*;
@@ -8,9 +8,9 @@ use ui::components::*;
 // use crate::reaper_connection::ReaperConnection;
 // #[cfg(not(target_arch = "wasm32"))]
 // use peer_2_peer::reaper_api::ReaperStateUpdate;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::setlist_connection::get_setlist_api;
 
 mod utils;
 #[cfg(not(target_arch = "wasm32"))]
@@ -55,17 +55,53 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    // Connect to setlist stream when app starts
+    // Track connection status
+    let is_connected = use_signal(|| false);
+    
     #[cfg(not(target_arch = "wasm32"))]
     {
-        use_effect(move || {
+        use_effect({
+            let mut is_connected = is_connected;
+            move || {
             spawn(async move {
+                    // Initialize connection first
                 if let Err(e) = setlist_connection::connect_to_reaper_setlist().await {
-                    tracing::warn!("Failed to connect to REAPER setlist: {}", e);
+                        tracing::warn!("Failed to initialize REAPER setlist connection: {}", e);
+                        return;
+                    }
+                    
+                    // Wait a bit for the connection status channel to be initialized
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    
+                    // Get connection status receiver
+                    let mut connection_rx = match setlist_connection::get_connection_status_receiver() {
+                        Some(rx) => rx,
+                        None => {
+                            warn!("Connection status receiver not available");
+                            return;
+                        }
+                    };
+                    
+                    // Set initial status
+                    is_connected.set(*connection_rx.borrow());
+                    
+                    // Watch for status changes
+                    while connection_rx.changed().await.is_ok() {
+                        let connected = *connection_rx.borrow();
+                        is_connected.set(connected);
+                        if connected {
+                            info!("[Desktop] Connection status: Connected");
+                        } else {
+                            warn!("[Desktop] Connection status: Disconnected");
+                        }
                 }
             });
+            }
         });
     }
+    
+    #[cfg(target_arch = "wasm32")]
+    let is_connected = use_signal(|| false);
     
     // REAPER connection via REAPER_ALPN is disabled - all data comes through setlist stream
     // The setlist stream includes both setlist and transport state, so no separate connection needed
@@ -128,9 +164,6 @@ fn App() -> Element {
         SETLIST.read().as_ref().and_then(|api| api.active_section_index())
     });
     
-                
-    // Connection status - for now always true when REAPER connection exists
-    let is_connected = use_signal(|| false);
     
     // Mode toggle callback - simplified for now
     let on_toggle_mode = Callback::new(move |_| {
@@ -138,28 +171,249 @@ fn App() -> Element {
     });
     
     // Callbacks
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_song_click = Callback::new(move |song_idx: usize| {
+        // Seek to the clicked song (switches to that song's tab)
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.seek_to_song(song_idx).await {
+                    Ok(Ok(())) => {
+                        info!("Successfully sought to song {}", song_idx);
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to seek to song: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error seeking to song: {}", e);
+                    }
+                }
+            } else {
+                warn!("Setlist API not available for song seek");
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
     let on_song_click = Callback::new(move |_idx: usize| {
-        // No-op: song selection is automatic from REAPER state via setlist signal
+        // No-op for wasm32
     });
     
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_section_click = Callback::new(move |(song_idx, section_idx): (usize, usize)| {
+        // Seek to the clicked section
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.seek_to_section(song_idx, section_idx).await {
+                    Ok(Ok(())) => {
+                        info!("Successfully sought to song {} section {}", song_idx, section_idx);
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to seek to section: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error seeking to section: {}", e);
+                    }
+                }
+            } else {
+                warn!("Setlist API not available for section seek");
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
     let on_section_click = Callback::new(move |(_song_idx, _section_idx): (usize, usize)| {
-        // No-op: section selection is automatic from REAPER state via setlist signal
+        // No-op for wasm32
     });
     
-    let on_transport_action = Callback::new(move |action: String| {
-        // TODO: Implement transport actions via REAPER connection
-        match action.as_str() {
-            "play_pause" => {
-                // TODO: Send play/pause command to REAPER
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_play_pause = Callback::new(move |_| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.transport_command(TransportCommand::TogglePlayPause).await {
+                    Ok(Ok(())) => {
+                        info!("Successfully toggled play/pause");
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to toggle play/pause: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error toggling play/pause: {}", e);
+                    }
+                }
+            } else {
+                warn!("Setlist API not available for play/pause");
             }
-            "loop_toggle" => {
-                // TODO: Send loop toggle command to REAPER
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_play_pause = Callback::new(move |_| {
+        // No-op for wasm32
+    });
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_loop_toggle = Callback::new(move |_| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.toggle_loop().await {
+                    Ok(Ok(())) => {
+                        info!("Successfully toggled loop");
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to toggle loop: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error toggling loop: {}", e);
+                    }
+                }
+            } else {
+                warn!("Setlist API not available for loop toggle");
             }
-            "back" | "advance" => {
-                // TODO: Implement navigation
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_loop_toggle = Callback::new(move |_| {
+        // No-op for wasm32
+    });
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_back = Callback::new(move |_| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.navigation_command(NavigationCommand::PreviousSectionOrSong).await {
+                    Ok(Ok(())) => {
+                        info!("Successfully navigated to previous section/song");
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to navigate back: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error navigating back: {}", e);
+                    }
+                }
+            } else {
+                warn!("Setlist API not available for navigation");
             }
-            _ => {}
-        }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_back = Callback::new(move |_| {
+        // No-op for wasm32
+    });
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_forward = Callback::new(move |_| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.navigation_command(NavigationCommand::NextSectionOrSong).await {
+                    Ok(Ok(())) => {
+                        info!("Successfully navigated to next section/song");
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to navigate forward: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error navigating forward: {}", e);
+                    }
+                }
+            } else {
+                warn!("Setlist API not available for navigation");
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_forward = Callback::new(move |_| {
+        // No-op for wasm32
+    });
+    
+    // Keyboard shortcuts
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_keydown = {
+        let on_play_pause = on_play_pause.clone();
+        let on_back = on_back.clone();
+        let on_forward = on_forward.clone();
+        let current_song_index = current_song_index.clone();
+        
+        Callback::new(move |evt: Event<KeyboardData>| {
+            use dioxus::prelude::Key;
+            
+            match evt.data.key() {
+                Key::Character(c) if c == " " => {
+                    // Spacebar: Play/Pause
+                    on_play_pause.call(());
+                }
+                Key::ArrowLeft => {
+                    // Left arrow: Previous section/song
+                    on_back.call(());
+                }
+                Key::ArrowRight => {
+                    // Right arrow: Next section/song
+                    on_forward.call(());
+                }
+                Key::ArrowUp => {
+                    // Up arrow: Previous song
+                    if let Some(api) = get_setlist_api() {
+                        if let Some(current_idx) = current_song_index() {
+                            if current_idx > 0 {
+                                let prev_song_idx = current_idx - 1;
+                                spawn(async move {
+                                    match api.seek_to_song(prev_song_idx).await {
+                                        Ok(Ok(())) => {
+                                            info!("Successfully navigated to previous song {}", prev_song_idx);
+                                        }
+                                        Ok(Err(e)) => {
+                                            warn!("Failed to navigate to previous song: {}", e);
+                                        }
+                                        Err(e) => {
+                                            warn!("RPC error navigating to previous song: {}", e);
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+                Key::ArrowDown => {
+                    // Down arrow: Next song
+                    if let Some(api) = get_setlist_api() {
+                        if let Some(current_idx) = current_song_index() {
+                            // Get total song count from SETLIST
+                            if let Some(setlist_api) = SETLIST.read().as_ref() {
+                                let setlist = setlist_api.get_setlist();
+                                let song_count = setlist.songs.len();
+                                if current_idx < song_count - 1 {
+                                    let next_song_idx = current_idx + 1;
+                                    spawn(async move {
+                                        match api.seek_to_song(next_song_idx).await {
+                                            Ok(Ok(())) => {
+                                                info!("Successfully navigated to next song {}", next_song_idx);
+                                            }
+                                            Ok(Err(e)) => {
+                                                warn!("Failed to navigate to next song: {}", e);
+                                            }
+                                            Err(e) => {
+                                                warn!("RPC error navigating to next song: {}", e);
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    // Ignore other keys
+                }
+            }
+        })
+    };
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_keydown = Callback::new(move |_evt: Event<KeyboardData>| {
+        // No-op for wasm32
     });
 
     rsx! {
@@ -170,6 +424,7 @@ fn App() -> Element {
         div {
             class: "h-screen w-screen flex flex-col overflow-hidden bg-background",
             tabindex: "0",
+            onkeydown: on_keydown,
             TopBar {
                 is_connected: is_connected,
                 is_server_mode: false,
@@ -197,18 +452,10 @@ fn App() -> Element {
                     })),
                     is_playing: Signal::new(false), // Will be derived from SETLIST in component
                     is_looping: Signal::new(false), // Will be derived from SETLIST in component
-                    on_play_pause: Callback::new(move |_| {
-                        on_transport_action.call("play_pause".to_string());
-                    }),
-                    on_loop_toggle: Callback::new(move |_| {
-                        on_transport_action.call("loop_toggle".to_string());
-                    }),
-                    on_back: Callback::new(move |_| {
-                        on_transport_action.call("back".to_string());
-                    }),
-                    on_forward: Callback::new(move |_| {
-                        on_transport_action.call("advance".to_string());
-                    }),
+                    on_play_pause: on_play_pause,
+                    on_loop_toggle: on_loop_toggle,
+                    on_back: on_back,
+                    on_forward: on_forward,
                 }
             }
         }

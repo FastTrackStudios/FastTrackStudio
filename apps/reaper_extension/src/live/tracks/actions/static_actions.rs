@@ -65,19 +65,19 @@ fn pause_current_project() {
 
 /// Action handlers
 
-fn setlist_play() {
+pub fn setlist_play() {
     let reaper = Reaper::get();
     debug!("Setlist Play action executed");
     play_current_project();
 }
 
-fn setlist_stop() {
+pub fn setlist_stop() {
     let reaper = Reaper::get();
     debug!("Setlist Stop action executed");
     stop_all_projects();
 }
 
-fn setlist_pause() {
+pub fn setlist_pause() {
     let reaper = Reaper::get();
     debug!("Setlist Pause action executed");
     pause_current_project();
@@ -116,7 +116,7 @@ fn is_any_project_playing() -> bool {
 }
 
 /// Toggle Play/Pause: If playing, pause; otherwise, play
-fn setlist_play_pause_toggle() {
+pub fn setlist_play_pause_toggle() {
     let reaper = Reaper::get();
     let is_playing = is_any_project_playing();
     
@@ -465,6 +465,39 @@ pub fn register_toggleable_actions() {
     if let Ok(mut storage) = get_registered_actions_storage().lock() {
         storage.push(registered_action1);
         storage.push(registered_action2);
+    }
+    
+    // Look up and store command IDs for toggleable actions (must be done on main thread)
+    // This allows background threads to trigger these actions
+    let medium_reaper = reaper.medium_reaper();
+    let command_ids_map = crate::action_registry::COMMAND_IDS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    if let Ok(mut map) = command_ids_map.lock() {
+        // Look up command IDs for toggleable actions
+        let toggleable_command_ids = [
+            "FTS_LIVE_SETLIST_PLAY_PAUSE",
+            "FTS_LIVE_SETLIST_PLAY_STOP",
+        ];
+        
+        for command_id_str in &toggleable_command_ids {
+            // Try both with and without underscore prefix
+            let lookup_names = [*command_id_str, &format!("_{}", command_id_str)];
+            for lookup_name in &lookup_names {
+                if let Some(cmd_id) = medium_reaper.named_command_lookup(*lookup_name) {
+                    map.insert(*command_id_str, cmd_id);
+                    debug!(
+                        command_id = %command_id_str,
+                        lookup_name = %lookup_name,
+                        "Stored command ID for toggleable action"
+                    );
+                    break;
+                }
+            }
+        }
+        
+        info!(
+            stored_toggleable_count = map.len(),
+            "Stored command IDs for toggleable actions"
+        );
     }
     
     info!("Live Tracks: Toggleable actions registered");

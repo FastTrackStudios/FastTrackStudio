@@ -120,7 +120,7 @@ impl ReaperConnection {
     async fn connect_with_retry(&self) {
         let mut retry_count = 0u32;
         
-        loop {
+            loop {
             retry_count += 1;
             
             match self.try_connect().await {
@@ -140,7 +140,7 @@ impl ReaperConnection {
                 }
                 Err(e) => {
                     if retry_count % 10 == 0 {
-                        warn!("[DESKTOP] Connection attempt {} failed: {}", retry_count, e);
+                    warn!("[DESKTOP] Connection attempt {} failed: {}", retry_count, e);
                         // After many failures, clear endpoint ID cache to allow rediscovery
                         // (in case REAPER restarted with a new endpoint ID)
                         // Note: we keep the endpoint itself as it's long-lived
@@ -179,7 +179,7 @@ impl ReaperConnection {
             } else {
                 info!("[DESKTOP] Discovering REAPER extension via IROH...");
                 let id = discover_reaper_endpoint().await?
-                    .ok_or_else(|| anyhow::anyhow!("Could not discover REAPER extension. Make sure REAPER extension is running."))?;
+            .ok_or_else(|| anyhow::anyhow!("Could not discover REAPER extension. Make sure REAPER extension is running."))?;
                 info!("[DESKTOP] Found REAPER endpoint ID: {}", id);
                 *cached_id = Some(id);
                 id

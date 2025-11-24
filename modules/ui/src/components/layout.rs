@@ -1,7 +1,8 @@
 use dioxus::prelude::*;
+use lucide_dioxus::{Clock, Ruler};
 use crate::components::transport::ConnectionStatus;
-use crate::components::progress::{SongProgressBar, ProgressSection, TempoMarker};
-use crate::components::song::SongTitle;
+use crate::components::progress::{SongProgressBar, SectionProgressBar, ProgressSection, TempoMarker};
+use crate::components::song::{SongTitle, FadedSongTitle};
 use crate::components::transport::TransportControlBar;
 use crate::components::sidebar_items::{SongItem, SongItemData, SectionItem};
 use crate::components::mode_toggle::ModeToggle;
@@ -68,6 +69,11 @@ pub fn Sidebar(
                     .map(|t| t.playhead_position.time.to_seconds())
                     .unwrap_or(0.0);
                 
+                // Check if this song is actively playing
+                let song_is_playing = song.transport_info.as_ref()
+                    .map(|t| t.is_playing())
+                    .unwrap_or(false);
+                
                 // Calculate song progress using song.progress() method
                 // Each song shows its own progress based on its transport_info
                 let song_progress = song.progress(position);
@@ -85,13 +91,13 @@ pub fn Sidebar(
                     }
                 }).collect();
                 
-                SongItemData {
+                (SongItemData {
                     label: song.name.clone(),
                     progress: song_progress,
                     bright_color: song.color_bright(),
                     muted_color: song.color_muted(),
                     sections,
-                }
+                }, song_is_playing)
             }).collect::<Vec<_>>()
         }).unwrap_or_default()
     });
@@ -107,11 +113,12 @@ pub fn Sidebar(
                 }
                 div {
                     class: "space-y-1",
-                    for (index, song_data) in sidebar_items().iter().enumerate() {
+                    for (index, (song_data, song_is_playing)) in sidebar_items().iter().enumerate() {
                         SongItem {
                             song_data: song_data.clone(),
                             index: index,
                             is_expanded: current_song_index() == Some(index),
+                            is_playing: *song_is_playing,
                             current_section_index: current_section_index(),
                             on_song_click: {
                                 let index = index;
@@ -194,62 +201,140 @@ pub fn MainContent(
         (song_name, song_idx, song_total)
     });
     
-    // Compute progress using song.progress() method
+    // Compute progress using full timeline (including count-in and ending)
     let progress = use_memo(move || {
         current_song_data().as_ref().map(|(song, current_pos)| {
-            song.progress(*current_pos)
+            // Get count-in start (if exists)
+            let count_in_start = song.count_in_marker.as_ref()
+                .map(|m| m.position.time.to_seconds())
+                .unwrap_or(0.0);
+            
+            // Get song start (effective start)
+            let song_start = song.effective_start();
+            
+            // Get ending position (render end or hard cut, whichever is later)
+            let ending_pos = song.render_end().max(song.hard_cut());
+            
+            // Calculate total duration from count-in start to ending
+            let total_start = if count_in_start > 0.0 { count_in_start } else { song_start };
+            let total_end = if ending_pos > song.effective_end() { ending_pos } else { song.effective_end() };
+            let total_duration = total_end - total_start;
+            
+            if total_duration > 0.0 {
+                ((*current_pos - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+            } else {
+                0.0
+            }
         }).unwrap_or(0.0)
     });
     
-    // Compute progress sections
-    let progress_sections = use_memo(move || {
+    // Compute progress sections (including count-in and ending)
+    // Also track which indices are count-in/ending so we can map clicks correctly
+    let progress_sections_data = use_memo(move || {
         current_song_data().as_ref().map(|(song, current_pos)| {
-            let song_start = if song.effective_start() > 0.0 {
-                song.effective_start()
-            } else {
-                song.sections.first().map(|s| s.start_seconds()).unwrap_or(0.0)
-            };
-            let song_end = if song.effective_end() > 0.0 {
-                song.effective_end()
-            } else {
-                song.sections.last().map(|s| s.end_seconds()).unwrap_or(0.0)
-            };
-            let song_duration = song_end - song_start;
+            // Get count-in start (if exists)
+            let count_in_start = song.count_in_marker.as_ref()
+                .map(|m| m.position.time.to_seconds())
+                .unwrap_or(0.0);
             
-            song.sections.iter().map(|section| {
-                let section_start = section.start_seconds();
-                let section_end = section.end_seconds();
-                let section_start_percent = if song_duration > 0.0 {
-                    ((section_start - song_start) / song_duration * 100.0).max(0.0).min(100.0)
+            // Get song start (effective start)
+            let song_start = song.effective_start();
+            
+            // Get song end (effective end)
+            let song_end = song.effective_end();
+            
+            // Get ending position (render end or hard cut, whichever is later)
+            let ending_pos = song.render_end().max(song.hard_cut());
+            
+            // Calculate total duration from count-in start to ending
+            let total_start = if count_in_start > 0.0 { count_in_start } else { song_start };
+            let total_end = if ending_pos > song_end { ending_pos } else { song_end };
+            let total_duration = total_end - total_start;
+            
+            let mut sections = Vec::new();
+            let has_count_in_section = count_in_start > 0.0 && count_in_start < song_start;
+            let has_ending_section = ending_pos > song_end;
+            
+            // Add count-in section (pink) if it exists
+            if has_count_in_section {
+                let count_in_start_percent = if total_duration > 0.0 {
+                    ((count_in_start - total_start) / total_duration * 100.0).max(0.0).min(100.0)
                 } else { 0.0 };
-                let section_end_percent = if song_duration > 0.0 {
-                    ((section_end - song_start) / song_duration * 100.0).max(0.0).min(100.0)
+                let count_in_end_percent = if total_duration > 0.0 {
+                    ((song_start - total_start) / total_duration * 100.0).max(0.0).min(100.0)
                 } else { 0.0 };
                 
-                ProgressSection {
+                sections.push(ProgressSection {
+                    start_percent: count_in_start_percent,
+                    end_percent: count_in_end_percent,
+                    color: "rgb(255, 192, 203)".to_string(), // Pink
+                    name: "Count In".to_string(),
+                });
+            }
+            
+            // Add song sections
+            for section in song.sections.iter() {
+                let section_start = section.start_seconds();
+                let section_end = section.end_seconds();
+                let section_start_percent = if total_duration > 0.0 {
+                    ((section_start - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+                } else { 0.0 };
+                let section_end_percent = if total_duration > 0.0 {
+                    ((section_end - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+                } else { 0.0 };
+                
+                sections.push(ProgressSection {
                     start_percent: section_start_percent,
                     end_percent: section_end_percent,
                     color: section.color_bright(),
                     name: section.display_name(),
-                }
-            }).collect::<Vec<_>>()
-        }).unwrap_or_default()
+                });
+            }
+            
+            // Add ending section (red) if it exists
+            if has_ending_section {
+                let ending_start_percent = if total_duration > 0.0 {
+                    ((song_end - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+                } else { 0.0 };
+                let ending_end_percent = if total_duration > 0.0 {
+                    ((ending_pos - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+                } else { 100.0 };
+                
+                sections.push(ProgressSection {
+                    start_percent: ending_start_percent,
+                    end_percent: ending_end_percent,
+                    color: "rgb(255, 0, 0)".to_string(), // Red
+                    name: "Ending".to_string(),
+                });
+            }
+            
+            (sections, has_count_in_section, has_ending_section)
+        }).unwrap_or((Vec::new(), false, false))
     });
     
-    // Compute tempo markers
+    // Extract the tuple from the memo
+    let progress_sections = use_memo(move || progress_sections_data().0.clone());
+    let has_count_in = use_memo(move || progress_sections_data().1);
+    let has_ending = use_memo(move || progress_sections_data().2);
+    
+    // Compute tempo markers (using same timeline as progress sections)
     let tempo_markers = use_memo(move || {
         current_song_data().as_ref().map(|(song, _)| {
-            let song_start = if song.effective_start() > 0.0 {
-                song.effective_start()
-            } else {
-                song.sections.first().map(|s| s.start_seconds()).unwrap_or(0.0)
-            };
-            let song_end = if song.effective_end() > 0.0 {
-                song.effective_end()
-            } else {
-                song.sections.last().map(|s| s.end_seconds()).unwrap_or(0.0)
-            };
-            let song_duration = song_end - song_start;
+            // Get count-in start (if exists)
+            let count_in_start = song.count_in_marker.as_ref()
+                .map(|m| m.position.time.to_seconds())
+                .unwrap_or(0.0);
+            
+            // Get song start (effective start) - this is where bar 1 starts
+            let song_start = song.effective_start();
+            
+            // Get ending position (render end or hard cut, whichever is later)
+            let ending_pos = song.render_end().max(song.hard_cut());
+            
+            // Calculate total duration from count-in start to ending (same as progress sections)
+            let total_start = if count_in_start > 0.0 { count_in_start } else { song_start };
+            let total_end = if ending_pos > song.effective_end() { ending_pos } else { song.effective_end() };
+            let song_duration = total_end - total_start;
             
             let mut markers = Vec::new();
             let mut sorted_changes: Vec<_> = song.tempo_time_sig_changes.iter().collect();
@@ -260,16 +345,72 @@ pub fn MainContent(
             let mut prev_tempo_for_label: Option<f64> = None;
             let mut prev_time_sig_for_label: Option<(i32, i32)> = None;
             
-            // Handle first point if it's at the start
-            if let Some(first_point) = sorted_changes.first() {
-                if first_point.position <= song_start {
-                    if first_point.tempo > 0.0 {
-                        prev_tempo_for_label = Some(first_point.tempo);
-                    }
-                    if let Some(time_sig) = first_point.time_signature {
-                        prev_time_sig_for_label = Some(time_sig);
+            // Always add the first BPM and time signature markers at the start of the progress bar (0%)
+            // Get the tempo and time signature at the count-in position (total_start)
+            // This is important because the progress bar starts at count-in, not song start
+            
+            // Convert total_start (absolute time) to song-relative position (0.0 = song start)
+            let count_in_position_song_relative = total_start - song_start;
+            
+            // Get tempo at count-in position by finding the last tempo change before or at that position
+            let first_tempo = {
+                let mut current_tempo = None;
+                // Find the last tempo change point at or before count-in position
+                for point in sorted_changes.iter() {
+                    if point.position <= count_in_position_song_relative {
+                        if point.tempo > 0.0 {
+                            current_tempo = Some(point.tempo);
+                        }
+                    } else {
+                        break;
                     }
                 }
+                // If no tempo change found, fallback to transport info
+                current_tempo.or_else(|| {
+                    song.transport_info.as_ref().map(|t| t.tempo.bpm)
+                })
+            };
+            
+            // Get time signature at count-in position
+            let first_time_sig = {
+                let mut current_time_sig = None;
+                // Find the last time signature change point at or before count-in position
+                for point in sorted_changes.iter() {
+                    if point.position <= count_in_position_song_relative {
+                        if let Some(ts) = point.time_signature {
+                            current_time_sig = Some(ts);
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                // If no time sig change found, fallback to transport info
+                current_time_sig.or_else(|| {
+                    song.transport_info.as_ref()
+                        .map(|t| (t.time_signature.numerator, t.time_signature.denominator))
+                })
+            };
+            
+            // Always add first BPM marker at 0% (unconditionally)
+            if let Some(tempo) = first_tempo {
+                markers.push(TempoMarker {
+                    position_percent: 0.0,
+                    label: format!("{:.0}", tempo),
+                    is_tempo: true,
+                    is_time_sig: false,
+                });
+                prev_tempo_for_label = Some(tempo);
+            }
+            
+            // Always add first time signature marker at 0% (unconditionally)
+            if let Some((n, d)) = first_time_sig {
+                markers.push(TempoMarker {
+                    position_percent: 0.0,
+                    label: format!("{}/{}", n, d),
+                    is_tempo: false,
+                    is_time_sig: true,
+                });
+                prev_time_sig_for_label = Some((n, d));
             }
             
             for point in sorted_changes.iter() {
@@ -287,35 +428,45 @@ pub fn MainContent(
                 };
                 
                 if tempo_changed || time_sig_changed {
-                    let marker_position_seconds = point.position;
+                    // point.position is song-relative (0.0 = song start), convert to absolute time
+                    let marker_position_absolute = song_start + point.position;
                     let marker_percent = if song_duration > 0.0 {
-                        ((marker_position_seconds - song_start) / song_duration * 100.0).max(0.0).min(100.0)
+                        ((marker_position_absolute - total_start) / song_duration * 100.0).max(0.0).min(100.0)
                     } else { 0.0 };
                     
-                    let mut label_parts = Vec::new();
-                    
+                    // Skip adding markers at 0% since we already added them at the start
+                    if marker_percent > 0.1 {
+                        // Create separate markers for tempo and time signature
+                        // Time signature marker
                     if let Some((n, d)) = current_time_sig {
-                        if let Some(prev_sig) = prev_time_sig_for_label {
-                            if prev_sig != (n, d) {
-                                label_parts.push(format!("{}/{}", n, d));
+                            // Add marker if it's different from previous
+                            let should_add = match prev_time_sig_for_label {
+                                Some(prev_sig) => prev_sig != (n, d),
+                                None => true, // First time signature change, always add it
+                            };
+                            if should_add {
+                                markers.push(TempoMarker {
+                                    position_percent: marker_percent,
+                                    label: format!("{}/{}", n, d),
+                                    is_tempo: false,
+                                    is_time_sig: true,
+                                });
                             }
                         }
-                    }
-                    
+                        
+                        // Tempo marker (just the number, no "bpm" text)
                     if let Some(tempo) = current_tempo {
                         if let Some(prev) = prev_tempo_for_label {
                             if (prev - tempo).abs() > 0.01 {
-                                label_parts.push(format!("{:.0} bpm", tempo));
-                            }
-                        }
-                    }
-                    
-                    let label = label_parts.join(" ");
-                    if !label.is_empty() {
                         markers.push(TempoMarker {
                             position_percent: marker_percent,
-                            label,
+                                        label: format!("{:.0}", tempo),
+                                        is_tempo: true,
+                                        is_time_sig: false,
                         });
+                                }
+                            }
+                        }
                     }
                     
                     if let Some(tempo) = current_tempo {
@@ -345,7 +496,14 @@ pub fn MainContent(
             // Only proceed if we have transport info
             let transport = song.transport_info.as_ref()?;
             
-            // Calculate song-relative position
+            // Use musical position directly from REAPER (which uses TimeMap2_timeToBeats internally)
+            // This correctly accounts for tempo and time signature changes
+            let musical_pos = transport.playhead_position.musical.clone();
+            
+            // Format the values
+            let musical_str = format!("{}.{}.{:03}", musical_pos.measure + 1, musical_pos.beat + 1, musical_pos.subdivision);
+            
+            // Calculate song-relative time position for time display
             let song_start = if song.effective_start() > 0.0 {
                 song.effective_start()
             } else {
@@ -353,17 +511,11 @@ pub fn MainContent(
             };
             let current_pos = transport.playhead_position.time.to_seconds();
             let song_relative_position = (current_pos - song_start).max(0.0);
+            let time_pos = TimePosition::from_seconds(song_relative_position);
             
-            // Use transport info from the song (bpm, time sig)
+            // Use transport info from the song (bpm, time sig) for display
             let tempo = transport.tempo.bpm;
             let time_sig = transport.time_signature.clone();
-            
-            // Calculate musical position from time position using song's tempo and time sig
-            let time_pos = TimePosition::from_seconds(song_relative_position);
-            let musical_pos = time_pos.to_musical_position(tempo, time_sig.clone());
-            
-            // Format the values
-            let musical_str = format!("{}.{}.{:03}", musical_pos.measure + 1, musical_pos.beat + 1, musical_pos.subdivision);
             let time_str = format!("{}:{:02}.{:03}", time_pos.minutes, time_pos.seconds, time_pos.milliseconds);
             let tempo_str = format!("{:.0}", tempo);
             let time_sig_str = format!("{}/{}", time_sig.numerator, time_sig.denominator);
@@ -405,6 +557,22 @@ pub fn MainContent(
     }).unwrap_or(false);
     
     let (song_name, song_position, song_total) = song_info();
+    
+    // Get next song info
+    let next_song_info = use_memo(move || {
+        let setlist_api = SETLIST.read();
+        let current_idx = current_song_index();
+        if let (Some(api), Some(idx)) = (setlist_api.as_ref(), current_idx) {
+            let setlist = api.get_setlist();
+            if let Some(next_song) = setlist.next_song(idx) {
+                Some((next_song.name.clone(), next_song.color()))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
     rsx! {
         div {
             class: "flex-1 flex flex-col overflow-hidden bg-background",
@@ -419,8 +587,6 @@ pub fn MainContent(
                         style: "bottom: calc(50% + 4rem);",
                         SongTitle {
                             song_name: song_name.clone(),
-                            position: song_position,
-                            total: song_total,
                         }
                     }
                     // Progress Bar Component (centered independently)
@@ -431,26 +597,106 @@ pub fn MainContent(
                         SongProgressBar {
                             progress: Signal::new(progress()),
                             sections: progress_sections(),
-                            on_section_click: on_section_click,
+                            on_section_click: {
+                                let on_click = on_section_click.clone();
+                                let has_count_in_val = has_count_in.clone();
+                                let has_ending_val = has_ending.clone();
+                                let progress_sections_val = progress_sections.clone();
+                                // Map progress section index to actual song section index
+                                // Progress sections: [count-in?] + [song sections] + [ending?]
+                                // Song sections: [song sections only]
+                                Some(Callback::new(move |progress_idx: usize| {
+                                    let has_count_in_flag = has_count_in_val();
+                                    let has_ending_flag = has_ending_val();
+                                    let sections = progress_sections_val();
+                                    
+                                    // If clicked on count-in (index 0) or ending (last index), ignore
+                                    if (has_count_in_flag && progress_idx == 0) || 
+                                       (has_ending_flag && progress_idx == sections.len() - 1) {
+                                        return;
+                                    }
+                                    
+                                    // Map to actual song section index
+                                    let song_section_idx = if has_count_in_flag {
+                                        progress_idx - 1
+                                    } else {
+                                        progress_idx
+                                    };
+                                    
+                                    if let Some(callback) = &on_click {
+                                        callback.call(song_section_idx);
+                                    }
+                                }))
+                            },
                             tempo_markers: tempo_markers(),
                             song_key: song_position.map(|i| i.to_string()),
                         }
                     }
-                    // Detail Badges Component (positioned below progress bar)
+                    // Section Progress Bar (positioned below BPM markers)
+                    div {
+                        class: "absolute left-0 right-0",
+                        style: "top: calc(50% + 5.5rem);",
+                        div {
+                            class: "w-full px-4",
+                            SectionProgressBar {
+                                progress: Signal::new(progress()),
+                                sections: progress_sections(),
+                                song_key: song_position.map(|i| i.to_string()),
+                            }
+                        }
+                    }
+                    // Detail Badges Component (positioned below section progress bar)
                     if let Some(badges) = detail_badges() {
                         div {
                             class: "absolute left-0 right-0",
-                            style: "top: calc(50% + 4rem);",
+                            style: "top: calc(50% + 8rem);",
                             div {
-                                class: "flex flex-wrap gap-2 justify-center",
+                                class: "flex flex-col items-center gap-4",
+                                div {
+                                    class: "flex flex-wrap gap-3 justify-center",
                                 for badge in badges {
                                     div {
-                                        class: "px-3 py-1 rounded-full bg-secondary text-secondary-foreground text-sm",
-                                        span {
-                                            class: "font-medium",
-                                            "{badge.label}: "
+                                            class: "px-4 py-2 rounded-full bg-secondary text-secondary-foreground text-base font-medium flex items-center gap-2",
+                                            if badge.label == "Time" {
+                                                Clock {
+                                                    size: 18,
+                                                    color: "currentColor",
+                                                }
+                                                "{badge.value}"
+                                            } else if badge.label == "Measure" {
+                                                Ruler {
+                                                    size: 18,
+                                                    color: "currentColor",
                                         }
+                                                "{badge.value}"
+                                            } else if badge.label == "BPM" {
+                                                "{badge.value} BPM"
+                                            } else {
                                         "{badge.value}"
+                                            }
+                                        }
+                                    }
+                                }
+                                // Next song title (faded, with next song's color)
+                                if let Some((next_name, next_color)) = next_song_info() {
+                                    FadedSongTitle {
+                                        song_name: next_name,
+                                        color: next_color,
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // If no badges, still show next song
+                        div {
+                            class: "absolute left-0 right-0",
+                            style: "top: calc(50% + 8rem);",
+                            div {
+                                class: "flex flex-col items-center gap-4",
+                                if let Some((next_name, next_color)) = next_song_info() {
+                                    FadedSongTitle {
+                                        song_name: next_name,
+                                        color: next_color,
                                     }
                                 }
                             }

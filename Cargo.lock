@@ -5007,6 +5007,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "naming-convention"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "splitty",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7540,6 +7548,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "splitty"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2db70a1e6827e4d71c655b606caf1346862c38ae52ab4f58c32635e7c7aedd67"
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8675,6 +8689,14 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "visibility"
+version = "0.1.0"
+dependencies = [
+ "naming-convention",
+ "serde",
+]
 
 [[package]]
 name = "vst"

@@ -15,7 +15,7 @@ static REGISTERED_ACTIONS: OnceLock<Mutex<Vec<RegisteredAction>>> = OnceLock::ne
 static ACTION_DEFS: OnceLock<Mutex<Vec<ActionDef>>> = OnceLock::new();
 
 /// Global storage for command IDs (looked up on main thread, safe to use from any thread)
-static COMMAND_IDS: OnceLock<Mutex<HashMap<&'static str, CommandId>>> = OnceLock::new();
+pub(crate) static COMMAND_IDS: OnceLock<Mutex<HashMap<&'static str, CommandId>>> = OnceLock::new();
 
 /// Get the storage for registered actions
 pub fn get_registered_actions_storage() -> &'static Mutex<Vec<RegisteredAction>> {

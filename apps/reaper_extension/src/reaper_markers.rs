@@ -3,10 +3,30 @@
 //! Reads markers and regions from REAPER projects and converts them to marker-region structs.
 
 use marker_region::core::{Marker, Region};
-use reaper_high::{Project, BookmarkType};
+use reaper_high::{Project, BookmarkType, Reaper};
 use reaper_medium::PositionInSeconds;
 use primitives::{Position, TimePosition, MusicalPosition, TimeRange};
 use crate::color_utils::extract_color_from_native;
+
+/// Get the project measure offset for a project
+/// Returns the offset value, or 0 if not found
+fn get_project_measure_offset(project: &Project) -> i32 {
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+    
+    // Get the project measure offset using project_config_var_get_offs
+    if let Some(offs_result) = medium_reaper.project_config_var_get_offs("projmeasoffs") {
+        // Get the actual value using the offset
+        if let Some(addr) = medium_reaper.project_config_var_addr(project.context(), offs_result.offset) {
+            // Read the integer value directly from the pointer (it's a 32-bit integer)
+            unsafe { *(addr.as_ptr() as *const i32) }
+        } else {
+            0
+        }
+    } else {
+        0
+    }
+}
 
 /// Read all markers from a REAPER project
 pub fn read_markers_from_project(project: &Project) -> Result<Vec<Marker>, String> {
@@ -39,7 +59,8 @@ pub fn read_markers_from_project(project: &Project) -> Result<Vec<Marker>, Strin
                 let position_pos = PositionInSeconds::new(position_seconds)
                     .map_err(|e| format!("Invalid position: {:?}", e))?;
                 let beat_info = project.beat_info_at(position_pos);
-                let measure = beat_info.measure_index;
+                let measure_offset = get_project_measure_offset(project);
+                let measure = beat_info.measure_index + measure_offset; // Apply project measure offset
                 let beats_since_measure = beat_info.beats_since_measure.get();
                 let beat = beats_since_measure.floor() as i32;
                 let subdivision = ((beats_since_measure - beats_since_measure.floor()) * 1000.0).round() as i32;
@@ -110,7 +131,8 @@ pub fn read_regions_from_project(project: &Project) -> Result<Vec<Region>, Strin
                     let start_position_pos = PositionInSeconds::new(start_position_seconds)
                         .map_err(|e| format!("Invalid start position: {:?}", e))?;
                     let start_beat_info = project.beat_info_at(start_position_pos);
-                    let start_measure = start_beat_info.measure_index;
+                    let measure_offset = get_project_measure_offset(project);
+                    let start_measure = start_beat_info.measure_index + measure_offset; // Apply project measure offset
                     let start_beats_since_measure = start_beat_info.beats_since_measure.get();
                     let start_beat = start_beats_since_measure.floor() as i32;
                     let start_subdivision = ((start_beats_since_measure - start_beats_since_measure.floor()) * 1000.0).round() as i32;
@@ -124,7 +146,7 @@ pub fn read_regions_from_project(project: &Project) -> Result<Vec<Region>, Strin
                     let end_position_pos = PositionInSeconds::new(end_position_seconds)
                         .map_err(|e| format!("Invalid end position: {:?}", e))?;
                     let end_beat_info = project.beat_info_at(end_position_pos);
-                    let end_measure = end_beat_info.measure_index;
+                    let end_measure = end_beat_info.measure_index + measure_offset; // Apply project measure offset
                     let end_beats_since_measure = end_beat_info.beats_since_measure.get();
                     let end_beat = end_beats_since_measure.floor() as i32;
                     let end_subdivision = ((end_beats_since_measure - end_beats_since_measure.floor()) * 1000.0).round() as i32;

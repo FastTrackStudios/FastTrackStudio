@@ -191,6 +191,15 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         // Update setlist state on every tick (target: 60Hz)
         setlist_stream::update_setlist_state();
         
+        // Process pending seek requests from async tasks
+        setlist_stream::process_seek_requests();
+        
+        // Process pending command execution requests from async tasks
+        setlist_stream::process_command_requests();
+        
+        // Process smooth seek queue (check if we should execute queued seeks)
+        setlist_stream::process_smooth_seek_queue();
+        
         // Log performance metrics every 10 seconds
         let last_log = LAST_LOG.get_or_init(|| std::sync::Mutex::new(Instant::now()));
         if let Ok(mut last_log_guard) = last_log.lock() {

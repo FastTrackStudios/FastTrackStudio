@@ -3,7 +3,10 @@ pub mod core;
 pub mod infra;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use infra::stream::{SetlistStreamApi, SetlistStateProvider, SetlistUpdateMessage};
+pub use infra::stream::{
+    SetlistStreamApi, SetlistStateProvider, SetlistUpdateMessage, SetlistCommandHandler,
+    TransportCommand, NavigationCommand, SeekToSection, SeekToSong, ToggleLoop,
+};
 
 #[cfg(feature = "dioxus")]
 pub use infra::dioxus::{SETLIST, TRANSPORT_INFO, ProjectTransportInfo};

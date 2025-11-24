@@ -9,6 +9,7 @@ members = [
     "modules/daw/transport",
     "modules/fts/setlist",
     "modules/fts/smart-template",
+    "modules/fts/visibility",
     "modules/peer-2-peer",  
     "packages/keyflow",
     "xtask",
@@ -17,7 +18,7 @@ members = [
     "apps/web", 
     "modules/ui", 
     "modules/api", 
-    "modules/daw/mix-fx",
+    "modules/daw/mix-fx", "modules/fts/naming-convention",
 ]
 resolver = "2"
 

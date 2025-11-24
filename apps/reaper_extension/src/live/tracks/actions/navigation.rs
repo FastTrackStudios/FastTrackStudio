@@ -7,8 +7,7 @@ use crate::reaper_markers::read_markers_from_project;
 use crate::live::tracks::actions::zoom::zoom_horizontally_to_song;
 use crate::live::tracks::tab_navigation::TabNavigator;
 use reaper_high::{BookmarkType, Project, Reaper};
-use reaper_medium::{PositionInSeconds, ProjectContext, ProjectRef, SetEditCurPosOptions};
-use setlist::core::Setlist;
+use reaper_medium::{PositionInSeconds, ProjectRef, SetEditCurPosOptions};
 use tracing::{debug, info, warn};
 
 /// Helper: Find Count-In marker position in a project
@@ -148,6 +147,89 @@ pub fn go_to_previous_song() {
     
     info!(from_song = current_index, to_song = previous_index, "Went to previous song");
     reaper.show_console_msg(format!("Go To Previous Song: {}\n", previous_project_name));
+}
+
+/// Go to a specific song by index in setlist
+pub fn go_to_song(song_index: usize) {
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+    
+    info!(song_index, "Go To Song action executed");
+    
+    // Build setlist
+    let setlist = match build_setlist_from_open_projects(None) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(error = %e, "Failed to build setlist");
+            reaper.show_console_msg(format!("Go To Song {}: Failed to build setlist\n", song_index));
+            return;
+        }
+    };
+    
+    if setlist.songs.is_empty() {
+        warn!("Setlist is empty");
+        reaper.show_console_msg(format!("Go To Song {}: Setlist is empty\n", song_index));
+        return;
+    }
+    
+    if song_index >= setlist.songs.len() {
+        warn!(song_index, song_count = setlist.songs.len(), "Song index out of range");
+        reaper.show_console_msg(format!("Go To Song {}: Index out of range (setlist has {} songs)\n", song_index, setlist.songs.len()));
+        return;
+    }
+    
+    let target_song = &setlist.songs[song_index];
+    let target_project_name = target_song.project_name_from_metadata();
+    
+    // Find tab index for target song
+    let tab_index = match find_tab_index_by_project_name(&target_project_name) {
+        Some(idx) => idx,
+        None => {
+            warn!(project_name = %target_project_name, "Target song project not found");
+            reaper.show_console_msg(format!("Go To Song {}: Project '{}' not found\n", song_index, target_project_name));
+            return;
+        }
+    };
+    
+    // Switch to target tab
+    if let Err(e) = switch_to_tab(tab_index) {
+        warn!(error = %e, "Failed to switch to target song");
+        reaper.show_console_msg(format!("Go To Song {}: Failed to switch to tab {}\n", song_index, tab_index));
+        return;
+    }
+    
+    // Move cursor to Count-In or beginning
+    if let Some(result) = medium_reaper.enum_projects(ProjectRef::Current, 0) {
+        let project = Project::new(result.project);
+        let start_pos = if let Some(count_in) = find_count_in_marker(&project) {
+            PositionInSeconds::new(count_in).unwrap_or(PositionInSeconds::ZERO)
+        } else {
+            PositionInSeconds::ZERO
+        };
+        
+        project.set_edit_cursor_position(start_pos, SetEditCurPosOptions { move_view: false, seek_play: false });
+        
+        // Log position and musical position
+        let edit_pos = project.edit_cursor_position().unwrap_or(PositionInSeconds::ZERO);
+        let edit_beat_info = project.beat_info_at(edit_pos);
+        let musical_pos = format!("{}.{}.{:03}", 
+            edit_beat_info.measure_index + 1,
+            edit_beat_info.beats_since_measure.get().floor() as i32 + 1,
+            ((edit_beat_info.beats_since_measure.get() - edit_beat_info.beats_since_measure.get().floor()) * 1000.0).round() as i32
+        );
+        info!(
+            song_index,
+            project_name = %target_project_name,
+            time_position = edit_pos.get(),
+            musical_position = %musical_pos,
+            "Went to song"
+        );
+        
+        // Zoom to song
+        zoom_horizontally_to_song();
+    }
+    
+    reaper.show_console_msg(format!("Go To Song {}: {}\n", song_index, target_project_name));
 }
 
 /// Go to next song in setlist

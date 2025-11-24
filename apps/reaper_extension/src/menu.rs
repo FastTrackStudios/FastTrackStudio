@@ -227,17 +227,17 @@ fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
     if let Some(general_subcategories) = categorized.remove("General") {
         for (_, general_actions) in general_subcategories {
             for action in general_actions {
-                let entry = item(
-                    action.display_name.clone(),
-                    action.command_id.to_string(),
-                );
-                
-                debug!(
-                    command_id = %action.command_id,
+        let entry = item(
+            action.display_name.clone(),
+            action.command_id.to_string(),
+        );
+        
+        debug!(
+            command_id = %action.command_id,
                     "Adding General action to menu"
-                );
-                
-                menu_entries.push(entry);
+        );
+        
+        menu_entries.push(entry);
             }
         }
     }

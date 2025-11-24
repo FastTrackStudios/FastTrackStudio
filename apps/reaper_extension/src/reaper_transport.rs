@@ -28,6 +28,26 @@ impl ReaperTransport {
         &self.project
     }
 
+    /// Get the project measure offset for this project
+    /// Returns the offset value, or 0 if not found
+    fn get_project_measure_offset(&self) -> i32 {
+        let reaper = Reaper::get();
+        let medium_reaper = reaper.medium_reaper();
+        
+        // Get the project measure offset using project_config_var_get_offs
+        if let Some(offs_result) = medium_reaper.project_config_var_get_offs("projmeasoffs") {
+            // Get the actual value using the offset
+            if let Some(addr) = medium_reaper.project_config_var_addr(self.project.context(), offs_result.offset) {
+                // Read the integer value directly from the pointer (it's a 32-bit integer)
+                unsafe { *(addr.as_ptr() as *const i32) }
+            } else {
+                0
+            }
+        } else {
+            0
+        }
+    }
+
     /// Convert REAPER play state to our PlayState
     fn play_state_to_transport(&self) -> PlayState {
         let play_state = self.project.play_state();
@@ -138,7 +158,8 @@ impl ReaperTransport {
         
         // Convert play position to musical position using REAPER's beat info
         // beat_info_at uses TimeMap2_timeToBeats internally, which is the correct API
-        let play_measure = play_beat_info.measure_index;
+        let measure_offset = self.get_project_measure_offset();
+        let play_measure = play_beat_info.measure_index + measure_offset; // Apply project measure offset
         let play_beats_since_measure = play_beat_info.beats_since_measure.get();
         let play_beat = play_beats_since_measure.floor() as i32;
         let play_subdivision = ((play_beats_since_measure - play_beats_since_measure.floor()) * 1000.0).round() as i32;
@@ -153,7 +174,7 @@ impl ReaperTransport {
         let edit_position_pos = PositionInSeconds::new(edit_position_seconds)
             .map_err(|e| TransportError::NotReady(format!("Invalid edit position: {:?}", e)))?;
         let edit_beat_info = self.project.beat_info_at(edit_position_pos);
-        let edit_measure = edit_beat_info.measure_index;
+        let edit_measure = edit_beat_info.measure_index + measure_offset; // Apply project measure offset
         let edit_beats_since_measure = edit_beat_info.beats_since_measure.get();
         let edit_beat = edit_beats_since_measure.floor() as i32;
         let edit_subdivision = ((edit_beats_since_measure - edit_beats_since_measure.floor()) * 1000.0).round() as i32;

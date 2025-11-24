@@ -14,6 +14,8 @@ pub struct ProgressSection {
 pub struct TempoMarker {
     pub position_percent: f64,  // 0-100, where this marker is positioned
     pub label: String,          // Label text (e.g., "4/4", "120 bpm", "4/4 120 bpm")
+    pub is_tempo: bool,         // true if this is a tempo marker, false if time signature
+    pub is_time_sig: bool,       // true if this is a time signature marker
 }
 
 /// Segmented progress bar component with different colored sections
@@ -41,8 +43,8 @@ pub fn SegmentedProgressBar(
     let should_animate = use_memo(move || {
         let prev = prev_progress();
         let prev_key = prev_song_key();
-        
-        // Check if song changed
+    
+    // Check if song changed
         let song_changed = prev_key != song_key_for_memo;
         
         // Check if there's a large position jump (more than 5% change)
@@ -64,7 +66,7 @@ pub fn SegmentedProgressBar(
         prev_progress.set(Some(current_progress_for_effect));
         if prev_song_key() != song_key_for_effect {
             prev_song_key.set(song_key_for_effect.clone());
-        }
+    }
     });
     
     // Pre-calculate section data
@@ -94,7 +96,7 @@ pub fn SegmentedProgressBar(
         // If we're past all sections, check if we're at the very end of the last section
         if let Some((_, start, end, _, _, _, _)) = section_data.last() {
             if current_progress >= *start && current_progress <= *end {
-                section_data.last()
+        section_data.last()
             } else {
                 None
             }
@@ -119,29 +121,108 @@ pub fn SegmentedProgressBar(
     
     let active_color = active_section.map(|(_, _, _, _, color, _, _)| color.clone()).unwrap_or_else(|| "rgb(100, 100, 100)".to_string());
     
+    // Helper function to check if two markers overlap (assuming ~4rem label width with larger text)
+    // Labels are centered, so they overlap if distance < ~2rem (4rem / 2)
+    // At 100% width, 2rem ≈ 2% of typical container width
+    let check_overlap = |pos1: f64, pos2: f64| -> bool {
+        (pos1 - pos2).abs() < 2.0
+    };
+    
+    // Pre-calculate positions for time signature markers (all in same row, no staggering)
+    // Also parse time signatures for fraction display
+    let time_sig_with_positions: Vec<_> = {
+        tempo_markers.iter()
+            .enumerate()
+            .filter(|(_, m)| m.is_time_sig)
+            .map(|(orig_idx, marker)| {
+                // Parse time signature for fraction display
+                let (numerator, denominator) = if marker.label.contains('/') {
+                    if let Some(slash_pos) = marker.label.find('/') {
+                        (marker.label[..slash_pos].trim().to_string(), marker.label[slash_pos + 1..].trim().to_string())
+                    } else {
+                        (marker.label.clone(), String::new())
+                    }
+                } else {
+                    (String::new(), String::new())
+                };
+                
+                (orig_idx, marker, "-4rem", numerator, denominator)
+            })
+            .collect()
+    };
+    
+    let tempo_with_positions: Vec<_> = {
+        let tempo_markers_list: Vec<_> = tempo_markers.iter()
+            .enumerate()
+            .filter(|(_, m)| m.is_tempo)
+            .collect();
+        
+        let mut result = Vec::new();
+        for (idx, (orig_idx, marker)) in tempo_markers_list.iter().enumerate() {
+            // Check if this marker overlaps with previous ones
+            let needs_stagger = if idx > 0 {
+                tempo_markers_list[..idx].iter().any(|(_, prev_marker)| {
+                    check_overlap(marker.position_percent, prev_marker.position_percent)
+                })
+            } else {
+                false
+            };
+            
+            let bottom_offset = if needs_stagger && idx % 2 == 1 {
+                "0.75rem"   // Lower lane for odd indices when overlapping
+            } else {
+                "0.5rem"    // Default higher lane (closer to progress bar)
+            };
+            result.push((*orig_idx, *marker, bottom_offset));
+        }
+        result
+    };
+    
     rsx! {
         div {
-            class: "flex flex-col items-center justify-center h-24 w-full px-4",
-            // Tempo/Time Signature labels (above progress bar)
+            class: "relative flex flex-col items-center justify-center h-20 w-full",
+            // Tempo/Time Signature labels (overlaid above and below progress bar)
+            // Time signature markers on top (staggered), BPM markers on bottom (staggered)
             if !tempo_markers.is_empty() {
-                div {
-                    class: "relative mb-6 h-6 w-full",
-                    for (index, marker) in tempo_markers.iter().enumerate() {
+                // Time signature markers (staggered - alternate heights)
+                for (orig_idx, marker, top_offset, numerator, denominator) in time_sig_with_positions.iter() {
                         div {
-                            key: "tempo-label-{index}",
-                            class: "absolute",
-                            style: format!("left: {}%; transform: translateX(-50%); top: 0;", marker.position_percent),
+                        key: "timesig-label-{orig_idx}",
+                        class: "absolute pointer-events-none",
+                        style: format!("left: {}%; transform: translateX(-50%); top: {};", marker.position_percent, top_offset),
                             div {
-                                class: "text-xs font-medium text-center whitespace-nowrap px-1 py-0.5 rounded bg-accent text-accent-foreground border border-border",
+                            class: "text-sm font-medium text-center whitespace-nowrap px-1 py-1 rounded bg-accent text-accent-foreground border border-border",
+                            if !denominator.is_empty() {
+                                div {
+                                    class: "flex flex-col items-center leading-tight",
+                                    span { "{numerator}" }
+                                    span {
+                                        class: "border-t border-current w-full my-0.5"
+                                    }
+                                    span { "{denominator}" }
+                                }
+                            } else {
                                 "{marker.label}"
                             }
+                        }
+                    }
+                }
+                // Tempo/BPM markers (staggered - alternate heights)
+                for (orig_idx, marker, bottom_offset) in tempo_with_positions.iter() {
+                    div {
+                        key: "tempo-label-{orig_idx}",
+                        class: "absolute pointer-events-none",
+                        style: format!("left: {}%; transform: translateX(-50%); top: calc(100% + {});", marker.position_percent, bottom_offset),
+                        div {
+                            class: "text-xs font-medium text-center whitespace-nowrap px-1 py-1 rounded bg-accent text-accent-foreground border border-border",
+                            "{marker.label}"
                         }
                     }
                 }
             }
             // Main segmented progress bar
             div {
-                class: "relative w-full h-16 rounded-lg overflow-hidden bg-secondary",
+                class: "relative w-full h-20 rounded-lg overflow-hidden bg-secondary px-4",
                 // Render sections as background layers (visual only, no individual progress bars)
                 for (index, section_start, _section_end, section_width, section_color, _filled_percent, _section_name) in section_data.iter() {
                     div {
@@ -175,6 +256,20 @@ pub fn SegmentedProgressBar(
                         }
                     }
                 }
+                // Section boundary lines (very subtle vertical lines at section boundaries)
+                for (index, section_start, _section_end, _section_width, _section_color, _filled_percent, _section_name) in section_data.iter() {
+                    // Add a line at the start of each section (except the first one at 0%)
+                    if *section_start > 0.0 {
+                        div {
+                            key: "section-boundary-{index}",
+                            class: "absolute pointer-events-none z-20",
+                            style: format!(
+                                "left: {}%; width: 1px; top: 0; bottom: 0; background-color: rgba(255, 255, 255, 0.15);",
+                                section_start
+                            ),
+                        }
+                    }
+                }
                 // Dark overlay covering unfilled portion (reveals bright colors as progress increases)
                 // pointer-events-none so clicks pass through to sections
                 // Disable transition on jumps for instant position updates
@@ -196,12 +291,13 @@ pub fn SegmentedProgressBar(
                     },
                 }
                 // Tempo/Time Signature markers (vertical lines extending above and through progress bar)
+                // Center the line at the marker position to align with marker cards
                 for (index, marker) in tempo_markers.iter().enumerate() {
                     div {
                         key: "tempo-marker-{index}",
                         class: "absolute pointer-events-none",
                         style: format!(
-                            "left: {}%; width: 2px; top: -1rem; bottom: 0; background-color: rgba(255, 255, 255, 0.7); z-index: 40;",
+                            "left: {}%; width: 2px; top: -1rem; bottom: 0; background-color: rgba(255, 255, 255, 0.7); z-index: 40; transform: translateX(-50%);",
                             marker.position_percent
                         ),
                     }
@@ -222,31 +318,6 @@ pub fn SegmentedProgressBar(
                             "{section_name}"
                         }
                     }
-                }
-            }
-            // Section progress bar (shows progress within current section)
-            div {
-                class: "relative w-full h-2 rounded-lg overflow-hidden bg-secondary mt-2",
-                // Background
-                div {
-                    class: "absolute inset-0 h-full",
-                    style: format!(
-                        "background-color: {}; opacity: 0.3;",
-                        active_color
-                    ),
-                }
-                // Filled portion - disable transitions for instant updates
-                div {
-                    class: if should_animate() {
-                        "absolute left-0 top-0 h-full transition-all duration-100 ease-linear"
-                    } else {
-                        "absolute left-0 top-0 h-full"
-                    },
-                    style: format!(
-                        "width: {}%; background-color: {}; opacity: 0.8;",
-                        section_progress,
-                        active_color
-                    ),
                 }
             }
         }
@@ -316,6 +387,111 @@ pub fn CompactProgressBar(
                     "color: white; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);".to_string()
                 },
                 "{label}"
+            }
+        }
+    }
+}
+
+/// Section progress bar component
+/// 
+/// Shows progress within the current section as a small bar below the main progress bar.
+#[component]
+pub fn SectionProgressBar(
+    progress: Signal<f64>,
+    sections: Vec<ProgressSection>,
+    #[props(default)]
+    song_key: Option<String>,
+) -> Element {
+    let current_progress = progress();
+    
+    // Track progress changes to detect jumps and disable animations
+    let mut prev_progress = use_signal(|| None::<f64>);
+    let mut prev_song_key = use_signal(|| None::<String>);
+    
+    let song_key_for_memo = song_key.clone();
+    let should_animate = use_memo(move || {
+        let prev = prev_progress();
+        let prev_key = prev_song_key();
+        let song_changed = prev_key != song_key_for_memo;
+        let large_jump = if let Some(prev_val) = prev {
+            (current_progress - prev_val).abs() > 5.0
+        } else {
+            false
+        };
+        !song_changed && !large_jump && prev.is_some()
+    });
+    
+    let current_progress_for_effect = current_progress;
+    let song_key_for_effect = song_key.clone();
+    use_effect(move || {
+        prev_progress.set(Some(current_progress_for_effect));
+        if prev_song_key() != song_key_for_effect {
+            prev_song_key.set(song_key_for_effect.clone());
+        }
+    });
+    
+    // Pre-calculate section data
+    let section_data: Vec<_> = sections.iter().enumerate().map(|(index, section)| {
+        let section_start = section.start_percent;
+        let section_end = section.end_percent;
+        let section_width = section.end_percent - section.start_percent;
+        (index, section_start, section_end, section_width, section.color.clone())
+    }).collect();
+    
+    // Find the active section
+    let active_section = section_data.iter().find(|(_, start, end, _, _)| {
+        current_progress >= *start && current_progress < *end
+    }).or_else(|| {
+        if let Some((_, start, end, _, _)) = section_data.last() {
+            if current_progress >= *start && current_progress <= *end {
+                section_data.last()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+    
+    // Calculate section progress (0-100% within the active section)
+    let section_progress = if let Some((_, section_start, section_end, section_width, _)) = active_section {
+        if current_progress <= *section_start {
+            0.0
+        } else if current_progress >= *section_end {
+            100.0
+        } else {
+            let progress_in_section = current_progress - section_start;
+            (progress_in_section / section_width) * 100.0
+        }
+    } else {
+        0.0
+    };
+    
+    let active_color = active_section.map(|(_, _, _, _, color)| color.clone()).unwrap_or_else(|| "rgb(100, 100, 100)".to_string());
+    
+    rsx! {
+        div {
+            class: "relative w-full h-2 rounded-lg overflow-hidden bg-secondary",
+            // Background
+            div {
+                class: "absolute inset-0 h-full",
+                style: format!(
+                    "background-color: {}; opacity: 0.3;",
+                    active_color
+                ),
+            }
+            // Filled portion - disable transitions for instant updates
+            div {
+                class: if should_animate() {
+                    "absolute left-0 top-0 h-full transition-all duration-100 ease-linear"
+                } else {
+                    "absolute left-0 top-0 h-full"
+                },
+                style: format!(
+                    "width: {}%; background-color: {}; opacity: 0.8;",
+                    section_progress,
+                    active_color
+                ),
             }
         }
     }

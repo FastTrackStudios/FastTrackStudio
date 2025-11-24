@@ -8,9 +8,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use iroh::{Endpoint, EndpointAddr};
 use irpc::{
-    channel::mpsc,
+    channel::{mpsc, oneshot},
     rpc::RemoteService,
-    rpc_requests, Client, WithChannels,
+    rpc_requests, Client, Request, WithChannels,
 };
 use irpc_iroh::IrohLazyRemoteConnection;
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,39 @@ pub struct SetlistUpdateMessage {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubscribeSetlist;
 
+/// Transport control commands
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TransportCommand {
+    Play,
+    Pause,
+    Stop,
+    TogglePlayPause,
+}
+
+/// Navigation commands
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum NavigationCommand {
+    NextSectionOrSong,
+    PreviousSectionOrSong,
+}
+
+/// Seek to a specific section
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeekToSection {
+    pub song_index: usize,
+    pub section_index: usize,
+}
+
+/// Seek to a specific song (switches to that song's tab and moves cursor to beginning)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeekToSong {
+    pub song_index: usize,
+}
+
+/// Toggle loop for current song
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToggleLoop;
+
 /// IRPC protocol for setlist stream service
 #[rpc_requests(message = SetlistStreamMessage)]
 #[derive(Serialize, Deserialize, Debug)]
@@ -35,6 +68,21 @@ pub enum SetlistStreamProtocol {
     /// Subscribe to setlist state updates (server streaming)
     #[rpc(tx=mpsc::Sender<SetlistUpdateMessage>)]
     SubscribeSetlist(SubscribeSetlist),
+    /// Transport control (play, pause, stop, toggle)
+    #[rpc(tx=oneshot::Sender<Result<(), String>>)]
+    TransportCommand(TransportCommand),
+    /// Navigation (next/previous section or song)
+    #[rpc(tx=oneshot::Sender<Result<(), String>>)]
+    NavigationCommand(NavigationCommand),
+    /// Seek to a specific section
+    #[rpc(tx=oneshot::Sender<Result<(), String>>)]
+    SeekToSection(SeekToSection),
+    /// Seek to a specific song
+    #[rpc(tx=oneshot::Sender<Result<(), String>>)]
+    SeekToSong(SeekToSong),
+    /// Toggle loop for current song
+    #[rpc(tx=oneshot::Sender<Result<(), String>>)]
+    ToggleLoop(ToggleLoop),
 }
 
 /// Trait for backends that can provide setlist state
@@ -54,6 +102,28 @@ pub trait SetlistStateProvider: Send + Sync {
     }
 }
 
+/// Trait for backends that can handle setlist commands
+/// 
+/// This allows the setlist stream actor to execute commands
+/// on different backends (REAPER, other DAWs, etc.)
+#[async_trait]
+pub trait SetlistCommandHandler: Send + Sync {
+    /// Execute a transport command
+    async fn execute_transport_command(&self, command: TransportCommand) -> Result<(), String>;
+    
+    /// Execute a navigation command
+    async fn execute_navigation_command(&self, command: NavigationCommand) -> Result<(), String>;
+    
+    /// Seek to a specific section
+    async fn seek_to_section(&self, song_index: usize, section_index: usize) -> Result<(), String>;
+    
+    /// Seek to a specific song (switches to that song's tab and moves cursor to beginning)
+    async fn seek_to_song(&self, song_index: usize) -> Result<(), String>;
+    
+    /// Toggle loop for current song
+    async fn toggle_loop(&self) -> Result<(), String>;
+}
+
 /// Setlist stream actor that handles client subscriptions and broadcasts updates
 struct SetlistStreamActor {
     recv: tokio::sync::mpsc::Receiver<SetlistStreamMessage>,
@@ -62,10 +132,19 @@ struct SetlistStreamActor {
     broadcast_tx: tokio::sync::broadcast::Sender<SetlistUpdateMessage>,
     /// Provider for getting setlist state
     state_provider: Arc<dyn SetlistStateProvider>,
+    /// Handler for executing commands (optional)
+    command_handler: Option<Arc<dyn SetlistCommandHandler>>,
 }
 
 impl SetlistStreamActor {
     pub fn spawn(state_provider: Arc<dyn SetlistStateProvider>) -> SetlistStreamApi {
+        Self::spawn_with_handler(state_provider, None)
+    }
+    
+    pub fn spawn_with_handler(
+        state_provider: Arc<dyn SetlistStateProvider>,
+        command_handler: Option<Arc<dyn SetlistCommandHandler>>,
+    ) -> SetlistStreamApi {
         let (tx, rx) = tokio::sync::mpsc::channel(16);
         // Create a broadcast channel with a large buffer (1000 messages) to handle bursts
         let (broadcast_tx, _) = tokio::sync::broadcast::channel(1000);
@@ -74,6 +153,7 @@ impl SetlistStreamActor {
             recv: rx,
             broadcast_tx: broadcast_tx.clone(),
             state_provider: state_provider.clone(),
+            command_handler: command_handler.clone(),
         };
 
         // Spawn the actor to handle messages
@@ -139,6 +219,81 @@ impl SetlistStreamActor {
                     }
                 });
             }
+            SetlistStreamMessage::TransportCommand(cmd) => {
+                let WithChannels { tx, inner, span, .. } = cmd;
+                let handler = self.command_handler.clone();
+                tokio::task::spawn(async move {
+                    let _entered = span.enter();
+                    let result = if let Some(handler) = handler {
+                        handler.execute_transport_command(inner).await
+                    } else {
+                        Err("Command handler not available".to_string())
+                    };
+                    if let Err(e) = tx.send(result).await {
+                        warn!("Failed to send transport command response: {}", e);
+                    }
+                });
+            }
+            SetlistStreamMessage::NavigationCommand(cmd) => {
+                let WithChannels { tx, inner, span, .. } = cmd;
+                let handler = self.command_handler.clone();
+                tokio::task::spawn(async move {
+                    let _entered = span.enter();
+                    let result = if let Some(handler) = handler {
+                        handler.execute_navigation_command(inner).await
+                    } else {
+                        Err("Command handler not available".to_string())
+                    };
+                    if let Err(e) = tx.send(result).await {
+                        warn!("Failed to send navigation command response: {}", e);
+                    }
+                });
+            }
+            SetlistStreamMessage::SeekToSection(cmd) => {
+                let WithChannels { tx, inner, span, .. } = cmd;
+                let handler = self.command_handler.clone();
+                tokio::task::spawn(async move {
+                    let _entered = span.enter();
+                    let result = if let Some(handler) = handler {
+                        handler.seek_to_section(inner.song_index, inner.section_index).await
+                    } else {
+                        Err("Command handler not available".to_string())
+                    };
+                    if let Err(e) = tx.send(result).await {
+                        warn!("Failed to send seek to section response: {}", e);
+                    }
+                });
+            }
+            SetlistStreamMessage::SeekToSong(cmd) => {
+                let WithChannels { tx, inner, span, .. } = cmd;
+                let handler = self.command_handler.clone();
+                tokio::task::spawn(async move {
+                    let _entered = span.enter();
+                    let result = if let Some(handler) = handler {
+                        handler.seek_to_song(inner.song_index).await
+                    } else {
+                        Err("Command handler not available".to_string())
+                    };
+                    if let Err(e) = tx.send(result).await {
+                        warn!("Failed to send seek to song response: {}", e);
+                    }
+                });
+            }
+            SetlistStreamMessage::ToggleLoop(cmd) => {
+                let WithChannels { tx, span, .. } = cmd;
+                let handler = self.command_handler.clone();
+                tokio::task::spawn(async move {
+                    let _entered = span.enter();
+                    let result = if let Some(handler) = handler {
+                        handler.toggle_loop().await
+                    } else {
+                        Err("Command handler not available".to_string())
+                    };
+                    if let Err(e) = tx.send(result).await {
+                        warn!("Failed to send toggle loop response: {}", e);
+                    }
+                });
+            }
         }
     }
 
@@ -189,7 +344,7 @@ impl SetlistStreamActor {
 }
 
 /// Setlist stream API for clients
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SetlistStreamApi {
     inner: Client<SetlistStreamProtocol>,
 }
@@ -206,6 +361,17 @@ impl SetlistStreamApi {
     /// (e.g., ReaperSetlistStateProvider) is specific to the backend.
     pub fn spawn(state_provider: Arc<dyn SetlistStateProvider>) -> Self {
         SetlistStreamActor::spawn(state_provider)
+    }
+    
+    /// Create a new setlist stream API with a state provider and command handler
+    /// 
+    /// This is called by the server (e.g., REAPER extension) to create
+    /// a setlist stream service with command execution capabilities.
+    pub fn spawn_with_handler(
+        state_provider: Arc<dyn SetlistStateProvider>,
+        command_handler: Option<Arc<dyn SetlistCommandHandler>>,
+    ) -> Self {
+        SetlistStreamActor::spawn_with_handler(state_provider, command_handler)
     }
 
     /// Connect to a remote setlist stream service using endpoint ID
@@ -238,6 +404,106 @@ impl SetlistStreamApi {
     /// Returns a receiver that will receive SetlistUpdateMessage messages
     pub async fn subscribe(&self) -> irpc::Result<mpsc::Receiver<SetlistUpdateMessage>> {
         self.inner.server_streaming(SubscribeSetlist, 32).await
+    }
+    
+    /// Execute a transport command
+    pub async fn transport_command(&self, command: TransportCommand) -> irpc::Result<Result<(), String>> {
+        let msg = command;
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
+    }
+    
+    /// Execute a navigation command
+    pub async fn navigation_command(&self, command: NavigationCommand) -> irpc::Result<Result<(), String>> {
+        let msg = command;
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
+    }
+    
+    /// Seek to a specific section
+    pub async fn seek_to_section(&self, song_index: usize, section_index: usize) -> irpc::Result<Result<(), String>> {
+        let msg = SeekToSection { song_index, section_index };
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
+    }
+    
+    /// Seek to a specific song (switches to that song's tab and moves cursor to beginning)
+    pub async fn seek_to_song(&self, song_index: usize) -> irpc::Result<Result<(), String>> {
+        let msg = SeekToSong { song_index };
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
+    }
+    
+    /// Toggle loop for current song
+    pub async fn toggle_loop(&self) -> irpc::Result<Result<(), String>> {
+        let msg = ToggleLoop;
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
     }
 }
 

@@ -64,10 +64,14 @@ pub fn SongItem(
     song_data: SongItemData,
     index: usize,
     is_expanded: bool,
+    is_playing: bool,
     current_section_index: Option<usize>,
     on_song_click: Callback<()>,
     on_section_click: Callback<usize>,
 ) -> Element {
+    // Show progress if the song is expanded OR if it's actively playing
+    let show_progress = is_expanded || is_playing;
+    
     rsx! {
         div {
             key: "{index}",
@@ -96,7 +100,7 @@ pub fn SongItem(
                         bright_color: song_data.bright_color.clone(),
                         muted_color: song_data.muted_color.clone(),
                         is_selected: is_expanded,
-                        is_inactive: !is_expanded,
+                        is_inactive: !show_progress,
                         always_black_bg: true,
                         on_click: Some(Callback::new(move |_| {
                             on_song_click.call(());
@@ -114,7 +118,7 @@ pub fn SongItem(
                                     bright_color: section.bright_color.clone(),
                                     muted_color: section.muted_color.clone(),
                                     is_selected: current_section_index == Some(section_idx),
-                                    is_inactive: !is_expanded,
+                                    is_inactive: !show_progress,
                                     on_click: {
                                         let section_idx = section_idx;
                                         Some(Callback::new(move |_| {

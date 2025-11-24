@@ -2,4 +2,5 @@
 
 pub mod actions;
 pub mod tab_navigation;
+pub mod smooth_seek;
 
