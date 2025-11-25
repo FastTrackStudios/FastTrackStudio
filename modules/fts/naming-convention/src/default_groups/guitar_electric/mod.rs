@@ -10,7 +10,7 @@ pub fn create_guitar_electric_group() -> FullGroup {
     define_group! {
         name = "Guitar Electric",
         prefix = "GTR",
-        patterns = ["guitar", "gtr", "electric guitar", "electric", "eg", "el", "e-gtr", "strat", "les paul", "tele", "sg"],
+        patterns = ["guitar", "gtr", "gtr e", "electric guitar", "electric", "eg", "el", "e-gtr", "strat", "les paul", "tele", "sg"],
         negative_patterns = ["bass", "acoustic"],
         parent_track = "GTR ELEC",
         arrangement_patterns = ["Clean", "Crunch", "Distorted", "Lead", "Rhythm", "Power", "Chord"],

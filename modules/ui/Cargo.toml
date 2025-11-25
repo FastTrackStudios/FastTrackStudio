@@ -6,13 +6,19 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-dioxus = { workspace = true }
+dioxus = { workspace = true, features = ["router"] }
+dioxus-router = "0.7"
 lucide-dioxus = { version = "2.44", features = ["all-icons"] }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 setlist = { path = "../../modules/fts/setlist", features = ["dioxus"] }
 primitives = { path = "../../modules/daw/primitives" }
 transport = { path = "../../modules/daw/transport" }
+lyrics = { path = "../../modules/fts/lyrics" }
 wasm-timer = "0.2"
+uuid = { version = "1.0", features = ["v4"] }
+tracing = { workspace = true }
+web-sys = { version = "0.3", features = ["Window", "ResizeObserver", "Element", "CssStyleDeclaration", "HtmlElement", "Document"] }
+wasm-bindgen = "0.2"
 
 [features]
 default = []

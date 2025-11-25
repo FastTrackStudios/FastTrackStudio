@@ -6,6 +6,7 @@ use marker_region::core::{Marker, Region};
 use reaper_high::{Project, Reaper};
 use reaper_medium::ProjectRef;
 use setlist::core::{Section, SectionType, Setlist, SetlistError, Song};
+use primitives::TimeSignature;
 use tracing::{debug, info, warn};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -984,6 +985,36 @@ fn build_song_from_region(
         .collect();
     
     song.set_tempo_time_sig_changes(song_tempo_changes);
+    
+    // Calculate starting tempo and time signature at count-in position (or song start if no count-in)
+    let starting_position = song.count_in_marker.as_ref()
+        .map(|m| m.position.time.to_seconds())
+        .unwrap_or(song_start_seconds);
+    
+    // Convert to song-relative position (0.0 = song start)
+    let starting_position_song_relative = starting_position - song_start_seconds;
+    
+    // Find the last tempo/time sig change at or before the starting position
+    let mut starting_tempo: Option<f64> = None;
+    let mut starting_time_sig: Option<TimeSignature> = None;
+    
+    for point in song.tempo_time_sig_changes.iter() {
+        if point.position <= starting_position_song_relative {
+            if point.tempo > 0.0 {
+                starting_tempo = Some(point.tempo);
+            }
+            if let Some((n, d)) = point.time_signature {
+                starting_time_sig = Some(TimeSignature::new(n, d));
+            }
+        } else {
+            break;
+        }
+    }
+    
+    // If no tempo/time sig found in changes, we could fallback to project defaults,
+    // but for now we'll leave it as None and let the desktop app handle the fallback
+    song.starting_tempo = starting_tempo;
+    song.starting_time_signature = starting_time_sig;
     
     // Transport info will be populated in update_setlist_state from the project
     // We don't attach the project to the song anymore - just store transport_info

@@ -66,22 +66,52 @@ impl SimpleParser {
             let mut prefix_path = Vec::new();
             Self::collect_prefix_path(group, &child_path, &mut prefix_path);
             
-            // Store the full prefix path (all parent prefixes)
-            if !prefix_path.is_empty() {
-                track_name.group_prefix = Some(prefix_path.join(" "));
+            // Check if "GTR E" pattern is present (for Electric Guitar)
+            let mut prefix_to_use = if !prefix_path.is_empty() {
+                prefix_path.join(" ")
             } else {
-                track_name.group_prefix = Some(group.prefix.clone());
+                group.prefix.clone()
+            };
+            
+            // If this is Electric Guitar and we have "GTR E" in the name, use "GTR E" as prefix
+            if group.name == "Guitar Electric" || group.prefix == "GTR" {
+                // Check if "gtr e" appears as a pattern (with word boundaries)
+                if name_to_match.contains("gtr e") || name_to_match.contains("gtr  e") {
+                    // Check if "E" appears right after "GTR" in the words
+                    for (i, word) in words.iter().enumerate() {
+                        let word_lower = word.to_lowercase();
+                        if word_lower == "gtr" && i + 1 < words.len() {
+                            let next_word = words[i + 1].to_lowercase();
+                            if next_word == "e" {
+                                prefix_to_use = "GTR E".to_string();
+                                break;
+                            }
+                        }
+                    }
+                }
             }
+            
+            // Store the prefix
+            track_name.group_prefix = Some(prefix_to_use.clone());
             
             // Track group-related words as matched
             let group_name_lower = group.name.to_lowercase();
             let group_prefix_lower = group.prefix.to_lowercase();
             
             // Mark group name and prefix as matched if they appear in the name
-            for word in &words {
+            for (i, word) in words.iter().enumerate() {
                 let word_lower = word.to_lowercase();
                 if word_lower == group_name_lower || word_lower == group_prefix_lower {
-                    matched_words.insert(word_lower);
+                    matched_words.insert(word_lower.clone());
+                    
+                    // If we matched "GTR" and the next word is "E", mark "E" as matched too
+                    // This handles "GTR E" as the Electric Guitar identifier
+                    if word_lower == "gtr" && i + 1 < words.len() {
+                        let next_word = words[i + 1].to_lowercase();
+                        if next_word == "e" {
+                            matched_words.insert("e".to_string());
+                        }
+                    }
                 }
             }
             
@@ -122,7 +152,7 @@ impl SimpleParser {
         }
         
         // Collect unparsed words (only include if they're not part of the expected structure)
-        let unparsed: Vec<String> = words.iter()
+        let mut unparsed: Vec<String> = words.iter()
             .filter(|w| {
                 let w_lower = w.to_lowercase();
                 // Don't include if already matched
@@ -130,6 +160,21 @@ impl SimpleParser {
             })
             .cloned()
             .collect();
+        
+        // Filter out single-letter uppercase words when a longer prefix already exists
+        // This removes standalone letters like "G" when "GTR" is already the prefix
+        // Note: Single letters like "L" or "R" should be extracted as channels, not left in unparsed
+        if let Some(ref prefix) = track_name.group_prefix {
+            let prefix_lower = prefix.to_lowercase();
+            // If we have a multi-character prefix, filter out single uppercase letter words
+            if prefix_lower.len() > 1 {
+                unparsed.retain(|w| {
+                    // Keep words that are longer than 1 character
+                    // Single letters should have been extracted as channels/other components
+                    w.len() > 1
+                });
+            }
+        }
         
         if !unparsed.is_empty() {
             track_name.unparsed_words = Some(unparsed);
@@ -407,6 +452,7 @@ impl SimpleParser {
             return;
         }
         
+        // First check group-specific performer patterns
         let patterns = group.get_component_patterns(ComponentType::Performer);
         for pattern in &patterns {
             let pattern_lower = pattern.to_lowercase();
@@ -416,6 +462,29 @@ impl SimpleParser {
                     matched_words.insert(pattern_lower);
                     return;
                 }
+            }
+        }
+        
+        // Fallback: Check against default performer names list
+        // Split the name into words and check each word
+        let words: Vec<String> = split_unquoted_whitespace(original)
+            .unwrap_quotes(true)
+            .map(|w| w.to_string())
+            .collect();
+        
+        for word in &words {
+            let word_lower = word.to_lowercase();
+            // Skip if already matched
+            if matched_words.contains(&word_lower) {
+                continue;
+            }
+            
+            // Check if this word is a known performer name
+            if let Some(performer_name) = crate::performers::get_performer_name(word) {
+                // Found a performer name - use the original case from the input
+                track_name.performer = Some(word.clone());
+                matched_words.insert(word_lower);
+                return;
             }
         }
     }

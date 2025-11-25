@@ -17,6 +17,7 @@ pub mod formatter;
 pub mod component_order;
 pub mod track_structure;
 pub mod simple_parser;
+pub mod performers;
 
 #[macro_use]
 pub mod macros;

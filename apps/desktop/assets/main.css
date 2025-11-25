@@ -6,3 +6,69 @@ body {
     margin: 0;
     padding: 0;
 }
+
+/* Fit-to-width text technique using container queries and registered custom properties */
+
+@property --captured-length {
+  syntax: "<length>";
+  initial-value: 0px;
+  inherits: true;
+}
+
+@property --captured-length2 {
+  syntax: "<length>";
+  initial-value: 0px;
+  inherits: true;
+}
+
+.text-fit {
+  display: flex;
+  container-type: inline-size;
+
+  --captured-length: initial;
+  --support-sentinel: var(--captured-length, 9999px);
+}
+
+.text-fit > [aria-hidden="true"] {
+  visibility: hidden;
+}
+
+.text-fit > :not([aria-hidden]) {
+  flex-grow: 1;
+  container-type: inline-size;
+
+  --captured-length: 100cqi;
+  --available-space: var(--captured-length);
+}
+
+.text-fit > :not([aria-hidden]) > * {
+  --support-sentinel: inherit;
+  --captured-length: 100cqi;
+  --ratio: tan(atan2(
+    var(--available-space),
+    var(--available-space) - var(--captured-length)
+  ));
+  --font-size: clamp(
+    1em,
+    1em * var(--ratio),
+    var(--max-font-size, infinity * 1px)
+    -
+    var(--support-sentinel)
+  );
+  inline-size: var(--available-space);
+}
+
+.text-fit > :not([aria-hidden]) > *:not(.text-fit) {
+  display: block;
+  font-size: var(--font-size);
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+
+.text-fit > :not([aria-hidden]) > *.text-fit {
+  --captured-length2: var(--font-size);
+  font-variation-settings:
+    'opsz'
+    tan(atan2(var(--captured-length2), 1px));
+}

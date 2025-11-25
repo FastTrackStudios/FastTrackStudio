@@ -43,6 +43,12 @@ pub struct Song {
     /// Current transport state for this song's project (serialized)
     /// This is the source of truth for transport state - projects can be looked up by name when needed for control
     pub transport_info: Option<Transport>,
+    /// Tempo at the count-in position (or song start if no count-in)
+    /// This is the tempo that should be displayed at the start of the progress bar
+    pub starting_tempo: Option<f64>,
+    /// Time signature at the count-in position (or song start if no count-in)
+    /// This is the time signature that should be displayed at the start of the progress bar
+    pub starting_time_signature: Option<TimeSignature>,
 }
 
 impl Song {
@@ -67,6 +73,8 @@ impl Song {
             tempo_time_sig_changes: Vec::new(),
             metadata: HashMap::new(),
             transport_info: None,
+            starting_tempo: None,
+            starting_time_signature: None,
         })
     }
 
@@ -113,6 +121,8 @@ impl Song {
             tempo_time_sig_changes,
             metadata,
             transport_info: None,
+            starting_tempo: None,
+            starting_time_signature: None,
         })
     }
 
@@ -683,6 +693,8 @@ impl Clone for Song {
             tempo_time_sig_changes: self.tempo_time_sig_changes.clone(),
             metadata: self.metadata.clone(),
             transport_info: self.transport_info.clone(),
+            starting_tempo: self.starting_tempo,
+            starting_time_signature: self.starting_time_signature.clone(),
         }
     }
 }

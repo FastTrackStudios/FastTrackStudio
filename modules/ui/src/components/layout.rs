@@ -19,6 +19,7 @@ pub fn TopBar(
     #[props(default)]
     on_toggle_mode: Option<Callback<()>>,
 ) -> Element {
+    
     rsx! {
         div {
             class: "h-12 flex-shrink-0 border-b border-border bg-card flex items-center justify-between px-4",
@@ -32,6 +33,21 @@ pub fn TopBar(
                     }
                 }
                 ConnectionStatus { is_connected }
+                
+                // Navigation tabs
+                div {
+                    class: "flex items-center gap-1 ml-6",
+                    Link {
+                        to: "/",
+                        class: "px-4 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent font-medium text-sm transition-colors data-[active=true]:bg-primary data-[active=true]:text-primary-foreground",
+                        "Performance"
+                    }
+                    Link {
+                        to: "/lyrics",
+                        class: "px-4 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent font-medium text-sm transition-colors data-[active=true]:bg-primary data-[active=true]:text-primary-foreground",
+                        "Lyrics"
+                    }
+                }
             }
             h1 {
                 class: "text-lg font-semibold text-card-foreground",
@@ -346,50 +362,17 @@ pub fn MainContent(
             let mut prev_time_sig_for_label: Option<(i32, i32)> = None;
             
             // Always add the first BPM and time signature markers at the start of the progress bar (0%)
-            // Get the tempo and time signature at the count-in position (total_start)
-            // This is important because the progress bar starts at count-in, not song start
+            // Use the starting_tempo and starting_time_signature fields from the song
+            // These are calculated in the REAPER extension at the count-in position (or song start)
+            let first_tempo = song.starting_tempo
+                .or_else(|| song.transport_info.as_ref().map(|t| t.tempo.bpm));
             
-            // Convert total_start (absolute time) to song-relative position (0.0 = song start)
-            let count_in_position_song_relative = total_start - song_start;
-            
-            // Get tempo at count-in position by finding the last tempo change before or at that position
-            let first_tempo = {
-                let mut current_tempo = None;
-                // Find the last tempo change point at or before count-in position
-                for point in sorted_changes.iter() {
-                    if point.position <= count_in_position_song_relative {
-                        if point.tempo > 0.0 {
-                            current_tempo = Some(point.tempo);
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                // If no tempo change found, fallback to transport info
-                current_tempo.or_else(|| {
-                    song.transport_info.as_ref().map(|t| t.tempo.bpm)
-                })
-            };
-            
-            // Get time signature at count-in position
-            let first_time_sig = {
-                let mut current_time_sig = None;
-                // Find the last time signature change point at or before count-in position
-                for point in sorted_changes.iter() {
-                    if point.position <= count_in_position_song_relative {
-                        if let Some(ts) = point.time_signature {
-                            current_time_sig = Some(ts);
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                // If no time sig change found, fallback to transport info
-                current_time_sig.or_else(|| {
+            let first_time_sig = song.starting_time_signature.as_ref()
+                .map(|ts| (ts.numerator, ts.denominator))
+                .or_else(|| {
                     song.transport_info.as_ref()
                         .map(|t| (t.time_signature.numerator, t.time_signature.denominator))
-                })
-            };
+                });
             
             // Always add first BPM marker at 0% (unconditionally)
             if let Some(tempo) = first_tempo {

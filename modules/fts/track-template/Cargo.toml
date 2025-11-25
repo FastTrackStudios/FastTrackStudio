@@ -1,0 +1,17 @@
+[package]
+name = "track-template"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+naming-convention = { path = "../naming-convention", features = ["default-groups"] }
+tracing = "0.1"
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"
+
+[[example]]
+name = "drum_kit"
+path = "examples/drum_kit.rs"
+

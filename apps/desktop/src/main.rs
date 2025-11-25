@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus_router::{Routable, Router, Outlet};
 use setlist::{Setlist, Song, Section, SectionType, SETLIST, TransportCommand, NavigationCommand};
 use marker_region::{Marker, application::TempoTimePoint};
 use primitives::Position;
@@ -53,8 +54,27 @@ fn main() {
     dioxus::launch(App);
 }
 
+#[derive(Routable, Clone, PartialEq, Debug)]
+enum Route {
+    #[layout(AppLayout)]
+    #[route("/")]
+    Performance {},
+    #[route("/lyrics")]
+    Lyrics {},
+}
+
 #[component]
 fn App() -> Element {
+    rsx! {
+        document::Link { rel: "icon", href: FAVICON }
+        document::Link { rel: "stylesheet", href: MAIN_CSS }
+        document::Link { rel: "stylesheet", href: TAILWIND_CSS }
+        Router::<Route> {}
+    }
+}
+
+#[component]
+fn AppLayout() -> Element {
     // Track connection status
     let is_connected = use_signal(|| false);
     
@@ -164,9 +184,9 @@ fn App() -> Element {
         SETLIST.read().as_ref().and_then(|api| api.active_section_index())
     });
     
-    
+                
     // Mode toggle callback - simplified for now
-    let on_toggle_mode = Callback::new(move |_| {
+    let on_toggle_mode = Callback::new(move |_: ()| {
         // TODO: Implement mode toggle if needed
     });
     
@@ -226,7 +246,7 @@ fn App() -> Element {
     });
     
     #[cfg(not(target_arch = "wasm32"))]
-    let on_play_pause = Callback::new(move |_| {
+    let on_play_pause = Callback::new(move |_: ()| {
         spawn(async move {
             if let Some(api) = get_setlist_api() {
                 match api.transport_command(TransportCommand::TogglePlayPause).await {
@@ -247,12 +267,12 @@ fn App() -> Element {
     });
     
     #[cfg(target_arch = "wasm32")]
-    let on_play_pause = Callback::new(move |_| {
+    let on_play_pause = Callback::new(move |_: ()| {
         // No-op for wasm32
     });
     
     #[cfg(not(target_arch = "wasm32"))]
-    let on_loop_toggle = Callback::new(move |_| {
+    let on_loop_toggle = Callback::new(move |_: ()| {
         spawn(async move {
             if let Some(api) = get_setlist_api() {
                 match api.toggle_loop().await {
@@ -273,12 +293,12 @@ fn App() -> Element {
     });
     
     #[cfg(target_arch = "wasm32")]
-    let on_loop_toggle = Callback::new(move |_| {
+    let on_loop_toggle = Callback::new(move |_: ()| {
         // No-op for wasm32
     });
     
     #[cfg(not(target_arch = "wasm32"))]
-    let on_back = Callback::new(move |_| {
+    let on_back = Callback::new(move |_: ()| {
         spawn(async move {
             if let Some(api) = get_setlist_api() {
                 match api.navigation_command(NavigationCommand::PreviousSectionOrSong).await {
@@ -299,12 +319,12 @@ fn App() -> Element {
     });
     
     #[cfg(target_arch = "wasm32")]
-    let on_back = Callback::new(move |_| {
+    let on_back = Callback::new(move |_: ()| {
         // No-op for wasm32
     });
     
     #[cfg(not(target_arch = "wasm32"))]
-    let on_forward = Callback::new(move |_| {
+    let on_forward = Callback::new(move |_: ()| {
         spawn(async move {
             if let Some(api) = get_setlist_api() {
                 match api.navigation_command(NavigationCommand::NextSectionOrSong).await {
@@ -325,7 +345,267 @@ fn App() -> Element {
     });
     
     #[cfg(target_arch = "wasm32")]
-    let on_forward = Callback::new(move |_| {
+    let on_forward = Callback::new(move |_: ()| {
+        // No-op for wasm32
+    });
+    
+    // Keyboard shortcuts
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_keydown = {
+        let on_play_pause = on_play_pause.clone();
+        let on_back = on_back.clone();
+        let on_forward = on_forward.clone();
+        let current_song_index = current_song_index.clone();
+        
+        Callback::new(move |evt: Event<KeyboardData>| {
+            use dioxus::prelude::Key;
+            
+            match evt.data.key() {
+                Key::Character(c) if c == " " => {
+                    // Spacebar: Play/Pause
+                    on_play_pause.call(());
+                }
+                Key::ArrowLeft => {
+                    // Left arrow: Previous section/song
+                    on_back.call(());
+                }
+                Key::ArrowRight => {
+                    // Right arrow: Next section/song
+                    on_forward.call(());
+                }
+                Key::ArrowUp => {
+                    // Up arrow: Previous song
+                    if let Some(api) = get_setlist_api() {
+                        if let Some(current_idx) = current_song_index() {
+                            if current_idx > 0 {
+                                let prev_song_idx = current_idx - 1;
+                                spawn(async move {
+                                    match api.seek_to_song(prev_song_idx).await {
+                                        Ok(Ok(())) => {
+                                            info!("Successfully navigated to previous song {}", prev_song_idx);
+                                        }
+                                        Ok(Err(e)) => {
+                                            warn!("Failed to navigate to previous song: {}", e);
+                                        }
+                                        Err(e) => {
+                                            warn!("RPC error navigating to previous song: {}", e);
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+                Key::ArrowDown => {
+                    // Down arrow: Next song
+                    if let Some(api) = get_setlist_api() {
+                        if let Some(current_idx) = current_song_index() {
+                            // Get total song count from SETLIST
+                            if let Some(setlist_api) = SETLIST.read().as_ref() {
+                                let setlist = setlist_api.get_setlist();
+                                let song_count = setlist.songs.len();
+                                if current_idx < song_count - 1 {
+                                    let next_song_idx = current_idx + 1;
+                                    spawn(async move {
+                                        match api.seek_to_song(next_song_idx).await {
+                                            Ok(Ok(())) => {
+                                                info!("Successfully navigated to next song {}", next_song_idx);
+                                            }
+                                            Ok(Err(e)) => {
+                                                warn!("Failed to navigate to next song: {}", e);
+                                            }
+                                            Err(e) => {
+                                                warn!("RPC error navigating to next song: {}", e);
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    // Ignore other keys
+                }
+            }
+        })
+    };
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_keydown = Callback::new(move |_evt: Event<KeyboardData>| {
+        // No-op for wasm32
+    });
+
+    // Derive current song and section index from SETLIST global signal
+    let current_song_index = use_memo(move || {
+        SETLIST.read().as_ref().and_then(|api| api.active_song_index())
+    });
+    
+    let current_section_index = use_memo(move || {
+        SETLIST.read().as_ref().and_then(|api| api.active_section_index())
+    });
+    
+    // Mode toggle callback - simplified for now
+    let on_toggle_mode = Callback::new(move |_: ()| {
+        // TODO: Implement mode toggle if needed
+    });
+    
+    // Callbacks
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_song_click = Callback::new(move |song_idx: usize| {
+        // Seek to the clicked song (switches to that song's tab)
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.seek_to_song(song_idx).await {
+                    Ok(Ok(())) => {
+                        info!("Successfully sought to song {}", song_idx);
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to seek to song: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error seeking to song: {}", e);
+                    }
+                }
+            } else {
+                warn!("Setlist API not available for song seek");
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_song_click = Callback::new(move |_idx: usize| {
+        // No-op for wasm32
+    });
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_section_click = Callback::new(move |(song_idx, section_idx): (usize, usize)| {
+        // Seek to the clicked section
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.seek_to_section(song_idx, section_idx).await {
+                    Ok(Ok(())) => {
+                        info!("Successfully sought to song {} section {}", song_idx, section_idx);
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to seek to section: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error seeking to section: {}", e);
+                    }
+                }
+            } else {
+                warn!("Setlist API not available for section seek");
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_section_click = Callback::new(move |(_song_idx, _section_idx): (usize, usize)| {
+        // No-op for wasm32
+    });
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_play_pause = Callback::new(move |_: ()| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.transport_command(TransportCommand::TogglePlayPause).await {
+                    Ok(Ok(())) => {
+                        info!("Successfully toggled play/pause");
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to toggle play/pause: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error toggling play/pause: {}", e);
+                    }
+                }
+            } else {
+                warn!("Setlist API not available for play/pause");
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_play_pause = Callback::new(move |_: ()| {
+        // No-op for wasm32
+    });
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_loop_toggle = Callback::new(move |_: ()| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.toggle_loop().await {
+                    Ok(Ok(())) => {
+                        info!("Successfully toggled loop");
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to toggle loop: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error toggling loop: {}", e);
+                    }
+                }
+            } else {
+                warn!("Setlist API not available for loop toggle");
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_loop_toggle = Callback::new(move |_: ()| {
+        // No-op for wasm32
+    });
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_back = Callback::new(move |_: ()| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.navigation_command(NavigationCommand::PreviousSectionOrSong).await {
+                    Ok(Ok(())) => {
+                        info!("Successfully navigated to previous section/song");
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to navigate back: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error navigating back: {}", e);
+                    }
+                }
+            } else {
+                warn!("Setlist API not available for navigation");
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_back = Callback::new(move |_: ()| {
+        // No-op for wasm32
+    });
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_forward = Callback::new(move |_: ()| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.navigation_command(NavigationCommand::NextSectionOrSong).await {
+                    Ok(Ok(())) => {
+                        info!("Successfully navigated to next section/song");
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to navigate forward: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error navigating forward: {}", e);
+                    }
+                }
+            } else {
+                warn!("Setlist API not available for navigation");
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_forward = Callback::new(move |_: ()| {
         // No-op for wasm32
     });
     
@@ -417,10 +697,6 @@ fn App() -> Element {
     });
 
     rsx! {
-        document::Link { rel: "icon", href: FAVICON }
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
-        document::Link { rel: "stylesheet", href: TAILWIND_CSS }
-        
         div {
             class: "h-screen w-screen flex flex-col overflow-hidden bg-background",
             tabindex: "0",
@@ -431,9 +707,118 @@ fn App() -> Element {
                 on_toggle_mode: Some(on_toggle_mode),
             }
             
+            Outlet::<Route> {}
+        }
+    }
+}
+
+#[component]
+fn Performance() -> Element {
+    // Derive current song and section index from SETLIST global signal
+    let current_song_index = use_memo(move || {
+        SETLIST.read().as_ref().and_then(|api| api.active_song_index())
+    });
+    
+    let current_section_index = use_memo(move || {
+        SETLIST.read().as_ref().and_then(|api| api.active_section_index())
+    });
+    
+    // Callbacks
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_song_click = Callback::new(move |song_idx: usize| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.seek_to_song(song_idx).await {
+                    Ok(Ok(())) => {
+                        info!("Successfully sought to song {}", song_idx);
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to seek to song: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error seeking to song: {}", e);
+                    }
+                }
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_song_click = Callback::new(move |_idx: usize| {});
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_section_click = Callback::new(move |(song_idx, section_idx): (usize, usize)| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                match api.seek_to_section(song_idx, section_idx).await {
+                    Ok(Ok(())) => {
+                        info!("Successfully sought to song {} section {}", song_idx, section_idx);
+                    }
+                    Ok(Err(e)) => {
+                        warn!("Failed to seek to section: {}", e);
+                    }
+                    Err(e) => {
+                        warn!("RPC error seeking to section: {}", e);
+                    }
+                }
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_section_click = Callback::new(move |(_song_idx, _section_idx): (usize, usize)| {});
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_play_pause = Callback::new(move |_: ()| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                api.transport_command(TransportCommand::TogglePlayPause).await.ok();
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_play_pause = Callback::new(move |_: ()| {});
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_loop_toggle = Callback::new(move |_: ()| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                api.toggle_loop().await.ok();
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_loop_toggle = Callback::new(move |_: ()| {});
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_back = Callback::new(move |_: ()| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                api.navigation_command(NavigationCommand::PreviousSectionOrSong).await.ok();
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_back = Callback::new(move |_: ()| {});
+    
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_forward = Callback::new(move |_: ()| {
+        spawn(async move {
+            if let Some(api) = get_setlist_api() {
+                api.navigation_command(NavigationCommand::NextSectionOrSong).await.ok();
+            }
+        });
+    });
+    
+    #[cfg(target_arch = "wasm32")]
+    let on_forward = Callback::new(move |_: ()| {});
+
+    rsx! {
             div {
                 class: "flex-1 flex overflow-hidden",
-                
                 Sidebar {
                     current_song_index: Signal::new(current_song_index()),
                     current_section_index: Signal::new(current_section_index()),
@@ -450,8 +835,8 @@ fn App() -> Element {
                             on_section_click.call((song_idx, idx));
                         }
                     })),
-                    is_playing: Signal::new(false), // Will be derived from SETLIST in component
-                    is_looping: Signal::new(false), // Will be derived from SETLIST in component
+                is_playing: Signal::new(false),
+                is_looping: Signal::new(false),
                     on_play_pause: on_play_pause,
                     on_loop_toggle: on_loop_toggle,
                     on_back: on_back,
@@ -459,6 +844,12 @@ fn App() -> Element {
                 }
             }
         }
+}
+
+#[component]
+fn Lyrics() -> Element {
+    rsx! {
+        LyricsView {}
     }
 }
 

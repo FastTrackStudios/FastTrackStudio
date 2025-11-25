@@ -4670,6 +4670,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "lyrics"
+version = "0.1.0"
+dependencies = [
+ "colored",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "setlist",
+ "thiserror 2.0.17",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "mac"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8417,6 +8432,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "track-template"
+version = "0.1.0"
+dependencies = [
+ "naming-convention",
+ "tracing",
+]
+
+[[package]]
 name = "transport"
 version = "0.1.0"
 dependencies = [
@@ -8564,12 +8587,18 @@ name = "ui"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "dioxus-router",
  "lucide-dioxus 2.44.0",
  "lumen-blocks",
+ "lyrics",
  "primitives",
  "setlist",
+ "tracing",
  "transport",
+ "uuid",
+ "wasm-bindgen",
  "wasm-timer",
+ "web-sys",
 ]
 
 [[package]]
@@ -8689,14 +8718,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "visibility"
-version = "0.1.0"
-dependencies = [
- "naming-convention",
- "serde",
-]
 
 [[package]]
 name = "vst"

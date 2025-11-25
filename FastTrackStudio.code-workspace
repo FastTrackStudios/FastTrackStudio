@@ -1,0 +1,78 @@
+{
+  "folders": [
+    {
+      "name": "FastTrackStudio",
+      "path": "."
+    },
+    {
+      "name": "lib-ref (Reference)",
+      "path": "../../Rust/lib-ref"
+    },
+    {
+      "name": "FTS-Extensions (Reference)",
+      "path": "../../Audio Development/FTS-Extensions"
+    },
+    {
+      "name": "audio-reference (Reference)",
+      "path": "../../Reference Projects/audio-reference"
+    },
+    {
+      "name": "FTS-REAPER Scripts (Reference)",
+      "path": "../../../Music/FTS-REAPER/Scripts"
+    },
+    {
+      "name": "lrxed (Reference)",
+      "path": "../../Rust/lib-ref/lrxed"
+    }
+  ],
+  "settings": {
+    "rust-analyzer.linkedProjects": [
+      "${workspaceFolder:FastTrackStudio}/Cargo.toml"
+    ],
+    "rust-analyzer.cargo.autoreload": false,
+    "rust-analyzer.cargo.features": "all",
+    "rust-analyzer.excludeGlobs": [
+      "**/lib-ref/**",
+      "**/FTS-Extensions/**",
+      "**/audio-reference/**",
+      "**/FTS-REAPER/**",
+      "**/lrxed/**",
+      "**/Reference Projects/**",
+      "**/Audio Development/**",
+      "**/Music/**",
+      "${workspaceFolder:lib-ref (Reference)}/**",
+      "${workspaceFolder:FTS-Extensions (Reference)}/**",
+      "${workspaceFolder:audio-reference (Reference)}/**",
+      "${workspaceFolder:FTS-REAPER Scripts (Reference)}/**",
+      "${workspaceFolder:lrxed (Reference)}/**"
+    ],
+    "rust-analyzer.cargo.buildScripts.enable": true,
+    "rust-analyzer.cargo.allFeatures": false,
+    "rust-analyzer.checkOnSave.enable": true,
+    "rust-analyzer.procMacro.enable": true,
+    "rust-analyzer.workspace.symbol.search.scope": "workspace",
+    "files.watcherExclude": {
+      "**/lib-ref/**": true,
+      "**/FTS-Extensions/**": true,
+      "**/audio-reference/**": true,
+      "**/FTS-REAPER/**": true,
+      "**/lrxed/**": true,
+      "**/Reference Projects/**": true,
+      "**/Audio Development/**": true,
+      "**/Music/**": true,
+      "**/target/**": true,
+      "**/.git/**": true
+    },
+    "search.exclude": {
+      "**/lib-ref/**": true,
+      "**/FTS-Extensions/**": true,
+      "**/audio-reference/**": true,
+      "**/FTS-REAPER/**": true,
+      "**/lrxed/**": true,
+      "**/Reference Projects/**": true,
+      "**/Audio Development/**": true,
+      "**/Music/**": true,
+      "**/target/**": true
+    }
+  }
+}
