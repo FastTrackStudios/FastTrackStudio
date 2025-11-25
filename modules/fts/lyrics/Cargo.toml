@@ -14,7 +14,18 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 tracing = { workspace = true }
 regex = "1.0"
 once_cell = "1.20"
-setlist = { path = "../setlist" }
+irpc = { workspace = true }
+irpc-iroh = "0.11.0"
+iroh = { version = "0.95", features = ["discovery-local-network"] }
+async-trait = "0.1"
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+# Note: setlist dependency removed to break circular dependency
+# Sync functionality can be added in setlist crate or a separate integration crate
+# setlist = { path = "../setlist", optional = true }
+
+[features]
+default = []
 
 [dev-dependencies]
 colored = "2.1"

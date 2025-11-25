@@ -6,11 +6,14 @@
 pub mod core;
 pub mod parser;
 pub mod output;
-pub mod sync;
+// Note: sync module removed to break circular dependency with setlist
+// Sync functionality should be implemented in setlist crate
 pub mod syllables;
+pub mod source;
+pub mod infra;
 
 pub use core::*;
 pub use parser::{parse_lyrics, parse_lyrics_with_config, ParserConfig, BackgroundVocalPattern, ParseError};
 pub use output::*;
-pub use sync::*;
 pub use syllables::*;
+pub use source::*;

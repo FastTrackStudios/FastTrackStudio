@@ -203,9 +203,15 @@ pub struct LyricLine {
     pub text: String,
     /// List of parts (regular text and parenthetical)
     pub parts: Vec<LinePart>,
-    /// Optional timing information (in seconds from song start)
+    /// Words in this line, broken down into syllables with timing and MIDI note assignments
+    /// This is optional - if None, words can be generated on-demand from text
+    /// If Some, it contains the persisted word/syllable structure with sync data
+    pub words: Option<Vec<Word>>,
+    /// Optional timing information (in seconds from song start) - line-level timing
+    /// Note: Individual syllable timing is stored in words[].syllables[].start_time/end_time
     pub start_time: Option<f64>,
-    /// Optional timing information (in seconds from song start)
+    /// Optional timing information (in seconds from song start) - line-level timing
+    /// Note: Individual syllable timing is stored in words[].syllables[].start_time/end_time
     pub end_time: Option<f64>,
     /// Optional metadata
     pub metadata: HashMap<String, String>,
@@ -219,10 +225,47 @@ impl LyricLine {
             id: None,
             text: text.clone(),
             parts,
+            words: None, // Words generated on-demand if not provided
             start_time: None,
             end_time: None,
             metadata: HashMap::new(),
         }
+    }
+
+    /// Create a new lyric line with words already parsed
+    pub fn with_words(text: String, words: Vec<Word>) -> Self {
+        let parts = Self::parse_parts(&text);
+        Self {
+            id: None,
+            text: text.clone(),
+            parts,
+            words: Some(words),
+            start_time: None,
+            end_time: None,
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Get words for this line, generating them if not already stored
+    pub fn get_words(&self) -> Vec<Word> {
+        if let Some(ref stored_words) = self.words {
+            stored_words.clone()
+        } else {
+            split_line_into_words(&self.regular_text())
+        }
+    }
+
+    /// Set words for this line (with syllable timing and MIDI notes)
+    pub fn set_words(&mut self, words: Vec<Word>) {
+        self.words = Some(words);
+    }
+
+    /// Get all syllables from this line (from stored words or generated)
+    pub fn get_syllables(&self) -> Vec<Syllable> {
+        self.get_words()
+            .iter()
+            .flat_map(|word| word.syllables.clone())
+            .collect()
     }
 
     /// Parse text into parts (handling parenthetical text)

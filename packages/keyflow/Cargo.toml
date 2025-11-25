@@ -20,3 +20,11 @@ path = "examples/simple/reckless_love.rs"
 [[example]]
 name = "build_my_life"
 path = "examples/simple/build_my_life.rs"
+
+[[example]]
+name = "all_along_the_watchtower"
+path = "examples/intermediate/all_along_the_watchtower.rs"
+
+[[example]]
+name = "well_jacob_collier"
+path = "examples/intermediate/well_jacob_collier.rs"

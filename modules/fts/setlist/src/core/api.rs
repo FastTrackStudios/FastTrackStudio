@@ -21,15 +21,18 @@ pub struct SetlistApi {
     pub active_song_index: Option<usize>,
     /// Index of the currently active section within the active song
     pub active_section_index: Option<usize>,
+    /// Index of the currently active slide within the active section (for lyrics view)
+    pub active_slide_index: Option<usize>,
 }
 
 impl SetlistApi {
     /// Create a new SetlistApi from a Setlist with active indices
-    pub fn new(setlist: Setlist, active_song_index: Option<usize>, active_section_index: Option<usize>) -> Self {
+    pub fn new(setlist: Setlist, active_song_index: Option<usize>, active_section_index: Option<usize>, active_slide_index: Option<usize>) -> Self {
         Self {
             setlist,
             active_song_index,
             active_section_index,
+            active_slide_index,
         }
     }
 
@@ -91,6 +94,11 @@ impl SetlistApi {
     /// Get the active section index
     pub fn active_section_index(&self) -> Option<usize> {
         self.active_section_index
+    }
+
+    /// Get the active slide index
+    pub fn active_slide_index(&self) -> Option<usize> {
+        self.active_slide_index
     }
 }
 

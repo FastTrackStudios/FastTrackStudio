@@ -6,9 +6,17 @@ use crate::components::song::{SongTitle, FadedSongTitle};
 use crate::components::transport::TransportControlBar;
 use crate::components::sidebar_items::{SongItem, SongItemData, SectionItem};
 use crate::components::mode_toggle::ModeToggle;
+use lumen_blocks::components::button::{Button, ButtonVariant};
 use setlist::{SETLIST, Setlist, Song, Section};
 use primitives::{TimePosition, MusicalPosition, TimeSignature};
 use transport::PlayState;
+
+/// Edit view mode for context-specific navigation
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EditViewMode {
+    Slides,
+    Sync,
+}
 
 /// Top bar component
 #[component]
@@ -18,8 +26,15 @@ pub fn TopBar(
     is_server_mode: bool,
     #[props(default)]
     on_toggle_mode: Option<Callback<()>>,
+    edit_mode: Signal<bool>,
+    on_toggle_edit: Callback<()>,
+    #[props(default)]
+    edit_view_mode: Option<Signal<Option<EditViewMode>>>,
+    #[props(default)]
+    on_edit_view_change: Option<Callback<EditViewMode>>,
+    #[props(default)]
+    current_route_path: Option<String>,
 ) -> Element {
-    
     rsx! {
         div {
             class: "h-12 flex-shrink-0 border-b border-border bg-card flex items-center justify-between px-4",
@@ -47,6 +62,51 @@ pub fn TopBar(
                         class: "px-4 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent font-medium text-sm transition-colors data-[active=true]:bg-primary data-[active=true]:text-primary-foreground",
                         "Lyrics"
                     }
+                    Link {
+                        to: "/arrangement",
+                        class: "px-4 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent font-medium text-sm transition-colors data-[active=true]:bg-primary data-[active=true]:text-primary-foreground",
+                        "Arrangement"
+                    }
+                    Link {
+                        to: "/testing",
+                        class: "px-4 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent font-medium text-sm transition-colors data-[active=true]:bg-primary data-[active=true]:text-primary-foreground",
+                        "Testing"
+                    }
+                }
+                
+                // Context-specific buttons (e.g., Slides/Sync for lyrics edit)
+                if edit_mode() {
+                    if let Some(path) = &current_route_path {
+                        if path == "/lyrics/edit" {
+                            if let (Some(edit_mode_signal), Some(on_change)) = (edit_view_mode, on_edit_view_change) {
+                                div {
+                                    class: "flex items-center gap-1 ml-4",
+                                    Button {
+                                        variant: if edit_mode_signal() == Some(EditViewMode::Slides) {
+                                            ButtonVariant::Primary
+                                        } else {
+                                            ButtonVariant::Ghost
+                                        },
+                                        on_click: move |_| {
+                                            on_change.call(EditViewMode::Slides);
+                                        },
+                                        "Slides"
+                                    }
+                                    Button {
+                                        variant: if edit_mode_signal() == Some(EditViewMode::Sync) {
+                                            ButtonVariant::Primary
+                                        } else {
+                                            ButtonVariant::Ghost
+                                        },
+                                        on_click: move |_| {
+                                            on_change.call(EditViewMode::Sync);
+                                        },
+                                        "Sync"
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             h1 {
@@ -54,7 +114,13 @@ pub fn TopBar(
                 "FastTrackStudio"
             }
             div {
-                class: "w-16", // Placeholder for right-aligned items
+                class: "flex items-center gap-2",
+                // Global edit mode toggle
+                Button {
+                    variant: if edit_mode() { ButtonVariant::Primary } else { ButtonVariant::Ghost },
+                    on_click: move |_| on_toggle_edit.call(()),
+                    if edit_mode() { "Edit" } else { "View" }
+                }
             }
         }
     }

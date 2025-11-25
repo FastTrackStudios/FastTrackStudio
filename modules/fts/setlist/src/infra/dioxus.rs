@@ -85,6 +85,9 @@ pub static CURRENT_TIME_SIG_DENOMINATOR: GlobalSignal<i32> = Signal::global(|| 4
     /// Index of the currently active song (None if no song is active)
     pub static ACTIVE_SONG_INDEX: GlobalSignal<Option<usize>> = Signal::global(|| None);
 
+    /// Index of the currently active slide (for lyrics view)
+    pub static ACTIVE_SLIDE_INDEX: GlobalSignal<Option<usize>> = Signal::global(|| None);
+
     // ============================================================================
     // App State - Application state like counting in, loop, etc.
     // ============================================================================

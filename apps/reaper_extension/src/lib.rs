@@ -11,6 +11,7 @@ mod command_handler;
 mod setlist_stream;
 
 mod live;
+mod lyrics;
 
 /// Polling state management for continuous updates
 pub mod polling_state {
@@ -36,10 +37,11 @@ use reaper_macros::reaper_extension_plugin;
 use std::error::Error;
 use std::sync::Arc;
 use reaper_low::{PluginContext, Swell};
-use reaper_medium::ReaperSession;
+use reaper_medium::{ReaperSession, HookCommand2};
 use reaper_high::Reaper as HighReaper;
 use tracing::{debug, error, info, warn};
 use crate::reaper_setlist::build_setlist_from_open_projects;
+use crate::action_registry::MidiEditorActionHook;
 
 /// REAPER will call this extension entry-point function once when it's starting.
 #[reaper_extension_plugin]
@@ -64,7 +66,15 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     }
     
     // Create a medium-level API session (keep it alive for timer registration)
-    let session = ReaperSession::load(context);
+    let mut session = ReaperSession::load(context);
+    
+    // Register hookcommand2 for MIDI editor actions (must be done before action registration)
+    if let Err(e) = session.plugin_register_add_hook_command_2::<MidiEditorActionHook>() {
+        warn!(error = %e, "Failed to register hookcommand2 for MIDI editor actions");
+    } else {
+        info!("Registered hookcommand2 for MIDI editor actions");
+    }
+    
     let reaper = session.reaper();
     
     // Print message to the ReaScript console
@@ -82,6 +92,13 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Register live tracks actions
     info!("Registering live tracks actions...");
     live::tracks::actions::register_all_actions();
+    
+    // Register lyrics actions
+    info!("Registering lyrics actions...");
+    lyrics::register_lyrics_actions();
+    
+        info!("Registering lyrics dev actions...");
+        lyrics::register_lyrics_dev_actions();
     
     // Wake up REAPER so actions are fully registered and available
     // This must be done before registering the menu so command IDs can be found
@@ -160,7 +177,6 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
                     // The router will run until shutdown is called
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
-                        info!("IROH router runtime still active");
             }
         });
     });
@@ -200,15 +216,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         // Process smooth seek queue (check if we should execute queued seeks)
         setlist_stream::process_smooth_seek_queue();
         
-        // Log performance metrics every 10 seconds
-        let last_log = LAST_LOG.get_or_init(|| std::sync::Mutex::new(Instant::now()));
-        if let Ok(mut last_log_guard) = last_log.lock() {
-            if last_log_guard.elapsed().as_secs() >= 10 {
-                let poll_rate = TICK_COUNT.swap(0, Ordering::Relaxed) / 10;
-                info!("[Performance] REAPER API polling: {} ticks/s (target: 60Hz)", poll_rate);
-                *last_log_guard = Instant::now();
-            }
-        }
+        // Performance metrics logging removed - timer is working
     }
     
     // Register the timer callback with REAPER (runs on main thread automatically)

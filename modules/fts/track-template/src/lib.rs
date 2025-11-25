@@ -12,7 +12,7 @@ pub mod matcher;
 pub mod template;
 
 pub use track::{Track, Take, SendReceive, SortStatus};
-pub use track_list::TrackList;
+pub use track_list::{TrackList, DisplayMode};
 pub use matcher::TrackMatcher;
 pub use template::Template;
 

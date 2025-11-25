@@ -98,6 +98,7 @@ impl HookCustomMenu for FastTrackStudioMenuHook {
 /// Examples:
 ///   "FTS_LIVE_SETLIST_PLAY" -> ("Live", "Tracks")
 ///   "FTS_VM_CREATE_GROUP" -> ("Visibility Manager", None)
+///   "FTS_LYRICS_READ_FROM_REAPER" -> ("Lyrics", None)
 ///   "FTS_DEV_LOG_PROJECTS" -> ("Dev", None)
 ///   "FTS_DEBUG_TEST" -> ("General", None)
 fn extract_category_from_command_id(command_id: &str) -> (String, Option<String>) {
@@ -107,6 +108,8 @@ fn extract_category_from_command_id(command_id: &str) -> (String, Option<String>
         ("Live".to_string(), Some("Tracks".to_string()))
     } else if command_id.starts_with("FTS_VM_") {
         ("Visibility Manager".to_string(), None)
+    } else if command_id.starts_with("FTS_LYRICS_") {
+        ("Lyrics".to_string(), None)
     } else if command_id.starts_with("FTS_DEV_") {
         ("Dev".to_string(), None)
     } else {
@@ -161,7 +164,7 @@ fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
     let mut menu_entries = Vec::new();
     
     // Define category order (non-General categories first, then General, then Dev)
-    let category_order = vec!["Live", "Visibility Manager", "Dev"];
+    let category_order = vec!["Live", "Visibility Manager", "Lyrics", "Dev"];
     
     // Add categorized submenus
     for category_name in &category_order {

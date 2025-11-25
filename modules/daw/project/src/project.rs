@@ -3,6 +3,7 @@ use primitives::TimeSignature;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use transport::{RecordMode, Tempo, Transport, TransportActions, TransportError};
+use tracks::Track;
 
 /// Embeddable project state that carries its own transport.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,6 +15,8 @@ pub struct Project<T> {
     metadata: HashMap<String, String>,
     transport: T,
     markers: Vec<Marker>,
+    /// List of tracks in this project
+    pub tracks: Vec<Track>,
 }
 
 /// Default project type backed by the core `Transport`.
@@ -30,6 +33,7 @@ impl<T> Project<T> {
             metadata: HashMap::new(),
             transport,
             markers: Vec::new(),
+            tracks: Vec::new(),
         }
     }
 
@@ -95,6 +99,38 @@ impl<T> Project<T> {
 
     pub fn add_marker(&mut self, marker: Marker) {
         self.markers.push(marker);
+    }
+
+    pub fn tracks(&self) -> &[Track] {
+        &self.tracks
+    }
+
+    pub fn tracks_mut(&mut self) -> &mut Vec<Track> {
+        &mut self.tracks
+    }
+
+    pub fn set_tracks(&mut self, tracks: Vec<Track>) {
+        self.tracks = tracks;
+    }
+
+    pub fn add_track(&mut self, track: Track) {
+        self.tracks.push(track);
+    }
+
+    pub fn remove_track(&mut self, index: usize) -> Option<Track> {
+        if index < self.tracks.len() {
+            Some(self.tracks.remove(index))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_track(&self, index: usize) -> Option<&Track> {
+        self.tracks.get(index)
+    }
+
+    pub fn get_track_mut(&mut self, index: usize) -> Option<&mut Track> {
+        self.tracks.get_mut(index)
     }
 }
 

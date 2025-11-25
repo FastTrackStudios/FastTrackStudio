@@ -17,6 +17,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = "0.1"
 anyhow = "1.0"
+# Staff crate - UI feature requires dioxus-web which conflicts with desktop builds
+# staff = { version = "0.11.0", features = ["ui"] }
 
 # Server-only dependencies (excluded for WASM builds)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

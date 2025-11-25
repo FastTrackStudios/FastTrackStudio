@@ -87,9 +87,18 @@ impl ChordMemory {
             parsed_symbol.to_string()
         } else if has_quality {
             // Has explicit quality - remember in BOTH global AND section memory
-            self.remember_global(root, parsed_symbol);
-            self.remember_section(section_type, root, parsed_symbol);
-            parsed_symbol.to_string()
+            // For scale degrees with explicit quality (e.g., "2maj"), we need to preserve
+            // the quality in the output even if normalized symbol doesn't include it
+            let output_symbol = if parsed_symbol == root && token_chord_part.len() > root.len() {
+                // The normalized symbol doesn't include quality (e.g., "2" for "2maj")
+                // Use the token's chord part to preserve the quality
+                token_chord_part.to_string()
+            } else {
+                parsed_symbol.to_string()
+            };
+            self.remember_global(root, &output_symbol);
+            self.remember_section(section_type, root, &output_symbol);
+            output_symbol
         } else {
             // Just root - lookup hierarchy: section → global → key inference
             if let Some(section_remembered) = self.recall_section(section_type, root) {

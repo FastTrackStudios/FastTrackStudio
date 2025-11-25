@@ -38,6 +38,7 @@ primitives = { path = "../../daw/primitives" }
 marker-region = { path = "../../daw/marker-region" }
 project = { path = "../../daw/project" }
 transport = { path = "../../daw/transport" }
+lyrics = { path = "../lyrics" }
 
 # HTTP infrastructure (optional - to be implemented later)
 # axum = { version = "0.8.6", optional = true, features = ["default", "ws"] }

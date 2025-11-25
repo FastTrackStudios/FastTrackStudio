@@ -18,6 +18,7 @@ use std::sync::Arc;
 use tokio::time;
 use tracing::{info, warn};
 
+
 /// Setlist update message sent over the irpc stream
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetlistUpdateMessage {
@@ -57,9 +58,47 @@ pub struct SeekToSong {
     pub song_index: usize,
 }
 
+/// Seek to a specific time position within a song
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeekToTime {
+    pub song_index: usize,
+    pub time_seconds: f64, // Time position relative to song start
+}
+
 /// Toggle loop for current song
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToggleLoop;
+
+/// Advance to the next syllable and assign it to the next MIDI note at edit cursor
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdvanceSyllable;
+
+/// Get current lyrics state
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetLyricsState;
+
+/// Response for GetLyricsState
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LyricsState {
+    pub current_line_index: Option<usize>,
+    pub current_syllable_index: Option<usize>,
+    pub total_syllables: usize,
+    pub line_text: Option<String>,
+    pub has_lyrics: bool,
+}
+
+/// Assign syllable to MIDI note at edit cursor position
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssignSyllableToNote {
+    pub syllable_text: String,
+}
+
+/// Update lyrics for a song
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateLyrics {
+    pub song_index: usize,
+    pub lyrics: lyrics::Lyrics,
+}
 
 /// IRPC protocol for setlist stream service
 #[rpc_requests(message = SetlistStreamMessage)]
@@ -80,9 +119,24 @@ pub enum SetlistStreamProtocol {
     /// Seek to a specific song
     #[rpc(tx=oneshot::Sender<Result<(), String>>)]
     SeekToSong(SeekToSong),
+    /// Seek to a specific time position within a song
+    #[rpc(tx=oneshot::Sender<Result<(), String>>)]
+    SeekToTime(SeekToTime),
     /// Toggle loop for current song
     #[rpc(tx=oneshot::Sender<Result<(), String>>)]
     ToggleLoop(ToggleLoop),
+    /// Advance to next syllable and assign to next MIDI note
+    #[rpc(tx=oneshot::Sender<Result<LyricsState, String>>)]
+    AdvanceSyllable(AdvanceSyllable),
+    /// Get current lyrics state
+    #[rpc(tx=oneshot::Sender<Result<LyricsState, String>>)]
+    GetLyricsState(GetLyricsState),
+    /// Assign a specific syllable to the MIDI note at edit cursor
+    #[rpc(tx=oneshot::Sender<Result<(), String>>)]
+    AssignSyllableToNote(AssignSyllableToNote),
+    /// Update lyrics for a song
+    #[rpc(tx=oneshot::Sender<Result<(), String>>)]
+    UpdateLyrics(UpdateLyrics),
 }
 
 /// Trait for backends that can provide setlist state
@@ -120,8 +174,23 @@ pub trait SetlistCommandHandler: Send + Sync {
     /// Seek to a specific song (switches to that song's tab and moves cursor to beginning)
     async fn seek_to_song(&self, song_index: usize) -> Result<(), String>;
     
+    /// Seek to a specific time position within a song
+    async fn seek_to_time(&self, song_index: usize, time_seconds: f64) -> Result<(), String>;
+    
     /// Toggle loop for current song
     async fn toggle_loop(&self) -> Result<(), String>;
+    
+    /// Advance to the next syllable and assign it to the next MIDI note at edit cursor
+    async fn advance_syllable(&self) -> Result<LyricsState, String>;
+    
+    /// Get current lyrics state
+    async fn get_lyrics_state(&self) -> Result<LyricsState, String>;
+    
+    /// Assign a specific syllable to the MIDI note at edit cursor position
+    async fn assign_syllable_to_note(&self, syllable_text: String) -> Result<(), String>;
+    
+    /// Update lyrics for a song
+    async fn update_lyrics(&self, song_index: usize, lyrics: lyrics::Lyrics) -> Result<(), String>;
 }
 
 /// Setlist stream actor that handles client subscriptions and broadcasts updates
@@ -279,6 +348,21 @@ impl SetlistStreamActor {
                     }
                 });
             }
+            SetlistStreamMessage::SeekToTime(cmd) => {
+                let WithChannels { tx, inner, span, .. } = cmd;
+                let handler = self.command_handler.clone();
+                tokio::task::spawn(async move {
+                    let _entered = span.enter();
+                    let result = if let Some(handler) = handler {
+                        handler.seek_to_time(inner.song_index, inner.time_seconds).await
+                    } else {
+                        Err("Command handler not available".to_string())
+                    };
+                    if let Err(e) = tx.send(result).await {
+                        warn!("Failed to send seek to time response: {}", e);
+                    }
+                });
+            }
             SetlistStreamMessage::ToggleLoop(cmd) => {
                 let WithChannels { tx, span, .. } = cmd;
                 let handler = self.command_handler.clone();
@@ -291,6 +375,66 @@ impl SetlistStreamActor {
                     };
                     if let Err(e) = tx.send(result).await {
                         warn!("Failed to send toggle loop response: {}", e);
+                    }
+                });
+            }
+            SetlistStreamMessage::AdvanceSyllable(cmd) => {
+                let WithChannels { tx, inner, span, .. } = cmd;
+                let handler = self.command_handler.clone();
+                tokio::task::spawn(async move {
+                    let _entered = span.enter();
+                    let result = if let Some(handler) = handler {
+                        handler.advance_syllable().await
+                    } else {
+                        Err("Command handler not available".to_string())
+                    };
+                    if let Err(e) = tx.send(result).await {
+                        warn!("Failed to send advance syllable response: {}", e);
+                    }
+                });
+            }
+            SetlistStreamMessage::GetLyricsState(cmd) => {
+                let WithChannels { tx, inner, span, .. } = cmd;
+                let handler = self.command_handler.clone();
+                tokio::task::spawn(async move {
+                    let _entered = span.enter();
+                    let result = if let Some(handler) = handler {
+                        handler.get_lyrics_state().await
+                    } else {
+                        Err("Command handler not available".to_string())
+                    };
+                    if let Err(e) = tx.send(result).await {
+                        warn!("Failed to send get lyrics state response: {}", e);
+                    }
+                });
+            }
+            SetlistStreamMessage::AssignSyllableToNote(cmd) => {
+                let WithChannels { tx, inner, span, .. } = cmd;
+                let handler = self.command_handler.clone();
+                tokio::task::spawn(async move {
+                    let _entered = span.enter();
+                    let result = if let Some(handler) = handler {
+                        handler.assign_syllable_to_note(inner.syllable_text).await
+                    } else {
+                        Err("Command handler not available".to_string())
+                    };
+                    if let Err(e) = tx.send(result).await {
+                        warn!("Failed to send assign syllable to note response: {}", e);
+                    }
+                });
+            }
+            SetlistStreamMessage::UpdateLyrics(cmd) => {
+                let WithChannels { tx, inner, span, .. } = cmd;
+                let handler = self.command_handler.clone();
+                tokio::task::spawn(async move {
+                    let _entered = span.enter();
+                    let result = if let Some(handler) = handler {
+                        handler.update_lyrics(inner.song_index, inner.lyrics).await
+                    } else {
+                        Err("Command handler not available".to_string())
+                    };
+                    if let Err(e) = tx.send(result).await {
+                        warn!("Failed to send update lyrics response: {}", e);
                     }
                 });
             }
@@ -329,15 +473,7 @@ impl SetlistStreamActor {
                     SEND_COUNT.fetch_add(1, Ordering::Relaxed);
                 }
                 
-                // Log performance metrics every 10 seconds
-                let last_log = LAST_LOG.get_or_init(|| std::sync::Mutex::new(Instant::now()));
-                if let Ok(mut last_log_guard) = last_log.lock() {
-                    if last_log_guard.elapsed().as_secs() >= 10 {
-                        let send_rate = SEND_COUNT.swap(0, Ordering::Relaxed) / 10;
-                        tracing::info!("[Performance] IRPC send: {} msg/s", send_rate);
-                        *last_log_guard = Instant::now();
-                    }
-                }
+                // Performance metrics logging removed - IRPC is working
             }
         }
     }
@@ -486,9 +622,109 @@ impl SetlistStreamApi {
         }
     }
     
+    /// Seek to a specific time position within a song
+    pub async fn seek_to_time(&self, song_index: usize, time_seconds: f64) -> irpc::Result<Result<(), String>> {
+        let msg = SeekToTime { song_index, time_seconds };
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
+    }
+    
     /// Toggle loop for current song
     pub async fn toggle_loop(&self) -> irpc::Result<Result<(), String>> {
         let msg = ToggleLoop;
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
+    }
+    
+    /// Advance to next syllable and assign to next MIDI note
+    pub async fn advance_syllable(&self) -> irpc::Result<Result<LyricsState, String>> {
+        let msg = AdvanceSyllable;
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
+    }
+    
+    /// Get current lyrics state
+    pub async fn get_lyrics_state(&self) -> irpc::Result<Result<LyricsState, String>> {
+        let msg = GetLyricsState;
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
+    }
+    
+    /// Assign syllable to MIDI note at edit cursor
+    pub async fn assign_syllable_to_note(&self, syllable_text: String) -> irpc::Result<Result<(), String>> {
+        let msg = AssignSyllableToNote { syllable_text };
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
+    }
+    
+    /// Update lyrics for a song
+    pub async fn update_lyrics(&self, song_index: usize, lyrics: lyrics::Lyrics) -> irpc::Result<Result<(), String>> {
+        let msg = UpdateLyrics { song_index, lyrics };
         let rx = match self.inner.request().await? {
             Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();

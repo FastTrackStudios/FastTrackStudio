@@ -60,7 +60,7 @@ fn main() {
         
         let mut track = Track::new(&formatted_name);
         track.set_parent(&woodwinds_bus_name);
-        track.add_take(Take::new(instrument));
+        track.add_take(Take::new(*instrument));
         template.add_track(track);
     }
     
@@ -81,7 +81,7 @@ fn main() {
         
         let mut track = Track::new(&formatted_name);
         track.set_parent(&brass_bus_name);
-        track.add_take(Take::new(instrument));
+        track.add_take(Take::new(*instrument));
         template.add_track(track);
     }
     
@@ -117,7 +117,7 @@ fn main() {
         
         let mut track = Track::new(&formatted_name);
         track.set_parent(&strings_bus_name);
-        track.add_take(Take::new(instrument));
+        track.add_take(Take::new(*instrument));
         template.add_track(track);
     }
     
@@ -157,7 +157,7 @@ fn main() {
         
         let mut track = Track::new(&formatted_name);
         track.set_parent(&orch_perc_bus_name);
-        track.add_take(Take::new(instrument));
+        track.add_take(Take::new(*instrument));
         template.add_track(track);
     }
     

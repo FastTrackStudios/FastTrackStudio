@@ -1,6 +1,7 @@
 //! Output generators for different lyric formats
 
 use crate::core::{LyricLine, LyricSection, Lyrics, Syllable, Word};
+use crate::source::DerivedLyrics;
 
 /// Generate a formatted lyric sheet (for printing/display)
 pub struct LyricSheet;
@@ -160,9 +161,18 @@ impl Slides {
 
     /// Generate slides with auto-suggested breaks based on character/word counts
     pub fn generate_with_config(lyrics: &Lyrics, config: SlideBreakConfig) -> Vec<Slide> {
+        Self::generate_with_config_and_annotations(lyrics, config, None)
+    }
+
+    /// Generate slides with annotations (respects custom slide breaks)
+    pub fn generate_with_config_and_annotations(
+        lyrics: &Lyrics,
+        config: SlideBreakConfig,
+        derived: Option<&DerivedLyrics>,
+    ) -> Vec<Slide> {
         let mut slides = Vec::new();
 
-        for section in &lyrics.sections {
+        for (section_idx, section) in lyrics.sections.iter().enumerate() {
             // Detect patterns in this section
             let pattern_boundaries = Self::detect_patterns(section);
             
@@ -251,8 +261,33 @@ impl Slides {
                 
                 let mut line_idx = 0;
                 let mut slide_num = 0;
+                let mut current_slide_lines = Vec::new();
                 
                 while line_idx < total_lines && slide_num < lines_per_slide.len() {
+                    // Check for custom slide break at this position
+                    let absolute_line_idx = pattern_start + line_idx;
+                    let has_custom_break = derived
+                        .and_then(|d| Some(d.is_custom_slide_break(section_idx, absolute_line_idx)))
+                        .unwrap_or(false);
+
+                    // If there's a custom break and we already have lines, finish current slide
+                    if has_custom_break && !current_slide_lines.is_empty() {
+                        let slide_text = current_slide_lines
+                            .iter()
+                            .map(|l: &LyricLine| l.display_text())
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        
+                        slides.push(Slide {
+                            section_name: section.name.clone(),
+                            text: slide_text,
+                            is_section_header: false,
+                            lines: current_slide_lines.clone(),
+                        });
+                        current_slide_lines.clear();
+                        slide_num += 1;
+                    }
+
                     let mut slide_lines = Vec::new();
                     let mut slide_words = 0;
                     

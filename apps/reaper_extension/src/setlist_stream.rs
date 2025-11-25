@@ -11,6 +11,7 @@ use setlist::{
     SetlistApi, SetlistStreamApi, SetlistStateProvider, SetlistCommandHandler,
     TransportCommand, NavigationCommand,
 };
+use setlist::infra::stream::LyricsState;
 
 use crate::reaper_setlist::build_setlist_from_open_projects;
 use crate::live::tracks::tab_navigation::TabNavigator;
@@ -45,6 +46,8 @@ fn get_project_measure_offset(project: &Project) -> i32 {
 /// Updated from REAPER's main thread, read from async tasks
 static LATEST_SETLIST_API: OnceLock<Arc<std::sync::Mutex<Option<SetlistApi>>>> = OnceLock::new();
 static SETLIST_UPDATED: AtomicBool = AtomicBool::new(false);
+/// Track previous active slide index to detect changes
+static PREV_ACTIVE_SLIDE_INDEX: OnceLock<Arc<std::sync::Mutex<Option<usize>>>> = OnceLock::new();
 
 /// Type alias for seek request channel (using std::sync for main thread compatibility)
 type SeekRequestSender = std::sync::mpsc::Sender<(usize, usize, std::sync::mpsc::Sender<Result<(), String>>)>;
@@ -59,6 +62,7 @@ enum CommandRequest {
     Transport(TransportCommand),
     Navigation(NavigationCommand),
     SeekToSong(usize),
+    SeekToTime(usize, f64), // (song_index, time_seconds)
     ToggleLoop,
 }
 
@@ -193,6 +197,9 @@ fn execute_command_main_thread(request: CommandRequest) -> Result<(), String> {
             go_to_song(song_index);
             info!("Executed seek to song: {}", song_index);
             Ok(())
+        }
+        CommandRequest::SeekToTime(song_index, time_seconds) => {
+            seek_to_time_main_thread(song_index, time_seconds)
         }
         CommandRequest::ToggleLoop => {
             let cmd_id = CommandId::new(1068); // Toggle repeat
@@ -399,6 +406,101 @@ fn seek_to_section_main_thread(song_index: usize, section_index: usize) -> Resul
     Ok(())
 }
 
+/// Seek to time position (executes on main thread)
+fn seek_to_time_main_thread(song_index: usize, time_seconds: f64) -> Result<(), String> {
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+    
+    // Build setlist to find the song
+    let setlist = build_setlist_from_open_projects(None)
+        .map_err(|e| format!("Failed to build setlist: {}", e))?;
+    
+    if song_index >= setlist.songs.len() {
+        return Err(format!("Song index {} out of range", song_index));
+    }
+    
+    let song = &setlist.songs[song_index];
+    let project_name = song.project_name_from_metadata();
+    
+    // Find the project tab for this song
+    let mut found_tab_index = None;
+    for i in 0..128u32 {
+        if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
+            let tab_name = result.file_path.as_ref()
+                .and_then(|p| p.as_std_path().file_stem())
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("Tab {}", i));
+            
+            if tab_name == project_name {
+                found_tab_index = Some(i as usize);
+                break;
+            }
+        }
+    }
+    
+    let tab_index = found_tab_index
+        .ok_or_else(|| format!("Could not find project for song: {}", project_name))?;
+    
+    // Get current project to check if we're playing and if it's the same song
+    let current_project_result = medium_reaper.enum_projects(ProjectRef::Current, 0)
+        .ok_or_else(|| "No current project".to_string())?;
+    
+    let current_project = reaper_high::Project::new(current_project_result.project);
+    
+    // Check if we're clicking in the same song (same tab)
+    let current_tab_index = {
+        let current_project_raw = current_project_result.project;
+        let mut found_current_tab = None;
+        for i in 0..128u32 {
+            if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
+                if result.project == current_project_raw {
+                    found_current_tab = Some(i as usize);
+                    break;
+                }
+            }
+        }
+        found_current_tab
+    };
+    
+    let is_same_song = current_tab_index == Some(tab_index);
+    
+    // Calculate absolute time position (song start + relative time)
+    let song_start = song.effective_start();
+    let absolute_time = song_start + time_seconds;
+    
+    let target_pos = PositionInSeconds::new(absolute_time)
+        .map_err(|e| format!("Invalid position: {}", e))?;
+    
+    // Switch to the tab if needed
+    let final_project = if !is_same_song {
+        let tab_navigator = TabNavigator::new();
+        tab_navigator.switch_to_tab(tab_index)
+            .map_err(|e| format!("Failed to switch to tab {}: {}", tab_index, e))?;
+        
+        // Get the current project (now switched to the target song)
+        let project_result = medium_reaper.enum_projects(ProjectRef::Current, 0)
+            .ok_or_else(|| "No current project after tab switch".to_string())?;
+        
+        reaper_high::Project::new(project_result.project)
+    } else {
+        current_project
+    };
+    
+    // Seek to the position
+    final_project.set_edit_cursor_position(target_pos, SetEditCurPosOptions { 
+        move_view: false, 
+        seek_play: true, // Seek play cursor immediately
+    });
+    
+    info!(
+        "Seeked to time position {}s (song: {}, absolute: {}s)",
+        time_seconds, song.name, absolute_time
+    );
+    
+    Ok(())
+}
+
 /// Update setlist state from REAPER's main thread
 /// This is called from REAPER's timer callback (target: 60Hz)
 pub fn update_setlist_state() {
@@ -450,6 +552,189 @@ pub fn update_setlist_state() {
                             })
                     });
                 
+                // Determine active slide index within the active section (for lyrics view)
+                // Use actual slide positions from REAPER to determine which slide is active
+                let active_slide_idx = active_song_idx
+                    .and_then(|song_idx| {
+                        setlist.songs.get(song_idx).and_then(|song| {
+                            // Re-read slides from REAPER to get actual positions
+                            let reaper = reaper_high::Reaper::get();
+                            let project_name = song.project_name_from_metadata();
+                            
+                            // Find the project for this song
+                            let medium_reaper = reaper.medium_reaper();
+                            let mut found_project = None;
+                            for i in 0..128u32 {
+                                if let Some(result) = medium_reaper.enum_projects(reaper_medium::ProjectRef::Tab(i), 512) {
+                                    let tab_project_name = result.file_path.as_ref()
+                                        .and_then(|p| p.as_std_path().file_stem())
+                                        .and_then(|s| s.to_str())
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| format!("Tab {}", i));
+                                    
+                                    if tab_project_name == project_name {
+                                        found_project = Some(reaper_high::Project::new(result.project));
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            found_project.and_then(|project| {
+                                // Read slides from REAPER - these are the actual slides (text items)
+                                use crate::lyrics::read::read_lyrics_from_project;
+                                let lyrics_data = read_lyrics_from_project(project).ok()?;
+                                
+                                // Find the active REAPER slide that contains the transport position
+                                // Each REAPER text item is already a slide, so we just find which one is active
+                                let active_reaper_slide = lyrics_data.slides.iter()
+                                    .find(|sd| {
+                                        let sd_start = sd.position;
+                                        let sd_end = sd.position + sd.length;
+                                        transport_position >= sd_start && transport_position < sd_end
+                                    })?;
+                                
+                                // Use the active_section_idx to get the exact section instance
+                                // This is important because there may be multiple sections with the same name
+                                let active_section = active_section_idx
+                                    .and_then(|idx| song.sections.get(idx))?;
+                                
+                                // Generate slides from lyrics to get the mapping
+                                song.lyrics.as_ref().and_then(|lyrics| {
+                                    use lyrics::output::{Slides, SlideBreakConfig};
+                                    let config = SlideBreakConfig {
+                                        max_chars: 120,
+                                        max_words: 19,
+                                        min_chars_to_bundle: 32,
+                                        min_words_to_bundle: 7,
+                                    };
+                                    let generated_slides = Slides::generate_with_config(lyrics, config);
+                                    
+                                    // Match generated slides to the active section by finding the corresponding lyrics section
+                                    // Lyrics sections should be in the same order as song sections
+                                    let active_lyrics_section = lyrics.sections.get(active_section_idx.unwrap_or(0));
+                                    
+                                    // Use the lyrics section name if available, otherwise use the song section name
+                                    // This ensures we match what's actually in the generated slides
+                                    let target_section_name = active_lyrics_section
+                                        .map(|ls| ls.name.trim())
+                                        .unwrap_or_else(|| active_section.name.trim());
+                                    
+                                    // Count how many sections with the exact same name appear before the active section
+                                    // We keep numbers to differentiate sections (e.g., "BR" vs "BR 2" are different)
+                                    let sections_before_with_same_name = song.sections.iter()
+                                        .take(active_section_idx.unwrap_or(0))
+                                        .filter(|s| s.name.trim() == target_section_name)
+                                        .count();
+                                    
+                                    // Iterate through generated slides and collect only those from the active section instance
+                                    // We need to skip slides from earlier sections with the exact same name
+                                    let mut section_slides: Vec<(usize, &lyrics::output::Slide)> = Vec::new();
+                                    let mut sections_with_same_name_seen = 0;
+                                    let mut in_active_section = false;
+                                    let mut prev_section_name: Option<&str> = None;
+                                    
+                                    for (idx, slide) in generated_slides.iter().enumerate() {
+                                        // Check if we've transitioned to a new section
+                                        let is_new_section = prev_section_name.map(|prev| prev != slide.section_name).unwrap_or(true);
+                                        
+                                        // Compare section names exactly (case-insensitive to handle "Hits" vs "HITS")
+                                        let slide_section_matches = slide.section_name.trim().eq_ignore_ascii_case(target_section_name);
+                                        
+                                        if slide_section_matches {
+                                            if is_new_section {
+                                                // We've entered a new section with the same name
+                                                if sections_with_same_name_seen == sections_before_with_same_name {
+                                                    // This is the active section instance
+                                                    in_active_section = true;
+                                                } else {
+                                                    // This is an earlier section with the same name
+                                                    sections_with_same_name_seen += 1;
+                                                    in_active_section = false; // Make sure we're not in active section yet
+                                                }
+                                            }
+                                            
+                                            if in_active_section {
+                                                section_slides.push((idx, slide));
+                                            }
+                                        } else {
+                                            // Different section name
+                                            if in_active_section {
+                                                // We've moved past the active section, stop collecting
+                                                break;
+                                            }
+                                            // Reset in_active_section when we leave a section with the same name
+                                            // (in case we were in an earlier instance)
+                                            in_active_section = false;
+                                        }
+                                        
+                                        prev_section_name = Some(&slide.section_name);
+                                    }
+                                    
+                                    if section_slides.is_empty() {
+                                        return None;
+                                    }
+                                    
+                                    // Get all REAPER slides in this section, sorted by position
+                                    let mut reaper_slides_in_section: Vec<&crate::lyrics::read::SlideData> = lyrics_data.slides.iter()
+                                        .filter(|sd| {
+                                            sd.position >= active_section.start_seconds()
+                                                && sd.position < active_section.end_seconds()
+                                        })
+                                        .collect();
+                                    
+                                    // Sort by position to ensure correct order
+                                    reaper_slides_in_section.sort_by(|a, b| {
+                                        a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal)
+                                    });
+                                    
+                                    if reaper_slides_in_section.is_empty() {
+                                        return Some(section_slides[0].0);
+                                    }
+                                    
+                                    // Find the index of the active REAPER slide within this section
+                                    // Match by exact position to ensure we get the correct slide
+                                    let active_reaper_idx = reaper_slides_in_section.iter()
+                                        .position(|sd| {
+                                            // Match by exact position (and optionally length for safety)
+                                            (sd.position - active_reaper_slide.position).abs() < 0.001
+                                        })?;
+                                    
+                                    // Map REAPER slide index to generated slide index
+                                    // Since each REAPER slide becomes a line in the lyrics section,
+                                    // and generated slides contain multiple lines, we need to find
+                                    // which generated slide contains the line at this REAPER slide index
+                                    
+                                    // The active REAPER slide corresponds to a line index in the lyrics section
+                                    // Since REAPER slides are converted to lines in order, the line index = REAPER slide index
+                                    let line_index = active_reaper_idx;
+                                    
+                                    // Find which generated slide contains this line
+                                    // We need to count lines across generated slides
+                                    let mut current_line_count = 0;
+                                    for (gen_idx, gen_slide) in section_slides.iter() {
+                                        let lines_in_slide = gen_slide.lines.len();
+                                        if line_index < current_line_count + lines_in_slide {
+                                            return Some(*gen_idx);
+                                        }
+                                        current_line_count += lines_in_slide;
+                                    }
+                                    
+                                    // If we didn't find it (shouldn't happen), return the last slide
+                                    tracing::warn!(
+                                        active_section_idx = active_section_idx,
+                                        section_name = %active_section.name,
+                                        line_index = line_index,
+                                        total_lines = current_line_count,
+                                        section_slides_count = section_slides.len(),
+                                        reaper_slides_in_section_count = reaper_slides_in_section.len(),
+                                        "Could not find matching generated slide, returning last"
+                                    );
+                                    Some(section_slides.last()?.0)
+                                })
+                            })
+                        })
+                    });
+                
                 // Populate transport_info for each song from its project
                 // We need to look up the project by name and get transport from it
                 let reaper = reaper_high::Reaper::get();
@@ -485,14 +770,90 @@ pub fn update_setlist_state() {
                 }
                 
                 // Build SetlistApi with computed fields (now includes transport_info in each song)
-                let setlist_api = SetlistApi::new(setlist.clone(), active_song_idx, active_section_idx);
+                let setlist_api = SetlistApi::new(setlist.clone(), active_song_idx, active_section_idx, active_slide_idx);
+                
+                // Log active slide changes
+                let prev_slide_storage = PREV_ACTIVE_SLIDE_INDEX.get_or_init(|| Arc::new(std::sync::Mutex::new(None)));
+                if let Ok(mut prev_guard) = prev_slide_storage.try_lock() {
+                    let prev_slide = *prev_guard;
+                    if prev_slide != active_slide_idx {
+                        if let Some(slide_idx) = active_slide_idx {
+                            if let Some(song_idx) = active_song_idx {
+                                if let Some(song) = setlist.songs.get(song_idx) {
+                                    if let Some(lyrics) = song.lyrics.as_ref() {
+                                        use lyrics::output::{Slides, SlideBreakConfig};
+                                        let config = SlideBreakConfig {
+                                            max_chars: 120,
+                                            max_words: 19,
+                                            min_chars_to_bundle: 32,
+                                            min_words_to_bundle: 7,
+                                        };
+                                        let slides = Slides::generate_with_config(lyrics, config);
+                                        if let Some(slide) = slides.get(slide_idx) {
+                                            let section_name = &slide.section_name;
+                                            let text_preview = slide.text.chars().take(50).collect::<String>();
+                                            
+                                            // Get the REAPER slide's start/end positions for logging
+                                            let (reaper_slide_start, reaper_slide_end) = {
+                                                let reaper = reaper_high::Reaper::get();
+                                                let project_name = song.project_name_from_metadata();
+                                                let medium_reaper = reaper.medium_reaper();
+                                                let mut found_project = None;
+                                                for i in 0..128u32 {
+                                                    if let Some(result) = medium_reaper.enum_projects(reaper_medium::ProjectRef::Tab(i), 512) {
+                                                        let tab_project_name = result.file_path.as_ref()
+                                                            .and_then(|p| p.as_std_path().file_stem())
+                                                            .and_then(|s| s.to_str())
+                                                            .map(|s| s.to_string())
+                                                            .unwrap_or_else(|| format!("Tab {}", i));
+                                                        
+                                                        if tab_project_name == project_name {
+                                                            found_project = Some(reaper_high::Project::new(result.project));
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                found_project.and_then(|project| {
+                                                    use crate::lyrics::read::read_lyrics_from_project;
+                                                    read_lyrics_from_project(project).ok()
+                                                        .and_then(|lyrics_data| {
+                                                            lyrics_data.slides.iter()
+                                                                .find(|sd| {
+                                                                    let sd_start = sd.position;
+                                                                    let sd_end = sd.position + sd.length;
+                                                                    transport_position >= sd_start && transport_position < sd_end
+                                                                })
+                                                                .map(|sd| (sd.position, sd.position + sd.length))
+                                                        })
+                                                }).unwrap_or((0.0, 0.0))
+                                            };
+                                            
+                                            info!(
+                                                song_index = song_idx,
+                                                section_name = %section_name,
+                                                slide_index = slide_idx,
+                                                text_preview = %text_preview,
+                                                transport_position = transport_position,
+                                                reaper_slide_start = reaper_slide_start,
+                                                reaper_slide_end = reaper_slide_end,
+                                                "Active slide changed"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            info!("Active slide cleared");
+                        }
+                        *prev_guard = active_slide_idx;
+                    }
+                }
                 
                 // Update the state (we'll use a blocking lock since we're on main thread)
                 if let Ok(mut guard) = state.try_lock() {
                     *guard = Some(setlist_api.clone());
                     SETLIST_UPDATED.store(true, Ordering::Release);
-                    
-                    // Logging removed - too verbose at 30Hz
                 } else {
                     // Lock is held by async task - this is fine, just skip this update
                 }
@@ -645,6 +1006,32 @@ impl SetlistCommandHandler for ReaperSetlistCommandHandler {
         }
     }
     
+    async fn seek_to_time(&self, song_index: usize, time_seconds: f64) -> Result<(), String> {
+        // Send command execution request to main thread via channel
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        
+        if let Some(channel_arc) = COMMAND_REQUEST_CHANNEL.get() {
+            if let Ok(channel_guard) = channel_arc.lock() {
+                if let Some(sender) = channel_guard.as_ref() {
+                    if let Err(e) = sender.send((CommandRequest::SeekToTime(song_index, time_seconds), result_tx)) {
+                        return Err(format!("Failed to send seek to time command to main thread: {}", e));
+                    }
+                    // Wait for the result from main thread
+                    match result_rx.recv() {
+                        Ok(result) => result,
+                        Err(e) => Err(format!("Failed to receive command result: {}", e)),
+                    }
+                } else {
+                    Err("Command request channel not initialized".to_string())
+                }
+            } else {
+                Err("Failed to lock command request channel".to_string())
+            }
+        } else {
+            Err("Command request channel not initialized".to_string())
+        }
+    }
+    
     async fn toggle_loop(&self) -> Result<(), String> {
         // Send command execution request to main thread via channel
         let (result_tx, result_rx) = std::sync::mpsc::channel();
@@ -669,6 +1056,33 @@ impl SetlistCommandHandler for ReaperSetlistCommandHandler {
         } else {
             Err("Command request channel not initialized".to_string())
         }
+    }
+    
+    async fn advance_syllable(&self) -> Result<LyricsState, String> {
+        // Use the lyrics stream handler implementation
+        use crate::lyrics::stream::ReaperLyricsCommandHandler;
+        let handler = ReaperLyricsCommandHandler::new();
+        handler.advance_syllable().await
+    }
+    
+    async fn get_lyrics_state(&self) -> Result<LyricsState, String> {
+        // Use the lyrics stream handler implementation
+        use crate::lyrics::stream::ReaperLyricsCommandHandler;
+        let handler = ReaperLyricsCommandHandler::new();
+        handler.get_lyrics_state().await
+    }
+    
+    async fn assign_syllable_to_note(&self, syllable_text: String) -> Result<(), String> {
+        // Use the lyrics stream handler implementation
+        use crate::lyrics::stream::ReaperLyricsCommandHandler;
+        let handler = ReaperLyricsCommandHandler::new();
+        handler.assign_syllable_to_note(syllable_text).await
+    }
+    
+    async fn update_lyrics(&self, song_index: usize, lyrics: lyrics::Lyrics) -> Result<(), String> {
+        // Update lyrics in REAPER project
+        use crate::lyrics::write::update_lyrics_in_reaper;
+        update_lyrics_in_reaper(song_index, lyrics)
     }
 }
 

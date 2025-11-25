@@ -1,0 +1,13 @@
+[package]
+name = "tracks"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+[lints]
+workspace = true

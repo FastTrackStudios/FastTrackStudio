@@ -4673,13 +4673,18 @@ dependencies = [
 name = "lyrics"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
  "colored",
+ "iroh",
+ "irpc",
+ "irpc-iroh",
  "once_cell",
  "regex",
  "serde",
  "serde_json",
- "setlist",
  "thiserror 2.0.17",
+ "tokio",
  "tracing",
  "uuid",
 ]
@@ -6245,6 +6250,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracks",
  "transport",
  "uuid",
 ]
@@ -6575,10 +6581,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "enumflags2",
  "fragile",
  "iroh",
  "irpc",
  "irpc-iroh",
+ "lyrics",
  "marker-region",
  "n0-future",
  "peer-2-peer",
@@ -6592,6 +6600,7 @@ dependencies = [
  "serde_json",
  "setlist",
  "swell-ui",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -7258,6 +7267,7 @@ dependencies = [
  "iroh",
  "irpc",
  "irpc-iroh",
+ "lyrics",
  "marker-region",
  "primitives",
  "project",
@@ -8435,8 +8445,17 @@ dependencies = [
 name = "track-template"
 version = "0.1.0"
 dependencies = [
+ "colored",
  "naming-convention",
  "tracing",
+]
+
+[[package]]
+name = "tracks"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "uuid",
 ]
 
 [[package]]

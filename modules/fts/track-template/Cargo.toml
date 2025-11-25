@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 naming-convention = { path = "../naming-convention", features = ["default-groups"] }
 tracing = "0.1"
+colored = "2.1"
 
 [[example]]
 name = "basic"

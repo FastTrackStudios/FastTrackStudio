@@ -12,7 +12,7 @@ use iroh::{Endpoint, EndpointId};
 use peer_2_peer::iroh_connection::read_endpoint_id;
 use std::sync::OnceLock;
 use tracing::{error, info, warn};
-use setlist::{SetlistStreamApi, SETLIST};
+use setlist::{SetlistStreamApi, SETLIST, ACTIVE_SLIDE_INDEX};
 
 // Cached endpoint (created once, kept alive for the lifetime of the app)
 static ENDPOINT: OnceLock<Endpoint> = OnceLock::new();
@@ -107,6 +107,7 @@ async fn connect_with_retry() {
                 
                 // Clear the SETLIST signal when disconnected
                 *SETLIST.write() = None;
+                *ACTIVE_SLIDE_INDEX.write() = None;
                 
                 // Clear the API instance
                 if let Some(api_storage) = SETLIST_API.get() {
@@ -135,6 +136,7 @@ async fn connect_with_retry() {
                 
                 // Clear the SETLIST signal when disconnected
                 *SETLIST.write() = None;
+                *ACTIVE_SLIDE_INDEX.write() = None;
                 
                 // Clear the API instance
                 if let Some(api_storage) = SETLIST_API.get() {
@@ -274,6 +276,9 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
                     UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
                     *SETLIST.write() = Some(msg.setlist_api.clone());
                     
+                    // Update active slide index signal (for lyrics view)
+                    *ACTIVE_SLIDE_INDEX.write() = msg.setlist_api.active_slide_index();
+                    
                     // Log first message received
                     if message_count == 1 {
                         info!("[Setlist Connection] ✅ Received first setlist update - signal is now updating");
@@ -293,6 +298,7 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
                     warn!("[Setlist Connection] Stream ended (received {} messages) - will reconnect", message_count);
                     // Clear the SETLIST signal when disconnected
                     *SETLIST.write() = None;
+                    *ACTIVE_SLIDE_INDEX.write() = None;
                     // Clear the API instance on error
                     if let Some(api_storage) = SETLIST_API.get() {
                         if let Ok(mut guard) = api_storage.lock() {
@@ -307,6 +313,7 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
                     error!("[Setlist Connection] Error receiving update (received {} messages): {}", message_count, e);
                     // Clear the SETLIST signal when disconnected
                     *SETLIST.write() = None;
+                    *ACTIVE_SLIDE_INDEX.write() = None;
                     // Clear the API instance on error
                     if let Some(api_storage) = SETLIST_API.get() {
                         if let Ok(mut guard) = api_storage.lock() {
@@ -322,6 +329,7 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
                     warn!("[Setlist Connection] Connection timeout (received {} messages) - will reconnect", message_count);
                     // Clear the SETLIST signal when disconnected
                     *SETLIST.write() = None;
+                    *ACTIVE_SLIDE_INDEX.write() = None;
                     // Clear the API instance on timeout
                     if let Some(api_storage) = SETLIST_API.get() {
                         if let Ok(mut guard) = api_storage.lock() {

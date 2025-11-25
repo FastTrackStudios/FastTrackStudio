@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use transport::{Transport, TransportActions, TransportError};
 
+use lyrics::core::Lyrics;
+
 use super::{Section, SectionType, SetlistError};
 
 /// Represents a song in the setlist
@@ -49,6 +51,9 @@ pub struct Song {
     /// Time signature at the count-in position (or song start if no count-in)
     /// This is the time signature that should be displayed at the start of the progress bar
     pub starting_time_signature: Option<TimeSignature>,
+    /// Lyrics data for this song (optional)
+    /// Contains all lyric sections, lines, words, syllables with timing and MIDI note assignments
+    pub lyrics: Option<Lyrics>,
 }
 
 impl Song {
@@ -75,6 +80,7 @@ impl Song {
             transport_info: None,
             starting_tempo: None,
             starting_time_signature: None,
+            lyrics: None,
         })
     }
 
@@ -123,6 +129,7 @@ impl Song {
             transport_info: None,
             starting_tempo: None,
             starting_time_signature: None,
+            lyrics: None,
         })
     }
 
@@ -670,6 +677,31 @@ impl Song {
             .cloned()
             .unwrap_or_else(|| "default".to_string())
     }
+
+    /// Set lyrics for this song
+    pub fn set_lyrics(&mut self, lyrics: Lyrics) {
+        self.lyrics = Some(lyrics);
+    }
+
+    /// Get lyrics for this song
+    pub fn get_lyrics(&self) -> Option<&Lyrics> {
+        self.lyrics.as_ref()
+    }
+
+    /// Get mutable lyrics for this song
+    pub fn get_lyrics_mut(&mut self) -> Option<&mut Lyrics> {
+        self.lyrics.as_mut()
+    }
+
+    /// Remove lyrics from this song
+    pub fn remove_lyrics(&mut self) -> Option<Lyrics> {
+        self.lyrics.take()
+    }
+
+    /// Check if this song has lyrics
+    pub fn has_lyrics(&self) -> bool {
+        self.lyrics.is_some()
+    }
 }
 
 // Song no longer implements TransportActions directly
@@ -695,6 +727,7 @@ impl Clone for Song {
             transport_info: self.transport_info.clone(),
             starting_tempo: self.starting_tempo,
             starting_time_signature: self.starting_time_signature.clone(),
+            lyrics: self.lyrics.clone(),
         }
     }
 }
@@ -716,6 +749,9 @@ impl std::fmt::Debug for Song {
             .field("tempo_time_sig_changes", &self.tempo_time_sig_changes)
             .field("metadata", &self.metadata)
             .field("transport_info", &self.transport_info)
+            .field("starting_tempo", &self.starting_tempo)
+            .field("starting_time_signature", &self.starting_time_signature)
+            .field("lyrics", &self.lyrics)
             .finish()
     }
 }
@@ -736,6 +772,9 @@ impl PartialEq for Song {
             && self.tempo_time_sig_changes == other.tempo_time_sig_changes
             && self.metadata == other.metadata
             && self.transport_info == other.transport_info
+            && self.starting_tempo == other.starting_tempo
+            && self.starting_time_signature == other.starting_time_signature
+            && self.lyrics == other.lyrics
     }
 }
 

@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use crate::reaper_markers::{read_markers_from_project, read_regions_from_project};
 use crate::reaper_project::create_reaper_project_wrapper;
 use marker_region::application::TempoTimePoint;
+use crate::lyrics::read::{read_lyrics_from_project, convert_lyrics_data_to_lyrics};
 
 /// Batched logging stats for setlist building
 struct BuildStats {
@@ -1016,6 +1017,25 @@ fn build_song_from_region(
     song.starting_tempo = starting_tempo;
     song.starting_time_signature = starting_time_sig;
     
+    // Read lyrics from the project
+    match read_lyrics_from_project(project.clone()) {
+        Ok(lyrics_data) => {
+            match convert_lyrics_data_to_lyrics(lyrics_data, parsed_song_name.clone(), &song) {
+                Ok(lyrics) => {
+                    song.lyrics = Some(lyrics);
+                    debug!(song_name = %parsed_song_name, "Successfully read lyrics from project");
+                }
+                Err(e) => {
+                    warn!(song_name = %parsed_song_name, error = %e, "Failed to convert lyrics from slides");
+                }
+            }
+        }
+        Err(e) => {
+            // Lyrics folder not found is expected for songs without lyrics, so log at debug level
+            debug!(song_name = %parsed_song_name, error = %e, "No lyrics found in project (this is OK if song has no lyrics)");
+        }
+    }
+    
     // Transport info will be populated in update_setlist_state from the project
     // We don't attach the project to the song anymore - just store transport_info
     
@@ -1288,6 +1308,25 @@ fn build_song_from_project_simple(
 
     // Auto-number sections
     song.auto_number_sections();
+
+    // Read lyrics from the project
+    match read_lyrics_from_project(project.clone()) {
+        Ok(lyrics_data) => {
+            match convert_lyrics_data_to_lyrics(lyrics_data, parsed_song_name.clone(), &song) {
+                Ok(lyrics) => {
+                    song.lyrics = Some(lyrics);
+                    debug!(song_name = %parsed_song_name, "Successfully read lyrics from project");
+                }
+                Err(e) => {
+                    warn!(song_name = %parsed_song_name, error = %e, "Failed to convert lyrics from slides");
+                }
+            }
+        }
+        Err(e) => {
+            // Lyrics folder not found is expected for songs without lyrics, so log at debug level
+            debug!(song_name = %parsed_song_name, error = %e, "No lyrics found in project (this is OK if song has no lyrics)");
+        }
+    }
 
     // Transport info will be populated in update_setlist_state from the project
     // We don't attach the project to the song anymore - just store transport_info

@@ -5,11 +5,11 @@ pub mod infra;
 #[cfg(not(target_arch = "wasm32"))]
 pub use infra::stream::{
     SetlistStreamApi, SetlistStateProvider, SetlistUpdateMessage, SetlistCommandHandler,
-    TransportCommand, NavigationCommand, SeekToSection, SeekToSong, ToggleLoop,
+    TransportCommand, NavigationCommand, SeekToSection, SeekToSong, SeekToTime, ToggleLoop,
 };
 
 #[cfg(feature = "dioxus")]
-pub use infra::dioxus::{SETLIST, TRANSPORT_INFO, ProjectTransportInfo};
+pub use infra::dioxus::{SETLIST, TRANSPORT_INFO, ProjectTransportInfo, CURRENT_POSITION_SECONDS, ACTIVE_SLIDE_INDEX};
 
 pub use core::{
     Section, SectionType, Setlist, SetlistApi, SetlistEntry, SetlistError, SetlistOrder, SetlistSummary, Song,

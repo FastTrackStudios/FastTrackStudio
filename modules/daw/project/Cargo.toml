@@ -8,6 +8,7 @@ edition = "2024"
 transport = { path = "../transport" }
 primitives = { path = "../primitives" }
 marker-region = { path = "../marker-region" }
+tracks = { path = "../tracks" }
 
 # External dependencies
 anyhow = "1.0.100"

@@ -18,7 +18,7 @@ members = [
     "apps/web", 
     "modules/ui", 
     "modules/api", 
-    "modules/daw/mix-fx", "modules/fts/naming-convention", "modules/fts/lyrics",
+    "modules/daw/mix-fx", "modules/fts/naming-convention", "modules/fts/lyrics", "modules/daw/tracks",
 ]
 resolver = "2"
 

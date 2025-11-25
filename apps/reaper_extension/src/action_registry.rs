@@ -3,10 +3,12 @@
 //! Provides a unified way to register actions with REAPER.
 
 use reaper_high::{ActionKind, Reaper, RegisteredAction};
-use reaper_medium::CommandId;
-use tracing::{debug, info};
+use reaper_medium::{CommandId, HookCommand2, SectionContext, ActionValueChange, WindowContext};
+use reaper_low::raw;
+use tracing::{debug, info, warn};
 use std::sync::{OnceLock, Mutex};
 use std::collections::HashMap;
+use std::ffi::CString;
 
 /// Global storage for registered actions (keeps them alive)
 static REGISTERED_ACTIONS: OnceLock<Mutex<Vec<RegisteredAction>>> = OnceLock::new();
@@ -16,6 +18,36 @@ static ACTION_DEFS: OnceLock<Mutex<Vec<ActionDef>>> = OnceLock::new();
 
 /// Global storage for command IDs (looked up on main thread, safe to use from any thread)
 pub(crate) static COMMAND_IDS: OnceLock<Mutex<HashMap<&'static str, CommandId>>> = OnceLock::new();
+
+/// Global storage for MIDI editor action handlers (command_id -> handler function)
+static MIDI_EDITOR_HANDLERS: OnceLock<Mutex<HashMap<CommandId, fn()>>> = OnceLock::new();
+
+/// Hook command handler for MIDI editor actions
+pub struct MidiEditorActionHook;
+
+impl HookCommand2 for MidiEditorActionHook {
+    fn call(
+        section: SectionContext,
+        command_id: CommandId,
+        _value_change: ActionValueChange,
+        _window: WindowContext,
+    ) -> bool {
+        // Only handle MIDI editor section (32060)
+        if let SectionContext::Sec(section_info) = section {
+            if section_info.unique_id().get() == 32060 {
+                // Check if this is one of our registered MIDI editor actions
+                if let Ok(handlers) = MIDI_EDITOR_HANDLERS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+                    if let Some(handler) = handlers.get(&command_id) {
+                        debug!(command_id = command_id.get(), "Executing MIDI editor action");
+                        handler();
+                        return true; // We handled it
+                    }
+                }
+            }
+        }
+        false // Not our command, let REAPER handle it
+    }
+}
 
 /// Get the storage for registered actions
 pub fn get_registered_actions_storage() -> &'static Mutex<Vec<RegisteredAction>> {
@@ -44,6 +76,24 @@ pub fn get_command_id(command_id_str: &str) -> Option<CommandId> {
         .and_then(|map| map.get(command_id_str).copied())
 }
 
+/// Section where an action should be registered
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionSection {
+    /// Main section (default)
+    Main,
+    /// MIDI editor section (32060)
+    MidiEditor,
+}
+
+impl ActionSection {
+    fn section_id(&self) -> i32 {
+        match self {
+            ActionSection::Main => 0,
+            ActionSection::MidiEditor => 32060,
+        }
+    }
+}
+
 /// Simple action definition for FastTrackStudio
 #[derive(Clone)]
 pub struct ActionDef {
@@ -58,6 +108,37 @@ pub struct ActionDef {
     
     /// Whether this action should appear in the menu
     pub appears_in_menu: bool,
+    
+    /// Section where this action should be registered (default: Main)
+    pub section: ActionSection,
+}
+
+impl Default for ActionDef {
+    fn default() -> Self {
+        ActionDef {
+            command_id: "",
+            display_name: String::new(),
+            handler: || {},
+            appears_in_menu: false,
+            section: ActionSection::Main,
+        }
+    }
+}
+
+/// Helper function to create an ActionDef with default section (Main)
+pub fn action_def(
+    command_id: &'static str,
+    display_name: String,
+    handler: fn(),
+    appears_in_menu: bool,
+) -> ActionDef {
+    ActionDef {
+        command_id,
+        display_name,
+        handler,
+        appears_in_menu,
+        section: ActionSection::Main,
+    }
 }
 
 impl ActionDef {
@@ -65,38 +146,130 @@ impl ActionDef {
     pub fn register(&self) {
         let handler = self.handler;
         let command_id = self.command_id;
+        let section_id = self.section.section_id();
         
         info!(
             command_id = %self.command_id,
             display_name = %self.display_name,
+            section_id = section_id,
             "Registering action with REAPER"
         );
 
-        // Build full action name
-        let action_name = format!("FTS: {}", self.display_name);
+        // Build full action name with category prefix
+        let action_name = if self.command_id.starts_with("FTS_LYRICS_") {
+            format!("FTS / Lyrics: {}", self.display_name)
+        } else if self.command_id.starts_with("FTS_LIVE_") {
+            format!("FTS / Live: {}", self.display_name)
+        } else if self.command_id.starts_with("FTS_VM_") {
+            format!("FTS / Visibility Manager: {}", self.display_name)
+        } else if self.command_id.starts_with("FTS_DEV_") {
+            format!("FTS / Dev: {}", self.display_name)
+        } else {
+            format!("FTS: {}", self.display_name)
+        };
 
-        // Register the action and store the RegisteredAction to keep it alive
-        let registered_action = Reaper::get().register_action(
-            self.command_id,
-            action_name.clone(),
-            None, // No default key binding
-            move || {
-                debug!(command_id = %command_id, "Executing action");
-                handler();
-            },
-            ActionKind::NotToggleable,
-        );
+        // Register to main section using high-level API
+        if self.section == ActionSection::Main {
+            let registered_action = Reaper::get().register_action(
+                self.command_id,
+                action_name.clone(),
+                None, // No default key binding
+                move || {
+                    debug!(command_id = %command_id, "Executing action");
+                    handler();
+                },
+                ActionKind::NotToggleable,
+            );
 
-        // Store the RegisteredAction to keep it alive
-        if let Ok(mut storage) = get_registered_actions_storage().lock() {
-            storage.push(registered_action);
+            // Store the RegisteredAction to keep it alive
+            if let Ok(mut storage) = get_registered_actions_storage().lock() {
+                storage.push(registered_action);
+            }
+
+            info!(
+                command_id = %self.command_id,
+                action_name = %action_name,
+                "✅ Action successfully registered with REAPER (main section)"
+            );
+        } else {
+            // Register to MIDI editor or other sections using low-level custom_action API
+            self.register_to_section(section_id, &action_name, handler, command_id);
         }
-
-        info!(
-            command_id = %self.command_id,
-            action_name = %action_name,
-            "✅ Action successfully registered with REAPER"
-        );
+    }
+    
+    /// Register action to a specific section using custom_action registration
+    fn register_to_section(
+        &self,
+        section_id: i32,
+        action_name: &str,
+        handler: fn(),
+        command_id: &'static str,
+    ) {
+        unsafe {
+            let reaper = Reaper::get();
+            let medium_reaper = reaper.medium_reaper();
+            let low_reaper = medium_reaper.low();
+            
+            // Create custom_action_register_t structure
+            let id_str_cstring = CString::new(command_id).expect("CString::new failed");
+            let name_cstring = CString::new(action_name).expect("CString::new failed");
+            
+            #[repr(C)]
+            struct CustomActionRegister {
+                unique_section_id: i32,
+                id_str: *const std::os::raw::c_char,
+                name: *const std::os::raw::c_char,
+                extra: *mut std::ffi::c_void,
+            }
+            
+            let mut custom_action_reg = CustomActionRegister {
+                unique_section_id: section_id,
+                id_str: id_str_cstring.as_ptr(),
+                name: name_cstring.as_ptr(),
+                extra: std::ptr::null_mut(),
+            };
+            
+            // Register the custom action using plugin_register
+            let custom_action_str = CString::new("custom_action").expect("CString::new failed");
+            let cmd_id = low_reaper.plugin_register(
+                custom_action_str.as_ptr(),
+                &mut custom_action_reg as *mut _ as *mut std::ffi::c_void,
+            );
+            std::mem::forget(custom_action_str); // Keep alive
+            
+            if cmd_id == 0 {
+                warn!(
+                    command_id = %command_id,
+                    section_id = section_id,
+                    "Failed to register action to section (custom_action returned 0)"
+                );
+                return;
+            }
+            
+            let command_id_value = CommandId::new(cmd_id as u32);
+            
+            // Store command ID for lookup
+            if let Ok(mut map) = COMMAND_IDS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+                map.insert(command_id, command_id_value);
+            }
+            
+            // Store handler for this command ID
+            if let Ok(mut handlers) = MIDI_EDITOR_HANDLERS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+                handlers.insert(command_id_value, handler);
+            }
+            
+            // Keep the CStrings alive (they need to persist)
+            std::mem::forget(id_str_cstring);
+            std::mem::forget(name_cstring);
+            
+            info!(
+                command_id = %command_id,
+                action_name = %action_name,
+                section_id = section_id,
+                registered_cmd_id = cmd_id,
+                "✅ Action successfully registered to MIDI editor section"
+            );
+        }
     }
 }
 

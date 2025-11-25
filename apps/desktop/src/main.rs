@@ -61,6 +61,14 @@ enum Route {
     Performance {},
     #[route("/lyrics")]
     Lyrics {},
+    #[route("/lyrics/edit")]
+    LyricsEdit {},
+    #[route("/lyrics/performance")]
+    LyricsPerformance {},
+    #[route("/arrangement")]
+    Arrangement {},
+    #[route("/testing")]
+    Testing {},
 }
 
 #[component]
@@ -77,6 +85,44 @@ fn App() -> Element {
 fn AppLayout() -> Element {
     // Track connection status
     let is_connected = use_signal(|| false);
+    
+    // Global edit mode
+    let mut edit_mode = use_signal(|| false);
+    
+    // Edit view mode for context-specific navigation (e.g., Slides/Sync in lyrics edit)
+    let mut edit_view_mode = use_signal(|| None::<ui::components::layout::EditViewMode>);
+    
+    // Get current route path
+    let current_route = use_route::<Route>();
+    let route_clone = current_route.clone();
+    let current_path = use_memo(move || {
+        match route_clone.clone() {
+            Route::Performance {} => Some("/".to_string()),
+            Route::Lyrics {} => Some("/lyrics".to_string()),
+            Route::LyricsEdit {} => Some("/lyrics/edit".to_string()),
+            Route::LyricsPerformance {} => Some("/lyrics/performance".to_string()),
+            Route::Arrangement {} => Some("/arrangement".to_string()),
+            Route::Testing {} => Some("/testing".to_string()),
+        }
+    });
+    
+    // Sync edit mode with route
+    let route_for_effect = current_route.clone();
+    use_effect(move || {
+        match route_for_effect.clone() {
+            Route::LyricsEdit {} => {
+                if !edit_mode() {
+                    edit_mode.set(true);
+                }
+            }
+            Route::Lyrics {} => {
+                if edit_mode() {
+                    edit_mode.set(false);
+                }
+            }
+            _ => {}
+        }
+    });
     
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -608,7 +654,7 @@ fn AppLayout() -> Element {
     let on_forward = Callback::new(move |_: ()| {
         // No-op for wasm32
     });
-    
+
     // Keyboard shortcuts
     #[cfg(not(target_arch = "wasm32"))]
     let on_keydown = {
@@ -705,10 +751,66 @@ fn AppLayout() -> Element {
                 is_connected: is_connected,
                 is_server_mode: false,
                 on_toggle_mode: Some(on_toggle_mode),
+                edit_mode: edit_mode,
+                on_toggle_edit: {
+                    let mut edit_mode = edit_mode;
+                    let navigator = dioxus_router::use_navigator();
+                    let route_for_toggle = current_route.clone();
+                    Callback::new(move |_| {
+                        let new_edit_mode = !edit_mode();
+                        edit_mode.set(new_edit_mode);
+                        
+                        // Navigate based on edit mode and current route
+                        match route_for_toggle.clone() {
+                            Route::Lyrics {} if new_edit_mode => {
+                                navigator.push(Route::LyricsEdit {});
+                            }
+                            Route::LyricsEdit {} if !new_edit_mode => {
+                                navigator.push(Route::Lyrics {});
+                            }
+                            _ => {}
+                        }
+                    })
+                },
+                edit_view_mode: Some(edit_view_mode),
+                on_edit_view_change: Some(Callback::new(move |mode| {
+                    edit_view_mode.set(Some(mode));
+                })),
+                current_route_path: current_path(),
             }
             
-            Outlet::<Route> {}
+            // Provide edit mode context to child routes
+            EditModeContext {
+                edit_mode: edit_mode,
+                edit_view_mode: edit_view_mode,
+                on_edit_view_change: {
+                    let mut edit_view_mode = edit_view_mode;
+                    Callback::new(move |mode| {
+                        edit_view_mode.set(Some(mode));
+                    })
+                },
+                Outlet::<Route> {}
+            }
         }
+    }
+}
+
+/// Context provider for edit mode state
+#[component]
+fn EditModeContext(
+    edit_mode: Signal<bool>,
+    edit_view_mode: Signal<Option<ui::components::layout::EditViewMode>>,
+    on_edit_view_change: Callback<ui::components::layout::EditViewMode>,
+    children: Element,
+) -> Element {
+    use_context_provider(move || ui::components::lyrics::EditModeCtx {
+        edit_mode,
+        edit_view_mode,
+        on_edit_view_change,
+    });
+    
+    rsx! {
+        {children}
     }
 }
 
@@ -850,6 +952,95 @@ fn Performance() -> Element {
 fn Lyrics() -> Element {
     rsx! {
         LyricsView {}
+    }
+}
+
+#[component]
+fn LyricsEdit() -> Element {
+    rsx! {
+        LyricsEditView {}
+    }
+}
+
+#[component]
+fn LyricsPerformance() -> Element {
+    rsx! {
+        PerformancePreview {}
+    }
+}
+
+    #[component]
+    fn Arrangement() -> Element {
+        #[cfg(not(target_arch = "wasm32"))]
+        let on_seek_to_time = Callback::new(move |(song_idx, time_seconds): (usize, f64)| {
+            spawn(async move {
+                if let Some(api) = get_setlist_api() {
+                    match api.seek_to_time(song_idx, time_seconds).await {
+                        Ok(Ok(())) => {
+                            info!("Successfully sought to song {} at time {}s", song_idx, time_seconds);
+                        }
+                        Ok(Err(e)) => {
+                            warn!("Failed to seek to time: {}", e);
+                        }
+                        Err(e) => {
+                            warn!("RPC error seeking to time: {}", e);
+                        }
+                    }
+                }
+            });
+        });
+        
+        #[cfg(target_arch = "wasm32")]
+        let on_seek_to_time = Callback::new(move |(_song_idx, _time_seconds): (usize, f64)| {});
+        
+        rsx! {
+            ArrangementView {
+                on_seek_to_time: Some(on_seek_to_time),
+            }
+        }
+    }
+
+#[component]
+fn Testing() -> Element {
+    // Note: Staff crate UI feature requires dioxus-web which conflicts with desktop builds
+    // Temporarily disabled until we can resolve the dependency conflict
+    // use staff::ui::{prelude::*, Font, Staff, NoteEvent, FretDiagram};
+    // use staff::{note::Accidental, time::{Duration, DurationKind}, Natural};
+    
+    // let selected = use_signal(|| None::<NoteEvent>);
+
+    rsx! {
+        div {
+            class: "flex-1 flex flex-col overflow-hidden bg-background p-6",
+            h1 {
+                class: "text-2xl font-bold mb-4",
+                "Testing - Staff Components"
+            }
+            div {
+                class: "flex-1 overflow-y-auto space-y-8",
+                div {
+                    class: "p-4 bg-card rounded-lg border",
+                    h2 {
+                        class: "text-xl font-semibold mb-4",
+                        "Staff Components"
+                    }
+                    p {
+                        class: "text-muted-foreground",
+                        "The staff crate's UI feature requires dioxus-web which conflicts with desktop builds."
+                    }
+                    p {
+                        class: "text-muted-foreground mt-2",
+                        "To use staff components, we need to either:"
+                    }
+                    ul {
+                        class: "list-disc list-inside text-muted-foreground mt-2 space-y-1",
+                        li { "Use staff without the UI feature (music theory only)" }
+                        li { "Find a way to conditionally enable web features" }
+                        li { "Use a different approach for rendering musical notation" }
+                    }
+                }
+            }
+        }
     }
 }
 
