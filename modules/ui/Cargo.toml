@@ -11,8 +11,7 @@ dioxus-router = "0.7"
 lucide-dioxus = { version = "2.44", features = ["all-icons"] }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 setlist = { path = "../../modules/fts/setlist", features = ["dioxus"] }
-primitives = { path = "../../modules/daw/primitives" }
-transport = { path = "../../modules/daw/transport" }
+daw = { path = "../../modules/daw" }
 lyrics = { path = "../../modules/fts/lyrics" }
 wasm-timer = "0.2"
 uuid = { version = "1.0", features = ["v4"] }

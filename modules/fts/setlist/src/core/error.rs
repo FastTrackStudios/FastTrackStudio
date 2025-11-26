@@ -245,8 +245,8 @@ impl From<uuid::Error> for SetlistError {
 }
 
 // Conversion from marker-region errors
-impl From<marker_region::MarkerRegionError> for SetlistError {
-    fn from(err: marker_region::MarkerRegionError) -> Self {
+impl From<daw::marker_region::MarkerRegionError> for SetlistError {
+    fn from(err: daw::marker_region::MarkerRegionError) -> Self {
         Self::source_error(err.to_string())
     }
 }

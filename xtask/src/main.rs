@@ -138,10 +138,7 @@ fn generate_types(output: Option<String>, no_index: bool) -> Result<(), DynError
 
 fn clean_module_bindings() -> Result<(), DynError> {
     let modules_to_clean = [
-        "modules/daw/transport/bindings",
-        "modules/daw/primitives/bindings",
-        "modules/daw/project/bindings",
-        "modules/daw/marker-region/bindings",
+        "modules/daw/bindings",
         "modules/fts/bindings",
     ];
 

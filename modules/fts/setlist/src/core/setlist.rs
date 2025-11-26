@@ -3,8 +3,8 @@
 //! This module contains the core domain types and traits for managing complete setlists,
 //! including setlist metadata, song ordering, and setlist sources.
 
-use marker_region::core::Marker;
-use primitives::Position;
+use daw::marker_region::core::Marker;
+use daw::primitives::Position;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -662,8 +662,8 @@ impl SetlistEntry {
 mod tests {
     use super::*;
     use crate::core::{Section, SectionType, Song};
-    use marker_region::core::Marker;
-    use primitives::Position;
+    use daw::marker_region::core::Marker;
+    use daw::primitives::Position;
 
     fn marker(seconds: f64, name: &str) -> Marker {
         Marker::from_seconds(seconds, name.to_string())

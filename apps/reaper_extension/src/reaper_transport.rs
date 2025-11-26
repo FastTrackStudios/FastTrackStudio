@@ -3,11 +3,11 @@
 //! Implements TransportActions for REAPER projects using reaper-high API.
 
 use reaper_high::{Project, Reaper};
-use reaper_medium::{CommandId, PositionInSeconds, ProjectContext, SetEditCurPosOptions, Reaper as MediumReaper};
-use transport::{
+use reaper_medium::{CommandId, PositionInSeconds, ProjectContext, SetEditCurPosOptions};
+use daw::transport::{
     PlayState, RecordMode, Tempo, Transport, TransportActions, TransportError,
 };
-use primitives::{Position, TimePosition, MusicalPosition, TimeSignature};
+use daw::primitives::{Position, TimePosition, MusicalPosition, TimeSignature};
 
 /// REAPER transport adapter that implements TransportActions
 /// 
@@ -29,23 +29,9 @@ impl ReaperTransport {
     }
 
     /// Get the project measure offset for this project
-    /// Returns the offset value, or 0 if not found
+    /// Uses the high-level API for safe access
     fn get_project_measure_offset(&self) -> i32 {
-        let reaper = Reaper::get();
-        let medium_reaper = reaper.medium_reaper();
-        
-        // Get the project measure offset using project_config_var_get_offs
-        if let Some(offs_result) = medium_reaper.project_config_var_get_offs("projmeasoffs") {
-            // Get the actual value using the offset
-            if let Some(addr) = medium_reaper.project_config_var_addr(self.project.context(), offs_result.offset) {
-                // Read the integer value directly from the pointer (it's a 32-bit integer)
-                unsafe { *(addr.as_ptr() as *const i32) }
-            } else {
-                0
-            }
-        } else {
-            0
-        }
+        self.project.measure_offset()
     }
 
     /// Convert REAPER play state to our PlayState
@@ -62,60 +48,20 @@ impl ReaperTransport {
         }
     }
 
-    /// Get tempo for a specific project by checking tempo markers
-    /// This ensures we get the tempo for THIS project, not the active one
-    #[allow(unsafe_code)] // Required for low-level REAPER API
+    /// Get tempo for a specific project at a specific time position
+    /// Uses the high-level TimeMap API which automatically handles tempo markers
     fn get_project_tempo(
         &self,
         medium_reaper: &reaper_medium::Reaper,
         project_context: ProjectContext,
-        play_position_seconds: f64,
+        play_position: PositionInSeconds,
     ) -> f64 {
-        // Try to get tempo from tempo markers first (project-specific)
-        let marker_count = medium_reaper.count_tempo_time_sig_markers(project_context) as i32;
-        let mut active_tempo: Option<f64> = None;
-        
-        // Iterate through all markers up to and including current position
-        for i in 0..marker_count {
-            let mut timepos_out: f64 = 0.0;
-            let mut _measurepos_out: i32 = 0;
-            let mut _beatpos_out: f64 = 0.0;
-            let mut bpm_out: f64 = 0.0;
-            let mut _timesig_num_out: i32 = 0;
-            let mut _timesig_denom_out: i32 = 0;
-            let mut _lineartempo_out: bool = false;
-            
-            let success = unsafe {
-                medium_reaper.low().GetTempoTimeSigMarker(
-                    project_context.to_raw(),
-                    i,
-                    &mut timepos_out,
-                    &mut _measurepos_out,
-                    &mut _beatpos_out,
-                    &mut bpm_out,
-                    &mut _timesig_num_out,
-                    &mut _timesig_denom_out,
-                    &mut _lineartempo_out,
-                )
-            };
-            
-            if success {
-                let is_before_current = timepos_out <= play_position_seconds;
-                let has_tempo = bpm_out > 0.0;
-                
-                if is_before_current && has_tempo {
-                    // This marker is at or before current position and has a tempo value
-                    active_tempo = Some(bpm_out);
-                }
-            }
-        }
-        
-        // If no tempo marker found, fallback to master tempo
-        // Note: master_get_tempo() might still return active project's tempo,
-        // but it's better than nothing
-        active_tempo.unwrap_or_else(|| {
-            medium_reaper.master_get_tempo().get()
-        })
+        // Use TimeMap API to get tempo at specific position
+        // This automatically accounts for tempo markers and is much more efficient
+        // than manually iterating through markers
+        medium_reaper
+            .time_map_2_get_divided_bpm_at_time(project_context, play_position)
+            .get()
     }
 
     /// Read current transport state from REAPER
@@ -144,9 +90,9 @@ impl ReaperTransport {
         let play_position_pos = PositionInSeconds::new(play_position_seconds)
             .map_err(|e| TransportError::NotReady(format!("Invalid play position: {:?}", e)))?;
         
-        // Get tempo for this specific project by checking tempo markers
-        // This ensures we get the tempo for THIS project, not the active one
-        let tempo_bpm = self.get_project_tempo(&medium_reaper, project_context, play_position_seconds);
+        // Get tempo for this specific project at the current position
+        // Uses TimeMap API which automatically handles tempo markers
+        let tempo_bpm = self.get_project_tempo(&medium_reaper, project_context, play_position_pos);
         let tempo = Tempo::new(tempo_bpm);
         
         // Get time signature from beat info (REAPER provides this per-project)
@@ -274,7 +220,7 @@ impl TransportActions for ReaperTransport {
         self.start_recording()
     }
 
-    fn set_tempo(&mut self, tempo: Tempo) -> Result<String, TransportError> {
+    fn set_tempo(&mut self, _tempo: Tempo) -> Result<String, TransportError> {
         // REAPER doesn't have a direct API to set tempo, we'd need to use actions
         // For now, return an error indicating this isn't supported
         Err(TransportError::NotReady(

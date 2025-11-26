@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use setlist::{SETLIST, Song};
-use primitives::{MusicalPosition, TimePosition};
+use daw::primitives::{MusicalPosition, TimePosition};
 use crate::components::{Slider, Ruler, MeasureInfo, TrackControlPanel};
 use lyrics::{Lyrics, output::{Slides, SlideBreakConfig}};
 
@@ -29,7 +29,7 @@ pub fn ArrangementView(
     // Get playhead position (play cursor)
     let playhead_position = use_memo(move || {
         active_song().as_ref().and_then(|song| {
-            song.transport_info.as_ref().map(|transport| {
+            song.transport().map(|transport| {
                 transport.playhead_position.time.to_seconds()
             })
         })
@@ -38,7 +38,7 @@ pub fn ArrangementView(
     // Get playhead musical position for measure calculation
     let playhead_measure = use_memo(move || {
         active_song().as_ref().and_then(|song| {
-            song.transport_info.as_ref().map(|transport| {
+            song.transport().map(|transport| {
                 transport.playhead_position.musical.measure
             })
         })
@@ -47,7 +47,7 @@ pub fn ArrangementView(
     // Get edit cursor position (separate from playhead)
     let edit_cursor_position = use_memo(move || {
         active_song().as_ref().and_then(|song| {
-            song.transport_info.as_ref().map(|transport| {
+            song.transport().map(|transport| {
                 transport.edit_position.time.to_seconds()
             })
         })
@@ -92,18 +92,11 @@ pub fn ArrangementView(
                 let calculated_zoom = required_pps / base_pps;
                 let clamped_zoom = calculated_zoom.max(0.1).min(10.0);
                 
-                tracing::info!(
-                    "[Arrangement] Zoom calculation: container_width={:.2}px, song_duration={:.2}s, song_start={:.2}s, song_end={:.2}s, available_width={:.2}px, target_song_width={:.2}px, required_pps={:.2}, calculated_zoom={:.2}x, clamped_zoom={:.2}x",
-                    viewport_width, song_duration, song_start, song_end, available_width, target_song_width, required_pps, calculated_zoom, clamped_zoom
-                );
-                
                 clamped_zoom
             } else {
-                tracing::warn!("[Arrangement] Zoom calculation skipped: song_duration={:.2}s, viewport_width={:.2}px", song_duration, viewport_width);
                 1.0
             }
         } else {
-            tracing::warn!("[Arrangement] Zoom calculation skipped: no active song");
             1.0
         }
     });
@@ -247,16 +240,6 @@ pub fn ArrangementView(
             }).collect();
             sections.extend(regular_sections);
             
-            // Log the last section's end position
-            if let Some(last_section) = song.sections.last() {
-                let last_end_rel = last_section.end_seconds() - timeline_start;
-                let last_end_px = last_end_rel * pps;
-                tracing::info!(
-                    "[Arrangement] Last section '{}': end_time={:.2}s, end_px={:.2}px, song_end={:.2}s, timeline_start={:.2}s",
-                    last_section.name, last_section.end_seconds(), last_end_px, song.effective_end(), timeline_start
-                );
-            }
-            
             sections
         }).unwrap_or_default()
     });
@@ -343,18 +326,82 @@ pub fn ArrangementView(
         }).unwrap_or_default()
     });
     
+    // Tracks from active song's project
+    let tracks = use_memo(move || {
+        active_song().as_ref()
+            .and_then(|song| song.project.as_ref())
+            .map(|project| project.tracks().to_vec())
+            .unwrap_or_default()
+    });
+    
+    // Compute initial collapsed state from REAPER's folder collapse state
+    let initial_collapsed_state = use_memo(move || {
+        tracks().iter().map(|track| {
+            // Check bus_compact.arrange first (arrange view collapse state)
+            if let Some(bus_compact) = &track.bus_compact {
+                match bus_compact.arrange {
+                    daw::tracks::api::collapse::ArrangeCollapseState::NotCollapsed => false,
+                    daw::tracks::api::collapse::ArrangeCollapseState::CollapsedMedium => true,
+                    daw::tracks::api::collapse::ArrangeCollapseState::CollapsedSmall => true,
+                    daw::tracks::api::collapse::ArrangeCollapseState::Unknown(_) => false,
+                }
+            } else if let Some(folder_state) = track.folder_state_tcp {
+                // Fall back to folder_state_tcp
+                match folder_state {
+                    daw::tracks::api::folder::TcpFolderState::Normal => false,
+                    daw::tracks::api::folder::TcpFolderState::Small => false,
+                    daw::tracks::api::folder::TcpFolderState::Collapsed => true,
+                }
+            } else {
+                // Default to expanded if no collapse state is set
+                false
+            }
+        }).collect::<Vec<bool>>()
+    });
+    
+    // Collapsed folder state - initialize from REAPER, but allow user to toggle
+    let mut collapsed_folders = use_signal(|| initial_collapsed_state().clone());
+    
+    // Update collapsed state when tracks change (preserve user changes if possible)
+    let tracks_for_effect = tracks;
+    let initial_state_for_effect = initial_collapsed_state;
+    let mut collapsed_folders_for_effect = collapsed_folders;
+    use_effect(move || {
+        let tracks_list = tracks_for_effect();
+        let track_count = tracks_list.len();
+        let current_state = collapsed_folders_for_effect();
+        let initial_state = initial_state_for_effect();
+        
+        if current_state.len() != track_count {
+            // Rebuild state: use initial REAPER state for new tracks, preserve user changes for existing
+            let mut new_state: Vec<bool> = (0..track_count).map(|idx| {
+                if idx < current_state.len() {
+                    // Preserve existing user state
+                    current_state[idx]
+                } else if idx < initial_state.len() {
+                    // Use initial REAPER state
+                    initial_state[idx]
+                } else {
+                    // New track not in initial state - default to expanded
+                    false
+                }
+            }).collect();
+            
+            *collapsed_folders_for_effect.write() = new_state;
+        }
+    });
+    
     // Track heights (resizable) - base heights before vertical zoom
-    let base_track_heights = use_signal(|| vec![64.0]); // Default height for lyric slides track
+    // Compute base heights from track count (default 64px per track)
+    let base_track_heights = use_memo(move || {
+        let track_count = tracks().len().max(1);
+        vec![64.0; track_count]
+    });
     
     // Apply vertical zoom to track heights (ruler not affected)
     let track_heights = use_memo(move || {
         let vertical_zoom = vertical_zoom_level();
         base_track_heights().iter().map(|h| h * vertical_zoom).collect::<Vec<f64>>()
-    });
-    
-    // Track names
-    let track_names = use_memo(move || {
-        vec!["Lyric Slides".to_string()]
     });
     
     // Calculate total height for tracks area (ruler + all tracks) - must match TCP
@@ -548,9 +595,21 @@ pub fn ArrangementView(
                             class: "sticky left-0 z-30 bg-card",
                             style: "height: 100%;",
                             TrackControlPanel {
-                                tracks: track_names(),
+                                tracks: tracks().to_vec(),
                                 track_heights: track_heights,
+                                collapsed_folders: collapsed_folders,
                                 on_track_height_change: None,
+                                on_folder_toggle: Some({
+                                    let mut collapsed_folders_for_callback = collapsed_folders;
+                                    Callback::new(move |idx: usize| {
+                                        let state = collapsed_folders_for_callback();
+                                        let mut new_state = state.clone();
+                                        if let Some(collapsed) = new_state.get_mut(idx) {
+                                            *collapsed = !*collapsed;
+                                            *collapsed_folders_for_callback.write() = new_state;
+                                        }
+                                    })
+                                }),
                             }
                         }
                         
@@ -571,13 +630,14 @@ pub fn ArrangementView(
                                 let all_measures = measures();
                                 rsx! {
                                     div {
-                                        class: "absolute inset-0 pointer-events-none z-0",
-                                        style: "top: 0px;", // Start from top (through ruler)
+                                        class: "absolute pointer-events-none z-0",
+                                        style: "top: 0px; bottom: 0px; left: 0px; right: 0px;", // Extend all the way down
                                         for measure in all_measures.iter() {
                                             div {
                                                 key: "gridline-{measure.measure_number}",
-                                                class: "absolute top-0 bottom-0 w-px bg-border/30",
-                                                style: format!("left: {}px;", 
+                                                class: "absolute w-px bg-border/30",
+                                                style: format!(
+                                                    "left: {}px; top: 0px; bottom: 0px; height: 100%;",
                                                     (measure.time_position - timeline_start) * pps
                                                 ),
                                             }
@@ -633,14 +693,14 @@ pub fn ArrangementView(
                                 
                                 rsx! {
                                     div {
-                                        class: "absolute inset-0 pointer-events-none",
-                                        style: "top: 0px; z-index: 15;", // Start from top (through ruler), above ruler (z-10) but below cursors (z-20)
+                                        class: "absolute pointer-events-none",
+                                        style: "top: 0px; bottom: 0px; left: 0px; right: 0px; z-index: 15;", // Extend all the way down, above ruler (z-10) but below cursors (z-20)
                                         // Render section boundary lines with section colors
                                         for (idx, (pos, color, _is_start)) in unique_boundaries.iter().enumerate() {
                                             div {
                                                 key: "section-boundary-{idx}",
-                                                class: "absolute top-0 bottom-0 w-0.5",
-                                                style: format!("left: {}px; background-color: {};", pos, color),
+                                                class: "absolute w-0.5",
+                                                style: format!("left: {}px; top: 0px; bottom: 0px; height: 100%; background-color: {};", pos, color),
                                             }
                                         }
                                     }

@@ -6,7 +6,7 @@ use peer_2_peer::unix_socket::IpcMessage;
 use reaper_high::Reaper;
 use reaper_medium::{CommandId, ProjectContext};
 use crate::reaper_transport::ReaperTransport;
-use transport::TransportActions;
+use daw::transport::TransportActions;
 use tracing::{info, warn};
 
 /// Handle an IPC command from the desktop app

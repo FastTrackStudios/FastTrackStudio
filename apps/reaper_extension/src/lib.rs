@@ -6,6 +6,9 @@ mod reaper_transport;
 mod reaper_project;
 mod reaper_markers;
 mod reaper_setlist;
+mod reaper_tracks;
+// mod track_state_manager; // Removed - using direct chunk-based reads instead
+mod track_change_detection;
 mod color_utils;
 mod command_handler;
 mod setlist_stream;
@@ -119,6 +122,22 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         info!("FastTrackStudio menu registered successfully");
     }
     
+    // Initialize comprehensive change detection (for future use - currently just polling)
+    info!("🔧 About to initialize change detection middleware...");
+    let _change_detection_arc = track_change_detection::init_change_detection();
+    
+    // Create the middleware directly (not wrapped in Arc/Mutex for the control surface)
+    let change_detection_middleware = track_change_detection::ComprehensiveChangeDetectionMiddleware::new();
+    
+    // Register control surface with change detection middleware
+    use reaper_high::MiddlewareControlSurface;
+    let control_surface = MiddlewareControlSurface::new(change_detection_middleware);
+    if let Err(e) = session_ptr.plugin_register_add_csurf_inst(Box::new(control_surface)) {
+        warn!("Failed to register change detection control surface: {}", e);
+    } else {
+        info!("✅ Change detection control surface registered");
+    }
+    
     // Initialize setlist state storage for setlist stream service
     info!("🔧 About to initialize setlist state storage...");
     setlist_stream::init_setlist_state();
@@ -204,7 +223,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         // ALWAYS run - no polling state check
         TICK_COUNT.fetch_add(1, Ordering::Relaxed);
         
-        // Update setlist state on every tick (target: 60Hz)
+        // Note: Change detection middleware's run() is called automatically by REAPER
+        // via the control surface's run() method. We don't need to call it here.
+        
+        // Update setlist state - always runs, uses optimized chunk-based API for tracks
         setlist_stream::update_setlist_state();
         
         // Process pending seek requests from async tasks

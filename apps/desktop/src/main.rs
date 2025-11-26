@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 use dioxus_router::{Routable, Router, Outlet};
 use setlist::{Setlist, Song, Section, SectionType, SETLIST, TransportCommand, NavigationCommand};
-use marker_region::{Marker, application::TempoTimePoint};
-use primitives::Position;
+use daw::marker_region::{Marker, application::TempoTimePoint};
+use daw::primitives::Position;
 use ui::components::*;
 // REAPER connection via REAPER_ALPN is disabled - all data comes through setlist stream
 // #[cfg(not(target_arch = "wasm32"))]
@@ -211,7 +211,7 @@ fn AppLayout() -> Element {
                         ReaperStateUpdate::TransportState(state) => {
                             info!("[DESKTOP] Received TransportState update - playing: {}, position: {:.2}s", 
                                 state.is_playing, state.position_seconds);
-                            // Transport state is now embedded in each song's transport_info via SETLIST
+                            // Transport state is now embedded in each song's project.transport() via SETLIST
                             // No need to update a separate TRANSPORT_INFO signal
                         }
                     }

@@ -12,7 +12,7 @@ use crate::reaper_transport::ReaperTransport;
 use crate::live::tracks::tab_navigation::TabNavigator;
 use reaper_high::{Reaper, Project, ActionKind};
 use reaper_medium::{PositionInSeconds, ProjectRef, SetEditCurPosOptions, CommandId, ProjectContext};
-use transport::TransportActions;
+use daw::transport::TransportActions;
 use tracing::{info, debug, warn};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};

@@ -1,5 +1,5 @@
 use setlist::{Song, Section, SectionType};
-use primitives::{Position, MusicalPosition, TimePosition, TimeSignature};
+use daw::primitives::{Position, MusicalPosition, TimePosition, TimeSignature};
 use std::collections::HashMap;
 
 pub mod navigation;

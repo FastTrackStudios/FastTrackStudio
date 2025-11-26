@@ -7,7 +7,7 @@
 //! - DRUMS (BUS) -> Cymbals (BUS) -> HighHat, OH
 //! - DRUMS (BUS) -> Rooms (BUS) -> Rooms
 //! - DRUMS (BUS) -> Percussion (BUS) -> Percussion
-//! - BASS (BUS) -> Bass DI
+//! - BASS -> Bass Guitar (BUS) -> Bass DI
 //! - KEYS (BUS) -> Piano
 //! - GTR E (BUS) -> Lead (SUM) -> L, R
 //! - GTR E (BUS) -> Clean (SUM) -> DI L, DI R
@@ -252,16 +252,25 @@ fn test_marc_martel_dont_stop_me_now() {
     template.add_track(percussion);
     
     // ============================================
-    // BASS (BUS)
+    // BASS (top level, no BUS type)
     // ============================================
-    let bass_bus_name = create_track_name("B", Some("Bass"), Some("BUS"), None, None);
-    let mut bass_bus = Track::new(&bass_bus_name);
-    template.add_track(bass_bus);
+    let bass_name = create_track_name("B", Some("Bass"), None, None, None);
+    let bass = Track::new(&bass_name);
+    template.add_track(bass);
     
-    // Bass DI
+    // ============================================
+    // Bass Guitar (BUS) - Child of Bass
+    // ============================================
+    // Use "Bass Guitar" as sub_type - the hierarchy extraction will handle it
+    let bass_guitar_bus_name = create_track_name("B", Some("Bass Guitar"), Some("BUS"), None, None);
+    let mut bass_guitar_bus = Track::new(&bass_guitar_bus_name);
+    bass_guitar_bus.set_parent(&bass_name);
+    template.add_track(bass_guitar_bus);
+    
+    // Bass DI - Child of Bass Guitar (BUS)
     let bass_di_name = create_track_name("B", Some("Bass"), None, Some("DI"), None);
     let mut bass_di = Track::new(&bass_di_name);
-    bass_di.set_parent(&bass_bus_name);
+    bass_di.set_parent(&bass_guitar_bus_name);
     bass_di.add_take(Take::new("Bass DI"));
     template.add_track(bass_di);
     

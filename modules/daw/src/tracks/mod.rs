@@ -1,0 +1,23 @@
+//! Track module - contains structures and functionality for managing tracks
+
+pub mod track;
+pub mod api;
+pub mod item;
+pub mod envelope;
+pub mod fx_chain;
+pub mod track_chunk;
+
+pub use track::Track;
+pub use track_chunk::{parse_track_chunk, ParsedTrackChunk};
+pub use api::folder::{TcpFolderState, McpFolderState};
+pub use api::automation::AutomationMode;
+pub use api::free_mode::FreeMode;
+pub use api::fixed_lanes::{FixedLanesSettings, LaneSoloSettings, LaneRecordSettings, LaneNameSettings};
+pub use api::record::{RecordSettings, RecordMode, MonitorMode};
+pub use api::receive::{TrackReceive, ReceiveMode};
+pub use api::hardware::{HardwareOutputSettings, MidiOutputSettings, MasterSendSettings};
+pub use api::solo::SoloMode;
+pub use api::collapse::{ArrangeCollapseState, MixerCollapseState, WiringCollapseState};
+pub use item::Item;
+pub use envelope::{Envelope, EnvelopePoint, EnvelopePointShape, AutomationItem, ExtensionData};
+pub use fx_chain::{FxChain, Plugin};

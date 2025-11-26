@@ -17,10 +17,7 @@ swell-ui = { path = "../../libs/swell-ui" }
 anyhow = "1.0"
 async-trait = "0.1"
 thiserror = "2.0.17"
-transport = { path = "../../modules/daw/transport" }
-project = { path = "../../modules/daw/project" }
-primitives = { path = "../../modules/daw/primitives" }
-marker-region = { path = "../../modules/daw/marker-region" }
+daw = { path = "../../modules/daw" }
 setlist = { path = "../../modules/fts/setlist" }
 lyrics = { path = "../../modules/fts/lyrics" }
 enumflags2 = "0.7"

@@ -3,10 +3,7 @@ members = [
     "apps/reaper_extension",
     "libs/macros",
     "libs/swell-ui",
-    "modules/daw/marker-region",
-    "modules/daw/primitives",
-    "modules/daw/project",
-    "modules/daw/transport",
+    "modules/daw",
     "modules/fts/setlist",
     "modules/fts/smart-template",
     "modules/fts/track-template",
@@ -18,7 +15,7 @@ members = [
     "apps/web", 
     "modules/ui", 
     "modules/api", 
-    "modules/daw/mix-fx", "modules/fts/naming-convention", "modules/fts/lyrics", "modules/daw/tracks",
+    "modules/fts/naming-convention", "modules/fts/lyrics", "modules/rppxml",
 ]
 resolver = "2"
 
@@ -34,7 +31,9 @@ async-trait = "0.1"
 dioxus = { version = "0.7.1", features = ["router"], default-features = false }
 fragile = "2.0.1"
 futures = "0.3"
-libloading = "0.8"
+libloading = "0.9"
+nom = "8.0.0"
+
 objc2 = "=0.3.0-beta.3"
 objc2-foundation = "0.2.0"
 palette = "0.7.3"

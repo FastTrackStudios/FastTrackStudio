@@ -5,9 +5,11 @@
 use super::memory::ChordMemory;
 use super::settings::ChartSettings;
 use super::templates::TemplateManager;
-use super::types::{ChartSection, KeyChange, TimeSignatureChange};
+use super::types::{ChartSection, ChordInstance, KeyChange, TimeSignatureChange};
 use crate::key::Key;
 use crate::metadata::SongMetadata;
+use crate::primitives::Note;
+use crate::sections::Section;
 use crate::time::{AbsolutePosition, MusicalDuration, Tempo, TimeSignature};
 
 /// The complete parsed chart structure
@@ -179,6 +181,295 @@ impl Chart {
         }
 
         AbsolutePosition::new(total_duration, section_index)
+    }
+
+    /// Convert the chart back to text syntax
+    /// 
+    /// This produces a valid syntax string that, when parsed, will result in the same chart structure.
+    /// The output may not match the original formatting exactly, but it will be functionally equivalent.
+    pub fn to_syntax(&self) -> String {
+        let mut output = String::new();
+
+        // 1. Title and Artist
+        if let Some(title) = &self.metadata.title {
+            output.push_str(title);
+            if let Some(artist) = &self.metadata.artist {
+                output.push_str(" - ");
+                output.push_str(artist);
+            }
+            output.push('\n');
+        }
+
+        // 2. Tempo, Time Signature, Key
+        let mut metadata_parts = Vec::new();
+        
+        if let Some(tempo) = &self.tempo {
+            metadata_parts.push(format!("{}bpm", tempo.bpm));
+        }
+        
+        // Use initial_time_signature if available, otherwise fall back to current time_signature
+        let ts = self.initial_time_signature.as_ref().or(self.time_signature.as_ref());
+        if let Some(ts) = ts {
+            metadata_parts.push(format!("{}/{}", ts.numerator, ts.denominator));
+        }
+        
+        if let Some(key) = &self.initial_key {
+            // Format key as #G, bBb, or #C (always use # prefix for major keys)
+            let key_str = self.format_key_for_syntax(key);
+            metadata_parts.push(key_str);
+        }
+        
+        if !metadata_parts.is_empty() {
+            output.push_str(&metadata_parts.join(" "));
+            output.push('\n');
+        }
+
+        // 3. Settings
+        if self.settings.smart_repeats() {
+            output.push_str("/SMART_REPEATS=true\n");
+        }
+
+        // 4. Sections
+        for (section_idx, section) in self.sections.iter().enumerate() {
+            // Empty line before section (except first)
+            if section_idx > 0 {
+                output.push('\n');
+            }
+
+            // Section header
+            let section_name = self.format_section_name(&section.section);
+            output.push_str(&section_name);
+            output.push('\n');
+
+            // Process measures
+            let mut measure_idx = 0;
+            while measure_idx < section.measures.len() {
+                let measure = &section.measures[measure_idx];
+                
+                // Check for repeats
+                let repeat_count = measure.repeat_count;
+
+                // Text cues before this measure
+                for cue in &measure.text_cues {
+                    output.push_str(&format!("{}\n", cue));
+                }
+
+                // Check for key change at this position
+                let position = self.calculate_position(section_idx, measure_idx);
+                for key_change in &self.key_changes {
+                    if key_change.position.total_duration.measures == position.total_duration.measures
+                        && key_change.section_index == section_idx {
+                        let key_str = self.format_key_for_syntax(&key_change.to_key);
+                        output.push_str(&key_str);
+                        output.push(' ');
+                    }
+                }
+
+                // Check for time signature change at this position
+                for ts_change in &self.time_signature_changes {
+                    if ts_change.position.total_duration.measures == position.total_duration.measures
+                        && ts_change.section_index == section_idx {
+                        output.push_str(&format!("{}/{} ", ts_change.time_signature.numerator, ts_change.time_signature.denominator));
+                    }
+                }
+
+                // Chords in this measure
+                let mut chord_parts = Vec::new();
+                for chord in &measure.chords {
+                    let chord_str = self.format_chord_for_syntax(chord, &measure.time_signature);
+                    if !chord_str.is_empty() {
+                        chord_parts.push(chord_str);
+                    }
+                }
+
+                if !chord_parts.is_empty() {
+                    output.push_str(&chord_parts.join(" "));
+                    
+                    // Add measure separator at end of measure (except last in section)
+                    // Only add if there are multiple measures or if explicitly needed
+                    if measure_idx < section.measures.len() - 1 {
+                        output.push_str(" |");
+                    }
+                    
+                    // Add repeat count if > 1
+                    if repeat_count > 1 {
+                        // Check if this is a smart repeat (would need to check section length)
+                        // For now, just output xN
+                        output.push_str(&format!(" x{}", repeat_count));
+                    }
+                } else {
+                    // Empty measure - just add separator if not last
+                    if measure_idx < section.measures.len() - 1 {
+                        output.push_str("|");
+                    }
+                }
+
+                output.push('\n');
+                measure_idx += 1;
+            }
+
+        }
+
+        output
+    }
+
+    /// Format a key for syntax output (#G, bBb, or #C)
+    /// Always use # prefix for major keys to match parser expectations
+    fn format_key_for_syntax(&self, key: &Key) -> String {
+        let root = key.root();
+        let note_name = root.name();
+        
+        // Remove any existing # or b from note name
+        let clean_note = note_name.trim_start_matches('#').trim_start_matches('b');
+        
+        // For major keys (Ionian), use # prefix
+        // For minor keys, we'd use b prefix, but for now all keys are major
+        if note_name.contains('b') {
+            format!("b{}", clean_note)
+        } else {
+            // Use # prefix for all major keys (matches parser expectation)
+            format!("#{}", clean_note)
+        }
+    }
+
+    /// Format a section name for syntax output
+    fn format_section_name(&self, section: &Section) -> String {
+        let mut name = String::new();
+        
+        // Subsection prefix
+        if section.is_subsection {
+            name.push('^');
+        }
+        
+        // Section type
+        match &section.section_type {
+            crate::sections::SectionType::Custom(custom_name) => {
+                name.push('[');
+                name.push_str(custom_name);
+                name.push(']');
+            }
+            _ => {
+                name.push_str(&section.section_type.abbreviation());
+            }
+        }
+        
+        // Number (only if section type should be numbered)
+        if section.section_type.should_number() {
+            if let Some(num) = section.number {
+                name.push(' ');
+                name.push_str(&num.to_string());
+            }
+        }
+        
+        // Split letter
+        if let Some(letter) = section.split_letter {
+            name.push(letter);
+        }
+        
+        // Measure count
+        if let Some(count) = section.measure_count {
+            name.push(' ');
+            name.push_str(&count.to_string());
+        }
+        
+        name
+    }
+
+    /// Format a chord for syntax output
+    fn format_chord_for_syntax(&self, chord: &ChordInstance, _time_sig: &(u8, u8)) -> String {
+        let mut output = String::new();
+        
+        // Push notation (leading apostrophes)
+        if let Some((is_push, amount)) = &chord.push_pull {
+            if *is_push {
+                let apostrophes = match amount {
+                    crate::chord::PushPullAmount::Eighth => "'",
+                    crate::chord::PushPullAmount::Sixteenth => "''",
+                    crate::chord::PushPullAmount::ThirtySecond => "'''",
+                };
+                output.push_str(apostrophes);
+            }
+        }
+        
+        // Chord symbol (use full_symbol which preserves the original format)
+        output.push_str(&chord.full_symbol);
+        
+        // Rhythm notation
+        output.push_str(&self.format_rhythm_for_syntax(&chord.rhythm));
+        
+        // Pull notation (trailing apostrophes)
+        if let Some((is_push, amount)) = &chord.push_pull {
+            if !is_push {
+                let apostrophes = match amount {
+                    crate::chord::PushPullAmount::Eighth => "'",
+                    crate::chord::PushPullAmount::Sixteenth => "''",
+                    crate::chord::PushPullAmount::ThirtySecond => "'''",
+                };
+                output.push_str(apostrophes);
+            }
+        }
+        
+        // Commands
+        for command in &chord.commands {
+            match command {
+                super::commands::Command::Fermata => {
+                    output.push_str(" /fermata");
+                }
+                super::commands::Command::Accent => {
+                    output.push_str("->");
+                }
+            }
+        }
+        
+        output
+    }
+
+    /// Format rhythm notation for syntax output
+    fn format_rhythm_for_syntax(&self, rhythm: &crate::chord::ChordRhythm) -> String {
+        use crate::chord::ChordRhythm;
+        match rhythm {
+            ChordRhythm::Default => String::new(),
+            ChordRhythm::Slashes(count) => {
+                "/".repeat(*count as usize)
+            }
+            ChordRhythm::Lily { duration, dotted, multiplier, tied } => {
+                let mut output = format!("_{}", duration.value());
+                if *dotted {
+                    output.push('.');
+                }
+                if let Some(mult) = multiplier {
+                    output.push_str(&format!("*{}", mult));
+                }
+                if *tied {
+                    output.push('~');
+                }
+                output
+            }
+            ChordRhythm::Rest { duration, dotted, multiplier } => {
+                let mut output = format!("r{}", duration.value());
+                if *dotted {
+                    output.push('.');
+                }
+                if let Some(mult) = multiplier {
+                    output.push_str(&format!("*{}", mult));
+                }
+                output
+            }
+            ChordRhythm::Space { duration, dotted, multiplier } => {
+                let mut output = format!("s{}", duration.value());
+                if *dotted {
+                    output.push('.');
+                }
+                if let Some(mult) = multiplier {
+                    output.push_str(&format!("*{}", mult));
+                }
+                output
+            }
+            ChordRhythm::Push(_) | ChordRhythm::Pull(_) => {
+                // Push/pull is handled separately in format_chord_for_syntax
+                String::new()
+            }
+        }
     }
 }
 
@@ -419,5 +710,44 @@ mod tests {
 
         // Verify current_key was updated
         assert_eq!(chart.current_key, Some(f_major));
+    }
+
+    #[test]
+    fn test_round_trip_serialization() {
+        let input = r#"
+My Song - Test Artist
+120bpm 4/4 #C
+
+Intro 4
+C G Am F
+
+VS 8
+C G Am F x2
+
+CH 8
+F C G Am
+"#;
+
+        // Parse the chart
+        let chart1 = Chart::parse(input).expect("Should parse successfully");
+        
+        // Serialize it
+        let output = chart1.to_syntax();
+        println!("Serialized output:\n{}", output);
+        
+        // Parse it again
+        let chart2 = Chart::parse(&output).expect("Should parse serialized output");
+        
+        // Verify they have the same structure
+        assert_eq!(chart1.metadata.title, chart2.metadata.title);
+        assert_eq!(chart1.metadata.artist, chart2.metadata.artist);
+        assert_eq!(chart1.tempo, chart2.tempo);
+        assert_eq!(chart1.initial_key, chart2.initial_key);
+        assert_eq!(chart1.sections.len(), chart2.sections.len());
+        
+        // Verify sections have same measure counts
+        for (s1, s2) in chart1.sections.iter().zip(chart2.sections.iter()) {
+            assert_eq!(s1.measures.len(), s2.measures.len());
+        }
     }
 }

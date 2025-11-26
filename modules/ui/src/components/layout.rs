@@ -8,8 +8,8 @@ use crate::components::sidebar_items::{SongItem, SongItemData, SectionItem};
 use crate::components::mode_toggle::ModeToggle;
 use lumen_blocks::components::button::{Button, ButtonVariant};
 use setlist::{SETLIST, Setlist, Song, Section};
-use primitives::{TimePosition, MusicalPosition, TimeSignature};
-use transport::PlayState;
+use daw::primitives::{TimePosition, MusicalPosition, TimeSignature};
+use daw::transport::PlayState;
 
 /// Edit view mode for context-specific navigation
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -146,22 +146,22 @@ pub fn Sidebar(
         setlist_api.as_ref().map(|api| {
             let setlist = api.get_setlist();
             setlist.songs.iter().enumerate().map(|(idx, song)| {
-                // Get position from song's transport_info
-                let position = song.transport_info.as_ref()
+                // Get position from song's transport (via project)
+                let position = song.transport()
                     .map(|t| t.playhead_position.time.to_seconds())
                     .unwrap_or(0.0);
                 
                 // Check if this song is actively playing
-                let song_is_playing = song.transport_info.as_ref()
+                let song_is_playing = song.transport()
                     .map(|t| t.is_playing())
                     .unwrap_or(false);
                 
                 // Calculate song progress using song.progress() method
-                // Each song shows its own progress based on its transport_info
+                // Each song shows its own progress based on its transport
                 let song_progress = song.progress(position);
                 
                 // Calculate section progress using section.progress() method
-                // Each section shows its own progress based on the song's transport_info
+                // Each section shows its own progress based on the song's transport
                 let sections: Vec<_> = song.sections.iter().enumerate().map(|(sec_idx, section)| {
                     let section_progress = section.progress(position);
                     
@@ -263,8 +263,8 @@ pub fn MainContent(
         let song_idx = current_song_index();
         song_idx.and_then(|idx| {
             setlist_api.as_ref()?.get_setlist().songs.get(idx).map(|song| {
-                // Get position from song's transport_info
-                let position = song.transport_info.as_ref()
+                // Get position from song's transport (via project)
+                let position = song.transport()
                     .map(|t| t.playhead_position.time.to_seconds())
                     .unwrap_or(0.0);
                 (song.clone(), position)
@@ -431,12 +431,12 @@ pub fn MainContent(
             // Use the starting_tempo and starting_time_signature fields from the song
             // These are calculated in the REAPER extension at the count-in position (or song start)
             let first_tempo = song.starting_tempo
-                .or_else(|| song.transport_info.as_ref().map(|t| t.tempo.bpm));
+                .or_else(|| song.transport().map(|t| t.tempo.bpm));
             
             let first_time_sig = song.starting_time_signature.as_ref()
                 .map(|ts| (ts.numerator, ts.denominator))
                 .or_else(|| {
-                    song.transport_info.as_ref()
+                    song.transport()
                         .map(|t| (t.time_signature.numerator, t.time_signature.denominator))
                 });
             
@@ -543,7 +543,7 @@ pub fn MainContent(
     let detail_badges = use_memo(move || {
         current_song_data().as_ref().and_then(|(song, _)| {
             // Only proceed if we have transport info
-            let transport = song.transport_info.as_ref()?;
+            let transport = song.transport()?;
             
             // Use musical position directly from REAPER (which uses TimeMap2_timeToBeats internally)
             // This correctly accounts for tempo and time signature changes
@@ -595,13 +595,13 @@ pub fn MainContent(
     let setlist_api = SETLIST.read(); // Dioxus tracks this automatically
     let is_playing = current_song_index().and_then(|idx| {
         setlist_api.as_ref()?.get_setlist().songs.get(idx)
-            .and_then(|song| song.transport_info.as_ref())
+            .and_then(|song| song.transport())
             .map(|transport| matches!(transport.play_state, PlayState::Playing | PlayState::Recording))
     }).unwrap_or(false);
     
     let is_looping = current_song_index().and_then(|idx| {
         setlist_api.as_ref()?.get_setlist().songs.get(idx)
-            .and_then(|song| song.transport_info.as_ref())
+            .and_then(|song| song.transport())
             .map(|transport| transport.looping)
     }).unwrap_or(false);
     

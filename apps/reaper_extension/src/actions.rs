@@ -8,7 +8,7 @@ use reaper_high::{Project, Reaper, BookmarkType};
 use reaper_medium::{ProjectRef, MasterTrackBehavior, UndoScope, ProjectPart};
 use reaper_low;
 use tracing::{info, warn, error};
-use transport::TransportActions;
+use daw::transport::{TransportActions, PlayState};
 use crate::lyrics;
 
 /// Dummy action handler - shows a message in REAPER console
@@ -62,7 +62,7 @@ fn log_open_projects_handler() {
                 Ok(transport) => {
                     let is_playing = matches!(
                         transport.play_state,
-                        transport::PlayState::Playing | transport::PlayState::Recording
+                        PlayState::Playing | PlayState::Recording
                     );
                     let time_pos = transport.playhead_position.time.to_seconds();
                     let musical_pos = transport.playhead_position.musical_position_string();

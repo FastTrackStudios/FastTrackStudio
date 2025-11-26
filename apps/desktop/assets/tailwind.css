@@ -225,6 +225,9 @@
   .pointer-events-none {
     pointer-events: none;
   }
+  .collapse {
+    visibility: collapse;
+  }
   .visible {
     visibility: visible;
   }
@@ -301,9 +304,6 @@
   }
   .z-0 {
     z-index: 0;
-  }
-  .z-1 {
-    z-index: 1;
   }
   .z-10 {
     z-index: 10;
@@ -528,6 +528,9 @@
   }
   .w-56 {
     width: calc(var(--spacing) * 56);
+  }
+  .w-64 {
+    width: calc(var(--spacing) * 64);
   }
   .w-96 {
     width: calc(var(--spacing) * 96);
@@ -771,6 +774,11 @@
       border-color: var(--border);
     }
   }
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .overflow-hidden {
     overflow: hidden;
   }
@@ -911,12 +919,6 @@
       background-color: color-mix(in oklab, var(--border) 30%, transparent);
     }
   }
-  .bg-border\/50 {
-    background-color: var(--border);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--border) 50%, transparent);
-    }
-  }
   .bg-card {
     background-color: var(--card);
   }
@@ -991,6 +993,9 @@
   }
   .bg-white {
     background-color: var(--color-white);
+  }
+  .bg-yellow-400 {
+    background-color: var(--color-yellow-400);
   }
   .bg-yellow-500 {
     background-color: var(--color-yellow-500);
@@ -1194,6 +1199,9 @@
   }
   .text-destructive {
     color: var(--destructive);
+  }
+  .text-destructive-foreground {
+    color: var(--primary-foreground);
   }
   .text-foreground {
     color: var(--foreground);
@@ -1561,6 +1569,16 @@
     &:hover {
       @media (hover: hover) {
         background-color: var(--muted);
+      }
+    }
+  }
+  .hover\:bg-muted\/80 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--muted);
+        @supports (color: color-mix(in lab, red, red)) {
+          background-color: color-mix(in oklab, var(--muted) 80%, transparent);
+        }
       }
     }
   }

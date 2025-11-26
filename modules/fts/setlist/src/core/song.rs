@@ -3,11 +3,12 @@
 //! This module contains the core domain types for managing songs within a setlist,
 //! including song metadata, sections, and marker positions.
 
-use marker_region::{application::TempoTimePoint, core::Marker};
-use primitives::{Position, TimePosition, TimeRange, TimeSignature};
+use daw::marker_region::{application::TempoTimePoint, core::Marker};
+use daw::primitives::{Position, TimePosition, TimeRange, TimeSignature};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use transport::{Transport, TransportActions, TransportError};
+use daw::transport::{Transport, TransportActions, TransportError};
+use daw::project::Project;
 
 use lyrics::core::Lyrics;
 
@@ -42,9 +43,9 @@ pub struct Song {
     pub tempo_time_sig_changes: Vec<TempoTimePoint>,
     /// Optional metadata (key, tempo, etc.)
     pub metadata: HashMap<String, String>,
-    /// Current transport state for this song's project (serialized)
-    /// This is the source of truth for transport state - projects can be looked up by name when needed for control
-    pub transport_info: Option<Transport>,
+    /// Project data for this song (optional)
+    /// Contains tracks, markers, transport, and other project-level data
+    pub project: Option<Project<Transport>>,
     /// Tempo at the count-in position (or song start if no count-in)
     /// This is the tempo that should be displayed at the start of the progress bar
     pub starting_tempo: Option<f64>,
@@ -77,7 +78,7 @@ impl Song {
             sections: Vec::new(),
             tempo_time_sig_changes: Vec::new(),
             metadata: HashMap::new(),
-            transport_info: None,
+            project: None,
             starting_tempo: None,
             starting_time_signature: None,
             lyrics: None,
@@ -126,7 +127,7 @@ impl Song {
             sections,
             tempo_time_sig_changes,
             metadata,
-            transport_info: None,
+            project: None,
             starting_tempo: None,
             starting_time_signature: None,
             lyrics: None,
@@ -207,9 +208,29 @@ impl Song {
         Self::marker_position(&self.song_region_end_marker)
     }
 
-    /// Update transport info from a project (call this when you have access to the project)
-    pub fn update_transport_info<T: TransportActions>(&mut self, project: &T) -> Result<(), TransportError> {
-        self.transport_info = Some(project.get_transport()?);
+    /// Get transport from the project (if available)
+    pub fn transport(&self) -> Option<&Transport> {
+        self.project.as_ref().map(|p| p.transport())
+    }
+
+    /// Set the project for this song
+    pub fn set_project(&mut self, project: Project<Transport>) {
+        self.project = Some(project);
+    }
+
+    /// Update project from a TransportActions implementation (call this when you have access to the project)
+    pub fn update_project<T: TransportActions>(&mut self, project_actions: &T) -> Result<(), TransportError> {
+        let transport = project_actions.get_transport()?;
+        // Create a new project with the transport, or update existing project's transport
+        if let Some(existing_project) = &mut self.project {
+            existing_project.replace_transport(transport);
+        } else {
+            // Create a minimal project with just the transport
+            // The project name should ideally come from the project itself
+            let project_name = self.project_name_from_metadata();
+            let project = Project::new(project_name, transport);
+            self.project = Some(project);
+        }
         Ok(())
     }
 
@@ -706,7 +727,7 @@ impl Song {
 
 // Song no longer implements TransportActions directly
 // Transport control should be done by looking up the project by name
-// Transport state is available via transport_info field
+// Transport state is available via project.transport() field
 
 impl Clone for Song {
     fn clone(&self) -> Self {
@@ -724,7 +745,7 @@ impl Clone for Song {
             sections: self.sections.clone(),
             tempo_time_sig_changes: self.tempo_time_sig_changes.clone(),
             metadata: self.metadata.clone(),
-            transport_info: self.transport_info.clone(),
+            project: self.project.clone(),
             starting_tempo: self.starting_tempo,
             starting_time_signature: self.starting_time_signature.clone(),
             lyrics: self.lyrics.clone(),
@@ -748,7 +769,7 @@ impl std::fmt::Debug for Song {
             .field("sections", &self.sections)
             .field("tempo_time_sig_changes", &self.tempo_time_sig_changes)
             .field("metadata", &self.metadata)
-            .field("transport_info", &self.transport_info)
+            .field("project", &self.project)
             .field("starting_tempo", &self.starting_tempo)
             .field("starting_time_signature", &self.starting_time_signature)
             .field("lyrics", &self.lyrics)
@@ -771,7 +792,7 @@ impl PartialEq for Song {
             && self.sections == other.sections
             && self.tempo_time_sig_changes == other.tempo_time_sig_changes
             && self.metadata == other.metadata
-            && self.transport_info == other.transport_info
+            && self.project == other.project
             && self.starting_tempo == other.starting_tempo
             && self.starting_time_signature == other.starting_time_signature
             && self.lyrics == other.lyrics
@@ -806,8 +827,8 @@ pub struct SongSummary {
 mod tests {
     use super::*;
     use crate::core::Section;
-    use marker_region::core::Marker;
-    use transport::TransportActions as _;
+    use daw::marker_region::core::Marker;
+    use daw::transport::TransportActions as _;
 
     fn marker(seconds: f64, name: &str) -> Marker {
         Marker::from_seconds(seconds, name.to_string())
@@ -970,12 +991,14 @@ mod tests {
     #[test]
     fn test_song_transport_info() {
         let mut song = Song::new("Transport Song".to_string()).unwrap();
-        // Transport info can be updated from a project
-        // For testing, we can create a Transport directly
-        use transport::Transport;
+        // Transport info can be accessed from the project
+        // For testing, we can create a Transport and Project directly
+        use daw::transport::Transport;
+        use daw::project::Project;
         let transport = Transport::new();
-        song.transport_info = Some(transport);
+        let project = Project::new("Test Project", transport);
+        song.set_project(project);
         
-        assert!(song.transport_info.is_some());
+        assert!(song.transport().is_some());
     }
 }

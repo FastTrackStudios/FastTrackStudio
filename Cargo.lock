@@ -763,6 +763,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "175812e0be2bccb6abe50bb8d566126198344f707e304f45c648fd8f2cc0365e"
 
 [[package]]
+name = "bytemuck"
+version = "1.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1538,6 +1544,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
 
 [[package]]
+name = "daw"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "enum-iterator",
+ "futures-util",
+ "helgoboss-midi",
+ "http 1.3.1",
+ "hyper 1.8.1",
+ "indexmap",
+ "iroh",
+ "irpc",
+ "irpc-iroh",
+ "matchit 0.9.0",
+ "once_cell",
+ "regex",
+ "reqwest 0.12.24",
+ "rgb",
+ "rosc",
+ "rpp-parser",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "specta",
+ "strsim 0.11.1",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-test",
+ "tonic",
+ "tower",
+ "tower-http",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "der"
 version = "0.8.0-rc.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1628,21 +1677,19 @@ name = "desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "daw",
  "dioxus",
  "iroh",
  "irpc",
  "irpc-iroh",
- "marker-region",
  "n0-future",
  "peer-2-peer",
- "primitives",
  "serde",
  "serde_json",
  "setlist",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "transport",
  "ui",
 ]
 
@@ -2580,6 +2627,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1e6a265c649f3f5979b601d26f1d05ada116434c87741c9493cb56218f76cbc"
 dependencies = [
  "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.110",
+]
+
+[[package]]
+name = "enum-iterator"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4549325971814bda7a44061bf3fe7e487d447cba01e4220a4b454d630d7a016"
+dependencies = [
+ "enum-iterator-derive",
+]
+
+[[package]]
+name = "enum-iterator-derive"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "685adfa4d6f3d765a26bc5dbc936577de9abf756c1feeb3089b01dd395034842"
+dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.110",
@@ -3958,6 +4025,8 @@ checksum = "6717a8d2a5a929a1a2eb43a12812498ed141a0bcfb7e8f7844fbdbe4303bba9f"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.0",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -4535,6 +4604,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libloading"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
+dependencies = [
+ "cfg-if",
+ "windows-link 0.2.1",
+]
+
+[[package]]
 name = "libredox"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4761,23 +4840,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "marker-region"
-version = "0.1.0"
-dependencies = [
- "primitives",
- "reqwest 0.11.27",
- "rpp-parser",
- "serde",
- "serde_json",
- "specta",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tokio-test",
- "uuid",
-]
-
-[[package]]
 name = "markup5ever"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4904,10 +4966,6 @@ dependencies = [
  "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "mix-fx"
-version = "0.1.0"
 
 [[package]]
 name = "mobile"
@@ -5216,6 +5274,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nom"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "nom_locate"
 version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5223,7 +5290,7 @@ checksum = "1e3c83c053b0713da60c5b8de47fe8e494fe3ece5267b2f23090a07a053ba8f3"
 dependencies = [
  "bytecount",
  "memchr",
- "nom",
+ "nom 7.1.3",
 ]
 
 [[package]]
@@ -6139,14 +6206,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
-name = "primitives"
-version = "0.1.0"
-dependencies = [
- "serde",
- "specta",
-]
-
-[[package]]
 name = "proc-macro-crate"
 version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6224,35 +6283,6 @@ dependencies = [
  "quote",
  "syn 2.0.110",
  "version_check",
-]
-
-[[package]]
-name = "project"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "base64 0.22.1",
- "futures-util",
- "helgoboss-midi",
- "http 1.3.1",
- "hyper 1.8.1",
- "marker-region",
- "matchit 0.9.0",
- "primitives",
- "rosc",
- "serde",
- "serde_derive",
- "serde_json",
- "tokio",
- "tonic",
- "tower",
- "tower-layer",
- "tower-service",
- "tracks",
- "transport",
- "uuid",
 ]
 
 [[package]]
@@ -6581,17 +6611,15 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "daw",
  "enumflags2",
  "fragile",
  "iroh",
  "irpc",
  "irpc-iroh",
  "lyrics",
- "marker-region",
  "n0-future",
  "peer-2-peer",
- "primitives",
- "project",
  "reaper-high",
  "reaper-low",
  "reaper-macros",
@@ -6604,7 +6632,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "transport",
 ]
 
 [[package]]
@@ -6812,6 +6839,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rgb"
+version = "0.8.52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c6a884d2998352bb4daf0183589aec883f16a6da1f4dde84d8e2e9a5409a1ce"
+dependencies = [
+ "bytemuck",
+ "serde",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6832,7 +6869,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd37602e1513794e952274082d074e8d31aa7f64d047e3acb746c91db40600a5"
 dependencies = [
  "byteorder",
- "nom",
+ "nom 7.1.3",
  "time",
 ]
 
@@ -6843,8 +6880,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dd0039e8ffda0615c8bb2ae8f8e55c368db38bd00c339a5369a5a93ec9859e9"
 dependencies = [
  "itertools",
- "nom",
+ "nom 7.1.3",
  "nom_locate",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "rppxml"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "nom 8.0.0",
+ "serde",
  "thiserror 1.0.69",
 ]
 
@@ -7263,14 +7310,12 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "daw",
  "dioxus",
  "iroh",
  "irpc",
  "irpc-iroh",
  "lyrics",
- "marker-region",
- "primitives",
- "project",
  "reqwest 0.11.27",
  "rpp-parser",
  "serde",
@@ -7280,7 +7325,6 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
- "transport",
  "uuid",
 ]
 
@@ -7702,7 +7746,7 @@ name = "swell-ui"
 version = "0.1.0"
 dependencies = [
  "fragile",
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "objc2 0.3.0-beta.3",
  "objc2-foundation 0.2.2",
  "palette",
@@ -8451,40 +8495,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tracks"
-version = "0.1.0"
-dependencies = [
- "serde",
- "uuid",
-]
-
-[[package]]
-name = "transport"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "chrono",
- "futures-util",
- "iroh",
- "irpc",
- "irpc-iroh",
- "matchit 0.9.0",
- "primitives",
- "reqwest 0.12.24",
- "rosc",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "tray-icon"
 version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8524,28 +8534,6 @@ dependencies = [
  "target-triple",
  "termcolor",
  "toml 0.9.8",
-]
-
-[[package]]
-name = "ts-rs"
-version = "11.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4994acea2522cd2b3b85c1d9529a55991e3ad5e25cdcd3de9d505972c4379424"
-dependencies = [
- "thiserror 2.0.17",
- "ts-rs-macros",
-]
-
-[[package]]
-name = "ts-rs-macros"
-version = "11.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee6ff59666c9cbaec3533964505d39154dc4e0a56151fdea30a09ed0301f62e2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.110",
- "termcolor",
 ]
 
 [[package]]
@@ -8605,15 +8593,14 @@ dependencies = [
 name = "ui"
 version = "0.1.0"
 dependencies = [
+ "daw",
  "dioxus",
  "dioxus-router",
  "lucide-dioxus 2.44.0",
  "lumen-blocks",
  "lyrics",
- "primitives",
  "setlist",
  "tracing",
- "transport",
  "uuid",
  "wasm-bindgen",
  "wasm-timer",
@@ -9859,10 +9846,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "primitives",
- "project",
- "transport",
- "ts-rs",
+ "daw",
 ]
 
 [[package]]

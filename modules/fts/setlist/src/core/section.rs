@@ -3,7 +3,7 @@
 //! This module contains the core domain types for managing song sections,
 //! including section types, section metadata, and section validation.
 
-use primitives::{MusicalPosition, Position, TimePosition, TimeRange, TimeSignature};
+use daw::primitives::{MusicalPosition, Position, TimePosition, TimeRange, TimeSignature};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -413,17 +413,17 @@ impl Section {
         name: String,
         number: Option<u32>,
         bpm: f64,
-        time_signature: primitives::TimeSignature,
+        time_signature: TimeSignature,
     ) -> Result<Self, SetlistError> {
-        let start_time = primitives::TimePosition::from_seconds(start_seconds);
-        let end_time = primitives::TimePosition::from_seconds(end_seconds);
+        let start_time = TimePosition::from_seconds(start_seconds);
+        let end_time = TimePosition::from_seconds(end_seconds);
         
         // Calculate musical positions from time positions
         let start_musical = start_time.to_musical_position(bpm, time_signature);
         let end_musical = end_time.to_musical_position(bpm, time_signature);
         
-        let start_position = primitives::Position::new(start_musical.clone(), start_time);
-        let end_position = primitives::Position::new(end_musical, end_time);
+        let start_position = Position::new(start_musical.clone(), start_time);
+        let end_position = Position::new(end_musical, end_time);
         
         Ok(Self::new(
             section_type,

@@ -9,9 +9,7 @@ edition.workspace = true
 dioxus = { workspace = true, features = ["router" ] }
 ui = { workspace = true }
 setlist = { path = "../../modules/fts/setlist", features = ["dioxus"] }
-transport = { path = "../../modules/daw/transport" }
-marker-region = { path = "../../modules/daw/marker-region" }
-primitives = { path = "../../modules/daw/primitives" }
+daw = { path = "../../modules/daw" }
 peer-2-peer = { path = "../../modules/peer-2-peer" }
 serde = { workspace = true }
 serde_json = { workspace = true }

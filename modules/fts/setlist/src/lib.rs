@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn test_primitives_integration() {
-        use primitives::Position;
+        use daw::primitives::Position;
 
         let section = Section::new(
             SectionType::Chorus,

@@ -61,7 +61,7 @@ impl Chart {
     ) -> std::fmt::Result {
         const MEASURES_PER_LINE: usize = 4;
         const SLOTS_PER_MEASURE: usize = 16; // 16th notes in 4/4 time
-        const CHARS_PER_SLOT: usize = 2; // Fixed width per slot for even division
+        const CHARS_PER_SLOT: usize = 4; // Fixed width per slot - accommodates chords like "2maj" (4 chars)
         
         let mut measure_idx = 0;
         let time_sig = if !measures.is_empty() {
@@ -154,7 +154,7 @@ impl Chart {
                 }
             }
 
-            // Display the grid
+            // Simple display: show chords with their positions and durations for debugging
             for measure_idx_in_line in 0..measures_on_line {
                 let measure = &measures[measure_idx + measure_idx_in_line];
                 
@@ -172,58 +172,47 @@ impl Chart {
                     }
                 }
 
-                // Display measure with grid - evenly divided into 16 slots of fixed width
-                for slot in 0..SLOTS_PER_MEASURE {
-                    // Visual markers only at beat boundaries (every 4 slots in 4/4)
-                    if slot > 0 && slot % slots_per_beat == 0 {
-                        // Beat boundary - subtle marker
-                        write!(f, "{}·{}", dim, reset)?;
-                    }
-
-                    // Each slot gets exactly CHARS_PER_SLOT characters for even division
-                    if let Some(chord) = grid[measure_idx_in_line][slot] {
-                        let mut chord_text = String::new();
-                        
-                        // Show push/pull notation
-                        // Push: apostrophe BEFORE chord ('C)
-                        // Pull: apostrophe AFTER chord (C')
-                        if let Some((is_push, _amount)) = chord.push_pull {
-                            if is_push {
-                                chord_text.push('\'');
-                            }
-                        }
-                        
-                        chord_text.push_str(&chord.full_symbol);
-                        
-                        // Show bass note for slash chords
-                        if let Some(ref bass) = chord.parsed.bass {
-                            chord_text.push_str(&format!("/{}", bass));
-                        }
-                        
-                        // Show pull notation (apostrophe AFTER)
-                        if let Some((is_push, _amount)) = chord.push_pull {
-                            if !is_push {
-                                chord_text.push('\'');
-                            }
-                        }
-                        
-                        // Write chord (can overflow slot width if needed)
-                        write!(f, "{}{}{}", chord_color, bold, chord_text)?;
-                        write!(f, "{}", reset)?;
-                        
-                        // Pad to fixed slot width for alignment
-                        let visible_len = chord_text.chars().count();
-                        if visible_len < CHARS_PER_SLOT {
-                            for _ in visible_len..CHARS_PER_SLOT {
-                                write!(f, " ")?;
-                            }
-                        }
-                    } else {
-                        // Empty slot - pad with spaces to maintain grid
-                        for _ in 0..CHARS_PER_SLOT {
-                            write!(f, " ")?;
+                // Display chords with their positions and durations for debugging
+                let mut chord_parts = Vec::new();
+                for chord in &measure.chords {
+                    let mut chord_text = String::new();
+                    
+                    // Show push/pull notation
+                    if let Some((is_push, _amount)) = chord.push_pull {
+                        if is_push {
+                            chord_text.push('\'');
                         }
                     }
+                    
+                    chord_text.push_str(&chord.full_symbol);
+                    
+                    // Show bass note for slash chords
+                    if let Some(ref bass) = chord.parsed.bass {
+                        chord_text.push_str(&format!("/{}", bass));
+                    }
+                    
+                    // Show pull notation
+                    if let Some((is_push, _amount)) = chord.push_pull {
+                        if !is_push {
+                            chord_text.push('\'');
+                        }
+                    }
+                    
+                    // Show position and duration for debugging
+                    let pos = &chord.position.total_duration;
+                    let dur = &chord.duration;
+                    chord_text.push_str(&format!(
+                        " [pos:{}:{}:{} dur:{}:{}:{}]",
+                        pos.measures, pos.beats, pos.subdivisions,
+                        dur.measures, dur.beats, dur.subdivisions
+                    ));
+                    
+                    chord_parts.push(chord_text);
+                }
+                
+                if !chord_parts.is_empty() {
+                    write!(f, "{}{}{}", chord_color, bold, chord_parts.join(" "))?;
+                    write!(f, "{}", reset)?;
                 }
 
                 // Measure separator (except for last measure on line)
@@ -231,7 +220,6 @@ impl Chart {
                     write!(f, " {}|{} ", dim, reset)?;
                 }
             }
-
             writeln!(f)?;
             measure_idx = line_end_idx;
         }

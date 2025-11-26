@@ -2,10 +2,10 @@
 //!
 //! Reads markers and regions from REAPER projects and converts them to marker-region structs.
 
-use marker_region::core::{Marker, Region};
+use daw::marker_region::core::{Marker, Region};
 use reaper_high::{Project, BookmarkType, Reaper};
 use reaper_medium::PositionInSeconds;
-use primitives::{Position, TimePosition, MusicalPosition, TimeRange};
+use daw::primitives::{Position, TimePosition, MusicalPosition, TimeRange};
 use crate::color_utils::extract_color_from_native;
 
 /// Get the project measure offset for a project

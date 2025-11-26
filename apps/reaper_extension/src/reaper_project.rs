@@ -2,7 +2,7 @@
 //!
 //! Wraps REAPER projects using the Project<T> generic type with ReaperTransport.
 
-use project::Project;
+use daw::project::Project;
 use reaper_high::Project as ReaperProject;
 use crate::reaper_transport::ReaperTransport;
 

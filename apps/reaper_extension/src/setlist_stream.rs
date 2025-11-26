@@ -20,6 +20,7 @@ use crate::live::tracks::smooth_seek::get_smooth_seek_handler;
 use crate::action_registry::get_command_id;
 use reaper_high::{Reaper, Project};
 use reaper_medium::{ProjectRef, PositionInSeconds, PositionInBeats, SetEditCurPosOptions, CommandId, ProjectContext, MeasureMode};
+use daw::primitives::MusicalPosition;
 use std::sync::OnceLock;
 
 /// Get the project measure offset for a project
@@ -285,7 +286,7 @@ fn seek_to_section_main_thread(song_index: usize, section_index: usize) -> Resul
     // This properly accounts for tempo and time signature changes
     // Note: musical_pos.measure already has the project measure offset applied,
     // so we need to subtract it to get REAPER's actual measure index
-    let musical_pos_to_time = |project: &Project, musical_pos: &primitives::MusicalPosition| -> Result<PositionInSeconds, String> {
+    let musical_pos_to_time = |project: &Project, musical_pos: &MusicalPosition| -> Result<PositionInSeconds, String> {
         let medium_reaper = reaper.medium_reaper();
         let project_context = project.context();
         
@@ -501,9 +502,47 @@ fn seek_to_time_main_thread(song_index: usize, time_seconds: f64) -> Result<(), 
     Ok(())
 }
 
+/// Poll transport position continuously
+/// This is called from the timer callback to get continuous position updates
+/// Transport info is always polled because position changes continuously
+pub fn poll_transport_position() {
+    use reaper_high::{Reaper, Project};
+    use reaper_medium::ProjectRef;
+    
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+    
+    // Get current project
+    let Some(project_result) = medium_reaper.enum_projects(ProjectRef::Current, 0) else {
+        return;
+    };
+    
+    let project = Project::new(project_result.project);
+    let play_state = project.play_state();
+    
+    // Always poll position - transport info should always be up-to-date
+    // Get current play position
+    let current_pos = if play_state.is_playing {
+        project.play_position_latency_compensated().get()
+    } else if play_state.is_paused {
+        // When paused, use play position (it's still valid)
+        project.play_position_latency_compensated().get()
+    } else {
+        // When stopped, use edit cursor position
+        project.edit_cursor_position()
+            .unwrap_or(reaper_medium::PositionInSeconds::ZERO)
+            .get()
+    };
+    
+    // Transport position is now always updated in update_setlist_state()
+    // No need to mark dirty - we just poll every time
+}
+
 /// Update setlist state from REAPER's main thread
-/// This is called from REAPER's timer callback (target: 60Hz)
+/// Always updates - uses optimized chunk-based API calls for tracks
 pub fn update_setlist_state() {
+    // Always update - chunk-based API is efficient enough for polling
+    
     if let Some(state) = LATEST_SETLIST_API.get() {
         match build_setlist_from_open_projects(None) {
             Ok(mut setlist) => {
@@ -621,86 +660,44 @@ pub fn update_setlist_state() {
                                     
                                     // Count how many sections with the exact same name appear before the active section
                                     // We keep numbers to differentiate sections (e.g., "BR" vs "BR 2" are different)
-                                    let sections_before_with_same_name = song.sections.iter()
+                                    let section_name_count = song.sections.iter()
                                         .take(active_section_idx.unwrap_or(0))
                                         .filter(|s| s.name.trim() == target_section_name)
                                         .count();
                                     
-                                    // Iterate through generated slides and collect only those from the active section instance
-                                    // We need to skip slides from earlier sections with the exact same name
-                                    let mut section_slides: Vec<(usize, &lyrics::output::Slide)> = Vec::new();
-                                    let mut sections_with_same_name_seen = 0;
-                                    let mut in_active_section = false;
-                                    let mut prev_section_name: Option<&str> = None;
-                                    
-                                    for (idx, slide) in generated_slides.iter().enumerate() {
-                                        // Check if we've transitioned to a new section
-                                        let is_new_section = prev_section_name.map(|prev| prev != slide.section_name).unwrap_or(true);
-                                        
-                                        // Compare section names exactly (case-insensitive to handle "Hits" vs "HITS")
-                                        let slide_section_matches = slide.section_name.trim().eq_ignore_ascii_case(target_section_name);
-                                        
-                                        if slide_section_matches {
-                                            if is_new_section {
-                                                // We've entered a new section with the same name
-                                                if sections_with_same_name_seen == sections_before_with_same_name {
-                                                    // This is the active section instance
-                                                    in_active_section = true;
-                                                } else {
-                                                    // This is an earlier section with the same name
-                                                    sections_with_same_name_seen += 1;
-                                                    in_active_section = false; // Make sure we're not in active section yet
-                                                }
-                                            }
-                                            
-                                            if in_active_section {
-                                                section_slides.push((idx, slide));
-                                            }
-                                        } else {
-                                            // Different section name
-                                            if in_active_section {
-                                                // We've moved past the active section, stop collecting
-                                                break;
-                                            }
-                                            // Reset in_active_section when we leave a section with the same name
-                                            // (in case we were in an earlier instance)
-                                            in_active_section = false;
-                                        }
-                                        
-                                        prev_section_name = Some(&slide.section_name);
-                                    }
-                                    
-                                    if section_slides.is_empty() {
-                                        return None;
-                                    }
-                                    
-                                    // Get all REAPER slides in this section, sorted by position
-                                    let mut reaper_slides_in_section: Vec<&crate::lyrics::read::SlideData> = lyrics_data.slides.iter()
-                                        .filter(|sd| {
-                                            sd.position >= active_section.start_seconds()
-                                                && sd.position < active_section.end_seconds()
+                                    // Get the section slides from generated slides
+                                    let section_slides: Vec<(usize, &lyrics::output::Slide)> = generated_slides.iter()
+                                        .enumerate()
+                                        .filter(|(_, slide)| {
+                                            // Match by section name and occurrence count
+                                            let slide_section_name = slide.section_name.trim();
+                                            slide_section_name == target_section_name
                                         })
                                         .collect();
                                     
-                                    // Sort by position to ensure correct order
-                                    reaper_slides_in_section.sort_by(|a, b| {
-                                        a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal)
-                                    });
+                                    // Get REAPER slides that are in the active section
+                                    let reaper_slides_in_section: Vec<_> = lyrics_data.slides.iter()
+                                        .enumerate()
+                                        .filter(|(_, sd)| {
+                                            let sd_start = sd.position;
+                                            let sd_end = sd.position + sd.length;
+                                            // Check if this REAPER slide is within the active section's time range
+                                            (sd_start >= active_section.start_seconds() && sd_start < active_section.end_seconds()) ||
+                                            (sd_end > active_section.start_seconds() && sd_end <= active_section.end_seconds()) ||
+                                            (sd_start <= active_section.start_seconds() && sd_end >= active_section.end_seconds())
+                                        })
+                                        .collect();
                                     
-                                    if reaper_slides_in_section.is_empty() {
-                                        return Some(section_slides[0].0);
-                                    }
-                                    
-                                    // Find the index of the active REAPER slide within this section
-                                    // Match by exact position to ensure we get the correct slide
+                                    // Find which REAPER slide index corresponds to the active REAPER slide
                                     let active_reaper_idx = reaper_slides_in_section.iter()
-                                        .position(|sd| {
-                                            // Match by exact position (and optionally length for safety)
-                                            (sd.position - active_reaper_slide.position).abs() < 0.001
+                                        .position(|(_, sd)| {
+                                            let sd_start = sd.position;
+                                            let sd_end = sd.position + sd.length;
+                                            transport_position >= sd_start && transport_position < sd_end
                                         })?;
                                     
                                     // Map REAPER slide index to generated slide index
-                                    // Since each REAPER slide becomes a line in the lyrics section,
+                                    // Since REAPER slides are converted to lines in order,
                                     // and generated slides contain multiple lines, we need to find
                                     // which generated slide contains the line at this REAPER slide index
                                     
@@ -719,7 +716,14 @@ pub fn update_setlist_state() {
                                         current_line_count += lines_in_slide;
                                     }
                                     
-                                    // If we didn't find it (shouldn't happen), return the last slide
+                                    // Handle edge case: if line_index equals or exceeds total lines,
+                                    // return the last slide (this can happen if the last REAPER slide
+                                    // is at the boundary or if there's a mismatch in slide counts)
+                                    if line_index >= current_line_count && !section_slides.is_empty() {
+                                        return Some(section_slides.last().unwrap().0);
+                                    }
+                                    
+                                    // If we didn't find it, return None (shouldn't normally happen)
                                     tracing::warn!(
                                         active_section_idx = active_section_idx,
                                         section_name = %active_section.name,
@@ -727,15 +731,15 @@ pub fn update_setlist_state() {
                                         total_lines = current_line_count,
                                         section_slides_count = section_slides.len(),
                                         reaper_slides_in_section_count = reaper_slides_in_section.len(),
-                                        "Could not find matching generated slide, returning last"
+                                        "Could not find matching generated slide"
                                     );
-                                    Some(section_slides.last()?.0)
+                                    None
                                 })
                             })
                         })
                     });
                 
-                // Populate transport_info for each song from its project
+                // Populate project with transport for each song from its REAPER project
                 // We need to look up the project by name and get transport from it
                 let reaper = reaper_high::Reaper::get();
                 let medium_reaper = reaper.medium_reaper();
@@ -760,16 +764,23 @@ pub fn update_setlist_state() {
                         }
                     }
                     
-                    // Get transport info from the project
-                    if let Some(project) = found_project {
-                        let transport_adapter = crate::reaper_transport::ReaperTransport::new(project);
-                        if let Ok(transport) = transport_adapter.read_transport() {
-                            song.transport_info = Some(transport);
+                        // Update song's project with transport info and tracks from the REAPER project
+                        if let Some(project) = found_project {
+                            let transport_adapter = crate::reaper_transport::ReaperTransport::new(project.clone());
+                            if let Err(e) = song.update_project(&transport_adapter) {
+                                tracing::warn!(error = %e, project_name = %project_name, "Failed to update song project with transport");
+                            }
+                            
+                            // Read tracks from REAPER project using optimized chunk-based API
+                            // TEMPORARILY COMMENTED OUT TO TEST PERFORMANCE
+                            // let tracks = crate::reaper_tracks::get_all_tracks(&project);
+                            // if let Some(song_project) = song.project.as_mut() {
+                            //     song_project.set_tracks(tracks);
+                            // }
                         }
-                    }
                 }
                 
-                // Build SetlistApi with computed fields (now includes transport_info in each song)
+                // Build SetlistApi with computed fields (now includes project with transport in each song)
                 let setlist_api = SetlistApi::new(setlist.clone(), active_song_idx, active_section_idx, active_slide_idx);
                 
                 // Log active slide changes
@@ -853,7 +864,9 @@ pub fn update_setlist_state() {
                 // Update the state (we'll use a blocking lock since we're on main thread)
                 if let Ok(mut guard) = state.try_lock() {
                     *guard = Some(setlist_api.clone());
-                    SETLIST_UPDATED.store(true, Ordering::Release);
+                    // Note: SETLIST_UPDATED is no longer used since get_setlist_api() 
+                    // now returns immediately without waiting. The polling task will
+                    // pick up the new state on its next poll (~120Hz).
                 } else {
                     // Lock is held by async task - this is fine, just skip this update
                 }
@@ -877,22 +890,16 @@ impl SetlistStateProvider for ReaperSetlistStateProvider {
             return Err("Setlist API state not initialized".to_string());
         };
         
-        // Reset the updated flag before waiting
-        SETLIST_UPDATED.store(false, Ordering::Release);
-
-        // Wait for setlist to be updated (with timeout)
-        let mut attempts = 0;
-        while !SETLIST_UPDATED.load(Ordering::Acquire) && attempts < 100 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-            attempts += 1;
-        }
-        
+        // Always return the latest state immediately - no waiting
+        // The state is continuously updated by the timer callback, so we just return
+        // whatever is currently available. This ensures transport updates are sent
+        // as fast as the polling task runs (~120Hz).
         let guard = state.lock().unwrap();
         guard.clone().ok_or_else(|| "No setlist API state available".to_string())
     }
     
     async fn get_setlist_api_with_transport(&self) -> Result<SetlistApi, String> {
-        // Transport info is now embedded in each song's transport_info field
+        // Transport info is now embedded in each song's project field
         self.get_setlist_api().await
     }
 }
