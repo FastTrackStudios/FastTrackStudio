@@ -12,6 +12,7 @@ pub fn create_bass_group() -> FullGroup {
         prefix = "B",
         patterns = ["bass"],
         negative_patterns = ["bassdrum", "bd"],
+        priority = "10",
         parent_track = "B (BUS)",
         children = [
             define_group! {

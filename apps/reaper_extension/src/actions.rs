@@ -1,9 +1,9 @@
 //! Actions for FastTrackStudio REAPER Extension
 
-use crate::action_registry::{ActionDef, register_actions};
-use crate::reaper_project::create_reaper_project_wrapper;
-use crate::reaper_markers::{read_markers_from_project, read_regions_from_project};
-use crate::reaper_setlist::{build_setlist_from_open_projects, build_song_from_current_project};
+use crate::infrastructure::action_registry::{ActionDef, register_actions};
+use crate::implementation::project::create_reaper_project_wrapper;
+use crate::implementation::markers::{read_markers_from_project, read_regions_from_project};
+use crate::implementation::setlist::{build_setlist_from_open_projects, build_song_from_current_project};
 use reaper_high::{Project, Reaper, BookmarkType};
 use reaper_medium::{ProjectRef, MasterTrackBehavior, UndoScope, ProjectPart};
 use reaper_low;
@@ -254,7 +254,7 @@ fn log_region_colors_handler() {
                 let rgb = medium_reaper.color_from_native(native_color);
                 
                 // Convert to packed u32 using standardized function
-                let packed_color = crate::color_utils::pack_rgb_to_u32(rgb);
+                let packed_color = crate::infrastructure::color_utils::pack_rgb_to_u32(rgb);
                 
                 // Format color info
                 let color_info = format!(
@@ -709,7 +709,7 @@ fn log_current_musical_position_handler() {
     reaper.show_console_msg("\n=== FastTrackStudio: Current Musical Position ===\n");
     
     // Get transport info to get current playhead position
-    let transport_adapter = crate::reaper_transport::ReaperTransport::new(current_project.clone());
+    let transport_adapter = crate::implementation::transport::ReaperTransport::new(current_project.clone());
     
     match transport_adapter.read_transport() {
         Ok(transport) => {
@@ -941,77 +941,77 @@ pub fn register_all_actions() {
             display_name: "Dummy Action".to_string(),
             handler: dummy_action_handler,
             appears_in_menu: true, // Show in menu
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_DEV_LOG_OPEN_PROJECTS",
             display_name: "Log Open Projects".to_string(),
             handler: log_open_projects_handler,
             appears_in_menu: true, // Show in menu
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_DEV_LOG_CURRENT_MARKERS",
             display_name: "Log Current Project Markers".to_string(),
             handler: log_current_project_markers_handler,
             appears_in_menu: true, // Show in menu
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_DEV_LOG_CURRENT_REGIONS",
             display_name: "Log Current Project Regions".to_string(),
             handler: log_current_project_regions_handler,
             appears_in_menu: true, // Show in menu
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_DEV_LOG_REGION_COLORS",
             display_name: "Log Region Colors (Debug)".to_string(),
             handler: log_region_colors_handler,
             appears_in_menu: true, // Show in menu
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_DEV_BUILD_SETLIST",
             display_name: "Build Setlist from Open Projects".to_string(),
             handler: build_setlist_from_projects_handler,
             appears_in_menu: true, // Show in menu
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_DEV_LOG_SETLIST_SONGS",
             display_name: "Log Setlist Songs".to_string(),
             handler: log_setlist_songs_handler,
             appears_in_menu: true, // Show in menu
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_DEV_LOG_CURRENT_SONG",
             display_name: "Log Current Song Details".to_string(),
             handler: log_current_song_details_handler,
             appears_in_menu: true, // Show in menu
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_DEV_LOG_TEMPO_TIME_SIG",
             display_name: "Log Tempo and Time Signature Changes".to_string(),
             handler: log_tempo_time_sig_changes_handler,
             appears_in_menu: true, // Show in menu
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_DEV_LOG_PROJECT_MEASURE_OFFSET",
             display_name: "Log Project Measure Offset".to_string(),
             handler: log_project_measure_offset_handler,
             appears_in_menu: true, // Show in menu
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_DEV_LOG_CURRENT_MUSICAL_POSITION",
             display_name: "Log Current Musical Position".to_string(),
             handler: log_current_musical_position_handler,
             appears_in_menu: true, // Show in menu
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
     ];
     

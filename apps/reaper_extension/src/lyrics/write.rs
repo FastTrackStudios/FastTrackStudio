@@ -228,7 +228,7 @@ pub fn create_text_items_from_lyrics(lyrics_text: String) -> anyhow::Result<()> 
 /// This updates both the Song struct and the REAPER project's SLIDES track
 #[allow(unsafe_code)]
 pub fn update_lyrics_in_reaper(song_index: usize, lyrics: Lyrics) -> Result<(), String> {
-    use crate::reaper_setlist::build_setlist_from_open_projects;
+    use crate::implementation::setlist::build_setlist_from_open_projects;
     use reaper_medium::ProjectRef;
     
     let reaper = Reaper::get();

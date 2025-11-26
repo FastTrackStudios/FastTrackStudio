@@ -2,8 +2,8 @@
 //!
 //! Actions for zooming the arrange view to song regions and markers
 
-use crate::reaper_setlist::build_song_from_current_project;
-use crate::reaper_markers::read_markers_from_project;
+use crate::implementation::setlist::build_song_from_current_project;
+use crate::implementation::markers::read_markers_from_project;
 use reaper_high::Project;
 use reaper_medium::{PositionInSeconds, ProjectContext};
 use reaper_high::Reaper;

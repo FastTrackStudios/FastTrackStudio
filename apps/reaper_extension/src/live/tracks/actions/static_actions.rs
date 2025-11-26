@@ -5,10 +5,10 @@
 
 use super::zoom::zoom_horizontally_to_song;
 use super::navigation::{go_to_previous_song, go_to_next_song, go_to_next_section, go_to_previous_section, go_to_next_section_song_smart, go_to_previous_section_song_smart};
-use crate::action_registry::{ActionDef, register_actions, get_registered_actions_storage};
-use crate::reaper_setlist::build_setlist_from_open_projects;
-use crate::reaper_markers::read_markers_from_project;
-use crate::reaper_transport::ReaperTransport;
+use crate::infrastructure::action_registry::{ActionDef, register_actions, get_registered_actions_storage};
+use crate::implementation::setlist::build_setlist_from_open_projects;
+use crate::implementation::markers::read_markers_from_project;
+use crate::implementation::transport::ReaperTransport;
 use crate::live::tracks::tab_navigation::TabNavigator;
 use reaper_high::{Reaper, Project, ActionKind};
 use reaper_medium::{PositionInSeconds, ProjectRef, SetEditCurPosOptions, CommandId, ProjectContext};
@@ -343,105 +343,105 @@ pub fn domain_actions() -> Vec<ActionDef> {
             display_name: "Setlist Play".to_string(),
             handler: setlist_play,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_SETLIST_STOP",
             display_name: "Setlist Stop".to_string(),
             handler: setlist_stop,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_SETLIST_PAUSE",
             display_name: "Setlist Pause".to_string(),
             handler: setlist_pause,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_SETLIST_RESUME",
             display_name: "Setlist Resume".to_string(),
             handler: setlist_resume,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_RESET_TO_BEGINNING_OF_SONG",
             display_name: "Reset to Beginning of Song".to_string(),
             handler: reset_to_beginning_of_song,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_RESET_TO_BEGINNING_OF_SETLIST",
             display_name: "Reset to Beginning of Setlist".to_string(),
             handler: reset_to_beginning_of_setlist,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_RESET_TO_BEGINNING_SMART",
             display_name: "Reset to Beginning (Double-Tap for Setlist)".to_string(),
             handler: reset_to_beginning_smart,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_SETLIST_RESUME_SMART",
             display_name: "Setlist Resume (Smart: From Last Stopped if No Pause)".to_string(),
             handler: setlist_resume_smart,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_ZOOM_HORIZONTALLY_TO_SONG",
             display_name: "Zoom Horizontally to Song".to_string(),
             handler: zoom_horizontally_to_song,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_GO_TO_PREVIOUS_SONG",
             display_name: "Go To Previous Song".to_string(),
             handler: go_to_previous_song,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_GO_TO_NEXT_SONG",
             display_name: "Go To Next Song".to_string(),
             handler: go_to_next_song,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_GO_TO_NEXT_SECTION",
             display_name: "Go To Next Section".to_string(),
             handler: go_to_next_section,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_GO_TO_PREVIOUS_SECTION",
             display_name: "Go To Previous Section".to_string(),
             handler: go_to_previous_section,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_GO_TO_NEXT_SECTION_SONG_SMART",
             display_name: "Go To Next Section / Song (Smart)".to_string(),
             handler: go_to_next_section_song_smart,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LIVE_GO_TO_PREVIOUS_SECTION_SONG_SMART",
             display_name: "Go To Previous Section / Song (Smart)".to_string(),
             handler: go_to_previous_section_song_smart,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
     ]
 }
@@ -485,7 +485,7 @@ pub fn register_toggleable_actions() {
     // Look up and store command IDs for toggleable actions (must be done on main thread)
     // This allows background threads to trigger these actions
     let medium_reaper = reaper.medium_reaper();
-    let command_ids_map = crate::action_registry::COMMAND_IDS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let command_ids_map = crate::infrastructure::action_registry::COMMAND_IDS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
     if let Ok(mut map) = command_ids_map.lock() {
         // Look up command IDs for toggleable actions
         let toggleable_command_ids = [

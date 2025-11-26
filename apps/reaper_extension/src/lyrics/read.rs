@@ -237,7 +237,13 @@ pub fn convert_lyrics_data_to_lyrics(
             });
         
         // Create a lyric line from the slide text
-        let line = LyricLine::new(slide.text.clone());
+        let mut line = LyricLine::new(slide.text.clone());
+        
+        // Set timing information from slide position and length
+        // Position is absolute project time, but we need song-relative time
+        // For now, use absolute position (will be adjusted if needed)
+        line.start_time = Some(slide.position);
+        line.end_time = Some(slide.position + slide.length);
         
         // Add the line to the section
         section.add_line(line);

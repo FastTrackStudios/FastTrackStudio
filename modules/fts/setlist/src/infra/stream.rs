@@ -463,17 +463,39 @@ impl SetlistStreamActor {
             // Get current setlist API state from the provider
             // Transport info is now embedded in each song's transport_info field
             // Use try_get_setlist_api if available to avoid blocking on stale data
-            if let Ok(setlist_api) = state_provider.get_setlist_api().await {
-                let update = SetlistUpdateMessage { 
-                    setlist_api,
-                };
-                // Broadcast to all subscribers (non-blocking)
-                // If channel is full, skip this update to avoid blocking
-                if broadcast_tx.send(update).is_ok() {
-                    SEND_COUNT.fetch_add(1, Ordering::Relaxed);
+            match state_provider.get_setlist_api().await {
+                Ok(setlist_api) => {
+                    let update = SetlistUpdateMessage { 
+                        setlist_api,
+                    };
+                    // Broadcast to all subscribers (non-blocking)
+                    // If channel is full, skip this update to avoid blocking
+                    if broadcast_tx.send(update).is_ok() {
+                        SEND_COUNT.fetch_add(1, Ordering::Relaxed);
+                    }
+                    
+                    // Log periodically to verify updates are being sent
+                    let count = SEND_COUNT.load(Ordering::Relaxed);
+                    if count % 1000 == 0 && count > 0 {
+                        tracing::debug!(
+                            send_count = count,
+                            "Setlist stream: broadcasting updates ({} messages sent)",
+                            count
+                        );
+                    }
                 }
-                
-                // Performance metrics logging removed - IRPC is working
+                Err(e) => {
+                    // Log error periodically to avoid spam
+                    static ERROR_COUNT: AtomicU64 = AtomicU64::new(0);
+                    let error_count = ERROR_COUNT.fetch_add(1, Ordering::Relaxed);
+                    if error_count % 1000 == 0 {
+                        tracing::warn!(
+                            error_count,
+                            error = %e,
+                            "Setlist stream: failed to get setlist API state"
+                        );
+                    }
+                }
             }
         }
     }

@@ -2,8 +2,8 @@
 //!
 //! Actions for navigating between songs and sections in the setlist
 
-use crate::reaper_setlist::build_setlist_from_open_projects;
-use crate::reaper_markers::read_markers_from_project;
+use crate::implementation::setlist::build_setlist_from_open_projects;
+use crate::implementation::markers::read_markers_from_project;
 use crate::live::tracks::actions::zoom::zoom_horizontally_to_song;
 use crate::live::tracks::tab_navigation::TabNavigator;
 use reaper_high::{BookmarkType, Project, Reaper};

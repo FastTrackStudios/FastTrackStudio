@@ -53,6 +53,7 @@ pub fn create_vocals_group() -> FullGroup {
                         name = "Bass",
                         prefix = "Bass",
                         patterns = ["bass", "low", "bottom"],
+                        negative_patterns = ["bass guitar", "bassguitar", "bg", "electric bass", "bass di", "bass amp", "bass amplifier", "bass synth", "synth bass"],
                         arrangement_patterns = ["Low", "Chest", "Fry"],
                     },
                     define_group! {

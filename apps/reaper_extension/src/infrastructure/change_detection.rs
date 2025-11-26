@@ -1,14 +1,15 @@
-//! Comprehensive Change Detection
+//! Change Detection Infrastructure
 //!
 //! Uses ChangeDetectionMiddleware to listen for ALL changes (tracks, play state, tempo, bookmarks, etc.)
 //! instead of polling. This is much more efficient than polling every 100ms.
 
 use reaper_high::{
     ChangeDetectionMiddleware, ChangeEvent, ControlSurfaceEvent, ControlSurfaceMiddleware,
+    MiddlewareControlSurface,
 };
+use reaper_medium::ReaperSession;
 use std::sync::{Arc, Mutex, OnceLock};
 use tracing::{debug, info, trace};
-use crate::setlist_stream;
 
 /// Control surface middleware that processes ALL change events
 #[derive(Debug)]
@@ -158,3 +159,28 @@ pub fn get_change_detection() -> Arc<Mutex<ComprehensiveChangeDetectionMiddlewar
     init_change_detection()
 }
 
+/// Change detection infrastructure
+#[derive(Debug)]
+pub struct ChangeDetection {
+    middleware: ComprehensiveChangeDetectionMiddleware,
+}
+
+impl ChangeDetection {
+    /// Create a new change detection instance
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self {
+            middleware: ComprehensiveChangeDetectionMiddleware::new(),
+        })
+    }
+    
+    /// Register the change detection control surface
+    pub fn register(&self, session: &mut ReaperSession) -> Result<(), Box<dyn std::error::Error>> {
+        // Create a new middleware instance for the control surface
+        // (we can't clone it, so we create a new one)
+        let middleware = ComprehensiveChangeDetectionMiddleware::new();
+        let control_surface = MiddlewareControlSurface::new(middleware);
+        session.plugin_register_add_csurf_inst(Box::new(control_surface))?;
+        info!("✅ Change detection control surface registered");
+        Ok(())
+    }
+}

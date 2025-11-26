@@ -8,7 +8,7 @@ use swell_ui::{Menu, menu_tree::{anonymous_menu, menu, item, separator, Entry}};
 use tracing::{debug, error, info, warn};
 use std::collections::HashMap;
 
-use crate::action_registry::get_all_registered_actions;
+use crate::infrastructure::action_registry::get_all_registered_actions;
 
 /// Register the extension menu with REAPER
 /// Must be called after actions are registered and REAPER is woken up
@@ -148,7 +148,7 @@ fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
     
     // Group actions by category and subcategory
     // Structure: category -> subcategory -> actions
-    let mut categorized: HashMap<String, HashMap<Option<String>, Vec<&crate::action_registry::ActionDef>>> = HashMap::new();
+    let mut categorized: HashMap<String, HashMap<Option<String>, Vec<&crate::infrastructure::action_registry::ActionDef>>> = HashMap::new();
     
     for action in &menu_actions {
         let (category, subcategory) = extract_category_from_command_id(action.command_id);

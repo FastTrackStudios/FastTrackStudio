@@ -1,6 +1,6 @@
 //! Lyrics actions for REAPER extension
 
-use crate::action_registry::{ActionDef, register_actions};
+use crate::infrastructure::action_registry::{ActionDef, register_actions};
 use crate::lyrics::{read::read_lyrics_from_reaper, write::create_text_items_from_lyrics};
 use reaper_high::Reaper;
 use tracing::{info, error};
@@ -111,14 +111,14 @@ pub fn register_lyrics_actions() {
             display_name: "Create Text Items from Lyrics".to_string(),
             handler: create_text_items_from_lyrics_handler,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
         ActionDef {
             command_id: "FTS_LYRICS_READ_FROM_REAPER",
             display_name: "Read Lyrics from REAPER".to_string(),
             handler: read_lyrics_from_reaper_handler,
             appears_in_menu: true,
-            section: crate::action_registry::ActionSection::Main,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
         },
     ];
     

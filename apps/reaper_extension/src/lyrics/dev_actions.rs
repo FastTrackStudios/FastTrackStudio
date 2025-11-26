@@ -1,6 +1,6 @@
 //! Dev actions for debugging lyrics and MIDI
 
-use crate::action_registry::{ActionDef, register_actions};
+use crate::infrastructure::action_registry::{ActionDef, register_actions};
 use reaper_high::{Reaper, Item, Take, Project};
 use reaper_medium::{MediaItemTake, ReaperStringArg, PositionInQuarterNotes, ProjectContext};
 use tracing::{info, warn};
@@ -480,7 +480,7 @@ fn assign_syllables_to_notes_handler() {
 
 /// Register dev actions for lyrics/MIDI debugging
 pub fn register_lyrics_dev_actions() {
-    use crate::action_registry::ActionSection;
+    use crate::infrastructure::action_registry::ActionSection;
     
     let actions = vec![
         ActionDef {

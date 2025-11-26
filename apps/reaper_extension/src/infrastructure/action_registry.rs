@@ -383,3 +383,26 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
     }
 }
 
+/// Action registry service
+#[derive(Debug)]
+pub struct ActionRegistry;
+
+impl ActionRegistry {
+    /// Create a new action registry
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self)
+    }
+    
+    /// Register all actions
+    pub fn register_all(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Register actions from modules
+        crate::actions::register_all_actions();
+        
+        // Wake up REAPER so actions are available
+        if let Err(e) = Reaper::get().wake_up() {
+            warn!("Failed to wake up REAPER: {}", e);
+        }
+        
+        Ok(())
+    }
+}

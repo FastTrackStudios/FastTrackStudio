@@ -254,21 +254,24 @@ fn test_marc_martel_dont_stop_me_now() {
     // ============================================
     // BASS (top level, no BUS type)
     // ============================================
-    let bass_name = create_track_name("B", Some("Bass"), None, None, None);
+    // Prefix is "Bass", not "B"
+    let bass_name = create_track_name("Bass", Some("Bass"), None, None, None);
     let bass = Track::new(&bass_name);
     template.add_track(bass);
     
     // ============================================
     // Bass Guitar (BUS) - Child of Bass
     // ============================================
-    // Use "Bass Guitar" as sub_type - the hierarchy extraction will handle it
-    let bass_guitar_bus_name = create_track_name("B", Some("Bass Guitar"), Some("BUS"), None, None);
+    // Use "Guitar" as sub_type - the hierarchy extraction will handle it
+    // The parent is "Bass", so "Guitar" will be shown as "Bass Guitar" in hierarchy
+    let bass_guitar_bus_name = create_track_name("Bass", Some("Guitar"), Some("BUS"), None, None);
     let mut bass_guitar_bus = Track::new(&bass_guitar_bus_name);
     bass_guitar_bus.set_parent(&bass_name);
     template.add_track(bass_guitar_bus);
     
     // Bass DI - Child of Bass Guitar (BUS)
-    let bass_di_name = create_track_name("B", Some("Bass"), None, Some("DI"), None);
+    // Just "DI" as multi_mic - the hierarchy extraction will remove "Bass Guitar" to show just "DI"
+    let bass_di_name = create_track_name("Bass", None, None, Some("DI"), None);
     let mut bass_di = Track::new(&bass_di_name);
     bass_di.set_parent(&bass_guitar_bus_name);
     bass_di.add_take(Take::new("Bass DI"));
@@ -434,5 +437,84 @@ fn test_marc_martel_dont_stop_me_now() {
     println!("{}", template.track_list());
     
     assert!(!track_names.is_empty(), "Should have track names to test");
+}
+
+#[test]
+fn test_bass_hierarchy_debug() {
+    use track_template::{Track, Template, Take, DisplayMode};
+    use naming_convention::{SimpleParser, create_default_groups, format_track_name_default, TrackName};
+    
+    // Helper function to create a TrackName
+    fn create_track_name(
+        group_prefix: &str,
+        sub_type: Option<&str>,
+        track_type: Option<&str>,
+        multi_mic: Option<&str>,
+        increment: Option<u32>,
+    ) -> String {
+        let mut track_name = TrackName::new();
+        track_name.group_prefix = Some(group_prefix.to_string());
+        if let Some(st) = sub_type {
+            track_name.sub_type = Some(vec![st.to_string()]);
+        }
+        if let Some(tt) = track_type {
+            track_name.track_type = Some(tt.to_string());
+        }
+        if let Some(mm) = multi_mic {
+            track_name.multi_mic = Some(vec![mm.to_string()]);
+        }
+        if let Some(inc) = increment {
+            track_name.increment = Some(inc.to_string());
+        }
+        format_track_name_default(&track_name)
+    }
+    
+    let parser = SimpleParser::new(create_default_groups());
+    let mut template = Template::new("Bass Hierarchy Debug");
+    
+    // Top-level Bass track
+    let bass_name = create_track_name("Bass", Some("Bass"), None, None, None);
+    println!("\n=== Top-level Bass track ===");
+    println!("Created name: {}", bass_name);
+    let parsed = parser.parse(&bass_name);
+    println!("Parsed: group_prefix={:?}, sub_type={:?}, arrangement={:?}", 
+             parsed.group_prefix, parsed.sub_type, parsed.arrangement);
+    let bass = Track::new(&bass_name);
+    template.add_track(bass);
+    
+    // Bass Guitar (BUS) - Child of Bass
+    let bass_guitar_bus_name = create_track_name("Bass", Some("Guitar"), Some("BUS"), None, None);
+    println!("\n=== Bass Guitar (BUS) track ===");
+    println!("Created name: {}", bass_guitar_bus_name);
+    let parsed_guitar = parser.parse(&bass_guitar_bus_name);
+    println!("Parsed: group_prefix={:?}, sub_type={:?}, arrangement={:?}", 
+             parsed_guitar.group_prefix, parsed_guitar.sub_type, parsed_guitar.arrangement);
+    let mut bass_guitar_bus = Track::new(&bass_guitar_bus_name);
+    bass_guitar_bus.set_parent(&bass_name);
+    template.add_track(bass_guitar_bus);
+    
+    // Bass DI - Child of Bass Guitar (BUS)
+    let bass_di_name = create_track_name("Bass", None, None, Some("DI"), None);
+    println!("\n=== Bass DI track ===");
+    println!("Created name: {}", bass_di_name);
+    let parsed_di = parser.parse(&bass_di_name);
+    println!("Parsed: group_prefix={:?}, sub_type={:?}, arrangement={:?}, multi_mic={:?}", 
+             parsed_di.group_prefix, parsed_di.sub_type, parsed_di.arrangement, parsed_di.multi_mic);
+    let mut bass_di = Track::new(&bass_di_name);
+    bass_di.set_parent(&bass_guitar_bus_name);
+    bass_di.add_take(Take::new("Bass DI"));
+    template.add_track(bass_di);
+    
+    // Test what parser returns for Drums
+    println!("\n=== Testing Drums parsing ===");
+    let drums_name = create_track_name("D", Some("Drums"), Some("BUS"), None, None);
+    let drums_parsed = parser.parse(&drums_name);
+    println!("Drums track name: {}", drums_name);
+    println!("Parsed: group_prefix={:?}, sub_type={:?}", drums_parsed.group_prefix, drums_parsed.sub_type);
+    
+    // Display in Hierarchy mode
+    template.track_list_mut().set_display_mode(DisplayMode::Hierarchy);
+    println!("\n=== Hierarchy Mode Output ===");
+    println!("{}", template.track_list());
 }
 

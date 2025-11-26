@@ -6,7 +6,7 @@ use daw::marker_region::core::{Marker, Region};
 use reaper_high::{Project, BookmarkType, Reaper};
 use reaper_medium::PositionInSeconds;
 use daw::primitives::{Position, TimePosition, MusicalPosition, TimeRange};
-use crate::color_utils::extract_color_from_native;
+use crate::infrastructure::color_utils::extract_color_from_native;
 
 /// Get the project measure offset for a project
 /// Returns the offset value, or 0 if not found

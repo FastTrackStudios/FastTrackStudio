@@ -1,166 +1,22 @@
-//! REAPER Setlist Building
+//! Song Building Logic
 //!
-//! Builds setlists from open REAPER projects, reading markers and regions from each project.
+//! Handles building songs and setlists from REAPER projects.
 
 use daw::marker_region::core::{Marker, Region};
 use reaper_high::{Project, Reaper};
 use reaper_medium::ProjectRef;
-use setlist::core::{Section, SectionType, Setlist, SetlistError, Song};
+use setlist::core::{Section, Setlist, SetlistError, Song};
 use daw::primitives::TimeSignature;
-use tracing::{debug, info, warn};
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
-
-use crate::reaper_markers::{read_markers_from_project, read_regions_from_project};
-use crate::reaper_project::create_reaper_project_wrapper;
+use tracing::{debug, warn};
 use daw::marker_region::application::TempoTimePoint;
+
+use crate::implementation::markers::{read_markers_from_project, read_regions_from_project};
+use crate::implementation::setlist::stats::{record_song_built, flush_build_stats_if_needed};
+use crate::implementation::setlist::tempo::read_tempo_time_sig_markers_from_project;
+use crate::implementation::setlist::parser::parse_song_name;
+use crate::implementation::setlist::region_finder::{find_marker_by_name, find_song_regions, find_song_region_for_marker, find_song_region};
+use crate::implementation::setlist::section_builder::{build_sections_from_regions, build_sections_from_regions_simple};
 use crate::lyrics::read::{read_lyrics_from_project, convert_lyrics_data_to_lyrics};
-
-/// Batched logging stats for setlist building
-struct BuildStats {
-    sections_created: usize,
-    songs_built: usize,
-    songs_reused: usize,
-    last_log_time: Instant,
-}
-
-impl Default for BuildStats {
-    fn default() -> Self {
-        Self {
-            sections_created: 0,
-            songs_built: 0,
-            songs_reused: 0,
-            last_log_time: Instant::now(),
-        }
-    }
-}
-
-static BUILD_STATS: OnceLock<Mutex<BuildStats>> = OnceLock::new();
-
-/// Record a section creation (batched logging)
-fn record_section_created() {
-    let stats = BUILD_STATS.get_or_init(|| Mutex::new(BuildStats::default()));
-    if let Ok(mut s) = stats.lock() {
-        s.sections_created += 1;
-    }
-}
-
-/// Record a song being built (batched logging)
-fn record_song_built() {
-    let stats = BUILD_STATS.get_or_init(|| Mutex::new(BuildStats::default()));
-    if let Ok(mut s) = stats.lock() {
-        s.songs_built += 1;
-    }
-}
-
-/// Record a song being reused from cache (batched logging)
-fn record_song_reused() {
-    let stats = BUILD_STATS.get_or_init(|| Mutex::new(BuildStats::default()));
-    if let Ok(mut s) = stats.lock() {
-        s.songs_reused += 1;
-    }
-}
-
-/// Flush batched stats if enough time has passed (every 5 seconds)
-fn flush_build_stats_if_needed() {
-    let stats = BUILD_STATS.get_or_init(|| Mutex::new(BuildStats::default()));
-    if let Ok(mut s) = stats.lock() {
-        let now = Instant::now();
-        if s.last_log_time.elapsed() >= Duration::from_secs(5) {
-            // Stats logging removed - too verbose
-            s.sections_created = 0;
-            s.songs_built = 0;
-            s.songs_reused = 0;
-            s.last_log_time = now;
-        }
-    }
-}
-
-/// Read all tempo/time signature markers from a REAPER project
-/// Returns Vec<(time_position_seconds, tempo_bpm, time_signature_option)>
-#[allow(unsafe_code)] // Required for low-level REAPER API
-fn read_tempo_time_sig_markers_from_project(project: &Project) -> Vec<(f64, f64, Option<(i32, i32)>)> {
-    let reaper = Reaper::get();
-    let medium_reaper = reaper.medium_reaper();
-    let project_context = project.context();
-    
-    let marker_count = medium_reaper.count_tempo_time_sig_markers(project_context) as i32;
-    let mut markers = Vec::new();
-    
-    for i in 0..marker_count {
-        let mut timepos_out: f64 = 0.0;
-        let mut _measurepos_out: i32 = 0;
-        let mut _beatpos_out: f64 = 0.0;
-        let mut bpm_out: f64 = 0.0;
-        let mut timesig_num_out: i32 = 0;
-        let mut timesig_denom_out: i32 = 0;
-        let mut _lineartempo_out: bool = false;
-        
-        let success = unsafe {
-            medium_reaper.low().GetTempoTimeSigMarker(
-                project_context.to_raw(),
-                i,
-                &mut timepos_out,
-                &mut _measurepos_out,
-                &mut _beatpos_out,
-                &mut bpm_out,
-                &mut timesig_num_out,
-                &mut timesig_denom_out,
-                &mut _lineartempo_out,
-            )
-        };
-        
-        if success {
-            let time_sig = if timesig_num_out > 0 && timesig_denom_out > 0 {
-                Some((timesig_num_out, timesig_denom_out))
-            } else {
-                None
-            };
-            markers.push((timepos_out, bpm_out, time_sig));
-        }
-    }
-    
-    // Sort by time position
-    markers.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    
-    markers
-}
-
-/// Parse a song name that may be in the format "Song Name" - Artist or Song Name - Artist
-/// Returns (song_name, artist_option)
-fn parse_song_name(full_name: &str) -> (String, Option<String>) {
-    let trimmed = full_name.trim();
-    
-    // Look for " - " separator
-    if let Some(separator_pos) = trimmed.find(" - ") {
-        let song_part = trimmed[..separator_pos].trim();
-        let artist_part = trimmed[separator_pos + 3..].trim();
-        
-        // Remove quotes from song name if present
-        let song_name = if song_part.starts_with('"') && song_part.ends_with('"') {
-            song_part[1..song_part.len() - 1].trim().to_string()
-        } else {
-            song_part.to_string()
-        };
-        
-        let artist = if artist_part.is_empty() {
-            None
-        } else {
-            Some(artist_part.to_string())
-        };
-        
-        (song_name, artist)
-    } else {
-        // No separator found, treat entire string as song name
-        let song_name = if trimmed.starts_with('"') && trimmed.ends_with('"') {
-            trimmed[1..trimmed.len() - 1].trim().to_string()
-        } else {
-            trimmed.to_string()
-        };
-        
-        (song_name, None)
-    }
-}
 
 /// Build a song from the current active project
 pub fn build_song_from_current_project() -> Result<Song, SetlistError> {
@@ -296,7 +152,7 @@ pub fn build_setlist_from_open_projects(existing_setlist: Option<&Setlist>) -> R
 
 /// Build multiple songs from markers and regions in a project
 /// A project can have multiple songs if it has multiple song regions (each with a SONGSTART or =START marker)
-fn build_songs_from_project(
+pub fn build_songs_from_project(
     project_name: &str,
     markers: &[Marker],
     regions: &[Region],
@@ -308,7 +164,7 @@ fn build_songs_from_project(
 
 /// Build multiple songs from markers and regions in a project, with caching support
 /// If `existing_setlist` is provided, reuses existing songs instead of rebuilding them
-fn build_songs_from_project_with_cache(
+pub fn build_songs_from_project_with_cache(
     project_name: &str,
     markers: &[Marker],
     regions: &[Region],
@@ -662,7 +518,7 @@ fn build_songs_from_project_with_cache(
 }
 
 /// Build a song from a specific song region
-fn build_song_from_region(
+pub fn build_song_from_region(
     song_name: &str,
     start_marker: &Marker,
     song_region: &Region,
@@ -783,164 +639,8 @@ fn build_song_from_region(
     song.set_song_region_start_marker(start_marker);
     song.set_song_region_end_marker(end_marker);
     
-    // Find sections (regions within the song region)
-    let song_start = song.start_position()
-        .map(|p| p.time.to_seconds())
-        .or_else(|| song.song_region_start().map(|p| p.time.to_seconds()))
-        .unwrap_or(song_region.start_seconds());
-    let song_end = song.song_end_position()
-        .map(|p| p.time.to_seconds())
-        .or_else(|| song.song_region_end().map(|p| p.time.to_seconds()))
-        .unwrap_or(song_region.end_seconds());
-    
-    let mut sections: Vec<Section> = all_regions
-        .iter()
-        .filter_map(|region| {
-            // Section must be within the song region boundaries
-            if region.start_seconds() < song_region.start_seconds() || 
-               region.end_seconds() > song_region.end_seconds() {
-                return None;
-            }
-            
-            // Don't include the song region itself
-            if region.start_seconds() == song_region.start_seconds() &&
-               region.end_seconds() == song_region.end_seconds() {
-                return None;
-            }
-            
-            // Section must be within song boundaries (SONGSTART to SONGEND)
-            if region.start_seconds() < song_start || region.end_seconds() > song_end {
-                return None;
-            }
-            
-            // Try to parse section type from region name
-            let section_type = parse_section_type_from_name(&region.name);
-            
-            // If we couldn't parse a section type, use Custom to indicate it's an unrecognized section
-            let section_type = section_type.unwrap_or(SectionType::Custom);
-            
-            // Extract number from name if present (but not for Custom sections)
-            let number = if matches!(section_type, SectionType::Custom) {
-                None // Custom sections should not have numbers extracted
-            } else {
-                extract_number_from_name(&region.name)
-            };
-            
-            // Create section with musical positions
-            let start_pos = region.time_range.start.clone();
-            let end_pos = region.time_range.end.clone();
-            
-            match Section::new(
-                section_type,
-                start_pos,
-                end_pos,
-                region.name.clone(),
-                number,
-            ) {
-                Ok(mut section) => {
-                    // Store color from region directly in section
-                    section.color = region.color;
-                    // Log color for debugging
-                    if let Some(color_val) = region.color {
-                        debug!(
-                            section_name = %section.name,
-                            region_name = %region.name,
-                            color = color_val,
-                            "Stored color in section"
-                        );
-                    }
-                    // Calculate and store length_measures in metadata (computed field, not stored in struct)
-                    if let Some(length_measures) = section.length_measures() {
-                        section.metadata.insert("length_measures".to_string(), length_measures.to_string());
-                    }
-                    record_section_created();
-                    Some(section)
-                }
-                Err(e) => {
-                    warn!(error = %e, name = %region.name, "Failed to create section");
-                    None
-                }
-            }
-        })
-        .collect();
-    
-    // Add count-in section if count-in marker exists and is before song start
-    if let Some(ref count_in_marker) = song.count_in_marker {
-        let count_in_start = count_in_marker.position.time.to_seconds();
-        let song_start_pos = song.start_position()
-            .map(|p| p.time.to_seconds())
-            .or_else(|| song.song_region_start().map(|p| p.time.to_seconds()))
-            .unwrap_or(song_start);
-        
-        if count_in_start < song_start_pos {
-            // Create count-in section from count-in marker to song start
-            let count_in_start_pos = count_in_marker.position.clone();
-            // Get song start position - we just set start_marker above, so it should exist
-            let song_start_pos_clone = song.start_marker.as_ref()
-                .map(|m| m.position.clone())
-                .or_else(|| song.song_region_start_marker.as_ref().map(|m| m.position.clone()))
-                .unwrap_or_else(|| start_marker_position.clone());
-            
-            match Section::new(
-                SectionType::Custom,
-                count_in_start_pos,
-                song_start_pos_clone,
-                "Count-In".to_string(),
-                None,
-            ) {
-                Ok(mut count_in_section) => {
-                    // Calculate and store length_measures in metadata
-                    if let Some(length_measures) = count_in_section.length_measures() {
-                        count_in_section.metadata.insert("length_measures".to_string(), length_measures.to_string());
-                    }
-                    record_section_created();
-                    sections.push(count_in_section);
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to create count-in section");
-                }
-            }
-        }
-    }
-    
-    // Add end section (from SONGEND to =END) if both exist
-    if let Some(ref song_end_marker) = song.song_end_marker {
-        let end_marker = song.end_marker.as_ref().or_else(|| song.render_end_marker.as_ref());
-        if let Some(end_marker) = end_marker {
-            let song_end_pos = song_end_marker.position.time.to_seconds();
-            let end_pos = end_marker.position.time.to_seconds();
-            
-            if song_end_pos < end_pos {
-                // Create end section from SONGEND to =END
-                match Section::new(
-                    SectionType::Custom,
-                    song_end_marker.position.clone(),
-                    end_marker.position.clone(),
-                    "End".to_string(),
-                    None,
-                ) {
-                    Ok(mut end_section) => {
-                        // Calculate and store length_measures in metadata
-                        if let Some(length_measures) = end_section.length_measures() {
-                            end_section.metadata.insert("length_measures".to_string(), length_measures.to_string());
-                        }
-                        record_section_created();
-                        sections.push(end_section);
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "Failed to create end section");
-                    }
-                }
-            }
-        }
-    }
-    
-    // Sort sections by start position
-    sections.sort_by(|a, b| {
-        a.start_seconds()
-            .partial_cmp(&b.start_seconds())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    // Build sections from regions
+    let sections = build_sections_from_regions(all_regions, &song, song_region);
     
     // Add sections to song
     for section in sections {
@@ -1036,14 +736,35 @@ fn build_song_from_region(
         }
     }
     
-    // Transport info will be populated in update_setlist_state from the project
-    // We don't attach the project to the song anymore - just store transport_info
+    // Read current transport info and store it in the song's project field
+    // This ensures transport state (playhead position, play state, tempo, etc.) is included in the setlist
+    use crate::implementation::transport::ReaperTransport;
+    
+    let reaper_project = project.clone();
+    let transport_adapter = ReaperTransport::new(reaper_project);
+    
+    // Read current transport state and store it in the song
+    match transport_adapter.read_transport() {
+        Ok(transport) => {
+            // Create a Project<Transport> with the current transport state
+            let project_name_str = project_name.unwrap_or(parsed_song_name.as_str());
+            let mut project_with_transport = daw::project::Project::new(project_name_str, transport);
+            if let Some(path) = project_path {
+                project_with_transport.set_path(path.to_string_lossy().to_string());
+            }
+            song.set_project(project_with_transport);
+            debug!(song_name = %parsed_song_name, "Stored transport info in song");
+        }
+        Err(e) => {
+            warn!(song_name = %parsed_song_name, error = %e, "Failed to read transport info for song");
+        }
+    }
     
     Ok(song)
 }
 
 /// Build a song from markers and regions in a project (simple version when no song regions found)
-fn build_song_from_project_simple(
+pub fn build_song_from_project_simple(
     project_name: &str,
     markers: &[Marker],
     regions: &[Region],
@@ -1140,161 +861,8 @@ fn build_song_from_project_simple(
         );
     }
 
-    // Find sections (regions within the song)
-    let song_start = song.start_position()
-        .map(|p| p.time.to_seconds())
-        .or_else(|| song.song_region_start().map(|p| p.time.to_seconds()))
-        .unwrap_or(0.0);
-    let song_end = song.song_end_position()
-        .map(|p| p.time.to_seconds())
-        .or_else(|| song.song_region_end().map(|p| p.time.to_seconds()))
-        .unwrap_or(f64::MAX);
-
-    let mut sections: Vec<Section> = regions
-        .iter()
-        .filter_map(|region| {
-            // Section must be within the song boundaries
-            if region.start_seconds() < song_start || region.end_seconds() > song_end {
-                return None;
-            }
-
-            // Don't include the song region itself
-            if let Some(song_region_start) = song.song_region_start() {
-                if let Some(song_region_end) = song.song_region_end() {
-                    if region.start_seconds() == song_region_start.time.to_seconds() &&
-                       region.end_seconds() == song_region_end.time.to_seconds() {
-                        return None;
-                    }
-                }
-            }
-
-            // Try to parse section type from region name
-            let section_type = parse_section_type_from_name(&region.name);
-
-            // Extract number from name if present
-            let number = extract_number_from_name(&region.name);
-
-            // Create section with musical positions
-            let start_pos = region.time_range.start.clone();
-            let end_pos = region.time_range.end.clone();
-
-            // If we couldn't parse a section type, use Custom to indicate it's an unrecognized section
-            let section_type = section_type.unwrap_or(SectionType::Custom);
-
-            match Section::new(
-                section_type,
-                start_pos,
-                end_pos,
-                region.name.clone(),
-                number,
-            ) {
-                Ok(mut section) => {
-                    // Store color from region directly in section
-                    section.color = region.color;
-                    // Log color for debugging
-                    if let Some(color_val) = region.color {
-                        debug!(
-                            section_name = %section.name,
-                            region_name = %region.name,
-                            color = color_val,
-                            "Stored color in section"
-                        );
-                    }
-                    // Calculate and store length_measures in metadata (computed field, not stored in struct)
-                    if let Some(length_measures) = section.length_measures() {
-                        section.metadata.insert("length_measures".to_string(), length_measures.to_string());
-                    }
-                    record_section_created();
-                    Some(section)
-                }
-                Err(e) => {
-                    warn!(error = %e, name = %region.name, "Failed to create section");
-                    None
-                }
-            }
-        })
-        .collect();
-
-    // Add count-in section if count-in marker exists and is before song start
-    if let Some(ref count_in_marker) = song.count_in_marker {
-        let count_in_start = count_in_marker.position.time.to_seconds();
-        let song_start_pos = song.start_position()
-            .map(|p| p.time.to_seconds())
-            .or_else(|| song.song_region_start().map(|p| p.time.to_seconds()))
-            .unwrap_or(0.0);
-        
-        if count_in_start < song_start_pos {
-            // Create count-in section from count-in marker to song start
-            let count_in_start_pos = count_in_marker.position.clone();
-            let song_start_pos_clone = song.start_marker.as_ref()
-                .map(|m| m.position.clone())
-                .or_else(|| song.song_region_start_marker.as_ref().map(|m| m.position.clone()))
-                .unwrap_or_else(|| {
-                    // Fallback: create a marker from seconds and use its position
-                    // This ensures we have a valid Position with musical time
-                    Marker::from_seconds(song_start_pos, "SONGSTART".to_string()).position
-                });
-            
-            match Section::new(
-                SectionType::Custom,
-                count_in_start_pos,
-                song_start_pos_clone,
-                "Count-In".to_string(),
-                None,
-            ) {
-                Ok(mut count_in_section) => {
-                    // Calculate and store length_measures in metadata
-                    if let Some(length_measures) = count_in_section.length_measures() {
-                        count_in_section.metadata.insert("length_measures".to_string(), length_measures.to_string());
-                    }
-                    record_section_created();
-                    sections.push(count_in_section);
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to create count-in section");
-                }
-            }
-        }
-    }
-    
-    // Add end section (from SONGEND to =END) if both exist
-    if let Some(ref song_end_marker) = song.song_end_marker {
-        let end_marker = song.end_marker.as_ref().or_else(|| song.render_end_marker.as_ref());
-        if let Some(end_marker) = end_marker {
-            let song_end_pos = song_end_marker.position.time.to_seconds();
-            let end_pos = end_marker.position.time.to_seconds();
-            
-            if song_end_pos < end_pos {
-                // Create end section from SONGEND to =END
-                match Section::new(
-                    SectionType::Custom,
-                    song_end_marker.position.clone(),
-                    end_marker.position.clone(),
-                    "End".to_string(),
-                    None,
-                ) {
-                    Ok(mut end_section) => {
-                        // Calculate and store length_measures in metadata
-                        if let Some(length_measures) = end_section.length_measures() {
-                            end_section.metadata.insert("length_measures".to_string(), length_measures.to_string());
-                        }
-                        record_section_created();
-                        sections.push(end_section);
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "Failed to create end section");
-                    }
-                }
-            }
-        }
-    }
-
-    // Sort sections by start position
-    sections.sort_by(|a, b| {
-        a.start_seconds()
-            .partial_cmp(&b.start_seconds())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    // Build sections from regions
+    let sections = build_sections_from_regions_simple(regions, &song);
 
     // Add sections to song
     for section in sections {
@@ -1328,333 +896,29 @@ fn build_song_from_project_simple(
         }
     }
 
-    // Transport info will be populated in update_setlist_state from the project
-    // We don't attach the project to the song anymore - just store transport_info
+    // Read current transport info and store it in the song's project field
+    // This ensures transport state (playhead position, play state, tempo, etc.) is included in the setlist
+    use crate::implementation::transport::ReaperTransport;
+    
+    let reaper_project = project.clone();
+    let transport_adapter = ReaperTransport::new(reaper_project);
+    
+    // Read current transport state and store it in the song
+    match transport_adapter.read_transport() {
+        Ok(transport) => {
+            // Create a Project<Transport> with the current transport state
+            let mut project_with_transport = daw::project::Project::new(project_name, transport);
+            if let Some(path) = project_path {
+                project_with_transport.set_path(path.to_string_lossy().to_string());
+            }
+            song.set_project(project_with_transport);
+            debug!(song_name = %parsed_song_name, "Stored transport info in song");
+        }
+        Err(e) => {
+            warn!(song_name = %parsed_song_name, error = %e, "Failed to read transport info for song");
+        }
+    }
 
     Ok(song)
-}
-
-/// Find a marker by name (case-insensitive)
-fn find_marker_by_name<'a>(markers: &'a [Marker], name: &str) -> Option<&'a Marker> {
-    markers.iter().find(|m| {
-        m.name.trim().eq_ignore_ascii_case(name)
-    })
-}
-
-/// Find song regions by identifying regions that contain other regions (sections)
-/// A song region is the largest region that contains multiple other regions within it.
-fn find_song_regions(regions: &[Region]) -> Vec<Region> {
-    let mut song_regions = Vec::new();
-    
-    for potential_song_region in regions {
-        // Count how many other regions are contained within this region
-        let contained_regions: Vec<&Region> = regions.iter()
-            .filter(|other_region| {
-                // Don't count self
-                if other_region.start_seconds() == potential_song_region.start_seconds() &&
-                   other_region.end_seconds() == potential_song_region.end_seconds() {
-                    return false;
-                }
-                
-                // Check if other_region is contained within potential_song_region
-                other_region.start_seconds() >= potential_song_region.start_seconds() &&
-                other_region.end_seconds() <= potential_song_region.end_seconds()
-            })
-            .collect();
-        
-        // If this region contains at least 2 other regions (sections), it's likely a song
-        // Also check if it's significantly larger than the sections it contains
-        if contained_regions.len() >= 2 {
-            let song_duration = potential_song_region.end_seconds() - potential_song_region.start_seconds();
-            let avg_section_duration: f64 = contained_regions.iter()
-                .map(|r| r.end_seconds() - r.start_seconds())
-                .sum::<f64>() / contained_regions.len() as f64;
-            
-            // Song region should be at least 1.5x the average section duration
-            // This ensures we're identifying a container, not just a larger section
-            if song_duration >= avg_section_duration * 1.5 {
-                song_regions.push(potential_song_region.clone());
-            }
-        }
-    }
-    
-    // Sort by start position for consistency
-    song_regions.sort_by(|a, b| {
-        a.start_seconds().partial_cmp(&b.start_seconds())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    
-    song_regions
-}
-
-/// Find the song region for a specific SONGSTART marker
-/// Returns the largest region that contains the marker and the most sections
-fn find_song_region_for_marker<'a>(
-    start_marker: &Marker,
-    _markers: &'a [Marker],
-    regions: &'a [Region],
-) -> Option<Region> {
-    // Find all regions that contain this marker
-    let containing_regions: Vec<&Region> = regions.iter()
-        .filter(|r| {
-            r.start_seconds() <= start_marker.position_seconds() &&
-            r.end_seconds() >= start_marker.position_seconds()
-        })
-        .collect();
-    
-    // Debug: Log all containing regions and their colors
-    debug!(
-        marker_pos = start_marker.position_seconds(),
-        containing_count = containing_regions.len(),
-        "Finding song region for marker"
-    );
-    for (idx, region) in containing_regions.iter().enumerate() {
-        debug!(
-            idx = idx,
-            region_name = %region.name,
-            region_color = ?region.color,
-            start = region.start_seconds(),
-            end = region.end_seconds(),
-            "Containing region candidate"
-        );
-    }
-    
-    if containing_regions.is_empty() {
-        return None;
-    }
-    
-    // If only one, use it
-    if containing_regions.len() == 1 {
-        let selected = containing_regions[0].clone();
-        debug!(
-            region_name = %selected.name,
-            region_color = ?selected.color,
-            "Selected single containing region as song region"
-        );
-        return Some(selected);
-    }
-    
-    // If multiple, find the one that contains the most other regions (sections)
-    // This is the parent container (song region)
-    let mut best_region: Option<&Region> = None;
-    let mut max_contained_count = 0;
-    
-    for candidate in &containing_regions {
-        let contained_count = regions.iter()
-            .filter(|other| {
-                // Don't count self
-                if other.start_seconds() == candidate.start_seconds() &&
-                   other.end_seconds() == candidate.end_seconds() {
-                    return false;
-                }
-                
-                // Check if contained
-                other.start_seconds() >= candidate.start_seconds() &&
-                other.end_seconds() <= candidate.end_seconds()
-            })
-            .count();
-        
-        if contained_count > max_contained_count {
-            max_contained_count = contained_count;
-            best_region = Some(candidate);
-        } else if contained_count == max_contained_count && max_contained_count > 0 {
-            // If tied, prefer the larger one (longer duration)
-            if let Some(current_best) = best_region {
-                let candidate_duration = candidate.end_seconds() - candidate.start_seconds();
-                let best_duration = current_best.end_seconds() - current_best.start_seconds();
-                if candidate_duration > best_duration {
-                    best_region = Some(candidate);
-                }
-            }
-        }
-    }
-    
-    if let Some(selected) = best_region {
-        let cloned = selected.clone();
-        debug!(
-            region_name = %cloned.name,
-            region_color = ?cloned.color,
-            contained_sections = max_contained_count,
-            "Selected best containing region as song region"
-        );
-        Some(cloned)
-    } else {
-        None
-    }
-}
-
-/// Find the song region (largest region that contains SONGSTART or contains multiple sections)
-/// This is the old single-song-per-project version - kept for backward compatibility
-fn find_song_region<'a>(markers: &'a [Marker], regions: &'a [Region]) -> Option<&'a Region> {
-    // First, try to find a region that contains SONGSTART
-    if let Some(start_marker) = find_marker_by_name(markers, "SONGSTART") {
-        let containing_regions: Vec<&Region> = regions
-            .iter()
-            .filter(|r| {
-                r.start_seconds() <= start_marker.position_seconds() &&
-                r.end_seconds() >= start_marker.position_seconds()
-            })
-            .collect();
-
-        if !containing_regions.is_empty() {
-            // Return the largest containing region
-            return containing_regions
-                .iter()
-                .max_by(|a, b| {
-                    let a_duration = a.end_seconds() - a.start_seconds();
-                    let b_duration = b.end_seconds() - b.start_seconds();
-                    a_duration.partial_cmp(&b_duration).unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .copied();
-        }
-    }
-
-    // If no SONGSTART, find regions that contain multiple other regions (sections)
-    for potential_song_region in regions {
-        let contained_count = regions
-            .iter()
-            .filter(|other| {
-                // Don't count self
-                if other.start_seconds() == potential_song_region.start_seconds() &&
-                   other.end_seconds() == potential_song_region.end_seconds() {
-                    return false;
-                }
-                // Check if contained
-                other.start_seconds() >= potential_song_region.start_seconds() &&
-                other.end_seconds() <= potential_song_region.end_seconds()
-            })
-            .count();
-
-        // If this region contains at least 2 other regions, it's likely a song
-        if contained_count >= 2 {
-            return Some(potential_song_region);
-        }
-    }
-
-    None
-}
-
-/// Parse section type from region name
-/// Handles names like "INST 1a", "VS 1", "CH 2", "BR 1", etc.
-/// Extracts the section type prefix before any numbers or letters
-fn parse_section_type_from_name(name: &str) -> Option<SectionType> {
-    let name = name.trim();
-    
-    // Try exact match first
-    if let Ok(section_type) = SectionType::from_str(name) {
-        return Some(section_type);
-    }
-    
-    // Extract the prefix before any number or letter suffix
-    // Examples: "INST 1a" -> "INST", "VS 1" -> "VS", "CH 2" -> "CH"
-    // Split by whitespace and take the first part
-    let parts: Vec<&str> = name.split_whitespace().collect();
-    if let Some(prefix) = parts.first() {
-        // Try matching the prefix
-        if let Ok(section_type) = SectionType::from_str(prefix) {
-            return Some(section_type);
-        }
-    }
-    
-    // Try matching common patterns like "INST1a", "VS1", "CH2" (no space)
-    // Check if it starts with a known abbreviation followed by a digit or letter
-    let name_lower = name.to_lowercase();
-    
-    // Check for full words first (longer matches first to avoid false positives)
-    if name_lower.starts_with("instrumental") {
-        return Some(SectionType::Instrumental);
-    }
-    if name_lower.starts_with("intro") {
-        return Some(SectionType::Intro);
-    }
-    if name_lower.starts_with("outro") {
-        return Some(SectionType::Outro);
-    }
-    if name_lower.starts_with("verse") {
-        return Some(SectionType::Verse);
-    }
-    if name_lower.starts_with("chorus") {
-        return Some(SectionType::Chorus);
-    }
-    if name_lower.starts_with("bridge") {
-        return Some(SectionType::Bridge);
-    }
-    
-    // Check for abbreviations (check longer ones first)
-    // "inst" must be checked before "in" to avoid false matches
-    if name_lower.starts_with("inst") {
-        // Check if it's exactly "inst" or followed by a digit/letter (like "inst1a")
-        if name_lower.len() == 4 || (name_lower.len() > 4 && name_lower.chars().nth(4).map(|c| c.is_alphanumeric()).unwrap_or(false)) {
-            return Some(SectionType::Instrumental);
-        }
-    }
-    if name_lower.starts_with("vs") {
-        // Check if it's exactly "vs" or followed by a digit/letter (like "vs1")
-        if name_lower.len() == 2 || (name_lower.len() > 2 && name_lower.chars().nth(2).map(|c| c.is_alphanumeric()).unwrap_or(false)) {
-            return Some(SectionType::Verse);
-        }
-    }
-    if name_lower.starts_with("ch") {
-        // Check if it's exactly "ch" or followed by a digit/letter (like "ch2")
-        if name_lower.len() == 2 || (name_lower.len() > 2 && name_lower.chars().nth(2).map(|c| c.is_alphanumeric()).unwrap_or(false)) {
-            return Some(SectionType::Chorus);
-        }
-    }
-    if name_lower.starts_with("br") {
-        // Check if it's exactly "br" or followed by a digit/letter (like "br1")
-        if name_lower.len() == 2 || (name_lower.len() > 2 && name_lower.chars().nth(2).map(|c| c.is_alphanumeric()).unwrap_or(false)) {
-            return Some(SectionType::Bridge);
-        }
-    }
-    if name_lower.starts_with("in") && !name_lower.starts_with("inst") {
-        // Only match "in" if it's not "inst" (already checked above)
-        if name_lower.len() == 2 || (name_lower.len() > 2 && name_lower.chars().nth(2).map(|c| c.is_alphanumeric()).unwrap_or(false)) {
-            return Some(SectionType::Intro);
-        }
-    }
-    if name_lower.starts_with("out") {
-        // Check if it's exactly "out" or followed by a digit/letter (like "out1")
-        if name_lower.len() == 3 || (name_lower.len() > 3 && name_lower.chars().nth(3).map(|c| c.is_alphanumeric()).unwrap_or(false)) {
-            return Some(SectionType::Outro);
-        }
-    }
-    
-    // Try Pre/Post prefixes
-    if name_lower.starts_with("pre-") {
-        if let Some(rest) = name_lower.strip_prefix("pre-") {
-            if let Some(inner) = parse_section_type_from_name(rest) {
-                return Some(SectionType::Pre(Box::new(inner)));
-            }
-        }
-    }
-    if name_lower.starts_with("post-") {
-        if let Some(rest) = name_lower.strip_prefix("post-") {
-            if let Some(inner) = parse_section_type_from_name(rest) {
-                return Some(SectionType::Post(Box::new(inner)));
-            }
-        }
-    }
-    
-    None
-}
-
-/// Extract number from name (e.g., "Verse 1", "CH 2")
-fn extract_number_from_name(name: &str) -> Option<u32> {
-    let name_lower = name.to_lowercase();
-    let parts: Vec<&str> = name_lower.split_whitespace().collect();
-
-    for part in &parts {
-        if let Ok(num) = part.parse::<u32>() {
-            return Some(num);
-        }
-        // Also check if number follows section type abbreviation
-        if part.len() > 2 {
-            if let Ok(num) = part[2..].parse::<u32>() {
-                return Some(num);
-            }
-        }
-    }
-
-    None
 }
 

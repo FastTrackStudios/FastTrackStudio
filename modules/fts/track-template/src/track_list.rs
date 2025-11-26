@@ -216,27 +216,132 @@ impl TrackList {
     fn build_hierarchy_name_from_parsed(&self, parsed: &naming_convention::TrackName) -> String {
         let mut parts = Vec::new();
         
+        // Track what we've already added to avoid duplicates
+        let mut added_sub_type = String::new();
+        
         // Add sub_type (e.g., "Kick", "Snare", "Bass Guitar")
         // Use the last sub_type (most specific) for hierarchy display
         // But remove "GTR E" if it's part of the sub_type (it should be prefix, not sub_type)
+        // Also remove the group prefix if it appears in the sub_type (e.g., "Bass Guitar" -> "Guitar" when prefix is "Bass")
         if let Some(sub_types) = &parsed.sub_type {
             if let Some(last_sub_type) = sub_types.last() {
                 let mut sub_type = last_sub_type.clone();
-                // Remove "GTR E " if it appears at the start of sub_type
-                if sub_type.starts_with("GTR E ") {
-                    sub_type = sub_type[6..].trim_start().to_string();
-                } else if sub_type == "GTR E" {
-                    sub_type = String::new();
+                
+                // Remove group prefix from sub_type if it appears at the start or anywhere
+                // This handles cases like "Bass Guitar" when prefix is "Bass" -> should be just "Guitar"
+                // Also handle cases where prefix is a single letter (like "B") but sub_type contains the full group name (like "Bass Guitar")
+                if let Some(prefix) = &parsed.group_prefix {
+                    let prefix_with_space = format!("{} ", prefix);
+                    // First, try removing from the start
+                    if sub_type.starts_with(&prefix_with_space) {
+                        sub_type = sub_type[prefix_with_space.len()..].trim_start().to_string();
+                    } else if &sub_type == prefix {
+                        // Sub_type is exactly the prefix - don't add it
+                        sub_type = String::new();
+                    } else {
+                        // Check if prefix is a single letter and sub_type starts with a word that starts with that letter
+                        // This handles "Bass Guitar" when prefix is "B" -> remove "Bass" to get "Guitar"
+                        // BUT: Don't remove if the word is a common instrument name that happens to start with that letter
+                        // (e.g., "Drums" when prefix is "D" should NOT be removed - "Drums" is the actual sub_type)
+                        if prefix.len() == 1 {
+                            let words: Vec<&str> = sub_type.split_whitespace().collect();
+                            if !words.is_empty() {
+                                let first_word = words[0];
+                                // Check if first word starts with the prefix letter
+                                if first_word.starts_with(prefix) && first_word.len() > prefix.len() {
+                                    // Only remove if it's a known group name pattern, not just any word
+                                    // Known group names that should be removed: "Bass" (for "B"), "Guitar" (for "G" when part of "Bass Guitar")
+                                    // Known instrument names that should NOT be removed: "Drums", "Keys", etc.
+                                    let known_group_names = ["Bass", "Guitar"]; // Add more as needed
+                                    if known_group_names.iter().any(|&name| first_word.eq_ignore_ascii_case(name)) {
+                                        // This is a known group name - remove it from the sub_type
+                                        if words.len() > 1 {
+                                            sub_type = words[1..].join(" ");
+                                        } else {
+                                            sub_type = String::new();
+                                        }
+                                    }
+                                    // Otherwise, keep the word (it's an instrument name like "Drums", "Keys", etc.)
+                                }
+                            }
+                        }
+                        
+                        // Also check if prefix appears anywhere in the sub_type
+                        if sub_type.contains(&prefix_with_space) {
+                            // Prefix appears somewhere in the middle - remove it
+                            sub_type = sub_type.replace(&prefix_with_space, " ").trim().to_string();
+                        } else if sub_type.contains(prefix) && &sub_type != prefix {
+                            // Prefix appears as a word (not at start) - try to remove it
+                            // This handles "Guitar Bass" -> "Guitar" (though this case is less common)
+                            let words: Vec<&str> = sub_type.split_whitespace().collect();
+                            let filtered_words: Vec<&str> = words.iter()
+                                .filter(|w| !w.eq_ignore_ascii_case(prefix))
+                                .copied()
+                                .collect();
+                            if !filtered_words.is_empty() {
+                                sub_type = filtered_words.join(" ");
+                            } else {
+                                sub_type = String::new();
+                            }
+                        }
+                    }
                 }
-                if !sub_type.is_empty() {
-                    parts.push(sub_type);
+                
+                // Remove "GTR E " if it appears at the start of sub_type
+                // Special case: "GTR E Clean" -> extract "Clean" as the arrangement, not sub_type
+                // Special case: "GTR E Lead" -> extract "Lead" as the arrangement, not sub_type
+                if sub_type.starts_with("GTR E ") {
+                    // Extract the part after "GTR E " - this is likely the arrangement
+                    let after_gtr_e = sub_type[6..].trim_start().to_string();
+                    // If it's a known arrangement word (like "Clean", "Lead"), treat it as arrangement
+                    // Add it to parts so it appears in the hierarchy name
+                    if after_gtr_e == "Clean" || after_gtr_e == "Lead" {
+                        // Add as arrangement (will be checked below to avoid duplicates)
+                        // But also mark it so we don't add it twice
+                        parts.push(after_gtr_e.clone());
+                        added_sub_type = after_gtr_e.clone();
+                    } else {
+                        // It's a real sub_type like "GTR E Guitar" -> "Guitar"
+                        parts.push(after_gtr_e.clone());
+                        added_sub_type = after_gtr_e;
+                    }
+                } else if sub_type == "GTR E" {
+                    // Just "GTR E" - don't add anything
+                } else if !sub_type.is_empty() {
+                    // Don't add sub_type if it matches the group prefix (redundant)
+                    // e.g., "Bass" sub_type when prefix is "Bass" -> don't add "Bass" again
+                    let should_add = if let Some(prefix) = &parsed.group_prefix {
+                        !sub_type.eq_ignore_ascii_case(prefix)
+                    } else {
+                        true
+                    };
+                    if should_add {
+                        parts.push(sub_type.clone());
+                        added_sub_type = sub_type;
+                    }
                 }
             }
         }
         
         // Add arrangement if it doesn't match sub_type (e.g., "Lead", "Clean")
+        // Also don't add if it matches the group prefix (e.g., "Bass" arrangement when prefix is "Bass")
         if let Some(arrangement) = &parsed.arrangement {
-            let should_include = if let Some(ref sub_types) = parsed.sub_type {
+            let should_include = if let Some(prefix) = &parsed.group_prefix {
+                // Don't add arrangement if it matches the group prefix
+                if arrangement.eq_ignore_ascii_case(prefix) {
+                    false
+                } else if !added_sub_type.is_empty() {
+                    // Don't add if we already added it as sub_type (after removing "GTR E ")
+                    !added_sub_type.eq_ignore_ascii_case(arrangement)
+                } else if let Some(ref sub_types) = parsed.sub_type {
+                    !sub_types.iter().any(|st| st.eq_ignore_ascii_case(arrangement))
+                } else {
+                    true
+                }
+            } else if !added_sub_type.is_empty() {
+                // Don't add if we already added it as sub_type (after removing "GTR E ")
+                !added_sub_type.eq_ignore_ascii_case(arrangement)
+            } else if let Some(ref sub_types) = parsed.sub_type {
                 !sub_types.iter().any(|st| st.eq_ignore_ascii_case(arrangement))
             } else {
                 true
@@ -273,6 +378,16 @@ impl TrackList {
         
         let mut result = parts.join(" ");
         
+        // Remove duplicate consecutive words (e.g., "Guitar Guitar" -> "Guitar")
+        let words: Vec<&str> = result.split_whitespace().collect();
+        let mut deduplicated_words = Vec::new();
+        for word in words {
+            if deduplicated_words.is_empty() || deduplicated_words.last() != Some(&word) {
+                deduplicated_words.push(word);
+            }
+        }
+        result = deduplicated_words.join(" ");
+
         // Remove "GTR E " if it appears at the start (should be prefix, not part of hierarchy)
         // This handles cases where parser includes "GTR E" in sub_type
         if result.starts_with("GTR E ") {
@@ -281,6 +396,35 @@ impl TrackList {
             result = String::new();
         }
         
+        // Remove group prefix from result if it appears at the start
+        // This handles cases where parser includes the prefix in sub_type or arrangement
+        // e.g., "Bass Guitar" when prefix is "Bass" -> should be just "Guitar"
+        if let Some(prefix) = &parsed.group_prefix {
+            let prefix_with_space = format!("{} ", prefix);
+            // Try removing from start first
+            if result.starts_with(&prefix_with_space) {
+                result = result[prefix_with_space.len()..].trim_start().to_string();
+            } else if &result == prefix {
+                // Result is exactly the prefix - clear it
+                result = String::new();
+            } else if result.contains(&prefix_with_space) {
+                // Prefix appears somewhere in the result - remove it
+                result = result.replace(&prefix_with_space, " ").trim().to_string();
+            } else if result.contains(prefix) && &result != prefix {
+                // Prefix appears as a word (not at start) - try to remove it
+                let words: Vec<&str> = result.split_whitespace().collect();
+                let filtered_words: Vec<&str> = words.iter()
+                    .filter(|w| !w.eq_ignore_ascii_case(prefix))
+                    .copied()
+                    .collect();
+                if !filtered_words.is_empty() {
+                    result = filtered_words.join(" ");
+                } else {
+                    result = String::new();
+                }
+            }
+        }
+
         result
     }
     
@@ -292,6 +436,76 @@ impl TrackList {
         
         // First, try to build from parsed components
         let mut result = self.build_hierarchy_name_from_parsed(&parsed);
+        
+        // Workaround: If the parser incorrectly parsed the sub_type (e.g., "D Drums" -> sub_type=["Snare"]),
+        // check if the parsed sub_type actually appears in the track name
+        // If not, try to extract the sub_type from the original track name directly
+        if let Some(parsed_sub_types) = &parsed.sub_type {
+            if !parsed_sub_types.is_empty() {
+                let parsed_sub_type = parsed_sub_types.last().unwrap();
+                let name_lower = track.name.to_lowercase();
+                let sub_type_lower = parsed_sub_type.to_lowercase();
+                
+                // If the parsed sub_type doesn't appear in the track name, it's likely wrong
+                // (e.g., "D Drums" parsed as sub_type="Snare" - "Snare" doesn't appear in "D Drums")
+                if !name_lower.contains(&sub_type_lower) {
+                    // Parser returned incorrect sub_type - try to extract from track name directly
+                    let name_without_type = if let Some(track_type) = &track.track_type {
+                        track.name.replace(&format!(" ({})", track_type), "")
+                    } else {
+                        track.name.clone()
+                    };
+                    
+                    // Remove group prefix from name
+                    // Only remove if it's actually a prefix (followed by space), not part of a word
+                    let name_clean = if let Some(prefix) = &parsed.group_prefix {
+                        let prefix_with_space = format!("{} ", prefix);
+                        if name_without_type.starts_with(&prefix_with_space) {
+                            // Prefix is followed by space - safe to remove
+                            name_without_type[prefix_with_space.len()..].trim_start().to_string()
+                        } else if name_without_type == prefix {
+                            // Name is exactly the prefix - clear it
+                            String::new()
+                        } else if prefix.len() == 1 {
+                            // Single-letter prefix - only remove if followed by space
+                            // Don't remove if it's part of a word (e.g., "Bass" shouldn't have "B" removed)
+                            let prefix_with_space = format!("{} ", prefix);
+                            if name_without_type.starts_with(&prefix_with_space) {
+                                name_without_type[prefix_with_space.len()..].trim_start().to_string()
+                            } else {
+                                // Prefix is part of a word (e.g., "Bass" contains "B" but "B" is not a prefix)
+                                name_without_type
+                            }
+                        } else {
+                            // Multi-letter prefix - check if it's actually a prefix
+                            if name_without_type.starts_with(prefix) {
+                                // Check if it's followed by space or end of string
+                                if name_without_type.len() > prefix.len() {
+                                    let after_prefix = &name_without_type[prefix.len()..];
+                                    if after_prefix.is_empty() || after_prefix.starts_with(' ') {
+                                        after_prefix.trim_start().to_string()
+                                    } else {
+                                        // Prefix is part of a word - don't remove
+                                        name_without_type
+                                    }
+                                } else {
+                                    name_without_type
+                                }
+                            } else {
+                                name_without_type
+                            }
+                        }
+                    } else {
+                        name_without_type
+                    };
+                    
+                    // Use the cleaned name as the hierarchy name
+                    if !name_clean.is_empty() {
+                        result = name_clean;
+                    }
+                }
+            }
+        }
         
         // Remove track type from result if present (we'll add it back in display logic if needed)
         if let Some(track_type) = &track.track_type {
@@ -318,20 +532,31 @@ impl TrackList {
                 result = result[prefix_with_space.len()..].trim_start().to_string();
             } else if result.starts_with(&prefix_with_tab) {
                 result = result[prefix_with_tab.len()..].trim_start().to_string();
-            } else if result.starts_with(prefix) && result.len() > prefix.len() {
-                result = result[prefix.len()..].trim_start().to_string();
             }
+            // Don't remove prefix if it's not followed by a space (e.g., "Bass" shouldn't have "B" removed)
+            // The prefix_with_space and prefix_with_tab checks above already handle "B " prefix removal
+            // If result starts with just "B" (not "B "), it's likely part of a word like "Bass", so don't remove it
             
             // Also handle multi-word prefixes that might be in sub_type (e.g., "GTR E" when prefix is "G")
-            // If sub_type contains "GTR E", we want to keep it in the hierarchy name (it's the instrument name)
-            // But if the prefix is just "G" and sub_type is "GTR E", we should use "GTR E" as the hierarchy name
+            // If sub_type contains "GTR E", remove "GTR E " from it (it should be prefix, not part of hierarchy)
+            // This handles cases where parser includes "GTR E" in sub_type
             if prefix == "G" {
                 if let Some(sub_types) = &parsed.sub_type {
                     for sub_type in sub_types {
-                        // If we have "G GTR E", the hierarchy name should be "GTR E" (the instrument group)
-                        if sub_type == "GTR E" || sub_type.starts_with("GTR E ") {
-                            // Use the sub_type as the hierarchy name instead of trying to remove the prefix
-                            result = sub_type.clone();
+                        // If sub_type is "GTR E" or starts with "GTR E ", remove "GTR E " from result
+                        if sub_type == "GTR E" {
+                            // If result is just "GTR E", clear it
+                            if result == "GTR E" {
+                                result = String::new();
+                            } else if result.starts_with("GTR E ") {
+                                result = result[6..].trim_start().to_string();
+                            }
+                            break;
+                        } else if sub_type.starts_with("GTR E ") {
+                            // Remove "GTR E " from result if present
+                            if result.starts_with("GTR E ") {
+                                result = result[6..].trim_start().to_string();
+                            }
                             break;
                         }
                     }
@@ -339,9 +564,13 @@ impl TrackList {
             }
             
             // If result is empty or doesn't seem right, use fallback
-            if result.is_empty() || 
+            // But be more careful - if result already looks good (doesn't contain "GTR E " at start), don't overwrite it
+            let should_use_fallback = result.is_empty() || 
                (name_without_type.starts_with(&prefix_with_space) && 
-                !name_without_type[prefix_with_space.len()..].trim_start().starts_with(&result)) {
+                !name_without_type[prefix_with_space.len()..].trim_start().starts_with(&result) &&
+                result.starts_with("GTR E "));  // Only use fallback if result starts with "GTR E "
+            
+            if should_use_fallback {
                 // Remove the prefix from the original name
                 if name_without_type.starts_with(&prefix_with_space) {
                     result = name_without_type[prefix_with_space.len()..].trim_start().to_string();
@@ -353,18 +582,10 @@ impl TrackList {
                     result = name_without_type.clone();
                 }
                 
-                // Also handle "GTR E" as a special case - if we have "G GTR E", remove both "G " and "GTR E "
-                // But only if what remains is a clear hierarchy case (like "Clean DI L")
+                // Also handle "GTR E" as a special case - always remove "GTR E " from fallback result
+                // This ensures "G GTR E Clean DI L" -> "GTR E Clean DI L" -> "Clean DI L" (parent will remove "Clean" later)
                 if result.starts_with("GTR E ") {
-                    let after_gtr_e = result[6..].trim_start();
-                    let after_words: Vec<&str> = after_gtr_e.split_whitespace().collect();
-                    // If what follows "GTR E " is a single word or starts with a hierarchy/tech term, remove "GTR E "
-                    // This handles "GTR E Clean DI L" -> "Clean DI L" (we'll remove "Clean" later via parent)
-                    if !after_words.is_empty() {
-                        result = after_gtr_e.to_string();
-                    } else {
-                        result = String::new();
-                    }
+                    result = result[6..].trim_start().to_string();
                 } else if result == "GTR E" {
                     result = String::new();
                 }
@@ -377,55 +598,126 @@ impl TrackList {
         // Final cleanup: remove any remaining single-letter prefixes that might have leaked through
         // This handles cases like "G GTR E" where "G" is incorrectly extracted as prefix
         // Also remove "GTR E " if it appears (it should be part of prefix, not hierarchy name)
+        // BUT: Don't remove if it would break a word (e.g., "B Bass" -> "Bass" is OK, but "Bass Guitar" -> "ass Guitar" is NOT)
         let single_letter_prefixes = ["G ", "D ", "B ", "K ", "V ", "VF ", "U ", "A "];
         for single_prefix in &single_letter_prefixes {
             if result.starts_with(single_prefix) {
                 let remaining = &result[single_prefix.len()..];
+                let prefix_letter = single_prefix.chars().next().unwrap();
+                let remaining_trimmed = remaining.trim_start();
+                
                 // If removing the single-letter prefix leaves "GTR E", remove "GTR E " too
-                if remaining.starts_with("GTR E ") {
-                    result = remaining[6..].trim_start().to_string(); // Remove both "G " and "GTR E "
-                } else if remaining == "GTR E" {
+                if remaining_trimmed.starts_with("GTR E ") {
+                    result = remaining_trimmed[6..].trim_start().to_string(); // Remove both "G " and "GTR E "
+                } else if remaining_trimmed == "GTR E" {
                     result = String::new(); // Remove both "G " and "GTR E"
+                } else if !remaining_trimmed.starts_with(prefix_letter) {
+                    // Only remove if the remaining text doesn't start with the same letter
+                    // This prevents "B Bass" -> "ass" (bad) but allows "B DI" -> "DI" (good)
+                    result = remaining_trimmed.to_string();
                 } else {
-                    // For other cases, remove the single-letter prefix
-                    result = remaining.trim_start().to_string();
+                    // The remaining text starts with the same letter as the prefix
+                    // This could be "B Bass" where "Bass" is a complete word, or "Bass Guitar" where "Bass" is part of a word
+                    // For "B Bass", we want to keep "B " (it's a prefix before the word "Bass")
+                    // For "Bass Guitar", we don't want to remove "B" from "Bass"
+                    // So we should NOT remove the prefix in this case - keep it as is
+                    // The prefix removal will happen later in the hierarchy extraction
                 }
+                // Keep the prefix (it's part of a word like "Bass" or it's a valid prefix like "B Bass")
                 break;
             }
         }
         
-        // Also remove "GTR E " if it appears at the start (should have been removed by prefix removal, but be defensive)
+        // Clean result of "GTR E " and single-letter prefixes before parent removal
+        // This ensures parent removal works on a clean result
+        // Handle both "G GTR E Clean DI L" -> remove "G " -> "GTR E Clean DI L" -> remove "GTR E " -> "Clean DI L"
+        // Use a more aggressive approach: remove "GTR E " first, then single-letter prefixes
+        // This ensures "GTR E " is always removed even if it appears after other text
+        
+        // First, remove "GTR E " if it appears anywhere (more aggressive)
+        if result.contains(" GTR E ") {
+            result = result.replace(" GTR E ", " ");
+        }
         if result.starts_with("GTR E ") {
             result = result[6..].trim_start().to_string();
         } else if result == "GTR E" {
             result = String::new();
         }
         
-        // Remove "GTR E " if it appears at the start (should be part of prefix, not hierarchy)
-        // Do this before parent removal so parent removal works correctly
-        // This handles cases where parser includes "GTR E" in sub_type or fallback includes it
-        // Check multiple times to handle cases like "G GTR E Clean DI L" -> remove "G " -> "GTR E Clean DI L" -> remove "GTR E " -> "Clean DI L"
-        loop {
-            let original = result.clone();
-            if result.starts_with("GTR E ") {
-                result = result[6..].trim_start().to_string();
-            } else if result == "GTR E" {
-                result = String::new();
-                break;
-            } else {
-                break; // No more "GTR E" to remove
+        // Then remove single-letter prefixes, but only if what follows is NOT a word that starts with that letter
+        // This prevents removing "B " from "B Bass Guitar" (which would become "ass Guitar")
+        // We should only remove prefixes when they're actual prefixes, not part of a word
+        let single_letter_prefixes = ["G ", "D ", "B ", "K ", "V ", "VF ", "U ", "A "];
+        for prefix in &single_letter_prefixes {
+            if result.starts_with(prefix) {
+                let remaining = &result[prefix.len()..];
+                let prefix_letter = prefix.chars().next().unwrap();
+                let remaining_trimmed = remaining.trim_start();
+                
+                // Only remove if the remaining text doesn't start with the same letter
+                // This prevents "B Bass" -> "ass" (bad) but allows "B DI" -> "DI" (good)
+                // Also allow removal if it's a known hierarchy word like "DI"
+                // BUT: "B Bass" should become "Bass" (remove "B "), not "ass" (remove "B" from "Bass")
+                // So we need to check if the remaining text is a complete word that starts with the prefix letter
+                // For "B Bass", remaining is "Bass" which starts with "B", so we should NOT remove "B "
+                // For "B DI", remaining is "DI" which doesn't start with "B", so we SHOULD remove "B "
+                if !remaining_trimmed.starts_with(prefix_letter) {
+                    // Safe to remove - remaining doesn't start with the same letter
+                    result = remaining_trimmed.to_string();
+                    break;
+                } else if remaining_trimmed.starts_with("DI ") || 
+                          (remaining_trimmed.starts_with("DI") && remaining_trimmed.len() == 2) {
+                    // Special case: "B DI" -> "DI" is OK
+                    result = remaining_trimmed.to_string();
+                    break;
+                }
+                // Otherwise, keep the prefix (it's part of a word like "Bass" - "B Bass" should stay as "B Bass")
             }
-            // If we didn't change anything, break to avoid infinite loop
-            if result == original {
-                break;
-            }
+        }
+        
+        // Final check: remove "GTR E " one more time in case it was added back
+        if result.starts_with("GTR E ") {
+            result = result[6..].trim_start().to_string();
+        } else if result == "GTR E" {
+            result = String::new();
         }
         
         // If we have a parent, remove the parent's hierarchy name from the beginning
         if let Some(parent_track) = parent {
             // Parse the parent track name and build its hierarchy name
             let parent_parsed = self.parser.parse(&parent_track.name);
-            let parent_hierarchy = self.build_hierarchy_name_from_parsed(&parent_parsed);
+            let mut parent_hierarchy = self.build_hierarchy_name_from_parsed(&parent_parsed);
+            
+            // Clean parent hierarchy of "GTR E " and single-letter prefixes too
+            // Also remove group prefix from parent hierarchy if it appears (e.g., "Bass Bass" -> "Bass")
+            for prefix in &single_letter_prefixes {
+                if parent_hierarchy.starts_with(prefix) {
+                    parent_hierarchy = parent_hierarchy[prefix.len()..].trim_start().to_string();
+                    break;
+                }
+            }
+            if parent_hierarchy.starts_with("GTR E ") {
+                parent_hierarchy = parent_hierarchy[6..].trim_start().to_string();
+            }
+            
+            // Remove group prefix from parent hierarchy if it appears
+            // This handles cases like "Bass Bass" -> "Bass" when prefix is "Bass"
+            // First, check for duplicate words (e.g., "Bass Bass" -> "Bass")
+            let words: Vec<&str> = parent_hierarchy.split_whitespace().collect();
+            if words.len() > 1 && words[0] == words[1] {
+                // Duplicate word like "Bass Bass" -> "Bass"
+                parent_hierarchy = words[0].to_string();
+            } else if let Some(parent_prefix) = &parent_parsed.group_prefix {
+                let parent_prefix_with_space = format!("{} ", parent_prefix);
+                if parent_hierarchy.starts_with(&parent_prefix_with_space) {
+                    parent_hierarchy = parent_hierarchy[parent_prefix_with_space.len()..].trim_start().to_string();
+                } else if parent_hierarchy == *parent_prefix {
+                    // Parent hierarchy is exactly the prefix - keep it as is (it's the group name)
+                } else if parent_hierarchy.contains(&parent_prefix_with_space) {
+                    // Prefix appears somewhere in the parent hierarchy - remove it
+                    parent_hierarchy = parent_hierarchy.replace(&parent_prefix_with_space, " ").trim().to_string();
+                }
+            }
             
             // Remove track type from parent hierarchy for comparison
             let mut parent_clean = parent_hierarchy.clone();
@@ -451,7 +743,8 @@ impl TrackList {
                 // Remove only if:
                 // 1. Result is exactly the parent (single word), OR
                 // 2. Remaining starts with a hierarchy word (possibly followed by increment/number), OR
-                // 3. Remaining starts with a technical term followed by a channel indicator (e.g., "DI L", "DI R")
+                // 3. Remaining starts with a technical term (e.g., "DI"), OR
+                // 4. Remaining starts with a technical term followed by a channel indicator (e.g., "DI L", "DI R")
                 if result_words.len() == 1 && result_words[0] == parent_clean {
                     result = remaining.to_string();
                 } else if !remaining_words.is_empty() {
@@ -460,19 +753,23 @@ impl TrackList {
                     let is_hierarchy_word = short_hierarchy_words.contains(&first_remaining) ||
                         (first_remaining.len() <= 3 && !technical_terms.contains(&first_remaining));
                     
+                    // Check if it's a technical term by itself (e.g., "DI")
+                    let is_tech_term = technical_terms.contains(&first_remaining);
+                    
                     // Check if it's a technical term followed by a channel (e.g., "DI L", "DI R")
                     let is_tech_term_with_channel = technical_terms.contains(&first_remaining) &&
                         remaining_words.len() >= 2 &&
                         channel_indicators.contains(&remaining_words[1]);
                     
-                    if is_hierarchy_word || is_tech_term_with_channel {
+                    if is_hierarchy_word || is_tech_term_with_channel || is_tech_term {
                         // This is a hierarchy case like:
                         // - "Snare Trig 2" -> "Trig 2"
                         // - "Kick In" -> "In"
                         // - "Clean DI L" -> "DI L"
+                        // - "Bass Guitar DI" -> "DI" (when parent is "Bass Guitar")
                         result = remaining.to_string();
                     }
-                    // Otherwise, preserve compound names like "Bass DI" (when DI is not followed by channel)
+                    // Otherwise, preserve compound names like "Bass Guitar" (when parent is "Bass" and remaining is "Guitar")
                 }
                 // Otherwise, preserve compound names like "Bass Guitar"
             } else if !parent_clean.is_empty() {
@@ -502,8 +799,13 @@ impl TrackList {
                         }
                     }
                 } else if result.contains(&parent_clean) {
-                    // Parent appears somewhere in the result (e.g., "GTR E Clean DI L" contains "Clean")
-                    // Try to remove it by finding where it appears
+                    // Parent appears somewhere in the result (e.g., "Bass Guitar DI" contains "Bass Guitar")
+                    // But first, ensure "GTR E " is removed if it's still present (defensive)
+                    if result.starts_with("GTR E ") {
+                        result = result[6..].trim_start().to_string();
+                    }
+                    
+                    // Now try to remove the parent
                     let parent_words: Vec<&str> = parent_clean.split_whitespace().collect();
                     let result_words: Vec<&str> = result.split_whitespace().collect();
                     
@@ -513,11 +815,12 @@ impl TrackList {
                             let slice = &result_words[i..i + parent_words.len()];
                             if slice == parent_words.as_slice() {
                                 // Found the parent words, remove them
-                                let before = result_words[..i].join(" ");
                                 let after = result_words[i + parent_words.len()..].join(" ");
                                 
                                 // Prefer the "after" part (what comes after the parent)
-                                // This handles "GTR E Clean DI L" -> remove "Clean" -> "DI L"
+                                // This handles:
+                                // - "Clean DI L" -> remove "Clean" -> "DI L"
+                                // - "Bass Guitar DI" -> remove "Bass Guitar" -> "DI"
                                 if !after.is_empty() {
                                     let after_words: Vec<&str> = after.split_whitespace().collect();
                                     if !after_words.is_empty() {
@@ -528,34 +831,45 @@ impl TrackList {
                                         let after_is_hierarchy_word = short_hierarchy_words.contains(&first_after) ||
                                             (first_after.len() <= 3 && !technical_terms.contains(&first_after));
                                         
-                                        if after_is_hierarchy_word || after_is_tech_term_with_channel || after_words.len() == 1 {
+                                        // Also check if it's a technical term by itself (e.g., "DI")
+                                        let is_tech_term = technical_terms.contains(&first_after);
+                                        
+                                        if after_is_hierarchy_word || after_is_tech_term_with_channel || is_tech_term || after_words.len() == 1 {
                                             result = after.trim().to_string();
                                             break;
                                         }
                                     }
                                 }
-                                
-                                // Fallback to checking what's before, or combined
-                                let remaining = if !after.is_empty() {
-                                    after.clone()
-                                } else if !before.is_empty() {
-                                    before
-                                } else {
-                                    String::new()
-                                };
-                                
-                                let remaining_words: Vec<&str> = remaining.split_whitespace().collect();
-                                if !remaining_words.is_empty() {
-                                    let first_remaining = remaining_words[0];
-                                    let is_tech_term_with_channel = technical_terms.contains(&first_remaining) &&
-                                        remaining_words.len() >= 2 &&
-                                        channel_indicators.contains(&remaining_words[1]);
-                                    let is_hierarchy_word = short_hierarchy_words.contains(&first_remaining) ||
-                                        (first_remaining.len() <= 3 && !technical_terms.contains(&first_remaining));
-                                    
-                                    if is_hierarchy_word || is_tech_term_with_channel || remaining_words.len() == 1 {
-                                        result = remaining.trim().to_string();
-                                        break;
+                            }
+                        }
+                    }
+                } else {
+                    // Parent doesn't appear in result, but check if we can remove parent words from the start
+                    // This handles "Bass DI" when parent is "Bass Guitar" - remove "Bass" to get "DI"
+                    let parent_words: Vec<&str> = parent_clean.split_whitespace().collect();
+                    let result_words: Vec<&str> = result.split_whitespace().collect();
+                    
+                    // Try removing parent words from the start of result
+                    if !parent_words.is_empty() && !result_words.is_empty() {
+                        // Check if result starts with any parent word
+                        for parent_word in parent_words.iter() {
+                            if result_words[0] == *parent_word {
+                                // Result starts with this parent word, check if we should remove it
+                                let remaining = result_words[1..].join(" ");
+                                if !remaining.is_empty() {
+                                    let remaining_words: Vec<&str> = remaining.split_whitespace().collect();
+                                    if !remaining_words.is_empty() {
+                                        let first_remaining = remaining_words[0];
+                                        let is_tech_term = technical_terms.contains(&first_remaining);
+                                        let is_hierarchy_word = short_hierarchy_words.contains(&first_remaining) ||
+                                            (first_remaining.len() <= 3 && !technical_terms.contains(&first_remaining));
+                                        
+                                        // If what remains is a technical term or hierarchy word, remove the parent word
+                                        // This handles "Bass DI" -> remove "Bass" -> "DI" (when parent is "Bass Guitar")
+                                        if is_tech_term || is_hierarchy_word || remaining_words.len() == 1 {
+                                            result = remaining.trim().to_string();
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -565,29 +879,43 @@ impl TrackList {
             }
         }
         
-        // Final pass: remove "GTR E " and single-letter prefixes if they still appear
-        // This ensures cleanup happens even if fallback logic added them back
-        // Do this BEFORE parent removal so parent removal can work on clean result
-        let mut cleaned_result = result.trim().to_string();
+        // Final defensive cleanup: ensure "GTR E " is removed if it somehow still appears
+        // Also remove group prefix if it still appears (e.g., "Bass Guitar" -> "Guitar" when prefix is "Bass")
+        // This handles edge cases where cleanup didn't work earlier
+        let mut final_result = result.trim().to_string();
+        if final_result.starts_with("GTR E ") {
+            final_result = final_result[6..].trim_start().to_string();
+        } else if final_result == "GTR E" {
+            final_result = String::new();
+        }
         
-        // Remove single-letter prefixes first, then "GTR E "
-        let single_letter_prefixes = ["G ", "D ", "B ", "K ", "V ", "VF ", "U ", "A "];
-        for prefix in &single_letter_prefixes {
-            if cleaned_result.starts_with(prefix) {
-                cleaned_result = cleaned_result[prefix.len()..].trim_start().to_string();
-                break;
+        // Remove group prefix from final result if it still appears
+        // This handles cases where parent removal didn't work correctly
+        if let Some(prefix) = &parsed.group_prefix {
+            let prefix_with_space = format!("{} ", prefix);
+            if final_result.starts_with(&prefix_with_space) {
+                final_result = final_result[prefix_with_space.len()..].trim_start().to_string();
+            } else if &final_result == prefix {
+                final_result = String::new();
+            } else if final_result.contains(&prefix_with_space) {
+                // Prefix appears somewhere in the result - remove it
+                final_result = final_result.replace(&prefix_with_space, " ").trim().to_string();
+            } else if final_result.contains(prefix) && &final_result != prefix {
+                // Prefix appears as a word (not at start) - try to remove it
+                let words: Vec<&str> = final_result.split_whitespace().collect();
+                let filtered_words: Vec<&str> = words.iter()
+                    .filter(|w| !w.eq_ignore_ascii_case(prefix))
+                    .copied()
+                    .collect();
+                if !filtered_words.is_empty() {
+                    final_result = filtered_words.join(" ");
+                } else {
+                    final_result = String::new();
+                }
             }
         }
-        
-        // Now remove "GTR E " if it appears
-        if cleaned_result.starts_with("GTR E ") {
-            cleaned_result = cleaned_result[6..].trim_start().to_string();
-        } else if cleaned_result == "GTR E" {
-            cleaned_result = String::new();
-        }
-        
-        // Use cleaned result for parent removal (parent removal logic is below)
-        result = cleaned_result;
+
+        final_result
     }
     
     /// Format the track list in a creative colored list format
@@ -637,7 +965,7 @@ impl TrackList {
                         }
                     }
                 } else {
-                    if let Some(track_type) = &track.track_type {
+        if let Some(track_type) = &track.track_type {
                         let type_suffix = format!(" ({})", track_type);
                         
                         // For root tracks with BUS type, explicitly remove the type if present
@@ -681,12 +1009,12 @@ impl TrackList {
         if track.takes.len() > 1 {
             for (i, take) in track.takes.iter().skip(1).enumerate() {
                 let is_last_take = i == track.takes.len() - 2 && track.sends.is_empty() && track.receives.is_empty() && children.is_empty();
-                let take_connector = if is_last_take { "└── " } else { "├── " };
-                write!(f, "{}{}Take: {}", child_prefix, take_connector, take.name)?;
-                if let Some(index) = take.index {
-                    write!(f, " [{}]", index)?;
-                }
-                writeln!(f)?;
+            let take_connector = if is_last_take { "└── " } else { "├── " };
+            write!(f, "{}{}Take: {}", child_prefix, take_connector, take.name)?;
+            if let Some(index) = take.index {
+                write!(f, " [{}]", index)?;
+            }
+            writeln!(f)?;
             }
         }
         
