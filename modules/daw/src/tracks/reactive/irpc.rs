@@ -3,29 +3,30 @@
 //! Exposes all track reactive streams over IRPC so they can be reactive over the network.
 
 use crate::tracks::Track;
+use async_trait::async_trait;
 use irpc::{
-    channel::mpsc,
+    channel::{mpsc, oneshot},
     rpc::RemoteService,
-    rpc_requests, Client, WithChannels,
+    rpc_requests, Client, Request, WithChannels,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use iroh::{protocol::ProtocolHandler, Endpoint, EndpointAddr};
 use irpc_iroh::{IrohLazyRemoteConnection, IrohProtocol};
 use rxrust::prelude::*;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 
 /// Tracks changed message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TracksChangedMessage {
-    pub project_id: Uuid,
+    pub project_id: String,
     pub tracks: Vec<Track>,
 }
 
 /// Track changed message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackChangedMessage {
-    pub project_id: Uuid,
+    pub project_id: String,
     pub track_index: usize,
     pub track: Track,
 }
@@ -33,7 +34,7 @@ pub struct TrackChangedMessage {
 /// Track added message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackAddedMessage {
-    pub project_id: Uuid,
+    pub project_id: String,
     pub track_index: usize,
     pub track: Track,
 }
@@ -41,7 +42,7 @@ pub struct TrackAddedMessage {
 /// Track removed message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackRemovedMessage {
-    pub project_id: Uuid,
+    pub project_id: String,
     pub track_index: usize,
 }
 
@@ -58,6 +59,22 @@ pub enum TrackUpdateMessage {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubscribeTracks;
 
+/// Set track mute command
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetTrackMute {
+    pub project_id: String,
+    pub track_index: usize,
+    pub muted: bool,
+}
+
+/// Set track solo command
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetTrackSolo {
+    pub project_id: String,
+    pub track_index: usize,
+    pub solo_mode: crate::tracks::api::solo::SoloMode,
+}
+
 /// IRPC protocol for track service
 #[rpc_requests(message = TrackMessage)]
 #[derive(Serialize, Deserialize, Debug)]
@@ -65,11 +82,32 @@ pub enum TrackProtocol {
     /// Subscribe to track updates (server streaming)
     #[rpc(tx = mpsc::Sender<TrackUpdateMessage>)]
     SubscribeTracks(SubscribeTracks),
+    /// Set track mute (request/response)
+    #[rpc(tx = oneshot::Sender<Result<(), String>>)]
+    SetTrackMute(SetTrackMute),
+    /// Set track solo (request/response)
+    #[rpc(tx = oneshot::Sender<Result<(), String>>)]
+    SetTrackSolo(SetTrackSolo),
+}
+
+/// Trait for backends that can handle track commands
+/// 
+/// This allows the track API to execute commands
+/// on different backends (REAPER, other DAWs, etc.)
+#[async_trait]
+pub trait TrackCommandHandler: Send + Sync {
+    /// Set track mute
+    async fn set_track_mute(&self, project_id: String, track_index: usize, muted: bool) -> Result<(), String>;
+    
+    /// Set track solo
+    async fn set_track_solo(&self, project_id: String, track_index: usize, solo_mode: crate::tracks::api::solo::SoloMode) -> Result<(), String>;
 }
 
 /// Track API client
 pub struct TrackApi {
     inner: Client<TrackProtocol>,
+    pub(crate) handler_data: Option<(mpsc::Receiver<TrackMessage>, broadcast::Sender<TrackUpdateMessage>, broadcast::Sender<TrackUpdateMessage>, broadcast::Sender<TrackUpdateMessage>, broadcast::Sender<TrackUpdateMessage>)>,
+    pub(crate) command_handler: Option<Arc<dyn TrackCommandHandler>>,
 }
 
 impl TrackApi {
@@ -77,6 +115,14 @@ impl TrackApi {
 
     /// Create a new track reactive API (server-side)
     pub fn spawn(service: Box<dyn crate::tracks::reactive::TrackReactiveService>) -> Self {
+        Self::spawn_with_handler(service, None)
+    }
+
+    /// Create a new track reactive API (server-side) with command handler
+    pub fn spawn_with_handler(
+        service: Box<dyn crate::tracks::reactive::TrackReactiveService>,
+        command_handler: Option<Arc<dyn TrackCommandHandler>>,
+    ) -> Self {
         let (tx, rx) = mpsc::channel(16);
         let streams = service.streams().clone();
 
@@ -134,54 +180,19 @@ impl TrackApi {
             });
         }
 
-        // Spawn async task to handle IRPC messages (only moves Send types)
-        tokio::task::spawn(async move {
-            let mut rx = rx;
-            while let Ok(Some(msg)) = rx.recv().await {
-                match msg {
-                    TrackMessage::SubscribeTracks(WithChannels { tx, .. }) => {
-                        // Subscribe to all broadcast channels and merge them
-                        let mut tracks_rx = tracks_broadcast.subscribe();
-                        let mut track_changed_rx = track_changed_broadcast.subscribe();
-                        let mut track_added_rx = track_added_broadcast.subscribe();
-                        let mut track_removed_rx = track_removed_broadcast.subscribe();
-
-                        // Forward from broadcast channels to IRPC
-                        tokio::spawn(async move {
-                            loop {
-                                tokio::select! {
-                                    Ok(msg) = tracks_rx.recv() => {
-                                        if tx.send(msg).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    Ok(msg) = track_changed_rx.recv() => {
-                                        if tx.send(msg).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    Ok(msg) = track_added_rx.recv() => {
-                                        if tx.send(msg).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    Ok(msg) = track_removed_rx.recv() => {
-                                        if tx.send(msg).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                    else => break,
-                                }
-                            }
-                        });
-                    }
-                }
-            }
-        });
+        // Store channels for later spawning in tokio runtime
+        let handler_data = (rx, tracks_broadcast, track_changed_broadcast, track_added_broadcast, track_removed_broadcast);
 
         TrackApi {
             inner: Client::local(tx),
+            handler_data: Some(handler_data),
+            command_handler,
         }
+    }
+
+    /// Extract handler data for spawning in tokio runtime
+    pub fn take_handler_data(&mut self) -> Option<(mpsc::Receiver<TrackMessage>, broadcast::Sender<TrackUpdateMessage>, broadcast::Sender<TrackUpdateMessage>, broadcast::Sender<TrackUpdateMessage>, broadcast::Sender<TrackUpdateMessage>)> {
+        self.handler_data.take()
     }
 
     /// Connect to a remote track service
@@ -192,6 +203,8 @@ impl TrackApi {
         let conn = IrohLazyRemoteConnection::new(endpoint, addr.into(), Self::ALPN.to_vec());
         Ok(TrackApi {
             inner: Client::boxed(conn),
+            handler_data: None,
+            command_handler: None,
         })
     }
 
@@ -208,6 +221,64 @@ impl TrackApi {
     /// Subscribe to track updates
     pub async fn subscribe(&self) -> irpc::Result<mpsc::Receiver<TrackUpdateMessage>> {
         self.inner.server_streaming(SubscribeTracks, 32).await
+    }
+
+    /// Set track mute
+    pub async fn set_track_mute(
+        &self,
+        project_id: String,
+        track_index: usize,
+        muted: bool,
+    ) -> irpc::Result<Result<(), String>> {
+        let msg = SetTrackMute {
+            project_id,
+            track_index,
+            muted,
+        };
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
+    }
+
+    /// Set track solo
+    pub async fn set_track_solo(
+        &self,
+        project_id: String,
+        track_index: usize,
+        solo_mode: crate::tracks::api::solo::SoloMode,
+    ) -> irpc::Result<Result<(), String>> {
+        let msg = SetTrackSolo {
+            project_id,
+            track_index,
+            solo_mode,
+        };
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
     }
 }
 

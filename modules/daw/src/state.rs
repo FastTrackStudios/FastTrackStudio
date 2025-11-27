@@ -7,7 +7,6 @@
 use crate::transport::Transport;
 use crate::tracks::Track;
 use std::collections::HashMap;
-use uuid::Uuid;
 
 /// Composed state for convenience (combines transport and tracks state)
 /// 
@@ -15,14 +14,14 @@ use uuid::Uuid;
 /// Individual services manage their own state separately.
 #[derive(Debug, Clone)]
 pub struct DawReactiveState {
-    /// Transport state for each project (project_id -> transport)
-    pub transport: HashMap<Uuid, Transport>,
+    /// Transport state for each project (project_name -> transport)
+    pub transport: HashMap<String, Transport>,
     
-    /// Tracks for each project (project_id -> tracks)
-    pub tracks: HashMap<Uuid, Vec<Track>>,
+    /// Tracks for each project (project_name -> tracks)
+    pub tracks: HashMap<String, Vec<Track>>,
     
-    /// Currently active project ID
-    pub active_project_id: Option<Uuid>,
+    /// Currently active project name
+    pub active_project_id: Option<String>,
 }
 
 impl Default for DawReactiveState {

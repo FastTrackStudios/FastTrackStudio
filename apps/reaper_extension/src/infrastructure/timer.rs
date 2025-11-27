@@ -3,7 +3,7 @@
 //! Manages the REAPER timer callback registration and execution.
 
 use reaper_medium::ReaperSession;
-use tracing::{debug, info, error, warn};
+use tracing::{debug, info, error};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 

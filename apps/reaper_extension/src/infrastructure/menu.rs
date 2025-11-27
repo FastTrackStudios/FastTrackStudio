@@ -32,7 +32,7 @@ impl HookCustomMenu for FastTrackStudioMenuHook {
     fn call(menuidstr: &ReaperStr, menu: Hmenu, flag: MenuHookFlag) {
         // Wrap the entire callback in panic handling to prevent crashes
         let result = std::panic::catch_unwind(|| {
-            info!(
+            debug!(
                 menu_id = %menuidstr.to_str(),
                 flag = ?flag,
                 "Menu hook called"
@@ -55,7 +55,7 @@ impl HookCustomMenu for FastTrackStudioMenuHook {
             // Count menu items for logging (before assigning IDs)
             let item_count = count_menu_items(&pure_menu);
             
-            info!(
+            debug!(
                 item_count = item_count,
                 "Built menu structure, assigning command IDs"
             );
@@ -66,13 +66,13 @@ impl HookCustomMenu for FastTrackStudioMenuHook {
                 assign_command_ids_recursively(entry);
             }
             
-            info!("Command IDs assigned, adding entries to SWELL menu");
+            debug!("Command IDs assigned, adding entries to SWELL menu");
             
             // Add the menu entries to the SWELL menu
             let swell_menu = Menu::new(menu.as_ptr());
             swell_ui::menu_tree::add_all_entries_of_menu(swell_menu, &pure_menu);
             
-            info!(
+            debug!(
                 menu_items = item_count,
                 "✅ FastTrackStudio menu populated successfully"
             );
@@ -116,7 +116,7 @@ fn extract_category_from_command_id(command_id: &str) -> (String, Option<String>
 fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
     // Get all registered actions that should appear in menu
     let actions = get_all_registered_actions();
-    info!(total_actions = actions.len(), "Building menu from registered actions");
+    debug!(total_actions = actions.len(), "Building menu from registered actions");
     
     let menu_actions: Vec<_> = actions
         .iter()
@@ -133,7 +133,7 @@ fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
         })
         .collect();
     
-    info!(menu_action_count = menu_actions.len(), "Actions to include in menu");
+    debug!(menu_action_count = menu_actions.len(), "Actions to include in menu");
     
     if menu_actions.is_empty() {
         warn!("No actions marked for menu display");

@@ -11,10 +11,10 @@ use crate::implementation::markers::read_markers_from_project;
 use crate::implementation::transport::ReaperTransport;
 use crate::live::tracks::tab_navigation::TabNavigator;
 use reaper_high::{Reaper, Project, ActionKind};
-use reaper_medium::{PositionInSeconds, ProjectRef, SetEditCurPosOptions, CommandId, ProjectContext};
+use reaper_medium::{PositionInSeconds, ProjectRef, SetEditCurPosOptions};
 use daw::transport::TransportActions;
 use tracing::{info, debug, warn};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Helper: Find Count-In marker position in a project

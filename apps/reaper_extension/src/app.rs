@@ -5,12 +5,12 @@
 use std::sync::Arc;
 use std::error::Error;
 use reaper_medium::ReaperSession;
-use tracing::info;
 
 use crate::services::{SetlistService, CommandService, SeekService, StreamService, SmoothSeekService};
 use crate::infrastructure::action_registry::ActionRegistry;
 use crate::infrastructure::change_detection::ChangeDetection;
 use crate::infrastructure::reactive_polling::ReactivePollingService;
+use crate::infrastructure::reactive_app_state::ReactiveAppStateService;
 
 /// Application container - holds all services and manages initialization
 #[derive(Debug)]
@@ -26,6 +26,7 @@ pub struct App {
     pub action_registry: Arc<ActionRegistry>,
     pub change_detection: Arc<ChangeDetection>,
     pub reactive_polling: Arc<ReactivePollingService>,
+    pub reactive_state: Arc<ReactiveAppStateService>,
     
     // Keep session alive (wrapped in RefCell for interior mutability)
     _session: std::cell::RefCell<ReaperSession>,
@@ -49,6 +50,9 @@ impl App {
         let action_registry = Arc::new(ActionRegistry::new()?);
         let change_detection = Arc::new(ChangeDetection::new()?);
         let reactive_polling = Arc::new(ReactivePollingService::new());
+        let reactive_state = Arc::new(ReactiveAppStateService::new_with_reaper(
+            setlist_service.clone(),
+        ));
         
         Ok(Self {
             setlist_service,
@@ -59,6 +63,7 @@ impl App {
             action_registry,
             change_detection,
             reactive_polling,
+            reactive_state,
             _session: std::cell::RefCell::new(session),
         })
     }
@@ -75,6 +80,17 @@ impl App {
         crate::lyrics::register_lyrics_actions();
         crate::lyrics::register_lyrics_dev_actions();
         
+        // Set track reactive service in change detection
+        // We know it's always ReaperTrackReactiveService, so we can create a new one with the same streams
+        let track_streams = self.reactive_state.track_service.streams().clone();
+        let track_service = std::sync::Arc::new(
+            crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService::new(
+                track_streams,
+                self.setlist_service.clone(),
+            )
+        );
+        self.change_detection.set_track_service(track_service);
+        
         // Register change detection (needs session)
         self.change_detection.register(&mut self.session_mut())?;
         
@@ -87,12 +103,16 @@ impl App {
         }
         
         // Start IROH server for IPC with desktop app
-        crate::infrastructure::iroh_server::start_iroh_server(self.stream_service.clone());
+        crate::infrastructure::iroh_server::start_iroh_server(
+            self.stream_service.clone(),
+            self.reactive_state.clone(),
+            self.setlist_service.clone(),
+        );
         Ok(())
     }
     
     /// Get a mutable reference to the session (for timer registration, etc.)
-    pub fn session_mut(&self) -> std::cell::RefMut<ReaperSession> {
+    pub fn session_mut(&self) -> std::cell::RefMut<'_, ReaperSession> {
         self._session.borrow_mut()
     }
 }

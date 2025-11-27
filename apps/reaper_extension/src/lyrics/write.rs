@@ -1,8 +1,7 @@
 //! Functions for writing lyrics data to REAPER
 
 use reaper_high::{Reaper, Project};
-use reaper_medium::{ProjectContext, MasterTrackBehavior, UndoScope, ProjectPart, ReaperStringArg, PositionInSeconds, DurationInSeconds, UiRefreshBehavior};
-use reaper_low;
+use reaper_medium::{MasterTrackBehavior, UndoScope, ProjectPart, PositionInSeconds};
 use lyrics::{Lyrics, output::Slides};
 use std::ffi::CString;
 use tracing::{info, warn, error};

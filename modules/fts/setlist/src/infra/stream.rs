@@ -309,7 +309,7 @@ pub fn get_state_provider() -> Option<Arc<dyn SetlistStateProvider>> {
 }
 
 /// Setlist stream actor that handles client subscriptions and broadcasts updates
-struct SetlistStreamActor {
+pub(crate) struct SetlistStreamActor {
     recv: tokio::sync::mpsc::Receiver<SetlistStreamMessage>,
     /// Broadcast channel for setlist updates
     /// The polling loop sends updates here, and subscriber tasks forward them to their clients
@@ -344,20 +344,40 @@ impl SetlistStreamActor {
         };
 
         // Spawn the actor to handle messages
-        tokio::task::spawn(actor.run());
+        // Try to spawn if runtime exists, otherwise store for later
+        let (actor_opt, broadcast_tx_opt, state_provider_opt) = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(actor.run());
+            (None, None, None)
+        } else {
+            tracing::warn!("No tokio runtime available when creating SetlistStreamApi - actor will be spawned in tokio runtime thread");
+            (Some(actor), Some(broadcast_tx.clone()), Some(state_provider.clone()))
+        };
 
         // Spawn the polling task that reads setlist state and broadcasts to all subscribers
         let state_provider_for_polling = state_provider.clone();
-        tokio::task::spawn(async move {
-            Self::poll_and_broadcast(broadcast_tx, state_provider_for_polling).await;
-        });
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                Self::poll_and_broadcast(broadcast_tx, state_provider_for_polling).await;
+            });
+        } else {
+            tracing::warn!("No tokio runtime available when creating SetlistStreamApi - polling task will be spawned in tokio runtime thread");
+        }
 
         SetlistStreamApi {
             inner: Client::local(tx),
+            actor: actor_opt,
+            broadcast_tx: broadcast_tx_opt,
+            state_provider: state_provider_opt,
         }
     }
+    
+    /// Spawn the actor in the current tokio runtime
+    /// This should be called from within a tokio runtime context
+    pub fn spawn_actor_in_runtime(actor: Self) {
+        tokio::spawn(actor.run());
+    }
 
-    async fn run(mut self) {
+    pub(crate) async fn run(mut self) {
         while let Some(msg) = self.recv.recv().await {
             self.handle(msg).await;
         }
@@ -1011,7 +1031,7 @@ impl SetlistStreamActor {
     /// - SongTransport: Sent when transport changes for a specific song
     /// - SongTracks: Sent when tracks change for a specific song
     /// - FullSetlist: Sent on initial connection or major structure changes
-    async fn poll_and_broadcast(
+    pub(crate) async fn poll_and_broadcast(
         broadcast_tx: tokio::sync::broadcast::Sender<SetlistUpdateMessage>,
         state_provider: Arc<dyn SetlistStateProvider>,
     ) {
@@ -1239,9 +1259,14 @@ impl SetlistStreamActor {
 }
 
 /// Setlist stream API for clients
-#[derive(Debug, Clone)]
 pub struct SetlistStreamApi {
     inner: Client<SetlistStreamProtocol>,
+    /// Actor to process messages (stored for deferred spawning)
+    actor: Option<SetlistStreamActor>,
+    /// Broadcast channel for polling task
+    broadcast_tx: Option<tokio::sync::broadcast::Sender<SetlistUpdateMessage>>,
+    /// State provider for polling task
+    state_provider: Option<Arc<dyn SetlistStateProvider>>,
 }
 
 impl SetlistStreamApi {
@@ -1281,6 +1306,9 @@ impl SetlistStreamApi {
         let conn = IrohLazyRemoteConnection::new(endpoint, addr.into(), Self::ALPN.to_vec());
         Ok(SetlistStreamApi {
             inner: Client::boxed(conn),
+            actor: None,
+            broadcast_tx: None,
+            state_provider: None,
         })
     }
 
@@ -1291,6 +1319,26 @@ impl SetlistStreamApi {
             .as_local()
             .context("cannot listen on remote service")?;
         Ok(IrohProtocol::new(SetlistStreamProtocol::remote_handler(local)))
+    }
+    
+    /// Spawn deferred tasks in the current tokio runtime
+    /// This should be called from within a tokio runtime context
+    /// Returns true if any tasks were spawned
+    pub fn spawn_deferred_tasks(&mut self) -> bool {
+        let mut spawned = false;
+        if let Some(actor) = self.actor.take() {
+            tokio::spawn(async move {
+                actor.run().await;
+            });
+            spawned = true;
+        }
+        if let (Some(broadcast_tx), Some(state_provider)) = (self.broadcast_tx.take(), self.state_provider.take()) {
+            tokio::spawn(async move {
+                SetlistStreamActor::poll_and_broadcast(broadcast_tx, state_provider).await;
+            });
+            spawned = true;
+        }
+        spawned
     }
 
     /// Subscribe to setlist state updates (legacy, subscribes to all updates)

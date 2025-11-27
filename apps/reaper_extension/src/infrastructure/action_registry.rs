@@ -4,8 +4,7 @@
 
 use reaper_high::{ActionKind, Reaper, RegisteredAction};
 use reaper_medium::{CommandId, HookCommand2, SectionContext, ActionValueChange, WindowContext};
-use reaper_low::raw;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use std::sync::{OnceLock, Mutex};
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -357,7 +356,7 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
     // Look up and store command IDs for all registered actions (must be done on main thread)
     // This allows background threads to trigger actions without calling REAPER APIs
     let medium_reaper = Reaper::get().medium_reaper();
-    let mut command_ids = COMMAND_IDS.get_or_init(|| Mutex::new(HashMap::new()));
+    let command_ids = COMMAND_IDS.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(mut map) = command_ids.lock() {
         for action in actions {
             // Try both with and without underscore prefix

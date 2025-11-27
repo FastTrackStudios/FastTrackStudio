@@ -15,6 +15,12 @@ pub fn TrackControlPanel(
     on_track_height_change: Option<Callback<(usize, f64)>>,
     /// Callback when folder is toggled: (track_index)
     on_folder_toggle: Option<Callback<usize>>,
+    /// Project name for track commands
+    project_name: String,
+    /// Callback when track mute is toggled: (project_name, track_index, new_muted_state)
+    on_track_mute: Option<Callback<(String, usize, bool)>>,
+    /// Callback when track solo is toggled: (project_name, track_index, new_solo_mode)
+    on_track_solo: Option<Callback<(String, usize, daw::tracks::api::solo::SoloMode)>>,
 ) -> Element {
                 // Compute visible tracks (filter out children of collapsed folders)
                 let collapsed_state = collapsed_folders();
@@ -63,6 +69,9 @@ pub fn TrackControlPanel(
                 track_heights: track_heights.clone(),
                 collapsed_folders: collapsed_folders.clone(),
                 on_folder_toggle: on_folder_toggle.clone(),
+                project_name: project_name.clone(),
+                on_track_mute: on_track_mute.clone(),
+                on_track_solo: on_track_solo.clone(),
             }
         }
     }
@@ -76,6 +85,9 @@ fn TrackList(
     track_heights: Memo<Vec<f64>>,
     collapsed_folders: Signal<Vec<bool>>,
     on_folder_toggle: Option<Callback<usize>>,
+    project_name: String,
+    on_track_mute: Option<Callback<(String, usize, bool)>>,
+    on_track_solo: Option<Callback<(String, usize, daw::tracks::api::solo::SoloMode)>>,
 ) -> Element {
                 rsx! {
                     div {
@@ -87,6 +99,9 @@ fn TrackList(
                     track_heights: track_heights.clone(),
                     collapsed_folders: collapsed_folders.clone(),
                     on_folder_toggle: on_folder_toggle.clone(),
+                    project_name: project_name.clone(),
+                    on_track_mute: on_track_mute.clone(),
+                    on_track_solo: on_track_solo.clone(),
                 }
             }
         }
@@ -101,6 +116,9 @@ fn TrackRow(
     track_heights: Memo<Vec<f64>>,
     collapsed_folders: Signal<Vec<bool>>,
     on_folder_toggle: Option<Callback<usize>>,
+    project_name: String,
+    on_track_mute: Option<Callback<(String, usize, bool)>>,
+    on_track_solo: Option<Callback<(String, usize, daw::tracks::api::solo::SoloMode)>>,
 ) -> Element {
                             let track_color = track.color.map(|c| {
                                 let r = ((c >> 16) & 0xFF) as u8;
@@ -113,6 +131,17 @@ fn TrackRow(
     let collapsed_state = collapsed_folders();
     let is_collapsed = collapsed_state.get(original_idx).copied().unwrap_or(false);
     let track_height = track_heights().get(original_idx).copied().unwrap_or(64.0);
+    
+    // Clone values needed for button handlers (to avoid move issues)
+    let on_mute_cb = on_track_mute.clone();
+    let on_solo_cb = on_track_solo.clone();
+    let project_name_mute = project_name.clone();
+    let project_name_solo = project_name.clone();
+    let track_idx_mute = original_idx;
+    let track_idx_solo = original_idx;
+    // Clone track state for button handlers (will be updated when track prop changes)
+    let track_muted = track.muted;
+    let track_solo_state = track.solo_state.clone();
                             
     rsx! {
                             div {
@@ -140,7 +169,7 @@ fn TrackRow(
                                     } else {
                                         div { class: "w-4" } // Spacer for non-folder tracks
                                     }
-                                    // Mute button
+                                    // Mute button - use track.muted directly for reactivity
                                     button {
                                         class: format!(
                                             "w-6 h-6 flex items-center justify-center text-xs rounded {}",
@@ -151,11 +180,14 @@ fn TrackRow(
                                             }
                                         ),
                                         onclick: move |_| {
-                                            // TODO: Implement mute toggle
+                                            if let Some(cb) = on_mute_cb {
+                                                let new_muted = !track.muted;
+                                                cb.call((project_name_mute.clone(), track_idx_mute, new_muted));
+                                            }
                                         },
                                         "M"
                                     }
-                                    // Solo button
+                                    // Solo button - use track.solo_state directly for reactivity
                                     button {
                                         class: format!(
                                             "w-6 h-6 flex items-center justify-center text-xs rounded {}",
@@ -166,7 +198,14 @@ fn TrackRow(
                                             }
                                         ),
                                         onclick: move |_| {
-                                            // TODO: Implement solo toggle
+                                            if let Some(cb) = on_solo_cb {
+                                                use daw::tracks::api::solo::SoloMode;
+                                                let new_solo_mode = match track.solo_state {
+                                                    SoloMode::Off | SoloMode::Unknown(_) => SoloMode::Solo,
+                                                    _ => SoloMode::Off,
+                                                };
+                                                cb.call((project_name_solo.clone(), track_idx_solo, new_solo_mode));
+                                            }
                                         },
                                         "S"
                                     }

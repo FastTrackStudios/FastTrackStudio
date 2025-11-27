@@ -5,9 +5,8 @@ use crate::implementation::project::create_reaper_project_wrapper;
 use crate::implementation::markers::{read_markers_from_project, read_regions_from_project};
 use crate::implementation::setlist::{build_setlist_from_open_projects, build_song_from_current_project};
 use reaper_high::{Project, Reaper, BookmarkType};
-use reaper_medium::{ProjectRef, MasterTrackBehavior, UndoScope, ProjectPart};
-use reaper_low;
-use tracing::{info, warn, error};
+use reaper_medium::ProjectRef;
+use tracing::{info, warn};
 use daw::transport::{TransportActions, PlayState};
 use crate::lyrics;
 

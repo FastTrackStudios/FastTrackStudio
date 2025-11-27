@@ -1,14 +1,19 @@
 use dioxus::prelude::*;
-use setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, SONG_TRANSPORT, Song};
+use setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, Song};
 use daw::primitives::{MusicalPosition, TimePosition};
 use crate::components::{Slider, Ruler, MeasureInfo, TrackControlPanel};
 use lyrics::{Lyrics, output::{Slides, SlideBreakConfig}};
+use crate::reactive_state::{use_transport_for_active_song, use_tracks_for_active_song};
 
 /// Arrangement view component - DAW timeline/arrange view
 #[component]
 pub fn ArrangementView(
     /// Callback for seeking to a time position: (song_index, time_seconds)
     on_seek_to_time: Option<Callback<(usize, f64)>>,
+    /// Callback when track mute is toggled: (project_name, track_index, new_muted_state)
+    on_track_mute: Option<Callback<(String, usize, bool)>>,
+    /// Callback when track solo is toggled: (project_name, track_index, new_solo_mode)
+    on_track_solo: Option<Callback<(String, usize, daw::tracks::api::solo::SoloMode)>>,
 ) -> Element {
     // Get active song from SETLIST_STRUCTURE and ACTIVE_INDICES
     // Only rerenders when structure changes or active song changes
@@ -27,38 +32,23 @@ pub fn ArrangementView(
         }).unwrap_or_default()
     });
     
-    // Get playhead position (play cursor) from SONG_TRANSPORT
+    // Get transport state for active song using reactive state hook
+    let transport = use_transport_for_active_song();
+    
+    // Get playhead position (play cursor) from transport
     // Only rerenders when transport for active song changes
     let playhead_position = use_memo(move || {
-        let song_transport = SONG_TRANSPORT.read();
-        let active_indices = ACTIVE_INDICES.read();
-        active_indices.0.and_then(|idx| {
-            song_transport.get(&idx).map(|transport| {
-                transport.playhead_position.time.to_seconds()
-            })
-        })
+        transport().as_ref().map(|t| t.playhead_position.time.to_seconds())
     });
     
     // Get playhead musical position for measure calculation
     let playhead_measure = use_memo(move || {
-        let song_transport = SONG_TRANSPORT.read();
-        let active_indices = ACTIVE_INDICES.read();
-        active_indices.0.and_then(|idx| {
-            song_transport.get(&idx).map(|transport| {
-                transport.playhead_position.musical.measure
-            })
-        })
+        transport().as_ref().map(|t| t.playhead_position.musical.measure)
     });
     
     // Get edit cursor position (separate from playhead)
     let edit_cursor_position = use_memo(move || {
-        let song_transport = SONG_TRANSPORT.read();
-        let active_indices = ACTIVE_INDICES.read();
-        active_indices.0.and_then(|idx| {
-            song_transport.get(&idx).map(|transport| {
-                transport.edit_position.time.to_seconds()
-            })
-        })
+        transport().as_ref().map(|t| t.edit_position.time.to_seconds())
     });
     
     // Track container width for zoom calculation
@@ -335,19 +325,14 @@ pub fn ArrangementView(
         }).unwrap_or_default()
     });
     
-    // Tracks from active song - read from SONG_TRACKS signal
+    // Tracks from active song using reactive state hook
     // Only rerenders when tracks for active song change
-    let tracks = use_memo(move || {
-        let song_tracks = setlist::SONG_TRACKS.read();
-        let active_indices = ACTIVE_INDICES.read();
-        active_indices.0.and_then(|idx| {
-            song_tracks.get(&idx).cloned()
-        }).unwrap_or_default()
-    });
+    let tracks = use_tracks_for_active_song();
     
     // Compute initial collapsed state from REAPER's folder collapse state
     let initial_collapsed_state = use_memo(move || {
-        tracks().iter().map(|track| {
+        tracks().as_ref().map(|tracks_vec| {
+            tracks_vec.iter().map(|track| {
             // Check bus_compact.arrange first (arrange view collapse state)
             if let Some(bus_compact) = &track.bus_compact {
                 match bus_compact.arrange {
@@ -368,6 +353,7 @@ pub fn ArrangementView(
                 false
             }
         }).collect::<Vec<bool>>()
+        }).unwrap_or_default()
     });
     
     // Collapsed folder state - initialize from REAPER, but allow user to toggle
@@ -378,7 +364,7 @@ pub fn ArrangementView(
     let initial_state_for_effect = initial_collapsed_state;
     let mut collapsed_folders_for_effect = collapsed_folders;
     use_effect(move || {
-        let tracks_list = tracks_for_effect();
+        let tracks_list = tracks_for_effect().as_ref().map(|t| t.clone()).unwrap_or_default();
         let track_count = tracks_list.len();
         let current_state = collapsed_folders_for_effect();
         let initial_state = initial_state_for_effect();
@@ -405,7 +391,7 @@ pub fn ArrangementView(
     // Track heights (resizable) - base heights before vertical zoom
     // Compute base heights from track count (default 64px per track)
     let base_track_heights = use_memo(move || {
-        let track_count = tracks().len().max(1);
+        let track_count = tracks().as_ref().map(|t| t.len()).unwrap_or(0).max(1);
         vec![64.0; track_count]
     });
     
@@ -606,7 +592,7 @@ pub fn ArrangementView(
                             class: "sticky left-0 z-30 bg-card",
                             style: "height: 100%;",
                             TrackControlPanel {
-                                tracks: tracks().to_vec(),
+                                tracks: tracks().as_ref().map(|t| t.clone()).unwrap_or_default(),
                                 track_heights: track_heights,
                                 collapsed_folders: collapsed_folders,
                                 on_track_height_change: None,
@@ -621,6 +607,17 @@ pub fn ArrangementView(
                                         }
                                     })
                                 }),
+                                project_name: active_song().as_ref()
+                                    .and_then(|song| {
+                                        song.metadata
+                                            .get("project_name")
+                                            .or_else(|| song.metadata.get("Project"))
+                                            .or_else(|| song.metadata.get("project"))
+                                            .cloned()
+                                    })
+                                    .unwrap_or_else(|| "default".to_string()),
+                                on_track_mute: on_track_mute.clone(),
+                                on_track_solo: on_track_solo.clone(),
                             }
                         }
                         

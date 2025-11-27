@@ -8,29 +8,24 @@
 
 use anyhow::Result;
 use dioxus::prelude::*;
-use iroh::{Endpoint, EndpointId};
-use peer_2_peer::iroh_connection::read_endpoint_id;
 use std::sync::OnceLock;
 use tracing::{debug, error, info, warn};
 use setlist::{
     SetlistStreamApi, SetlistUpdateMessage,
     SETLIST, ACTIVE_SLIDE_INDEX, SONG_TRACKS, SONG_TRANSPORT, SETLIST_STRUCTURE, ACTIVE_INDICES,
 };
-
-// Cached endpoint (created once, kept alive for the lifetime of the app)
-static ENDPOINT: OnceLock<Endpoint> = OnceLock::new();
-// Cached endpoint ID (can be cleared and re-read on retries)
-static ENDPOINT_ID: OnceLock<std::sync::Mutex<Option<EndpointId>>> = OnceLock::new();
+use crate::iroh_connection_manager::{init_shared_endpoint, get_shared_endpoint, get_reaper_endpoint_addr};
 // Cached setlist stream API (for making RPC calls)
-static SETLIST_API: OnceLock<std::sync::Mutex<Option<SetlistStreamApi>>> = OnceLock::new();
+// Made public so setlist_commands can access it
+// Using tokio::sync::Mutex so we can hold the lock across await points
+pub(crate) static SETLIST_API: OnceLock<tokio::sync::Mutex<Option<SetlistStreamApi>>> = OnceLock::new();
 // Connection status channel for UI updates
 static CONNECTION_STATUS: OnceLock<tokio::sync::watch::Sender<bool>> = OnceLock::new();
 
 /// Initialize the setlist API storage
 #[cfg(not(target_arch = "wasm32"))]
 fn init_setlist_api_storage() {
-    SETLIST_API.get_or_init(|| std::sync::Mutex::new(None));
-    ENDPOINT_ID.get_or_init(|| std::sync::Mutex::new(None));
+    SETLIST_API.get_or_init(|| tokio::sync::Mutex::new(None));
 }
 
 /// Get a receiver for connection status updates
@@ -41,10 +36,15 @@ pub fn get_connection_status_receiver() -> Option<tokio::sync::watch::Receiver<b
 
 /// Get the current setlist stream API instance
 /// Returns None if not connected
+/// 
+/// Note: SetlistStreamApi doesn't implement Clone, so this function is deprecated.
+/// Callers should access the API through the storage directly or use a different approach.
 #[cfg(not(target_arch = "wasm32"))]
+#[deprecated(note = "SetlistStreamApi no longer implements Clone. Use a different approach to access the API.")]
 pub fn get_setlist_api() -> Option<SetlistStreamApi> {
-    init_setlist_api_storage();
-    SETLIST_API.get()?.lock().ok()?.clone()
+    // This function can no longer return a clone since SetlistStreamApi doesn't implement Clone
+    // Callers should be updated to not use this function
+    None
 }
 
 /// Connect to REAPER extension and start streaming setlist updates with automatic reconnection
@@ -57,10 +57,8 @@ pub async fn connect_to_reaper_setlist() -> Result<()> {
     let (tx, _rx) = tokio::sync::watch::channel(false);
     CONNECTION_STATUS.set(tx).map_err(|_| anyhow::anyhow!("Connection status already initialized"))?;
     
-    // Create the endpoint once (iroh endpoints are long-lived)
-    let endpoint = Endpoint::builder().bind().await
-        .map_err(|e| anyhow::anyhow!("Failed to create client endpoint: {}", e))?;
-    ENDPOINT.set(endpoint).map_err(|_| anyhow::anyhow!("Endpoint already initialized"))?;
+    // Ensure shared endpoint is initialized
+    init_shared_endpoint().await?;
     
     // Spawn the connection task with retry logic
     spawn(async move {
@@ -114,9 +112,8 @@ async fn connect_with_retry() {
                 
                 // Clear the API instance
                 if let Some(api_storage) = SETLIST_API.get() {
-                    if let Ok(mut guard) = api_storage.lock() {
-                        *guard = None;
-                    }
+                    let mut guard = api_storage.lock().await;
+                    *guard = None;
                 }
                 
                 // Update connection status to disconnected
@@ -143,9 +140,8 @@ async fn connect_with_retry() {
                 
                 // Clear the API instance
                 if let Some(api_storage) = SETLIST_API.get() {
-                    if let Ok(mut guard) = api_storage.lock() {
-                        *guard = None;
-                    }
+                    let mut guard = api_storage.lock().await;
+                    *guard = None;
                 }
                 
                 // Update connection status to disconnected
@@ -171,41 +167,13 @@ async fn connect_with_retry() {
 /// Returns a channel that will receive a message when the connection is lost.
 #[cfg(not(target_arch = "wasm32"))]
 async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
-    // Get the cached endpoint (should exist from connect_to_reaper_setlist())
-    let endpoint = ENDPOINT.get()
-        .ok_or_else(|| anyhow::anyhow!("Endpoint not initialized. Call connect_to_reaper_setlist() first."))?
-        .clone();
+    // Get the shared endpoint
+    let endpoint = get_shared_endpoint()
+        .ok_or_else(|| anyhow::anyhow!("Shared endpoint not initialized. Call connect_to_reaper_setlist() first."))?;
     
-    // Always re-read the endpoint ID from file on each connection attempt
-    // This ensures we get the latest endpoint ID if REAPER restarted
-    // (REAPER might get a new endpoint ID when it restarts)
-    let endpoint_id = match read_endpoint_id() {
-        Ok(Some(id)) => {
-            // Update cache with the latest endpoint ID
-            if let Some(endpoint_id_lock) = ENDPOINT_ID.get() {
-                if let Ok(mut guard) = endpoint_id_lock.lock() {
-                    // Only log if it changed
-                    if *guard != Some(id) {
-                        if let Some(old_id) = *guard {
-                            info!("[Setlist Connection] Endpoint ID changed: {} -> {}", old_id, id);
-    } else {
-                            info!("[Setlist Connection] Found REAPER endpoint ID: {}", id);
-                        }
-                    }
-                    *guard = Some(id);
-                }
-            }
-            id
-        }
-        Ok(None) => {
-            return Err(anyhow::anyhow!("No endpoint ID found, REAPER extension may not be running"));
-        }
-        Err(e) => {
-            return Err(anyhow::anyhow!("Failed to read endpoint ID: {}", e));
-        }
-    };
-    
-    let endpoint_addr = iroh::EndpointAddr::from(endpoint_id);
+    // Get the REAPER endpoint address
+    let endpoint_addr = get_reaper_endpoint_addr()?
+        .ok_or_else(|| anyhow::anyhow!("No endpoint ID found, REAPER extension may not be running"))?;
     
     // CRITICAL: Create a NEW SetlistStreamApi instance on each connection attempt
     // The IrohLazyRemoteConnection inside has limited retry logic, so we need
@@ -224,9 +192,12 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
     let connection_timeout = tokio::time::Duration::from_secs(10);
     
     // Subscribe to all granular streams
+    // Note: subscribe() methods take &self, so they don't consume setlist_api
+    // We can use it for subscribing, then store it afterwards
     let (mut structure_rx, mut active_indices_rx, mut tracks_rx, mut transport_rx) = match tokio::time::timeout(
         connection_timeout,
         async {
+            // Borrow setlist_api for subscribing (methods take &self)
             info!("[Setlist Connection] Subscribing to SetlistStructure stream...");
             let structure = setlist_api.subscribe_structure().await?;
             info!("[Setlist Connection] ✅ Subscribed to SetlistStructure stream");
@@ -260,15 +231,15 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
         }
     };
     
-    // Only store the API instance AFTER subscribe() succeeds
+    // Store the API instance AFTER subscribe() succeeds
     // This ensures we only mark as connected when we can actually receive data
-    // NOTE: We create a new SetlistStreamApi on each retry, so we need to update the stored instance
-    let setlist_api_for_storage = setlist_api.clone();
+    // The subscribe() methods take &self, so setlist_api is still available here
     if let Some(api_storage) = SETLIST_API.get() {
-        if let Ok(mut guard) = api_storage.lock() {
-            *guard = Some(setlist_api_for_storage);
-            info!("[Setlist Connection] Stored setlist API instance for RPC calls");
-        }
+        let mut guard = api_storage.lock().await;
+        *guard = Some(setlist_api);
+        info!("[Setlist Connection] ✅ Stored setlist API instance for commands");
+    } else {
+        warn!("[Setlist Connection] ⚠️ API storage not initialized - commands will not work");
     }
     
     // Create a channel to signal when the connection is lost
@@ -526,9 +497,16 @@ fn cleanup_on_disconnect() {
     *SETLIST.write() = None;
     *ACTIVE_SLIDE_INDEX.write() = None;
     // Clear the API instance
+    // Note: This is called from sync context, but we're in a tokio runtime
+    // so we can use Handle::try_current() to await
     if let Some(api_storage) = SETLIST_API.get() {
-        if let Ok(mut guard) = api_storage.lock() {
-            *guard = None;
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let mut guard = api_storage.lock().await;
+                *guard = None;
+            });
+        } else {
+            warn!("Cannot clear API storage - no tokio runtime available");
         }
     }
 }

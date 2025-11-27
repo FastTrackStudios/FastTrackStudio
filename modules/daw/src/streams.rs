@@ -6,7 +6,6 @@
 
 use crate::transport::reactive::TransportStreams;
 use crate::tracks::reactive::TrackStreams;
-use uuid::Uuid;
 use rxrust::prelude::*;
 use std::cell::RefCell;
 
@@ -17,7 +16,7 @@ pub type EventStreamSubject<T> = RefCell<LocalSubject<'static, T, ()>>;
 #[derive(Clone, Default, Debug)]
 pub struct ProjectStreams {
     /// Project opened/closed
-    pub project_changed: EventStreamSubject<Option<Uuid>>, // project_id or None if closed
+    pub project_changed: EventStreamSubject<Option<String>>, // project_name or None if closed
 }
 
 impl ProjectStreams {

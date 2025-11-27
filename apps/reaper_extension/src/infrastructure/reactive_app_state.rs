@@ -12,15 +12,15 @@
 //! - Efficient updates (no unnecessary rerenders)
 //! - Composable architecture where each domain defines its own reactive behavior
 
+use std::sync::Arc;
 use daw::transport::Transport;
 use daw::{DawStreams, ProjectStreams};
-use daw::transport::reactive::{TransportReactiveService, DefaultTransportReactiveService};
-use daw::tracks::reactive::{TrackReactiveService, DefaultTrackReactiveService};
+use daw::transport::reactive::TransportReactiveService;
+use daw::tracks::reactive::TrackReactiveService;
 use setlist::SetlistApi;
 use setlist::reactive::{SetlistReactiveStreams, SetlistReactiveService};
 use lyrics::{Lyrics, LyricsAnnotations};
-use std::sync::Arc;
-use uuid::Uuid;
+use lyrics::reactive::{LyricsReactiveService, LyricsStreams};
 
 /// Centralized application state
 /// This is a lightweight wrapper that composes domain services
@@ -61,11 +61,11 @@ impl ReactiveAppStateStreams {
         self.setlist.active_indices.active_indices_changed.borrow().clone()
     }
     
-    pub fn tracks_changed(&self) -> rxrust::prelude::LocalSubject<'static, (uuid::Uuid, Vec<daw::tracks::Track>), ()> {
+    pub fn tracks_changed(&self) -> rxrust::prelude::LocalSubject<'static, (String, Vec<daw::tracks::Track>), ()> {
         self.daw.tracks.tracks_changed.borrow().clone()
     }
     
-    pub fn transport_changed(&self) -> rxrust::prelude::LocalSubject<'static, (uuid::Uuid, Transport), ()> {
+    pub fn transport_changed(&self) -> rxrust::prelude::LocalSubject<'static, (String, Transport), ()> {
         self.daw.transport.transport_changed.borrow().clone()
     }
     
@@ -106,31 +106,84 @@ pub struct ReactiveAppStateService {
     pub setlist: Option<SetlistApi>,
     
     /// Transport reactive service
-    /// Note: Uses `Box` because reactive services are not `Send` or `Sync`
-    /// (reactive streams use `Rc<RefCell<...>>` and are main-thread only)
-    pub transport_service: Box<dyn TransportReactiveService>,
+    /// Note: Uses `Arc` to allow cloning for IRPC API creation
+    /// Reactive services are not `Send` or `Sync` (reactive streams use `Rc<RefCell<...>>` and are main-thread only)
+    pub transport_service: Arc<dyn TransportReactiveService>,
     
     /// Track reactive service
-    /// Note: Uses `Box` because reactive services are not `Send` or `Sync`
-    pub track_service: Box<dyn TrackReactiveService>,
+    /// Note: Uses `Arc` to allow cloning for IRPC API creation
+    pub track_service: Arc<dyn TrackReactiveService>,
+    
+    /// Concrete REAPER transport service (for calling REAPER-specific methods)
+    /// This is the same instance as transport_service, but typed for convenience
+    pub(crate) reaper_transport_service: Option<Arc<crate::infrastructure::reaper_transport_reactive::ReaperTransportReactiveService>>,
+    
+    /// Concrete REAPER track service (for calling REAPER-specific methods)
+    /// This is the same instance as track_service, but typed for convenience
+    pub reaper_track_service: Option<Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>>,
     
     /// Setlist reactive service (manages setlist, song, lyrics, active indices)
     pub setlist_service: SetlistReactiveService,
+    
+    /// Lyrics reactive service (manages lyrics and active slide for songs)
+    /// Note: Uses `Arc` to allow cloning for IRPC API creation
+    /// Reactive services are not `Send` or `Sync` (reactive streams use `Rc<RefCell<...>>` and are main-thread only)
+    pub lyrics_service: Arc<dyn LyricsReactiveService>,
+    
+    /// Concrete REAPER lyrics service (for calling REAPER-specific methods)
+    /// This is the same instance as lyrics_service, but typed for convenience
+    pub(crate) reaper_lyrics_service: Option<Arc<crate::infrastructure::reaper_lyrics_reactive::ReaperLyricsReactiveService>>,
     
     /// Reactive streams (composed from domain services)
     pub streams: ReactiveAppStateStreams,
 }
 
+impl std::fmt::Debug for ReactiveAppStateService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReactiveAppStateService")
+            .field("setlist", &self.setlist)
+            .field("streams", &self.streams)
+            .finish_non_exhaustive()
+    }
+}
+
 impl ReactiveAppStateService {
-    pub fn new() -> Self {
+    /// Create with REAPER implementations
+    pub fn new_with_reaper(
+        setlist_service: Arc<crate::services::SetlistService>,
+    ) -> Self {
         let daw_streams = DawStreams::new();
         let setlist_streams = SetlistReactiveStreams::new();
         
+        let reaper_transport = Arc::new(
+            crate::infrastructure::reaper_transport_reactive::ReaperTransportReactiveService::new(
+                daw_streams.transport.clone(),
+                setlist_service.clone(),
+            )
+        );
+        let reaper_track = Arc::new(
+            crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService::new(
+                daw_streams.tracks.clone(),
+                setlist_service.clone(),
+            )
+        );
+        
+        let lyrics_streams = LyricsStreams::new();
+        let reaper_lyrics = Arc::new(
+            crate::infrastructure::reaper_lyrics_reactive::ReaperLyricsReactiveService::new(
+                lyrics_streams.clone(),
+            )
+        );
+        
         Self {
             setlist: None,
-            transport_service: Box::new(DefaultTransportReactiveService::new(daw_streams.transport.clone())),
-            track_service: Box::new(DefaultTrackReactiveService::new(daw_streams.tracks.clone())),
+            transport_service: reaper_transport.clone() as Arc<dyn TransportReactiveService>,
+            track_service: reaper_track.clone() as Arc<dyn TrackReactiveService>,
+            reaper_transport_service: Some(reaper_transport),
+            reaper_track_service: Some(reaper_track),
             setlist_service: SetlistReactiveService::new(setlist_streams.clone()),
+            lyrics_service: reaper_lyrics.clone() as Arc<dyn LyricsReactiveService>,
+            reaper_lyrics_service: Some(reaper_lyrics),
             streams: ReactiveAppStateStreams {
                 daw: daw_streams,
                 setlist: setlist_streams,
@@ -140,8 +193,8 @@ impl ReactiveAppStateService {
     
     /// Create with custom reactive service implementations
     pub fn with_services(
-        transport_service: Box<dyn TransportReactiveService>,
-        track_service: Box<dyn TrackReactiveService>,
+        transport_service: Arc<dyn TransportReactiveService>,
+        track_service: Arc<dyn TrackReactiveService>,
     ) -> Self {
         let setlist_streams = SetlistReactiveStreams::new();
         let daw_streams = DawStreams {
@@ -150,11 +203,20 @@ impl ReactiveAppStateService {
             project: ProjectStreams::new(),
         };
         
+        let lyrics_streams = LyricsStreams::new();
+        let default_lyrics = Arc::new(
+            lyrics::reactive::DefaultLyricsReactiveService::new(lyrics_streams)
+        ) as Arc<dyn LyricsReactiveService>;
+        
         Self {
             setlist: None,
             transport_service,
             track_service,
+            reaper_transport_service: None,
+            reaper_track_service: None,
             setlist_service: SetlistReactiveService::new(setlist_streams.clone()),
+            lyrics_service: default_lyrics,
+            reaper_lyrics_service: None,
             streams: ReactiveAppStateStreams {
                 daw: daw_streams,
                 setlist: setlist_streams,

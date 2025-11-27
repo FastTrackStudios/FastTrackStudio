@@ -2,7 +2,6 @@
 //!
 //! Handles commands from the stream API by delegating to services.
 
-use async_trait::async_trait;
 use std::sync::Arc;
 use setlist::{SetlistCommandHandler, TransportCommand, NavigationCommand};
 use setlist::infra::stream::LyricsState;

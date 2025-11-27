@@ -8,7 +8,6 @@ use crate::tracks::Track;
 /// Embeddable project state that carries its own transport.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project<T> {
-    id: uuid::Uuid,
     name: String,
     description: Option<String>,
     path: Option<String>,
@@ -24,7 +23,6 @@ impl<T> Project<T> {
     /// Create a new project with a specific transport implementation.
     pub fn new(name: impl Into<String>, transport: T) -> Self {
         Self {
-            id: uuid::Uuid::new_v4(),
             name: name.into(),
             description: None,
             path: None,
@@ -35,8 +33,9 @@ impl<T> Project<T> {
         }
     }
 
-    pub fn id(&self) -> uuid::Uuid {
-        self.id
+    /// Get the project ID (which is the project name, used as a stable identifier)
+    pub fn id(&self) -> &str {
+        &self.name
     }
 
     pub fn name(&self) -> &str {
@@ -140,8 +139,7 @@ impl Default for Project<Transport> {
 
 impl PartialEq for Project<Transport> {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-            && self.name == other.name
+        self.name == other.name
             && self.description == other.description
             && self.path == other.path
             && self.metadata == other.metadata

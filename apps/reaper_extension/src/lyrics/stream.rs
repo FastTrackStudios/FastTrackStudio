@@ -4,12 +4,10 @@
 //! These are used by the setlist stream protocol.
 
 use setlist::infra::stream::LyricsState;
-use reaper_high::{Reaper, Project, Track, Item};
-use reaper_medium::{ProjectContext, MediaItemTake, PositionInSeconds, ReaperStringArg};
-use reaper_low;
-use tracing::{info, warn, error, debug};
+use reaper_high::Reaper;
+use reaper_medium::{MediaItemTake, PositionInSeconds};
 use std::ffi::CString;
-use lyrics::{Lyrics, LyricLine, Word, Syllable};
+use lyrics::Syllable;
 use lyrics::core::split_line_into_words;
 
 /// REAPER implementation of lyrics command handlers

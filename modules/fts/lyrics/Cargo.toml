@@ -20,6 +20,7 @@ iroh = { version = "0.95", features = ["discovery-local-network"] }
 async-trait = "0.1"
 anyhow = "1.0"
 tokio = { version = "1.0", features = ["full"] }
+rxrust = { workspace = true }
 # Note: setlist dependency removed to break circular dependency
 # Sync functionality can be added in setlist crate or a separate integration crate
 # setlist = { path = "../setlist", optional = true }

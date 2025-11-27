@@ -131,10 +131,12 @@ fn broadcast_track_update_for_song(track: &reaper_high::Track) {
     };
     
     // Get the broadcast sender and state provider
+    // Note: This is legacy code - track updates are now handled by the reactive track service
+    // We keep this for backwards compatibility but it's not critical if it fails
     let broadcast_tx = match get_broadcast_sender() {
         Some(tx) => tx,
         None => {
-            warn!("Broadcast sender not available yet - setlist stream not initialized");
+            // Broadcast sender not available - this is OK, track updates are handled by reactive service
             return;
         }
     };
@@ -142,7 +144,7 @@ fn broadcast_track_update_for_song(track: &reaper_high::Track) {
     let state_provider = match get_state_provider() {
         Some(sp) => sp,
         None => {
-            warn!("State provider not available yet - setlist stream not initialized");
+            // State provider not available - this is OK, track updates are handled by reactive service
             return;
         }
     };
@@ -180,9 +182,13 @@ fn broadcast_track_update_for_song(track: &reaper_high::Track) {
 
 /// Initialize reactive stream subscriptions for setlist updates
 /// This subscribes to all track-related reactive streams and broadcasts updates
+/// Also updates the track reactive service when tracks change
 /// 
 /// Note: This must be called from the main thread after the middleware is created
-pub fn init_reactive_stream_subscriptions(rx: &ControlSurfaceRx) {
+pub fn init_reactive_stream_subscriptions(
+    rx: &ControlSurfaceRx,
+    track_service: Option<std::sync::Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>>,
+) {
     use crate::implementation::tracks::{invalidate_track_cache, invalidate_all_track_caches};
     use setlist::infra::stream::{get_broadcast_sender, get_state_provider, SetlistUpdateMessage};
     use reaper_high::Reaper;
@@ -223,26 +229,44 @@ pub fn init_reactive_stream_subscriptions(rx: &ControlSurfaceRx) {
         }
     });
     
-    // Track structure changes - invalidate cache and broadcast track updates
+    // Track structure changes - invalidate cache, broadcast updates, and update reactive service
+    let track_service_clone = track_service.clone();
     rx.track_added().subscribe(move |track| {
         debug!(track = ?track, "Track added - invalidating cache and broadcasting update");
         let reaper = Reaper::get();
         let project = reaper.current_project();
         invalidate_track_cache(&project);
         broadcast_track_update_for_song(&track);
+        
+        // Update track reactive service
+        if let Some(ref track_svc) = track_service_clone {
+            track_svc.update_tracks_from_reaper(project);
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.track_removed().subscribe(move |track| {
         debug!(track = ?track, "Track removed - invalidating cache and broadcasting update");
         let reaper = Reaper::get();
         let project = reaper.current_project();
         invalidate_track_cache(&project);
         broadcast_track_update_for_song(&track);
+        
+        // Update track reactive service
+        if let Some(ref track_svc) = track_service_clone {
+            track_svc.update_tracks_from_reaper(project);
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.tracks_reordered().subscribe(move |project| {
         debug!(project = ?project, "Tracks reordered - invalidating cache and broadcasting update");
         invalidate_track_cache(&project);
+        
+        // Update track reactive service
+        if let Some(ref track_svc) = track_service_clone {
+            track_svc.update_tracks_from_reaper(project);
+        }
         
         // Broadcast tracks for all songs in the current project
         // (tracks_reordered gives us the project, so we need to find all songs for that project)
@@ -294,78 +318,178 @@ pub fn init_reactive_stream_subscriptions(rx: &ControlSurfaceRx) {
         }
     });
     
-    // Track property changes - broadcast track updates reactively
+    // Track property changes - broadcast track updates reactively and update reactive service
+    // For property changes, we update the specific track (more efficient than updating all tracks)
+    let track_service_clone = track_service.clone();
     rx.track_volume_changed().subscribe(move |track| {
         trace!(track = ?track, "Track volume changed - broadcasting update");
         broadcast_track_update_for_song(&track);
+        
+        // Update specific track in reactive service
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.track_pan_changed().subscribe(move |track| {
         trace!(track = ?track, "Track pan changed - broadcasting update");
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.track_mute_changed().subscribe(move |track| {
         trace!(track = ?track, "Track mute changed - broadcasting update");
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.track_solo_changed().subscribe(move |track| {
         trace!(track = ?track, "Track solo changed - broadcasting update");
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.track_arm_changed().subscribe(move |track| {
         trace!(track = ?track, "Track arm changed - broadcasting update");
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.track_name_changed().subscribe(move |track| {
         debug!(track = ?track, "Track name changed - broadcasting update");
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.track_input_changed().subscribe(move |track| {
         trace!(track = ?track, "Track input changed - broadcasting update");
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.track_input_monitoring_changed().subscribe(move |track| {
         trace!(track = ?track, "Track input monitoring changed - broadcasting update");
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.track_automation_mode_changed().subscribe(move |track| {
         trace!(track = ?track, "Track automation mode changed - broadcasting update");
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
     // Route changes - get track from route
+    let track_service_clone = track_service.clone();
     rx.track_route_volume_changed().subscribe(move |route| {
         trace!(route = ?route, "Track route volume changed - broadcasting update");
         let track = route.track();
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.track_route_pan_changed().subscribe(move |route| {
         trace!(route = ?route, "Track route pan changed - broadcasting update");
         let track = route.track();
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.receive_count_changed().subscribe(move |track| {
         trace!(track = ?track, "Receive count changed - broadcasting update");
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.track_send_count_changed().subscribe(move |track| {
         trace!(track = ?track, "Track send count changed - broadcasting update");
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
+    let track_service_clone = track_service.clone();
     rx.hardware_output_send_count_changed().subscribe(move |track| {
         trace!(track = ?track, "Hardware output send count changed - broadcasting update");
         broadcast_track_update_for_song(&track);
+        
+        if let Some(ref track_svc) = track_service_clone {
+            if let Some(track_index) = track.index() {
+                track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            }
+        }
     });
     
     info!("✅ Initialized reactive stream subscriptions for all track-related events");
@@ -389,19 +513,31 @@ pub fn init_deferred_reactive_logger(middleware: &ComprehensiveChangeDetectionMi
 /// 
 /// Note: Logger initialization is deferred until the first project is loaded to avoid
 /// RefCell borrow panics during initial setup.
-pub fn init_middleware_reactive_streams(middleware: &ComprehensiveChangeDetectionMiddleware) {
+pub fn init_middleware_reactive_streams(
+    middleware: &ComprehensiveChangeDetectionMiddleware,
+    track_service: Option<std::sync::Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>>,
+) {
     // Initialize reactive stream subscriptions (these are needed for broadcasting updates)
-    init_reactive_stream_subscriptions(middleware.rx());
+    init_reactive_stream_subscriptions(middleware.rx(), track_service);
     
     // Logger initialization is deferred - will be called after first setlist update
     // This avoids RefCell borrow panics during initial project loading
 }
 
 /// Change detection infrastructure
-#[derive(Debug)]
 pub struct ChangeDetection {
     middleware: ComprehensiveChangeDetectionMiddleware,
     logger_initialized: std::cell::Cell<bool>,
+    track_service: std::cell::Cell<Option<std::sync::Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>>>,
+}
+
+impl std::fmt::Debug for ChangeDetection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChangeDetection")
+            .field("middleware", &self.middleware)
+            .field("logger_initialized", &self.logger_initialized.get())
+            .finish_non_exhaustive()
+    }
 }
 
 impl ChangeDetection {
@@ -410,7 +546,13 @@ impl ChangeDetection {
         Ok(Self {
             middleware: ComprehensiveChangeDetectionMiddleware::new(),
             logger_initialized: std::cell::Cell::new(false),
+            track_service: std::cell::Cell::new(None),
         })
+    }
+    
+    /// Set the track reactive service (called from App initialization)
+    pub fn set_track_service(&self, track_service: std::sync::Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>) {
+        self.track_service.set(Some(track_service));
     }
     
     /// Initialize the reactive logger (deferred until first project is loaded)
@@ -430,7 +572,9 @@ impl ChangeDetection {
         let middleware = ComprehensiveChangeDetectionMiddleware::new();
         
         // Initialize reactive streams (subscriptions only - logger is deferred)
-        init_middleware_reactive_streams(&middleware);
+        // Pass the track service if available
+        let track_service = self.track_service.take();
+        init_middleware_reactive_streams(&middleware, track_service);
         
         let control_surface = MiddlewareControlSurface::new(middleware);
         session.plugin_register_add_csurf_inst(Box::new(control_surface))?;

@@ -34,7 +34,7 @@ use std::error::Error;
 use reaper_low::{PluginContext, Swell};
 use reaper_medium::ReaperSession;
 use reaper_high::Reaper as HighReaper;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use crate::infrastructure::action_registry::MidiEditorActionHook;
 use crate::app::App;
 use fragile::Fragile;
@@ -74,6 +74,13 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Create a medium-level API session (keep it alive for timer registration)
     let mut session = ReaperSession::load(context);
     
+    // Initialize TaskSupport for dispatching work to main thread
+    if let Err(e) = crate::infrastructure::task_support::init_task_support() {
+        warn!(error = %e, "Failed to initialize TaskSupport");
+    } else {
+        info!("TaskSupport initialized");
+    }
+    
     // Register hookcommand2 for MIDI editor actions (must be done before action registration)
     if let Err(e) = session.plugin_register_add_hook_command_2::<MidiEditorActionHook>() {
         warn!(error = %e, "Failed to register hookcommand2 for MIDI editor actions");
@@ -103,7 +110,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     extern "C" fn polling_timer_callback() {
         use crate::infrastructure::timer::{log_first_timer_call, increment_tick_count};
         use std::sync::atomic::{AtomicU64, Ordering};
-        use std::sync::OnceLock;
+        
+        // Process main thread tasks from TaskSupport
+        crate::infrastructure::task_support::run_middleware();
         
         // Log first call and increment tick count
         log_first_timer_call();
@@ -139,6 +148,33 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
                         info!("✅ All reactive loggers initialized (after first project loaded)");
                     }
                     
+                    // Update reactive setlist service with current setlist and active indices
+                    if let Some(setlist_api) = app.setlist_service.get_setlist() {
+                        let setlist = setlist_api.get_setlist();
+                        app.reactive_state.setlist_service.update_setlist(setlist.clone());
+                        app.reactive_state.setlist_service.update_active_indices(
+                            setlist_api.active_song_index(),
+                            setlist_api.active_section_index(),
+                            setlist_api.active_slide_index(),
+                        );
+                        
+                        // Update lyrics reactive service with active slide index
+                        if let Some(song_index) = setlist_api.active_song_index() {
+                            if let Some(song) = setlist.songs.get(song_index) {
+                                let song_name = song.name.clone();
+                                let slide_index = setlist_api.active_slide_index();
+                                
+                                // Update lyrics if they exist
+                                if let Some(lyrics) = song.lyrics.as_ref() {
+                                    app.reactive_state.lyrics_service.update_lyrics(&song_name, lyrics.clone());
+                                }
+                                
+                                // Update active slide index
+                                app.reactive_state.lyrics_service.update_active_slide_index(&song_name, slide_index);
+                            }
+                        }
+                    }
+                    
                     // Success - only log periodically to avoid spam
                     if count % 1000 == 0 {
                         debug!("✅ Setlist state updated successfully (tick {})", count);
@@ -154,6 +190,12 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
             // Only poll after setlist is ready to avoid RefCell borrow issues
             if app.setlist_service.get_setlist().is_some() {
                 app.reactive_polling.poll();
+                
+                // Update transport reactive service from REAPER
+                // Use the concrete REAPER service instance if available
+                if let Some(ref transport_service) = app.reactive_state.reaper_transport_service {
+                    transport_service.update_from_reaper();
+                }
             }
             
             // Process pending seek requests from async tasks

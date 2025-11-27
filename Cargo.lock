@@ -1683,6 +1683,7 @@ dependencies = [
  "iroh",
  "irpc",
  "irpc-iroh",
+ "lyrics",
  "n0-future",
  "peer-2-peer",
  "serde",
@@ -4761,6 +4762,7 @@ dependencies = [
  "irpc-iroh",
  "once_cell",
  "regex",
+ "rxrust",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -6623,6 +6625,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "crossbeam-channel",
  "daw",
  "enumflags2",
  "fragile",

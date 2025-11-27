@@ -12,8 +12,20 @@ pub mod syllables;
 pub mod source;
 pub mod infra;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod reactive;
+
 pub use core::*;
 pub use parser::{parse_lyrics, parse_lyrics_with_config, ParserConfig, BackgroundVocalPattern, ParseError};
 pub use output::*;
 pub use syllables::*;
 pub use source::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use reactive::{
+    LyricsStreams, LyricsReactiveState, LyricsReactiveService,
+    DefaultLyricsReactiveService, EventStreamSubject,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use reactive::irpc::{LyricsApi, LyricsProtocol, LyricsUpdateMessage};

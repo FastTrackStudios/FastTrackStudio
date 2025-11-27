@@ -10,6 +10,8 @@ use lyrics::{Lyrics, LyricsAnnotations};
 use rxrust::prelude::Observer;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
+#[cfg(not(target_arch = "wasm32"))]
+use tracing::info;
 
 /// State managed by the setlist reactive service
 #[derive(Debug, Clone)]
@@ -79,16 +81,58 @@ impl SetlistReactiveService {
     /// Update setlist structure
     /// Emits event only if setlist structure actually changed
     pub fn update_setlist(&self, setlist: Setlist) {
-        let changed = {
+        let (changed, changes) = {
             let mut state = self.state.lock().unwrap();
-            let changed = state.setlist.as_ref().map(|old| old != &setlist).unwrap_or(true);
+            let (changed, changes) = if let Some(old_setlist) = state.setlist.as_ref() {
+                // Compare setlists and track what changed
+                let mut changes = Vec::new();
+                
+                if old_setlist.songs.len() != setlist.songs.len() {
+                    changes.push(format!("song_count: {} → {}", old_setlist.songs.len(), setlist.songs.len()));
+                }
+                
+                // Check for song name changes
+                for (i, (old_song, new_song)) in old_setlist.songs.iter().zip(setlist.songs.iter()).enumerate() {
+                    if old_song.name != new_song.name {
+                        changes.push(format!("song[{}] name: {} → {}", i, old_song.name, new_song.name));
+                    }
+                }
+                
+                // Check for new songs
+                for (i, new_song) in setlist.songs.iter().enumerate().skip(old_setlist.songs.len()) {
+                    changes.push(format!("song[{}] {} (new)", i, new_song.name));
+                }
+                
+                let any_changed = !changes.is_empty();
+                (any_changed, changes)
+            } else {
+                // New setlist - initial state
+                (true, vec![format!("initial setlist: {} songs", setlist.songs.len())])
+            };
+            
             if changed {
                 state.setlist = Some(setlist.clone());
             }
-            changed
+            (changed, changes)
         };
         
         if changed {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let changes_str = if changes.is_empty() {
+                    "".to_string()
+                } else {
+                    // Limit to first few changes to avoid log spam
+                    let display_changes: Vec<_> = changes.iter().take(3).cloned().collect();
+                    let more = if changes.len() > 3 {
+                        format!(" (+{} more)", changes.len() - 3)
+                    } else {
+                        String::new()
+                    };
+                    format!(" | {}", display_changes.join(", ").to_string() + &more)
+                };
+                info!("📋 SETLIST{}", changes_str);
+            }
             self.emit_setlist_structure(setlist);
         }
     }
@@ -218,20 +262,40 @@ impl SetlistReactiveService {
         section_index: Option<usize>,
         slide_index: Option<usize>,
     ) {
-        let changed = {
+        let (changed, changes) = {
             let mut state = self.state.lock().unwrap();
-            let changed = state.active_song_index != song_index
-                || state.active_section_index != section_index
-                || state.active_slide_index != slide_index;
+            let mut changes = Vec::new();
+            
+            if state.active_song_index != song_index {
+                changes.push(format!("song: {:?} → {:?}", state.active_song_index, song_index));
+            }
+            if state.active_section_index != section_index {
+                changes.push(format!("section: {:?} → {:?}", state.active_section_index, section_index));
+            }
+            if state.active_slide_index != slide_index {
+                changes.push(format!("slide: {:?} → {:?}", state.active_slide_index, slide_index));
+            }
+            
+            let changed = !changes.is_empty();
             if changed {
                 state.active_song_index = song_index;
                 state.active_section_index = section_index;
                 state.active_slide_index = slide_index;
             }
-            changed
+            (changed, changes)
         };
         
         if changed {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let changes_str = if changes.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(" | {}", changes.join(", "))
+                };
+                info!("📍 INDICES{}", changes_str);
+            }
+            
             self.emit_active_indices(song_index, section_index, slide_index);
             
             // Also emit individual index changes

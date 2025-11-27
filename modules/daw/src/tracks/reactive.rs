@@ -10,7 +10,6 @@ use rxrust::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use uuid::Uuid;
 
 /// Re-export EventStreamSubject for convenience
 pub type EventStreamSubject<T> = RefCell<LocalSubject<'static, T, ()>>;
@@ -19,16 +18,16 @@ pub type EventStreamSubject<T> = RefCell<LocalSubject<'static, T, ()>>;
 #[derive(Clone, Default, Debug)]
 pub struct TrackStreams {
     /// Tracks changed for a specific project
-    pub tracks_changed: EventStreamSubject<(Uuid, Vec<Track>)>,
+    pub tracks_changed: EventStreamSubject<(String, Vec<Track>)>,
     
     /// A single track changed
-    pub track_changed: EventStreamSubject<(Uuid, usize, Track)>, // project_id, track_index, track
+    pub track_changed: EventStreamSubject<(String, usize, Track)>, // project_name, track_index, track
     
     /// Track added
-    pub track_added: EventStreamSubject<(Uuid, usize, Track)>, // project_id, track_index, track
+    pub track_added: EventStreamSubject<(String, usize, Track)>, // project_name, track_index, track
     
     /// Track removed
-    pub track_removed: EventStreamSubject<(Uuid, usize)>, // project_id, track_index
+    pub track_removed: EventStreamSubject<(String, usize)>, // project_name, track_index
 }
 
 impl TrackStreams {
@@ -48,8 +47,8 @@ impl TrackStreams {
 /// State managed by the track reactive service
 #[derive(Debug, Clone)]
 pub struct TrackReactiveState {
-    /// Tracks for each project (project_id -> tracks)
-    pub tracks: HashMap<Uuid, Vec<Track>>,
+    /// Tracks for each project (project_name -> tracks)
+    pub tracks: HashMap<String, Vec<Track>>,
 }
 
 impl Default for TrackReactiveState {
@@ -124,12 +123,12 @@ impl TrackReactiveService for DefaultTrackReactiveService {
     }
     
     fn update_tracks(&self, project: &Project<Transport>, tracks: Vec<Track>) {
-        let project_id = project.id();
+        let project_id = project.id().to_string();
         let changed = {
             let mut state = self.state.lock().unwrap();
             let changed = state.tracks.get(&project_id).map(|old| old != &tracks).unwrap_or(true);
             if changed {
-                state.tracks.insert(project_id, tracks.clone());
+                state.tracks.insert(project_id.clone(), tracks.clone());
             }
             changed
         };
@@ -140,7 +139,7 @@ impl TrackReactiveService for DefaultTrackReactiveService {
     }
     
     fn update_track(&self, project: &Project<Transport>, track_index: usize, track: Track) {
-        let project_id = project.id();
+        let project_id = project.id().to_string();
         let changed = {
             let mut state = self.state.lock().unwrap();
             let changed = state.tracks.get(&project_id)
@@ -163,10 +162,10 @@ impl TrackReactiveService for DefaultTrackReactiveService {
     }
     
     fn add_track(&self, project: &Project<Transport>, track_index: usize, track: Track) {
-        let project_id = project.id();
+        let project_id = project.id().to_string();
         {
             let mut state = self.state.lock().unwrap();
-            let tracks = state.tracks.entry(project_id).or_insert_with(Vec::new);
+            let tracks = state.tracks.entry(project_id.clone()).or_insert_with(Vec::new);
             if track_index <= tracks.len() {
                 tracks.insert(track_index, track.clone());
             }
@@ -176,7 +175,7 @@ impl TrackReactiveService for DefaultTrackReactiveService {
     }
     
     fn remove_track(&self, project: &Project<Transport>, track_index: usize) {
-        let project_id = project.id();
+        let project_id = project.id().to_string();
         {
             let mut state = self.state.lock().unwrap();
             if let Some(tracks) = state.tracks.get_mut(&project_id) {
@@ -193,7 +192,7 @@ impl TrackReactiveService for DefaultTrackReactiveService {
 impl DefaultTrackReactiveService {
     // Private emit methods (with guard to prevent nested calls)
     
-    fn emit_tracks(&self, project_id: Uuid, tracks: Vec<Track>) {
+    fn emit_tracks(&self, project_id: String, tracks: Vec<Track>) {
         let mut emitting = self.emitting.lock().unwrap();
         if *emitting {
             return;
@@ -204,7 +203,7 @@ impl DefaultTrackReactiveService {
         *self.emitting.lock().unwrap() = false;
     }
     
-    fn emit_track(&self, project_id: Uuid, track_index: usize, track: Track) {
+    fn emit_track(&self, project_id: String, track_index: usize, track: Track) {
         let mut emitting = self.emitting.lock().unwrap();
         if *emitting {
             return;
@@ -215,7 +214,7 @@ impl DefaultTrackReactiveService {
         *self.emitting.lock().unwrap() = false;
     }
     
-    fn emit_track_added(&self, project_id: Uuid, track_index: usize, track: Track) {
+    fn emit_track_added(&self, project_id: String, track_index: usize, track: Track) {
         let mut emitting = self.emitting.lock().unwrap();
         if *emitting {
             return;
@@ -226,7 +225,7 @@ impl DefaultTrackReactiveService {
         *self.emitting.lock().unwrap() = false;
     }
     
-    fn emit_track_removed(&self, project_id: Uuid, track_index: usize) {
+    fn emit_track_removed(&self, project_id: String, track_index: usize) {
         let mut emitting = self.emitting.lock().unwrap();
         if *emitting {
             return;

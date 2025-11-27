@@ -2,27 +2,19 @@ use dioxus::prelude::*;
 use lyrics::{Lyrics, output::{Slides, SlideBreakConfig, Slide}};
 use lyrics::core::{SectionTypeHint, LinePart};
 use std::collections::HashMap;
-use setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, ACTIVE_SLIDE_INDEX};
+use setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES};
 use crate::components::text_fit::{TextFit, TextFitMode};
 use crate::components::syllable_editor::{SyllableEditor, SyllableEditorProps, SyllableKey};
+use crate::reactive_state::{use_lyrics_for_active_song, use_active_slide_for_active_song};
 
 /// Lyrics view component - full-screen confidence monitor style display
 #[component]
 pub fn LyricsView() -> Element {
-    // Get lyrics from current song in setlist (reactive to SETLIST_STRUCTURE and ACTIVE_INDICES changes)
-    let lyrics_data = use_memo(move || {
-        // Read SETLIST_STRUCTURE and ACTIVE_INDICES to trigger reactivity
-        let setlist_structure = SETLIST_STRUCTURE.read();
-        let active_indices = ACTIVE_INDICES.read();
-        if let Some(active_song_idx) = active_indices.0 {
-            if let Some(setlist) = setlist_structure.as_ref() {
-                if let Some(song) = setlist.songs.get(active_song_idx) {
-                    return song.lyrics.clone();
-                }
-            }
-        }
-        None
-    });
+    // Get lyrics from current song using reactive state hook
+    let lyrics_data = use_lyrics_for_active_song();
+    
+    // Get active slide index using reactive state hook (must be called at component level)
+    let active_slide_idx = use_active_slide_for_active_song();
     
     // Generate slides with config
     let slides = use_memo(move || {
@@ -47,10 +39,9 @@ pub fn LyricsView() -> Element {
             return None;
         }
         
-        // Get active slide index from signal (updated directly from REAPER via irpc)
-        // Reading the signal here makes the memo reactive to signal changes
-        let active_slide_idx = ACTIVE_SLIDE_INDEX();
-        if let Some(slide_idx) = active_slide_idx {
+        // Get active slide index from hook (called at component level)
+        let active_slide_idx_val = active_slide_idx();
+        if let Some(slide_idx) = active_slide_idx_val {
             if let Some(slide) = slides_vec.get(slide_idx) {
                 return Some(slide.clone());
             }
@@ -87,9 +78,9 @@ pub fn LyricsView() -> Element {
             return None;
         }
         
-        // Get the index of the current slide from signal
-        let active_slide_idx = ACTIVE_SLIDE_INDEX();
-        if let Some(current_idx) = active_slide_idx {
+        // Get the index of the current slide from hook (called at component level)
+        let active_slide_idx_val = active_slide_idx();
+        if let Some(current_idx) = active_slide_idx_val {
             // Get next slide after current
             return slides_vec.get(current_idx + 1).cloned();
         }
@@ -257,20 +248,8 @@ pub fn LyricsEditView() -> Element {
     // Track the selected/active slide (can be set by clicking)
     let selected_slide_index = use_signal(|| None::<usize>);
     
-    // Get lyrics from current song in setlist (reactive to SETLIST_STRUCTURE and ACTIVE_INDICES changes)
-    let lyrics_data = use_memo(move || {
-        // Read SETLIST_STRUCTURE and ACTIVE_INDICES to trigger reactivity
-        let setlist_structure = SETLIST_STRUCTURE.read();
-        let active_indices = ACTIVE_INDICES.read();
-        if let Some(active_song_idx) = active_indices.0 {
-            if let Some(setlist) = setlist_structure.as_ref() {
-                if let Some(song) = setlist.songs.get(active_song_idx) {
-                    return song.lyrics.clone();
-                }
-            }
-        }
-        None
-    });
+    // Get lyrics from current song using reactive state hook
+    let lyrics_data = use_lyrics_for_active_song();
     
     // Generate slides with config
     let slides = use_memo(move || {

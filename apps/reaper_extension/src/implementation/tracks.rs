@@ -13,7 +13,7 @@ use reaper_medium::ChunkCacheHint;
 use daw::tracks::{Track, parse_track_chunk};
 use tracing::{warn, debug};
 use serde::{Serialize, Deserialize};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::collections::HashMap;
 
 /// Lightweight track summary for efficient API transmission
@@ -73,8 +73,8 @@ impl TrackSummary {
     /// Convert to a minimal Track (for compatibility with Project type)
     /// Only essential fields are populated - items, envelopes, FX chains, etc. are empty
     pub fn to_minimal_track(&self) -> Track {
-        use daw::tracks::api::automation::AutomationMode;
-        use daw::tracks::api::solo::SoloMode;
+        
+        
         
         let mut track = Track::new(self.name.clone());
         track.index = Some(self.index);

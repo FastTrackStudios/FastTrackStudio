@@ -11,11 +11,7 @@ pub mod navigation;
 pub use navigation::go_to_song;
 
 // Re-export for external use
-pub use static_actions::{
-    register_all_actions, domain_actions, 
-    setlist_play, setlist_pause, setlist_stop, setlist_play_pause_toggle,
-};
+pub use static_actions::register_all_actions;
 
 // Compatibility re-export (empty for now)
-pub use static_actions::ACTION_DEFS;
 

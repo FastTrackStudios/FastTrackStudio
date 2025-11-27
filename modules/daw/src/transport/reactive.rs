@@ -9,7 +9,6 @@ use rxrust::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use uuid::Uuid;
 
 /// Re-export EventStreamSubject for convenience
 pub type EventStreamSubject<T> = RefCell<LocalSubject<'static, T, ()>>;
@@ -18,16 +17,16 @@ pub type EventStreamSubject<T> = RefCell<LocalSubject<'static, T, ()>>;
 #[derive(Clone, Default, Debug)]
 pub struct TransportStreams {
     /// Transport state changed for a specific project
-    pub transport_changed: EventStreamSubject<(Uuid, Transport)>,
+    pub transport_changed: EventStreamSubject<(String, Transport)>,
     
     /// Play state changed
-    pub play_state_changed: EventStreamSubject<(Uuid, PlayState)>,
+    pub play_state_changed: EventStreamSubject<(String, PlayState)>,
     
     /// Tempo changed
-    pub tempo_changed: EventStreamSubject<(Uuid, Tempo)>,
+    pub tempo_changed: EventStreamSubject<(String, Tempo)>,
     
     /// Position changed (playhead)
-    pub position_changed: EventStreamSubject<(Uuid, f64)>,
+    pub position_changed: EventStreamSubject<(String, f64)>,
 }
 
 impl TransportStreams {
@@ -47,8 +46,8 @@ impl TransportStreams {
 /// State managed by the transport reactive service
 #[derive(Debug, Clone)]
 pub struct TransportReactiveState {
-    /// Transport state for each project (project_id -> transport)
-    pub transport: HashMap<Uuid, Transport>,
+    /// Transport state for each project (project_name -> transport)
+    pub transport: HashMap<String, Transport>,
 }
 
 impl Default for TransportReactiveState {
@@ -123,12 +122,12 @@ impl TransportReactiveService for DefaultTransportReactiveService {
     }
     
     fn update_transport(&self, project: &Project<Transport>, transport: Transport) {
-        let project_id = project.id();
+        let project_id = project.id().to_string();
         let changed = {
             let mut state = self.state.lock().unwrap();
             let changed = state.transport.get(&project_id).map(|old| old != &transport).unwrap_or(true);
             if changed {
-                state.transport.insert(project_id, transport.clone());
+                state.transport.insert(project_id.clone(), transport.clone());
             }
             changed
         };
@@ -139,7 +138,7 @@ impl TransportReactiveService for DefaultTransportReactiveService {
     }
     
     fn update_play_state(&self, project: &Project<Transport>, play_state: PlayState) {
-        let project_id = project.id();
+        let project_id = project.id().to_string();
         let changed = {
             let state = self.state.lock().unwrap();
             state.transport.get(&project_id)
@@ -153,7 +152,7 @@ impl TransportReactiveService for DefaultTransportReactiveService {
     }
     
     fn update_tempo(&self, project: &Project<Transport>, tempo: Tempo) {
-        let project_id = project.id();
+        let project_id = project.id().to_string();
         let changed = {
             let state = self.state.lock().unwrap();
             state.transport.get(&project_id)
@@ -167,7 +166,7 @@ impl TransportReactiveService for DefaultTransportReactiveService {
     }
     
     fn update_position(&self, project: &Project<Transport>, position: f64) {
-        let project_id = project.id();
+        let project_id = project.id().to_string();
         const THRESHOLD: f64 = 0.001; // 1ms threshold
         
         let changed = {
@@ -189,7 +188,7 @@ impl TransportReactiveService for DefaultTransportReactiveService {
 impl DefaultTransportReactiveService {
     // Private emit methods (with guard to prevent nested calls)
     
-    fn emit_transport(&self, project_id: Uuid, transport: Transport) {
+    fn emit_transport(&self, project_id: String, transport: Transport) {
         let mut emitting = self.emitting.lock().unwrap();
         if *emitting {
             return;
@@ -200,7 +199,7 @@ impl DefaultTransportReactiveService {
         *self.emitting.lock().unwrap() = false;
     }
     
-    fn emit_play_state(&self, project_id: Uuid, play_state: PlayState) {
+    fn emit_play_state(&self, project_id: String, play_state: PlayState) {
         let mut emitting = self.emitting.lock().unwrap();
         if *emitting {
             return;
@@ -211,7 +210,7 @@ impl DefaultTransportReactiveService {
         *self.emitting.lock().unwrap() = false;
     }
     
-    fn emit_tempo(&self, project_id: Uuid, tempo: Tempo) {
+    fn emit_tempo(&self, project_id: String, tempo: Tempo) {
         let mut emitting = self.emitting.lock().unwrap();
         if *emitting {
             return;
@@ -222,7 +221,7 @@ impl DefaultTransportReactiveService {
         *self.emitting.lock().unwrap() = false;
     }
     
-    fn emit_position(&self, project_id: Uuid, position: f64) {
+    fn emit_position(&self, project_id: String, position: f64) {
         let mut emitting = self.emitting.lock().unwrap();
         if *emitting {
             return;

@@ -5,7 +5,7 @@
 use daw::marker_region::core::{Marker, Region};
 use reaper_high::{Project, Reaper};
 use reaper_medium::ProjectRef;
-use setlist::core::{Section, Setlist, SetlistError, Song};
+use setlist::core::{Setlist, SetlistError, Song};
 use daw::primitives::TimeSignature;
 use tracing::{debug, warn};
 use daw::marker_region::application::TempoTimePoint;
@@ -739,7 +739,7 @@ pub fn build_song_from_region(
     // Read current transport info and tracks, then store them in the song's project field
     // This ensures transport state (playhead position, play state, tempo, etc.) and all track information is included in the setlist
     use crate::implementation::transport::ReaperTransport;
-    use crate::implementation::tracks::get_all_tracks;
+    
     
     let reaper_project = project.clone();
     let transport_adapter = ReaperTransport::new(reaper_project.clone());
@@ -912,7 +912,7 @@ pub fn build_song_from_project_simple(
     // Read current transport info and tracks, then store them in the song's project field
     // This ensures transport state (playhead position, play state, tempo, etc.) and all track information is included in the setlist
     use crate::implementation::transport::ReaperTransport;
-    use crate::implementation::tracks::get_all_tracks;
+    
     
     let reaper_project = project.clone();
     let transport_adapter = ReaperTransport::new(reaper_project.clone());

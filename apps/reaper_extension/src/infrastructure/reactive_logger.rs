@@ -318,35 +318,8 @@ pub fn init_reactive_stream_logger(rx: &ControlSurfaceRx) {
 pub fn init_reactive_polling_logger(streams: &ReactivePollingStreams) {
     info!("🔍 Initializing reactive polling stream logger");
     
-    // Subscribe to edit cursor position changes - using TimeMap2_timeToBeats directly
-    streams.edit_cursor_position_changed().subscribe(move |pos| {
-        let musical = format_musical_position(pos);
-        if !musical.is_empty() {
-            info!("✏️ EDIT CURSOR POSITION CHANGED: {:.3}s | {}", pos, musical);
-        } else {
-            info!("✏️ EDIT CURSOR POSITION CHANGED: {:.3}s", pos);
-        }
-    });
-    
-    // Subscribe to play cursor position changes - using TimeMap2_timeToBeats directly
-    streams.play_cursor_position_changed().subscribe(move |pos| {
-        let musical = format_musical_position(pos);
-        if !musical.is_empty() {
-            info!("▶️ PLAY CURSOR POSITION CHANGED: {:.3}s | {}", pos, musical);
-        } else {
-            info!("▶️ PLAY CURSOR POSITION CHANGED: {:.3}s", pos);
-        }
-    });
-    
-    // Subscribe to transport position changes - using TimeMap2_timeToBeats directly
-    streams.transport_position_changed().subscribe(move |pos| {
-        let musical = format_musical_position(pos);
-        if !musical.is_empty() {
-            info!("🎵 TRANSPORT POSITION CHANGED: {:.3}s | {}", pos, musical);
-        } else {
-            info!("🎵 TRANSPORT POSITION CHANGED: {:.3}s", pos);
-        }
-    });
+    // Position changes are now logged as part of the transport change log
+    // (removed individual position change logs to consolidate into single transport log)
     
     streams.active_song_index_changed().subscribe(move |song_idx| {
         info!("🎵 ACTIVE SONG INDEX CHANGED: {:?}", song_idx);
@@ -356,14 +329,11 @@ pub fn init_reactive_polling_logger(streams: &ReactivePollingStreams) {
         info!("📑 ACTIVE SECTION INDEX CHANGED: {:?}", section_idx);
     });
     
-    streams.active_slide_index_changed().subscribe(move |slide_idx| {
-        info!("📄 ACTIVE SLIDE INDEX CHANGED: {:?}", slide_idx);
-    });
+    // Active slide logging is now handled by the lyrics reactive service
+    // (removed to avoid duplicate logs)
     
-    // Subscribe to full transport state changes
-    streams.transport_changed().subscribe(move |transport| {
-        info!("🎛️ TRANSPORT CHANGED: {}", transport);
-    });
+    // Transport changes are now logged in reaper_transport_reactive.rs with details of what changed
+    // (removed duplicate transport log to consolidate into single log line)
     
     info!("✅ Reactive polling stream logger initialized - ALL polling events will be logged");
 }
