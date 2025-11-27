@@ -9,6 +9,9 @@ pub mod iroh_server;
 pub mod menu;
 pub mod tracing_config;
 pub mod color_utils;
+pub mod reactive_logger;
+pub mod reactive_polling;
+pub mod reactive_app_state;
 
 pub use action_registry::ActionRegistry;
 pub use change_detection::ChangeDetection;

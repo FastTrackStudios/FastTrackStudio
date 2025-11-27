@@ -6,6 +6,7 @@ pub mod item;
 pub mod envelope;
 pub mod fx_chain;
 pub mod track_chunk;
+pub mod reactive;
 
 pub use track::Track;
 pub use track_chunk::{parse_track_chunk, ParsedTrackChunk};
@@ -21,3 +22,8 @@ pub use api::collapse::{ArrangeCollapseState, MixerCollapseState, WiringCollapse
 pub use item::Item;
 pub use envelope::{Envelope, EnvelopePoint, EnvelopePointShape, AutomationItem, ExtensionData};
 pub use fx_chain::{FxChain, Plugin};
+pub use reactive::{
+    TrackStreams, TrackReactiveService, DefaultTrackReactiveService,
+    TrackReactiveState, EventStreamSubject as TrackEventStreamSubject,
+};
+pub use reactive::irpc::{TrackProtocol, TrackApi, TrackUpdateMessage};

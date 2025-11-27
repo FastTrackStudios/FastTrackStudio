@@ -29,6 +29,7 @@ futures-util = "0.3.31"
 helgoboss-midi = "0.4.0"
 matchit = "0.9.0"
 rosc = "0.11.4"
+rxrust = { workspace = true }
 
 # Instruments module dependencies
 strsim = "0.11"

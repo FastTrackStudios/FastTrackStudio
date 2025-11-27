@@ -53,6 +53,10 @@ pub struct TrackName {
     /// Words that didn't match any known patterns (for validation/debugging)
     pub unparsed_words: Option<Vec<String>>,
     
+    /// Original input string before parsing (preserves full context for later analysis)
+    /// This allows removing context based on matched group, but still checking the original context later
+    pub original_name: Option<String>,
+    
     /// File extension if parsed from a filename (e.g., ".wav", ".aiff", ".flac")
     /// This is typically not included in string formatting output
     pub file_extension: Option<String>,
@@ -80,6 +84,7 @@ impl TrackName {
             && self.playlist.is_none()
             && self.track_type.is_none()
             && self.unparsed_words.is_none()
+            // Note: original_name is not checked as it's metadata, not a component
     }
     
     /// Check if a specific component type is present

@@ -16,6 +16,8 @@ pub mod tracks;
 pub mod project;
 pub mod mix_fx;
 pub mod instruments;
+pub mod streams;
+pub mod state;
 
 // Re-export commonly used types for convenience
 pub use primitives::*;
@@ -23,4 +25,8 @@ pub use transport::{Transport, TransportActions, TransportError, PlayState, Reco
 pub use marker_region::{Marker, Region, MarkerRegionSource};
 pub use tracks::{Track, Item, Envelope, FxChain};
 pub use project::Project;
+pub use streams::{DawStreams, ProjectStreams, EventStreamSubject};
+pub use state::DawReactiveState;
+pub use transport::reactive::TransportStreams;
+pub use tracks::reactive::TrackStreams;
 

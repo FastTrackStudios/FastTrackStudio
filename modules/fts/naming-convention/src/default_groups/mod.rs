@@ -26,7 +26,7 @@ pub use guitar_electric::create_guitar_electric_group;
 pub use guitar_acoustic::create_guitar_acoustic_group;
 pub use keys::create_keys_group;
 pub use synths::create_synths_group;
-pub use vocals::create_vocals_group;
+pub use vocals::{create_vocals_group, create_bgvs_group};
 
 #[cfg(feature = "default-groups")]
 pub use track_structures::create_drums_track_structure;
@@ -44,6 +44,7 @@ pub fn create_default_groups() -> Vec<FullGroup> {
         create_keys_group(),
         create_synths_group(),
         create_vocals_group(),
+        create_bgvs_group(), // BGVs is a separate top-level group, not a child of Vocals
         // TODO: Add more groups if needed
     ]
 }

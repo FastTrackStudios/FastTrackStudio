@@ -736,14 +736,15 @@ pub fn build_song_from_region(
         }
     }
     
-    // Read current transport info and store it in the song's project field
-    // This ensures transport state (playhead position, play state, tempo, etc.) is included in the setlist
+    // Read current transport info and tracks, then store them in the song's project field
+    // This ensures transport state (playhead position, play state, tempo, etc.) and all track information is included in the setlist
     use crate::implementation::transport::ReaperTransport;
+    use crate::implementation::tracks::get_all_tracks;
     
     let reaper_project = project.clone();
-    let transport_adapter = ReaperTransport::new(reaper_project);
+    let transport_adapter = ReaperTransport::new(reaper_project.clone());
     
-    // Read current transport state and store it in the song
+    // Read current transport state and tracks
     match transport_adapter.read_transport() {
         Ok(transport) => {
             // Create a Project<Transport> with the current transport state
@@ -752,8 +753,20 @@ pub fn build_song_from_region(
             if let Some(path) = project_path {
                 project_with_transport.set_path(path.to_string_lossy().to_string());
             }
+            
+            // Read lightweight track summaries (performant approach, similar to CSI)
+            // Only essential track info is included - no items, envelopes, FX chains, etc.
+            use crate::implementation::tracks::get_track_summaries;
+            let track_summaries = get_track_summaries(project);
+            // Convert summaries to minimal tracks for Project compatibility
+            let minimal_tracks: Vec<daw::tracks::Track> = track_summaries
+                .iter()
+                .map(|summary| summary.to_minimal_track())
+                .collect();
+            project_with_transport.set_tracks(minimal_tracks);
+            debug!(song_name = %parsed_song_name, track_count = project_with_transport.tracks().len(), "Stored transport info and lightweight track summaries in song");
+            
             song.set_project(project_with_transport);
-            debug!(song_name = %parsed_song_name, "Stored transport info in song");
         }
         Err(e) => {
             warn!(song_name = %parsed_song_name, error = %e, "Failed to read transport info for song");
@@ -896,14 +909,15 @@ pub fn build_song_from_project_simple(
         }
     }
 
-    // Read current transport info and store it in the song's project field
-    // This ensures transport state (playhead position, play state, tempo, etc.) is included in the setlist
+    // Read current transport info and tracks, then store them in the song's project field
+    // This ensures transport state (playhead position, play state, tempo, etc.) and all track information is included in the setlist
     use crate::implementation::transport::ReaperTransport;
+    use crate::implementation::tracks::get_all_tracks;
     
     let reaper_project = project.clone();
-    let transport_adapter = ReaperTransport::new(reaper_project);
+    let transport_adapter = ReaperTransport::new(reaper_project.clone());
     
-    // Read current transport state and store it in the song
+    // Read current transport state and tracks
     match transport_adapter.read_transport() {
         Ok(transport) => {
             // Create a Project<Transport> with the current transport state
@@ -911,8 +925,20 @@ pub fn build_song_from_project_simple(
             if let Some(path) = project_path {
                 project_with_transport.set_path(path.to_string_lossy().to_string());
             }
+            
+            // Read lightweight track summaries (performant approach, similar to CSI)
+            // Only essential track info is included - no items, envelopes, FX chains, etc.
+            use crate::implementation::tracks::get_track_summaries;
+            let track_summaries = get_track_summaries(project);
+            // Convert summaries to minimal tracks for Project compatibility
+            let minimal_tracks: Vec<daw::tracks::Track> = track_summaries
+                .iter()
+                .map(|summary| summary.to_minimal_track())
+                .collect();
+            project_with_transport.set_tracks(minimal_tracks);
+            debug!(song_name = %parsed_song_name, track_count = project_with_transport.tracks().len(), "Stored transport info and lightweight track summaries in song");
+            
             song.set_project(project_with_transport);
-            debug!(song_name = %parsed_song_name, "Stored transport info in song");
         }
         Err(e) => {
             warn!(song_name = %parsed_song_name, error = %e, "Failed to read transport info for song");

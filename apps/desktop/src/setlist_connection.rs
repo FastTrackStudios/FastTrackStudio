@@ -11,8 +11,11 @@ use dioxus::prelude::*;
 use iroh::{Endpoint, EndpointId};
 use peer_2_peer::iroh_connection::read_endpoint_id;
 use std::sync::OnceLock;
-use tracing::{error, info, warn};
-use setlist::{SetlistStreamApi, SETLIST, ACTIVE_SLIDE_INDEX};
+use tracing::{debug, error, info, warn};
+use setlist::{
+    SetlistStreamApi, SetlistUpdateMessage,
+    SETLIST, ACTIVE_SLIDE_INDEX, SONG_TRACKS, SONG_TRANSPORT, SETLIST_STRUCTURE, ACTIVE_INDICES,
+};
 
 // Cached endpoint (created once, kept alive for the lifetime of the app)
 static ENDPOINT: OnceLock<Endpoint> = OnceLock::new();
@@ -217,16 +220,39 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
     
     // The actual connection attempt happens here in subscribe()
     // IrohLazyRemoteConnection will try to connect when subscribe() calls open_bi()
-    info!("[Setlist Connection] Attempting to connect and subscribe to stream...");
+    info!("[Setlist Connection] Attempting to connect and subscribe to all streams...");
     let connection_timeout = tokio::time::Duration::from_secs(10);
-    let mut receiver = match tokio::time::timeout(connection_timeout, setlist_api.subscribe()).await {
-        Ok(Ok(receiver)) => {
-            info!("[Setlist Connection] ✅ Successfully connected and subscribed to setlist stream");
-            receiver
+    
+    // Subscribe to all granular streams
+    let (mut structure_rx, mut active_indices_rx, mut tracks_rx, mut transport_rx) = match tokio::time::timeout(
+        connection_timeout,
+        async {
+            info!("[Setlist Connection] Subscribing to SetlistStructure stream...");
+            let structure = setlist_api.subscribe_structure().await?;
+            info!("[Setlist Connection] ✅ Subscribed to SetlistStructure stream");
+            
+            info!("[Setlist Connection] Subscribing to ActiveIndices stream...");
+            let active_indices = setlist_api.subscribe_active_indices().await?;
+            info!("[Setlist Connection] ✅ Subscribed to ActiveIndices stream");
+            
+            info!("[Setlist Connection] Subscribing to SongTracks stream...");
+            let tracks = setlist_api.subscribe_tracks().await?;
+            info!("[Setlist Connection] ✅ Subscribed to SongTracks stream");
+            
+            info!("[Setlist Connection] Subscribing to SongTransport stream...");
+            let transport = setlist_api.subscribe_transport().await?;
+            info!("[Setlist Connection] ✅ Subscribed to SongTransport stream");
+            
+            Ok::<_, irpc::Error>((structure, active_indices, tracks, transport))
+        }
+    ).await {
+        Ok(Ok((structure, active_indices, tracks, transport))) => {
+            info!("[Setlist Connection] ✅ Successfully connected and subscribed to all 4 streams (Structure, ActiveIndices, Tracks, Transport)");
+            (structure, active_indices, tracks, transport)
         }
         Ok(Err(e)) => {
-            warn!("[Setlist Connection] ❌ Failed to connect/subscribe to setlist stream: {}", e);
-            return Err(anyhow::anyhow!("Failed to connect/subscribe to setlist stream: {}", e));
+            warn!("[Setlist Connection] ❌ Failed to connect/subscribe to streams: {}", e);
+            return Err(anyhow::anyhow!("Failed to connect/subscribe to streams: {}", e));
         }
         Err(_) => {
             warn!("[Setlist Connection] ❌ Connection timeout after {:?} - REAPER extension may not be running or unreachable", connection_timeout);
@@ -248,103 +274,262 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
     // Create a channel to signal when the connection is lost
     let (tx, rx) = tokio::sync::oneshot::channel();
     
-    // Spawn task to receive updates and update the global signal using Dioxus spawn
-    // This task will run until the connection is lost, then signal the disconnect
-    // The retry loop will create a new receiver and restart this task on reconnect
+    // Spawn task to receive updates from all streams and update the global signal using Dioxus spawn
+    // This task will run until any connection is lost, then signal the disconnect
+    // The retry loop will create new receivers and restart this task on reconnect
     spawn(async move {
         use std::sync::atomic::{AtomicU64, Ordering};
-        use std::time::Instant;
         
         static RECV_COUNT: AtomicU64 = AtomicU64::new(0);
-        static UPDATE_COUNT: AtomicU64 = AtomicU64::new(0);
-        static LAST_LOG: std::sync::OnceLock<std::sync::Mutex<Instant>> = std::sync::OnceLock::new();
         
-        let connection_timeout = tokio::time::Duration::from_secs(5);
-        
-        info!("[Setlist Connection] ✅ Started receiving setlist updates - signal will now update");
+        info!("[Setlist Connection] ✅ Started receiving setlist updates from all streams - signal will now update");
         let mut message_count = 0u64;
         
+        // Merge all streams using tokio::select!
+        // If any stream closes, we'll exit and trigger reconnection
         loop {
-            // Use timeout to detect if connection is dead
-            match tokio::time::timeout(connection_timeout, receiver.recv()).await {
-                Ok(Ok(Some(msg))) => {
-                    message_count += 1;
-                    RECV_COUNT.fetch_add(1, Ordering::Relaxed);
-                    
-                    // Update the global SETLIST signal on every message - no rate limiting
-                    // This ensures the UI stays in sync with the latest state
-                    UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
-                    *SETLIST.write() = Some(msg.setlist_api.clone());
-                    
-                    // Update active slide index signal (for lyrics view)
-                    *ACTIVE_SLIDE_INDEX.write() = msg.setlist_api.active_slide_index();
-                    
-                    // Log first message received
-                    if message_count == 1 {
-                        info!("[Setlist Connection] ✅ Received first setlist update - signal is now updating");
-                    }
-                            
-                    // Log performance metrics every 10 seconds
-                    let last_log = LAST_LOG.get_or_init(|| std::sync::Mutex::new(Instant::now()));
-                    let mut last_log_guard = last_log.lock().unwrap();
-                    if last_log_guard.elapsed().as_secs() >= 10 {
-                        let recv_rate = RECV_COUNT.swap(0, Ordering::Relaxed) / 10;
-                        let update_rate = UPDATE_COUNT.swap(0, Ordering::Relaxed) / 10;
-                        info!("[Performance] IRPC receive: {} msg/s, UI updates: {} updates/s", recv_rate, update_rate);
-                        *last_log_guard = Instant::now();
-                    }
-                }
-                Ok(Ok(None)) => {
-                    warn!("[Setlist Connection] Stream ended (received {} messages) - will reconnect", message_count);
-                    // Clear the SETLIST signal when disconnected
-                    *SETLIST.write() = None;
-                    *ACTIVE_SLIDE_INDEX.write() = None;
-                    // Clear the API instance on error
-                    if let Some(api_storage) = SETLIST_API.get() {
-                        if let Ok(mut guard) = api_storage.lock() {
-                            *guard = None;
+            tokio::select! {
+                msg = structure_rx.recv() => {
+                    match msg {
+                        Ok(Some(msg)) => {
+                            message_count += 1;
+                            RECV_COUNT.fetch_add(1, Ordering::Relaxed);
+                            handle_message(msg, &mut message_count, &RECV_COUNT).await;
+                        }
+                        Ok(None) => {
+                            warn!("[Setlist Connection] Structure stream ended (received {} messages) - will reconnect", message_count);
+                            break;
+                        }
+                        Err(e) => {
+                            error!(
+                                error = %e,
+                                error_debug = ?e,
+                                message_count = message_count,
+                                "[Setlist Connection] Error receiving structure update (received {} messages)",
+                                message_count
+                            );
+                            break;
                         }
                     }
-                    // Signal disconnect - this will trigger reconnection
-                    let _ = tx.send(());
-                    break;
                 }
-                Ok(Err(e)) => {
-                    error!("[Setlist Connection] Error receiving update (received {} messages): {}", message_count, e);
-                    // Clear the SETLIST signal when disconnected
-                    *SETLIST.write() = None;
-                    *ACTIVE_SLIDE_INDEX.write() = None;
-                    // Clear the API instance on error
-                    if let Some(api_storage) = SETLIST_API.get() {
-                        if let Ok(mut guard) = api_storage.lock() {
-                            *guard = None;
+                msg = active_indices_rx.recv() => {
+                    match msg {
+                        Ok(Some(msg)) => {
+                            message_count += 1;
+                            RECV_COUNT.fetch_add(1, Ordering::Relaxed);
+                            handle_message(msg, &mut message_count, &RECV_COUNT).await;
+                        }
+                        Ok(None) => {
+                            warn!("[Setlist Connection] ActiveIndices stream ended (received {} messages) - will reconnect", message_count);
+                            break;
+                        }
+                        Err(e) => {
+                            error!(
+                                error = %e,
+                                error_debug = ?e,
+                                message_count = message_count,
+                                "[Setlist Connection] Error receiving ActiveIndices update (received {} messages)",
+                                message_count
+                            );
+                            break;
                         }
                     }
-                    // Signal disconnect - this will trigger reconnection
-                    let _ = tx.send(());
-                    break;
                 }
-                Err(_) => {
-                    // Timeout - connection appears dead
-                    warn!("[Setlist Connection] Connection timeout (received {} messages) - will reconnect", message_count);
-                    // Clear the SETLIST signal when disconnected
-                    *SETLIST.write() = None;
-                    *ACTIVE_SLIDE_INDEX.write() = None;
-                    // Clear the API instance on timeout
-                    if let Some(api_storage) = SETLIST_API.get() {
-                        if let Ok(mut guard) = api_storage.lock() {
-                            *guard = None;
+                msg = tracks_rx.recv() => {
+                    match msg {
+                        Ok(Some(msg)) => {
+                            message_count += 1;
+                            RECV_COUNT.fetch_add(1, Ordering::Relaxed);
+                            handle_message(msg, &mut message_count, &RECV_COUNT).await;
+                        }
+                        Ok(None) => {
+                            warn!("[Setlist Connection] Tracks stream ended (received {} messages) - will reconnect", message_count);
+                            break;
+                        }
+                        Err(e) => {
+                            error!(
+                                error = %e,
+                                error_debug = ?e,
+                                message_count = message_count,
+                                "[Setlist Connection] Error receiving Tracks update (received {} messages)",
+                                message_count
+                            );
+                            break;
                         }
                     }
-                    // Signal disconnect - this will trigger reconnection
-                    let _ = tx.send(());
-                    break;
+                }
+                msg = transport_rx.recv() => {
+                    match msg {
+                        Ok(Some(msg)) => {
+                            message_count += 1;
+                            RECV_COUNT.fetch_add(1, Ordering::Relaxed);
+                            handle_message(msg, &mut message_count, &RECV_COUNT).await;
+                        }
+                        Ok(None) => {
+                            warn!("[Setlist Connection] Transport stream ended (received {} messages) - will reconnect", message_count);
+                            break;
+                        }
+                        Err(e) => {
+                            error!(
+                                error = %e,
+                                error_debug = ?e,
+                                message_count = message_count,
+                                "[Setlist Connection] Error receiving Transport update (received {} messages)",
+                                message_count
+                            );
+                            break;
+                        }
+                    }
                 }
             }
         }
+        
+        // Cleanup and signal disconnect
+        cleanup_on_disconnect();
+        
+        // Signal disconnect - this will trigger reconnection
+        let _ = tx.send(());
         
         info!("[Setlist Connection] Update receiver task ended - reconnection loop will create a new one");
     });
     
     Ok(rx)
 }
+
+/// Handle a single message from any stream
+async fn handle_message(msg: setlist::SetlistUpdateMessage, message_count: &mut u64, recv_count: &std::sync::atomic::AtomicU64) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Instant;
+    
+    static UPDATE_COUNT: AtomicU64 = AtomicU64::new(0);
+    static LAST_LOG: std::sync::OnceLock<std::sync::Mutex<Instant>> = std::sync::OnceLock::new();
+    
+    // Handle granular updates - only update what changed
+    match msg {
+        SetlistUpdateMessage::FullSetlist { setlist, active_song_index, active_section_index, active_slide_index } => {
+            // Initial load or major change - update structure and active indices
+            // Note: FullSetlist does NOT include tracks/transport - those are sent separately
+            UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
+            *SETLIST_STRUCTURE.write() = Some(setlist.clone());
+            *ACTIVE_INDICES.write() = (active_song_index, active_section_index, active_slide_index);
+            
+            // Also update legacy SETLIST signal for backward compatibility
+            // TODO: Remove once all components use granular signals
+            *SETLIST.write() = Some(setlist::SetlistApi::new(
+                setlist,
+                active_song_index,
+                active_section_index,
+                active_slide_index,
+            ));
+            *ACTIVE_SLIDE_INDEX.write() = active_slide_index;
+            
+            if *message_count == 1 {
+                info!("[Setlist Connection] ✅ Received first full setlist update (structure only, tracks/transport sent separately)");
+            } else {
+                info!("[Setlist Connection] Received full setlist structure update (major change detected)");
+            }
+        }
+        SetlistUpdateMessage::SongTracks { song_index, tracks } => {
+            // Update tracks for a specific song - only rerenders components using that song's tracks
+            UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
+            let mut song_tracks = SONG_TRACKS.write();
+            song_tracks.insert(song_index, tracks.clone());
+            info!("[Setlist Connection] ✅ Updated tracks for song {} ({} tracks)", song_index, tracks.len());
+        }
+        SetlistUpdateMessage::SongTransport { song_index, transport } => {
+            // Update transport for a specific song - only rerenders components using that song's transport
+            UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
+            let mut song_transport = SONG_TRANSPORT.write();
+            song_transport.insert(song_index, transport);
+            debug!("[Setlist Connection] Updated transport for song {}", song_index);
+        }
+        SetlistUpdateMessage::ActiveIndices { active_song_index, active_section_index, active_slide_index } => {
+            // Update active indices - frequent updates during playback
+            UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
+            *ACTIVE_INDICES.write() = (active_song_index, active_section_index, active_slide_index);
+            
+            // Also update legacy signals for backward compatibility
+            *ACTIVE_SLIDE_INDEX.write() = active_slide_index;
+            
+            // Update SETLIST signal's active indices if it exists
+            // Clone the value first, then drop the read guard before writing
+            let api_opt = SETLIST.read().clone();
+            if let Some(mut api) = api_opt {
+                api.active_song_index = active_song_index;
+                api.active_section_index = active_section_index;
+                api.active_slide_index = active_slide_index;
+                *SETLIST.write() = Some(api);
+            }
+        }
+        SetlistUpdateMessage::SongMetadata { song_index, song } => {
+            // Update song metadata - only rerenders components using that song
+            UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
+            if let Some(mut setlist) = SETLIST_STRUCTURE.read().clone() {
+                if let Some(existing_song) = setlist.songs.get_mut(song_index) {
+                    *existing_song = song;
+                    *SETLIST_STRUCTURE.write() = Some(setlist);
+                    debug!("[Setlist Connection] Updated metadata for song {}", song_index);
+                }
+            }
+        }
+        SetlistUpdateMessage::SongAdded { song_index, song } => {
+            // Add new song - rerenders setlist structure
+            UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
+            if let Some(mut setlist) = SETLIST_STRUCTURE.read().clone() {
+                if song_index < setlist.songs.len() {
+                    setlist.songs.insert(song_index, song);
+                } else {
+                    setlist.songs.push(song);
+                }
+                *SETLIST_STRUCTURE.write() = Some(setlist);
+                info!("[Setlist Connection] Added song at index {}", song_index);
+            }
+        }
+        SetlistUpdateMessage::SongRemoved { song_index } => {
+            // Remove song - rerenders setlist structure
+            UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
+            if let Some(mut setlist) = SETLIST_STRUCTURE.read().clone() {
+                if song_index < setlist.songs.len() {
+                    setlist.songs.remove(song_index);
+                    *SETLIST_STRUCTURE.write() = Some(setlist);
+                    
+                    // Remove tracks and transport for this song
+                    SONG_TRACKS.write().remove(&song_index);
+                    SONG_TRANSPORT.write().remove(&song_index);
+                    
+                    info!("[Setlist Connection] Removed song at index {}", song_index);
+                }
+            }
+        }
+        SetlistUpdateMessage::SongsReordered { setlist } => {
+            // Songs reordered - rerenders setlist structure
+            UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
+            *SETLIST_STRUCTURE.write() = Some(setlist);
+            info!("[Setlist Connection] Songs reordered");
+        }
+    }
+    
+    // Log performance metrics every 10 seconds
+    let last_log = LAST_LOG.get_or_init(|| std::sync::Mutex::new(Instant::now()));
+    let mut last_log_guard = last_log.lock().unwrap();
+    if last_log_guard.elapsed().as_secs() >= 10 {
+        let recv_rate = recv_count.swap(0, Ordering::Relaxed) / 10;
+        let update_rate = UPDATE_COUNT.swap(0, Ordering::Relaxed) / 10;
+        info!("[Performance] IRPC receive: {} msg/s, UI updates: {} updates/s", recv_rate, update_rate);
+        *last_log_guard = Instant::now();
+    }
+}
+
+/// Cleanup signals when connection is lost
+fn cleanup_on_disconnect() {
+    // Clear the SETLIST signal when disconnected
+    *SETLIST.write() = None;
+    *ACTIVE_SLIDE_INDEX.write() = None;
+    // Clear the API instance
+    if let Some(api_storage) = SETLIST_API.get() {
+        if let Ok(mut guard) = api_storage.lock() {
+            *guard = None;
+        }
+    }
+}
+

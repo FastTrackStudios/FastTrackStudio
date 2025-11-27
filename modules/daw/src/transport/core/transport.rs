@@ -165,8 +165,17 @@ impl fmt::Display for Transport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Transport {{ state: {}, record_mode: {}, looping: {}, tempo: {}, playrate: {:.2}x, time_sig: {} }}",
-            self.play_state, self.record_mode, self.looping, self.tempo, self.playrate, self.time_signature
+            "Transport {{ state: {}, record_mode: {}, looping: {}, tempo: {}, playrate: {:.2}x, time_sig: {}, playhead: {} ({:.3}s), edit: {} ({:.3}s) }}",
+            self.play_state,
+            self.record_mode,
+            self.looping,
+            self.tempo,
+            self.playrate,
+            self.time_signature,
+            self.playhead_position.musical_position_string(),
+            self.playhead_position.time.to_seconds(),
+            self.edit_position.musical_position_string(),
+            self.edit_position.time.to_seconds()
         )
     }
 }

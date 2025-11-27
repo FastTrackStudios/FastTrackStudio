@@ -10,6 +10,7 @@ use tracing::info;
 use crate::services::{SetlistService, CommandService, SeekService, StreamService, SmoothSeekService};
 use crate::infrastructure::action_registry::ActionRegistry;
 use crate::infrastructure::change_detection::ChangeDetection;
+use crate::infrastructure::reactive_polling::ReactivePollingService;
 
 /// Application container - holds all services and manages initialization
 #[derive(Debug)]
@@ -24,6 +25,7 @@ pub struct App {
     // Infrastructure
     pub action_registry: Arc<ActionRegistry>,
     pub change_detection: Arc<ChangeDetection>,
+    pub reactive_polling: Arc<ReactivePollingService>,
     
     // Keep session alive (wrapped in RefCell for interior mutability)
     _session: std::cell::RefCell<ReaperSession>,
@@ -32,8 +34,6 @@ pub struct App {
 impl App {
     /// Create a new application instance
     pub fn new(session: ReaperSession) -> Result<Self, Box<dyn Error>> {
-        info!("Creating application container...");
-        
         // Initialize services
         let setlist_service = Arc::new(SetlistService::new());
         let command_service = Arc::new(CommandService::new());
@@ -48,6 +48,7 @@ impl App {
         // Initialize infrastructure
         let action_registry = Arc::new(ActionRegistry::new()?);
         let change_detection = Arc::new(ChangeDetection::new()?);
+        let reactive_polling = Arc::new(ReactivePollingService::new());
         
         Ok(Self {
             setlist_service,
@@ -57,14 +58,13 @@ impl App {
             stream_service,
             action_registry,
             change_detection,
+            reactive_polling,
             _session: std::cell::RefCell::new(session),
         })
     }
     
     /// Initialize the application (register actions, etc.)
     pub fn initialize(&self) -> Result<(), Box<dyn Error>> {
-        info!("Initializing application...");
-        
         // Register actions
         self.action_registry.register_all()?;
         
@@ -78,18 +78,16 @@ impl App {
         // Register change detection (needs session)
         self.change_detection.register(&mut self.session_mut())?;
         
+        // Reactive polling logger is deferred until first project is loaded
+        // (will be initialized in setlist_service when first update completes)
+        
         // Register extension menu (must be after actions are registered and REAPER is woken up)
-        info!("🔧 About to register extension menu...");
         if let Err(e) = crate::infrastructure::menu::register_extension_menu() {
             tracing::warn!("Failed to register extension menu: {:#}", e);
-        } else {
-            info!("FastTrackStudio menu registered successfully");
         }
         
         // Start IROH server for IPC with desktop app
         crate::infrastructure::iroh_server::start_iroh_server(self.stream_service.clone());
-        
-        info!("Application initialized successfully");
         Ok(())
     }
     

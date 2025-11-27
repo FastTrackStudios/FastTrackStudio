@@ -5,6 +5,7 @@
 use std::sync::{Arc, Mutex};
 use setlist::SetlistApi;
 use crate::implementation::setlist::build_setlist_from_open_projects;
+use crate::infrastructure::reactive_polling::ReactivePollingService;
 use tracing::{info, warn};
 
 /// Service for managing setlist state
@@ -237,9 +238,33 @@ impl SetlistService {
                 active_slide = ?setlist_api.active_slide_index(),
                 "Setlist state initialized - stream API can now send updates"
             );
+            
+            // Now that the first project is loaded, we can initialize deferred loggers
+            // This will be done in the timer callback to avoid RefCell borrow panics
         }
         
         trace!("Setlist state updated successfully");
+        Ok(())
+    }
+
+    /// Update setlist and notify reactive polling service of active indices
+    /// This version emits reactive events only when indices change
+    pub fn update_setlist_with_polling(
+        &self,
+        polling_service: Arc<ReactivePollingService>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // First, do the normal update
+        self.update_setlist()?;
+        
+        // Then, get the active indices and notify the polling service
+        if let Some(setlist_api) = self.get_setlist() {
+            polling_service.update_active_indices(
+                setlist_api.active_song_index(),
+                setlist_api.active_section_index(),
+                setlist_api.active_slide_index(),
+            );
+        }
+        
         Ok(())
     }
 

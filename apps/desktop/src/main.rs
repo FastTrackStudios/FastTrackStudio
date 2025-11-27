@@ -1,6 +1,9 @@
 use dioxus::prelude::*;
 use dioxus_router::{Routable, Router, Outlet};
-use setlist::{Setlist, Song, Section, SectionType, SETLIST, TransportCommand, NavigationCommand};
+use setlist::{
+    Setlist, Song, Section, SectionType, SETLIST, TransportCommand, NavigationCommand,
+    ACTIVE_INDICES, SETLIST_STRUCTURE, SONG_TRACKS, SONG_TRANSPORT,
+};
 use daw::marker_region::{Marker, application::TempoTimePoint};
 use daw::primitives::Position;
 use ui::components::*;
@@ -227,7 +230,7 @@ fn AppLayout() -> Element {
     });
     
     let current_section_index = use_memo(move || {
-        SETLIST.read().as_ref().and_then(|api| api.active_section_index())
+        ACTIVE_INDICES.read().1
     });
     
                 
@@ -446,9 +449,8 @@ fn AppLayout() -> Element {
                     // Down arrow: Next song
                     if let Some(api) = get_setlist_api() {
                         if let Some(current_idx) = current_song_index() {
-                            // Get total song count from SETLIST
-                            if let Some(setlist_api) = SETLIST.read().as_ref() {
-                                let setlist = setlist_api.get_setlist();
+                            // Get total song count from SETLIST_STRUCTURE
+                            if let Some(setlist) = SETLIST_STRUCTURE.read().as_ref() {
                                 let song_count = setlist.songs.len();
                                 if current_idx < song_count - 1 {
                                     let next_song_idx = current_idx + 1;
@@ -482,15 +484,21 @@ fn AppLayout() -> Element {
         // No-op for wasm32
     });
 
-    // Derive current song and section index from SETLIST global signal
+    // Derive current song and section index from ACTIVE_INDICES granular signal
+    // This only rerenders when active indices change, not when tracks/transport change
     let current_song_index = use_memo(move || {
-        SETLIST.read().as_ref().and_then(|api| api.active_song_index())
+        ACTIVE_INDICES.read().0
     });
     
     let current_section_index = use_memo(move || {
-        SETLIST.read().as_ref().and_then(|api| api.active_section_index())
+        ACTIVE_INDICES.read().1
     });
     
+    // Get setlist structure (songs, sections) - only rerenders when structure changes
+    let setlist_structure = use_memo(move || {
+        SETLIST_STRUCTURE.read().clone()
+    });
+                
     // Mode toggle callback - simplified for now
     let on_toggle_mode = Callback::new(move |_: ()| {
         // TODO: Implement mode toggle if needed
@@ -706,9 +714,8 @@ fn AppLayout() -> Element {
                     // Down arrow: Next song
                     if let Some(api) = get_setlist_api() {
                         if let Some(current_idx) = current_song_index() {
-                            // Get total song count from SETLIST
-                            if let Some(setlist_api) = SETLIST.read().as_ref() {
-                                let setlist = setlist_api.get_setlist();
+                            // Get total song count from SETLIST_STRUCTURE
+                            if let Some(setlist) = SETLIST_STRUCTURE.read().as_ref() {
                                 let song_count = setlist.songs.len();
                                 if current_idx < song_count - 1 {
                                     let next_song_idx = current_idx + 1;
@@ -822,7 +829,7 @@ fn Performance() -> Element {
     });
     
     let current_section_index = use_memo(move || {
-        SETLIST.read().as_ref().and_then(|api| api.active_section_index())
+        ACTIVE_INDICES.read().1
     });
     
     // Callbacks

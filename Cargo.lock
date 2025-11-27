@@ -1568,6 +1568,7 @@ dependencies = [
  "rgb",
  "rosc",
  "rpp-parser",
+ "rxrust",
  "serde",
  "serde_derive",
  "serde_json",
@@ -6606,6 +6607,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reaper-rx"
+version = "0.1.0"
+source = "git+https://github.com/helgoboss/reaper-rs.git?branch=master#bfca464885bc5f0f9e400d74633ccead3b57f251"
+dependencies = [
+ "helgoboss-midi",
+ "reaper-high",
+ "reaper-medium",
+ "rxrust",
+]
+
+[[package]]
 name = "reaper_extension"
 version = "0.1.0"
 dependencies = [
@@ -6624,6 +6636,8 @@ dependencies = [
  "reaper-low",
  "reaper-macros",
  "reaper-medium",
+ "reaper-rx",
+ "rxrust",
  "serde",
  "serde_json",
  "setlist",
@@ -6632,6 +6646,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -7318,6 +7333,7 @@ dependencies = [
  "lyrics",
  "reqwest 0.11.27",
  "rpp-parser",
+ "rxrust",
  "serde",
  "serde_json",
  "tempfile",

@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use setlist::{SETLIST, Song};
+use setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, SONG_TRANSPORT, Song};
 use daw::primitives::{MusicalPosition, TimePosition};
 use crate::components::{Slider, Ruler, MeasureInfo, TrackControlPanel};
 use lyrics::{Lyrics, output::{Slides, SlideBreakConfig}};
@@ -10,12 +10,13 @@ pub fn ArrangementView(
     /// Callback for seeking to a time position: (song_index, time_seconds)
     on_seek_to_time: Option<Callback<(usize, f64)>>,
 ) -> Element {
-    // Get active song
+    // Get active song from SETLIST_STRUCTURE and ACTIVE_INDICES
+    // Only rerenders when structure changes or active song changes
     let active_song = use_memo(move || {
-        SETLIST.read().as_ref().and_then(|api| {
-            api.active_song_index().and_then(|idx| {
-                api.get_setlist().songs.get(idx).cloned()
-            })
+        let setlist_structure = SETLIST_STRUCTURE.read();
+        let active_indices = ACTIVE_INDICES.read();
+        active_indices.0.and_then(|idx| {
+            setlist_structure.as_ref()?.songs.get(idx).cloned()
         })
     });
     
@@ -26,10 +27,13 @@ pub fn ArrangementView(
         }).unwrap_or_default()
     });
     
-    // Get playhead position (play cursor)
+    // Get playhead position (play cursor) from SONG_TRANSPORT
+    // Only rerenders when transport for active song changes
     let playhead_position = use_memo(move || {
-        active_song().as_ref().and_then(|song| {
-            song.transport().map(|transport| {
+        let song_transport = SONG_TRANSPORT.read();
+        let active_indices = ACTIVE_INDICES.read();
+        active_indices.0.and_then(|idx| {
+            song_transport.get(&idx).map(|transport| {
                 transport.playhead_position.time.to_seconds()
             })
         })
@@ -37,8 +41,10 @@ pub fn ArrangementView(
     
     // Get playhead musical position for measure calculation
     let playhead_measure = use_memo(move || {
-        active_song().as_ref().and_then(|song| {
-            song.transport().map(|transport| {
+        let song_transport = SONG_TRANSPORT.read();
+        let active_indices = ACTIVE_INDICES.read();
+        active_indices.0.and_then(|idx| {
+            song_transport.get(&idx).map(|transport| {
                 transport.playhead_position.musical.measure
             })
         })
@@ -46,8 +52,10 @@ pub fn ArrangementView(
     
     // Get edit cursor position (separate from playhead)
     let edit_cursor_position = use_memo(move || {
-        active_song().as_ref().and_then(|song| {
-            song.transport().map(|transport| {
+        let song_transport = SONG_TRANSPORT.read();
+        let active_indices = ACTIVE_INDICES.read();
+        active_indices.0.and_then(|idx| {
+            song_transport.get(&idx).map(|transport| {
                 transport.edit_position.time.to_seconds()
             })
         })
@@ -156,9 +164,10 @@ pub fn ArrangementView(
     let base_pixels_per_second = 10.0; // Base scaling factor
     let pixels_per_second = use_memo(move || base_pixels_per_second * zoom_level());
     
-    // Get active song index for seeking
+    // Get active song index for seeking from ACTIVE_INDICES
+    // Only rerenders when active song changes
     let active_song_idx = use_memo(move || {
-        SETLIST.read().as_ref().and_then(|api| api.active_song_index())
+        ACTIVE_INDICES.read().0
     });
     
     // Calculate cursor positions (reactive to zoom)
@@ -326,12 +335,14 @@ pub fn ArrangementView(
         }).unwrap_or_default()
     });
     
-    // Tracks from active song's project
+    // Tracks from active song - read from SONG_TRACKS signal
+    // Only rerenders when tracks for active song change
     let tracks = use_memo(move || {
-        active_song().as_ref()
-            .and_then(|song| song.project.as_ref())
-            .map(|project| project.tracks().to_vec())
-            .unwrap_or_default()
+        let song_tracks = setlist::SONG_TRACKS.read();
+        let active_indices = ACTIVE_INDICES.read();
+        active_indices.0.and_then(|idx| {
+            song_tracks.get(&idx).cloned()
+        }).unwrap_or_default()
     });
     
     // Compute initial collapsed state from REAPER's folder collapse state

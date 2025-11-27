@@ -254,8 +254,9 @@ fn test_marc_martel_dont_stop_me_now() {
     // ============================================
     // BASS (top level, no BUS type)
     // ============================================
-    // Prefix is "Bass", not "B"
-    let bass_name = create_track_name("Bass", Some("Bass"), None, None, None);
+    // Use prefix "B" (the actual Bass group prefix) and sub_type "Bass" to create "B Bass"
+    // But we want to display it as just "Bass" in hierarchy mode
+    let bass_name = create_track_name("B", Some("Bass"), None, None, None);
     let bass = Track::new(&bass_name);
     template.add_track(bass);
     
@@ -358,17 +359,18 @@ fn test_marc_martel_dont_stop_me_now() {
     vocal.add_take(Take::new("Vocal"));
     template.add_track(vocal);
     
-    // Background Vocals (SUM) - Child of Vocals (BUS)
-    let bgv_sum_name = create_track_name("V", Some("Background Vocals"), Some("SUM"), None, None);
-    let mut bgv_sum = Track::new(&bgv_sum_name);
-    bgv_sum.set_parent(&vocals_bus_name);
-    template.add_track(bgv_sum);
+    // ============================================
+    // BGVs (top level, separate from Vocals)
+    // ============================================
+    let bgvs_name = create_track_name("V", Some("BGVs"), Some("SUM"), None, None);
+    let bgvs = Track::new(&bgvs_name);
+    template.add_track(bgvs);
     
-    // BGV1-4
+    // BGV1-4 - Children of BGVs (SUM)
     for i in 1..=4 {
-        let bgv_name = create_track_name("V", Some("BGV"), None, None, Some(i));
+        let bgv_name = create_track_name("V", Some("BGVs"), None, None, Some(i));
         let mut bgv = Track::new(&bgv_name);
-        bgv.set_parent(&bgv_sum_name);
+        bgv.set_parent(&bgvs_name);
         bgv.add_take(Take::new(&format!("BGV{}", i)));
         template.add_track(bgv);
     }
@@ -473,7 +475,9 @@ fn test_bass_hierarchy_debug() {
     let mut template = Template::new("Bass Hierarchy Debug");
     
     // Top-level Bass track
-    let bass_name = create_track_name("Bass", Some("Bass"), None, None, None);
+    // Use prefix "B" (the actual Bass group prefix) and sub_type "Bass" to create "B Bass"
+    // But we want to display it as just "Bass" in hierarchy mode
+    let bass_name = create_track_name("B", Some("Bass"), None, None, None);
     println!("\n=== Top-level Bass track ===");
     println!("Created name: {}", bass_name);
     let parsed = parser.parse(&bass_name);

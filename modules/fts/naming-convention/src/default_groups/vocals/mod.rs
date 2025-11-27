@@ -1,17 +1,18 @@
 //! Default Vocals group configuration
 //!
-//! Vocals group includes Lead Vocal and BGV (Backing Vocals) as sub-types.
+//! Vocals group includes Lead Vocal as a sub-type.
+//! BGVs (Backing Vocals) is a separate top-level group.
 //! Based on the fts-naming-parser config.json structure.
 
 use crate::{FullGroup, define_group};
 
-/// Create the default Vocals group with sub-types
+/// Create the default Vocals group with Lead Vocal sub-type
 pub fn create_vocals_group() -> FullGroup {
     let mut vocals = define_group! {
         name = "Vocals",
         prefix = "V",
         patterns = ["vocal", "vox", "vocals", "voice"],
-        negative_patterns = [],
+        negative_patterns = ["bgv", "bgvs", "backing", "background", "backing vocal", "background vocal", "harm", "harmony", "choir", "vocal stack"],
         parent_track = "Vocals",
         children = [
             define_group! {
@@ -24,50 +25,56 @@ pub fn create_vocals_group() -> FullGroup {
                 multi_mic_patterns = ["Close", "Room", "Condenser", "Dynamic", "Ribbon", "Intimate", "Robust"],
                 effect_patterns = ["Reverb", "Delay", "Chorus", "Flanger", "Distortion", "Autotune", "h3000", "eko", "plate", "magic", "vocoder"],
             },
-            define_group! {
-                name = "BGV",
-                prefix = "V BGVs",
-                patterns = ["v bgvs", "v bgv", "bgv", "bgvs", "backing vocal", "background vocal", "harm", "harmony", "choir", "vocal stack"],
-                arrangement_patterns = ["Harmony", "Unison", "Octave", "Third", "Fifth", "Stack", "Layer", "Blend", "Call", "Response", "Ah", "Oh", "La", "Do"],
-                multi_mic_patterns = ["Close", "Room", "Condenser", "Dynamic"],
-                children = [
-                    define_group! {
-                        name = "Soprano",
-                        prefix = "Soprano",
-                        patterns = ["soprano", "high"],
-                        arrangement_patterns = ["High", "Head", "Falsetto", "Whistle"],
-                    },
-                    define_group! {
-                        name = "Alto",
-                        prefix = "Alto",
-                        patterns = ["alto", "mid", "middle"],
-                        arrangement_patterns = ["Mid", "Chest", "Mixed", "Belt"],
-                    },
-                    define_group! {
-                        name = "Tenor",
-                        prefix = "Tenor",
-                        patterns = ["tenor"],
-                        arrangement_patterns = ["High", "Head", "Mixed", "Belt"],
-                    },
-                    define_group! {
-                        name = "Bass",
-                        prefix = "Bass",
-                        patterns = ["bass", "low", "bottom"],
-                        negative_patterns = ["bass guitar", "bassguitar", "bg", "electric bass", "bass di", "bass amp", "bass amplifier", "bass synth", "synth bass"],
-                        arrangement_patterns = ["Low", "Chest", "Fry"],
-                    },
-                    define_group! {
-                        name = "Unison",
-                        prefix = "Unison",
-                        patterns = ["unison", "all", "stack"],
-                        arrangement_patterns = ["All", "Together", "Stack", "Blend"],
-                    },
-                ],
-            },
         ],
     };
     
     vocals
+}
+
+/// Create the default BGVs (Backing Vocals) group as a separate top-level group
+pub fn create_bgvs_group() -> FullGroup {
+    define_group! {
+        name = "BGVs",
+        prefix = "V BGVs",
+        patterns = ["v bgvs", "v bgv", "bgv", "bgvs", "backing vocal", "background vocal", "harm", "harmony", "choir", "vocal stack"],
+        negative_patterns = [],
+        parent_track = "V BGVs",
+        arrangement_patterns = ["Harmony", "Unison", "Octave", "Third", "Fifth", "Stack", "Layer", "Blend", "Call", "Response", "Ah", "Oh", "La", "Do"],
+        multi_mic_patterns = ["Close", "Room", "Condenser", "Dynamic"],
+        children = [
+            define_group! {
+                name = "Soprano",
+                prefix = "Soprano",
+                patterns = ["soprano", "high"],
+                arrangement_patterns = ["High", "Head", "Falsetto", "Whistle"],
+            },
+            define_group! {
+                name = "Alto",
+                prefix = "Alto",
+                patterns = ["alto", "mid", "middle"],
+                arrangement_patterns = ["Mid", "Chest", "Mixed", "Belt"],
+            },
+            define_group! {
+                name = "Tenor",
+                prefix = "Tenor",
+                patterns = ["tenor"],
+                arrangement_patterns = ["High", "Head", "Mixed", "Belt"],
+            },
+            define_group! {
+                name = "Bass",
+                prefix = "Bass",
+                patterns = ["bass", "low", "bottom"],
+                negative_patterns = ["bass guitar", "bassguitar", "bg", "electric bass", "bass di", "bass amp", "bass amplifier", "bass synth", "synth bass", "b bass"],
+                arrangement_patterns = ["Low", "Chest", "Fry"],
+            },
+            define_group! {
+                name = "Unison",
+                prefix = "Unison",
+                patterns = ["unison", "all", "stack"],
+                arrangement_patterns = ["All", "Together", "Stack", "Blend"],
+            },
+        ],
+    }
 }
 
 #[cfg(test)]
@@ -92,9 +99,21 @@ mod tests {
     fn test_vocals_children() {
         let vocals = create_vocals_group();
         
-        // Verify children exist
+        // Verify children exist (only Lead Vocal, BGVs is now separate)
         assert!(vocals.find_child("Lead Vocal").is_some());
-        assert!(vocals.find_child("BGV").is_some());
+        assert_eq!(vocals.children.len(), 1);
+    }
+    
+    #[test]
+    fn test_bgvs_group() {
+        let bgvs = create_bgvs_group();
+        
+        assert_eq!(bgvs.name, "BGVs");
+        assert_eq!(bgvs.prefix, "V BGVs");
+        assert!(bgvs.patterns.contains(&"bgv".to_string()));
+        assert!(bgvs.patterns.contains(&"bgvs".to_string()));
+        assert!(bgvs.has_children());
+        assert_eq!(bgvs.children.len(), 5);
     }
 
     #[test]
@@ -174,23 +193,22 @@ mod tests {
     }
 
     #[test]
-    fn test_bgv_subtype() {
-        let vocals = create_vocals_group();
-        let bgv = vocals.find_child("BGV").unwrap();
+    fn test_bgvs_group_properties() {
+        let bgvs = create_bgvs_group();
         
-        assert_eq!(bgv.name, "BGV");
-        assert_eq!(bgv.prefix, "V BGVs");
-        assert!(bgv.patterns.contains(&"bgv".to_string()));
-        assert!(bgv.patterns.contains(&"bgvs".to_string()));
-        assert!(bgv.patterns.contains(&"backing vocal".to_string()));
-        assert!(bgv.patterns.contains(&"background vocal".to_string()));
-        assert!(bgv.patterns.contains(&"harm".to_string()));
-        assert!(bgv.patterns.contains(&"harmony".to_string()));
-        assert!(bgv.patterns.contains(&"choir".to_string()));
-        assert!(bgv.patterns.contains(&"vocal stack".to_string()));
+        assert_eq!(bgvs.name, "BGVs");
+        assert_eq!(bgvs.prefix, "V BGVs");
+        assert!(bgvs.patterns.contains(&"bgv".to_string()));
+        assert!(bgvs.patterns.contains(&"bgvs".to_string()));
+        assert!(bgvs.patterns.contains(&"backing vocal".to_string()));
+        assert!(bgvs.patterns.contains(&"background vocal".to_string()));
+        assert!(bgvs.patterns.contains(&"harm".to_string()));
+        assert!(bgvs.patterns.contains(&"harmony".to_string()));
+        assert!(bgvs.patterns.contains(&"choir".to_string()));
+        assert!(bgvs.patterns.contains(&"vocal stack".to_string()));
         
         // Verify arrangement patterns
-        let arrangement_patterns = bgv.arrangement_patterns();
+        let arrangement_patterns = bgvs.arrangement_patterns();
         assert!(arrangement_patterns.contains(&"Harmony".to_string()));
         assert!(arrangement_patterns.contains(&"Unison".to_string()));
         assert!(arrangement_patterns.contains(&"Octave".to_string()));
@@ -201,7 +219,7 @@ mod tests {
         assert!(arrangement_patterns.contains(&"Blend".to_string()));
         
         // Verify multi-mic patterns
-        let multi_mic_patterns = bgv.multi_mic_patterns();
+        let multi_mic_patterns = bgvs.multi_mic_patterns();
         assert!(multi_mic_patterns.contains(&"Close".to_string()));
         assert!(multi_mic_patterns.contains(&"Room".to_string()));
         assert!(multi_mic_patterns.contains(&"Condenser".to_string()));
@@ -209,17 +227,16 @@ mod tests {
     }
 
     #[test]
-    fn test_bgv_children() {
-        let vocals = create_vocals_group();
-        let bgv = vocals.find_child("BGV").unwrap();
+    fn test_bgvs_children() {
+        let bgvs = create_bgvs_group();
         
-        // Verify BGV has children
-        assert!(bgv.has_children());
-        assert!(bgv.find_child("Soprano").is_some());
-        assert!(bgv.find_child("Alto").is_some());
-        assert!(bgv.find_child("Tenor").is_some());
-        assert!(bgv.find_child("Bass").is_some());
-        assert!(bgv.find_child("Unison").is_some());
+        // Verify BGVs has children
+        assert!(bgvs.has_children());
+        assert!(bgvs.find_child("Soprano").is_some());
+        assert!(bgvs.find_child("Alto").is_some());
+        assert!(bgvs.find_child("Tenor").is_some());
+        assert!(bgvs.find_child("Bass").is_some());
+        assert!(bgvs.find_child("Unison").is_some());
     }
 
     #[test]

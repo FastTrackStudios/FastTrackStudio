@@ -3,7 +3,7 @@
 //! Manages the REAPER timer callback registration and execution.
 
 use reaper_medium::ReaperSession;
-use tracing::{info, error, warn};
+use tracing::{debug, info, error, warn};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -16,16 +16,11 @@ pub type TimerCallback = extern "C" fn();
 
 /// Register a timer callback with REAPER
 pub fn register_timer(session: &mut ReaperSession, callback: TimerCallback) -> Result<(), Box<dyn std::error::Error>> {
-    info!("🔧 About to register timer callback with REAPER...");
-    
     let timer_result = session.plugin_register_add_timer(callback);
     
     match timer_result {
         Ok(_) => {
-            info!("✅✅✅ SUCCESS: Registered polling timer callback with REAPER (target: 60Hz)");
-            info!("⏰ Timer callback registered - waiting for REAPER to call it...");
-            info!("📊 Timer will ALWAYS run - no polling state checks");
-            info!("📊 If you don't see 'Timer callback FIRST CALL' logs, REAPER is not calling the timer");
+            debug!("Registered polling timer callback with REAPER (target: 60Hz)");
             Ok(())
         }
         Err(e) => {

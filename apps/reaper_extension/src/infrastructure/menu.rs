@@ -13,21 +13,15 @@ use crate::infrastructure::action_registry::get_all_registered_actions;
 /// Register the extension menu with REAPER
 /// Must be called after actions are registered and REAPER is woken up
 pub fn register_extension_menu() -> anyhow::Result<()> {
-    info!("Starting extension menu registration");
-    
     // Safely get Reaper instance - if it panics, return an error
     let reaper = std::panic::catch_unwind(|| Reaper::get())
         .map_err(|_| anyhow::anyhow!("Reaper::get() panicked - Reaper not available globally yet"))?;
     
-    info!("Adding Extensions main menu entry");
     reaper.medium_reaper().add_extensions_main_menu();
-    
-    info!("Registering custom menu hook");
     reaper
         .medium_session()
         .plugin_register_add_hook_custom_menu::<FastTrackStudioMenuHook>()?;
     
-    info!("✅ Extension menu hook registered successfully");
     Ok(())
 }
 
@@ -53,7 +47,7 @@ impl HookCustomMenu for FastTrackStudioMenuHook {
                 return;
             }
             
-            info!("Building FastTrackStudio menu");
+            debug!("Building FastTrackStudio menu");
             
             // Build the pure menu structure using swell-ui's menu_tree
             let mut pure_menu = extension_menu();

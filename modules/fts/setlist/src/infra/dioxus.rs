@@ -89,6 +89,25 @@ pub static CURRENT_TIME_SIG_DENOMINATOR: GlobalSignal<i32> = Signal::global(|| 4
     pub static ACTIVE_SLIDE_INDEX: GlobalSignal<Option<usize>> = Signal::global(|| None);
 
     // ============================================================================
+    // Granular Signals - Separate signals for tracks and transport per song
+    // ============================================================================
+
+    /// Tracks per song index - only updates when tracks change for a specific song
+    /// Key: song_index, Value: tracks for that song
+    pub static SONG_TRACKS: GlobalSignal<HashMap<usize, Vec<daw::tracks::Track>>> = Signal::global(|| HashMap::new());
+
+    /// Transport per song index - only updates when transport changes for a specific song
+    /// Key: song_index, Value: transport state for that song
+    pub static SONG_TRANSPORT: GlobalSignal<HashMap<usize, daw::transport::Transport>> = Signal::global(|| HashMap::new());
+
+    /// Setlist structure (songs, sections, metadata) - only updates when structure changes
+    /// This excludes tracks and transport which are in separate signals
+    pub static SETLIST_STRUCTURE: GlobalSignal<Option<crate::core::Setlist>> = Signal::global(|| None);
+
+    /// Active indices (song, section, slide) - updates frequently during playback
+    pub static ACTIVE_INDICES: GlobalSignal<(Option<usize>, Option<usize>, Option<usize>)> = Signal::global(|| (None, None, None));
+
+    // ============================================================================
     // App State - Application state like counting in, loop, etc.
     // ============================================================================
 

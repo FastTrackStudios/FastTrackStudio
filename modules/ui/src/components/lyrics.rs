@@ -2,19 +2,21 @@ use dioxus::prelude::*;
 use lyrics::{Lyrics, output::{Slides, SlideBreakConfig, Slide}};
 use lyrics::core::{SectionTypeHint, LinePart};
 use std::collections::HashMap;
-use setlist::{SETLIST, ACTIVE_SLIDE_INDEX};
+use setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, ACTIVE_SLIDE_INDEX};
 use crate::components::text_fit::{TextFit, TextFitMode};
 use crate::components::syllable_editor::{SyllableEditor, SyllableEditorProps, SyllableKey};
 
 /// Lyrics view component - full-screen confidence monitor style display
 #[component]
 pub fn LyricsView() -> Element {
-    // Get lyrics from current song in setlist (reactive to SETLIST changes)
+    // Get lyrics from current song in setlist (reactive to SETLIST_STRUCTURE and ACTIVE_INDICES changes)
     let lyrics_data = use_memo(move || {
-        // Read SETLIST to trigger reactivity
-        if let Some(setlist_api) = SETLIST.read().as_ref() {
-            if let Some(active_song_idx) = setlist_api.active_song_index() {
-                if let Some(song) = setlist_api.get_setlist().songs.get(active_song_idx) {
+        // Read SETLIST_STRUCTURE and ACTIVE_INDICES to trigger reactivity
+        let setlist_structure = SETLIST_STRUCTURE.read();
+        let active_indices = ACTIVE_INDICES.read();
+        if let Some(active_song_idx) = active_indices.0 {
+            if let Some(setlist) = setlist_structure.as_ref() {
+                if let Some(song) = setlist.songs.get(active_song_idx) {
                     return song.lyrics.clone();
                 }
             }
@@ -55,10 +57,12 @@ pub fn LyricsView() -> Element {
         }
         
         // Fallback: try to get from active section if slide index not available
-        if let Some(setlist_api) = SETLIST.read().as_ref() {
-            if let Some(active_song_idx) = setlist_api.active_song_index() {
-                if let Some(song) = setlist_api.get_setlist().songs.get(active_song_idx) {
-                    if let Some(active_section_idx) = setlist_api.active_section_index() {
+        let setlist_structure = SETLIST_STRUCTURE.read();
+        let active_indices = ACTIVE_INDICES.read();
+        if let Some(active_song_idx) = active_indices.0 {
+            if let Some(setlist) = setlist_structure.as_ref() {
+                if let Some(song) = setlist.songs.get(active_song_idx) {
+                    if let Some(active_section_idx) = active_indices.1 {
                         if let Some(section) = song.sections.get(active_section_idx) {
                             // Find slide matching this section name
                             for slide in slides_vec.iter() {
@@ -253,12 +257,14 @@ pub fn LyricsEditView() -> Element {
     // Track the selected/active slide (can be set by clicking)
     let selected_slide_index = use_signal(|| None::<usize>);
     
-    // Get lyrics from current song in setlist (reactive to SETLIST changes)
+    // Get lyrics from current song in setlist (reactive to SETLIST_STRUCTURE and ACTIVE_INDICES changes)
     let lyrics_data = use_memo(move || {
-        // Read SETLIST to trigger reactivity
-        if let Some(setlist_api) = SETLIST.read().as_ref() {
-            if let Some(active_song_idx) = setlist_api.active_song_index() {
-                if let Some(song) = setlist_api.get_setlist().songs.get(active_song_idx) {
+        // Read SETLIST_STRUCTURE and ACTIVE_INDICES to trigger reactivity
+        let setlist_structure = SETLIST_STRUCTURE.read();
+        let active_indices = ACTIVE_INDICES.read();
+        if let Some(active_song_idx) = active_indices.0 {
+            if let Some(setlist) = setlist_structure.as_ref() {
+                if let Some(song) = setlist.songs.get(active_song_idx) {
                     return song.lyrics.clone();
                 }
             }
@@ -297,9 +303,11 @@ pub fn LyricsEditView() -> Element {
         let mut map = HashMap::new();
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Some(setlist_api) = SETLIST.read().as_ref() {
-                if let Some(active_song_idx) = setlist_api.active_song_index() {
-                    if let Some(song) = setlist_api.get_setlist().songs.get(active_song_idx) {
+            let setlist_structure = SETLIST_STRUCTURE.read();
+            let active_indices = ACTIVE_INDICES.read();
+            if let Some(active_song_idx) = active_indices.0 {
+                if let Some(setlist) = setlist_structure.as_ref() {
+                    if let Some(song) = setlist.songs.get(active_song_idx) {
                         for section in &song.sections {
                             map.insert(section.name.clone(), section.color_bright());
                         }
@@ -327,10 +335,12 @@ pub fn LyricsEditView() -> Element {
         // Try to get active section from setlist
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Some(setlist_api) = SETLIST.read().as_ref() {
-                if let Some(active_song_idx) = setlist_api.active_song_index() {
-                    if let Some(song) = setlist_api.get_setlist().songs.get(active_song_idx) {
-                        if let Some(active_section_idx) = setlist_api.active_section_index() {
+            let setlist_structure = SETLIST_STRUCTURE.read();
+            let active_indices = ACTIVE_INDICES.read();
+            if let Some(active_song_idx) = active_indices.0 {
+                if let Some(setlist) = setlist_structure.as_ref() {
+                    if let Some(song) = setlist.songs.get(active_song_idx) {
+                        if let Some(active_section_idx) = active_indices.1 {
                             if let Some(section) = song.sections.get(active_section_idx) {
                                 // Find slide matching this section name
                                 for (idx, slide) in slides_vec.iter().enumerate() {
@@ -363,10 +373,12 @@ pub fn LyricsEditView() -> Element {
             // Try to find current slide index from setlist
             #[cfg(not(target_arch = "wasm32"))]
             {
-                if let Some(setlist_api) = SETLIST.read().as_ref() {
-                    if let Some(active_song_idx) = setlist_api.active_song_index() {
-                        if let Some(song) = setlist_api.get_setlist().songs.get(active_song_idx) {
-                            if let Some(active_section_idx) = setlist_api.active_section_index() {
+                let setlist_structure = SETLIST_STRUCTURE.read();
+                let active_indices = ACTIVE_INDICES.read();
+                if let Some(active_song_idx) = active_indices.0 {
+                    if let Some(setlist) = setlist_structure.as_ref() {
+                        if let Some(song) = setlist.songs.get(active_song_idx) {
+                            if let Some(active_section_idx) = active_indices.1 {
                                 if let Some(section) = song.sections.get(active_section_idx) {
                                     // Find slide matching this section name
                                     for (idx, slide) in slides_vec.iter().enumerate() {
@@ -381,7 +393,7 @@ pub fn LyricsEditView() -> Element {
                 }
             }
             // Default to first slide's next
-            return slides_vec.get(1).cloned();
+            0
         };
         
         // Get next slide after current
@@ -400,10 +412,12 @@ pub fn LyricsEditView() -> Element {
             
             #[cfg(not(target_arch = "wasm32"))]
             {
-                if let Some(setlist_api) = SETLIST.read().as_ref() {
-                    if let Some(active_song_idx) = setlist_api.active_song_index() {
-                        if let Some(song) = setlist_api.get_setlist().songs.get(active_song_idx) {
-                            if let Some(active_section_idx) = setlist_api.active_section_index() {
+                let setlist_structure = SETLIST_STRUCTURE.read();
+                let active_indices = ACTIVE_INDICES.read();
+                if let Some(active_song_idx) = active_indices.0 {
+                    if let Some(setlist) = setlist_structure.as_ref() {
+                        if let Some(song) = setlist.songs.get(active_song_idx) {
+                            if let Some(active_section_idx) = active_indices.1 {
                                 if let Some(section) = song.sections.get(active_section_idx) {
                                     // Find slide matching this section name and select it
                                     for (idx, slide) in slides_vec.iter().enumerate() {
@@ -742,12 +756,14 @@ pub fn LyricsEditView() -> Element {
 /// Performance preview component - custom preview for performance
 #[component]
 pub fn PerformancePreview() -> Element {
-    // Get lyrics from current song in setlist (reactive to SETLIST changes)
+    // Get lyrics from current song in setlist (reactive to SETLIST_STRUCTURE and ACTIVE_INDICES changes)
     let lyrics_data = use_memo(move || {
-        // Read SETLIST to trigger reactivity
-        if let Some(setlist_api) = SETLIST.read().as_ref() {
-            if let Some(active_song_idx) = setlist_api.active_song_index() {
-                if let Some(song) = setlist_api.get_setlist().songs.get(active_song_idx) {
+        // Read SETLIST_STRUCTURE and ACTIVE_INDICES to trigger reactivity
+        let setlist_structure = SETLIST_STRUCTURE.read();
+        let active_indices = ACTIVE_INDICES.read();
+        if let Some(active_song_idx) = active_indices.0 {
+            if let Some(setlist) = setlist_structure.as_ref() {
+                if let Some(song) = setlist.songs.get(active_song_idx) {
                     return song.lyrics.clone();
                 }
             }

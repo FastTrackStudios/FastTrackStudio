@@ -87,7 +87,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     reaper.show_console_msg("FastTrackStudio REAPER Extension loaded!\n");
     
     // Create and initialize App
-    info!("Creating application container...");
+    debug!("Creating application container...");
     let app = App::new(session)?;
     
     // Initialize the application (register actions, menu, IROH server, etc.)
@@ -123,8 +123,22 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
             // Update setlist state - ALWAYS runs every timer tick
             // This reads transport info and updates active song/section indices
             // The setlist is rebuilt with fresh transport info for each song
-            match app.setlist_service.update_setlist() {
+            // Now it will also update reactive polling with active indices
+            let setlist_was_ready = app.setlist_service.get_setlist().is_some();
+            match app.setlist_service.update_setlist_with_polling(app.reactive_polling.clone()) {
                 Ok(_) => {
+                    // Check if this is the first time setlist became ready
+                    let setlist_is_now_ready = app.setlist_service.get_setlist().is_some();
+                    if !setlist_was_ready && setlist_is_now_ready {
+                        // First project is loaded - initialize deferred reactive loggers
+                        // This avoids RefCell borrow panics during initial setup
+                        app.change_detection.init_deferred_logger();
+                        crate::infrastructure::reactive_logger::init_reactive_polling_logger(
+                            app.reactive_polling.streams()
+                        );
+                        info!("✅ All reactive loggers initialized (after first project loaded)");
+                    }
+                    
                     // Success - only log periodically to avoid spam
                     if count % 1000 == 0 {
                         debug!("✅ Setlist state updated successfully (tick {})", count);
@@ -133,6 +147,13 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
                 Err(e) => {
                     warn!(error = %e, "Failed to update setlist state");
                 }
+            }
+            
+            // Poll cursor positions and transport - emits reactive events only when values change
+            // Do this AFTER setlist update to avoid nested borrows
+            // Only poll after setlist is ready to avoid RefCell borrow issues
+            if app.setlist_service.get_setlist().is_some() {
+                app.reactive_polling.poll();
             }
             
             // Process pending seek requests from async tasks

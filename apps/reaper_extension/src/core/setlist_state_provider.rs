@@ -43,10 +43,5 @@ impl SetlistStateProvider for ReaperSetlistStateProvider {
             }
         }
     }
-    
-    async fn get_setlist_api_with_transport(&self) -> Result<SetlistApi, String> {
-        // Transport info is now embedded in each song's project field
-        self.get_setlist_api().await
-    }
 }
 

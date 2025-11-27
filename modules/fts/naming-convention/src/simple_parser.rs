@@ -23,6 +23,9 @@ impl SimpleParser {
     pub fn parse(&self, name: &str) -> TrackName {
         let mut track_name = TrackName::new();
         
+        // Store the original input name for later context checking
+        track_name.original_name = Some(name.to_string());
+        
         // Extract file extension if present
         let (clean_name, extension) = Self::extract_file_extension(name);
         track_name.file_extension = extension;
@@ -58,26 +61,51 @@ impl SimpleParser {
         let original_base = base_name.clone();
         let name_to_match = base_name.to_lowercase();
         
-        // STEP 1: Find matching group
-        let matching_group = self.find_matching_group(&name_to_match, &original_base);
+        // ============================================
+        // PASS 1: Match parent groups first (narrow down to top-level groups)
+        // ============================================
+        // Find matching top-level group first, without checking children
+        let matching_parent_group = self.find_matching_parent_group(&name_to_match, &original_base);
         
-        if let Some((group, child_path)) = matching_group {
+        if let Some((parent_group, parent_score)) = matching_parent_group {
+            // Mark parent group words as matched
+            let group_name_lower = parent_group.name.to_lowercase();
+            let group_prefix_lower = parent_group.prefix.to_lowercase();
+            
+            for (i, word) in words.iter().enumerate() {
+                let word_lower = word.to_lowercase();
+                if word_lower == group_name_lower || word_lower == group_prefix_lower {
+                    matched_words.insert(word_lower.clone());
+                    
+                    // If we matched "GTR" and the next word is "E", mark "E" as matched too
+                    if word_lower == "gtr" && i + 1 < words.len() {
+                        let next_word = words[i + 1].to_lowercase();
+                        if next_word == "e" {
+                            matched_words.insert("e".to_string());
+                        }
+                    }
+                }
+            }
+            
+            // ============================================
+            // PASS 2: Narrow down within the parent group (find children)
+            // ============================================
+            let child_path = Self::find_child_path(parent_group, &name_to_match, &original_base);
+            
             // Build the full prefix path from all parent groups
             let mut prefix_path = Vec::new();
-            Self::collect_prefix_path(group, &child_path, &mut prefix_path);
+            Self::collect_prefix_path(parent_group, &child_path, &mut prefix_path);
             
             // Check if "GTR E" pattern is present (for Electric Guitar)
             let mut prefix_to_use = if !prefix_path.is_empty() {
                 prefix_path.join(" ")
             } else {
-                group.prefix.clone()
+                parent_group.prefix.clone()
             };
             
             // If this is Electric Guitar and we have "GTR E" in the name, use "GTR E" as prefix
-            if group.name == "Guitar Electric" || group.prefix == "GTR" {
-                // Check if "gtr e" appears as a pattern (with word boundaries)
+            if parent_group.name == "Guitar Electric" || parent_group.prefix == "GTR" {
                 if name_to_match.contains("gtr e") || name_to_match.contains("gtr  e") {
-                    // Check if "E" appears right after "GTR" in the words
                     for (i, word) in words.iter().enumerate() {
                         let word_lower = word.to_lowercase();
                         if word_lower == "gtr" && i + 1 < words.len() {
@@ -94,55 +122,108 @@ impl SimpleParser {
             // Store the prefix
             track_name.group_prefix = Some(prefix_to_use.clone());
             
-            // Track group-related words as matched
-            let group_name_lower = group.name.to_lowercase();
-            let group_prefix_lower = group.prefix.to_lowercase();
-            
-            // Mark group name and prefix as matched if they appear in the name
-            for (i, word) in words.iter().enumerate() {
-                let word_lower = word.to_lowercase();
-                if word_lower == group_name_lower || word_lower == group_prefix_lower {
-                    matched_words.insert(word_lower.clone());
-                    
-                    // If we matched "GTR" and the next word is "E", mark "E" as matched too
-                    // This handles "GTR E" as the Electric Guitar identifier
-                    if word_lower == "gtr" && i + 1 < words.len() {
-                        let next_word = words[i + 1].to_lowercase();
-                        if next_word == "e" {
-                            matched_words.insert("e".to_string());
-                        }
-                    }
-                }
-            }
-            
             // Set sub-types from child path and mark them as matched
-            // Note: child_path contains the nested group names, not prefixes
             if !child_path.is_empty() {
                 track_name.sub_type = Some(child_path.clone());
-                // Mark sub-type names as matched
                 for sub_type in &child_path {
                     let sub_type_lower = sub_type.to_lowercase();
                     matched_words.insert(sub_type_lower.clone());
-                    // Also check if any words match the sub-type
                     for word in &words {
                         if word.to_lowercase() == sub_type_lower {
                             matched_words.insert(word.to_lowercase());
                         }
                     }
                 }
+            } else if parent_group.name == "Bass" {
+                // Special case: "Bass" by default should match "Bass Guitar" child
+                if let Some(bass_guitar_child) = parent_group.find_child("Bass Guitar") {
+                    let bass_guitar_prefix_lower = bass_guitar_child.prefix.to_lowercase();
+                    let contains_bass = name_lower == "bass"
+                        || name_lower == bass_guitar_prefix_lower
+                        || name_lower.starts_with(&format!("{} ", bass_guitar_prefix_lower))
+                        || name_lower.ends_with(&format!(" {}", bass_guitar_prefix_lower))
+                        || name_lower.contains(&format!(" {} ", bass_guitar_prefix_lower));
+                    let pattern_matches = bass_guitar_child.patterns.iter().any(|p| {
+                        let p_lower = p.to_lowercase();
+                        name_lower == p_lower
+                            || name_lower.starts_with(&format!("{} ", p_lower))
+                            || name_lower.contains(&format!(" {} ", p_lower))
+                    });
+                    if contains_bass || pattern_matches {
+                        track_name.sub_type = Some(vec!["Bass Guitar".to_string()]);
+                        matched_words.insert("bass".to_string());
+                        matched_words.insert("guitar".to_string());
+                    }
+                }
             }
             
-            // STEP 2: Extract components using group context
-            Self::extract_arrangement(&mut track_name, &base_name, &name_to_match, group, &mut matched_words);
-            Self::extract_section(&mut track_name, &base_name, &name_to_match, group, &mut matched_words);
-            Self::extract_performer(&mut track_name, &base_name, &name_to_match, group, &mut matched_words);
-            Self::extract_layers(&mut track_name, &base_name, &name_to_match, group, &mut matched_words);
-            Self::extract_multi_mic(&mut track_name, &base_name, &name_to_match, group, &mut matched_words);
-            Self::extract_effect(&mut track_name, &base_name, &name_to_match, group, &mut matched_words);
-            Self::extract_increment(&mut track_name, &base_name, &name_to_match, group, &mut matched_words);
+            // Determine the group context for component extraction
+            // If we found a sub_type, use the deepest child group for group-specific patterns
+            let group_for_components = if !child_path.is_empty() {
+                let mut current_group = parent_group;
+                for child_name in &child_path {
+                    if let Some(child) = current_group.find_child(child_name) {
+                        current_group = child;
+                    } else {
+                        break;
+                    }
+                }
+                current_group
+            } else {
+                parent_group
+            };
+            
+            // ============================================
+            // PASS 3: Extract components in fts-naming-parser order
+            // This chips away at possibilities systematically, reducing ambiguity at each step
+            // Order from config.json: RecTag, Performer, Arrangement, Section, Layers, Multi-Mic, Playlist, Track Type
+            // ============================================
+            // Note: Track Type was already extracted earlier from parentheses
+            
+            // 1. RecTag (highest priority after group - helps identify recording sessions)
+            Self::extract_rec_tag(&mut track_name, &base_name, &name_to_match, group_for_components, &mut matched_words);
+            
+            // 2. Performer (helps narrow down who played the track)
+            Self::extract_performer(&mut track_name, &base_name, &name_to_match, group_for_components, &mut matched_words);
+            
+            // 3. Arrangement (helps identify playing style/technique)
+            Self::extract_arrangement(&mut track_name, &base_name, &name_to_match, group_for_components, &mut matched_words);
+            
+            // 4. Section (helps identify song section)
+            Self::extract_section(&mut track_name, &base_name, &name_to_match, group_for_components, &mut matched_words);
+            
+            // 5. Layers (helps identify layering/doubling)
+            Self::extract_layers(&mut track_name, &base_name, &name_to_match, group_for_components, &mut matched_words);
+            
+            // 6. Multi-Mic (use deepest group for multi-mic descriptors - helps identify mic positions)
+            let group_for_multi_mic = if !child_path.is_empty() {
+                let mut current_group = parent_group;
+                for child_name in &child_path {
+                    if let Some(child) = current_group.find_child(child_name) {
+                        current_group = child;
+                    } else {
+                        break;
+                    }
+                }
+                current_group
+            } else {
+                parent_group
+            };
+            Self::extract_multi_mic(&mut track_name, &base_name, &name_to_match, group_for_multi_mic, &mut matched_words);
+            
+            // 7. Effect (helps identify effects/sends)
+            Self::extract_effect(&mut track_name, &base_name, &name_to_match, group_for_components, &mut matched_words);
+            
+            // 8. Increment (helps identify numbered instances like Tom 1, Tom 2)
+            Self::extract_increment(&mut track_name, &base_name, &name_to_match, group_for_components, &mut matched_words);
+            
+            // 9. Channel (helps identify L/R/C channels)
             Self::extract_channel(&mut track_name, &base_name, &name_to_match, &mut matched_words);
+            
+            // 10. Playlist (helps identify playlist variants)
             Self::extract_playlist(&mut track_name, &base_name, &name_to_match, &mut matched_words);
-            Self::extract_rec_tag(&mut track_name, &base_name, &name_to_match, group, &mut matched_words);
+            
+            // Track Type was already extracted at the beginning from parentheses
         }
         
         // Mark track type word as matched (if it was extracted from parentheses)
@@ -183,14 +264,35 @@ impl SimpleParser {
         track_name
     }
     
-    /// Find the best matching group for a track name
+    /// Find the best matching parent (top-level) group for a track name
+    /// This is PASS 1: Match parent groups first to narrow down possibilities
+    fn find_matching_parent_group(&self, name_lower: &str, original: &str) -> Option<(&FullGroup, i32)> {
+        let mut best_match: Option<(&FullGroup, i32)> = None;
+        
+        for group in &self.groups {
+            // Only check if this top-level group matches (don't check children yet)
+            if let Some(score) = Self::group_matches(group, name_lower, original) {
+                let current_best = best_match.as_ref().map(|(_, s)| *s).unwrap_or(0);
+                if score > current_best {
+                    best_match = Some((group, score));
+                }
+            }
+        }
+        
+        best_match
+    }
+    
+    /// Find the best matching group for a track name (legacy method, kept for compatibility)
     /// Returns the top-level group and the full path to the deepest matching child
+    /// NOTE: This is now split into find_matching_parent_group (PASS 1) and find_child_path (PASS 2)
     fn find_matching_group(&self, name_lower: &str, original: &str) -> Option<(&FullGroup, Vec<String>)> {
         let mut best_match: Option<(&FullGroup, Vec<String>, i32)> = None;
         
         for group in &self.groups {
             // First check if this group matches
-            if let Some(score) = Self::group_matches(group, name_lower, original) {
+            let parent_score = Self::group_matches(group, name_lower, original);
+            
+            if let Some(score) = parent_score {
                 // Try to find child groups recursively (use original for case preservation)
                 let child_path = Self::find_child_path(group, name_lower, original);
                 
@@ -203,14 +305,40 @@ impl SimpleParser {
                 }
             }
             
-            // Also check if any child matches (even if parent doesn't)
-            // This handles cases like "Kick In" matching Kick (child of Drums)
-            let child_match = Self::find_matching_child_in_group(group, name_lower, original);
-            if let Some((child_path, child_score)) = child_match {
-                let current_best = best_match.as_ref().map(|(_, _, s)| *s).unwrap_or(0);
-                if child_score > current_best {
-                    // Build full path including parent
-                    best_match = Some((group, child_path, child_score));
+            // Also check if any child matches, but ONLY if:
+            // 1. Parent group has some match (score > 50), OR
+            // 2. The child match is very strong (score > 200) - this handles cases like "HighHat" matching "Hi Hat" child of Cymbals
+            // This prevents false positives like "Vocal" matching "Cymbals" child of Drums
+            let should_check_children = if let Some(score) = parent_score {
+                score > 50 // Parent has at least a weak match
+            } else {
+                // No parent match - only check children if we get a very strong child match
+                // This handles cases like "HighHat" matching "Hi Hat" child of Cymbals
+                false // We'll check this after getting child match
+            };
+            
+            if should_check_children {
+                let child_match = Self::find_matching_child_in_group(group, name_lower, original);
+                if let Some((child_path, child_score)) = child_match {
+                    let current_best = best_match.as_ref().map(|(_, _, s)| *s).unwrap_or(0);
+                    if child_score > current_best {
+                        // Build full path including parent
+                        best_match = Some((group, child_path, child_score));
+                    }
+                }
+            } else if parent_score.is_none() {
+                // No parent match - check children but require very strong match (score > 200)
+                // This handles cases like "HighHat" matching "Hi Hat" child of Cymbals
+                let child_match = Self::find_matching_child_in_group(group, name_lower, original);
+                if let Some((child_path, child_score)) = child_match {
+                    if child_score > 200 {
+                        // Very strong child match - safe to use even without parent match
+                        let current_best = best_match.as_ref().map(|(_, _, s)| *s).unwrap_or(0);
+                        if child_score > current_best {
+                            // Build full path including parent
+                            best_match = Some((group, child_path, child_score));
+                        }
+                    }
                 }
             }
         }
@@ -220,6 +348,26 @@ impl SimpleParser {
     
     /// Find if any child of a group matches, returning the path and score
     fn find_matching_child_in_group(group: &FullGroup, name_lower: &str, original: &str) -> Option<(Vec<String>, i32)> {
+        // Context-based matching: If parent is Vocals, require vocal keywords
+        // BGVs is separate and doesn't require vocal keywords for its children
+        let parent_requires_vocal_keyword = group.name == "Vocals";
+        let vocal_keywords = ["vox", "vocal", "vocals", "voice"];
+        let has_vocal_keyword = if parent_requires_vocal_keyword {
+            vocal_keywords.iter().any(|keyword| {
+                name_lower == *keyword
+                    || name_lower.starts_with(&format!("{} ", keyword))
+                    || name_lower.ends_with(&format!(" {}", keyword))
+                    || name_lower.contains(&format!(" {} ", keyword))
+            })
+        } else {
+            true // No requirement for non-vocal groups
+        };
+        
+        // Don't check children of Vocals/BGV if no vocal keyword found
+        if parent_requires_vocal_keyword && !has_vocal_keyword {
+            return None;
+        }
+        
         for child in &group.children {
             if let Some(score) = Self::group_matches(child, name_lower, original) {
                 // Found a matching child, build the path
@@ -255,9 +403,67 @@ impl SimpleParser {
             }
         }
         
+        // Check patterns FIRST - if a pattern matches, allow it regardless of keyword checks
+        // This ensures "Vocal" matches Vocals via the "vocal" pattern
+        let mut pattern_matched = false;
+        for pattern in &group.patterns {
+            let pattern_lower = pattern.to_lowercase();
+            if name_lower == pattern_lower {
+                pattern_matched = true;
+                break;
+            } else if name_lower.starts_with(&format!("{} ", pattern_lower))
+                || name_lower.ends_with(&format!(" {}", pattern_lower))
+                || name_lower.contains(&format!(" {} ", pattern_lower)) {
+                pattern_matched = true;
+                break;
+            } else if name_lower.contains(&pattern_lower) {
+                pattern_matched = true;
+                break;
+            }
+        }
+        
+        // Context-based matching: Require explicit keywords for certain groups
+        // Vocals group requires vocal keywords (vox, vocal, vocals, voice) to match
+        // BUT: If a pattern matched, we already know it's valid, so skip the keyword check
+        // BGVs is separate and matches based on its own patterns (bgv, bgvs, backing vocal, etc.)
+        if group.name == "Vocals" && !pattern_matched {
+            let vocal_keywords = ["vox", "vocal", "vocals", "voice"];
+            let is_vocal_keyword = vocal_keywords.iter().any(|keyword| name_lower == *keyword);
+            let has_vocal_keyword = is_vocal_keyword || vocal_keywords.iter().any(|keyword| {
+                name_lower.starts_with(&format!("{} ", keyword))
+                    || name_lower.ends_with(&format!(" {}", keyword))
+                    || name_lower.contains(&format!(" {} ", keyword))
+            });
+            if !has_vocal_keyword {
+                // No vocal keyword found and no pattern matched - don't match Vocals group
+                return None;
+            }
+        }
+        
+        // BGVs group should NOT match if it contains vocal-only keywords without BGV patterns
+        // This prevents "Vocal" from matching BGVs when it should match Vocals
+        if group.name == "BGVs" {
+            // Check if name contains BGV-specific patterns
+            let bgv_patterns = ["bgv", "bgvs", "backing", "background", "harm", "harmony", "choir", "stack"];
+            let has_bgv_pattern = bgv_patterns.iter().any(|pattern| {
+                name_lower.contains(pattern)
+            });
+            
+            // If it's just "vocal" or "vox" without BGV patterns, don't match BGVs
+            let vocal_only_keywords = ["vocal", "vox", "vocals", "voice"];
+            let is_vocal_only = vocal_only_keywords.iter().any(|keyword| {
+                name_lower == *keyword || name_lower == format!("{} ", keyword) || name_lower == format!(" {}", keyword)
+            });
+            
+            if is_vocal_only && !has_bgv_pattern {
+                // Just vocal keywords without BGV patterns - don't match BGVs
+                return None;
+            }
+        }
+        
         // Check if any pattern matches (using word boundaries)
         let mut has_match = false;
-        let mut score = group.priority;
+        let mut score = 0; // Removed priority system - score based only on match quality
         
         // Check group name (exact word match gets highest score)
         let group_name_lower = group.name.to_lowercase();
@@ -274,22 +480,8 @@ impl SimpleParser {
             score += 100; // Substring match (lower priority)
         }
         
-        // Check prefix (exact word match)
-        let prefix_lower = group.prefix.to_lowercase();
-        if name_lower == prefix_lower {
-            has_match = true;
-            score += 500;
-        } else if name_lower.starts_with(&format!("{} ", prefix_lower))
-            || name_lower.ends_with(&format!(" {}", prefix_lower))
-            || name_lower.contains(&format!(" {} ", prefix_lower)) {
-            has_match = true;
-            score += 200;
-        } else if name_lower.contains(&prefix_lower) {
-            has_match = true;
-            score += 50;
-        }
-        
-        // Check patterns (word boundary matching)
+        // Check patterns FIRST (word boundary matching) - patterns are more specific than prefixes
+        // This ensures "BGV1" matches "bgv" pattern in Vocals/BGV before matching "B" prefix in Bass
         for pattern in &group.patterns {
             let pattern_lower = pattern.to_lowercase();
             if name_lower == pattern_lower {
@@ -302,10 +494,54 @@ impl SimpleParser {
                 has_match = true;
                 score += 100;
                 break;
+            } else if name_lower.starts_with(&pattern_lower) {
+                // Pattern at start of name (e.g., "bgv" in "bgv1")
+                // Check if next character is not a letter (number, space, etc.)
+                if name_lower.len() > pattern_lower.len() {
+                    let next_char = name_lower.chars().nth(pattern_lower.len()).unwrap();
+                    if !next_char.is_alphabetic() {
+                        has_match = true;
+                        score += 100; // Strong match for pattern at start
+                        break;
+                    }
+                }
             } else if name_lower.contains(&pattern_lower) {
                 has_match = true;
                 score += 10;
                 break;
+            }
+        }
+        
+        // Check prefix (exact word match) - only if no pattern match yet
+        // This prevents "BGV1" from matching Bass just because it starts with "B"
+        // Also require word boundaries for single-letter prefixes to avoid false matches
+        if !has_match {
+            let prefix_lower = group.prefix.to_lowercase();
+            if name_lower == prefix_lower {
+                has_match = true;
+                score += 500;
+            } else if name_lower.starts_with(&format!("{} ", prefix_lower))
+                || name_lower.ends_with(&format!(" {}", prefix_lower))
+                || name_lower.contains(&format!(" {} ", prefix_lower)) {
+                has_match = true;
+                score += 200;
+            } else if prefix_lower.len() > 1 && name_lower.contains(&prefix_lower) {
+                // Only allow substring match for multi-character prefixes
+                has_match = true;
+                score += 50;
+            } else if prefix_lower.len() == 1 {
+                // For single-letter prefixes, require word boundary (start/end of word)
+                // This prevents "BGV1" from matching "B" prefix in Bass
+                if name_lower.starts_with(&prefix_lower) && name_lower.len() > 1 && !name_lower.chars().nth(1).unwrap().is_alphanumeric() {
+                    // Prefix at start followed by non-alphanumeric (e.g., "B " or "B.")
+                    has_match = true;
+                    score += 200;
+                } else if name_lower.ends_with(&prefix_lower) && name_lower.len() > 1 && !name_lower.chars().nth(name_lower.len() - 2).unwrap().is_alphanumeric() {
+                    // Prefix at end preceded by non-alphanumeric (e.g., " B" or ".B")
+                    has_match = true;
+                    score += 200;
+                }
+                // Don't match single-letter prefixes as substrings (e.g., "B" in "BGV1")
             }
         }
         
@@ -340,20 +576,48 @@ impl SimpleParser {
             }
             
             // Check if child matches (using word boundaries)
+            // For child groups, require that at least one pattern matches (not just prefix)
+            // This prevents "B Bass" from matching "Bass Guitar" just because "Bass" is the prefix
             let child_name_lower = child.name.to_lowercase();
-            let child_matches = 
-                name_lower == child_name_lower
+            let child_prefix_lower = child.prefix.to_lowercase();
+            
+            // First check if child name matches exactly (highest priority)
+            let name_matches = name_lower == child_name_lower
                 || name_lower.starts_with(&format!("{} ", child_name_lower))
                 || name_lower.ends_with(&format!(" {}", child_name_lower))
-                || name_lower.contains(&format!(" {} ", child_name_lower))
-                || child.patterns.iter().any(|p| {
-                    let p_lower = p.to_lowercase();
-                    name_lower == p_lower
-                        || name_lower.starts_with(&format!("{} ", p_lower))
-                        || name_lower.ends_with(&format!(" {}", p_lower))
-                        || name_lower.contains(&format!(" {} ", p_lower))
-                })
-                || name_lower.contains(&child.prefix.to_lowercase());
+                || name_lower.contains(&format!(" {} ", child_name_lower));
+            
+            // Then check if any child patterns match (required for child groups to avoid false positives)
+            let pattern_matches = child.patterns.iter().any(|p| {
+                let p_lower = p.to_lowercase();
+                name_lower == p_lower
+                    || name_lower.starts_with(&format!("{} ", p_lower))
+                    || name_lower.ends_with(&format!(" {}", p_lower))
+                    || name_lower.contains(&format!(" {} ", p_lower))
+            });
+            
+            // Check prefix matching with restrictions to avoid false positives
+            // Allow prefix matching if:
+            // 1. No patterns defined (use prefix as fallback), OR
+            // 2. Name starts with prefix (e.g., "Bass DI" starts with "Bass" prefix of "Bass Guitar")
+            // But don't allow if name ends with prefix (e.g., "B Bass" ending with "Bass" shouldn't match "Bass Guitar")
+            let prefix_matches = if child.patterns.is_empty() {
+                // No patterns defined, use prefix as fallback
+                name_lower == child_prefix_lower
+                    || name_lower.starts_with(&format!("{} ", child_prefix_lower))
+                    || name_lower.ends_with(&format!(" {}", child_prefix_lower))
+                    || name_lower.contains(&format!(" {} ", child_prefix_lower))
+            } else {
+                // Patterns are defined - only allow prefix matching if name STARTS with prefix
+                // This allows "Bass DI" to match "Bass Guitar" (starts with "Bass")
+                // But prevents "B Bass" from matching "Bass Guitar" (ends with "Bass", doesn't start with it)
+                name_lower == child_prefix_lower
+                    || name_lower.starts_with(&format!("{} ", child_prefix_lower))
+                    // Don't check ends_with or contains - only starts_with to avoid false positives
+            };
+            
+            // Child matches if name matches, or if patterns match, or if prefix matches (only when no patterns defined)
+            let child_matches = name_matches || pattern_matches || prefix_matches;
             
             if child_matches {
                 // Try to preserve original case from the input

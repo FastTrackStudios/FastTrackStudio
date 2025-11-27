@@ -148,7 +148,7 @@ impl ActionDef {
         let command_id = self.command_id;
         let section_id = self.section.section_id();
         
-        info!(
+        debug!(
             command_id = %self.command_id,
             display_name = %self.display_name,
             section_id = section_id,
@@ -186,10 +186,10 @@ impl ActionDef {
                 storage.push(registered_action);
             }
 
-            info!(
+            debug!(
                 command_id = %self.command_id,
                 action_name = %action_name,
-                "✅ Action successfully registered with REAPER (main section)"
+                "Action successfully registered with REAPER (main section)"
             );
         } else {
             // Register to MIDI editor or other sections using low-level custom_action API
@@ -262,12 +262,12 @@ impl ActionDef {
             std::mem::forget(id_str_cstring);
             std::mem::forget(name_cstring);
             
-            info!(
+            debug!(
                 command_id = %command_id,
                 action_name = %action_name,
                 section_id = section_id,
                 registered_cmd_id = cmd_id,
-                "✅ Action successfully registered to MIDI editor section"
+                "Action successfully registered to MIDI editor section"
             );
         }
     }
@@ -280,7 +280,7 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
         defs_storage.extend(actions.iter().cloned());
     }
     
-    info!(
+    debug!(
         module = %module_name,
         action_count = actions.len(),
         "Starting action registration for module"
@@ -294,7 +294,7 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
     let mut success_count = 0;
     
     for (index, action) in actions.iter().enumerate() {
-        info!(
+        debug!(
             module = %module_name,
             index = index + 1,
             total = actions.len(),
@@ -334,7 +334,7 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
         }
     }
 
-    info!(
+    debug!(
         module = %module_name,
         success_count,
         total = actions.len(),
@@ -374,7 +374,7 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
                 }
             }
         }
-        info!(
+        debug!(
             module = %module_name,
             stored_count = map.len(),
             "Stored {} command IDs for background thread access",

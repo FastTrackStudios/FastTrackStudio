@@ -7,7 +7,7 @@ use crate::components::transport::TransportControlBar;
 use crate::components::sidebar_items::{SongItem, SongItemData, SectionItem};
 use crate::components::mode_toggle::ModeToggle;
 use lumen_blocks::components::button::{Button, ButtonVariant};
-use setlist::{SETLIST, Setlist, Song, Section};
+use setlist::{SETLIST_STRUCTURE, SONG_TRANSPORT, Setlist, Song, Section};
 use daw::primitives::{TimePosition, MusicalPosition, TimeSignature};
 use daw::transport::PlayState;
 
@@ -128,7 +128,8 @@ pub fn TopBar(
 
 /// Left sidebar component (1/3 width) - Navigator
 /// 
-/// Reads setlist data directly from SETLIST global signal.
+/// Reads setlist structure from SETLIST_STRUCTURE and transport from SONG_TRANSPORT.
+/// Only rerenders when structure or transport for visible songs changes.
 #[component]
 pub fn Sidebar(
     current_song_index: Signal<Option<usize>>,
@@ -138,21 +139,23 @@ pub fn Sidebar(
     on_section_click: Callback<(usize, usize)>,
 ) -> Element {
     // Convert setlist to sidebar items using methods on Song and Section
-    // Read directly from SETLIST - Dioxus automatically tracks SETLIST.read()
+    // Read from SETLIST_STRUCTURE (structure only) and SONG_TRANSPORT (per-song transport)
+    // This only rerenders when structure changes or transport for a specific song changes
     let sidebar_items = use_memo(move || {
-        let setlist_api = SETLIST.read();
+        let setlist_structure = SETLIST_STRUCTURE.read();
+        let song_transport = SONG_TRANSPORT.read();
         let current_song_idx = current_song_index();
         
-        setlist_api.as_ref().map(|api| {
-            let setlist = api.get_setlist();
+        setlist_structure.as_ref().map(|setlist| {
             setlist.songs.iter().enumerate().map(|(idx, song)| {
-                // Get position from song's transport (via project)
-                let position = song.transport()
+                // Get transport for this song from SONG_TRANSPORT signal
+                let transport = song_transport.get(&idx);
+                let position = transport
                     .map(|t| t.playhead_position.time.to_seconds())
                     .unwrap_or(0.0);
                 
                 // Check if this song is actively playing
-                let song_is_playing = song.transport()
+                let song_is_playing = transport
                     .map(|t| t.is_playing())
                     .unwrap_or(false);
                 
@@ -233,7 +236,8 @@ pub struct DetailBadge {
 
 /// Main content area component (2/3 width)
 /// 
-/// Reads setlist data directly from SETLIST global signal.
+/// Reads setlist structure from SETLIST_STRUCTURE and transport from SONG_TRANSPORT.
+/// Only rerenders when structure or transport for the current song changes.
 #[component]
 pub fn MainContent(
     current_song_index: Signal<Option<usize>>,
@@ -256,15 +260,17 @@ pub fn MainContent(
             .unwrap_or_else(|| "default".to_string())
     };
     
-    // Get current song data with transport info from the song itself
-    // Dioxus automatically tracks SETLIST.read() - no memo needed
+    // Get current song data with transport info
+    // Read from SETLIST_STRUCTURE (structure) and SONG_TRANSPORT (per-song transport)
+    // This only rerenders when structure changes or transport for the current song changes
     let current_song_data = use_memo(move || {
-        let setlist_api = SETLIST.read();
+        let setlist_structure = SETLIST_STRUCTURE.read();
+        let song_transport = SONG_TRANSPORT.read();
         let song_idx = current_song_index();
         song_idx.and_then(|idx| {
-            setlist_api.as_ref()?.get_setlist().songs.get(idx).map(|song| {
-                // Get position from song's transport (via project)
-                let position = song.transport()
+            setlist_structure.as_ref()?.songs.get(idx).map(|song| {
+                // Get position from SONG_TRANSPORT signal for this song
+                let position = song_transport.get(&idx)
                     .map(|t| t.playhead_position.time.to_seconds())
                     .unwrap_or(0.0);
                 (song.clone(), position)
@@ -273,13 +279,14 @@ pub fn MainContent(
     });
     
     // Compute song name, position, and total
+    // Only rerenders when structure changes (song count) or current song changes
     let song_info = use_memo(move || {
-        let setlist_api = SETLIST.read();
+        let setlist_structure = SETLIST_STRUCTURE.read();
         let song_idx = current_song_index();
         let song_name = song_idx.and_then(|idx| {
-            setlist_api.as_ref()?.get_setlist().songs.get(idx).map(|song| song.name.clone())
+            setlist_structure.as_ref()?.songs.get(idx).map(|song| song.name.clone())
         }).unwrap_or_else(|| "No song selected".to_string());
-        let song_total = setlist_api.as_ref().map(|api| api.get_setlist().songs.len());
+        let song_total = setlist_structure.as_ref().map(|setlist| setlist.songs.len());
         (song_name, song_idx, song_total)
     });
     
@@ -591,28 +598,26 @@ pub fn MainContent(
     });
     
     // Get transport state for the current song for transport controls
-    // Read directly from SETLIST global signal - Dioxus automatically tracks SETLIST.read()
-    let setlist_api = SETLIST.read(); // Dioxus tracks this automatically
+    // Read from SONG_TRANSPORT - only rerenders when transport for current song changes
+    let song_transport = SONG_TRANSPORT.read();
     let is_playing = current_song_index().and_then(|idx| {
-        setlist_api.as_ref()?.get_setlist().songs.get(idx)
-            .and_then(|song| song.transport())
+        song_transport.get(&idx)
             .map(|transport| matches!(transport.play_state, PlayState::Playing | PlayState::Recording))
     }).unwrap_or(false);
     
     let is_looping = current_song_index().and_then(|idx| {
-        setlist_api.as_ref()?.get_setlist().songs.get(idx)
-            .and_then(|song| song.transport())
+        song_transport.get(&idx)
             .map(|transport| transport.looping)
     }).unwrap_or(false);
     
     let (song_name, song_position, song_total) = song_info();
     
-    // Get next song info
+    // Get next song info from SETLIST_STRUCTURE
+    // Only rerenders when structure changes or current song changes
     let next_song_info = use_memo(move || {
-        let setlist_api = SETLIST.read();
+        let setlist_structure = SETLIST_STRUCTURE.read();
         let current_idx = current_song_index();
-        if let (Some(api), Some(idx)) = (setlist_api.as_ref(), current_idx) {
-            let setlist = api.get_setlist();
+        if let (Some(setlist), Some(idx)) = (setlist_structure.as_ref(), current_idx) {
             if let Some(next_song) = setlist.next_song(idx) {
                 Some((next_song.name.clone(), next_song.color()))
             } else {

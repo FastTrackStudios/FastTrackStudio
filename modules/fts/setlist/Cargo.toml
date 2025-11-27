@@ -36,6 +36,7 @@ tracing = "0.1"
 # Workspace dependencies
 daw = { path = "../../daw" }
 lyrics = { path = "../lyrics" }
+rxrust = { workspace = true }
 
 # HTTP infrastructure (optional - to be implemented later)
 # axum = { version = "0.8.6", optional = true, features = ["default", "ws"] }

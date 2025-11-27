@@ -1,6 +1,7 @@
 pub mod application;
 pub mod core;
 pub mod infra;
+pub mod reactive;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use infra::stream::{
@@ -9,12 +10,22 @@ pub use infra::stream::{
 };
 
 #[cfg(feature = "dioxus")]
-pub use infra::dioxus::{SETLIST, TRANSPORT_INFO, ProjectTransportInfo, CURRENT_POSITION_SECONDS, ACTIVE_SLIDE_INDEX};
+pub use infra::dioxus::{
+    SETLIST, TRANSPORT_INFO, ProjectTransportInfo, CURRENT_POSITION_SECONDS, ACTIVE_SLIDE_INDEX,
+    SONG_TRACKS, SONG_TRANSPORT, SETLIST_STRUCTURE, ACTIVE_INDICES,
+};
 
 pub use core::{
     Section, SectionType, Setlist, SetlistApi, SetlistEntry, SetlistError, SetlistOrder, SetlistSummary, Song,
     SongSummary,
 };
+pub use reactive::{
+    SetlistReactiveStreams, SetlistStreams, SongStreams, LyricsStreams, ActiveIndicesStreams, EventStreamSubject,
+    SetlistReactiveService, SetlistReactiveState,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use reactive::irpc::{SetlistReactiveProtocol, SetlistReactiveApi};
 
 pub fn default_setlist() -> Result<Setlist, SetlistError> {
     Setlist::default_app_setlist()
