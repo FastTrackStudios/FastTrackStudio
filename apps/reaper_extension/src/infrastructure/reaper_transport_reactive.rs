@@ -4,12 +4,11 @@
 
 use std::sync::{Arc, Mutex};
 use reaper_high::{Reaper, Project as ReaperProject};
-use reaper_medium::ProjectRef;
 use daw::transport::reactive::{TransportReactiveService, TransportStreams, TransportReactiveState};
 use daw::transport::{Transport, PlayState, Tempo};
 use daw::project::Project;
 use crate::services::SetlistService;
-use tracing::{trace, info, debug};
+use tracing::{info, debug};
 use rxrust::prelude::Observer;
 use crate::infrastructure::formatted_logging::format_transport_change;
 

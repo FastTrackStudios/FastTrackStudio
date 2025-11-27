@@ -40,4 +40,5 @@ crate-type = ["cdylib", "rlib"]
 
 [lints.rust]
 unsafe_code = "allow"  # Required for low-level REAPER API calls
+unused = "allow"  # Allow unused items (API functions will be used later)
 

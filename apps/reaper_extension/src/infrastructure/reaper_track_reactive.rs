@@ -3,14 +3,13 @@
 //! Reads track state from REAPER and updates reactive streams.
 
 use std::sync::{Arc, Mutex};
-use reaper_high::{Reaper, Project as ReaperProject, Track as ReaperTrack};
-use reaper_medium::ProjectRef;
+use reaper_high::{Reaper, Project as ReaperProject};
 use daw::tracks::reactive::{TrackReactiveService, TrackStreams, TrackReactiveState};
 use daw::tracks::Track;
 use daw::project::Project;
 use daw::transport::Transport;
 use crate::services::SetlistService;
-use tracing::{trace, info, debug};
+use tracing::{info, debug};
 use rxrust::prelude::Observer;
 use crate::infrastructure::formatted_logging::{format_track_change, format_track_specific_change};
 

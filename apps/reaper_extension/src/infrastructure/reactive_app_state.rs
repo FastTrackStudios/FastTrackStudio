@@ -53,38 +53,47 @@ impl ReactiveAppStateStreams {
     
     // Convenience accessors that delegate to domain streams
     
+    #[allow(unused)]
     pub fn setlist_structure_changed(&self) -> rxrust::prelude::LocalSubject<'static, setlist::Setlist, ()> {
         self.setlist.setlist.setlist_structure_changed.borrow().clone()
     }
     
+    #[allow(unused)]
     pub fn active_indices_changed(&self) -> rxrust::prelude::LocalSubject<'static, (Option<usize>, Option<usize>, Option<usize>), ()> {
         self.setlist.active_indices.active_indices_changed.borrow().clone()
     }
     
+    #[allow(unused)]
     pub fn tracks_changed(&self) -> rxrust::prelude::LocalSubject<'static, (String, Vec<daw::tracks::Track>), ()> {
         self.daw.tracks.tracks_changed.borrow().clone()
     }
     
+    #[allow(unused)]
     pub fn transport_changed(&self) -> rxrust::prelude::LocalSubject<'static, (String, Transport), ()> {
         self.daw.transport.transport_changed.borrow().clone()
     }
     
+    #[allow(unused)]
     pub fn song_lyrics_changed(&self) -> rxrust::prelude::LocalSubject<'static, (usize, Lyrics), ()> {
         self.setlist.lyrics.lyrics_changed.borrow().clone()
     }
     
+    #[allow(unused)]
     pub fn song_lyrics_annotations_changed(&self) -> rxrust::prelude::LocalSubject<'static, (usize, LyricsAnnotations), ()> {
         self.setlist.lyrics.lyrics_annotations_changed.borrow().clone()
     }
     
+    #[allow(unused)]
     pub fn song_added(&self) -> rxrust::prelude::LocalSubject<'static, (usize, setlist::Song), ()> {
         self.setlist.setlist.song_added.borrow().clone()
     }
     
+    #[allow(unused)]
     pub fn song_removed(&self) -> rxrust::prelude::LocalSubject<'static, usize, ()> {
         self.setlist.setlist.song_removed.borrow().clone()
     }
     
+    #[allow(unused)]
     pub fn songs_reordered(&self) -> rxrust::prelude::LocalSubject<'static, setlist::Setlist, ()> {
         self.setlist.setlist.songs_reordered.borrow().clone()
     }

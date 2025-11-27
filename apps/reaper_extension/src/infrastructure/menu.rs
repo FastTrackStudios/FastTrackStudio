@@ -5,7 +5,7 @@
 use reaper_high::Reaper;
 use reaper_medium::{HookCustomMenu, Hmenu, MenuHookFlag, ReaperStr};
 use swell_ui::{Menu, menu_tree::{anonymous_menu, menu, item, separator, Entry}};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 use std::collections::HashMap;
 
 use crate::infrastructure::action_registry::get_all_registered_actions;

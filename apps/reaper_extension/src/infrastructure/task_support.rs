@@ -4,7 +4,7 @@
 //! work to REAPER's main thread from async handlers.
 
 use reaper_high::{TaskSupport, MainTaskMiddleware, MainThreadTask};
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::unbounded;
 use std::sync::{Arc, OnceLock, Mutex};
 
 static TASK_SUPPORT: OnceLock<Arc<TaskSupport>> = OnceLock::new();

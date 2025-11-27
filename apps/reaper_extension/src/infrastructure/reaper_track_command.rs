@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use daw::tracks::reactive::irpc::TrackCommandHandler;
 use daw::tracks::api::solo::SoloMode;
-use reaper_high::{Reaper, Track as ReaperTrack, Project as ReaperProject, TaskSupport};
+use reaper_high::{Reaper, Project as ReaperProject, TaskSupport};
 use reaper_medium::{ProjectRef, SoloMode as ReaperSoloMode};
 use std::sync::{Arc, OnceLock};
 use fragile::Fragile;

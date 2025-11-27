@@ -34,3 +34,6 @@ desktop = ["dioxus/desktop" ]
 # Server feature - defined but not enabled by default
 # Will be re-enabled incrementally when server features are added back
 server = ["dioxus/server"]
+
+[lints.rust]
+unused = "allow"  # Allow unused items (variables/functions will be used later)

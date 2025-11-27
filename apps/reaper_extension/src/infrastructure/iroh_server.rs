@@ -91,7 +91,7 @@ pub fn start_iroh_server(
     let mut lyrics_api = lyrics::LyricsApi::spawn(lyrics_service_box);
     
     // Create setlist stream API (on main thread)
-    let mut setlist_api = match stream_service.create_stream_api() {
+    let setlist_api = match stream_service.create_stream_api() {
         Ok(api) => api,
         Err(e) => {
             warn!("Failed to create setlist stream service: {}", e);
