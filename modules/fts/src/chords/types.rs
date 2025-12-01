@@ -21,7 +21,7 @@ pub enum ChordDisplayFormat {
 ///
 /// The musical structure (chord, root note, bass note) comes from keyflow.
 /// Only timing and MIDI data are DAW-specific.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChordData {
     /// The detected chord (from keyflow)
     pub chord: Chord,
@@ -40,7 +40,7 @@ pub struct ChordData {
 }
 
 /// Complete chord analysis with all display formats
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChordAnalysis {
     /// The chord data with timing
     pub data: ChordData,
@@ -53,7 +53,7 @@ pub struct ChordAnalysis {
 }
 
 /// Collection of detected chords
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChordsData {
     /// All detected chords in chronological order
     pub chords: Vec<ChordAnalysis>,

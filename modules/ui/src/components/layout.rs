@@ -7,7 +7,7 @@ use crate::components::transport::TransportControlBar;
 use crate::components::sidebar_items::{SongItem, SongItemData, SectionItem};
 use crate::components::mode_toggle::ModeToggle;
 use lumen_blocks::components::button::{Button, ButtonVariant};
-use fts::fts::setlist::{SETLIST_STRUCTURE, SONG_TRANSPORT, Setlist, Song, Section};
+use fts::setlist::{SETLIST_STRUCTURE, SONG_TRANSPORT, Setlist, Song, Section};
 use daw::primitives::{TimePosition, MusicalPosition, TimeSignature};
 use daw::transport::PlayState;
 
@@ -363,21 +363,21 @@ pub fn MainContent(
             
             // Add song sections
             for section in song.sections.iter() {
-                let section_start = section.start_seconds();
-                let section_end = section.end_seconds();
-                let section_start_percent = if total_duration > 0.0 {
-                    ((section_start - total_start) / total_duration * 100.0).max(0.0).min(100.0)
-                } else { 0.0 };
-                let section_end_percent = if total_duration > 0.0 {
-                    ((section_end - total_start) / total_duration * 100.0).max(0.0).min(100.0)
-                } else { 0.0 };
+                if let (Some(section_start), Some(section_end)) = (section.start_seconds(), section.end_seconds()) {
+                    let section_start_percent = if total_duration > 0.0 {
+                        ((section_start - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+                    } else { 0.0 };
+                    let section_end_percent = if total_duration > 0.0 {
+                        ((section_end - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+                    } else { 0.0 };
                 
-                sections.push(ProgressSection {
-                    start_percent: section_start_percent,
-                    end_percent: section_end_percent,
-                    color: section.color_bright(),
-                    name: section.display_name(),
-                });
+                    sections.push(ProgressSection {
+                        start_percent: section_start_percent,
+                        end_percent: section_end_percent,
+                        color: section.color_bright(),
+                        name: section.display_name(),
+                    });
+                }
             }
             
             // Add ending section (red) if it exists
@@ -563,7 +563,7 @@ pub fn MainContent(
             let song_start = if song.effective_start() > 0.0 {
                 song.effective_start()
             } else {
-                song.sections.first().map(|s| s.start_seconds()).unwrap_or(0.0)
+                song.sections.first().and_then(|s| s.start_seconds()).unwrap_or(0.0)
             };
             let current_pos = transport.playhead_position.time.to_seconds();
             let song_relative_position = (current_pos - song_start).max(0.0);

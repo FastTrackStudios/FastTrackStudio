@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use fts::fts::setlist::Song;
+use fts::setlist::Song;
 
 /// Measure information for the grid
 #[derive(Clone, Debug, PartialEq)]
@@ -42,7 +42,9 @@ pub fn Ruler(
         }
         // Add regular section starts
         for section in &s.sections {
-            starts.push(section.start_seconds());
+            if let Some(start) = section.start_seconds() {
+                starts.push(start);
+            }
         }
         starts
     }).unwrap_or_default();
@@ -106,7 +108,9 @@ pub fn Ruler(
             }
             // Add all section starts
             for section in &s.sections {
-                boundaries.push(section.start_seconds());
+                if let Some(start) = section.start_seconds() {
+                    boundaries.push(start);
+                }
             }
             boundaries.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             boundaries

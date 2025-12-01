@@ -648,7 +648,7 @@ pub fn build_song_from_region(
         if let Err(e) = song.add_section(section) {
             // Section overlaps can happen if regions overlap in REAPER
             // This is expected during rebuilds, so log at debug level
-            debug!(error = %e, section_name = %section_name, "Section overlaps with existing sections (skipping)");
+            debug!(error = %e, section_name = ?section_name, "Section overlaps with existing sections (skipping)");
         }
     }
     
@@ -883,7 +883,7 @@ pub fn build_song_from_project_simple(
         if let Err(e) = song.add_section(section) {
             // Section overlaps can happen if regions overlap in REAPER
             // This is expected during rebuilds, so log at debug level
-            debug!(error = %e, section_name = %section_name, "Section overlaps with existing sections (skipping)");
+            debug!(error = %e, section_name = ?section_name, "Section overlaps with existing sections (skipping)");
         }
     }
 

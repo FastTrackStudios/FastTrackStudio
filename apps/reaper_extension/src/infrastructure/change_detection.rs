@@ -118,7 +118,7 @@ fn get_project_name_for_track(track: &reaper_high::Track) -> Option<String> {
 /// Helper function to broadcast SongTracks update for a track
 /// Finds the song containing the track and broadcasts the updated tracks
 fn broadcast_track_update_for_song(track: &reaper_high::Track) {
-    use setlist::infra::stream::{get_broadcast_sender, get_state_provider, SetlistUpdateMessage};
+    use fts::setlist::infra::stream::{get_broadcast_sender, get_state_provider, SetlistUpdateMessage};
     use tracing::warn;
     
     // Get the project name for this track
@@ -190,7 +190,7 @@ pub fn init_reactive_stream_subscriptions(
     track_service: Option<std::sync::Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>>,
 ) {
     use crate::implementation::tracks::{invalidate_track_cache, invalidate_all_track_caches};
-    use setlist::infra::stream::{get_broadcast_sender, get_state_provider, SetlistUpdateMessage};
+    use fts::setlist::infra::stream::{get_broadcast_sender, get_state_provider, SetlistUpdateMessage};
     use reaper_high::Reaper;
     use rxrust::prelude::*;
     

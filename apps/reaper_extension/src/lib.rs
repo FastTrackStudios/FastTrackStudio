@@ -8,7 +8,6 @@ mod app;
 
 mod live;
 mod lyrics;
-mod chords;
 
 /// Polling state management for continuous updates
 pub mod polling_state {

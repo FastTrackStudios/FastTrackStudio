@@ -107,10 +107,10 @@ fn build_section_from_region(region: &Region) -> Option<Section> {
     let section_type = parse_section_type_from_name(&region.name);
     
     // If we couldn't parse a section type, use Custom to indicate it's an unrecognized section
-    let section_type = section_type.unwrap_or(SectionType::Custom);
+    let section_type = section_type.unwrap_or_else(|| SectionType::Custom(region.name.clone()));
     
     // Extract number from name if present (but not for Custom sections)
-    let number = if matches!(section_type, SectionType::Custom) {
+    let number = if matches!(section_type, SectionType::Custom(_)) {
         None // Custom sections should not have numbers extracted
     } else {
         extract_number_from_name(&region.name)
@@ -120,7 +120,7 @@ fn build_section_from_region(region: &Region) -> Option<Section> {
     let start_pos = region.time_range.start.clone();
     let end_pos = region.time_range.end.clone();
     
-    match Section::new(
+    match Section::new_with_positions(
         section_type,
         start_pos,
         end_pos,
@@ -133,7 +133,7 @@ fn build_section_from_region(region: &Region) -> Option<Section> {
             // Log color for debugging
             if let Some(color_val) = region.color {
                 debug!(
-                    section_name = %section.name,
+                    section_name = ?section.name,
                     region_name = %region.name,
                     color = color_val,
                     "Stored color in section"
@@ -158,8 +158,8 @@ fn create_count_in_section(
     count_in_start_pos: daw::primitives::Position,
     song_start_pos: daw::primitives::Position,
 ) -> Option<Section> {
-    match Section::new(
-        SectionType::Custom,
+    match Section::new_with_positions(
+        SectionType::Custom("Count-In".to_string()),
         count_in_start_pos,
         song_start_pos,
         "Count-In".to_string(),
@@ -185,8 +185,8 @@ fn create_end_section(
     song_end_pos: daw::primitives::Position,
     end_pos: daw::primitives::Position,
 ) -> Option<Section> {
-    match Section::new(
-        SectionType::Custom,
+    match Section::new_with_positions(
+        SectionType::Custom("End".to_string()),
         song_end_pos,
         end_pos,
         "End".to_string(),

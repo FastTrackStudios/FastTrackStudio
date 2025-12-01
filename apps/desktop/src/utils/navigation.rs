@@ -1,4 +1,4 @@
-use fts::fts::setlist::{Setlist, Song};
+use fts::setlist::{Setlist, Song};
 use std::collections::HashMap;
 use crate::utils::get_project_name;
 
@@ -11,10 +11,11 @@ pub fn update_position_to_section(
     song_positions: &mut HashMap<String, f64>,
 ) {
     if let Some(section) = song.sections.get(section_idx) {
-        let project_name = get_project_name(song).unwrap_or_else(|| "default".to_string());
-        let new_position = section.start_seconds();
-        transport_positions.insert(project_name.clone(), new_position);
-        song_positions.insert(song_idx.to_string(), new_position);
+        if let Some(new_position) = section.start_seconds() {
+            let project_name = get_project_name(song).unwrap_or_else(|| "default".to_string());
+            transport_positions.insert(project_name.clone(), new_position);
+            song_positions.insert(song_idx.to_string(), new_position);
+        }
     }
 }
 
@@ -28,7 +29,7 @@ pub fn reset_song_position(
         song.effective_start()
     } else {
         song.sections.first()
-            .map(|s| s.start_seconds())
+            .and_then(|s| s.start_seconds())
             .unwrap_or(0.0)
     };
     song_positions.insert(song_idx.to_string(), reset_position);

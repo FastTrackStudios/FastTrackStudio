@@ -185,8 +185,11 @@ impl SeekService {
         
         // Convert section's musical position (which has measure offset applied) to time
         let target_pos = if is_same_song {
-            musical_pos_to_time(&current_project, &section.start_position.musical)
-                .map_err(|e| format!("Failed to convert musical position to time: {}", e))?
+            section.start_position.as_ref()
+                .ok_or_else(|| "Section has no start position".to_string())
+                .and_then(|pos| musical_pos_to_time(&current_project, &pos.musical)
+                    .map_err(|e| format!("Failed to convert musical position to time: {}", e)))
+                .map_err(|e| format!("Failed to get section start position: {}", e))?
         } else {
             // Placeholder - will be recalculated after switching tabs
             PositionInSeconds::ZERO
@@ -228,8 +231,11 @@ impl SeekService {
             let project = Project::new(project_result.project);
             
             // Convert section's musical position to time using the target project
-            let target_pos = musical_pos_to_time(&project, &section.start_position.musical)
-                .map_err(|e| format!("Failed to convert musical position to time: {}", e))?;
+            let target_pos = section.start_position.as_ref()
+                .ok_or_else(|| "Section has no start position".to_string())
+                .and_then(|pos| musical_pos_to_time(&project, &pos.musical)
+                    .map_err(|e| format!("Failed to convert musical position to time: {}", e)))
+                .map_err(|e| format!("Failed to get section start position: {}", e))?;
             
             // Just move the cursor directly - no markers needed
             project.set_edit_cursor_position(target_pos, SetEditCurPosOptions { 

@@ -10,7 +10,7 @@ use anyhow::Result;
 use dioxus::prelude::*;
 use std::sync::OnceLock;
 use tracing::{debug, error, info, warn};
-use fts::fts::setlist::{
+use fts::setlist::{
     SetlistStreamApi, SetlistUpdateMessage,
     SETLIST, ACTIVE_SLIDE_INDEX, SONG_TRACKS, SONG_TRANSPORT, SETLIST_STRUCTURE, ACTIVE_INDICES,
 };

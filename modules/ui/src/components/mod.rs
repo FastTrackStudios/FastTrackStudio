@@ -21,7 +21,7 @@ pub use transport::{TransportControlBar, ConnectionStatus};
 pub use progress::{SongProgressBar, SectionProgressBar, SegmentedProgressBar, CompactProgressBar, ProgressSection, TempoMarker};
 pub use song::{SongTitle, FadedSongTitle};
 pub use mode_toggle::ModeToggle;
-pub use fts::lyrics::{LyricsView, LyricsEditView, PerformancePreview};
+pub use lyrics::{LyricsView, LyricsEditView, PerformancePreview};
 pub use text_fit::{TextFit, TextFitMode, TextFitProps};
 pub use piano::{Piano, PianoProps, MidiNote};
 pub use midi_editor::MidiEditor;

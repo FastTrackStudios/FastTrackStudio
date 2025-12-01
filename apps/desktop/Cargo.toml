@@ -10,6 +10,7 @@ dioxus = { workspace = true, features = ["router" ] }
 ui = { workspace = true }
 fts = { path = "../../modules/fts", features = ["dioxus"] }
 daw = { path = "../../modules/daw" }
+keyflow = { path = "../../packages/keyflow" }
 peer-2-peer = { path = "../../modules/peer-2-peer" }
 serde = { workspace = true }
 serde_json = { workspace = true }

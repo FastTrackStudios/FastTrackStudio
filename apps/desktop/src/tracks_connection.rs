@@ -10,7 +10,7 @@ use tracing::{debug, error, info, warn};
 use daw::tracks::reactive::irpc::{TrackApi, TrackUpdateMessage};
 use daw::tracks::Track;
 use crate::iroh_connection_manager::{init_shared_endpoint, get_shared_endpoint, get_reaper_endpoint_addr};
-use fts::fts::setlist::{SETLIST_STRUCTURE, SONG_TRACKS};
+use fts::setlist::{SETLIST_STRUCTURE, SONG_TRACKS};
 // Cached tracks API (for making RPC calls)
 pub static TRACKS_API: OnceLock<tokio::sync::Mutex<Option<TrackApi>>> = OnceLock::new();
 // Connection status channel for UI updates

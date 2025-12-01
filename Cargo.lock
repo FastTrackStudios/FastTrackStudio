@@ -1719,6 +1719,7 @@ dependencies = [
  "iroh",
  "irpc",
  "irpc-iroh",
+ "keyflow",
  "n0-future",
  "peer-2-peer",
  "serde",

@@ -12,7 +12,7 @@
 use dioxus::prelude::*;
 
 // Re-export setlist signals for convenience (they're still being updated by setlist_connection)
-pub use fts::fts::setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, ACTIVE_SLIDE_INDEX, SONG_TRACKS, SONG_TRANSPORT};
+pub use fts::setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, ACTIVE_SLIDE_INDEX, SONG_TRACKS, SONG_TRANSPORT};
 
 /// Hook to get transport state for the active song from SONG_TRANSPORT
 /// 

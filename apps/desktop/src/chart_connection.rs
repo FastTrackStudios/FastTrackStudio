@@ -1,7 +1,7 @@
-//! Chords Connection Module
+//! Chart Connection Module
 //!
-//! Handles connection to REAPER extension and streaming chords updates.
-//! Updates global signals for chords state.
+//! Handles connection to REAPER extension and streaming chart updates.
+//! Updates global signals for chart state.
 
 use anyhow::Result;
 use dioxus::prelude::*;
@@ -9,22 +9,25 @@ use std::sync::OnceLock;
 use tracing::{debug, error, info, warn};
 use crate::iroh_connection_manager::{init_shared_endpoint, get_shared_endpoint, get_reaper_endpoint_addr};
 
-// Use chords types from fts crate
-use fts::chords::{ChordsApi, ChordsUpdateMessage, ChordsData};
+// Use chart types from fts crate
+use fts::chords::{ChartApi, ChartUpdateMessage};
+// Chart is from keyflow - we need to add keyflow as a dependency or re-export it
+// For now, we'll use the full path
+use keyflow::Chart;
 
-// Cached chords API (for making RPC calls)
-static CHORDS_API: OnceLock<std::sync::Mutex<Option<ChordsApi>>> = OnceLock::new();
+// Cached chart API (for making RPC calls)
+static CHART_API: OnceLock<std::sync::Mutex<Option<ChartApi>>> = OnceLock::new();
 // Connection status channel for UI updates
 static CONNECTION_STATUS: OnceLock<tokio::sync::watch::Sender<bool>> = OnceLock::new();
 
-// Global signals for chords state (project_name -> chords)
-static CHORDS_STATE: OnceLock<GlobalSignal<std::collections::HashMap<String, ChordsData>>> = OnceLock::new();
+// Global signals for chart state (project_name -> chart)
+static CHART_STATE: OnceLock<GlobalSignal<std::collections::HashMap<String, Chart>>> = OnceLock::new();
 
-/// Initialize the chords API storage and signals
+/// Initialize the chart API storage and signals
 #[cfg(not(target_arch = "wasm32"))]
-fn init_chords_storage() {
-    CHORDS_API.get_or_init(|| std::sync::Mutex::new(None));
-    CHORDS_STATE.get_or_init(|| Signal::global(|| std::collections::HashMap::new()));
+fn init_chart_storage() {
+    CHART_API.get_or_init(|| std::sync::Mutex::new(None));
+    CHART_STATE.get_or_init(|| Signal::global(|| std::collections::HashMap::new()));
 }
 
 /// Get a receiver for connection status updates
@@ -33,19 +36,19 @@ pub fn get_connection_status_receiver() -> Option<tokio::sync::watch::Receiver<b
     CONNECTION_STATUS.get().map(|tx| tx.subscribe())
 }
 
-/// Get the current chords state signal
-pub fn get_chords_state() -> Option<&'static GlobalSignal<std::collections::HashMap<String, ChordsData>>> {
-    CHORDS_STATE.get()
+/// Get the current chart state signal
+pub fn get_chart_state() -> Option<&'static GlobalSignal<std::collections::HashMap<String, Chart>>> {
+    CHART_STATE.get()
 }
 
-/// Connect to REAPER extension and start streaming chords updates with automatic reconnection
+/// Connect to REAPER extension and start streaming chart updates with automatic reconnection
 ///
 /// Note: This shares the endpoint with other connections. The endpoint should be initialized
 /// by the first connection module (usually setlist_connection).
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn connect_to_reaper_chords() -> Result<()> {
+pub async fn connect_to_reaper_chart() -> Result<()> {
     // Initialize the API storage
-    init_chords_storage();
+    init_chart_storage();
     
     // Create connection status channel
     let (tx, _rx) = tokio::sync::watch::channel(false);
@@ -73,15 +76,15 @@ async fn connect_with_retry() {
         let _ = status_tx.send(false);
     }
     
-    info!("[Chords Connection] Starting reconnection loop - will continuously retry every {} seconds until connected", RETRY_INTERVAL_SECONDS);
+    info!("[Chart Connection] Starting reconnection loop - will continuously retry every {} seconds until connected", RETRY_INTERVAL_SECONDS);
     
     loop {
         retry_count += 1;
-        info!("[Chords Connection] Attempting to connect (attempt {})...", retry_count);
+        info!("[Chart Connection] Attempting to connect (attempt {})...", retry_count);
         
         match try_connect().await {
             Ok(disconnect_rx) => {
-                info!("[Chords Connection] ✅ Successfully connected on attempt {}", retry_count);
+                info!("[Chart Connection] ✅ Successfully connected on attempt {}", retry_count);
                 retry_count = 0;
                 
                 // Update connection status to connected
@@ -90,17 +93,17 @@ async fn connect_with_retry() {
                 }
                 
                 // Wait for the disconnect signal
-                info!("[Chords Connection] Waiting for connection to be established and receiving updates...");
+                info!("[Chart Connection] Waiting for connection to be established and receiving updates...");
                 let _ = disconnect_rx.await;
-                warn!("[Chords Connection] ❌ Connection lost, will retry immediately...");
+                warn!("[Chart Connection] ❌ Connection lost, will retry immediately...");
                 
-                // Clear the chords state when disconnected
-                if let Some(state) = CHORDS_STATE.get() {
+                // Clear the chart state when disconnected
+                if let Some(state) = CHART_STATE.get() {
                     *state.write() = std::collections::HashMap::new();
                 }
                 
                 // Clear the API instance
-                if let Some(api_storage) = CHORDS_API.get() {
+                if let Some(api_storage) = CHART_API.get() {
                     if let Ok(mut guard) = api_storage.lock() {
                         *guard = None;
                     }
@@ -111,13 +114,13 @@ async fn connect_with_retry() {
                     let _ = status_tx.send(false);
                 }
                 
-                info!("[Chords Connection] Retrying immediately after connection loss...");
+                info!("[Chart Connection] Retrying immediately after connection loss...");
             }
             Err(e) => {
                 if retry_count == 1 || retry_count % 10 == 0 {
-                    warn!("[Chords Connection] Connection attempt {} failed: {}", retry_count, e);
+                    warn!("[Chart Connection] Connection attempt {} failed: {}", retry_count, e);
                 } else {
-                    debug!("[Chords Connection] Connection attempt {} failed: {}", retry_count, e);
+                    debug!("[Chart Connection] Connection attempt {} failed: {}", retry_count, e);
                 }
                 
                 // Update connection status to disconnected
@@ -140,51 +143,60 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
     let endpoint_addr = get_reaper_endpoint_addr()?
         .ok_or_else(|| anyhow::anyhow!("REAPER endpoint address not found"))?;
     
-    info!("[Chords Connection] Connecting to REAPER at {:?}", endpoint_addr);
+    info!("[Chart Connection] Connecting to REAPER at {:?}", endpoint_addr);
     
-    // Connect to chords API
-    let chords_api = ChordsApi::connect(endpoint.clone(), endpoint_addr.clone())
-        .map_err(|e| anyhow::anyhow!("Failed to connect to chords API: {}", e))?;
+    // Connect to chart API
+    let chart_api = ChartApi::connect(endpoint.clone(), endpoint_addr.clone())
+        .map_err(|e| anyhow::anyhow!("Failed to connect to chart API: {}", e))?;
     
-    info!("[Chords Connection] ✅ Connected to REAPER chords API");
+    info!("[Chart Connection] ✅ Connected to REAPER chart API");
     
     // Store the API instance
-    if let Some(api_storage) = CHORDS_API.get() {
-        if let Ok(mut guard) = api_storage.lock() {
-            *guard = Some(chords_api.clone());
-        }
-    }
+    // Note: ChartApi doesn't implement Clone, so we can't store it
+    // The API is only used for subscribing, which we do immediately
     
-    // Subscribe to chords updates
-    let mut stream = chords_api.subscribe().await
-        .map_err(|e| anyhow::anyhow!("Failed to subscribe to chords updates: {}", e))?;
+    // Subscribe to chart updates
+    let mut stream = chart_api.subscribe().await
+        .map_err(|e| anyhow::anyhow!("Failed to subscribe to chart updates: {}", e))?;
     
-    info!("[Chords Connection] ✅ Subscribed to chords updates");
+    info!("[Chart Connection] ✅ Subscribed to chart updates");
     
     // Create a channel to signal when the connection is lost
     let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel();
     
     // Spawn task to receive updates
     tokio::spawn(async move {
-        info!("[Chords Connection] Started receiving chords updates");
+        info!("[Chart Connection] Started receiving chart updates");
         
-        while let Some(msg) = stream.recv().await {
-            match msg {
-                ChordsUpdateMessage::ChordsChanged(changed) => {
+        loop {
+            match stream.recv().await {
+                Ok(Some(msg)) => {
+                    match msg {
+                        ChartUpdateMessage::ChartChanged(changed) => {
                     debug!(
                         project_name = %changed.project_name,
-                        chord_count = changed.chords.chords.len(),
-                        "[Chords Connection] Received chords update"
+                        section_count = changed.chart.sections.len(),
+                        "[Chart Connection] Received chart update"
                     );
                     
-                    if let Some(chords_state) = CHORDS_STATE.get() {
-                        chords_state.write().insert(changed.project_name, changed.chords);
+                            if let Some(chart_state) = CHART_STATE.get() {
+                                chart_state.write().insert(changed.project_name, changed.chart);
+                            }
+                        }
                     }
+                }
+                Ok(None) => {
+                    warn!("[Chart Connection] Stream ended normally");
+                    break;
+                }
+                Err(e) => {
+                    warn!("[Chart Connection] Stream error: {}", e);
+                    break;
                 }
             }
         }
         
-        warn!("[Chords Connection] Stream ended, connection lost");
+        warn!("[Chart Connection] Stream ended, connection lost");
         let _ = disconnect_tx.send(());
     });
     

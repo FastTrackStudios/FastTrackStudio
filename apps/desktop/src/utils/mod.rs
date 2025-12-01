@@ -1,4 +1,4 @@
-use fts::fts::setlist::{Song, Section, SectionType};
+use fts::setlist::{Song, Section, SectionType};
 use daw::primitives::{Position, MusicalPosition, TimePosition, TimeSignature};
 use std::collections::HashMap;
 
@@ -22,7 +22,7 @@ pub fn calculate_song_progress(song: &Song, transport_position: f64) -> f64 {
     } else {
         // Fall back to first section start
         song.sections.first()
-            .map(|s| s.start_seconds())
+            .and_then(|s| s.start_seconds())
             .unwrap_or(0.0)
     };
     
@@ -31,7 +31,7 @@ pub fn calculate_song_progress(song: &Song, transport_position: f64) -> f64 {
     } else {
         // Fall back to last section end
         song.sections.last()
-            .map(|s| s.end_seconds())
+            .and_then(|s| s.end_seconds())
             .unwrap_or(0.0)
     };
     
@@ -48,22 +48,26 @@ pub fn calculate_song_progress(song: &Song, transport_position: f64) -> f64 {
 
 /// Calculate section progress percentage (0-100) based on transport position
 pub fn calculate_section_progress(section: &Section, transport_position: f64) -> f64 {
-    let start = section.start_position.time.to_seconds();
-    let end = section.end_position.time.to_seconds();
-    
-    if end <= start {
-        return 0.0;
+    if let (Some(start_pos), Some(end_pos)) = (&section.start_position, &section.end_position) {
+        let start = start_pos.time.to_seconds();
+        let end = end_pos.time.to_seconds();
+        
+        if end <= start {
+            return 0.0;
+        }
+        
+        if transport_position >= end {
+            return 100.0;
+        }
+        if transport_position < start {
+            return 0.0;
+        }
+        
+        let progress = ((transport_position - start) / (end - start)).clamp(0.0, 1.0);
+        progress * 100.0
+    } else {
+        0.0 // No positions available
     }
-    
-    if transport_position >= end {
-        return 100.0;
-    }
-    if transport_position < start {
-        return 0.0;
-    }
-    
-    let progress = ((transport_position - start) / (end - start)).clamp(0.0, 1.0);
-    progress * 100.0
 }
 
 /// Convert u32 color (RGB format: (r << 16) | (g << 8) | b) to RGB string

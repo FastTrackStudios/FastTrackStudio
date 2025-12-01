@@ -3,7 +3,7 @@
 //! Provides functions to send commands to REAPER via the setlist API.
 //! Uses the same storage as setlist_connection to access the API.
 
-use fts::fts::setlist::{TransportCommand, NavigationCommand};
+use fts::setlist::{TransportCommand, NavigationCommand};
 use crate::setlist_connection::SETLIST_API;
 use tracing::{warn, info};
 

@@ -1,7 +1,7 @@
 //! Syllable editor component for editing notes and rhythms of each syllable
 
 use dioxus::prelude::*;
-use fts::fts::lyrics::core::{Lyrics, LyricSection, LyricLine, Word, Syllable, split_line_into_words};
+use fts::lyrics::core::{Lyrics, LyricSection, LyricLine, Word, Syllable, split_line_into_words};
 use crate::components::piano::{Piano, PianoProps, MidiNote};
 use lucide_dioxus::{Play, Pause, Square};
 
@@ -118,7 +118,7 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
     let syllable_data = use_memo(move || {
         let lyrics = match &props.lyrics {
             Some(l) => l,
-            None => return Vec::new(),
+            None => return Vec::<(SyllableKey, String, String, String, Syllable)>::new(),
         };
         
         let mut result = Vec::new();

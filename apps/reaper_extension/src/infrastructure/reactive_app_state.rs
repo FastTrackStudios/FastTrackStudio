@@ -20,7 +20,7 @@ use daw::tracks::reactive::TrackReactiveService;
 use fts::setlist::SetlistApi;
 use fts::setlist::reactive::{SetlistReactiveStreams, SetlistReactiveService};
 use fts::lyrics::{Lyrics, LyricsAnnotations};
-use fts::fts::lyrics::reactive::{LyricsReactiveService, LyricsStreams};
+use fts::lyrics::reactive::{LyricsReactiveService, LyricsStreams};
 
 /// Centralized application state
 /// This is a lightweight wrapper that composes domain services
@@ -214,7 +214,7 @@ impl ReactiveAppStateService {
         
         let lyrics_streams = LyricsStreams::new();
         let default_lyrics = Arc::new(
-            fts::fts::lyrics::reactive::DefaultLyricsReactiveService::new(lyrics_streams)
+            fts::lyrics::reactive::DefaultLyricsReactiveService::new(lyrics_streams)
         ) as Arc<dyn LyricsReactiveService>;
         
         Self {

@@ -163,7 +163,7 @@ impl SetlistService {
                                 if let Some(song_section) = song.sections.get(section_idx) {
                                     // Find matching lyric section by name
                                     lyrics.sections.iter()
-                                        .find(|lyric_section| lyric_section.name == song_section.name)
+                                        .find(|lyric_section| song_section.name.as_deref() == Some(&lyric_section.name))
                                         .and_then(|lyric_section| {
                                             // Return first slide index in this section
                                             // Calculate offset: sum of lines in previous sections

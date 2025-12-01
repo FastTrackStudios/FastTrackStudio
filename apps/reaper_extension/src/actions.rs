@@ -385,8 +385,12 @@ pub fn build_setlist_from_projects_handler() {
                 if !song.sections.is_empty() {
                     reaper.show_console_msg("    Sections:\n");
                     for section in &song.sections {
-                        let start_musical = section.start_position.musical_position_string();
-                        let end_musical = section.end_position.musical_position_string();
+                        let start_musical = section.start_position.as_ref()
+                            .map(|pos| pos.musical_position_string())
+                            .unwrap_or_else(|| "N/A".to_string());
+                        let end_musical = section.end_position.as_ref()
+                            .map(|pos| pos.musical_position_string())
+                            .unwrap_or_else(|| "N/A".to_string());
                         let section_info = format!(
                             "      - {} ({} - {})\n",
                             section.display_name(),
@@ -577,11 +581,15 @@ fn log_current_song_details_handler() {
             } else {
                 reaper.show_console_msg(format!("\nSections ({}):\n", song.sections.len()).as_str());
                 for (idx, section) in song.sections.iter().enumerate() {
-                    let start_time = section.start_seconds();
-                    let end_time = section.end_seconds();
+                    let start_time = section.start_seconds().unwrap_or(0.0);
+                    let end_time = section.end_seconds().unwrap_or(0.0);
                     let duration = section.duration();
-                    let start_musical = section.start_position.musical_position_string();
-                    let end_musical = section.end_position.musical_position_string();
+                    let start_musical = section.start_position.as_ref()
+                        .map(|p| p.musical_position_string())
+                        .unwrap_or_else(|| "N/A".to_string());
+                    let end_musical = section.end_position.as_ref()
+                        .map(|p| p.musical_position_string())
+                        .unwrap_or_else(|| "N/A".to_string());
                     
                     let section_info = format!(
                         "  {}. {} ({:.2}s - {:.2}s, {:.2}s) [{} - {}]\n",

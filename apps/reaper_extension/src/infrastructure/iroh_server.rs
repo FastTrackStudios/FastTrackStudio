@@ -23,9 +23,9 @@ pub mod alpn {
     /// ALPN for setlist protocol (matches SetlistStreamApi::ALPN)
     pub const SETLIST: &[u8] = fts::setlist::SetlistStreamApi::ALPN;
     /// ALPN for lyrics protocol (matches LyricsApi::ALPN)
-    pub const LYRICS: &[u8] = fts::fts::lyrics::reactive::irpc::LyricsApi::ALPN;
-    /// ALPN for chords protocol (matches ChordsApi::ALPN)
-    pub const CHORDS: &[u8] = fts::chords::reactive::irpc::ChordsApi::ALPN;
+    pub const LYRICS: &[u8] = fts::lyrics::reactive::irpc::LyricsApi::ALPN;
+    /// ALPN for chart protocol (matches ChartApi::ALPN)
+    pub const CHART: &[u8] = fts::chords::reactive::irpc::ChartApi::ALPN;
 }
 
 /// Start the IROH server with all IRPC APIs (Transport, Tracks, Setlist)
@@ -86,11 +86,11 @@ pub fn start_iroh_server(
     );
     
     // Create lyrics API using REAPER implementation
-    let lyrics_service_box: Box<dyn fts::fts::lyrics::reactive::LyricsReactiveService> = 
+    let lyrics_service_box: Box<dyn fts::lyrics::reactive::LyricsReactiveService> = 
         Box::new(crate::infrastructure::reaper_lyrics_reactive::ReaperLyricsReactiveService::new(
             lyrics_streams,
         ));
-    let mut lyrics_api = fts::fts::lyrics::reactive::irpc::LyricsApi::spawn(lyrics_service_box);
+    let mut lyrics_api = fts::lyrics::reactive::irpc::LyricsApi::spawn(lyrics_service_box);
     
     // Create chords API using REAPER implementation
     let chords_streams = fts::chords::reactive::ChordsStreams::new();
@@ -98,7 +98,7 @@ pub fn start_iroh_server(
         Box::new(crate::infrastructure::reaper_chords_reactive::ReaperChordsReactiveService::new(
             chords_streams,
         ));
-    let mut chords_api = fts::chords::reactive::irpc::ChordsApi::spawn(chords_service_box);
+    let mut chart_api = fts::chords::reactive::irpc::ChartApi::spawn(chords_service_box);
     
     // Create setlist stream API (on main thread)
     let setlist_api = match stream_service.create_stream_api() {
@@ -113,7 +113,7 @@ pub fn start_iroh_server(
     let transport_handler_data = transport_api.take_handler_data();
     let tracks_handler_data = tracks_api.take_handler_data();
     let lyrics_handler_data = lyrics_api.take_handler_data();
-    let chords_handler_data = chords_api.take_handler_data();
+    let chart_handler_data = chart_api.take_handler_data();
     
     // Expose all handlers (on main thread)
     let transport_handler = match transport_api.expose() {
@@ -150,10 +150,10 @@ pub fn start_iroh_server(
         }
     };
     
-    let chords_handler = match chords_api.expose() {
+    let chart_handler = match chart_api.expose() {
         Ok(handler) => handler,
         Err(e) => {
-            warn!("Failed to expose chords service: {}", e);
+            warn!("Failed to expose chart service: {}", e);
             return;
         }
     };
@@ -391,48 +391,43 @@ pub fn start_iroh_server(
                 });
             }
             
-            if let Some((rx, chords_broadcast)) = chords_handler_data {
-                let chords_broadcast_clone = chords_broadcast.clone();
+            if let Some((rx, chart_broadcast)) = chart_handler_data {
+                let chart_broadcast_clone = chart_broadcast.clone();
                 
                 tokio::spawn(async move {
-                    use crate::chords::reactive_irpc::ChordsMessage;
+                    use fts::chords::reactive::irpc::ChartUpdateMessage;
                     use irpc::WithChannels;
                     let mut rx = rx;
-                    info!("[Chords Handler] Started listening for chords subscription requests");
+                    info!("[Chart Handler] Started listening for chart subscription requests");
                     while let Ok(msg_opt) = rx.recv().await {
                         match msg_opt {
-                            Some(msg) => {
-                                info!("[Chords Handler] Received message: {:?}", std::mem::discriminant(&msg));
-                                match msg {
-                                    ChordsMessage::SubscribeChords(WithChannels { tx, .. }) => {
-                                        info!("[Chords Handler] ✅ Client subscribed to chords stream");
-                                        let mut chords_rx = chords_broadcast_clone.subscribe();
+                            Some(fts::chords::reactive::irpc::ChartMessage::SubscribeChart(WithChannels { tx, .. })) => {
+                                info!("[Chart Handler] ✅ Client subscribed to chart stream");
+                                let mut chart_rx = chart_broadcast_clone.subscribe();
 
-                                        tokio::spawn(async move {
-                                            info!("[Chords Handler] Started forwarding chords updates to client");
-                                            loop {
-                                                tokio::select! {
-                                                    Ok(msg) = chords_rx.recv() => {
-                                                        if tx.send(msg).await.is_err() { 
-                                                            warn!("[Chords Handler] Client disconnected (chords_rx)");
-                                                            break; 
-                                                        }
-                                                    }
-                                                    else => break,
+                                tokio::spawn(async move {
+                                    info!("[Chart Handler] Started forwarding chart updates to client");
+                                    loop {
+                                        tokio::select! {
+                                            Ok(msg) = chart_rx.recv() => {
+                                                if tx.send(msg).await.is_err() { 
+                                                    warn!("[Chart Handler] Client disconnected (chart_rx)");
+                                                    break; 
                                                 }
                                             }
-                                            info!("[Chords Handler] Stopped forwarding chords updates to client");
-                                        });
+                                            else => break,
+                                        }
                                     }
-                                }
+                                    info!("[Chart Handler] Stopped forwarding chart updates to client");
+                                });
                             }
                             None => {
-                                warn!("[Chords Handler] Message channel closed");
+                                warn!("[Chart Handler] Message channel closed");
                                 break;
                             }
                         }
                     }
-                    warn!("[Chords Handler] Handler loop ended");
+                    warn!("[Chart Handler] Handler loop ended");
                 });
             }
             
@@ -452,7 +447,7 @@ pub fn start_iroh_server(
                 .accept(alpn::TRACKS.to_vec(), tracks_handler)
                 .accept(alpn::SETLIST.to_vec(), setlist_handler)
                 .accept(alpn::LYRICS.to_vec(), lyrics_handler)
-                .accept(alpn::CHORDS.to_vec(), chords_handler)
+                .accept(alpn::CHART.to_vec(), chart_handler)
                 .spawn();
             
             // Store endpoint ID for client discovery
@@ -466,6 +461,7 @@ pub fn start_iroh_server(
             info!("Tracks ALPN: {:?}", String::from_utf8_lossy(alpn::TRACKS));
             info!("Setlist ALPN: {:?}", String::from_utf8_lossy(alpn::SETLIST));
             info!("Lyrics ALPN: {:?}", String::from_utf8_lossy(alpn::LYRICS));
+            info!("Chart ALPN: {:?}", String::from_utf8_lossy(alpn::CHART));
                     
             // Keep router alive - it handles all connections
             // The router will run until shutdown is called

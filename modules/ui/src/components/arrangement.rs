@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
-use fts::fts::setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, Song};
+use fts::setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, Song};
 use daw::primitives::{MusicalPosition, TimePosition};
 use crate::components::{Slider, Ruler, MeasureInfo, TrackControlPanel};
-use fts::fts::lyrics::{Lyrics, output::{Slides, SlideBreakConfig}};
+use fts::lyrics::{Lyrics, output::{Slides, SlideBreakConfig}};
 use crate::reactive_state::{use_transport_for_active_song, use_tracks_for_active_song};
 
 /// Arrangement view component - DAW timeline/arrange view
@@ -229,14 +229,20 @@ pub fn ArrangementView(
             }
             
             // Add regular sections (positioned relative to timeline_start)
-            let regular_sections: Vec<_> = song.sections.iter().map(|section| {
-                let start_rel = section.start_seconds() - timeline_start;
-                let end_rel = section.end_seconds() - timeline_start;
-                let width = (end_rel - start_rel) * pps;
-                let left = start_rel * pps;
-                let color = section.color_bright();
-                (section.name.clone(), left, width, color)
-            }).collect();
+            let regular_sections: Vec<_> = song.sections.iter()
+                .filter_map(|section| {
+                    if let (Some(start), Some(end)) = (section.start_seconds(), section.end_seconds()) {
+                        let start_rel = start - timeline_start;
+                        let end_rel = end - timeline_start;
+                        let width = (end_rel - start_rel) * pps;
+                        let left = start_rel * pps;
+                        let color = section.color_bright();
+                        Some((section.name.as_deref().unwrap_or("Unknown").to_string(), left, width, color))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
             sections.extend(regular_sections);
             
             sections
@@ -262,19 +268,21 @@ pub fn ArrangementView(
                 let mut slide_idx = 0;
                 
                 for section in song.sections.iter() {
-                    let section_start = section.start_seconds() - song_start;
-                    let section_end = section.end_seconds() - song_start;
-                    let section_duration = section_end - section_start;
-                    
-                    // Find slides for this section (collect indices first to avoid lifetime issues)
-                    let mut section_slide_indices = Vec::new();
-                    for (idx, slide) in generated_slides.iter().enumerate().skip(slide_idx) {
-                        if slide.section_name.trim().eq_ignore_ascii_case(section.name.trim()) {
-                            section_slide_indices.push(idx);
-                        } else {
-                            break;
+                    if let (Some(section_start), Some(section_end)) = (section.start_seconds(), section.end_seconds()) {
+                        let section_start = section_start - song_start;
+                        let section_end = section_end - song_start;
+                        let section_duration = section_end - section_start;
+                        
+                        // Find slides for this section (collect indices first to avoid lifetime issues)
+                        let mut section_slide_indices = Vec::new();
+                        let section_name = section.name.as_deref().unwrap_or("");
+                        for (idx, slide) in generated_slides.iter().enumerate().skip(slide_idx) {
+                            if slide.section_name.trim().eq_ignore_ascii_case(section_name.trim()) {
+                                section_slide_indices.push(idx);
+                            } else {
+                                break;
+                            }
                         }
-                    }
                     
                     if !section_slide_indices.is_empty() {
                         // Distribute slides evenly across the section
@@ -317,6 +325,7 @@ pub fn ArrangementView(
                         }
                         
                         slide_idx += section_slide_indices.len();
+                    }
                     }
                 }
                 

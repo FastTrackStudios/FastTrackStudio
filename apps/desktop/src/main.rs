@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_router::{Routable, Router, Outlet};
-use fts::fts::setlist::{
+use fts::setlist::{
     Setlist, Song, Section, SectionType, SETLIST, TransportCommand, NavigationCommand,
     ACTIVE_INDICES, SETLIST_STRUCTURE, SONG_TRACKS, SONG_TRANSPORT,
 };
@@ -25,7 +25,7 @@ mod setlist_connection;
 #[cfg(not(target_arch = "wasm32"))]
 mod tracks_connection;
 #[cfg(not(target_arch = "wasm32"))]
-mod chords_connection;
+mod chart_connection;
 #[cfg(not(target_arch = "wasm32"))]
 mod iroh_connection_manager;
 #[cfg(not(target_arch = "wasm32"))]

@@ -1,8 +1,9 @@
-//! IRPC protocol for chords reactive service
+//! IRPC protocol for chart reactive service
 //!
-//! Exposes chords reactive streams over IRPC so they can be reactive over the network.
+//! Exposes chart reactive streams over IRPC so they can be reactive over the network.
+//! The Chart includes chords, sections, tempo, time signatures, and all other chart data.
 
-use crate::chords::types::ChordsData;
+use keyflow::Chart;
 use crate::chords::reactive::ChordsReactiveService;
 use irpc::{
     channel::mpsc,
@@ -15,93 +16,102 @@ use irpc_iroh::{IrohLazyRemoteConnection, IrohProtocol};
 use rxrust::prelude::*;
 use tokio::sync::broadcast;
 
-/// Chords changed message
-/// Note: ChordsData cannot be serialized because it contains keyflow types that don't implement Serialize
-#[derive(Debug, Clone)]
-pub struct ChordsChangedMessage {
+/// Chart changed message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChartChangedMessage {
     pub project_name: String,
-    pub chords: ChordsData,
+    pub chart: Chart,
 }
 
-/// All chords update messages
-/// Note: Cannot use Serialize/Deserialize because ChordsData contains keyflow types
-#[derive(Debug, Clone)]
-pub enum ChordsUpdateMessage {
-    ChordsChanged(ChordsChangedMessage),
+/// All chart update messages
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ChartUpdateMessage {
+    ChartChanged(ChartChangedMessage),
 }
 
-/// Request to subscribe to chords updates
+/// Request to subscribe to chart updates
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SubscribeChords;
+pub struct SubscribeChart;
 
-/// IRPC protocol for chords service
-/// 
-/// NOTE: Currently disabled because ChordsData contains keyflow types (Chord, MusicalNote, Key)
-/// that don't implement Serialize/Deserialize. To enable IRPC, we need to create a serializable
-/// representation of ChordsData (e.g., convert to strings or custom serializable structs).
-/// 
-/// For now, chords updates are only available through in-process reactive streams.
-// FIXME: Create serializable representation of ChordsData for IRPC
-// #[rpc_requests(message = ChordsMessage)]
-// #[derive(Serialize, Deserialize, Debug)]
-// pub enum ChordsProtocol {
-//     /// Subscribe to chords updates (server streaming)
-//     #[rpc(tx = mpsc::Sender<ChordsUpdateMessage>)]
-//     SubscribeChords(SubscribeChords),
-// }
-
-/// Chords API client
-/// 
-/// NOTE: Currently disabled - see ChordsProtocol comment above.
-/// This struct is kept for future implementation when serializable representation is available.
-pub struct ChordsApi {
-    // inner: Client<ChordsProtocol>,  // Disabled until serialization is available
-    pub(crate) handler_data: Option<(mpsc::Receiver<()>, broadcast::Sender<ChordsUpdateMessage>)>,  // Placeholder
+/// IRPC protocol for chart service
+#[rpc_requests(message = ChartMessage)]
+#[derive(Serialize, Deserialize, Debug)]
+pub enum ChartProtocol {
+    /// Subscribe to chart updates (server streaming)
+    #[rpc(tx = mpsc::Sender<ChartUpdateMessage>)]
+    SubscribeChart(SubscribeChart),
 }
 
-impl ChordsApi {
-    pub const ALPN: &[u8] = b"irpc-iroh/chords/1";
+/// Chart API client
+pub struct ChartApi {
+    inner: Client<ChartProtocol>,
+    pub(crate) handler_data: Option<(mpsc::Receiver<ChartMessage>, broadcast::Sender<ChartUpdateMessage>)>,
+}
 
-    /// Create a new chords reactive API (server-side)
+impl ChartApi {
+    pub const ALPN: &[u8] = b"irpc-iroh/chart/1";
+
+    /// Create a new chart reactive API (server-side)
     /// 
-    /// NOTE: Currently creates a minimal implementation that only works in-process.
-    /// IRPC serialization is disabled until ChordsData can be serialized.
+    /// Note: This currently uses ChordsReactiveService, but in the future
+    /// we should create a ChartReactiveService that directly streams Chart updates.
+    /// For now, we'll need to convert ChordsData to Chart or extend the service.
     pub fn spawn(service: Box<dyn ChordsReactiveService>) -> Self {
-        let (_tx, rx) = mpsc::channel(16);
+        let (tx, rx) = mpsc::channel(16);
         let streams = service.streams().clone();
 
-        // Create broadcast channel for chords stream
-        let (chords_broadcast, _) = broadcast::channel(1000);
+        // Create broadcast channel for chart stream
+        let (chart_broadcast, _) = broadcast::channel(1000);
 
         // Subscribe to reactive streams synchronously (on current thread)
         // This subscription will forward to broadcast channel
+        // TODO: When we have ChartReactiveService, subscribe to chart_changed instead
+        // For now, we'll need to handle the conversion from ChordsData to Chart
+        // or extend the service to also stream Chart updates
         {
-            let chords_subject = streams.chords_changed.borrow().clone();
-            let tx = chords_broadcast.clone();
-            chords_subject.subscribe(move |(project_name, chords)| {
-                let _ = tx.send(ChordsUpdateMessage::ChordsChanged(ChordsChangedMessage {
-                    project_name,
-                    chords,
-                }));
-            });
+            // Placeholder: We'll need to implement chart streaming
+            // For now, this is a placeholder that will need to be updated
+            // when we have Chart data available from the service
         }
 
         // Store channels for later spawning in tokio runtime
-        let handler_data = (rx, chords_broadcast);
+        let handler_data = (rx, chart_broadcast);
 
-        ChordsApi {
+        ChartApi {
+            inner: Client::local(tx),
             handler_data: Some(handler_data),
         }
     }
 
     /// Extract handler data for spawning in tokio runtime
-    pub fn take_handler_data(&mut self) -> Option<(mpsc::Receiver<()>, broadcast::Sender<ChordsUpdateMessage>)> {
+    pub fn take_handler_data(&mut self) -> Option<(mpsc::Receiver<ChartMessage>, broadcast::Sender<ChartUpdateMessage>)> {
         self.handler_data.take()
     }
 
-    // NOTE: connect() and expose() are disabled until serialization is available
-    // pub fn connect(...) { ... }
-    // pub fn expose(...) { ... }
-    // pub async fn subscribe(...) { ... }
-}
+    /// Connect to a remote chart service
+    pub fn connect(
+        endpoint: Endpoint,
+        addr: impl Into<EndpointAddr>,
+    ) -> Result<Self, anyhow::Error> {
+        let conn = IrohLazyRemoteConnection::new(endpoint, addr.into(), Self::ALPN.to_vec());
+        Ok(ChartApi {
+            inner: Client::boxed(conn),
+            handler_data: None,
+        })
+    }
 
+    /// Expose this service as a protocol handler for IROH router
+    pub fn expose(&self) -> Result<impl ProtocolHandler, anyhow::Error> {
+        use anyhow::Context;
+        let local = self
+            .inner
+            .as_local()
+            .context("cannot listen on remote service")?;
+        Ok(IrohProtocol::new(ChartProtocol::remote_handler(local)))
+    }
+
+    /// Subscribe to chart updates
+    pub async fn subscribe(&self) -> irpc::Result<mpsc::Receiver<ChartUpdateMessage>> {
+        self.inner.server_streaming(SubscribeChart, 32).await
+    }
+}

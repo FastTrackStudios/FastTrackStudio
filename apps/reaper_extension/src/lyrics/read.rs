@@ -205,8 +205,8 @@ pub fn read_lyrics_from_reaper() -> Result<LyricsData, LyricsReadError> {
 pub fn convert_lyrics_data_to_lyrics(
     lyrics_data: LyricsData,
     song_name: String,
-    song: &setlist::core::Song,
-) -> Result<lyrics::Lyrics, String> {
+    song: &fts::setlist::core::Song,
+) -> Result<fts::lyrics::core::Lyrics, String> {
     use fts::lyrics::core::{Lyrics, LyricSection, LyricLine};
     
     let mut lyrics = Lyrics::new(song_name);
@@ -252,18 +252,19 @@ pub fn convert_lyrics_data_to_lyrics(
     // Ensure all song sections are represented, even if they have no slides
     // Add empty lines for sections that don't have any lyrics (like instrumentals)
     for song_section in &song.sections {
-        let section_name = song_section.name.clone();
-        
-        // If this section doesn't have any lyrics yet, add an empty line
-        if !section_map.contains_key(&section_name) {
-            let mut empty_section = LyricSection::new(section_name.clone());
-            // Set color from the song section
-            if let Some(color) = song_section.color {
-                empty_section.set_metadata("color", color.to_string());
+        // Only process sections that have a name
+        if let Some(section_name) = &song_section.name {
+            // If this section doesn't have any lyrics yet, add an empty line
+            if !section_map.contains_key(section_name) {
+                let mut empty_section = LyricSection::new(section_name.clone());
+                // Set color from the song section
+                if let Some(color) = song_section.color {
+                    empty_section.set_metadata("color", color.to_string());
+                }
+                // Add an empty line to represent this section
+                empty_section.add_line(LyricLine::new(String::new()));
+                section_map.insert(section_name.clone(), empty_section);
             }
-            // Add an empty line to represent this section
-            empty_section.add_line(LyricLine::new(String::new()));
-            section_map.insert(section_name, empty_section);
         }
     }
     
@@ -287,14 +288,13 @@ pub fn convert_lyrics_data_to_lyrics(
 }
 
 /// Find which song section a position (in seconds) belongs to
-fn find_section_for_position(position_seconds: f64, song: &setlist::core::Song) -> String {
+fn find_section_for_position(position_seconds: f64, song: &fts::setlist::core::Song) -> String {
     // Find the section that contains this position
     for section in &song.sections {
-        let section_start = section.start_seconds();
-        let section_end = section.end_seconds();
-        
-        if position_seconds >= section_start && position_seconds <= section_end {
-            return section.name.clone();
+        if let (Some(section_start), Some(section_end)) = (section.start_seconds(), section.end_seconds()) {
+            if position_seconds >= section_start && position_seconds <= section_end {
+                return section.name.as_deref().unwrap_or("Unknown").to_string();
+            }
         }
     }
     
@@ -303,19 +303,19 @@ fn find_section_for_position(position_seconds: f64, song: &setlist::core::Song) 
 }
 
 /// Find a song section by name
-fn find_song_section_by_name<'a>(name: &str, song: &'a setlist::core::Song) -> Option<&'a setlist::core::Section> {
-    song.sections.iter().find(|s| s.name == name)
+fn find_song_section_by_name<'a>(name: &str, song: &'a fts::setlist::core::Song) -> Option<&'a fts::setlist::core::Section> {
+    song.sections.iter().find(|s| s.name.as_deref() == Some(name))
 }
 
 /// Find the start position of a section in the song
 fn find_section_start_position(
     section: &fts::lyrics::core::LyricSection,
-    song: &setlist::core::Song,
+    song: &fts::setlist::core::Song,
 ) -> f64 {
     // Find the song section that matches this lyric section by name
     for song_section in &song.sections {
-        if song_section.name == section.name {
-            return song_section.start_seconds();
+        if song_section.name.as_deref() == Some(&section.name) {
+            return song_section.start_seconds().unwrap_or(0.0);
         }
     }
     

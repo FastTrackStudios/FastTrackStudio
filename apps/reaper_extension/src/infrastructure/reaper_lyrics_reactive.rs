@@ -3,9 +3,9 @@
 //! This module provides a REAPER-specific implementation of the LyricsReactiveService trait.
 //! It reads lyrics state from REAPER and updates reactive streams.
 
-use fts::fts::lyrics::reactive::{LyricsReactiveService, LyricsReactiveState, LyricsStreams};
-use fts::fts::lyrics::core::Lyrics;
-use fts::fts::lyrics::source::LyricsAnnotations;
+use fts::lyrics::reactive::{LyricsReactiveService, LyricsReactiveState, LyricsStreams};
+use fts::lyrics::core::Lyrics;
+use fts::lyrics::source::LyricsAnnotations;
 use std::sync::{Arc, Mutex};
 use rxrust::prelude::Observer;
 use tracing::info;

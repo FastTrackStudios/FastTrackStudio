@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
-use fts::fts::lyrics::{Lyrics, output::{Slides, SlideBreakConfig, Slide}};
-use fts::fts::lyrics::core::{SectionTypeHint, LinePart};
+use fts::lyrics::{Lyrics, output::{Slides, SlideBreakConfig, Slide}};
+use fts::lyrics::core::{SectionTypeHint, LinePart};
 use std::collections::HashMap;
-use fts::fts::setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES};
+use fts::setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES};
 use crate::components::text_fit::{TextFit, TextFitMode};
 use crate::components::syllable_editor::{SyllableEditor, SyllableEditorProps, SyllableKey};
 use crate::reactive_state::{use_lyrics_for_active_song, use_active_slide_for_active_song};
@@ -57,7 +57,7 @@ pub fn LyricsView() -> Element {
                         if let Some(section) = song.sections.get(active_section_idx) {
                             // Find slide matching this section name
                             for slide in slides_vec.iter() {
-                                if slide.section_name == section.name {
+                                if slide.section_name == section.name.as_deref().unwrap_or("") {
                                     return Some(slide.clone());
                                 }
                             }
@@ -271,7 +271,9 @@ pub fn LyricsEditView() -> Element {
         let mut map = HashMap::new();
         if let Some(lyrics) = lyrics_data() {
             for section in &lyrics.sections {
-                map.insert(section.name.clone(), section.section_type.clone());
+                if let Some(section_type) = &section.section_type {
+                    map.insert(section.name.clone(), section_type.clone());
+                }
             }
         }
         map
@@ -288,7 +290,9 @@ pub fn LyricsEditView() -> Element {
                 if let Some(setlist) = setlist_structure.as_ref() {
                     if let Some(song) = setlist.songs.get(active_song_idx) {
                         for section in &song.sections {
-                            map.insert(section.name.clone(), section.color_bright());
+                            if let Some(name) = &section.name {
+                                map.insert(name.clone(), section.color_bright());
+                            }
                         }
                     }
                 }
@@ -323,7 +327,7 @@ pub fn LyricsEditView() -> Element {
                             if let Some(section) = song.sections.get(active_section_idx) {
                                 // Find slide matching this section name
                                 for (idx, slide) in slides_vec.iter().enumerate() {
-                                    if slide.section_name == section.name {
+                                    if slide.section_name == section.name.as_deref().unwrap_or("") {
                                         return Some(slide.clone());
                                     }
                                 }
@@ -361,7 +365,7 @@ pub fn LyricsEditView() -> Element {
                                 if let Some(section) = song.sections.get(active_section_idx) {
                                     // Find slide matching this section name
                                     for (idx, slide) in slides_vec.iter().enumerate() {
-                                        if slide.section_name == section.name {
+                                        if slide.section_name == section.name.as_deref().unwrap_or("") {
                                             return slides_vec.get(idx + 1).cloned();
                                         }
                                     }
@@ -400,7 +404,7 @@ pub fn LyricsEditView() -> Element {
                                 if let Some(section) = song.sections.get(active_section_idx) {
                                     // Find slide matching this section name and select it
                                     for (idx, slide) in slides_vec.iter().enumerate() {
-                                        if slide.section_name == section.name {
+                                        if slide.section_name == section.name.as_deref().unwrap_or("") {
                                             selected_slide_index.set(Some(idx));
                                             break;
                                         }

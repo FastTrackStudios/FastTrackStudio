@@ -1,4 +1,4 @@
-use fts::fts::setlist::{Setlist, Song};
+use fts::setlist::{Setlist, Song};
 use std::collections::HashMap;
 use crate::utils::{get_project_name, calculate_song_progress, calculate_section_progress};
 
@@ -48,7 +48,7 @@ pub fn reset_previous_song_position(
                 prev_song.effective_start()
             } else {
                 prev_song.sections.first()
-                    .map(|s| s.start_seconds())
+                    .and_then(|s| s.start_seconds())
                     .unwrap_or(0.0)
             };
             transport_positions.insert(project_name, reset_position);
@@ -65,13 +65,13 @@ pub fn update_position_on_section_click(
     song_positions: &mut HashMap<String, f64>,
 ) -> Option<f64> {
     if let Some(section) = song.sections.get(section_idx) {
-        let section_start = section.start_seconds();
-        let project_name = get_project_name(song).unwrap_or_else(|| "default".to_string());
-        transport_positions.insert(project_name.clone(), section_start);
-        song_positions.insert(song_idx.to_string(), section_start);
-        Some(section_start)
-    } else {
-        None
+        if let Some(section_start) = section.start_seconds() {
+            let project_name = get_project_name(song).unwrap_or_else(|| "default".to_string());
+            transport_positions.insert(project_name.clone(), section_start);
+            song_positions.insert(song_idx.to_string(), section_start);
+            return Some(section_start);
+        }
     }
+    None
 }
 

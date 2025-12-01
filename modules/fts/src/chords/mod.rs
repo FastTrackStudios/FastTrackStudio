@@ -17,6 +17,5 @@ pub use reactive::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use reactive::irpc::{ChordsApi, ChordsUpdateMessage};
-// NOTE: ChordsProtocol is disabled - see irpc.rs for details
+pub use reactive::irpc::{ChartApi, ChartUpdateMessage};
 
