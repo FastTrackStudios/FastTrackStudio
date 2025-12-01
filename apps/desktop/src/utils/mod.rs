@@ -1,4 +1,4 @@
-use setlist::{Song, Section, SectionType};
+use fts::fts::setlist::{Song, Section, SectionType};
 use daw::primitives::{Position, MusicalPosition, TimePosition, TimeSignature};
 use std::collections::HashMap;
 

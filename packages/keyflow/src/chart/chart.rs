@@ -10,10 +10,11 @@ use crate::key::Key;
 use crate::metadata::SongMetadata;
 use crate::primitives::Note;
 use crate::sections::Section;
-use crate::time::{AbsolutePosition, MusicalDuration, Tempo, TimeSignature};
+use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition, Tempo, TimeSignature};
+use serde::{Deserialize, Serialize};
 
 /// The complete parsed chart structure
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Chart {
     /// Song metadata (title, artist, etc.)
     pub metadata: SongMetadata,
@@ -109,7 +110,7 @@ impl Chart {
 
         // Apply key changes up to this position
         for change in &self.key_changes {
-            if change.position.total_duration.measures <= position.total_duration.measures {
+            if change.position.total_duration.measure <= position.total_duration.measure {
                 current_key = Some(&change.to_key);
             } else {
                 break;
@@ -133,7 +134,7 @@ impl Chart {
 
         // Apply time signature changes up to (and including) this position
         for change in &self.time_signature_changes {
-            if change.position.total_duration.measures <= position.total_duration.measures {
+            if change.position.total_duration.measure <= position.total_duration.measure {
                 current_ts = Some(&change.time_signature);
             } else {
                 break;
@@ -149,7 +150,7 @@ impl Chart {
         section_index: usize,
         measure_index: usize,
     ) -> AbsolutePosition {
-        let mut total_duration = MusicalDuration::new(0, 0, 0);
+        let mut total_duration = MusicalPosition::start();
 
         // Sum durations of all sections before this one
         for (idx, section) in self.sections.iter().enumerate() {
@@ -160,11 +161,11 @@ impl Chart {
             // Sum all measures in this section (each measure is always 1.0.0)
             for _measure in &section.measures {
                 // Each measure adds exactly 1.0.0 to the total duration
-                total_duration = MusicalDuration::new(
-                    total_duration.measures + 1,
-                    total_duration.beats,
-                    total_duration.subdivisions,
-                );
+                total_duration = MusicalPosition::try_new(
+                    total_duration.measure + 1,
+                    total_duration.beat,
+                    total_duration.subdivision,
+                ).unwrap_or_else(|_| MusicalPosition::start());
             }
         }
 
@@ -172,11 +173,11 @@ impl Chart {
         if let Some(section) = self.sections.get(section_index) {
             for _idx in 0..measure_index.min(section.measures.len()) {
                 // Each measure adds exactly 1.0.0 to the total duration
-                total_duration = MusicalDuration::new(
-                    total_duration.measures + 1,
-                    total_duration.beats,
-                    total_duration.subdivisions,
-                );
+                total_duration = MusicalPosition::try_new(
+                    total_duration.measure + 1,
+                    total_duration.beat,
+                    total_duration.subdivision,
+                ).unwrap_or_else(|_| MusicalPosition::start());
             }
         }
 
@@ -204,7 +205,7 @@ impl Chart {
         let mut metadata_parts = Vec::new();
         
         if let Some(tempo) = &self.tempo {
-            metadata_parts.push(format!("{}bpm", tempo.bpm));
+            metadata_parts.push(format!("{}bpm", tempo.bpm as u32));
         }
         
         // Use initial_time_signature if available, otherwise fall back to current time_signature
@@ -257,7 +258,7 @@ impl Chart {
                 // Check for key change at this position
                 let position = self.calculate_position(section_idx, measure_idx);
                 for key_change in &self.key_changes {
-                    if key_change.position.total_duration.measures == position.total_duration.measures
+                    if key_change.position.total_duration.measure == position.total_duration.measure
                         && key_change.section_index == section_idx {
                         let key_str = self.format_key_for_syntax(&key_change.to_key);
                         output.push_str(&key_str);
@@ -267,7 +268,7 @@ impl Chart {
 
                 // Check for time signature change at this position
                 for ts_change in &self.time_signature_changes {
-                    if ts_change.position.total_duration.measures == position.total_duration.measures
+                    if ts_change.position.total_duration.measure == position.total_duration.measure
                         && ts_change.section_index == section_idx {
                         output.push_str(&format!("{}/{} ", ts_change.time_signature.numerator, ts_change.time_signature.denominator));
                     }
@@ -524,7 +525,7 @@ mod tests {
         // Add key change at measure 4 (start of measure 2 in verse = section 1, measure 2)
         let g_major = Key::major(MusicalNote::g());
         let key_change_position = AbsolutePosition::new(
-            MusicalDuration::new(4, 0, 0), // After 4 measures total
+            MusicalPosition::try_new(4, 0, 0).unwrap(), // After 4 measures total
             1,                             // Section 1 (verse)
         );
         chart.add_key_change(g_major.clone(), key_change_position.clone(), 1);
@@ -544,44 +545,44 @@ mod tests {
         // Add time signature change at measure 6 (start of chorus = section 2, measure 0)
         let time_6_8 = TimeSignature::new(6, 8);
         let ts_change_position = AbsolutePosition::new(
-            MusicalDuration::new(6, 0, 0), // After 6 measures total
+            MusicalPosition::try_new(6, 0, 0).unwrap(), // After 6 measures total
             2,                             // Section 2 (chorus)
         );
         chart.add_time_signature_change(time_6_8, ts_change_position.clone(), 2);
 
         // Test 1: Position at start of song (section 0, measure 0)
         let pos_start = chart.calculate_position(0, 0);
-        assert_eq!(pos_start.total_duration.measures, 0);
+        assert_eq!(pos_start.total_duration.measure, 0);
         assert_eq!(pos_start.section_index, 0);
 
         // Test 2: Position at end of intro (section 0, after 2 measures)
         let pos_end_intro = chart.calculate_position(0, 2);
-        assert_eq!(pos_end_intro.total_duration.measures, 2);
+        assert_eq!(pos_end_intro.total_duration.measure, 2);
         assert_eq!(pos_end_intro.section_index, 0);
 
         // Test 3: Position at start of verse (section 1, measure 0)
         let pos_start_verse = chart.calculate_position(1, 0);
-        assert_eq!(pos_start_verse.total_duration.measures, 2);
+        assert_eq!(pos_start_verse.total_duration.measure, 2);
         assert_eq!(pos_start_verse.section_index, 1);
 
         // Test 4: Position where key changes (section 1, measure 2)
         let pos_key_change = chart.calculate_position(1, 2);
-        assert_eq!(pos_key_change.total_duration.measures, 4);
+        assert_eq!(pos_key_change.total_duration.measure, 4);
         assert_eq!(pos_key_change.section_index, 1);
 
         // Test 5: Position at end of verse (section 1, after 4 measures)
         let pos_end_verse = chart.calculate_position(1, 4);
-        assert_eq!(pos_end_verse.total_duration.measures, 6);
+        assert_eq!(pos_end_verse.total_duration.measure, 6);
         assert_eq!(pos_end_verse.section_index, 1);
 
         // Test 6: Position at start of chorus / time sig change (section 2, measure 0)
         let pos_start_chorus = chart.calculate_position(2, 0);
-        assert_eq!(pos_start_chorus.total_duration.measures, 6);
+        assert_eq!(pos_start_chorus.total_duration.measure, 6);
         assert_eq!(pos_start_chorus.section_index, 2);
 
         // Test 7: Position in middle of chorus (section 2, measure 2)
         let pos_mid_chorus = chart.calculate_position(2, 2);
-        assert_eq!(pos_mid_chorus.total_duration.measures, 8);
+        assert_eq!(pos_mid_chorus.total_duration.measure, 8);
         assert_eq!(pos_mid_chorus.section_index, 2);
 
         // Test 8: Verify key_at_position works correctly
@@ -589,7 +590,7 @@ mod tests {
         assert_eq!(key_at_start, Some(&c_major));
 
         let key_before_change =
-            chart.key_at_position(&AbsolutePosition::new(MusicalDuration::new(3, 0, 0), 1));
+            chart.key_at_position(&AbsolutePosition::new(MusicalPosition::try_new(3, 0, 0).unwrap(), 1));
         assert_eq!(key_before_change, Some(&c_major));
 
         let key_after_change = chart.key_at_position(&pos_key_change);
@@ -610,7 +611,7 @@ mod tests {
         // Just before the change (end of verse at position 6) - still in 4/4
         // Note: pos_end_verse is at 6.0.0, which is the same as pos_start_chorus!
         // So we need a position just before that
-        let pos_before_change = AbsolutePosition::new(MusicalDuration::new(5, 0, 0), 1);
+        let pos_before_change = AbsolutePosition::new(MusicalPosition::try_new(5, 0, 0).unwrap(), 1);
         let ts_before_change = chart.time_signature_at_position(&pos_before_change);
         assert_eq!(ts_before_change, Some(&time_4_4));
 
@@ -651,14 +652,14 @@ mod tests {
         // Key change at measure 2 (start of section 1)
         chart.add_key_change(
             g_major.clone(),
-            AbsolutePosition::new(MusicalDuration::new(2, 0, 0), 1),
+            AbsolutePosition::new(MusicalPosition::try_new(2, 0, 0).unwrap(), 1),
             1,
         );
 
         // Key change at measure 4 (start of section 2)
         chart.add_key_change(
             d_major.clone(),
-            AbsolutePosition::new(MusicalDuration::new(4, 0, 0), 2),
+            AbsolutePosition::new(MusicalPosition::try_new(4, 0, 0).unwrap(), 2),
             2,
         );
 
@@ -666,22 +667,22 @@ mod tests {
         assert_eq!(chart.key_changes.len(), 2);
 
         // Test key at different positions
-        let pos_0 = AbsolutePosition::new(MusicalDuration::new(0, 0, 0), 0);
+        let pos_0 = AbsolutePosition::new(MusicalPosition::try_new(0, 0, 0).unwrap(), 0);
         assert_eq!(chart.key_at_position(&pos_0), Some(&c_major));
 
-        let pos_1 = AbsolutePosition::new(MusicalDuration::new(1, 0, 0), 0);
+        let pos_1 = AbsolutePosition::new(MusicalPosition::try_new(1, 0, 0).unwrap(), 0);
         assert_eq!(chart.key_at_position(&pos_1), Some(&c_major));
 
-        let pos_2 = AbsolutePosition::new(MusicalDuration::new(2, 0, 0), 1);
+        let pos_2 = AbsolutePosition::new(MusicalPosition::try_new(2, 0, 0).unwrap(), 1);
         assert_eq!(chart.key_at_position(&pos_2), Some(&g_major));
 
-        let pos_3 = AbsolutePosition::new(MusicalDuration::new(3, 0, 0), 1);
+        let pos_3 = AbsolutePosition::new(MusicalPosition::try_new(3, 0, 0).unwrap(), 1);
         assert_eq!(chart.key_at_position(&pos_3), Some(&g_major));
 
-        let pos_4 = AbsolutePosition::new(MusicalDuration::new(4, 0, 0), 2);
+        let pos_4 = AbsolutePosition::new(MusicalPosition::try_new(4, 0, 0).unwrap(), 2);
         assert_eq!(chart.key_at_position(&pos_4), Some(&d_major));
 
-        let pos_5 = AbsolutePosition::new(MusicalDuration::new(5, 0, 0), 2);
+        let pos_5 = AbsolutePosition::new(MusicalPosition::try_new(5, 0, 0).unwrap(), 2);
         assert_eq!(chart.key_at_position(&pos_5), Some(&d_major));
     }
 
@@ -704,7 +705,7 @@ mod tests {
         // Add key change
         chart.add_key_change(
             f_major.clone(),
-            AbsolutePosition::new(MusicalDuration::new(1, 0, 0), 0),
+            AbsolutePosition::new(MusicalPosition::try_new(1, 0, 0).unwrap(), 0),
             0,
         );
 

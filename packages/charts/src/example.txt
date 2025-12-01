@@ -1,0 +1,36 @@
+Reckless Love - Cory Asbury
+68bpm 6/8 #E
+
+leadline = {
+  \relative {
+  r8. g8.'' g g g fs fs fs fs e d c g4. r \break
+  r8. g8.' g g g fs fs fs fs e d c g'4. r
+} }
+
+leadline = {
+    r8. 18. 1 1 1 7 7 7 7 6 5 4 14. r
+}
+
+Intro 4
+Em7 Dsus ''Cadd9 Gmaj7 
+
+Verse 16
+^ x4
+
+Chorus 16
+^ x4
+
+Inst 8
+% 
+
+Verse
+
+Chorus
+
+Inst
+
+Bridge 16
+
+Chorus
+
+Outro 4

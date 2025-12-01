@@ -3,7 +3,7 @@
 //! These match the SetlistMessage enum from reaper_extension
 //! Split into ClientEvent (sent from client) and ServerEvent (sent from server)
 
-use setlist::Setlist;
+use fts::fts::setlist::Setlist;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

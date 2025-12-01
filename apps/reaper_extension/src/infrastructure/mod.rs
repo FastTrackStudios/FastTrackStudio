@@ -17,6 +17,7 @@ pub mod reaper_transport_reactive;
 pub mod reaper_track_reactive;
 pub mod reaper_track_command;
 pub mod reaper_lyrics_reactive;
+pub mod reaper_chords_reactive;
 pub mod formatted_logging;
 
 

@@ -9,7 +9,7 @@ use daw::tracks::Track;
 use daw::project::Project;
 use daw::transport::Transport;
 use crate::services::SetlistService;
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
 use rxrust::prelude::Observer;
 use crate::infrastructure::formatted_logging::{format_track_change, format_track_specific_change};
 
@@ -45,8 +45,17 @@ impl ReaperTrackReactiveService {
     
     /// Update a single track from REAPER
     pub fn update_track_from_reaper(&self, reaper_project: ReaperProject, track_index: usize) {
+        info!(
+            track_index,
+            "update_track_from_reaper called - looking up project"
+        );
         // Get the Project<Transport> from the setlist
         if let Some(project) = self.get_project_from_reaper(reaper_project) {
+            info!(
+                project_id = %project.id(),
+                track_index,
+                "Project found in setlist, proceeding with track update"
+            );
             // Check if tracks vector exists and is large enough
             let needs_full_update = {
                 let state = self.state.lock().unwrap();
@@ -62,10 +71,46 @@ impl ReaperTrackReactiveService {
             } else {
                 // Read the specific track from REAPER
                 if let Some(track) = crate::implementation::tracks::get_track(&reaper_project, track_index) {
+                    info!(
+                        project_id = %project.id(),
+                        track_index,
+                        track_name = %track.name,
+                        track_depth = track.track_depth.value(),
+                        "Read track from REAPER, calling update_track"
+                    );
                     // Update using the trait method (this will only emit if changed)
                     self.update_track(&project, track_index, track);
+                } else {
+                    warn!(
+                        project_id = %project.id(),
+                        track_index,
+                        "Failed to read track from REAPER"
+                    );
                 }
             }
+        } else {
+            // Project not found in setlist - log this for debugging
+            let medium_reaper = Reaper::get().medium_reaper();
+            let project_name = {
+                let mut found_name = None;
+                for i in 0..128u32 {
+                    if let Some(result) = medium_reaper.enum_projects(reaper_medium::ProjectRef::Tab(i), 512) {
+                        if result.project == reaper_project.raw() {
+                            found_name = result.file_path.as_ref()
+                                .and_then(|p| p.as_std_path().file_stem())
+                                .and_then(|s| s.to_str())
+                                .map(|s| s.to_string());
+                            break;
+                        }
+                    }
+                }
+                found_name
+            };
+            warn!(
+                project_name = ?project_name,
+                track_index,
+                "Track update skipped: project not found in setlist"
+            );
         }
     }
     
@@ -188,6 +233,17 @@ impl TrackReactiveService for ReaperTrackReactiveService {
     
     fn update_track(&self, project: &Project<Transport>, track_index: usize, track: Track) {
         let project_id = project.id().to_string();
+        
+        // Log what we're trying to update
+        debug!(
+            project_id = %project_id,
+            track_index,
+            track_name = %track.name,
+            track_color = ?track.color,
+            track_depth = track.track_depth.value(),
+            "update_track called - track data from REAPER"
+        );
+        
         let (changed, changes) = {
             let mut state = self.state.lock().unwrap();
             // Get or create tracks vector for this project
@@ -200,6 +256,13 @@ impl TrackReactiveService for ReaperTrackReactiveService {
                 let mut changes = Vec::new();
                 
                 if old_track.name != track.name {
+                    info!(
+                        project_id = %project_id,
+                        track_index,
+                        old_name = %old_track.name,
+                        new_name = %track.name,
+                        "Track name change detected in update_track"
+                    );
                     changes.push(format!("name: {} → {}", old_track.name, track.name));
                 }
                 if (old_track.volume - track.volume).abs() > 0.0001 {
@@ -223,6 +286,15 @@ impl TrackReactiveService for ReaperTrackReactiveService {
                 if old_track.locked != track.locked {
                     changes.push(format!("locked: {} → {}", old_track.locked, track.locked));
                 }
+                if old_track.color != track.color {
+                    changes.push(format!("color: {:?} → {:?}", old_track.color, track.color));
+                }
+                if old_track.is_folder != track.is_folder {
+                    changes.push(format!("is_folder: {} → {}", old_track.is_folder, track.is_folder));
+                }
+                if old_track.track_depth != track.track_depth {
+                    changes.push(format!("track_depth: {} → {}", old_track.track_depth.value(), track.track_depth.value()));
+                }
                 
                 let any_changed = !changes.is_empty();
                 (any_changed, changes)
@@ -245,9 +317,23 @@ impl TrackReactiveService for ReaperTrackReactiveService {
         };
         
         if changed {
-            let message = format_track_specific_change(&track.name, track_index, &changes);
-            info!("{}", message);
+            info!(
+                project_id = %project_id,
+                track_index,
+                track_name = %track.name,
+                track_depth = track.track_depth.value(),
+                changes = ?changes,
+                "Emitting track change to reactive stream"
+            );
+            // Logging also happens in service layer (TrackApi subscription in irpc.rs)
             self.emit_track(project_id, track_index, track);
+        } else {
+            debug!(
+                project_id = %project_id,
+                track_index,
+                track_name = %track.name,
+                "Track update called but no changes detected - skipping emit"
+            );
         }
     }
     

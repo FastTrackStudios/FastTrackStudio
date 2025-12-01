@@ -7,8 +7,10 @@ edition.workspace = true
 tracing = "0.1"
 color-eyre = "0.6"
 serde = { version = "1.0", features = ["derive"] }
-colored = "2.0"
+colored = "3.0"
 regex = "1.11.3"
+daw = { path = "../../modules/daw" }
+uuid = { version = "1.0", features = ["serde", "v4"] }
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

@@ -14,7 +14,7 @@ pub mod send_mode;
 pub mod timebase;
 pub mod midi_note_name;
 
-pub use folder::{TcpFolderState, McpFolderState};
+pub use folder::{TcpFolderState, McpFolderState, FolderDepthChange, TrackDepth};
 pub use automation::AutomationMode;
 pub use free_mode::FreeMode;
 pub use fixed_lanes::{FixedLanesSettings, LaneSoloSettings, LaneRecordSettings, LaneNameSettings};

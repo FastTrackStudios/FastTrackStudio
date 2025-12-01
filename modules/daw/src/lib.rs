@@ -10,6 +10,11 @@
 //! - `instruments`: Instrument definitions
 
 pub mod primitives;
+
+pub use primitives::{
+    Duration, MusicalDuration, MusicalPosition, Position, TimeDuration, TimePosition,
+    TimeRange, TimeSignature,
+};
 pub mod transport;
 pub mod marker_region;
 pub mod tracks;

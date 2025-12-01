@@ -6,7 +6,7 @@
 //! This parser converts REAPER state chunk format to daw::tracks::Track structs.
 
 use crate::tracks::Track;
-use crate::tracks::api::folder::{TcpFolderState, McpFolderState};
+use crate::tracks::api::folder::{TcpFolderState, McpFolderState, TrackDepth, FolderDepthChange};
 use crate::tracks::api::solo::SoloMode;
 use crate::tracks::api::automation::AutomationMode;
 use crate::tracks::api::timebase::TrackTimebase;
@@ -47,8 +47,11 @@ pub fn parse_track_chunk(chunk: &str, default_index: usize) -> Result<ParsedTrac
                 if tokens.len() > 1 {
                     let name = tokens[1..].join(" ");
                     // Remove quotes if present
-                    parsed.name = name.trim_matches('"').trim_matches('\'').trim_matches('`').to_string();
+                    let cleaned_name = name.trim_matches('"').trim_matches('\'').trim_matches('`').to_string();
+                    parsed.name = cleaned_name;
                 }
+                // If NAME field exists but has no value, we leave the default name from ParsedTrackChunk::default
+                // which is "Track {index}"
             }
             "LOCK" => {
                 if tokens.len() > 1 {
@@ -108,7 +111,12 @@ pub fn parse_track_chunk(chunk: &str, default_index: usize) -> Result<ParsedTrac
                     let folder_type = parse_int(tokens[1])?;
                     parsed.is_folder = folder_type == 1;
                     if tokens.len() >= 3 {
-                        parsed.track_depth = parse_int(tokens[2])?;
+                        // ISBUS field 2 is the relative indentation change (folder_depth_change)
+                        // This is the relative change: 0=normal, 1=folder start, -1=closes one level, etc.
+                        let depth_change_value = parse_int(tokens[2])?;
+                        parsed.folder_depth_change = FolderDepthChange::from_reaper_value(depth_change_value);
+                        // Note: track_depth (absolute cumulative depth) will be calculated
+                        // in the implementation layer by summing folder_depth_change values
                     }
                 }
             }
@@ -234,7 +242,8 @@ pub struct ParsedTrackChunk {
     is_folder: bool,
     folder_state_tcp: Option<TcpFolderState>,
     folder_state_mcp: Option<McpFolderState>,
-    track_depth: i32,
+    track_depth: TrackDepth,
+    folder_depth_change: FolderDepthChange,
     bus_compact: Option<BusCompactSettings>,
     locked: bool,
     peak_color: Option<i32>,
@@ -264,7 +273,8 @@ impl ParsedTrackChunk {
             is_folder: false,
             folder_state_tcp: None,
             folder_state_mcp: None,
-            track_depth: 0,
+            track_depth: TrackDepth::default(),
+            folder_depth_change: FolderDepthChange::Normal,
             bus_compact: None,
             locked: false,
             peak_color: None,
@@ -297,6 +307,7 @@ impl ParsedTrackChunk {
         track.folder_state_tcp = self.folder_state_tcp;
         track.folder_state_mcp = self.folder_state_mcp;
         track.track_depth = self.track_depth;
+        track.folder_depth_change = self.folder_depth_change;
         track.bus_compact = self.bus_compact;
         track.selected = selected;
         track.locked = self.locked;

@@ -61,6 +61,14 @@ impl Tempo {
     pub fn is_valid(&self) -> bool {
         self.bpm > 0.0 && self.bpm <= 999.0
     }
+
+    /// Parse tempo from string (e.g., "120bpm", "120")
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim().to_lowercase();
+        let s = s.strip_suffix("bpm").unwrap_or(&s).trim();
+
+        s.parse::<f64>().ok().map(|bpm| Tempo { bpm })
+    }
 }
 
 impl Default for Tempo {

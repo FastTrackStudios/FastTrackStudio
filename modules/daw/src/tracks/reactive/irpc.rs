@@ -149,6 +149,15 @@ impl TrackApi {
             let track_changed_subject = streams.track_changed.borrow().clone();
             let tx = track_changed_broadcast.clone();
             track_changed_subject.subscribe(move |(project_id, track_index, track)| {
+                use tracing::info;
+                info!(
+                    project_id = %project_id,
+                    track_index,
+                    track_name = %track.name,
+                    track_color = ?track.color,
+                    track_depth = track.track_depth.value(),
+                    "🎵 [Tracks Service] Track changed - emitting to API"
+                );
                 let _ = tx.send(TrackUpdateMessage::TrackChanged(TrackChangedMessage {
                     project_id,
                     track_index,

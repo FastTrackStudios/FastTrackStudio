@@ -5,7 +5,7 @@
 use daw::marker_region::core::{Marker, Region};
 use reaper_high::{Project, Reaper};
 use reaper_medium::ProjectRef;
-use setlist::core::{Setlist, SetlistError, Song};
+use fts::setlist::core::{Setlist, SetlistError, Song};
 use daw::primitives::TimeSignature;
 use tracing::{debug, warn};
 use daw::marker_region::application::TempoTimePoint;

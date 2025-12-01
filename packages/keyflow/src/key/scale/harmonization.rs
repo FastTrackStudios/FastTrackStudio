@@ -7,9 +7,10 @@
 use super::ScaleMode;
 use crate::chord::{from_semitones, Chord};
 use crate::primitives::{MusicalNote, Note, RootNotation};
+use serde::{Deserialize, Serialize};
 
 /// Depth of chord harmonization
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HarmonizationDepth {
     /// Triads only (3 notes: 1-3-5)
     Triads,
@@ -48,7 +49,7 @@ impl HarmonizationDepth {
 }
 
 /// A harmonized scale with all its chords
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScaleHarmonization {
     /// The scale mode used
     pub mode: ScaleMode,

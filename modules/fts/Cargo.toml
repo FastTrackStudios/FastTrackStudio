@@ -1,0 +1,62 @@
+[package]
+name = "fts"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "FastTrackStudio core modules - setlist, lyrics, chords, naming conventions, and templates"
+
+[dependencies]
+# Core dependencies
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = "2.0.17"
+uuid = { version = "1.0", features = ["v4", "serde", "js"] }
+tracing = { workspace = true }
+regex = "1.0"
+once_cell = "1.20"
+chrono = { workspace = true }
+splitty = "1.0.2"
+colored = "2.1"
+
+# IROH/IRPC dependencies (server-only)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+irpc = { workspace = true }
+irpc-iroh = "0.11.0"
+iroh = { version = "0.95", features = ["discovery-local-network"] }
+anyhow = "1.0"
+async-trait = "0.1"
+tokio = { version = "1.0", features = ["full"] }
+rxrust = { workspace = true }
+
+# Workspace dependencies
+daw = { path = "../../modules/daw" }
+keyflow = { path = "../../packages/keyflow" }
+
+# Dioxus integration (optional)
+[dependencies.dioxus]
+workspace = true
+optional = true
+default-features = true
+
+# RPP file parsing (optional)
+[features]
+default = []
+reaper = []
+rpp = ["dep:rpp-parser"]
+dioxus = ["dep:dioxus"]
+full = ["reaper", "rpp"]
+
+[dependencies.rpp-parser]
+version = "0.1"
+optional = true
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.0"
+colored = "2.1"
+reqwest = { version = "0.11", features = ["json"] }
+
+[lints]
+workspace = true
+

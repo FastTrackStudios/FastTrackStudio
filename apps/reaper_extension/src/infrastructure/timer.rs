@@ -20,7 +20,7 @@ pub fn register_timer(session: &mut ReaperSession, callback: TimerCallback) -> R
     
     match timer_result {
         Ok(_) => {
-            debug!("Registered polling timer callback with REAPER (target: 60Hz)");
+            debug!("Registered polling timer callback with REAPER (target: 30Hz)");
             Ok(())
         }
         Err(e) => {

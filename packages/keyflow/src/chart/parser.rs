@@ -15,8 +15,8 @@ use crate::key::Key;
 use crate::metadata::SongMetadata;
 use crate::parsing::Lexer;
 use crate::sections::{Section, SectionNumberer, SectionType};
-use crate::time::Duration as _; // Import Duration trait for to_beats()
-use crate::time::{AbsolutePosition, MusicalDuration, Tempo, TimeSignature};
+use crate::time::DurationTrait; // Import Duration trait for to_beats()
+use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition, Tempo, TimeSignature};
 use crate::RootNotation;
 
 /// Repeat count specification
@@ -145,7 +145,7 @@ impl Chart {
             // Try time signature
             if part.contains('/') {
                 if let Some((num, den)) = Self::parse_time_signature(part) {
-                    self.time_signature = Some(TimeSignature::new(num, den));
+                    self.time_signature = Some(TimeSignature::new(num as i32, den as i32));
                     continue;
                 }
             }
@@ -729,7 +729,7 @@ impl Chart {
 
                 for _ in 0..padding_needed {
                     // Create a space chord that fills one full measure
-                    let space_duration = MusicalDuration::new(1, 0, 0); // One full measure
+                    let space_duration = MusicalDuration::new(1, 0, 0); // One full measure (DAW uses i32)
                     let note = crate::primitives::MusicalNote::from_string("C").unwrap();
                     let root_notation = RootNotation::from_note_name(note);
                     let space_chord = ChordInstance::new(
@@ -747,7 +747,7 @@ impl Chart {
                     );
 
                     let mut space_measure = Measure::new();
-                    space_measure.time_signature = (time_sig.numerator, time_sig.denominator);
+                    space_measure.time_signature = (time_sig.numerator as u8, time_sig.denominator as u8);
                     space_measure.chords.push(space_chord);
                     measures.push(space_measure);
                 }
@@ -846,7 +846,7 @@ impl Chart {
         section_type: &SectionType,
         section_measure_count: Option<usize>,
     ) -> Result<Vec<Measure>, String> {
-        use crate::time::Duration as DurationTrait;
+        use crate::time::DurationTrait;
 
         let mut time_sig = self.time_signature.unwrap_or(TimeSignature::common_time());
         let mut beats_per_measure = time_sig.numerator as f64;
@@ -928,7 +928,7 @@ impl Chart {
                 }
                 // Always start a new measure after |
                 current_measure = Measure::new();
-                current_measure.time_signature = (time_sig.numerator, time_sig.denominator);
+                current_measure.time_signature = (time_sig.numerator as u8, time_sig.denominator as u8);
                 current_measure_beats = 0.0;
                 just_processed_separator = true; // Mark that we just processed a separator
                 measure_was_created_by_separator = true; // Mark that this measure was created by |
@@ -939,7 +939,7 @@ impl Chart {
             if token_str.contains('/') && !token_str.starts_with('/') {
                 if let Some((num, den)) = Self::parse_time_signature(token_str) {
                     // Update the time signature for subsequent measures
-                    time_sig = TimeSignature::new(num, den);
+                    time_sig = TimeSignature::new(num as i32, den as i32);
                     self.time_signature = Some(time_sig);
 
                     // If we have a current measure, finalize it before the time sig change
@@ -994,7 +994,7 @@ impl Chart {
                                 measures.push(current_measure.clone());
                             }
                             current_measure = Measure::new();
-                            current_measure.time_signature = (time_sig.numerator, time_sig.denominator);
+                            current_measure.time_signature = (time_sig.numerator as u8, time_sig.denominator as u8);
                             current_measure_beats = 0.0;
                             measure_was_created_by_separator = false; // Auto-created, not by separator
                         }
@@ -1019,7 +1019,7 @@ impl Chart {
                         // small epsilon for float comparison
                         measures.push(current_measure.clone());
                         current_measure = Measure::new();
-                        current_measure.time_signature = (time_sig.numerator, time_sig.denominator);
+                        current_measure.time_signature = (time_sig.numerator as u8, time_sig.denominator as u8);
                         current_measure_beats = 0.0;
                         // Auto-created measure, not by separator
                     }
@@ -1270,8 +1270,8 @@ impl Chart {
             // Get time signature from first measure or default (before we borrow mutably)
             let time_sig = if !section.measures.is_empty() {
                 TimeSignature::new(
-                    section.measures[0].time_signature.0,
-                    section.measures[0].time_signature.1,
+                    section.measures[0].time_signature.0 as i32,
+                    section.measures[0].time_signature.1 as i32,
                 )
             } else {
                 TimeSignature::new(4, 4)
@@ -1294,7 +1294,7 @@ impl Chart {
                         if is_push && is_first {
                             // Need to insert space before
                             // Initial space has 0 duration, will be filled by push adjustment
-                            let space_duration = MusicalDuration::new(0, 0, 0);
+                            let space_duration = MusicalDuration::new(0, 0, 0); // DAW uses i32
                             let note = crate::primitives::MusicalNote::from_string("C").unwrap();
                             let root_notation = RootNotation::from_note_name(note);
                             let space_chord = ChordInstance::new(
@@ -1382,20 +1382,20 @@ impl Chart {
     /// Calculate absolute positions for all elements in the chart
     /// This accumulates durations as we traverse sections and measures
     fn calculate_absolute_positions(&mut self) {
-        use crate::time::Duration as DurationTrait;
+        use crate::time::DurationTrait;
 
         // Start at position 0.0.0
-        let mut current_position = MusicalDuration::new(0, 0, 0);
+        let mut current_position = MusicalDuration::new(0, 0, 0); // DAW uses i32
         let mut current_time_sig = self.time_signature.unwrap_or(TimeSignature::common_time());
 
         for (section_idx, section) in self.sections.iter_mut().enumerate() {
             for measure in &mut section.measures {
                 // Update time signature if this measure has one
                 if measure.time_signature
-                    != (current_time_sig.numerator, current_time_sig.denominator)
+                    != (current_time_sig.numerator as u8, current_time_sig.denominator as u8)
                 {
                     current_time_sig =
-                        TimeSignature::new(measure.time_signature.0, measure.time_signature.1);
+                        TimeSignature::new(measure.time_signature.0 as i32, measure.time_signature.1 as i32);
                 }
 
                 // Assign positions to all chords in this measure
@@ -1442,12 +1442,18 @@ impl Chart {
                             position_in_prev_measure
                         };
                         // Create position in previous measure
-                        MusicalDuration::from_beats(
-                            (adjusted_measure_num.max(0) as f64 * beats_per_measure) + position_in_prev_measure.max(0.0),
-                            current_time_sig
-                        )
+                        let total_beats = (adjusted_measure_num.max(0) as f64 * beats_per_measure) + position_in_prev_measure.max(0.0);
+                        let measure = (total_beats / beats_per_measure).floor() as i32;
+                        let beat = ((total_beats % beats_per_measure).floor() as i32);
+                        let subdivision = (((total_beats % beats_per_measure) % 1.0) * 1000.0).round() as i32;
+                        MusicalPosition::try_new(measure, beat, subdivision.clamp(0, 999))
+                            .unwrap_or_else(|_| MusicalPosition::start())
                     } else {
-                        MusicalDuration::from_beats(adjusted_position_beats.max(0.0), current_time_sig)
+                        let measure = (adjusted_position_beats.max(0.0) / beats_per_measure).floor() as i32;
+                        let beat = ((adjusted_position_beats.max(0.0) % beats_per_measure).floor() as i32);
+                        let subdivision = (((adjusted_position_beats.max(0.0) % beats_per_measure) % 1.0) * 1000.0).round() as i32;
+                        MusicalPosition::try_new(measure, beat, subdivision.clamp(0, 999))
+                            .unwrap_or_else(|_| MusicalPosition::start())
                     };
                     chord.position = AbsolutePosition::new(adjusted_position, section_idx);
 
@@ -1493,7 +1499,7 @@ cmaj7 Dm7 g7 Cmaj7
         // Verify metadata
         assert_eq!(chart.metadata.title, Some("My Song".to_string()));
         assert_eq!(chart.metadata.artist, Some("Artist Name".to_string()));
-        assert_eq!(chart.tempo.unwrap().bpm, 120);
+        assert_eq!(chart.tempo.unwrap().bpm, 120.0);
         assert_eq!(chart.time_signature.unwrap().numerator, 4);
         assert_eq!(chart.time_signature.unwrap().denominator, 4);
 

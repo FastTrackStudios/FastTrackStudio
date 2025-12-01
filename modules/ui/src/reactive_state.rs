@@ -12,7 +12,7 @@
 use dioxus::prelude::*;
 
 // Re-export setlist signals for convenience (they're still being updated by setlist_connection)
-pub use setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, ACTIVE_SLIDE_INDEX, SONG_TRACKS, SONG_TRANSPORT};
+pub use fts::fts::setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, ACTIVE_SLIDE_INDEX, SONG_TRACKS, SONG_TRANSPORT};
 
 /// Hook to get transport state for the active song from SONG_TRANSPORT
 /// 
@@ -46,7 +46,7 @@ pub fn use_tracks_for_active_song() -> Memo<Option<Vec<daw::tracks::Track>>> {
 /// 
 /// This gets the lyrics from the active song in the setlist structure.
 /// It's reactive - components using this will automatically rerender when lyrics change.
-pub fn use_lyrics_for_active_song() -> Memo<Option<lyrics::core::Lyrics>> {
+pub fn use_lyrics_for_active_song() -> Memo<Option<fts::lyrics::core::Lyrics>> {
     use_memo(move || {
         let active_indices = ACTIVE_INDICES.read();
         let active_song_idx = active_indices.0?;

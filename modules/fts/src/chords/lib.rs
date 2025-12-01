@@ -1,0 +1,22 @@
+//! Chord detection and display for FastTrackStudio
+//!
+//! This module provides functionality for detecting, analyzing, and displaying chords
+//! with support for multiple notation formats (standard names, Nashville Number System, Roman Numerals).
+
+pub mod types;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod reactive;
+
+pub use types::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use reactive::{
+    ChordsStreams, ChordsReactiveState, ChordsReactiveService,
+    DefaultChordsReactiveService, EventStreamSubject,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use reactive::irpc::{ChordsApi, ChordsUpdateMessage};
+// NOTE: ChordsProtocol is disabled - see irpc.rs for details
+

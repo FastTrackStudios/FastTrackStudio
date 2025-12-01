@@ -8,10 +8,11 @@
 
 use crate::parsing::{ParseError, Token, TokenType};
 use crate::time::{MusicalDuration, TimeSignature};
+use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 /// Rhythm notation for a chord
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChordRhythm {
     /// Default - one bar (implied if no rhythm specified)
     Default,
@@ -43,7 +44,7 @@ pub enum ChordRhythm {
 }
 
 /// Lily-inspired duration values
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LilySyntax {
     Whole,        // 1
     Half,         // 2
@@ -81,7 +82,7 @@ impl LilySyntax {
 }
 
 /// Push/Pull amount (number of apostrophes)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PushPullAmount {
     Eighth,       // ' - one apostrophe
     Sixteenth,    // '' - two apostrophes

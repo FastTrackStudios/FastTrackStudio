@@ -3,7 +3,7 @@
 //! Provides setlist state to the stream API.
 
 use std::sync::Arc;
-use setlist::{SetlistApi, SetlistStateProvider};
+use fts::setlist::{SetlistApi, SetlistStateProvider};
 
 /// REAPER implementation of SetlistStateProvider
 pub struct ReaperSetlistStateProvider {

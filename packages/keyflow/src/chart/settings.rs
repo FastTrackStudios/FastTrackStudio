@@ -3,23 +3,24 @@
 //! Configuration options for chart parsing and display
 
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 /// Chart configuration settings
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChartSettings {
     /// Internal settings storage
     settings: HashMap<ChartSetting, SettingValue>,
 }
 
 /// Available chart settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ChartSetting {
     /// Automatically group repeated phrases into 4-bar units with repeat signs
     SmartRepeats,
 }
 
 /// Setting value types
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SettingValue {
     Bool(bool),
     String(String),

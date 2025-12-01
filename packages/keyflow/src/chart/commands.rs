@@ -4,9 +4,10 @@
 //! Commands can be specified with slash syntax (/fermata) or shorthand (->)
 
 use std::fmt;
+use serde::{Deserialize, Serialize};
 
 /// Commands that can be applied to musical elements
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Command {
     /// Fermata - hold the note/chord longer
     Fermata,

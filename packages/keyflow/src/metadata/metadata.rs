@@ -2,8 +2,10 @@
 //!
 //! Represents song information like title, artist, composer, etc.
 
+use serde::{Deserialize, Serialize};
+
 /// Complete song metadata
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct SongMetadata {
     pub title: Option<String>,
     pub subtitle: Option<String>,

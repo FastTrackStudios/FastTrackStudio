@@ -3,6 +3,7 @@
 //! Manages global and section-specific chord memory for chord quality recall
 
 use crate::sections::SectionType;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Manages chord memory for quality recall
@@ -12,7 +13,7 @@ use std::collections::HashMap;
 /// 2. Section-specific memory - middle priority
 /// 3. Global memory - low priority
 /// 4. Default qualities from key - lowest priority (future feature)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChordMemory {
     /// Global chord memory (root -> full symbol)
     global: HashMap<String, String>,

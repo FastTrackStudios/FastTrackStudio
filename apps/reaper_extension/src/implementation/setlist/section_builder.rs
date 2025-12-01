@@ -3,7 +3,7 @@
 //! Handles building sections from regions within songs.
 
 use daw::marker_region::core::{Marker, Region};
-use setlist::core::{Section, SectionType, Song};
+use fts::setlist::core::{Section, SectionType, Song};
 use tracing::{debug, warn};
 use crate::implementation::setlist::parser::{parse_section_type_from_name, extract_number_from_name};
 use crate::implementation::setlist::stats::record_section_created;

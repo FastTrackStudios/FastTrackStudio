@@ -9,7 +9,7 @@
 //! updated from server messages.
 
 use dioxus::prelude::*;
-use setlist::Setlist;
+use fts::fts::setlist::Setlist;
 use std::collections::HashMap;
 
 pub mod local;

@@ -1,0 +1,23 @@
+[package]
+name = "lilypond"
+version = "0.1.1"
+authors = ["Jared Forth <jaredforthdev@gmail.com>"]
+edition = "2018"
+
+description = "A Rust wrapper and types for GNU LilyPond"
+homepage = "https://crates.io/crates/lilypond"
+repository = "https://github.com/jaredforth/lilypond"
+license = "GPL-3.0-or-later"
+readme = "README.md"
+documentation = "https://docs.rs/lilypond"
+keywords = ["music", "notation", "typography", "lilypond"]
+categories = ["multimedia"]
+
+[badges]
+travis-ci = { repository = "jaredforth/lilypond" }
+appveyor = { repository = "jaredforth/lilypond" }
+
+[dependencies]
+fsutils = "0.1.2"
+regex = "1"
+lazy_static = "1.4.0"

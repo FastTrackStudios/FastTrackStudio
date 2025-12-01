@@ -1,7 +1,9 @@
 //! Tempo representation
 
+use serde::{Deserialize, Serialize};
+
 /// Represents a tempo in beats per minute
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Tempo {
     pub bpm: u32,
 }

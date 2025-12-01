@@ -10,7 +10,7 @@ use tracing::{debug, error, info, warn};
 use daw::tracks::reactive::irpc::{TrackApi, TrackUpdateMessage};
 use daw::tracks::Track;
 use crate::iroh_connection_manager::{init_shared_endpoint, get_shared_endpoint, get_reaper_endpoint_addr};
-use setlist::{SETLIST_STRUCTURE, SONG_TRACKS};
+use fts::fts::setlist::{SETLIST_STRUCTURE, SONG_TRACKS};
 // Cached tracks API (for making RPC calls)
 pub static TRACKS_API: OnceLock<tokio::sync::Mutex<Option<TrackApi>>> = OnceLock::new();
 // Connection status channel for UI updates
@@ -281,9 +281,11 @@ async fn handle_message(msg: TrackUpdateMessage, message_count: &mut u64, recv_c
             // Also update SONG_TRACKS (song_index -> tracks) for UI reactivity
             // Map project_id to song_index by looking up in setlist structure
             if let Some(song_index) = find_song_index_by_project_name(&msg.project_id) {
+                // Clone the entire HashMap and replace it to ensure Dioxus detects the change
                 let mut song_tracks = SONG_TRACKS.write();
-                // Replace the entire vector to ensure Dioxus detects the change
-                song_tracks.insert(song_index, msg.tracks.clone());
+                let mut new_map = song_tracks.clone();
+                new_map.insert(song_index, msg.tracks.clone());
+                *song_tracks = new_map;
                 drop(song_tracks); // Explicitly drop to trigger signal update
                 debug!("[Tracks Connection] Updated SONG_TRACKS for song {} (project: {})", song_index, msg.project_id);
             } else {
@@ -299,11 +301,21 @@ async fn handle_message(msg: TrackUpdateMessage, message_count: &mut u64, recv_c
         TrackUpdateMessage::TrackChanged(msg) => {
             UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
             
+            use tracing::info;
+            info!(
+                project_id = %msg.project_id,
+                track_index = msg.track_index,
+                track_name = %msg.track.name,
+                track_color = ?msg.track.color,
+                "[Tracks Connection] 🎵 Track changed - updating state"
+            );
+            
             // Update TRACKS_STATE (project_name -> tracks)
             if let Some(state) = TRACKS_STATE.get() {
                 let mut tracks_map = state.write();
                 if let Some(tracks) = tracks_map.get_mut(&msg.project_id) {
                     if msg.track_index < tracks.len() {
+                        // Replace entire track to ensure all fields are updated
                         tracks[msg.track_index] = msg.track.clone();
                     } else {
                         // Track index out of bounds - extend vector
@@ -327,36 +339,22 @@ async fn handle_message(msg: TrackUpdateMessage, message_count: &mut u64, recv_c
             
             // Also update SONG_TRACKS (song_index -> tracks) for UI reactivity
             if let Some(song_index) = find_song_index_by_project_name(&msg.project_id) {
+                // Create a completely new HashMap to ensure Dioxus detects the change
+                // Dioxus signals use reference equality, so modifying the existing HashMap
+                // might not trigger reactivity. We need to create a new one.
                 let mut song_tracks = SONG_TRACKS.write();
-                let mut tracks = song_tracks.get(&song_index).cloned().unwrap_or_else(|| {
+                let mut new_tracks_map = song_tracks.clone(); // Clone the entire HashMap
+                
+                let mut tracks = new_tracks_map.get(&song_index).cloned().unwrap_or_else(|| {
                     // Song doesn't have tracks yet - create empty vector
                     Vec::new()
                 });
                 
                 // Update the specific track in the vector
-                // Only update the fields that actually changed (mute/solo) to preserve all other fields
+                // Always replace the entire track to ensure ALL fields are updated (name, color, etc.)
                 if msg.track_index < tracks.len() {
-                    let existing_track = &mut tracks[msg.track_index];
-                    
-                    // Only update the fields that changed (mute and solo_state)
-                    // This preserves color, name, guid, and all other fields
-                    existing_track.muted = msg.track.muted;
-                    existing_track.solo_state = msg.track.solo_state.clone();
-                    
-                    // Also update any other fields that might have changed, but preserve color
-                    if msg.track.color.is_some() {
-                        existing_track.color = msg.track.color;
-                    }
-                    // Preserve other essential fields if they're missing in the update
-                    if !msg.track.name.is_empty() {
-                        existing_track.name = msg.track.name.clone();
-                    }
-                    if msg.track.guid.is_some() {
-                        existing_track.guid = msg.track.guid.clone();
-                    }
-                    if msg.track.index.is_some() {
-                        existing_track.index = msg.track.index;
-                    }
+                    // Replace entire track - this ensures color, name, and all other fields are updated
+                    tracks[msg.track_index] = msg.track.clone();
                 } else {
                     // Track index out of bounds - extend vector
                     let current_len = tracks.len();
@@ -367,10 +365,24 @@ async fn handle_message(msg: TrackUpdateMessage, message_count: &mut u64, recv_c
                     tracks[msg.track_index] = msg.track.clone();
                 }
                 
-                // Replace the entire vector to ensure Dioxus detects the change
-                song_tracks.insert(song_index, tracks);
+                // Insert the updated vector into the new HashMap
+                new_tracks_map.insert(song_index, tracks);
+                
+                // Replace the entire HashMap to ensure Dioxus detects the change
+                *song_tracks = new_tracks_map;
                 drop(song_tracks); // Explicitly drop to trigger signal update
-                debug!("[Tracks Connection] Updated SONG_TRACKS track {} for song {} (project: {})", msg.track_index, song_index, msg.project_id);
+                info!(
+                    track_index = msg.track_index,
+                    song_index,
+                    project_id = %msg.project_id,
+                    track_name = %msg.track.name,
+                    "[Tracks Connection] ✅ Updated SONG_TRACKS - UI should react"
+                );
+            } else {
+                warn!(
+                    project_id = %msg.project_id,
+                    "[Tracks Connection] Could not find song_index for project - SONG_TRACKS not updated"
+                );
             }
             
             debug!("[Tracks Connection] Updated track {} for project: {} -> {}", msg.track_index, msg.project_id, msg.track.name);

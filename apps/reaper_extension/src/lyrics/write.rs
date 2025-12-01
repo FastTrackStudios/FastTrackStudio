@@ -2,7 +2,7 @@
 
 use reaper_high::{Reaper, Project};
 use reaper_medium::{MasterTrackBehavior, UndoScope, ProjectPart, PositionInSeconds};
-use lyrics::{Lyrics, output::Slides};
+use fts::lyrics::{Lyrics, output::Slides};
 use std::ffi::CString;
 use tracing::{info, warn, error};
 use enumflags2::BitFlags;
@@ -15,7 +15,7 @@ pub fn create_text_items_from_lyrics(lyrics_text: String) -> anyhow::Result<()> 
     let current_project = reaper.current_project();
     
     // Parse lyrics
-    let lyrics = match lyrics::parse_lyrics(&lyrics_text, "Untitled Song".to_string()) {
+    let lyrics = match fts::fts::lyrics::parse_lyrics(&lyrics_text, "Untitled Song".to_string()) {
         Ok(lyrics) => lyrics,
         Err(e) => {
             let error_msg = format!("FastTrackStudio: Failed to parse lyrics: {}\n", e);

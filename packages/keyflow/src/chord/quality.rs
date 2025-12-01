@@ -3,9 +3,10 @@
 //! Defines basic triad qualities and their intervals
 
 use crate::primitives::Interval;
+use serde::{Deserialize, Serialize};
 
 /// Basic chord quality - the fundamental triad structure
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ChordQuality {
     /// Major triad (1, 3, 5) - C, E, G
     Major,
@@ -22,7 +23,7 @@ pub enum ChordQuality {
 }
 
 /// Type of suspended chord
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SuspendedType {
     /// Sus2 - suspended 2nd (1, 2, 5) - C, D, G
     Second,

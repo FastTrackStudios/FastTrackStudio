@@ -3,6 +3,7 @@
 //! Represents absolute positions within a musical piece
 
 use super::duration::{Duration, MusicalDuration};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Trait for positions within a song
@@ -18,7 +19,7 @@ pub trait Position: fmt::Debug + fmt::Display {
 }
 
 /// Standard implementation of Position
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AbsolutePosition {
     /// The total duration from the start of the song
     pub total_duration: MusicalDuration,

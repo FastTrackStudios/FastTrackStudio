@@ -13,10 +13,11 @@ use crate::key::Key;
 use crate::parsing::{ParseError, Token, TokenType};
 use crate::primitives::{Interval, MusicalNote, RootNotation};
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument, trace};
 
 /// A complete chord with root, quality, family, extensions, and alterations
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Chord {
     /// The original input string that was parsed
     pub origin: String,

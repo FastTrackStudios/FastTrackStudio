@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use setlist::Song;
+use fts::fts::setlist::Song;
 
 /// Measure information for the grid
 #[derive(Clone, Debug, PartialEq)]

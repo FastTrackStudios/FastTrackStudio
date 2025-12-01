@@ -1,20 +1,45 @@
 //! Section Definition
 //!
 //! Represents a section with its type and optional numbering
+//! Supports both chart parsing (measure_count, is_subsection) and DAW integration (positions, id, etc.)
 
 use super::section_type::SectionType;
+use daw::primitives::Position;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Represents a section with its type and optional number
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// Can be used for both chart parsing and DAW integration
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Section {
+    /// Section type
     pub section_type: SectionType,
+    /// Optional section number (e.g., 1, 2, 3 for Verse 1, Verse 2, etc.)
     pub number: Option<u32>,
-    pub split_letter: Option<char>, // For consecutive same sections (1a, 1b, etc.)
-    pub measure_count: Option<usize>, // Specified measure count
-    pub is_subsection: bool,        // True if prefixed with ^ (e.g., ^Band-In)
+    /// Split letter for consecutive sections (e.g., 'a', 'b', 'c')
+    pub split_letter: Option<char>,
+    /// Specified measure count (for chart parsing)
+    pub measure_count: Option<usize>,
+    /// True if prefixed with ^ (e.g., ^Band-In) - for chart parsing
+    pub is_subsection: bool,
+    
+    // Optional DAW integration fields
+    /// Unique identifier for this section (for DAW integration)
+    pub id: Option<uuid::Uuid>,
+    /// Start position (contains both musical and time position) - for DAW integration
+    pub start_position: Option<Position>,
+    /// End position (contains both musical and time position) - for DAW integration
+    pub end_position: Option<Position>,
+    /// Section name (from region name) - for DAW integration
+    pub name: Option<String>,
+    /// Color from the region (optional, for display purposes) - for DAW integration
+    pub color: Option<u32>,
+    /// Optional metadata - for DAW integration
+    pub metadata: HashMap<String, String>,
 }
 
 impl Section {
+    /// Create a new section (for chart parsing)
     pub fn new(section_type: SectionType) -> Self {
         Self {
             section_type,
@@ -22,7 +47,130 @@ impl Section {
             split_letter: None,
             measure_count: None,
             is_subsection: false,
+            id: None,
+            start_position: None,
+            end_position: None,
+            name: None,
+            color: None,
+            metadata: HashMap::new(),
         }
+    }
+
+    /// Create a new section with DAW positions (for DAW integration)
+    pub fn with_positions(
+        section_type: SectionType,
+        start_position: Position,
+        end_position: Position,
+        name: String,
+        number: Option<u32>,
+    ) -> Self {
+        Self {
+            section_type,
+            number,
+            split_letter: None,
+            measure_count: None,
+            is_subsection: false,
+            id: None,
+            start_position: Some(start_position),
+            end_position: Some(end_position),
+            name: Some(name),
+            color: None,
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Create a new section with DAW positions (for DAW integration, with validation)
+    /// Returns an error if validation fails
+    /// Note: This is different from `new()` which creates a section for chart parsing
+    pub fn new_with_positions(
+        section_type: SectionType,
+        start_position: Position,
+        end_position: Position,
+        name: String,
+        number: Option<u32>,
+    ) -> Result<Self, String> {
+        if start_position.time.to_seconds() >= end_position.time.to_seconds() {
+            return Err(format!(
+                "Invalid time range: start ({}) >= end ({})",
+                start_position.time.to_seconds(),
+                end_position.time.to_seconds()
+            ));
+        }
+
+        if name.trim().is_empty() {
+            return Err("Section name cannot be empty".to_string());
+        }
+
+        Ok(Self::with_positions(section_type, start_position, end_position, name, number))
+    }
+
+    /// Create a new section with ID
+    pub fn with_id(
+        id: uuid::Uuid,
+        section_type: SectionType,
+        start_position: Position,
+        end_position: Position,
+        name: String,
+        number: Option<u32>,
+    ) -> Result<Self, String> {
+        let mut section = Self::new_with_positions(section_type, start_position, end_position, name, number)?;
+        section.id = Some(id);
+        Ok(section)
+    }
+
+    /// Create a section from seconds (for DAW integration compatibility)
+    /// Uses default BPM (120) and time signature (4/4) to calculate musical positions
+    pub fn from_seconds(
+        section_type: SectionType,
+        start_seconds: f64,
+        end_seconds: f64,
+        name: String,
+        number: Option<u32>,
+    ) -> Result<Self, String> {
+        use daw::primitives::{TimePosition, TimeSignature};
+        
+        Self::from_seconds_with_tempo(
+            section_type,
+            start_seconds,
+            end_seconds,
+            name,
+            number,
+            120.0, // Default BPM
+            TimeSignature::new(4, 4), // Default time signature
+        )
+    }
+
+    /// Create a section from seconds with specified BPM and time signature
+    pub fn from_seconds_with_tempo(
+        section_type: SectionType,
+        start_seconds: f64,
+        end_seconds: f64,
+        name: String,
+        number: Option<u32>,
+        bpm: f64,
+        time_signature: daw::primitives::TimeSignature,
+    ) -> Result<Self, String> {
+        use daw::primitives::TimePosition;
+        
+        if start_seconds >= end_seconds {
+            return Err(format!("Invalid time range: start ({}) >= end ({})", start_seconds, end_seconds));
+        }
+
+        if name.trim().is_empty() {
+            return Err("Section name cannot be empty".to_string());
+        }
+
+        let start_time = TimePosition::from_seconds(start_seconds);
+        let end_time = TimePosition::from_seconds(end_seconds);
+        
+        // Calculate musical positions from time positions
+        let start_musical = start_time.to_musical_position(bpm, time_signature);
+        let end_musical = end_time.to_musical_position(bpm, time_signature);
+        
+        let start_position = Position::new(start_musical.clone(), start_time);
+        let end_position = Position::new(end_musical, end_time);
+        
+        Ok(Self::with_positions(section_type, start_position, end_position, name, number))
     }
 
     pub fn with_subsection(mut self, is_subsection: bool) -> Self {
@@ -37,14 +185,264 @@ impl Section {
 
     /// Get a display name for this section
     pub fn display_name(&self) -> String {
-        let base = self.section_type.full_name();
-        let prefix = if self.is_subsection { "^" } else { "" };
+        // If we have a name from DAW, use it (but still format with number/split letter if needed)
+        if let Some(ref name) = self.name {
+            // For custom sections, use the name as-is
+            if matches!(self.section_type, SectionType::Custom(_)) {
+                return name.clone();
+            }
+            
+            // For other sections, check if the name already includes the number
+            // If not, add number and split letter if present
+            let with_number = if let Some(num) = self.number {
+                if !name.contains(&num.to_string()) {
+                    format!("{} {}", name, num)
+                } else {
+                    name.clone()
+                }
+            } else {
+                name.clone()
+            };
+            
+            if let Some(letter) = self.split_letter {
+                if !with_number.ends_with(letter) {
+                    format!("{}{}", with_number, letter)
+                } else {
+                    with_number
+                }
+            } else {
+                with_number
+            }
+        } else {
+            // Chart parsing mode - use section type
+            let base = self.section_type.full_name();
+            let prefix = if self.is_subsection { "^" } else { "" };
 
-        match (self.number, self.split_letter) {
-            (Some(n), Some(l)) => format!("{}{} {}{}", prefix, base, n, l),
-            (Some(n), None) => format!("{}{} {}", prefix, base, n),
-            (None, _) => format!("{}{}", prefix, base),
+            match (self.number, self.split_letter) {
+                (Some(n), Some(l)) => format!("{}{} {}{}", prefix, base, n, l),
+                (Some(n), None) => format!("{}{} {}", prefix, base, n),
+                (None, _) => format!("{}{}", prefix, base),
+            }
         }
+    }
+
+    /// Calculate the duration of the section in seconds (for DAW integration)
+    pub fn duration_seconds(&self) -> Option<f64> {
+        if let (Some(start), Some(end)) = (&self.start_position, &self.end_position) {
+            Some(end.time.to_seconds() - start.time.to_seconds())
+        } else {
+            None
+        }
+    }
+
+    /// Get start time in seconds (for DAW integration)
+    pub fn start_seconds(&self) -> Option<f64> {
+        self.start_position.as_ref().map(|p| p.time.to_seconds())
+    }
+
+    /// Get end time in seconds (for DAW integration)
+    pub fn end_seconds(&self) -> Option<f64> {
+        self.end_position.as_ref().map(|p| p.time.to_seconds())
+    }
+
+    /// Check if a time position is within this section (for DAW integration)
+    pub fn contains_position(&self, seconds: f64) -> bool {
+        if let (Some(start), Some(end)) = (self.start_seconds(), self.end_seconds()) {
+            seconds >= start && seconds < end
+        } else {
+            false
+        }
+    }
+
+    /// Get metadata value
+    pub fn get_metadata(&self, key: &str) -> Option<&String> {
+        self.metadata.get(key)
+    }
+
+    /// Set metadata value
+    pub fn set_metadata<K: Into<String>, V: Into<String>>(&mut self, key: K, value: V) {
+        self.metadata.insert(key.into(), value.into());
+    }
+
+    /// Remove metadata value
+    pub fn remove_metadata(&mut self, key: &str) -> Option<String> {
+        self.metadata.remove(key)
+    }
+
+    // DAW integration methods (for FTS compatibility)
+    
+    /// Calculate the duration of the section in seconds (alias for duration_seconds for compatibility)
+    pub fn duration(&self) -> f64 {
+        self.duration_seconds().unwrap_or(0.0)
+    }
+
+    /// Check if a Position is within this section (for DAW integration)
+    pub fn contains_position_exact(&self, position: Position) -> bool {
+        if let Some(seconds) = position.time.to_seconds().into() {
+            self.contains_position(seconds)
+        } else {
+            false
+        }
+    }
+
+    /// Check if this section overlaps with another time range
+    pub fn overlaps_with_range(&self, start: f64, end: f64) -> bool {
+        if let (Some(section_start), Some(section_end)) = (self.start_seconds(), self.end_seconds()) {
+            !(section_end <= start || section_start >= end)
+        } else {
+            false
+        }
+    }
+
+    /// Check if this section overlaps with another section
+    pub fn overlaps_with_section(&self, other: &Section) -> bool {
+        if let (Some(start), Some(end)) = (other.start_seconds(), other.end_seconds()) {
+            self.overlaps_with_range(start, end)
+        } else {
+            false
+        }
+    }
+
+    /// Get the section's color as RGB string (bright variant)
+    pub fn color_bright(&self) -> String {
+        if let Some(color_u32) = self.color.filter(|&c| c != 0) {
+            let r = ((color_u32 >> 16) & 0xFF) as u8;
+            let g = ((color_u32 >> 8) & 0xFF) as u8;
+            let b = (color_u32 & 0xFF) as u8;
+            let r = (r as f32 * 1.2).min(255.0) as u8;
+            let g = (g as f32 * 1.2).min(255.0) as u8;
+            let b = (b as f32 * 1.2).min(255.0) as u8;
+            format!("rgb({}, {}, {})", r, g, b)
+        } else {
+            "rgb(128, 128, 128)".to_string()
+        }
+    }
+
+    /// Get the section's color as RGB string (muted variant)
+    pub fn color_muted(&self) -> String {
+        if let Some(color_u32) = self.color.filter(|&c| c != 0) {
+            let r = ((color_u32 >> 16) & 0xFF) as u8;
+            let g = ((color_u32 >> 8) & 0xFF) as u8;
+            let b = (color_u32 & 0xFF) as u8;
+            let r = (r as f32 * 0.6) as u8;
+            let g = (g as f32 * 0.6) as u8;
+            let b = (b as f32 * 0.6) as u8;
+            format!("rgb({}, {}, {})", r, g, b)
+        } else {
+            "rgb(80, 80, 80)".to_string()
+        }
+    }
+
+    /// Get the section's color (defaults to bright)
+    pub fn color_rgb(&self) -> String {
+        self.color_bright()
+    }
+
+    /// Calculate progress percentage (0-100) based on transport position
+    pub fn progress(&self, transport_position: f64) -> f64 {
+        if let (Some(start), Some(end)) = (self.start_seconds(), self.end_seconds()) {
+            if end <= start {
+                return 0.0;
+            }
+            
+            if transport_position >= end {
+                return 100.0;
+            }
+            if transport_position < start {
+                return 0.0;
+            }
+            
+            ((transport_position - start) / (end - start) * 100.0).clamp(0.0, 100.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Calculate the length of the section in measures
+    /// Uses the musical positions from start_position and end_position
+    /// Assumes 4/4 time signature (4 beats per measure)
+    /// Returns None if musical positions are not available
+    pub fn length_measures(&self) -> Option<f64> {
+        if let (Some(start_pos), Some(end_pos)) = (&self.start_position, &self.end_position) {
+            let start_musical = &start_pos.musical;
+            let end_musical = &end_pos.musical;
+            
+            // Calculate beats per measure from time signature (default to 4/4)
+            // TODO: Get actual time signature from song/project metadata
+            let beats_per_measure = 4.0;
+            
+            // Convert musical positions to total measures
+            // measure + (beat + subdivision/1000) / beats_per_measure
+            let start_measures = start_musical.measure as f64 
+                + (start_musical.beat as f64 + start_musical.subdivision as f64 / 1000.0) / beats_per_measure;
+            
+            let end_measures = end_musical.measure as f64 
+                + (end_musical.beat as f64 + end_musical.subdivision as f64 / 1000.0) / beats_per_measure;
+            
+            let length = end_measures - start_measures;
+            if length > 0.0 {
+                Some(length)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Validate section data
+    pub fn validate(&self) -> Result<(), String> {
+        if let (Some(start), Some(end)) = (self.start_seconds(), self.end_seconds()) {
+            if start >= end {
+                return Err(format!("Invalid time range: start ({}) >= end ({})", start, end));
+            }
+        }
+
+        if let Some(ref name) = self.name {
+            if name.trim().is_empty() {
+                return Err("Section name cannot be empty".to_string());
+            }
+        }
+
+        if let Some(start) = self.start_seconds() {
+            if start < 0.0 {
+                return Err("Section start time cannot be negative".to_string());
+            }
+        }
+
+        if let Some(num) = self.number {
+            if num == 0 {
+                return Err("Section number must be greater than 0".to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Clone this section with a new time range
+    pub fn with_time_range(
+        &self,
+        start_seconds: f64,
+        end_seconds: f64,
+    ) -> Result<Self, String> {
+        if start_seconds >= end_seconds {
+            return Err(format!("Invalid time range: start ({}) >= end ({})", start_seconds, end_seconds));
+        }
+
+        let start_pos = Position::from_seconds(start_seconds);
+        let mut new_section = self.clone();
+        new_section.id = None; // New section gets new ID
+        new_section.start_position = Some(start_pos);
+        new_section.end_position = Some(Position::from_seconds(end_seconds));
+        Ok(new_section)
+    }
+
+    /// Clone this section with a new section type
+    pub fn with_section_type(&self, section_type: SectionType) -> Self {
+        let mut new_section = self.clone();
+        new_section.id = None; // New section gets new ID
+        new_section.section_type = section_type;
+        new_section
     }
 }
 

@@ -2,6 +2,8 @@
 //!
 //! Provides both a trait for accidental-aware types and a concrete enum for accidentals
 
+use serde::{Deserialize, Serialize};
+
 /// Trait for types that can have accidentals applied to them
 pub trait WithAccidental {
     /// Apply a sharp to this element
@@ -21,7 +23,7 @@ pub trait WithAccidental {
 }
 
 /// Concrete accidental type enum
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Accidental {
     DoubleFlat,
     Flat,

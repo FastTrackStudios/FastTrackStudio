@@ -2,7 +2,7 @@
 //!
 //! Helper functions for parsing song names, section types, and extracting numbers.
 
-use setlist::core::SectionType;
+use fts::setlist::core::SectionType;
 
 /// Parse a song name that may be in the format "Song Name" - Artist or Song Name - Artist
 /// Returns (song_name, artist_option)

@@ -207,7 +207,7 @@ pub fn convert_lyrics_data_to_lyrics(
     song_name: String,
     song: &setlist::core::Song,
 ) -> Result<lyrics::Lyrics, String> {
-    use lyrics::core::{Lyrics, LyricSection, LyricLine};
+    use fts::lyrics::core::{Lyrics, LyricSection, LyricLine};
     
     let mut lyrics = Lyrics::new(song_name);
     
@@ -309,7 +309,7 @@ fn find_song_section_by_name<'a>(name: &str, song: &'a setlist::core::Song) -> O
 
 /// Find the start position of a section in the song
 fn find_section_start_position(
-    section: &lyrics::core::LyricSection,
+    section: &fts::lyrics::core::LyricSection,
     song: &setlist::core::Song,
 ) -> f64 {
     // Find the song section that matches this lyric section by name

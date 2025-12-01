@@ -320,6 +320,7 @@ pub fn init_reactive_stream_subscriptions(
     
     // Track property changes - broadcast track updates reactively and update reactive service
     // For property changes, we update the specific track (more efficient than updating all tracks)
+    // If track index is unavailable (e.g., nested tracks), fall back to updating all tracks
     let track_service_clone = track_service.clone();
     rx.track_volume_changed().subscribe(move |track| {
         trace!(track = ?track, "Track volume changed - broadcasting update");
@@ -329,6 +330,10 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available (e.g., nested track) - update all tracks
+                debug!(track = ?track, "Track volume changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });
@@ -341,6 +346,10 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks
+                debug!(track = ?track, "Track pan changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });
@@ -353,6 +362,10 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks
+                debug!(track = ?track, "Track mute changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });
@@ -365,6 +378,10 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks
+                debug!(track = ?track, "Track solo changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });
@@ -377,19 +394,43 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks
+                debug!(track = ?track, "Track arm changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });
     
     let track_service_clone = track_service.clone();
     rx.track_name_changed().subscribe(move |track| {
-        debug!(track = ?track, "Track name changed - broadcasting update");
+        info!(
+            track_name = ?track.name(),
+            track_index = ?track.index(),
+            project = ?track.project(),
+            "Track name changed - processing update"
+        );
         broadcast_track_update_for_song(&track);
         
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
+                info!(
+                    track_index,
+                    track_name = ?track.name(),
+                    "Updating track from REAPER"
+                );
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks for this project
+                warn!(
+                    track = ?track,
+                    track_name = ?track.name(),
+                    "Track name changed but index unavailable - updating all tracks"
+                );
+                track_svc.update_tracks_from_reaper(track.project());
             }
+        } else {
+            warn!("Track service not available for track name change");
         }
     });
     
@@ -401,6 +442,10 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks
+                debug!(track = ?track, "Track input changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });
@@ -413,6 +458,10 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks
+                debug!(track = ?track, "Track input monitoring changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });
@@ -425,6 +474,10 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks
+                debug!(track = ?track, "Track automation mode changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });
@@ -439,6 +492,10 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks
+                debug!(track = ?track, "Track route volume changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });
@@ -452,6 +509,10 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks
+                debug!(track = ?track, "Track route pan changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });
@@ -464,6 +525,10 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks
+                debug!(track = ?track, "Receive count changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });
@@ -476,6 +541,10 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks
+                debug!(track = ?track, "Track send count changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });
@@ -488,6 +557,10 @@ pub fn init_reactive_stream_subscriptions(
         if let Some(ref track_svc) = track_service_clone {
             if let Some(track_index) = track.index() {
                 track_svc.update_track_from_reaper(track.project(), track_index as usize);
+            } else {
+                // Track index not available - update all tracks
+                debug!(track = ?track, "Hardware output send count changed but index unavailable - updating all tracks");
+                track_svc.update_tracks_from_reaper(track.project());
             }
         }
     });

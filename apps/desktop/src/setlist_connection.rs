@@ -10,7 +10,7 @@ use anyhow::Result;
 use dioxus::prelude::*;
 use std::sync::OnceLock;
 use tracing::{debug, error, info, warn};
-use setlist::{
+use fts::fts::setlist::{
     SetlistStreamApi, SetlistUpdateMessage,
     SETLIST, ACTIVE_SLIDE_INDEX, SONG_TRACKS, SONG_TRANSPORT, SETLIST_STRUCTURE, ACTIVE_INDICES,
 };
@@ -368,7 +368,7 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
 }
 
 /// Handle a single message from any stream
-async fn handle_message(msg: setlist::SetlistUpdateMessage, message_count: &mut u64, recv_count: &std::sync::atomic::AtomicU64) {
+async fn handle_message(msg: fts::setlist::SetlistUpdateMessage, message_count: &mut u64, recv_count: &std::sync::atomic::AtomicU64) {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Instant;
     
@@ -386,7 +386,7 @@ async fn handle_message(msg: setlist::SetlistUpdateMessage, message_count: &mut 
             
             // Also update legacy SETLIST signal for backward compatibility
             // TODO: Remove once all components use granular signals
-            *SETLIST.write() = Some(setlist::SetlistApi::new(
+            *SETLIST.write() = Some(fts::setlist::SetlistApi::new(
                 setlist,
                 active_song_index,
                 active_section_index,

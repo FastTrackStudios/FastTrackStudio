@@ -11,6 +11,7 @@
 use reaper_high::{Project, Track as ReaperTrack};
 use reaper_medium::ChunkCacheHint;
 use daw::tracks::{Track, parse_track_chunk};
+use daw::tracks::api::folder::{TrackDepth, FolderDepthChange};
 use tracing::{warn, debug};
 use serde::{Serialize, Deserialize};
 use std::sync::Mutex;
@@ -42,8 +43,8 @@ pub struct TrackSummary {
     pub selected: bool,
     /// Whether this track is a folder
     pub is_folder: bool,
-    /// Track depth (for folder hierarchy)
-    pub track_depth: i32,
+    /// Track depth (for folder hierarchy) - absolute cumulative nesting level
+    pub track_depth: i32, // Keep as i32 for API compatibility, will convert to TrackDepth in Track struct
     /// Whether track has FX enabled
     pub has_fx: bool,
     /// Whether track is armed for recording
@@ -64,7 +65,7 @@ impl TrackSummary {
             color: track.color,
             selected: track.selected,
             is_folder: track.is_folder,
-            track_depth: track.track_depth,
+            track_depth: track.track_depth.value() as i32,
             has_fx: track.has_fx,
             record_armed: track.record_armed,
         }
@@ -86,7 +87,7 @@ impl TrackSummary {
         track.color = self.color;
         track.selected = self.selected;
         track.is_folder = self.is_folder;
-        track.track_depth = self.track_depth;
+        track.track_depth = TrackDepth::new(self.track_depth);
         track.has_fx = self.has_fx;
         track.record_armed = self.record_armed;
         
@@ -154,10 +155,19 @@ pub fn get_track_summaries(project: &Project) -> Vec<TrackSummary> {
     
     // Cache miss or invalid - rebuild summaries
     let mut summaries = Vec::new();
+    let mut cumulative_depth = 0i32;
     
     for (index, reaper_track) in project.tracks().enumerate() {
-        match get_track_summary_from_reaper_track(&reaper_track, index) {
-            Ok(summary) => summaries.push(summary),
+        // Calculate cumulative depth by summing folder_depth_change from track 0 to current
+        let folder_depth_change = reaper_track.folder_depth_change();
+        cumulative_depth += folder_depth_change;
+        
+        match get_track_summary_from_reaper_track(&reaper_track, index, cumulative_depth) {
+            Ok(mut summary) => {
+                // Override track_depth with calculated cumulative depth
+                summary.track_depth = cumulative_depth.max(0) as i32; // Ensure non-negative
+                summaries.push(summary);
+            }
             Err(e) => {
                 warn!(
                     error = %e,
@@ -218,9 +228,13 @@ pub fn invalidate_all_track_caches() {
 }
 
 /// Get a lightweight track summary directly from REAPER track (without full chunk parsing)
+/// 
+/// `cumulative_depth` is the cumulative folder depth calculated by summing
+/// all `folder_depth_change()` values from track 0 to the current track.
 fn get_track_summary_from_reaper_track(
     reaper_track: &ReaperTrack,
     index: usize,
+    cumulative_depth: i32,
 ) -> Result<TrackSummary, String> {
     // Get basic properties using high-level API (fast, no chunk parsing needed)
     let name = reaper_track.name()
@@ -243,7 +257,8 @@ fn get_track_summary_from_reaper_track(
     
     let folder_depth = reaper_track.folder_depth_change();
     let is_folder = folder_depth > 0;
-    let track_depth = folder_depth.max(0) as i32; // Ensure non-negative
+    // Use the cumulative depth passed in (calculated in get_track_summaries)
+    let track_depth = cumulative_depth.max(0) as i32; // Ensure non-negative
     
     // Get FX enabled state (requires chunk, but we can do a minimal read)
     let has_fx = reaper_track.fx_is_enabled();
@@ -279,10 +294,19 @@ fn get_track_summary_from_reaper_track(
 /// For API efficiency, prefer `get_track_summaries()` instead.
 pub fn get_all_tracks(project: &Project) -> Vec<Track> {
     let mut tracks = Vec::new();
+    let mut cumulative_depth = 0i32;
     
     for (index, reaper_track) in project.tracks().enumerate() {
-        match get_track_from_chunk(&reaper_track, index) {
-            Ok(track) => tracks.push(track),
+        // Calculate cumulative depth by summing folder_depth_change from track 0 to current
+        let folder_depth_change = reaper_track.folder_depth_change();
+        cumulative_depth += folder_depth_change;
+        
+        match get_track_from_chunk(&reaper_track, index, cumulative_depth) {
+            Ok(mut track) => {
+                // Override track_depth with calculated cumulative depth
+                track.track_depth = TrackDepth::new(cumulative_depth);
+                tracks.push(track);
+            }
             Err(e) => {
                 warn!(
                     error = %e,
@@ -302,7 +326,15 @@ pub fn get_all_tracks(project: &Project) -> Vec<Track> {
 pub fn get_track(project: &Project, index: usize) -> Option<Track> {
     let reaper_track = project.track_by_index(index as u32)?;
     
-    get_track_from_chunk(&reaper_track, index)
+    // Calculate cumulative depth by summing folder_depth_change from track 0 to current
+    let mut cumulative_depth = 0i32;
+    for i in 0..=index {
+        if let Some(track) = project.track_by_index(i as u32) {
+            cumulative_depth += track.folder_depth_change();
+        }
+    }
+    
+    get_track_from_chunk(&reaper_track, index, cumulative_depth)
         .map_err(|e| {
             warn!(
                 error = %e,
@@ -310,6 +342,11 @@ pub fn get_track(project: &Project, index: usize) -> Option<Track> {
                 "Failed to get track from chunk"
             );
             e
+        })
+        .map(|mut track| {
+            // Override track_depth with calculated cumulative depth
+            track.track_depth = TrackDepth::new(cumulative_depth);
+            track
         })
         .ok()
 }
@@ -321,9 +358,23 @@ pub fn get_track(project: &Project, index: usize) -> Option<Track> {
 pub fn get_tracks(project: &Project, indices: &[usize]) -> Vec<Track> {
     let mut tracks = Vec::new();
     
+    // Pre-calculate cumulative depths for all tracks up to the maximum index
+    let max_index = indices.iter().max().copied().unwrap_or(0);
+    let mut cumulative_depths = Vec::with_capacity(max_index + 1);
+    let mut cumulative_depth = 0i32;
+    for i in 0..=max_index {
+        if let Some(track) = project.track_by_index(i as u32) {
+            cumulative_depth += track.folder_depth_change();
+        }
+        cumulative_depths.push(cumulative_depth);
+    }
+    
     for &index in indices {
         if let Some(reaper_track) = project.track_by_index(index as u32) {
-            if let Ok(track) = get_track_from_chunk(&reaper_track, index) {
+            let cumulative_depth = cumulative_depths.get(index).copied().unwrap_or(0);
+            if let Ok(mut track) = get_track_from_chunk(&reaper_track, index, cumulative_depth) {
+                // Override track_depth with calculated cumulative depth
+                track.track_depth = TrackDepth::new(cumulative_depth);
                 tracks.push(track);
             }
         }
@@ -335,9 +386,13 @@ pub fn get_tracks(project: &Project, indices: &[usize]) -> Vec<Track> {
 /// Internal helper to get a track from its chunk
 /// 
 /// Uses the high-level Track::chunk() API for safe property access.
+/// 
+/// `cumulative_depth` is the cumulative folder depth calculated by summing
+/// all `folder_depth_change()` values from track 0 to the current track.
 fn get_track_from_chunk(
     reaper_track: &ReaperTrack,
     index: usize,
+    cumulative_depth: i32,
 ) -> Result<Track, String> {
     // Read track state chunk using high-level safe API
     // Track::chunk() is safe and internally handles the unsafe calls
@@ -351,9 +406,65 @@ fn get_track_from_chunk(
     // Parse chunk and convert to Track
     let parsed = parse_track_chunk(&chunk_str, index)?;
     
+    // Also get name from high-level API
+    // The high-level API name is more reliable and up-to-date than the chunk
+    // (chunk cache can be stale, especially after name changes)
+    let high_level_name = reaper_track.name()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("Track {}", index));
+    
     // Get selected state using high-level API (safe)
     let selected = reaper_track.is_selected();
     
+    // Also get color from high-level API (more reliable than chunk cache)
+    let high_level_color = reaper_track.custom_color().map(|rgb| {
+        // Convert RgbColor to u32 packed RGB: (r << 16) | (g << 8) | b
+        ((rgb.r as u32) << 16) | ((rgb.g as u32) << 8) | (rgb.b as u32)
+    });
+    
     // Convert parsed chunk to Track struct
-    Ok(parsed.to_track(Some(index), selected))
+    let mut track = parsed.to_track(Some(index), selected);
+    
+    // Override track_depth with calculated cumulative depth (from folder_depth_change)
+    // The chunk's track_depth is the relative indentation change, not absolute depth
+    track.track_depth = TrackDepth::new(cumulative_depth);
+    
+    // Also update folder_depth_change from high-level API to ensure it's current
+    // (chunk may be stale, but high-level API is always up-to-date)
+    let folder_depth_change_value = reaper_track.folder_depth_change();
+    track.folder_depth_change = FolderDepthChange::from_reaper_value(folder_depth_change_value);
+    
+    // Override the name with the high-level API name if they differ
+    // This ensures we get the most up-to-date name, especially after name changes
+    // The chunk cache can be stale, but the high-level API always has the current name
+    // This is expected behavior - chunk cache is often stale after name changes
+    if track.name != high_level_name && !high_level_name.is_empty() {
+        if !track.name.is_empty() {
+            debug!(
+                track_index = index,
+                chunk_name = %track.name,
+                high_level_name = %high_level_name,
+                "Track name mismatch - using high-level API name (chunk cache is stale, this is expected)"
+            );
+        }
+        track.name = high_level_name; // Use the most up-to-date name from high-level API
+    }
+    
+    // Override the color with the high-level API color if they differ
+    // This ensures we get the most up-to-date color, especially after color changes
+    // The chunk cache can be stale, but the high-level API always has the current color
+    // This is expected behavior - chunk cache is often stale after color changes
+    if track.color != high_level_color {
+        if track.color.is_some() || high_level_color.is_some() {
+            debug!(
+                track_index = index,
+                chunk_color = ?track.color,
+                high_level_color = ?high_level_color,
+                "Track color mismatch - using high-level API color (chunk cache is stale, this is expected)"
+            );
+        }
+        track.color = high_level_color; // Use the most up-to-date color from high-level API
+    }
+    
+    Ok(track)
 }

@@ -4,7 +4,7 @@
 //! They directly update signals, which is appropriate for local mode.
 
 use dioxus::prelude::*;
-use setlist::Setlist;
+use fts::fts::setlist::Setlist;
 use std::collections::HashMap;
 use crate::utils::{get_project_name, navigation::handle_keyboard_navigation};
 use crate::utils::sidebar_helpers::update_position_on_section_click;

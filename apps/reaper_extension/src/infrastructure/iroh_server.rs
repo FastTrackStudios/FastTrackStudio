@@ -21,9 +21,11 @@ pub mod alpn {
     /// ALPN for tracks protocol (matches TrackApi::ALPN)
     pub const TRACKS: &[u8] = daw::tracks::TrackApi::ALPN;
     /// ALPN for setlist protocol (matches SetlistStreamApi::ALPN)
-    pub const SETLIST: &[u8] = setlist::SetlistStreamApi::ALPN;
+    pub const SETLIST: &[u8] = fts::setlist::SetlistStreamApi::ALPN;
     /// ALPN for lyrics protocol (matches LyricsApi::ALPN)
-    pub const LYRICS: &[u8] = lyrics::LyricsApi::ALPN;
+    pub const LYRICS: &[u8] = fts::fts::lyrics::reactive::irpc::LyricsApi::ALPN;
+    /// ALPN for chords protocol (matches ChordsApi::ALPN)
+    pub const CHORDS: &[u8] = fts::chords::reactive::irpc::ChordsApi::ALPN;
 }
 
 /// Start the IROH server with all IRPC APIs (Transport, Tracks, Setlist)
@@ -84,11 +86,19 @@ pub fn start_iroh_server(
     );
     
     // Create lyrics API using REAPER implementation
-    let lyrics_service_box: Box<dyn lyrics::reactive::LyricsReactiveService> = 
+    let lyrics_service_box: Box<dyn fts::fts::lyrics::reactive::LyricsReactiveService> = 
         Box::new(crate::infrastructure::reaper_lyrics_reactive::ReaperLyricsReactiveService::new(
             lyrics_streams,
         ));
-    let mut lyrics_api = lyrics::LyricsApi::spawn(lyrics_service_box);
+    let mut lyrics_api = fts::fts::lyrics::reactive::irpc::LyricsApi::spawn(lyrics_service_box);
+    
+    // Create chords API using REAPER implementation
+    let chords_streams = fts::chords::reactive::ChordsStreams::new();
+    let chords_service_box: Box<dyn fts::chords::reactive::ChordsReactiveService> = 
+        Box::new(crate::infrastructure::reaper_chords_reactive::ReaperChordsReactiveService::new(
+            chords_streams,
+        ));
+    let mut chords_api = fts::chords::reactive::irpc::ChordsApi::spawn(chords_service_box);
     
     // Create setlist stream API (on main thread)
     let setlist_api = match stream_service.create_stream_api() {
@@ -103,6 +113,7 @@ pub fn start_iroh_server(
     let transport_handler_data = transport_api.take_handler_data();
     let tracks_handler_data = tracks_api.take_handler_data();
     let lyrics_handler_data = lyrics_api.take_handler_data();
+    let chords_handler_data = chords_api.take_handler_data();
     
     // Expose all handlers (on main thread)
     let transport_handler = match transport_api.expose() {
@@ -135,6 +146,14 @@ pub fn start_iroh_server(
         Ok(handler) => handler,
         Err(e) => {
             warn!("Failed to expose lyrics service: {}", e);
+            return;
+        }
+    };
+    
+    let chords_handler = match chords_api.expose() {
+        Ok(handler) => handler,
+        Err(e) => {
+            warn!("Failed to expose chords service: {}", e);
             return;
         }
     };
@@ -317,7 +336,7 @@ pub fn start_iroh_server(
                 let annotations_broadcast_clone = annotations_broadcast.clone();
                 
                 tokio::spawn(async move {
-                    use lyrics::reactive::irpc::LyricsMessage;
+                    use fts::lyrics::reactive::irpc::LyricsMessage;
                     use irpc::WithChannels;
                     let mut rx = rx;
                     info!("[Lyrics Handler] Started listening for lyrics subscription requests");
@@ -372,6 +391,51 @@ pub fn start_iroh_server(
                 });
             }
             
+            if let Some((rx, chords_broadcast)) = chords_handler_data {
+                let chords_broadcast_clone = chords_broadcast.clone();
+                
+                tokio::spawn(async move {
+                    use crate::chords::reactive_irpc::ChordsMessage;
+                    use irpc::WithChannels;
+                    let mut rx = rx;
+                    info!("[Chords Handler] Started listening for chords subscription requests");
+                    while let Ok(msg_opt) = rx.recv().await {
+                        match msg_opt {
+                            Some(msg) => {
+                                info!("[Chords Handler] Received message: {:?}", std::mem::discriminant(&msg));
+                                match msg {
+                                    ChordsMessage::SubscribeChords(WithChannels { tx, .. }) => {
+                                        info!("[Chords Handler] ✅ Client subscribed to chords stream");
+                                        let mut chords_rx = chords_broadcast_clone.subscribe();
+
+                                        tokio::spawn(async move {
+                                            info!("[Chords Handler] Started forwarding chords updates to client");
+                                            loop {
+                                                tokio::select! {
+                                                    Ok(msg) = chords_rx.recv() => {
+                                                        if tx.send(msg).await.is_err() { 
+                                                            warn!("[Chords Handler] Client disconnected (chords_rx)");
+                                                            break; 
+                                                        }
+                                                    }
+                                                    else => break,
+                                                }
+                                            }
+                                            info!("[Chords Handler] Stopped forwarding chords updates to client");
+                                        });
+                                    }
+                                }
+                            }
+                            None => {
+                                warn!("[Chords Handler] Message channel closed");
+                                break;
+                            }
+                        }
+                    }
+                    warn!("[Chords Handler] Handler loop ended");
+                });
+            }
+            
             // Create IROH endpoint
             let endpoint = match iroh::Endpoint::bind().await {
                 Ok(ep) => ep,
@@ -388,6 +452,7 @@ pub fn start_iroh_server(
                 .accept(alpn::TRACKS.to_vec(), tracks_handler)
                 .accept(alpn::SETLIST.to_vec(), setlist_handler)
                 .accept(alpn::LYRICS.to_vec(), lyrics_handler)
+                .accept(alpn::CHORDS.to_vec(), chords_handler)
                 .spawn();
             
             // Store endpoint ID for client discovery

@@ -4,18 +4,17 @@ members = [
     "libs/macros",
     "libs/swell-ui",
     "modules/daw",
-    "modules/fts/setlist",
-    "modules/fts/smart-template",
-    "modules/fts/track-template",
+    "modules/fts",
     "modules/peer-2-peer",  
     "packages/keyflow",
+    "packages/charts",
     "xtask",
     "apps/desktop", 
     "apps/mobile", 
     "apps/web", 
     "modules/ui", 
     "modules/api", 
-    "modules/fts/naming-convention", "modules/fts/lyrics", "modules/rppxml",
+    "modules/rppxml", 
 ]
 resolver = "2"
 

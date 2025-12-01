@@ -1,4 +1,4 @@
-use setlist::{Setlist, Song};
+use fts::fts::setlist::{Setlist, Song};
 use std::collections::HashMap;
 use crate::utils::{get_project_name, calculate_song_progress, calculate_section_progress};
 
@@ -20,7 +20,7 @@ pub fn get_song_progress_for_sidebar(
 
 /// Calculate section progress for sidebar display
 pub fn get_section_progress_for_sidebar(
-    section: &setlist::Section,
+    section: &fts::setlist::Section,
     song: &Song,
     song_idx: usize,
     current_song_idx: Option<usize>,

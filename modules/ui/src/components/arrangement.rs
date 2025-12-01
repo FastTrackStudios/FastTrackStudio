@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
-use setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, Song};
+use fts::fts::setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES, Song};
 use daw::primitives::{MusicalPosition, TimePosition};
 use crate::components::{Slider, Ruler, MeasureInfo, TrackControlPanel};
-use lyrics::{Lyrics, output::{Slides, SlideBreakConfig}};
+use fts::fts::lyrics::{Lyrics, output::{Slides, SlideBreakConfig}};
 use crate::reactive_state::{use_transport_for_active_song, use_tracks_for_active_song};
 
 /// Arrangement view component - DAW timeline/arrange view
@@ -290,7 +290,7 @@ pub fn ArrangementView(
                             // Get preview text (first line or truncated)
                             let preview_text = slide.lines.first()
                                 .map(|line| {
-                                    use lyrics::core::LinePart;
+                                    use fts::lyrics::core::LinePart;
                                     let mut text = String::new();
                                     for part in line.parts.iter() {
                                         match part {
@@ -388,11 +388,30 @@ pub fn ArrangementView(
         }
     });
     
-    // Track heights (resizable) - base heights before vertical zoom
-    // Compute base heights from track count (default 64px per track)
-    let base_track_heights = use_memo(move || {
+    // Track heights (resizable) - per-track heights that persist
+    // Initialize from track count, but allow individual track resizing
+    let mut base_track_heights = use_signal(move || {
         let track_count = tracks().as_ref().map(|t| t.len()).unwrap_or(0).max(1);
         vec![64.0; track_count]
+    });
+    
+    // Update heights when track count changes (preserve existing heights)
+    let tracks_for_height_effect = tracks;
+    let mut base_heights_for_effect = base_track_heights;
+    use_effect(move || {
+        let track_count = tracks_for_height_effect().as_ref().map(|t| t.len()).unwrap_or(0).max(1);
+        let current_heights = base_heights_for_effect();
+        
+        if current_heights.len() != track_count {
+            let mut new_heights = current_heights.clone();
+            // Preserve existing heights, add default for new tracks
+            if track_count > current_heights.len() {
+                new_heights.extend(vec![64.0; track_count - current_heights.len()]);
+            } else if track_count < current_heights.len() {
+                new_heights.truncate(track_count);
+            }
+            *base_heights_for_effect.write() = new_heights;
+        }
     });
     
     // Apply vertical zoom to track heights (ruler not affected)
@@ -400,6 +419,26 @@ pub fn ArrangementView(
         let vertical_zoom = vertical_zoom_level();
         base_track_heights().iter().map(|h| h * vertical_zoom).collect::<Vec<f64>>()
     });
+    
+    // Callback for track height changes
+    let on_track_height_change = {
+        let mut base_heights = base_track_heights;
+        let vertical_zoom = vertical_zoom_level;
+        Some(Callback::new(move |(track_idx, new_height): (usize, f64)| {
+            let mut heights = base_heights();
+            let zoom = vertical_zoom();
+            // Convert from zoomed height back to base height
+            let base_height = new_height / zoom;
+            let min_height = 32.0 / zoom;
+            let max_height = 256.0 / zoom;
+            let clamped_height = base_height.max(min_height).min(max_height);
+            
+            if track_idx < heights.len() {
+                heights[track_idx] = clamped_height;
+                *base_heights.write() = heights;
+            }
+        }))
+    };
     
     // Calculate total height for tracks area (ruler + all tracks) - must match TCP
     // Note: ruler height is NOT affected by vertical zoom
@@ -595,7 +634,7 @@ pub fn ArrangementView(
                                 tracks: tracks().as_ref().map(|t| t.clone()).unwrap_or_default(),
                                 track_heights: track_heights,
                                 collapsed_folders: collapsed_folders,
-                                on_track_height_change: None,
+                                on_track_height_change: on_track_height_change.clone(),
                                 on_folder_toggle: Some({
                                     let mut collapsed_folders_for_callback = collapsed_folders;
                                     Callback::new(move |idx: usize| {

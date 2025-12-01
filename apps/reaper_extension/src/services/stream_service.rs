@@ -3,7 +3,7 @@
 //! Creates and manages the setlist stream API.
 
 use std::sync::Arc;
-use setlist::SetlistStreamApi;
+use fts::fts::setlist::SetlistStreamApi;
 use crate::core::{ReaperSetlistStateProvider, ReaperSetlistCommandHandler};
 use crate::services::{SetlistService, CommandService, SeekService};
 use tracing::info;

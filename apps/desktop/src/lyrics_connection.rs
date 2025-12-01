@@ -7,9 +7,9 @@ use anyhow::Result;
 use dioxus::prelude::*;
 use std::sync::OnceLock;
 use tracing::{debug, error, info, warn};
-use lyrics::reactive::irpc::{LyricsApi, LyricsUpdateMessage};
-use lyrics::core::Lyrics;
-use lyrics::source::LyricsAnnotations;
+use fts::lyrics::reactive::irpc::{LyricsApi, LyricsUpdateMessage};
+use fts::lyrics::core::Lyrics;
+use fts::lyrics::source::LyricsAnnotations;
 use crate::iroh_connection_manager::{init_shared_endpoint, get_shared_endpoint, get_reaper_endpoint_addr};
 // Cached lyrics API (for making RPC calls)
 static LYRICS_API: OnceLock<std::sync::Mutex<Option<LyricsApi>>> = OnceLock::new();

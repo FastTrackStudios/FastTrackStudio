@@ -4,9 +4,10 @@
 //! using @ notation (e.g., @keys "synth here", @drums "crash on 3")
 
 use std::fmt;
+use serde::{Deserialize, Serialize};
 
 /// Represents an instrument group that can be targeted by cues
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum InstrumentGroup {
     All,
     Keys,
@@ -47,7 +48,7 @@ impl fmt::Display for InstrumentGroup {
 }
 
 /// Represents a text cue for a specific instrument group
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TextCue {
     pub group: InstrumentGroup,
     pub text: String,

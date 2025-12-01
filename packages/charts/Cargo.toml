@@ -1,0 +1,21 @@
+[package]
+name = "charts"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "charts"
+path = "src/lib.rs"
+
+[dependencies]
+lilypond = { path = "rust2ly/lilypond-rs" }
+serde = { workspace = true }
+nom = "8.0.0"
+splitty = "1.0.2"
+colored = "3.0.0"
+flate2 = "1.0"
+base64 = "0.22"
+pathdiff = "0.2"
+keyflow = { path = "../../packages/keyflow" }

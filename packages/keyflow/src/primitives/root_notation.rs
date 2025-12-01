@@ -5,17 +5,18 @@
 
 use super::note::{MusicalNote, MusicalNoteToken, Note};
 use super::roman_numeral::RomanNumeralToken;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Case for Roman numeral notation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RomanCase {
     Upper, // I, II, III, IV, V, VI, VII (typically major)
     Lower, // i, ii, iii, iv, v, vi, vii (typically minor)
 }
 
 /// The original format used to specify the root
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RootFormat {
     /// Scale degree (1-7)
     ScaleDegree(u8),
@@ -30,7 +31,7 @@ pub enum RootFormat {
 /// This struct stores both the resolved note and the original format,
 /// making all three formats 100% interchangeable while preserving
 /// how the user originally wrote it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RootNotation {
     /// The resolved note (may be None if key-relative and not yet resolved)
     resolved_note: Option<MusicalNote>,

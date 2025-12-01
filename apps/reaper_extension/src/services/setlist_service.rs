@@ -3,7 +3,7 @@
 //! Manages setlist state and provides access to the current setlist API.
 
 use std::sync::{Arc, Mutex};
-use setlist::SetlistApi;
+use fts::setlist::SetlistApi;
 use crate::implementation::setlist::build_setlist_from_open_projects;
 use crate::infrastructure::reactive_polling::ReactivePollingService;
 use tracing::info;

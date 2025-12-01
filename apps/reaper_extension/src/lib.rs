@@ -8,6 +8,7 @@ mod app;
 
 mod live;
 mod lyrics;
+mod chords;
 
 /// Polling state management for continuous updates
 pub mod polling_state {
@@ -105,7 +106,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     APP_INSTANCE.set(Fragile::new(app))
         .expect("App already initialized");
     
-    // Register REAPER timer callback for 60Hz polling (~16.67ms intervals)
+    // Register REAPER timer callback for 30Hz polling (~33.33ms intervals)
     // This runs on REAPER's main thread automatically, so we can safely call REAPER APIs
     extern "C" fn polling_timer_callback() {
         use crate::infrastructure::timer::{log_first_timer_call, increment_tick_count};
@@ -118,12 +119,17 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         log_first_timer_call();
         increment_tick_count();
         
-        // Periodic logging to verify timer is running (every 1000 ticks = ~16 seconds at 60Hz)
+        // Periodic logging to verify timer is running (every 1000 ticks = ~33 seconds at 30Hz)
         static LOG_COUNTER: AtomicU64 = AtomicU64::new(0);
         let count = LOG_COUNTER.fetch_add(1, Ordering::Relaxed);
         if count % 1000 == 0 && count > 0 {
             debug!("⏰ Timer running: {} ticks processed", count);
         }
+        
+        // Track polling counter - poll all tracks every ~5 seconds (150 ticks at 30Hz)
+        static TRACK_POLL_COUNTER: AtomicU64 = AtomicU64::new(0);
+        let track_poll_count = TRACK_POLL_COUNTER.fetch_add(1, Ordering::Relaxed);
+        const TRACK_POLL_INTERVAL: u64 = 150; // 150 ticks = ~5 seconds at 30Hz
         
         // Get app instance (Fragile ensures this is main thread)
         if let Some(app_fragile) = get_app() {
@@ -195,6 +201,20 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
                 // Use the concrete REAPER service instance if available
                 if let Some(ref transport_service) = app.reactive_state.reaper_transport_service {
                     transport_service.update_from_reaper();
+                }
+                
+                // Poll all tracks every ~5 seconds to catch changes that don't have reactive events
+                // (e.g., folder collapse state, which isn't detected reactively)
+                if track_poll_count % TRACK_POLL_INTERVAL == 0 && track_poll_count > 0 {
+                    use reaper_high::Reaper;
+                    let reaper = Reaper::get();
+                    let current_project = reaper.current_project();
+                    
+                    // Update all tracks from REAPER (will only emit if changes detected)
+                    if let Some(ref track_service) = app.reactive_state.reaper_track_service {
+                        track_service.update_tracks_from_reaper(current_project);
+                        debug!("📊 Polled all tracks for changes (tick {})", track_poll_count);
+                    }
                 }
             }
             

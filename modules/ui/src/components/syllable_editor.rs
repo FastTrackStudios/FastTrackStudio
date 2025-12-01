@@ -1,7 +1,7 @@
 //! Syllable editor component for editing notes and rhythms of each syllable
 
 use dioxus::prelude::*;
-use lyrics::core::{Lyrics, LyricSection, LyricLine, Word, Syllable, split_line_into_words};
+use fts::fts::lyrics::core::{Lyrics, LyricSection, LyricLine, Word, Syllable, split_line_into_words};
 use crate::components::piano::{Piano, PianoProps, MidiNote};
 use lucide_dioxus::{Play, Pause, Square};
 

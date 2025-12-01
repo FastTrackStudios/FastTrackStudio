@@ -51,15 +51,15 @@ Cmaj7/// Dm7///
     assert_eq!(all_chords.len(), 8);
 
     // Dm7 (second chord) should be at position 0.3.0
-    assert_eq!(all_chords[1].position.total_duration.measures, 0);
-    assert_eq!(all_chords[1].position.total_duration.beats, 3);
+    assert_eq!(all_chords[1].position.total_duration.measure, 0);
+    assert_eq!(all_chords[1].position.total_duration.beat, 3);
 
     // Last space chord should be at position 6.2.0
     // (after 2 measures of 3-beat chords = 1.2.0, then 5 more full measures)
     let last_space = all_chords.last().unwrap();
     assert_eq!(last_space.full_symbol, "s");
-    assert_eq!(last_space.position.total_duration.measures, 6);
-    assert_eq!(last_space.position.total_duration.beats, 2);
+    assert_eq!(last_space.position.total_duration.measure, 6);
+    assert_eq!(last_space.position.total_duration.beat, 2);
 }
 
 #[test]
@@ -93,9 +93,9 @@ Em7/// Fmaj7///
 
     // First chorus chord should be at measure 7.2.0
     // (after verse ends: 2 chord measures + 6 space measures = 1.2.0 + 6 measures = 7.2.0)
-    assert_eq!(chorus_first_chord.position.total_duration.measures, 7);
-    assert_eq!(chorus_first_chord.position.total_duration.beats, 2);
-    assert_eq!(chorus_first_chord.position.total_duration.subdivisions, 0);
+    assert_eq!(chorus_first_chord.position.total_duration.measure, 7);
+    assert_eq!(chorus_first_chord.position.total_duration.beat, 2);
+    assert_eq!(chorus_first_chord.position.total_duration.subdivision, 0);
 }
 
 #[test]
@@ -121,21 +121,21 @@ Cmaj7/// Dm7/// Em7/// Fmaj7///
     assert_eq!(chords.len(), 4);
 
     // First chord at beginning
-    assert_eq!(chords[0].position.total_duration.measures, 0);
-    assert_eq!(chords[0].position.total_duration.beats, 0);
-    assert_eq!(chords[0].position.total_duration.subdivisions, 0);
+    assert_eq!(chords[0].position.total_duration.measure, 0);
+    assert_eq!(chords[0].position.total_duration.beat, 0);
+    assert_eq!(chords[0].position.total_duration.subdivision, 0);
 
     // Second chord at 3 beats
-    assert_eq!(chords[1].position.total_duration.measures, 0);
-    assert_eq!(chords[1].position.total_duration.beats, 3);
+    assert_eq!(chords[1].position.total_duration.measure, 0);
+    assert_eq!(chords[1].position.total_duration.beat, 3);
 
     // Third chord at 1 measure + 2 beats (1.2.0)
-    assert_eq!(chords[2].position.total_duration.measures, 1);
-    assert_eq!(chords[2].position.total_duration.beats, 2);
+    assert_eq!(chords[2].position.total_duration.measure, 1);
+    assert_eq!(chords[2].position.total_duration.beat, 2);
 
     // Fourth chord at 2 measures + 1 beat (2.1.0)
-    assert_eq!(chords[3].position.total_duration.measures, 2);
-    assert_eq!(chords[3].position.total_duration.beats, 1);
+    assert_eq!(chords[3].position.total_duration.measure, 2);
+    assert_eq!(chords[3].position.total_duration.beat, 1);
 }
 
 #[test]
@@ -157,25 +157,25 @@ Cmaj7/// Dm7/// 6/8 Em7/. Fmaj7/.
     assert_eq!(chords.len(), 4);
 
     // First two chords in 4/4 time (3 beats each)
-    assert_eq!(chords[0].position.total_duration.measures, 0);
-    assert_eq!(chords[0].position.total_duration.beats, 0);
+    assert_eq!(chords[0].position.total_duration.measure, 0);
+    assert_eq!(chords[0].position.total_duration.beat, 0);
 
-    assert_eq!(chords[1].position.total_duration.measures, 0);
-    assert_eq!(chords[1].position.total_duration.beats, 3);
+    assert_eq!(chords[1].position.total_duration.measure, 0);
+    assert_eq!(chords[1].position.total_duration.beat, 3);
 
     // After time sig change to 6/8
     // Previous chords filled: 0.3 + 0.3 = 1.2 (1 measure + 2 beats in 4/4)
     // Em7/. in 6/8 (dotted quarter = 3 eighth notes, which is half a measure in 6/8)
     // But the measure boundary happens at 1.2.0 (after 6 beats total)
     // So Em7 starts at 1.2.0
-    assert_eq!(chords[2].position.total_duration.measures, 1);
-    assert_eq!(chords[2].position.total_duration.beats, 2);
+    assert_eq!(chords[2].position.total_duration.measure, 1);
+    assert_eq!(chords[2].position.total_duration.beat, 2);
 
     // Fmaj7/. starts after Em7/.
     // In 6/8, /. = 3 eighth notes = 3 beats
     // So Fmaj7 is at 1.2 + 3 = 1.5 (measure 1, beat 5)
-    assert_eq!(chords[3].position.total_duration.measures, 1);
-    assert_eq!(chords[3].position.total_duration.beats, 5);
+    assert_eq!(chords[3].position.total_duration.measure, 1);
+    assert_eq!(chords[3].position.total_duration.beat, 5);
 }
 
 #[test]
@@ -205,9 +205,9 @@ Cmaj7/// @keys "here" Dm7/// Em7///
     let chord_position = &cue_measure.chords[0].position;
 
     // Cue should be at position 0.3.0 (after first chord which is 3 beats)
-    assert_eq!(chord_position.total_duration.measures, 0);
-    assert_eq!(chord_position.total_duration.beats, 3);
-    assert_eq!(chord_position.total_duration.subdivisions, 0);
+    assert_eq!(chord_position.total_duration.measure, 0);
+    assert_eq!(chord_position.total_duration.beat, 3);
+    assert_eq!(chord_position.total_duration.subdivision, 0);
 }
 
 #[test]
@@ -235,9 +235,9 @@ Em7/// Fmaj7///
         .flat_map(|m| &m.chords)
         .collect();
 
-    assert_eq!(verse_chords[0].position.total_duration.measures, 0);
-    assert_eq!(verse_chords[1].position.total_duration.measures, 0);
-    assert_eq!(verse_chords[1].position.total_duration.beats, 3);
+    assert_eq!(verse_chords[0].position.total_duration.measure, 0);
+    assert_eq!(verse_chords[1].position.total_duration.measure, 0);
+    assert_eq!(verse_chords[1].position.total_duration.beat, 3);
 
     // Chorus chords should continue from where verse left off
     // Verse has 4 measures declared, with 2 chords + 2 spaces
@@ -249,12 +249,12 @@ Em7/// Fmaj7///
         .collect();
 
     // First chorus chord starts where verse ended
-    assert_eq!(chorus_chords[0].position.total_duration.measures, 3);
-    assert_eq!(chorus_chords[0].position.total_duration.beats, 2);
+    assert_eq!(chorus_chords[0].position.total_duration.measure, 3);
+    assert_eq!(chorus_chords[0].position.total_duration.beat, 2);
 
     // Second chorus chord
-    assert_eq!(chorus_chords[1].position.total_duration.measures, 4);
-    assert_eq!(chorus_chords[1].position.total_duration.beats, 1);
+    assert_eq!(chorus_chords[1].position.total_duration.measure, 4);
+    assert_eq!(chorus_chords[1].position.total_duration.beat, 1);
 }
 
 #[test]
@@ -280,20 +280,16 @@ Cmaj7//// 'Dm7////
             "Chord {}: {} at {}.{}.{}",
             i,
             chord.full_symbol,
-            chord.position.total_duration.measures,
-            chord.position.total_duration.beats,
-            chord.position.total_duration.subdivisions
+            chord.position.total_duration.measure,
+            chord.position.total_duration.beat,
+            chord.position.total_duration.subdivision
         );
     }
 
     // All chords should have valid positions
     for chord in chords {
-        assert!(
-            chord
-                .position
-                .total_duration
-                .to_beats(chart.time_signature.unwrap())
-                >= 0.0
-        );
+        let pos = &chord.position.total_duration;
+        // Check that position is non-negative
+        assert!(pos.measure >= 0 && pos.beat >= 0 && pos.subdivision >= 0);
     }
 }

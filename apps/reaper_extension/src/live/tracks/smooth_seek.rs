@@ -712,8 +712,8 @@ impl SmoothSeekHandler {
                 
                 // Queue marker deletions to happen on main thread
                 state.markers_to_delete.extend(markers_to_delete_on_completion);
-            } else if state.verification_checks > 300 {
-                // After 300 checks (about 5 seconds at 60Hz), give up and log failure
+            } else if state.verification_checks > 150 {
+                // After 150 checks (about 5 seconds at 30Hz), give up and log failure
                 warn!(
                     target_position = target_time,
                     actual_position = current_time,

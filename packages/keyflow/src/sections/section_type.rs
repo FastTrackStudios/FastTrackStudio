@@ -2,8 +2,10 @@
 //!
 //! Defines different types of song sections
 
+use serde::{Deserialize, Serialize};
+
 /// Represents different types of song sections
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SectionType {
     Intro,
     Verse,
@@ -57,7 +59,133 @@ impl SectionType {
         }
     }
 
-    /// Parse a section marker from input
+    /// Parse a section type from a string (name or abbreviation)
+    /// 
+    /// Handles case-insensitive matching and common typos/variations:
+    /// - "verse", "Verse", "VERSE", "vs", "VS", "vErSe", "vrse" -> Verse
+    /// - "chorus", "Chorus", "CHORUS", "ch", "CH", "chorous", "corus" -> Chorus
+    /// - etc.
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        let s_lower = s.to_lowercase();
+        let s_lower = s_lower.trim();
+
+        // Try exact matches first (case-insensitive)
+        match s_lower {
+            "verse" | "vs" | "v" => return Ok(SectionType::Verse),
+            "chorus" | "ch" | "c" => return Ok(SectionType::Chorus),
+            "bridge" | "br" | "b" => return Ok(SectionType::Bridge),
+            "intro" | "in" | "i" => return Ok(SectionType::Intro),
+            "outro" | "out" | "o" => return Ok(SectionType::Outro),
+            "instrumental" | "inst" | "instrument" => return Ok(SectionType::Instrumental),
+            _ => {}
+        }
+
+        // Try fuzzy matching for common typos and variations
+        // Verse variations
+        if Self::fuzzy_match(&s_lower, "verse", &["vrse", "verce", "vers", "versa"]) {
+            return Ok(SectionType::Verse);
+        }
+
+        // Chorus variations
+        if Self::fuzzy_match(
+            &s_lower,
+            "chorus",
+            &["chorous", "corus", "chrous", "chors", "chor"],
+        ) {
+            return Ok(SectionType::Chorus);
+        }
+
+        // Bridge variations
+        if Self::fuzzy_match(&s_lower, "bridge", &["bridg", "brige", "brid"]) {
+            return Ok(SectionType::Bridge);
+        }
+
+        // Intro variations - handle "introduction", "intro", etc.
+        if Self::fuzzy_match(
+            &s_lower,
+            "intro",
+            &["intr", "int", "introo", "introduction"],
+        ) {
+            return Ok(SectionType::Intro);
+        }
+        // Also check if it starts with "introduction"
+        if s_lower.starts_with("introduction") {
+            return Ok(SectionType::Intro);
+        }
+
+        // Outro variations - handle "outroduction", "outro", etc.
+        if Self::fuzzy_match(
+            &s_lower,
+            "outro",
+            &["outr", "out", "outroo", "outroduction"],
+        ) {
+            return Ok(SectionType::Outro);
+        }
+        // Also check if it starts with "outroduction"
+        if s_lower.starts_with("outroduction") {
+            return Ok(SectionType::Outro);
+        }
+
+        // Instrumental variations
+        if Self::fuzzy_match(
+            &s_lower,
+            "instrumental",
+            &["instumental", "instrumantal", "instrument"],
+        ) {
+            return Ok(SectionType::Instrumental);
+        }
+
+        // Try to parse Pre/Post
+        if let Some(rest) = s_lower.strip_prefix("pre-") {
+            if let Ok(inner) = Self::from_str(rest) {
+                return Ok(SectionType::Pre(Box::new(inner)));
+            }
+        }
+        if let Some(rest) = s_lower.strip_prefix("post-") {
+            if let Ok(inner) = Self::from_str(rest) {
+                return Ok(SectionType::Post(Box::new(inner)));
+            }
+        }
+
+        Err(format!(
+            "Unknown section type: '{}' - supported types: verse, chorus, bridge, intro, outro, instrumental, pre-*, post-*",
+            s
+        ))
+    }
+
+    /// Fuzzy matching helper - checks if the input matches the target or any variations
+    fn fuzzy_match(input: &str, target: &str, variations: &[&str]) -> bool {
+        // Exact match with target
+        if input == target {
+            return true;
+        }
+
+        // Check if input starts with target (allows for trailing characters like numbers)
+        if input.starts_with(target) {
+            return true;
+        }
+
+        // Check variations
+        for variation in variations {
+            if input == *variation || input.starts_with(variation) {
+                return true;
+            }
+        }
+
+        // Check if input is close enough to target (simple edit distance check)
+        // For very short strings, just check if first few chars match
+        if input.len() >= 3 && target.len() >= 3 {
+            let input_prefix = &input[..input.len().min(3)];
+            let target_prefix = &target[..target.len().min(3)];
+            if input_prefix == target_prefix {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Parse a section marker from input (for chart parsing)
     /// 
     /// Supports:
     /// - Standard sections: "VS 16", "Intro 4", etc.

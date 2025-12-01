@@ -3,9 +3,10 @@
 //! Represents musical durations in measure.beats.subdivision format
 
 use std::fmt;
+use serde::{Deserialize, Serialize};
 
 /// Represents a time signature for duration calculations
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TimeSignature {
     pub numerator: u8,
     pub denominator: u8,
@@ -53,7 +54,7 @@ pub trait Duration: fmt::Debug + fmt::Display {
 }
 
 /// Standard implementation of Duration
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MusicalDuration {
     pub measures: u32,
     pub beats: u32,

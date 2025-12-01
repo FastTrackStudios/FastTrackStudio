@@ -65,7 +65,7 @@ impl Chart {
         
         let mut measure_idx = 0;
         let time_sig = if !measures.is_empty() {
-            crate::time::TimeSignature::new(measures[0].time_signature.0, measures[0].time_signature.1)
+            crate::time::TimeSignature::new(measures[0].time_signature.0 as i32, measures[0].time_signature.1 as i32)
         } else {
             crate::time::TimeSignature::common_time()
         };
@@ -94,11 +94,11 @@ impl Chart {
                 // Check if last measure is on this line
                 if last_measure_idx >= measure_idx && last_measure_idx < line_end_idx {
                     for chord in next_chords.iter() {
-                        let chord_abs_measures = chord.position.total_duration.measures;
+                        let chord_abs_measures = chord.position.total_duration.measure.max(0) as u32;
                         // If this chord belongs to the last measure of current section (pushed from next section)
                         if chord_abs_measures == last_measure_abs {
-                            let chord_abs_beats = chord.position.total_duration.beats;
-                            let chord_abs_subdivisions = chord.position.total_duration.subdivisions;
+                            let chord_abs_beats = chord.position.total_duration.beat.max(0) as u32;
+                            let chord_abs_subdivisions = chord.position.total_duration.subdivision.max(0).min(999) as u32;
                             let beats_in_slots = chord_abs_beats as usize * slots_per_beat;
                             let subdivisions_in_slots = (chord_abs_subdivisions as usize * SLOTS_PER_MEASURE) / (beats_per_measure * 1000);
                             let slot = beats_in_slots + subdivisions_in_slots;
@@ -118,9 +118,9 @@ impl Chart {
                 for chord in &measure.chords {
                     // Calculate position within the measure
                     // chord.position.total_duration is absolute from song start
-                    let chord_abs_measures = chord.position.total_duration.measures;
-                    let chord_abs_beats = chord.position.total_duration.beats;
-                    let chord_abs_subdivisions = chord.position.total_duration.subdivisions;
+                    let chord_abs_measures = chord.position.total_duration.measure.max(0) as u32;
+                    let chord_abs_beats = chord.position.total_duration.beat.max(0) as u32;
+                    let chord_abs_subdivisions = chord.position.total_duration.subdivision.max(0).min(999) as u32;
                     
                     // Determine which measure on this line this chord belongs to based on its position
                     // Chords can be pushed into previous measures, so check all measures on this line
@@ -203,8 +203,8 @@ impl Chart {
                     let dur = &chord.duration;
                     chord_text.push_str(&format!(
                         " [pos:{}:{}:{} dur:{}:{}:{}]",
-                        pos.measures, pos.beats, pos.subdivisions,
-                        dur.measures, dur.beats, dur.subdivisions
+                        pos.measure, pos.beat, pos.subdivision,
+                        dur.measure, dur.beat, dur.subdivision
                     ));
                     
                     chord_parts.push(chord_text);
@@ -401,7 +401,7 @@ impl std::fmt::Display for Chart {
                         let next_first_measure = &next_section.measures[0];
                         let pushed_chords: Vec<_> = next_first_measure.chords.iter()
                             .filter(|chord| {
-                                let chord_abs_measures = chord.position.total_duration.measures;
+                                let chord_abs_measures = chord.position.total_duration.measure.max(0) as u32;
                                 // If chord belongs to previous measure (pushed from start of next section), include it
                                 // Check that it's actually a push (not pull) and that it's in the previous measure
                                 if let Some((is_push, _)) = chord.push_pull {

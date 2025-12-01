@@ -1,12 +1,13 @@
 use dioxus::prelude::*;
 use dioxus_router::{Routable, Router, Outlet};
-use setlist::{
+use fts::fts::setlist::{
     Setlist, Song, Section, SectionType, SETLIST, TransportCommand, NavigationCommand,
     ACTIVE_INDICES, SETLIST_STRUCTURE, SONG_TRACKS, SONG_TRANSPORT,
 };
 use daw::marker_region::{Marker, application::TempoTimePoint};
 use daw::primitives::Position;
 use ui::components::*;
+use ui::components::chords::ChordsView;
 // REAPER connection via REAPER_ALPN is disabled - all data comes through setlist stream
 // #[cfg(not(target_arch = "wasm32"))]
 // use crate::reaper_connection::ReaperConnection;
@@ -23,6 +24,8 @@ mod reaper_connection;
 mod setlist_connection;
 #[cfg(not(target_arch = "wasm32"))]
 mod tracks_connection;
+#[cfg(not(target_arch = "wasm32"))]
+mod chords_connection;
 #[cfg(not(target_arch = "wasm32"))]
 mod iroh_connection_manager;
 #[cfg(not(target_arch = "wasm32"))]
@@ -78,8 +81,8 @@ enum Route {
     LyricsPerformance {},
     #[route("/arrangement")]
     Arrangement {},
-    #[route("/testing")]
-    Testing {},
+    #[route("/chords")]
+    Chords {},
 }
 
 #[component]
@@ -113,7 +116,7 @@ fn AppLayout() -> Element {
             Route::LyricsEdit {} => Some("/lyrics/edit".to_string()),
             Route::LyricsPerformance {} => Some("/lyrics/performance".to_string()),
             Route::Arrangement {} => Some("/arrangement".to_string()),
-            Route::Testing {} => Some("/testing".to_string()),
+            Route::Chords {} => Some("/chords".to_string()),
         }
     });
     
@@ -242,15 +245,20 @@ fn AppLayout() -> Element {
     }
     */
     
-    // Derive current song and section index from SETLIST global signal
+    // Derive current song and section index from ACTIVE_INDICES granular signal
+    // This only rerenders when active indices change, not when tracks/transport change
     let current_song_index = use_memo(move || {
-        SETLIST.read().as_ref().and_then(|api| api.active_song_index())
+        ACTIVE_INDICES.read().0
     });
     
     let current_section_index = use_memo(move || {
         ACTIVE_INDICES.read().1
     });
     
+    // Get setlist structure (songs, sections) - only rerenders when structure changes
+    let setlist_structure = use_memo(move || {
+        SETLIST_STRUCTURE.read().clone()
+    });
                 
     // Mode toggle callback - simplified for now
     let on_toggle_mode = Callback::new(move |_: ()| {
@@ -410,27 +418,7 @@ fn AppLayout() -> Element {
         // No-op for wasm32
     });
 
-    // Derive current song and section index from ACTIVE_INDICES granular signal
-    // This only rerenders when active indices change, not when tracks/transport change
-    let current_song_index = use_memo(move || {
-        ACTIVE_INDICES.read().0
-    });
-    
-    let current_section_index = use_memo(move || {
-        ACTIVE_INDICES.read().1
-    });
-    
-    // Get setlist structure (songs, sections) - only rerenders when structure changes
-    let setlist_structure = use_memo(move || {
-        SETLIST_STRUCTURE.read().clone()
-    });
-                
-    // Mode toggle callback - simplified for now
-    let on_toggle_mode = Callback::new(move |_: ()| {
-        // TODO: Implement mode toggle if needed
-    });
-    
-    // Callbacks
+    // Callbacks (duplicate definitions removed - using ones defined earlier)
     #[cfg(not(target_arch = "wasm32"))]
     let on_song_click = Callback::new(move |song_idx: usize| {
         // Seek to the clicked song (switches to that song's tab)
@@ -657,9 +645,10 @@ fn EditModeContext(
 
 #[component]
 fn Performance() -> Element {
-    // Derive current song and section index from SETLIST global signal
+    // Derive current song and section index from ACTIVE_INDICES granular signal
+    // This only rerenders when active indices change, not when tracks/transport change
     let current_song_index = use_memo(move || {
-        SETLIST.read().as_ref().and_then(|api| api.active_song_index())
+        ACTIVE_INDICES.read().0
     });
     
     let current_section_index = use_memo(move || {
@@ -782,6 +771,13 @@ fn LyricsPerformance() -> Element {
     }
 }
 
+#[component]
+fn Chords() -> Element {
+    rsx! {
+        ChordsView {}
+    }
+}
+
     #[component]
     fn Arrangement() -> Element {
         #[cfg(not(target_arch = "wasm32"))]
@@ -837,49 +833,7 @@ fn LyricsPerformance() -> Element {
         }
     }
 
-#[component]
-fn Testing() -> Element {
-    // Note: Staff crate UI feature requires dioxus-web which conflicts with desktop builds
-    // Temporarily disabled until we can resolve the dependency conflict
-    // use staff::ui::{prelude::*, Font, Staff, NoteEvent, FretDiagram};
-    // use staff::{note::Accidental, time::{Duration, DurationKind}, Natural};
-    
-    // let selected = use_signal(|| None::<NoteEvent>);
-
-    rsx! {
-        div {
-            class: "flex-1 flex flex-col overflow-hidden bg-background p-6",
-            h1 {
-                class: "text-2xl font-bold mb-4",
-                "Testing - Staff Components"
-            }
-            div {
-                class: "flex-1 overflow-y-auto space-y-8",
-                div {
-                    class: "p-4 bg-card rounded-lg border",
-                    h2 {
-                        class: "text-xl font-semibold mb-4",
-                        "Staff Components"
-                    }
-                    p {
-                        class: "text-muted-foreground",
-                        "The staff crate's UI feature requires dioxus-web which conflicts with desktop builds."
-                    }
-                    p {
-                        class: "text-muted-foreground mt-2",
-                        "To use staff components, we need to either:"
-                    }
-                    ul {
-                        class: "list-disc list-inside text-muted-foreground mt-2 space-y-1",
-                        li { "Use staff without the UI feature (music theory only)" }
-                        li { "Find a way to conditionally enable web features" }
-                        li { "Use a different approach for rendering musical notation" }
-                    }
-                }
-            }
-        }
-    }
-}
+// Testing component and Mosaic test page removed - was using libs/ui which is no longer used
 
 /// Create sample setlist with real Setlist data
 fn create_sample_setlist() -> Setlist {

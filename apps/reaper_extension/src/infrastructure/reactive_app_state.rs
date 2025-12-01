@@ -17,10 +17,10 @@ use daw::transport::Transport;
 use daw::{DawStreams, ProjectStreams};
 use daw::transport::reactive::TransportReactiveService;
 use daw::tracks::reactive::TrackReactiveService;
-use setlist::SetlistApi;
-use setlist::reactive::{SetlistReactiveStreams, SetlistReactiveService};
-use lyrics::{Lyrics, LyricsAnnotations};
-use lyrics::reactive::{LyricsReactiveService, LyricsStreams};
+use fts::setlist::SetlistApi;
+use fts::setlist::reactive::{SetlistReactiveStreams, SetlistReactiveService};
+use fts::lyrics::{Lyrics, LyricsAnnotations};
+use fts::fts::lyrics::reactive::{LyricsReactiveService, LyricsStreams};
 
 /// Centralized application state
 /// This is a lightweight wrapper that composes domain services
@@ -54,7 +54,7 @@ impl ReactiveAppStateStreams {
     // Convenience accessors that delegate to domain streams
     
     #[allow(unused)]
-    pub fn setlist_structure_changed(&self) -> rxrust::prelude::LocalSubject<'static, setlist::Setlist, ()> {
+    pub fn setlist_structure_changed(&self) -> rxrust::prelude::LocalSubject<'static, fts::setlist::Setlist, ()> {
         self.setlist.setlist.setlist_structure_changed.borrow().clone()
     }
     
@@ -84,7 +84,7 @@ impl ReactiveAppStateStreams {
     }
     
     #[allow(unused)]
-    pub fn song_added(&self) -> rxrust::prelude::LocalSubject<'static, (usize, setlist::Song), ()> {
+    pub fn song_added(&self) -> rxrust::prelude::LocalSubject<'static, (usize, fts::setlist::Song), ()> {
         self.setlist.setlist.song_added.borrow().clone()
     }
     
@@ -94,7 +94,7 @@ impl ReactiveAppStateStreams {
     }
     
     #[allow(unused)]
-    pub fn songs_reordered(&self) -> rxrust::prelude::LocalSubject<'static, setlist::Setlist, ()> {
+    pub fn songs_reordered(&self) -> rxrust::prelude::LocalSubject<'static, fts::setlist::Setlist, ()> {
         self.setlist.setlist.songs_reordered.borrow().clone()
     }
 }
@@ -214,7 +214,7 @@ impl ReactiveAppStateService {
         
         let lyrics_streams = LyricsStreams::new();
         let default_lyrics = Arc::new(
-            lyrics::reactive::DefaultLyricsReactiveService::new(lyrics_streams)
+            fts::fts::lyrics::reactive::DefaultLyricsReactiveService::new(lyrics_streams)
         ) as Arc<dyn LyricsReactiveService>;
         
         Self {

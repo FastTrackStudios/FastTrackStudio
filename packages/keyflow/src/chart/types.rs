@@ -7,10 +7,11 @@ use super::cues::TextCue;
 use crate::chord::{Chord, ChordRhythm, PushPullAmount};
 use crate::primitives::RootNotation;
 use crate::sections::Section;
-use crate::time::{AbsolutePosition, MusicalDuration};
+use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition};
+use serde::{Deserialize, Serialize};
 
 /// Represents a chord instance with position and timing information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChordInstance {
     /// Root notation (preserves original format: note, degree, or roman)
     pub root: RootNotation,
@@ -85,7 +86,7 @@ impl ChordInstance {
 ///
 /// A measure is ALWAYS 1.0.0 in duration (one measure).
 /// The time signature defines how many beats are in that measure.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Measure {
     /// Chords in this measure
     pub chords: Vec<ChordInstance>,
@@ -138,7 +139,7 @@ impl Default for Measure {
 }
 
 /// Represents a section with its measures
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChartSection {
     /// Section information (type, number, etc.)
     pub section: Section,
@@ -174,7 +175,7 @@ impl ChartSection {
 }
 
 /// Represents a key change event in the chart
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KeyChange {
     /// Position where the key change occurs
     pub position: AbsolutePosition,
@@ -206,7 +207,7 @@ impl KeyChange {
 }
 
 /// Represents a time signature change at a specific position
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TimeSignatureChange {
     /// Position where the time signature change occurs
     pub position: AbsolutePosition,

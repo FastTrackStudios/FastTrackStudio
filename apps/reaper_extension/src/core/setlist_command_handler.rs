@@ -3,8 +3,8 @@
 //! Handles commands from the stream API by delegating to services.
 
 use std::sync::Arc;
-use setlist::{SetlistCommandHandler, TransportCommand, NavigationCommand};
-use setlist::infra::stream::LyricsState;
+use fts::setlist::{SetlistCommandHandler, TransportCommand, NavigationCommand};
+use fts::setlist::infra::stream::LyricsState;
 use crate::services::{CommandService, SeekService};
 
 /// REAPER implementation of SetlistCommandHandler
@@ -75,7 +75,7 @@ impl SetlistCommandHandler for ReaperSetlistCommandHandler {
         handler.assign_syllable_to_note(syllable_text).await
     }
     
-    async fn update_lyrics(&self, song_index: usize, lyrics: lyrics::core::Lyrics) -> Result<(), String> {
+    async fn update_lyrics(&self, song_index: usize, lyrics: fts::lyrics::core::Lyrics) -> Result<(), String> {
         // Update lyrics in REAPER project
         use crate::lyrics::write::update_lyrics_in_reaper;
         update_lyrics_in_reaper(song_index, lyrics)

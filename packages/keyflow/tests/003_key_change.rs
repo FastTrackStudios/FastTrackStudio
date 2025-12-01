@@ -25,7 +25,7 @@ gmaj7 cmaj7 #C# c#maj7 g#m7
 
     // Test tempo
     assert!(chart.tempo.is_some());
-    assert_eq!(chart.tempo.as_ref().unwrap().bpm, 120);
+    assert_eq!(chart.tempo.as_ref().unwrap().bpm, 120.0);
 
     // Test time signature
     assert!(chart.time_signature.is_some());

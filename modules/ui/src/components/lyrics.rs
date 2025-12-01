@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
-use lyrics::{Lyrics, output::{Slides, SlideBreakConfig, Slide}};
-use lyrics::core::{SectionTypeHint, LinePart};
+use fts::fts::lyrics::{Lyrics, output::{Slides, SlideBreakConfig, Slide}};
+use fts::fts::lyrics::core::{SectionTypeHint, LinePart};
 use std::collections::HashMap;
-use setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES};
+use fts::fts::setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES};
 use crate::components::text_fit::{TextFit, TextFitMode};
 use crate::components::syllable_editor::{SyllableEditor, SyllableEditorProps, SyllableKey};
 use crate::reactive_state::{use_lyrics_for_active_song, use_active_slide_for_active_song};

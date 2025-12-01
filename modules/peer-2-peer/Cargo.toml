@@ -12,7 +12,7 @@ irpc = { workspace = true }
 irpc-iroh = "0.11.0"
 
 # Setlist types
-setlist = { path = "../fts/setlist" }
+fts = { path = "../fts" }
 
 # Iroh P2P networking library (with local discovery feature)
 iroh = { version = "0.95", features = ["discovery-local-network"] }

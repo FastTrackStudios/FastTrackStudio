@@ -3,12 +3,12 @@
 //! Implements lyrics command handlers for REAPER extension.
 //! These are used by the setlist stream protocol.
 
-use setlist::infra::stream::LyricsState;
+use fts::setlist::infra::stream::LyricsState;
 use reaper_high::Reaper;
 use reaper_medium::{MediaItemTake, PositionInSeconds};
 use std::ffi::CString;
-use lyrics::Syllable;
-use lyrics::core::split_line_into_words;
+use fts::lyrics::Syllable;
+use fts::fts::lyrics::core::split_line_into_words;
 
 /// REAPER implementation of lyrics command handlers
 pub struct ReaperLyricsCommandHandler;

@@ -1,4 +1,4 @@
-use setlist::{Setlist, Song};
+use fts::fts::setlist::{Setlist, Song};
 use std::collections::HashMap;
 use crate::utils::get_project_name;
 

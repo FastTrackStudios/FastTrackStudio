@@ -2,10 +2,11 @@
 //!
 //! Comprehensive interval system supporting all common and extended intervals
 
+use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
 /// Enum representing all possible intervals of a chord
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Interval {
     Unison,

@@ -3,8 +3,9 @@
 //! The diatonic scale and its 7 modes (Ionian, Dorian, Phrygian, etc.)
 
 use super::trait_module::ScaleFamily;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DiatonicMode {
     Ionian, // Major
     Dorian,

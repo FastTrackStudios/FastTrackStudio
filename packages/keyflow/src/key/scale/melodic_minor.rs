@@ -3,8 +3,9 @@
 //! The melodic minor scale and its 7 modes (including Altered scale)
 
 use super::trait_module::ScaleFamily;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MelodicMinorMode {
     MelodicMinor,
     DorianFlat2,

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::tracks::api::folder::{TcpFolderState, McpFolderState};
+use crate::tracks::api::folder::{TcpFolderState, McpFolderState, TrackDepth, FolderDepthChange};
 use crate::tracks::api::automation::AutomationMode;
 use crate::tracks::api::free_mode::FreeMode;
 use crate::tracks::api::fixed_lanes::{FixedLanesSettings, LaneSoloSettings, LaneRecordSettings, LaneNameSettings};
@@ -69,8 +69,15 @@ pub struct Track {
     pub folder_state_tcp: Option<TcpFolderState>,
     /// Folder state for MCP (Mixer Control Panel)
     pub folder_state_mcp: Option<McpFolderState>,
-    /// Track depth (for folder hierarchy)
-    pub track_depth: i32,
+    /// Track depth (for folder hierarchy) - absolute cumulative nesting level
+    /// This is calculated by summing all folder_depth_change values from track 0
+    pub track_depth: TrackDepth,
+    /// Folder depth change - relative change from previous track (from ISBUS field 2)
+    /// - 0 = normal track
+    /// - 1 = folder parent (starts new folder)
+    /// - -1 = closes one folder level
+    /// - -2 = closes two folder levels, etc.
+    pub folder_depth_change: FolderDepthChange,
     /// Whether this track is a folder
     pub is_folder: bool,
     /// Bus compact settings (BUSCOMP) - collapse folder settings
@@ -213,7 +220,8 @@ impl Track {
             invert_phase: false,
             folder_state_tcp: None,
             folder_state_mcp: None,
-            track_depth: 0,
+            track_depth: TrackDepth::default(),
+            folder_depth_change: FolderDepthChange::Normal,
             is_folder: false,
             bus_compact: None,
             

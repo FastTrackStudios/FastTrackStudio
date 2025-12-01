@@ -5,7 +5,7 @@
 
 use irpc::{channel::mpsc, rpc_requests};
 use serde::{Deserialize, Serialize};
-use setlist::Setlist;
+use fts::fts::setlist::Setlist;
 
 /// Transport state information
 #[derive(Debug, Clone, Serialize, Deserialize)]

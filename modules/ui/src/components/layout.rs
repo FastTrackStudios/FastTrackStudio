@@ -7,7 +7,7 @@ use crate::components::transport::TransportControlBar;
 use crate::components::sidebar_items::{SongItem, SongItemData, SectionItem};
 use crate::components::mode_toggle::ModeToggle;
 use lumen_blocks::components::button::{Button, ButtonVariant};
-use setlist::{SETLIST_STRUCTURE, SONG_TRANSPORT, Setlist, Song, Section};
+use fts::fts::setlist::{SETLIST_STRUCTURE, SONG_TRANSPORT, Setlist, Song, Section};
 use daw::primitives::{TimePosition, MusicalPosition, TimeSignature};
 use daw::transport::PlayState;
 
@@ -68,9 +68,9 @@ pub fn TopBar(
                         "Arrangement"
                     }
                     Link {
-                        to: "/testing",
+                        to: "/chords",
                         class: "px-4 py-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent font-medium text-sm transition-colors data-[active=true]:bg-primary data-[active=true]:text-primary-foreground",
-                        "Testing"
+                        "Chords"
                     }
                 }
                 

@@ -5,7 +5,7 @@
 
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use setlist::{TransportCommand, NavigationCommand};
+use fts::setlist::{TransportCommand, NavigationCommand};
 use crate::infrastructure::action_registry::get_command_id;
 use reaper_medium::{CommandId, ProjectContext};
 use tracing::info;

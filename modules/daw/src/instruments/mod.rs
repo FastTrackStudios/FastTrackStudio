@@ -56,6 +56,7 @@ pub use vocals::Vocal;
 pub use world::WorldInstrument;
 
 /// Common transpositions for transposing instruments
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Transposition {
     /// Concert pitch (no transposition)
     C,

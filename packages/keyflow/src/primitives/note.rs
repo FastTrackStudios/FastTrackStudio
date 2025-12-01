@@ -4,6 +4,7 @@
 
 use super::accidental::{Accidental, WithAccidental};
 use crate::parsing::token::{Token, TokenType};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Trait for musical notes
@@ -25,7 +26,7 @@ pub trait Note: fmt::Debug + fmt::Display {
 }
 
 /// Musical note implementation
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MusicalNote {
     /// The note name as written (e.g., "C#", "Db", "F")
     pub name: String,
