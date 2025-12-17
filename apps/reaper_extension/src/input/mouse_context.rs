@@ -615,17 +615,24 @@ pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode
 pub fn get_context_from_mouse_position(medium_reaper: &MediumReaper) -> (Context, String, String) {
     let mode = DetectionMode::minimal(); // Use minimal mode for performance
     let mouse_context = determine_mouse_context(medium_reaper, mode);
-    let context_name = format!("{} ({})", 
-        match mouse_context.context {
-            Context::Main => "Main",
-            Context::Midi => "MIDI Editor",
-            Context::MidiEventListEditor => "MIDI Event List Editor",
-            Context::MidiInlineEditor => "MIDI Inline Editor",
-            Context::MediaExplorer => "Media Explorer",
-            Context::CrossfadeEditor => "Crossfade Editor",
-            Context::Global => "Global",
-        },
-        mouse_context.window
-    );
+    let context_name = match mouse_context.context {
+        Context::Main => "Main",
+        Context::Midi => "MIDI Editor",
+        Context::MidiEventListEditor => "MIDI Event List Editor",
+        Context::MidiInlineEditor => "MIDI Inline Editor",
+        Context::MediaExplorer => "Media Explorer",
+        Context::CrossfadeEditor => "Crossfade Editor",
+        Context::Global => "Global",
+    }.to_string();
     (mouse_context.context, context_name, mouse_context.window_title)
+}
+
+/// Get mouse cursor context (BR_GetMouseCursorContext equivalent)
+/// Returns (window, segment, details) as strings matching SWS BR_GetMouseCursorContext format
+pub fn get_mouse_cursor_context(medium_reaper: &MediumReaper) -> (String, String, String) {
+    let mode = DetectionMode::all(); // Use full mode to get all details
+    let mouse_context = determine_mouse_context(medium_reaper, mode);
+    
+    // Return window, segment, details matching BR_GetMouseCursorContext format
+    (mouse_context.window.clone(), mouse_context.segment.clone(), mouse_context.details.clone())
 }

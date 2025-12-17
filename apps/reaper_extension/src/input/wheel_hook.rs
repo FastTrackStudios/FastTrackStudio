@@ -1,10 +1,16 @@
-//! Mouse Wheel Event Hook
+//! Mouse Event Hook
 //!
-//! Uses window procedure (WndProc) hooking to intercept WM_MOUSEWHEEL messages.
+//! Uses window procedure (WndProc) hooking to intercept mouse wheel and click events.
 //! This is necessary because TranslateAccel only handles keyboard accelerators.
+//!
+//! Handles:
+//! - WM_MOUSEWHEEL / WM_MOUSEHWHEEL - Mouse wheel events
+//! - WM_LBUTTONDOWN / WM_RBUTTONDOWN / WM_MBUTTONDOWN - Mouse click events
+//!
+//! Logs mouse context on clicks and when context changes (on wheel events).
 
 use reaper_high::Reaper;
-use reaper_low::raw::{GWL_WNDPROC, HWND, LPARAM, LRESULT, POINT, UINT, WM_MOUSEHWHEEL, WM_MOUSEWHEEL, WPARAM};
+use reaper_low::raw::{GWL_WNDPROC, HWND, LPARAM, LRESULT, POINT, UINT, WM_MOUSEHWHEEL, WM_MOUSEWHEEL, WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WPARAM};
 use reaper_low::Swell;
 use swell_ui::Window;
 use std::cell::RefCell;
@@ -21,6 +27,8 @@ thread_local! {
     static ORIGINAL_PROCS: RefCell<HashMap<HWND, unsafe extern "C" fn(HWND, UINT, WPARAM, LPARAM) -> LRESULT>> = RefCell::new(HashMap::new());
     /// Track which windows we've already hooked
     static HOOKED_WINDOWS: RefCell<HashSet<HWND>> = RefCell::new(HashSet::new());
+    /// Track previous mouse context to detect changes
+    static PREVIOUS_CONTEXT: RefCell<Option<(crate::input::state::Context, String)>> = RefCell::new(None);
 }
 
 /// Determine context from a specific HWND (used for mouse position-based detection)
@@ -125,12 +133,75 @@ fn determine_context_from_hwnd(hwnd: HWND, medium_reaper: &reaper_medium::Reaper
     (Context::Main, "Main".to_string(), found_window_title)
 }
 
-/// Our custom window procedure that intercepts mouse wheel events
+/// Log mouse context (called on clicks and context changes)
+fn log_mouse_context(context: crate::input::state::Context, context_name: &str, _window_title: &str, event_type: &str) {
+    let reaper = Reaper::get();
+    
+    // Check if context changed
+    let context_changed = PREVIOUS_CONTEXT.with(|prev| {
+        let mut prev_borrow = prev.borrow_mut();
+        let changed = match prev_borrow.as_ref() {
+            Some((prev_ctx, prev_name)) => {
+                *prev_ctx != context || prev_name != context_name
+            }
+            None => true, // First time, always log
+        };
+        
+        if changed {
+            *prev_borrow = Some((context, context_name.to_string()));
+        }
+        changed
+    });
+    
+    // Log if context changed or on every click
+    if context_changed || event_type == "click" {
+        // Don't log here - let the caller log with event details
+    }
+}
+
+/// Our custom window procedure that intercepts mouse wheel and click events
 unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM) -> LRESULT {
     // Check if interception is enabled
     if !crate::input::handler::InputHandler::is_enabled() {
         // Pass through to original procedure
         return call_original_proc(hwnd, msg, w, l);
+    }
+
+    // Handle mouse click events
+    match msg {
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {
+            // Get mouse position from lParam
+            let x = l as i32 & 0xFFFF;
+            let y = (l as i32 >> 16) & 0xFFFF;
+            let pt = POINT { x, y };
+            
+            // Convert to screen coordinates
+            let swell = Swell::get();
+            let mut pt_screen = pt;
+            swell.ClientToScreen(hwnd, &mut pt_screen);
+            
+            // Determine context from mouse position
+            let reaper = Reaper::get();
+            let medium_reaper = reaper.medium_reaper();
+            let (context, context_name, _window_title) = 
+                crate::input::mouse_context::get_context_from_mouse_position(&medium_reaper);
+            
+            // Determine button name
+            let button = match msg {
+                WM_LBUTTONDOWN => "Left",
+                WM_RBUTTONDOWN => "Right",
+                WM_MBUTTONDOWN => "Middle",
+                _ => "Unknown",
+            };
+            
+            // Log mouse click with context
+            log_mouse_context(context, &context_name, &_window_title, "click");
+            reaper.show_console_msg(format!("{} click in {}\n", button, context_name));
+            
+            // Always pass through mouse clicks to REAPER (don't intercept)
+            return call_original_proc(hwnd, msg, w, l);
+        }
+        _ => {}
     }
 
     // Handle mouse wheel events
@@ -149,33 +220,18 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
             // Use the mouse context module which ports BR_MouseInfo::GetContext
             let reaper = Reaper::get();
             let medium_reaper = reaper.medium_reaper();
-            let (context, context_name, window_title) = 
+            let (context, context_name, _window_title) = 
                 crate::input::mouse_context::get_context_from_mouse_position(&medium_reaper);
             
-            // Build modifier string
-            let mut modifiers = Vec::new();
-            if ctrl { modifiers.push("Ctrl"); }
-            if shift { modifiers.push("Shift"); }
-            if alt { modifiers.push("Alt"); }
-            let modifier_str = if modifiers.is_empty() {
-                String::new()
-            } else {
-                format!("+{}", modifiers.join("+"))
-            };
+            // Log context change on wheel events
+            log_mouse_context(context, &context_name, &_window_title, "wheel");
             
-            let direction = if delta > 0 { "up/right" } else { "down/left" };
+            // Determine wheel direction and type
+            let direction = if delta > 0 { "up" } else { "down" };
+            let wheel_type = if is_horizontal { "horizontal wheel" } else { "wheel" };
             
             // Log mouse wheel event
-            reaper.show_console_msg(format!(
-                "FTS-Input: {} wheel {} (delta: {}){} in {} (Context: {:?}, Window: '{}')\n",
-                if is_horizontal { "Horizontal" } else { "Vertical" },
-                direction,
-                delta,
-                modifier_str,
-                context_name,
-                context,
-                window_title
-            ));
+            reaper.show_console_msg(format!("Mouse {} {} in {}\n", wheel_type, direction, context_name));
             
             // Check passthrough mode
             if crate::input::handler::InputHandler::is_passthrough() {

@@ -390,18 +390,95 @@ impl TranslateAccel for InputHandler {
         let key = args.msg.key();
         let behavior = args.msg.behavior();
         
-        // Determine context - this now also returns the window title it found
-        let (context, context_name, window_title) = Self::determine_context();
-        
         // Convert key to string for logging
         let key_str = Self::key_to_string(key, &behavior);
         
+        // Check for 'r' key to log arrange view right drag default action
+        if key_str == "r" || key_str == "R" {
+            if INTERCEPTION_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                let reaper = Reaper::get();
+                let medium_reaper = reaper.medium_reaper();
+                
+                // Get the arrange view right drag default action (modifier flag 0 = no modifiers)
+                use crate::input::mouse_modifiers::core::{get_mouse_modifier, MouseModifierFlag};
+                use crate::input::mouse_modifiers::types::{MouseModifierContext, MouseButtonInput};
+                use crate::input::mouse_modifiers::behaviors::get_mouse_modifier_name;
+                
+                let context_str = "MM_CTX_ARRANGE_RMOUSE";
+                let flag = MouseModifierFlag::new(false, false, false, false); // Default action (no modifiers)
+                
+                if let Some(action_str) = get_mouse_modifier(context_str, flag, &medium_reaper) {
+                    // Parse the action
+                    use crate::input::mouse_modifiers::actions::MouseModifierAction as ParsedAction;
+                    if let Ok(parsed_action) = ParsedAction::parse(&action_str) {
+                        // Get the context enum
+                        let context_enum = MouseModifierContext::ArrangeView(
+                            crate::input::mouse_modifiers::types::ArrangeViewInteraction::Right(
+                                MouseButtonInput::RightDrag
+                            )
+                        );
+                        
+                        // Get the display name
+                        let display_name = get_mouse_modifier_name(
+                            &context_enum,
+                            MouseButtonInput::RightDrag,
+                            parsed_action.command_id,
+                        );
+                        
+                        reaper.show_console_msg(format!(
+                            "Arrange View -> Right Drag (Default): {} ({})\n",
+                            display_name,
+                            action_str
+                        ));
+                    } else {
+                        reaper.show_console_msg(format!(
+                            "Arrange View -> Right Drag (Default): {} (could not parse)\n",
+                            action_str
+                        ));
+                    }
+                } else {
+                    reaper.show_console_msg("Arrange View -> Right Drag (Default): No action assigned\n");
+                }
+                
+                // Eat the 'r' key so REAPER doesn't process it
+                return TranslateAccelResult::Eat;
+            }
+        }
+        
+        // Check for 'a' key to log mouse cursor context (BR_GetMouseCursorContext equivalent)
+        if key_str == "a" || key_str == "A" {
+            let reaper = Reaper::get();
+            let medium_reaper = reaper.medium_reaper();
+            let (window, segment, details) = crate::input::mouse_context::get_mouse_cursor_context(&medium_reaper);
+            
+            // Also get the full context for display
+            let (context, context_name, window_title) = Self::determine_context();
+            
+            reaper.show_console_msg(format!(
+                "FTS-Input: Mouse Cursor Context:\n  Window: '{}'\n  Segment: '{}'\n  Details: '{}'\n  Context: {:?} ({})\n  Window Title: '{}'\n",
+                window, segment, details, context, context_name, window_title
+            ));
+            
+            // Eat the 'a' key so REAPER doesn't process it
+            return TranslateAccelResult::Eat;
+        }
+        
+        // Check for 'm' key to log all mouse modifiers
+        if key_str == "m" || key_str == "M" {
+            let reaper = Reaper::get();
+            let medium_reaper = reaper.medium_reaper();
+            crate::input::mouse_modifiers::preset::log_all_modifiers(&medium_reaper);
+            
+            // Eat the 'm' key so REAPER doesn't process it
+            return TranslateAccelResult::Eat;
+        }
+        
+        // Determine context - this now also returns the window title it found
+        let (context, context_name, _window_title) = Self::determine_context();
+        
         // Log ALL keypresses to REAPER console for testing (only when interception is enabled)
         let reaper = Reaper::get();
-        reaper.show_console_msg(format!(
-            "FTS-Input: Key '{}' pressed in {} (Context: {:?}, Window: '{}')\n",
-            key_str, context_name, context, window_title
-        ));
+        reaper.show_console_msg(format!("Key '{}' pressed in {}\n", key_str, context_name));
         
         // Determine what to do with the key:
         // - If passthrough mode is ON: log and pass through to REAPER (NotOurWindow)
@@ -444,31 +521,15 @@ impl InputHandler {
         let direction = if delta > 0 { "up/right" } else { "down/left" };
         
         // Determine context
-        let (context, context_name, window_title) = Self::determine_context();
+        let (context, context_name, _window_title) = Self::determine_context();
         
-        // Build modifier string
-        let mut modifiers = Vec::new();
-        if ctrl { modifiers.push("Ctrl"); }
-        if shift { modifiers.push("Shift"); }
-        if alt { modifiers.push("Alt"); }
-        let modifier_str = if modifiers.is_empty() {
-            String::new()
-        } else {
-            format!("+{}", modifiers.join("+"))
-        };
+        // Determine wheel direction and type
+        let direction = if delta > 0 { "up" } else { "down" };
+        let wheel_type = if is_horizontal { "horizontal wheel" } else { "wheel" };
         
         // Log mouse wheel event
         let reaper = Reaper::get();
-        reaper.show_console_msg(format!(
-            "FTS-Input: {} wheel {} (delta: {}){} in {} (Context: {:?}, Window: '{}')\n",
-            if is_horizontal { "Horizontal" } else { "Vertical" },
-            direction,
-            delta,
-            modifier_str,
-            context_name,
-            context,
-            window_title
-        ));
+        reaper.show_console_msg(format!("Mouse {} {} in {}\n", wheel_type, direction, context_name));
         
         // Determine what to do with the wheel event:
         // - If passthrough mode is ON: log and pass through to REAPER (NotOurWindow)
