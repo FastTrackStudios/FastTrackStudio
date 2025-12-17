@@ -4,21 +4,17 @@
 //! - Setlist management
 //! - Lyrics sync and display
 //! - Chord detection and display
-//! - Naming conventions
-//! - Track templates
-//! - Smart templates
+//! - Smart templates (includes naming conventions and track templates)
 
 pub mod setlist;
 pub mod lyrics;
 pub mod chords;
-pub mod naming_convention;
-pub mod track_template;
 pub mod smart_template;
+pub mod smart_template_legacy;
 
 // Re-export commonly used types
 pub use setlist::*;
 pub use lyrics::*;
 pub use chords::*;
-pub use naming_convention::*;
-pub use track_template::*;
+pub use smart_template::*;
 
