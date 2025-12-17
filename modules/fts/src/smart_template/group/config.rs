@@ -25,6 +25,47 @@ pub struct PatternCategory {
     pub required: bool,
 }
 
+/// Track reference with name and GUID
+///
+/// Represents a reference to a track in REAPER, containing both the track name
+/// (for matching/display) and GUID (for precise identification).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrackReference {
+    /// Track name (for matching and display)
+    pub name: Option<String>,
+    
+    /// Track GUID (for precise identification in REAPER)
+    pub guid: Option<String>,
+}
+
+impl TrackReference {
+    /// Create a new track reference with name only
+    pub fn with_name(name: impl Into<String>) -> Self {
+        Self {
+            name: Some(name.into()),
+            guid: None,
+        }
+    }
+    
+    /// Create a new track reference with GUID only
+    pub fn with_guid(guid: impl Into<String>) -> Self {
+        Self {
+            name: None,
+            guid: Some(guid.into()),
+        }
+    }
+    
+    /// Create a new track reference with both name and GUID
+    pub fn new(name: Option<String>, guid: Option<String>) -> Self {
+        Self { name, guid }
+    }
+    
+    /// Check if this reference is empty (no name or GUID)
+    pub fn is_empty(&self) -> bool {
+        self.name.is_none() && self.guid.is_none()
+    }
+}
+
 /// Group configuration matching the REAPER script format
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupConfig {
