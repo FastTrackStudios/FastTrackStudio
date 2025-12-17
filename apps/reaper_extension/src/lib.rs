@@ -117,6 +117,14 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
             use crate::infrastructure::timer::{log_first_timer_call, increment_tick_count};
             use std::sync::atomic::{AtomicU64, Ordering};
             
+            // Check for and hook MIDI editor windows (if input feature is enabled)
+            #[cfg(feature = "input")]
+            {
+                if crate::input::handler::InputHandler::is_enabled() {
+                    crate::input::wheel_hook::check_and_hook_midi_editors();
+                }
+            }
+            
             // Process main thread tasks from TaskSupport
             crate::infrastructure::task_support::run_middleware();
             

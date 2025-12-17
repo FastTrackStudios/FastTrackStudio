@@ -10,10 +10,17 @@
 
 pub mod state;
 pub mod bindings;
+pub mod event_parser;
 pub mod matcher;
 pub mod executor;
 pub mod handler;
 pub mod actions;
+pub mod wheel_hook;
+pub mod mouse_util;
+pub mod mouse_context;
+pub mod midi_utils;
+pub mod utils;
+pub mod reaper_windows;
 
 pub use handler::InputHandler;
 pub use state::{CommandState, Mode, Context};

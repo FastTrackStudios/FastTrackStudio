@@ -8,6 +8,7 @@ use reaper_medium::{
     AccelMsgKind, AcceleratorPosition, TranslateAccel, TranslateAccelArgs, TranslateAccelResult,
     AcceleratorKeyCode, AcceleratorBehavior, Hwnd,
 };
+use reaper_low::raw;
 use swell_ui::Window;
 use crate::input::state::Context;
 use tracing::info;
@@ -139,7 +140,8 @@ impl InputHandler {
     
     /// Determine context from current focused window
     /// Returns (Context, context_name, window_title)
-    fn determine_context() -> (Context, String, String) {
+    /// Made public so wheel_hook can use it
+    pub fn determine_context() -> (Context, String, String) {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
         
@@ -344,12 +346,39 @@ impl TranslateAccel for InputHandler {
             return TranslateAccelResult::NotOurWindow;
         }
         
-        // If we reach here, interception is enabled
-        // Process and log the keypress
+        // Check the raw message type to detect mouse wheel and other events
+        let raw_msg = args.msg.raw();
+        let raw_message_type = raw_msg.message;
         let msg_type = args.msg.message();
         
-        // Only process KeyDown and SysKeyDown events
+        // DEBUG: Log all non-keyboard message types to see what we're receiving
+        // This will help us understand if mouse wheel events come through TranslateAccel
+        // WM_MOUSEWHEEL = 0x020A = 522, WM_MOUSEHWHEEL = 0x020E = 526
+        match msg_type {
+            AccelMsgKind::KeyDown | AccelMsgKind::KeyUp | AccelMsgKind::SysKeyDown | AccelMsgKind::SysKeyUp | AccelMsgKind::Char => {
+                // Normal keyboard events - don't log
+            }
+            _ => {
+                // Log unknown or non-keyboard message types
+                let reaper = Reaper::get();
+                reaper.show_console_msg(format!(
+                    "FTS-Input: Non-keyboard message type: {:?} (raw: 0x{:X} = {})\n",
+                    msg_type, raw_message_type, raw_message_type
+                ));
+            }
+        }
+        
+        // Detect mouse wheel events (WM_MOUSEWHEEL = 0x020A = 522, WM_MOUSEHWHEEL = 0x020E = 526)
+        if raw_message_type == raw::WM_MOUSEWHEEL || raw_message_type == raw::WM_MOUSEHWHEEL {
+            return Self::handle_mouse_wheel(args, raw_message_type);
+        }
+        
+        // Handle keyboard events
+        let msg_type = args.msg.message();
+        
+        // Only process KeyDown and SysKeyDown events for keyboard
         if msg_type != AccelMsgKind::KeyDown && msg_type != AccelMsgKind::SysKeyDown {
+            // Unknown message type - might be other events we don't handle yet
             return TranslateAccelResult::NotOurWindow;
         }
         
@@ -392,6 +421,67 @@ impl TranslateAccel for InputHandler {
 }
 
 impl InputHandler {
+    /// Handle mouse wheel events
+    /// WM_MOUSEWHEEL: wParam high word = delta (positive = forward, negative = backward)
+    ///                low word = key states
+    ///                lParam = point coordinates
+    /// WM_MOUSEHWHEEL: same structure but for horizontal wheel
+    fn handle_mouse_wheel(args: TranslateAccelArgs, message_type: u32) -> TranslateAccelResult {
+        let raw_msg = args.msg.raw();
+        
+        // Extract wheel delta from wParam (high 16 bits)
+        // Delta is typically 120 or multiples (WHEEL_DELTA = 120)
+        let delta = (raw_msg.wParam as i32 >> 16) as i16;
+        
+        // Extract key states from wParam (low 16 bits)
+        let key_states = (raw_msg.wParam as u32) & 0xFFFF;
+        let ctrl = (key_states & 0x0008) != 0;  // MK_CONTROL
+        let shift = (key_states & 0x0004) != 0; // MK_SHIFT
+        let alt = (key_states & 0x0020) != 0;   // MK_ALT (if applicable)
+        
+        // Determine wheel direction
+        let is_horizontal = message_type == raw::WM_MOUSEHWHEEL;
+        let direction = if delta > 0 { "up/right" } else { "down/left" };
+        
+        // Determine context
+        let (context, context_name, window_title) = Self::determine_context();
+        
+        // Build modifier string
+        let mut modifiers = Vec::new();
+        if ctrl { modifiers.push("Ctrl"); }
+        if shift { modifiers.push("Shift"); }
+        if alt { modifiers.push("Alt"); }
+        let modifier_str = if modifiers.is_empty() {
+            String::new()
+        } else {
+            format!("+{}", modifiers.join("+"))
+        };
+        
+        // Log mouse wheel event
+        let reaper = Reaper::get();
+        reaper.show_console_msg(format!(
+            "FTS-Input: {} wheel {} (delta: {}){} in {} (Context: {:?}, Window: '{}')\n",
+            if is_horizontal { "Horizontal" } else { "Vertical" },
+            direction,
+            delta,
+            modifier_str,
+            context_name,
+            context,
+            window_title
+        ));
+        
+        // Determine what to do with the wheel event:
+        // - If passthrough mode is ON: log and pass through to REAPER (NotOurWindow)
+        // - If passthrough mode is OFF: log and intercept the event (Eat)
+        if PASSTHROUGH_MODE.load(std::sync::atomic::Ordering::Relaxed) {
+            TranslateAccelResult::NotOurWindow
+        } else {
+            // TODO: Check if we have wheel bindings configured
+            // For now, intercept when passthrough is off
+            TranslateAccelResult::Eat
+        }
+    }
+    
     /// Check if interception is enabled
     pub fn is_enabled() -> bool {
         INTERCEPTION_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
@@ -412,6 +502,15 @@ impl InputHandler {
                     HANDLER_REGISTERED.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
             }
+            
+            // Also install wheel hook for mouse wheel events
+            if let Err(e) = crate::input::wheel_hook::install_main_window_hook() {
+                tracing::warn!("Failed to install wheel hook: {}", e);
+            }
+            
+            // Check for and hook MIDI editor windows
+            crate::input::wheel_hook::check_and_hook_midi_editors();
+            
             info!("FTS-Input interception enabled");
         } else if !enabled && was_enabled {
             // Disabling: mark as disabled
