@@ -1,0 +1,49 @@
+//! Ruler mouse modifier behaviors
+
+use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorId, BehaviorDisplay};
+#[allow(unused_imports)]
+use crate::define_behavior_enum;
+
+/// Ruler left drag behaviors
+define_behavior_enum! {
+    pub enum RulerLeftDragBehavior {
+        NoAction => (0, "No action"),
+        EditLoopPoint => (1, "Edit loop point"),
+        MoveLoopPoints => (3, "Move loop points"),
+        MoveLoopPointsIgnoringSnap => (4, "Move loop points ignoring snap"),
+        EditLoopPointAndTimeSelectionTogether => (5, "Edit loop point and time selection together"),
+        MoveLoopPointsAndTimeSelectionTogether => (7, "Move loop points and time selection together"),
+        MoveLoopPointsAndTimeSelectionTogetherIgnoringSnap => (8, "Move loop points and time selection together ignoring snap"),
+        HandScroll => (9, "Hand scroll"),
+        HandScrollAndHorizontalZoom => (10, "Hand scroll and horizontal zoom"),
+        HorizontalZoom => (12, "Horizontal zoom"),
+        SetEditCursorAndHorizontalZoom => (14, "Set edit cursor and horizontal zoom"),
+    }
+}
+
+/// Ruler click behaviors
+define_behavior_enum! {
+    pub enum RulerClickBehavior {
+        NoAction => (0, "No action"),
+        MoveEditCursor => (1, "Move edit cursor"),
+        MoveEditCursorIgnoringSnap => (2, "Move edit cursor ignoring snap"),
+        ClearLoopPoints => (3, "Clear loop points"),
+        ExtendLoopPoints => (4, "Extend loop points"),
+        ExtendLoopPointsIgnoringSnap => (5, "Extend loop points ignoring snap"),
+        SeekPlaybackWithoutMovingEditCursor => (6, "Seek playback without moving edit cursor"),
+        RestorePreviousZoomScroll => (7, "Restore previous zoom/scroll"),
+        RestorePreviousZoomLevel => (8, "Restore previous zoom level"),
+    }
+}
+
+/// Ruler double click behaviors
+define_behavior_enum! {
+    pub enum RulerDoubleClickBehavior {
+        NoAction => (0, "No action"),
+        SetLoopPointsToRegion => (1, "Set loop points to region"),
+        SetTimeSelectionToRegion => (2, "Set time selection to region"),
+        SetLoopPointsAndTimeSelectionToRegion => (3, "Set loop points and time selection to region"),
+        RestorePreviousZoomScroll => (4, "Restore previous zoom/scroll"),
+        RestorePreviousZoomLevel => (5, "Restore previous zoom level"),
+    }
+}

@@ -21,6 +21,7 @@ pub mod mouse_context;
 pub mod midi_utils;
 pub mod utils;
 pub mod reaper_windows;
+pub mod mouse_modifiers;
 
 pub use handler::InputHandler;
 pub use state::{CommandState, Mode, Context};
