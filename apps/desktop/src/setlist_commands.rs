@@ -127,6 +127,40 @@ pub async fn seek_to_song(song_index: usize) -> Result<(), String> {
     }
 }
 
+/// Seek to a specific musical position
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn seek_to_musical_position(song_index: usize, musical_position: daw::primitives::MusicalPosition) -> Result<(), String> {
+    if let Some(storage) = SETLIST_API.get() {
+        let mut guard = storage.lock().await;
+        if let Some(api) = guard.as_ref() {
+            let musical_pos_for_log = musical_position.clone();
+            match api.seek_to_musical_position(song_index, musical_position).await {
+                Ok(Ok(())) => {
+                    info!("Successfully sought to song {} musical position {}", song_index, musical_pos_for_log);
+                    Ok(())
+                }
+                Ok(Err(e)) => {
+                    warn!("Failed to seek to musical position: {}", e);
+                    Err(e)
+                }
+                Err(e) => {
+                    warn!("API error seeking to musical position: {}", e);
+                    Err(format!("API error: {}", e))
+                }
+            }
+        } else {
+            Err("API not available".to_string())
+        }
+    } else {
+        Err("API storage not initialized".to_string())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn seek_to_musical_position(_song_index: usize, _musical_position: daw::primitives::MusicalPosition) -> Result<(), String> {
+    Ok(())
+}
+
 /// Seek to a specific time position
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn seek_to_time(song_index: usize, time_seconds: f64) -> Result<(), String> {

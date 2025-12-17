@@ -182,7 +182,7 @@ pub fn get_tempo_at_position(song: &Song, position_seconds: f64) -> f64 {
     let mut current_tempo = 120.0; // Default tempo
     
     for change in &song.tempo_time_sig_changes {
-        if change.position <= position_seconds {
+        if change.position_seconds() <= position_seconds {
             current_tempo = change.tempo;
         } else {
             break;
@@ -199,7 +199,7 @@ pub fn get_time_signature_at_position(song: &Song, position_seconds: f64) -> Tim
     let mut current_time_sig = TimeSignature::new(4, 4); // Default 4/4
     
     for change in &song.tempo_time_sig_changes {
-        if change.position <= position_seconds {
+        if change.position_seconds() <= position_seconds {
             if let Some((num, den)) = change.time_signature {
                 current_time_sig = TimeSignature::new(num, den);
             }

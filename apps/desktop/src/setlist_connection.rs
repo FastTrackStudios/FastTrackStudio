@@ -386,11 +386,14 @@ async fn handle_message(msg: fts::setlist::SetlistUpdateMessage, message_count: 
             
             // Also update legacy SETLIST signal for backward compatibility
             // TODO: Remove once all components use granular signals
+            // Note: song_progress and section_progress will be updated via ActiveIndices message
             *SETLIST.write() = Some(fts::setlist::SetlistApi::new(
                 setlist,
                 active_song_index,
                 active_section_index,
                 active_slide_index,
+                None, // song_progress - updated via ActiveIndices
+                None, // section_progress - updated via ActiveIndices
             ));
             *ACTIVE_SLIDE_INDEX.write() = active_slide_index;
             
@@ -414,7 +417,7 @@ async fn handle_message(msg: fts::setlist::SetlistUpdateMessage, message_count: 
             song_transport.insert(song_index, transport);
             debug!("[Setlist Connection] Updated transport for song {}", song_index);
         }
-        SetlistUpdateMessage::ActiveIndices { active_song_index, active_section_index, active_slide_index } => {
+        SetlistUpdateMessage::ActiveIndices { active_song_index, active_section_index, active_slide_index, song_progress, section_progress } => {
             // Update active indices - frequent updates during playback
             UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
             *ACTIVE_INDICES.write() = (active_song_index, active_section_index, active_slide_index);
@@ -422,13 +425,15 @@ async fn handle_message(msg: fts::setlist::SetlistUpdateMessage, message_count: 
             // Also update legacy signals for backward compatibility
             *ACTIVE_SLIDE_INDEX.write() = active_slide_index;
             
-            // Update SETLIST signal's active indices if it exists
+            // Update SETLIST signal's active indices and progress if it exists
             // Clone the value first, then drop the read guard before writing
             let api_opt = SETLIST.read().clone();
             if let Some(mut api) = api_opt {
                 api.active_song_index = active_song_index;
                 api.active_section_index = active_section_index;
                 api.active_slide_index = active_slide_index;
+                api.song_progress = song_progress;
+                api.section_progress = section_progress;
                 *SETLIST.write() = Some(api);
             }
         }

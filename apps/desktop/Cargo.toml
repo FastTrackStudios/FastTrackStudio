@@ -12,10 +12,14 @@ fts = { path = "../../modules/fts", features = ["dioxus"] }
 daw = { path = "../../modules/daw" }
 keyflow = { path = "../../packages/keyflow" }
 peer-2-peer = { path = "../../modules/peer-2-peer" }
+pdf = { path = "../../libs/pdf" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = "0.1"
 anyhow = "1.0"
+base64 = "0.22"
+rfd = "0.15.3"
+futures = { workspace = true }
 # Staff crate - UI feature requires dioxus-web which conflicts with desktop builds
 # staff = { version = "0.11.0", features = ["ui"] }
 
@@ -34,6 +38,10 @@ desktop = ["dioxus/desktop" ]
 # Server feature - defined but not enabled by default
 # Will be re-enabled incrementally when server features are added back
 server = ["dioxus/server"]
+
+[package.metadata.bundle]
+# Bundle PDFium library with the app
+resources = ["../../lib/libpdfium.dylib"]
 
 [lints.rust]
 unused = "allow"  # Allow unused items (variables/functions will be used later)
