@@ -6,7 +6,9 @@
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use crate::implementation::setlist::build_setlist_from_open_projects;
+#[cfg(feature = "live")]
 use crate::live::tracks::tab_navigation::TabNavigator;
+#[cfg(feature = "live")]
 use crate::live::tracks::smooth_seek::get_smooth_seek_handler;
 use reaper_high::{Reaper, Project};
 use reaper_medium::{ProjectRef, PositionInSeconds, PositionInBeats, SetEditCurPosOptions, MeasureMode};
@@ -115,150 +117,157 @@ impl SeekService {
         let tab_index = found_tab_index
             .ok_or_else(|| format!("Could not find project for song: {}", project_name))?;
         
-        // Get current project to check if we're playing and if it's the same song
-        let current_project_result = medium_reaper.enum_projects(ProjectRef::Current, 0)
-            .ok_or_else(|| "No current project".to_string())?;
-        
-        let current_project = Project::new(current_project_result.project);
-        let play_state = current_project.play_state();
-        let is_playing = play_state.is_playing || play_state.is_paused;
-        
-        // Check if we're clicking a section in the same song (same tab)
-        let current_tab_index = {
-            let current_project_raw = current_project_result.project;
-            let mut found_current_tab = None;
-            for i in 0..128u32 {
-                if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
-                    if result.project == current_project_raw {
-                        found_current_tab = Some(i as usize);
-                        break;
+        #[cfg(feature = "live")]
+        {
+            // Get current project to check if we're playing and if it's the same song
+            let current_project_result = medium_reaper.enum_projects(ProjectRef::Current, 0)
+                .ok_or_else(|| "No current project".to_string())?;
+            
+            let current_project = Project::new(current_project_result.project);
+            let play_state = current_project.play_state();
+            let is_playing = play_state.is_playing || play_state.is_paused;
+            
+            // Check if we're clicking a section in the same song (same tab)
+            let current_tab_index = {
+                let current_project_raw = current_project_result.project;
+                let mut found_current_tab = None;
+                for i in 0..128u32 {
+                    if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
+                        if result.project == current_project_raw {
+                            found_current_tab = Some(i as usize);
+                            break;
+                        }
                     }
                 }
-            }
-            found_current_tab
-        };
-        
-        let is_same_song = current_tab_index == Some(tab_index);
-        
-        // Get the section position
-        if section_index >= song.sections.len() {
-            return Err(format!("Section index {} out of range", section_index));
-        }
-        
-        let section = &song.sections[section_index];
-        
-        // Helper function to convert musical position to time using REAPER's TimeMap2_beatsToTime
-        let get_project_measure_offset = |project: &Project| -> i32 {
-            let reaper = Reaper::get();
-            let medium_reaper = reaper.medium_reaper();
+                found_current_tab
+            };
             
-            if let Some(offs_result) = medium_reaper.project_config_var_get_offs("projmeasoffs") {
-                if let Some(addr) = medium_reaper.project_config_var_addr(project.context(), offs_result.offset) {
-                    unsafe { *(addr.as_ptr() as *const i32) }
+            let is_same_song = current_tab_index == Some(tab_index);
+            
+            // Get the section position
+            if section_index >= song.sections.len() {
+                return Err(format!("Section index {} out of range", section_index));
+            }
+            
+            let section = &song.sections[section_index];
+            
+            // Helper function to convert musical position to time using REAPER's TimeMap2_beatsToTime
+            let get_project_measure_offset = |project: &Project| -> i32 {
+                let reaper = Reaper::get();
+                let medium_reaper = reaper.medium_reaper();
+                
+                if let Some(offs_result) = medium_reaper.project_config_var_get_offs("projmeasoffs") {
+                    if let Some(addr) = medium_reaper.project_config_var_addr(project.context(), offs_result.offset) {
+                        unsafe { *(addr.as_ptr() as *const i32) }
+                    } else {
+                        0
+                    }
                 } else {
                     0
                 }
+            };
+            
+            let musical_pos_to_time = |project: &Project, musical_pos: &MusicalPosition| -> Result<PositionInSeconds, String> {
+                let medium_reaper = reaper.medium_reaper();
+                let project_context = project.context();
+                
+                // Get the project measure offset
+                let measure_offset = get_project_measure_offset(project);
+                
+                // Convert back to REAPER's measure index (subtract the offset we added earlier)
+                let reaper_measure_index = musical_pos.measure - measure_offset;
+                
+                // Calculate beats since measure start (beat + subdivision/1000.0)
+                let beats_since_measure = musical_pos.beat as f64 + (musical_pos.subdivision as f64 / 1000.0);
+                let beats_pos = PositionInBeats::new(beats_since_measure)
+                    .map_err(|e| format!("Invalid beats position: {:?}", e))?;
+                
+                // Use TimeMap2_beatsToTime with FromMeasureAtIndex to convert musical position to time
+                let measure_mode = MeasureMode::FromMeasureAtIndex(reaper_measure_index);
+                Ok(medium_reaper.time_map_2_beats_to_time(project_context, measure_mode, beats_pos))
+            };
+            
+            // Convert section's musical position (which has measure offset applied) to time
+            let target_pos = if is_same_song {
+                section.start_position.as_ref()
+                    .ok_or_else(|| "Section has no start position".to_string())
+                    .and_then(|pos| musical_pos_to_time(&current_project, &pos.musical)
+                        .map_err(|e| format!("Failed to convert musical position to time: {}", e)))
+                    .map_err(|e| format!("Failed to get section start position: {}", e))?
             } else {
-                0
+                // Placeholder - will be recalculated after switching tabs
+                PositionInSeconds::ZERO
+            };
+            
+            // If we're playing and clicking a section in the same song, use smooth seek
+            if is_playing && is_same_song {
+                // Move edit cursor immediately for visual feedback
+                current_project.set_edit_cursor_position(target_pos, SetEditCurPosOptions { 
+                    move_view: false, 
+                    seek_play: false, // Don't seek play cursor yet - that will happen smoothly at measure boundary
+                });
+                
+                // Queue smooth seek for play cursor to execute at next measure start
+                let smooth_seek_handler = get_smooth_seek_handler();
+                if let Err(e) = smooth_seek_handler.queue_seek(&current_project, target_pos, true) {
+                    warn!(error = %e, "Failed to queue smooth seek, falling back to immediate seek");
+                } else {
+                    info!(
+                        song_index,
+                        section_index,
+                        time_position = target_pos.get(),
+                        "Queued smooth seek to section"
+                    );
+                    return Ok(());
+                }
             }
-        };
-        
-        let musical_pos_to_time = |project: &Project, musical_pos: &MusicalPosition| -> Result<PositionInSeconds, String> {
-            let medium_reaper = reaper.medium_reaper();
-            let project_context = project.context();
             
-            // Get the project measure offset
-            let measure_offset = get_project_measure_offset(project);
-            
-            // Convert back to REAPER's measure index (subtract the offset we added earlier)
-            let reaper_measure_index = musical_pos.measure - measure_offset;
-            
-            // Calculate beats since measure start (beat + subdivision/1000.0)
-            let beats_since_measure = musical_pos.beat as f64 + (musical_pos.subdivision as f64 / 1000.0);
-            let beats_pos = PositionInBeats::new(beats_since_measure)
-                .map_err(|e| format!("Invalid beats position: {:?}", e))?;
-            
-            // Use TimeMap2_beatsToTime with FromMeasureAtIndex to convert musical position to time
-            let measure_mode = MeasureMode::FromMeasureAtIndex(reaper_measure_index);
-            Ok(medium_reaper.time_map_2_beats_to_time(project_context, measure_mode, beats_pos))
-        };
-        
-        // Convert section's musical position (which has measure offset applied) to time
-        let target_pos = if is_same_song {
-            section.start_position.as_ref()
-                .ok_or_else(|| "Section has no start position".to_string())
-                .and_then(|pos| musical_pos_to_time(&current_project, &pos.musical)
-                    .map_err(|e| format!("Failed to convert musical position to time: {}", e)))
-                .map_err(|e| format!("Failed to get section start position: {}", e))?
-        } else {
-            // Placeholder - will be recalculated after switching tabs
-            PositionInSeconds::ZERO
-        };
-        
-        // If we're playing and clicking a section in the same song, use smooth seek
-        if is_playing && is_same_song {
-            // Move edit cursor immediately for visual feedback
-            current_project.set_edit_cursor_position(target_pos, SetEditCurPosOptions { 
-                move_view: false, 
-                seek_play: false, // Don't seek play cursor yet - that will happen smoothly at measure boundary
-            });
-            
-            // Queue smooth seek for play cursor to execute at next measure start
-            let smooth_seek_handler = get_smooth_seek_handler();
-            if let Err(e) = smooth_seek_handler.queue_seek(&current_project, target_pos, true) {
-                warn!(error = %e, "Failed to queue smooth seek, falling back to immediate seek");
+            // Otherwise, do immediate seek (not playing, different song, or smooth seek failed)
+            let final_project = if !is_same_song {
+                let tab_navigator = TabNavigator::new();
+                tab_navigator.switch_to_tab(tab_index)
+                    .map_err(|e| format!("Failed to switch to tab {}: {}", tab_index, e))?;
+                
+                // Get the current project (now switched to the target song)
+                let project_result = medium_reaper.enum_projects(ProjectRef::Current, 0)
+                    .ok_or_else(|| "No current project after tab switch".to_string())?;
+                
+                let project = Project::new(project_result.project);
+                
+                // Convert section's musical position to time using the target project
+                let target_pos = section.start_position.as_ref()
+                    .ok_or_else(|| "Section has no start position".to_string())
+                    .and_then(|pos| musical_pos_to_time(&project, &pos.musical)
+                        .map_err(|e| format!("Failed to convert musical position to time: {}", e)))
+                    .map_err(|e| format!("Failed to get section start position: {}", e))?;
+                
+                // Just move the cursor directly - no markers needed
+                project.set_edit_cursor_position(target_pos, SetEditCurPosOptions { 
+                    move_view: false, 
+                    seek_play: true, // Seek play cursor immediately
+                });
+                project
             } else {
-                info!(
-                    song_index,
-                    section_index,
-                    time_position = target_pos.get(),
-                    "Queued smooth seek to section"
-                );
-                return Ok(());
-            }
+                // Same song - immediate seek (either not playing, or smooth seek failed)
+                current_project.set_edit_cursor_position(target_pos, SetEditCurPosOptions { 
+                    move_view: false, 
+                    seek_play: true, // Seek play cursor immediately
+                });
+                current_project
+            };
+            
+            info!(
+                song_index,
+                section_index,
+                time_position = final_project.edit_cursor_position().unwrap_or(PositionInSeconds::ZERO).get(),
+                "Seeked to section"
+            );
+            Ok(())
         }
-        
-        // Otherwise, do immediate seek (not playing, different song, or smooth seek failed)
-        let final_project = if !is_same_song {
-            let tab_navigator = TabNavigator::new();
-            tab_navigator.switch_to_tab(tab_index)
-                .map_err(|e| format!("Failed to switch to tab {}: {}", tab_index, e))?;
-            
-            // Get the current project (now switched to the target song)
-            let project_result = medium_reaper.enum_projects(ProjectRef::Current, 0)
-                .ok_or_else(|| "No current project after tab switch".to_string())?;
-            
-            let project = Project::new(project_result.project);
-            
-            // Convert section's musical position to time using the target project
-            let target_pos = section.start_position.as_ref()
-                .ok_or_else(|| "Section has no start position".to_string())
-                .and_then(|pos| musical_pos_to_time(&project, &pos.musical)
-                    .map_err(|e| format!("Failed to convert musical position to time: {}", e)))
-                .map_err(|e| format!("Failed to get section start position: {}", e))?;
-            
-            // Just move the cursor directly - no markers needed
-            project.set_edit_cursor_position(target_pos, SetEditCurPosOptions { 
-                move_view: false, 
-                seek_play: true, // Seek play cursor immediately
-            });
-            project
-        } else {
-            // Same song - immediate seek (either not playing, or smooth seek failed)
-            current_project.set_edit_cursor_position(target_pos, SetEditCurPosOptions { 
-                move_view: false, 
-                seek_play: true, // Seek play cursor immediately
-            });
-            current_project
-        };
-        
-        info!(
-            song_index,
-            section_index,
-            time_position = final_project.edit_cursor_position().unwrap_or(PositionInSeconds::ZERO).get(),
-            "Seeked to section"
-        );
-        Ok(())
+        #[cfg(not(feature = "live"))]
+        {
+            Err("Live feature not enabled".to_string())
+        }
     }
 }
 

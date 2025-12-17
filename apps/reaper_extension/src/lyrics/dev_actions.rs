@@ -489,6 +489,7 @@ pub fn register_lyrics_dev_actions() {
             handler: log_selected_midi_items_handler,
             appears_in_menu: true,
             section: ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_DEV_ASSIGN_SYLLABLES_TO_NOTES",
@@ -496,6 +497,7 @@ pub fn register_lyrics_dev_actions() {
             handler: assign_syllables_to_notes_handler,
             appears_in_menu: true,
             section: ActionSection::MidiEditor, // Register to MIDI editor section
+            ..Default::default()
         },
     ];
     

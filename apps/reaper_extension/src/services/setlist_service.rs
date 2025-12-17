@@ -191,13 +191,103 @@ impl SetlistService {
                     })
             });
         
-        // Convert setlist to SetlistApi with active indices
+        // Calculate song progress (0.0 to 1.0, linear time-based)
+        let song_progress = active_song_idx.and_then(|song_idx| {
+            setlist.songs.get(song_idx).map(|song| {
+                let song_start = song.effective_start();
+                let song_end = song.effective_end();
+                let song_duration = song_end - song_start;
+                
+                if song_duration > 0.0 && transport_position >= song_start {
+                    let progress = ((transport_position - song_start) / song_duration).max(0.0).min(1.0);
+                    progress
+                } else {
+                    0.0
+                }
+            })
+        });
+        
+        // Log song progress for debugging
+        static LAST_SONG_PROGRESS: std::sync::Mutex<Option<f64>> = std::sync::Mutex::new(None);
+        if let Some(progress) = song_progress {
+            let mut last = LAST_SONG_PROGRESS.lock().unwrap();
+            if *last != Some(progress) {
+                info!(
+                    song_progress = progress,
+                    transport_position = transport_position,
+                    active_song_index = ?active_song_idx,
+                    "Calculated song_progress (0.0-1.0)"
+                );
+                *last = Some(progress);
+            }
+        } else {
+            let mut last = LAST_SONG_PROGRESS.lock().unwrap();
+            if last.is_some() {
+                info!(
+                    transport_position = transport_position,
+                    active_song_index = ?active_song_idx,
+                    "song_progress is None (no active song)"
+                );
+                *last = None;
+            }
+        }
+        
+        // Calculate section progress (0.0 to 1.0, linear time-based)
+        let section_progress = active_song_idx.and_then(|song_idx| {
+            active_section_idx.and_then(|section_idx| {
+                setlist.songs.get(song_idx)
+                    .and_then(|song| song.sections.get(section_idx))
+                    .and_then(|section| {
+                        let section_start = section.start_seconds()?;
+                        let section_end = section.end_seconds()?;
+                        let section_duration = section_end - section_start;
+                        
+                        if section_duration > 0.0 && transport_position >= section_start {
+                            let progress = ((transport_position - section_start) / section_duration).max(0.0).min(1.0);
+                            Some(progress)
+                        } else {
+                            Some(0.0)
+                        }
+                    })
+            })
+        });
+        
+        // Log section progress for debugging
+        static LAST_SECTION_PROGRESS: std::sync::Mutex<Option<f64>> = std::sync::Mutex::new(None);
+        if let Some(progress) = section_progress {
+            let mut last = LAST_SECTION_PROGRESS.lock().unwrap();
+            if *last != Some(progress) {
+                info!(
+                    section_progress = progress,
+                    transport_position = transport_position,
+                    active_song_index = ?active_song_idx,
+                    active_section_index = ?active_section_idx,
+                    "Calculated section_progress (0.0-1.0)"
+                );
+                *last = Some(progress);
+            }
+        } else {
+            let mut last = LAST_SECTION_PROGRESS.lock().unwrap();
+            if last.is_some() {
+                info!(
+                    transport_position = transport_position,
+                    active_song_index = ?active_song_idx,
+                    active_section_index = ?active_section_idx,
+                    "section_progress is None (no active section)"
+                );
+                *last = None;
+            }
+        }
+        
+        // Convert setlist to SetlistApi with active indices and progress
         // Note: Each song in the setlist already has transport_info populated with current state
         let setlist_api = SetlistApi::new(
             setlist,
             active_song_idx,
             active_section_idx,
             active_slide_idx,
+            song_progress,
+            section_progress,
         );
         
         // Update state - this is what the stream API reads from

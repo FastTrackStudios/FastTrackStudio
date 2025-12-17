@@ -46,6 +46,10 @@ impl SetlistCommandHandler for ReaperSetlistCommandHandler {
         self.command_service.seek_to_song(song_index)
     }
     
+    async fn seek_to_musical_position(&self, song_index: usize, musical_position: daw::primitives::MusicalPosition) -> Result<(), String> {
+        self.command_service.seek_to_musical_position(song_index, musical_position)
+    }
+
     async fn seek_to_time(&self, song_index: usize, time_seconds: f64) -> Result<(), String> {
         self.command_service.seek_to_time(song_index, time_seconds)
     }
@@ -55,30 +59,58 @@ impl SetlistCommandHandler for ReaperSetlistCommandHandler {
     }
     
     async fn advance_syllable(&self) -> Result<LyricsState, String> {
-        // Use the lyrics stream handler implementation
-        use crate::lyrics::stream::ReaperLyricsCommandHandler;
-        let handler = ReaperLyricsCommandHandler::new();
-        handler.advance_syllable().await
+        #[cfg(feature = "lyrics")]
+        {
+            // Use the lyrics stream handler implementation
+            use crate::lyrics::stream::ReaperLyricsCommandHandler;
+            let handler = ReaperLyricsCommandHandler::new();
+            handler.advance_syllable().await
+        }
+        #[cfg(not(feature = "lyrics"))]
+        {
+            Err("Lyrics feature not enabled".to_string())
+        }
     }
     
     async fn get_lyrics_state(&self) -> Result<LyricsState, String> {
-        // Use the lyrics stream handler implementation
-        use crate::lyrics::stream::ReaperLyricsCommandHandler;
-        let handler = ReaperLyricsCommandHandler::new();
-        handler.get_lyrics_state().await
+        #[cfg(feature = "lyrics")]
+        {
+            // Use the lyrics stream handler implementation
+            use crate::lyrics::stream::ReaperLyricsCommandHandler;
+            let handler = ReaperLyricsCommandHandler::new();
+            handler.get_lyrics_state().await
+        }
+        #[cfg(not(feature = "lyrics"))]
+        {
+            Err("Lyrics feature not enabled".to_string())
+        }
     }
     
     async fn assign_syllable_to_note(&self, syllable_text: String) -> Result<(), String> {
-        // Use the lyrics stream handler implementation
-        use crate::lyrics::stream::ReaperLyricsCommandHandler;
-        let handler = ReaperLyricsCommandHandler::new();
-        handler.assign_syllable_to_note(syllable_text).await
+        #[cfg(feature = "lyrics")]
+        {
+            // Use the lyrics stream handler implementation
+            use crate::lyrics::stream::ReaperLyricsCommandHandler;
+            let handler = ReaperLyricsCommandHandler::new();
+            handler.assign_syllable_to_note(syllable_text).await
+        }
+        #[cfg(not(feature = "lyrics"))]
+        {
+            Err("Lyrics feature not enabled".to_string())
+        }
     }
     
     async fn update_lyrics(&self, song_index: usize, lyrics: fts::lyrics::core::Lyrics) -> Result<(), String> {
-        // Update lyrics in REAPER project
-        use crate::lyrics::write::update_lyrics_in_reaper;
-        update_lyrics_in_reaper(song_index, lyrics)
+        #[cfg(feature = "lyrics")]
+        {
+            // Update lyrics in REAPER project
+            use crate::lyrics::write::update_lyrics_in_reaper;
+            update_lyrics_in_reaper(song_index, lyrics)
+        }
+        #[cfg(not(feature = "lyrics"))]
+        {
+            Err("Lyrics feature not enabled".to_string())
+        }
     }
 }
 

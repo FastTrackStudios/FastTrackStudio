@@ -112,6 +112,7 @@ pub fn register_lyrics_actions() {
             handler: create_text_items_from_lyrics_handler,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LYRICS_READ_FROM_REAPER",
@@ -119,6 +120,7 @@ pub fn register_lyrics_actions() {
             handler: read_lyrics_from_reaper_handler,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
     ];
     

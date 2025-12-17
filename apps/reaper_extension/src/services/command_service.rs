@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use fts::setlist::{TransportCommand, NavigationCommand};
 use crate::infrastructure::action_registry::get_command_id;
 use reaper_medium::{CommandId, ProjectContext};
-use tracing::info;
+use tracing::{info, warn};
 
 /// Command execution request
 enum CommandRequest {
@@ -16,6 +16,7 @@ enum CommandRequest {
     Navigation(NavigationCommand),
     SeekToSong(usize),
     SeekToTime(usize, f64), // (song_index, time_seconds)
+    SeekToMusicalPosition(usize, daw::primitives::MusicalPosition), // (song_index, musical_position)
     ToggleLoop,
 }
 
@@ -56,6 +57,10 @@ impl CommandService {
     /// Seek to a time position (called from async context)
     pub fn seek_to_time(&self, song_index: usize, time_seconds: f64) -> Result<(), String> {
         self.send_command(CommandRequest::SeekToTime(song_index, time_seconds))
+    }
+
+    pub fn seek_to_musical_position(&self, song_index: usize, musical_position: daw::primitives::MusicalPosition) -> Result<(), String> {
+        self.send_command(CommandRequest::SeekToMusicalPosition(song_index, musical_position))
     }
 
     /// Toggle loop (called from async context)
@@ -131,17 +136,152 @@ impl CommandService {
                 Ok(())
             }
             CommandRequest::SeekToSong(song_index) => {
-                use crate::live::tracks::actions::go_to_song;
-                go_to_song(song_index);
-                info!("Executed seek to song: {}", song_index);
-                Ok(())
+                #[cfg(feature = "live")]
+                {
+                    use crate::live::tracks::actions::go_to_song;
+                    go_to_song(song_index);
+                    info!("Executed seek to song: {}", song_index);
+                    Ok(())
+                }
+                #[cfg(not(feature = "live"))]
+                {
+                    warn!("SeekToSong command requires 'live' feature");
+                    Err("Live feature not enabled".to_string())
+                }
+            }
+            CommandRequest::SeekToMusicalPosition(song_index, musical_position) => {
+                #[cfg(feature = "live")]
+                {
+                    // Convert musical position to time using REAPER's tempo map
+                    use crate::implementation::setlist::build_setlist_from_open_projects;
+                    use crate::live::tracks::tab_navigation::TabNavigator;
+                    use reaper_high::{Reaper, Project};
+                    use reaper_medium::{ProjectRef, PositionInSeconds, SetEditCurPosOptions, PositionInBeats, MeasureMode};
+                    use daw::primitives::MusicalPosition;
+                    
+                    let reaper = Reaper::get();
+                    let medium_reaper = reaper.medium_reaper();
+                    
+                    // Build setlist to find the song
+                    let setlist = build_setlist_from_open_projects(None)
+                        .map_err(|e| format!("Failed to build setlist: {}", e))?;
+                    
+                    if song_index >= setlist.songs.len() {
+                        return Err(format!("Song index {} out of range", song_index));
+                    }
+                    
+                    let song = &setlist.songs[song_index];
+                    
+                    // Find tab index by matching project name (same approach as seek_to_time)
+                    let project_name = song.metadata.get("project_name")
+                        .or_else(|| song.metadata.get("Project"))
+                        .or_else(|| song.metadata.get("project"))
+                        .ok_or_else(|| "Song has no project_name in metadata".to_string())?;
+                    
+                    let mut found_tab_index = None;
+                    for i in 0..128u32 {
+                        if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
+                            let tab_name = result.file_path.as_ref()
+                                .and_then(|p| p.as_std_path().file_stem())
+                                .and_then(|s| s.to_str())
+                                .map(|s| s.to_string());
+                            
+                            if tab_name.as_ref() == Some(project_name) {
+                                found_tab_index = Some(i as usize);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    let tab_index = found_tab_index
+                        .ok_or_else(|| format!("Could not find project for song: {}", project_name))?;
+                    
+                    // Get current project
+                    let current_project_result = medium_reaper.enum_projects(ProjectRef::Current, 0)
+                        .ok_or_else(|| "No current project".to_string())?;
+                    let current_project = Project::new(current_project_result.project);
+                    
+                    // Find current tab index
+                    let current_tab_index = {
+                        let current_project_raw = current_project_result.project;
+                        let mut found_current_tab = None;
+                        for i in 0..128u32 {
+                            if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
+                                if result.project == current_project_raw {
+                                    found_current_tab = Some(i as usize);
+                                    break;
+                                }
+                            }
+                        }
+                        found_current_tab
+                    };
+                    
+                    // Check if we need to switch tabs
+                    let final_project = if current_tab_index != Some(tab_index) {
+                        let tab_navigator = TabNavigator::new();
+                        tab_navigator.switch_to_tab(tab_index)
+                            .map_err(|e| format!("Failed to switch to tab {}: {}", tab_index, e))?;
+                        
+                        let project_result = medium_reaper.enum_projects(ProjectRef::Current, 0)
+                            .ok_or_else(|| "No current project after tab switch".to_string())?;
+                        Project::new(project_result.project)
+                    } else {
+                        current_project
+                    };
+                    
+                    // Get project measure offset
+                    let get_project_measure_offset = |project: &Project| -> i32 {
+                        if let Some(offs_result) = medium_reaper.project_config_var_get_offs("projmeasoffs") {
+                            if let Some(addr) = medium_reaper.project_config_var_addr(project.context(), offs_result.offset) {
+                                unsafe { *(addr.as_ptr() as *const i32) }
+                            } else {
+                                0
+                            }
+                        } else {
+                            0
+                        }
+                    };
+                    
+                    let measure_offset = get_project_measure_offset(&final_project);
+                    let reaper_measure_index = musical_position.measure - measure_offset;
+                    
+                    // Calculate beats since measure start
+                    let beats_since_measure = musical_position.beat as f64 + (musical_position.subdivision as f64 / 1000.0);
+                    let beats_pos = PositionInBeats::new(beats_since_measure)
+                        .map_err(|e| format!("Invalid beats position: {:?}", e))?;
+                    
+                    // Use TimeMap2_beatsToTime to convert musical position to time
+                    let measure_mode = MeasureMode::FromMeasureAtIndex(reaper_measure_index);
+                    let target_pos = medium_reaper.time_map_2_beats_to_time(final_project.context(), measure_mode, beats_pos);
+                    
+                    // Seek to the position
+                    final_project.set_edit_cursor_position(target_pos, SetEditCurPosOptions { 
+                        move_view: false, 
+                        seek_play: true,
+                    });
+                    
+                    info!(
+                        song_index,
+                        musical_position = %musical_position,
+                        time_position = target_pos.get(),
+                        "Seeked to musical position"
+                    );
+                    Ok(())
+                }
+                #[cfg(not(feature = "live"))]
+                {
+                    warn!("SeekToMusicalPosition command requires 'live' feature");
+                    Err("Live feature not enabled".to_string())
+                }
             }
             CommandRequest::SeekToTime(song_index, time_seconds) => {
-                // Delegate to SeekService for time-based seeks
-                // For now, we'll implement it here since SeekService handles section seeks
-                // TODO: Move this to SeekService
-                use crate::implementation::setlist::build_setlist_from_open_projects;
-                use crate::live::tracks::tab_navigation::TabNavigator;
+                #[cfg(feature = "live")]
+                {
+                    // Delegate to SeekService for time-based seeks
+                    // For now, we'll implement it here since SeekService handles section seeks
+                    // TODO: Move this to SeekService
+                    use crate::implementation::setlist::build_setlist_from_open_projects;
+                    use crate::live::tracks::tab_navigation::TabNavigator;
                 use reaper_high::{Reaper, Project};
                 use reaper_medium::{ProjectRef, PositionInSeconds, SetEditCurPosOptions};
                 
@@ -230,11 +370,17 @@ impl CommandService {
                     seek_play: true, // Seek play cursor immediately
                 });
                 
-                info!(
-                    "Seeked to time position {}s (song: {}, absolute: {}s)",
-                    time_seconds, song.name, absolute_time
-                );
-                Ok(())
+                    info!(
+                        "Seeked to time position {}s (song: {}, absolute: {}s)",
+                        time_seconds, song.name, absolute_time
+                    );
+                    Ok(())
+                }
+                #[cfg(not(feature = "live"))]
+                {
+                    warn!("SeekToTime command requires 'live' feature");
+                    Err("Live feature not enabled".to_string())
+                }
             }
             CommandRequest::ToggleLoop => {
                 let cmd_id = CommandId::new(1068); // Toggle repeat

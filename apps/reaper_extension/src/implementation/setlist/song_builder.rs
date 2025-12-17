@@ -4,11 +4,11 @@
 
 use daw::marker_region::core::{Marker, Region};
 use reaper_high::{Project, Reaper};
-use reaper_medium::ProjectRef;
+use reaper_medium::{ProjectRef, PositionInSeconds};
 use fts::setlist::core::{Setlist, SetlistError, Song};
-use daw::primitives::TimeSignature;
+use daw::primitives::{TimeSignature, Position, MusicalPosition, TimePosition};
 use tracing::{debug, warn};
-use daw::marker_region::application::TempoTimePoint;
+use daw::marker_region::application::{TempoTimePoint, TempoTimeEnvelope};
 
 use crate::implementation::markers::{read_markers_from_project, read_regions_from_project};
 use crate::implementation::setlist::stats::{record_song_built, flush_build_stats_if_needed};
@@ -16,6 +16,7 @@ use crate::implementation::setlist::tempo::read_tempo_time_sig_markers_from_proj
 use crate::implementation::setlist::parser::parse_song_name;
 use crate::implementation::setlist::region_finder::{find_marker_by_name, find_song_regions, find_song_region_for_marker, find_song_region};
 use crate::implementation::setlist::section_builder::{build_sections_from_regions, build_sections_from_regions_simple};
+#[cfg(feature = "lyrics")]
 use crate::lyrics::read::{read_lyrics_from_project, convert_lyrics_data_to_lyrics};
 
 /// Build a song from the current active project
@@ -663,25 +664,80 @@ pub fn build_song_from_region(
     
     // Read tempo/time signature changes from the project and filter to song range
     let all_tempo_changes = read_tempo_time_sig_markers_from_project(project);
-    let song_tempo_changes: Vec<TempoTimePoint> = all_tempo_changes
+    
+    // Get project default tempo and time signature (we'll need these for calculating musical positions)
+    let project_tempo = project.tempo().bpm().get();
+    let zero_pos = PositionInSeconds::ZERO;
+    let beat_info = project.beat_info_at(zero_pos);
+    let project_time_sig = (
+        beat_info.time_signature.numerator.get() as i32,
+        beat_info.time_signature.denominator.get() as i32,
+    );
+    
+    // First, collect tempo changes with song-relative positions
+    let mut tempo_changes_with_positions: Vec<(f64, f64, Option<(i32, i32)>)> = all_tempo_changes
         .into_iter()
         .filter_map(|(time_pos, tempo, time_sig)| {
             // Only include changes within the song region
             if time_pos >= song_region.start_seconds() && time_pos <= song_region.end_seconds() {
                 // Convert to song-relative position (0.0 = start of song)
                 let song_relative_pos = time_pos - song_start_seconds;
-                Some(TempoTimePoint::new_full(
-                    song_relative_pos,
-                    tempo,
-                    None, // shape
-                    time_sig,
-                    None, // selected
-                    None, // bezier_tension
-                    None, // metronome_pattern
-                ))
+                Some((song_relative_pos, tempo, time_sig))
             } else {
                 None
             }
+        })
+        .collect();
+    
+    // Sort by position
+    tempo_changes_with_positions.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    
+    // Build a TempoTimeEnvelope to calculate musical positions
+    // We need to use absolute positions (not song-relative) for the envelope
+    let mut envelope = TempoTimeEnvelope::new(project_tempo, project_time_sig);
+    for (song_relative_pos, tempo, time_sig) in &tempo_changes_with_positions {
+        let absolute_pos = song_start_seconds + song_relative_pos;
+        let point = TempoTimePoint::new_full_from_seconds(
+            absolute_pos,
+            *tempo,
+            None, // shape
+            *time_sig,
+            None, // selected
+            None, // bezier_tension
+            None, // metronome_pattern
+        );
+        envelope.add_point(point);
+    }
+    
+    // Now create TempoTimePoint instances with full Position (including musical position)
+    let song_tempo_changes: Vec<TempoTimePoint> = tempo_changes_with_positions
+        .into_iter()
+        .map(|(song_relative_pos, tempo, time_sig)| {
+            // Calculate musical position using the envelope
+            let absolute_pos = song_start_seconds + song_relative_pos;
+            let (measure, beat, beat_fraction) = envelope.musical_position_at_time(absolute_pos);
+            
+            // Create Position with both time and musical position
+            let musical_pos = MusicalPosition::try_new(
+                measure - 1, // Convert from 1-based to 0-based
+                beat - 1,     // Convert from 1-based to 0-based
+                (beat_fraction * 1000.0).round() as i32,
+            ).unwrap_or_else(|_| MusicalPosition::start());
+            
+            let position = Position::new(
+                musical_pos,
+                TimePosition::from_seconds(song_relative_pos),
+            );
+            
+            TempoTimePoint::new_full(
+                position,
+                tempo,
+                None, // shape
+                time_sig,
+                None, // selected
+                None, // bezier_tension
+                None, // metronome_pattern
+            )
         })
         .collect();
     
@@ -700,7 +756,7 @@ pub fn build_song_from_region(
     let mut starting_time_sig: Option<TimeSignature> = None;
     
     for point in song.tempo_time_sig_changes.iter() {
-        if point.position <= starting_position_song_relative {
+        if point.position_seconds() <= starting_position_song_relative {
             if point.tempo > 0.0 {
                 starting_tempo = Some(point.tempo);
             }
@@ -717,22 +773,25 @@ pub fn build_song_from_region(
     song.starting_tempo = starting_tempo;
     song.starting_time_signature = starting_time_sig;
     
-    // Read lyrics from the project
-    match read_lyrics_from_project(project.clone()) {
-        Ok(lyrics_data) => {
-            match convert_lyrics_data_to_lyrics(lyrics_data, parsed_song_name.clone(), &song) {
-                Ok(lyrics) => {
-                    song.lyrics = Some(lyrics);
-                    debug!(song_name = %parsed_song_name, "Successfully read lyrics from project");
-                }
-                Err(e) => {
-                    warn!(song_name = %parsed_song_name, error = %e, "Failed to convert lyrics from slides");
+    // Read lyrics from the project (if lyrics feature is enabled)
+    #[cfg(feature = "lyrics")]
+    {
+        match read_lyrics_from_project(project.clone()) {
+            Ok(lyrics_data) => {
+                match convert_lyrics_data_to_lyrics(lyrics_data, parsed_song_name.clone(), &song) {
+                    Ok(lyrics) => {
+                        song.lyrics = Some(lyrics);
+                        debug!(song_name = %parsed_song_name, "Successfully read lyrics from project");
+                    }
+                    Err(e) => {
+                        warn!(song_name = %parsed_song_name, error = %e, "Failed to convert lyrics from slides");
+                    }
                 }
             }
-        }
-        Err(e) => {
-            // Lyrics folder not found is expected for songs without lyrics, so log at debug level
-            debug!(song_name = %parsed_song_name, error = %e, "No lyrics found in project (this is OK if song has no lyrics)");
+            Err(e) => {
+                // Lyrics folder not found is expected for songs without lyrics, so log at debug level
+                debug!(song_name = %parsed_song_name, error = %e, "No lyrics found in project (this is OK if song has no lyrics)");
+            }
         }
     }
     
@@ -772,6 +831,11 @@ pub fn build_song_from_region(
             warn!(song_name = %parsed_song_name, error = %e, "Failed to read transport info for song");
         }
     }
+    
+    // Calculate measure positions for this song
+    // This provides both MusicalPosition and TimePosition for each measure
+    // so clients can display measures correctly without complex tempo calculations
+    song.measure_positions = calculate_measure_positions(project, &song);
     
     Ok(song)
 }
@@ -890,22 +954,25 @@ pub fn build_song_from_project_simple(
     // Auto-number sections
     song.auto_number_sections();
 
-    // Read lyrics from the project
-    match read_lyrics_from_project(project.clone()) {
-        Ok(lyrics_data) => {
-            match convert_lyrics_data_to_lyrics(lyrics_data, parsed_song_name.clone(), &song) {
-                Ok(lyrics) => {
-                    song.lyrics = Some(lyrics);
-                    debug!(song_name = %parsed_song_name, "Successfully read lyrics from project");
-                }
-                Err(e) => {
-                    warn!(song_name = %parsed_song_name, error = %e, "Failed to convert lyrics from slides");
+    // Read lyrics from the project (if lyrics feature is enabled)
+    #[cfg(feature = "lyrics")]
+    {
+        match read_lyrics_from_project(project.clone()) {
+            Ok(lyrics_data) => {
+                match convert_lyrics_data_to_lyrics(lyrics_data, parsed_song_name.clone(), &song) {
+                    Ok(lyrics) => {
+                        song.lyrics = Some(lyrics);
+                        debug!(song_name = %parsed_song_name, "Successfully read lyrics from project");
+                    }
+                    Err(e) => {
+                        warn!(song_name = %parsed_song_name, error = %e, "Failed to convert lyrics from slides");
+                    }
                 }
             }
-        }
-        Err(e) => {
-            // Lyrics folder not found is expected for songs without lyrics, so log at debug level
-            debug!(song_name = %parsed_song_name, error = %e, "No lyrics found in project (this is OK if song has no lyrics)");
+            Err(e) => {
+                // Lyrics folder not found is expected for songs without lyrics, so log at debug level
+                debug!(song_name = %parsed_song_name, error = %e, "No lyrics found in project (this is OK if song has no lyrics)");
+            }
         }
     }
 
@@ -945,6 +1012,88 @@ pub fn build_song_from_project_simple(
         }
     }
 
+    // Calculate measure positions for this song
+    // This provides both MusicalPosition and TimePosition for each measure
+    // so clients can display measures correctly without complex tempo calculations
+    song.measure_positions = calculate_measure_positions(project, &song);
+    
     Ok(song)
+}
+
+/// Calculate Position (MusicalPosition + TimePosition) for each measure in the song
+/// Uses REAPER's tempo map to get accurate time positions for each measure
+fn calculate_measure_positions(project: &Project, song: &Song) -> Vec<Position> {
+    use reaper_medium::{PositionInBeats, MeasureMode, PositionInSeconds};
+    use reaper_high::Reaper;
+    
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+    let project_context = project.context();
+    
+    // Get project measure offset
+    let get_project_measure_offset = || -> i32 {
+        if let Some(offs_result) = medium_reaper.project_config_var_get_offs("projmeasoffs") {
+            if let Some(addr) = medium_reaper.project_config_var_addr(project_context, offs_result.offset) {
+                unsafe { *(addr.as_ptr() as *const i32) }
+            } else {
+                0
+            }
+        } else {
+            0
+        }
+    };
+    
+    let measure_offset = get_project_measure_offset();
+    
+    // Get song start and end measures
+    let song_start_musical = song.sections.first()
+        .and_then(|s| s.start_position.as_ref())
+        .map(|p| p.musical.measure)
+        .unwrap_or(0);
+    
+    let song_end_musical = song.sections.last()
+        .and_then(|s| s.end_position.as_ref())
+        .map(|p| p.musical.measure)
+        .unwrap_or(song_start_musical + 100); // Safety limit
+    
+    let mut measure_positions = Vec::new();
+    
+    // Iterate through measures from song start to end
+    for measure_num in song_start_musical..=song_end_musical {
+        // Convert REAPER measure index (subtract offset)
+        let reaper_measure_index = measure_num - measure_offset;
+        
+        // Get measure start time using REAPER's TimeMap2
+        // Use FromMeasureAtIndex with beat 0 to get measure start
+        let beats_pos = PositionInBeats::new(0.0)
+            .unwrap_or_else(|_| PositionInBeats::ZERO);
+        let measure_mode = MeasureMode::FromMeasureAtIndex(reaper_measure_index);
+        let measure_time = medium_reaper.time_map_2_beats_to_time(project_context, measure_mode, beats_pos);
+        
+        // Get beat info at this time to get accurate musical position
+        let beat_info = project.beat_info_at(measure_time);
+        let actual_measure = beat_info.measure_index + measure_offset; // Add offset back
+        
+        // Only add if this measure is within the song range
+        if actual_measure >= song_start_musical && actual_measure <= song_end_musical {
+            let musical_pos = MusicalPosition::try_new(
+                actual_measure,
+                0, // Beat 0 (start of measure)
+                0, // Subdivision 0
+            ).unwrap_or_else(|_| MusicalPosition::start());
+            
+            let time_pos = TimePosition::from_seconds(measure_time.get());
+            let position = Position::new(musical_pos, time_pos);
+            
+            measure_positions.push(position);
+        }
+        
+        // Safety limit
+        if measure_num > song_start_musical + 1000 {
+            break;
+        }
+    }
+    
+    measure_positions
 }
 

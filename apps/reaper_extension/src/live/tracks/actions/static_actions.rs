@@ -344,6 +344,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: setlist_play,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_SETLIST_STOP",
@@ -351,6 +352,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: setlist_stop,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_SETLIST_PAUSE",
@@ -358,6 +360,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: setlist_pause,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_SETLIST_RESUME",
@@ -365,6 +368,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: setlist_resume,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_RESET_TO_BEGINNING_OF_SONG",
@@ -372,6 +376,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: reset_to_beginning_of_song,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_RESET_TO_BEGINNING_OF_SETLIST",
@@ -379,6 +384,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: reset_to_beginning_of_setlist,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_RESET_TO_BEGINNING_SMART",
@@ -386,6 +392,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: reset_to_beginning_smart,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_SETLIST_RESUME_SMART",
@@ -393,6 +400,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: setlist_resume_smart,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_ZOOM_HORIZONTALLY_TO_SONG",
@@ -400,6 +408,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: zoom_horizontally_to_song,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_GO_TO_PREVIOUS_SONG",
@@ -407,6 +416,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: go_to_previous_song,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_GO_TO_NEXT_SONG",
@@ -414,6 +424,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: go_to_next_song,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_GO_TO_NEXT_SECTION",
@@ -421,6 +432,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: go_to_next_section,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_GO_TO_PREVIOUS_SECTION",
@@ -428,6 +440,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: go_to_previous_section,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_GO_TO_NEXT_SECTION_SONG_SMART",
@@ -435,6 +448,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: go_to_next_section_song_smart,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
         ActionDef {
             command_id: "FTS_LIVE_GO_TO_PREVIOUS_SECTION_SONG_SMART",
@@ -442,6 +456,7 @@ pub fn domain_actions() -> Vec<ActionDef> {
             handler: go_to_previous_section_song_smart,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
     ]
 }
