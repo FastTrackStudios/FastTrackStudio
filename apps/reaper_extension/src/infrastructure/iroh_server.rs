@@ -23,8 +23,10 @@ pub mod alpn {
     /// ALPN for setlist protocol (matches SetlistStreamApi::ALPN)
     pub const SETLIST: &[u8] = fts::setlist::SetlistStreamApi::ALPN;
     /// ALPN for lyrics protocol (matches LyricsApi::ALPN)
+    #[cfg(feature = "lyrics")]
     pub const LYRICS: &[u8] = fts::lyrics::reactive::irpc::LyricsApi::ALPN;
     /// ALPN for chart protocol (matches ChartApi::ALPN)
+    #[cfg(feature = "keyflow")]
     pub const CHART: &[u8] = fts::chords::reactive::irpc::ChartApi::ALPN;
 }
 
@@ -43,6 +45,7 @@ pub fn start_iroh_server(
     // Use REAPER implementations - create new instances that share the same streams
     let transport_streams = reactive_state.transport_service.streams().clone();
     let track_streams = reactive_state.track_service.streams().clone();
+    #[cfg(feature = "lyrics")]
     let lyrics_streams = reactive_state.lyrics_service.streams().clone();
     
     // Create transport API using REAPER implementation
@@ -85,20 +88,26 @@ pub fn start_iroh_server(
         Some(track_command_handler.clone()),
     );
     
-    // Create lyrics API using REAPER implementation
-    let lyrics_service_box: Box<dyn fts::lyrics::reactive::LyricsReactiveService> = 
-        Box::new(crate::infrastructure::reaper_lyrics_reactive::ReaperLyricsReactiveService::new(
-            lyrics_streams,
-        ));
-    let mut lyrics_api = fts::lyrics::reactive::irpc::LyricsApi::spawn(lyrics_service_box);
+    // Create lyrics API using REAPER implementation (if lyrics feature is enabled)
+    #[cfg(feature = "lyrics")]
+    let mut lyrics_api = {
+        let lyrics_service_box: Box<dyn fts::lyrics::reactive::LyricsReactiveService> = 
+            Box::new(crate::infrastructure::reaper_lyrics_reactive::ReaperLyricsReactiveService::new(
+                lyrics_streams,
+            ));
+        fts::lyrics::reactive::irpc::LyricsApi::spawn(lyrics_service_box)
+    };
     
-    // Create chords API using REAPER implementation
-    let chords_streams = fts::chords::reactive::ChordsStreams::new();
-    let chords_service_box: Box<dyn fts::chords::reactive::ChordsReactiveService> = 
-        Box::new(crate::infrastructure::reaper_chords_reactive::ReaperChordsReactiveService::new(
-            chords_streams,
-        ));
-    let mut chart_api = fts::chords::reactive::irpc::ChartApi::spawn(chords_service_box);
+    // Create chords API using REAPER implementation (if keyflow feature is enabled)
+    #[cfg(feature = "keyflow")]
+    let mut chart_api = {
+        let chords_streams = fts::chords::reactive::ChordsStreams::new();
+        let chords_service_box: Box<dyn fts::chords::reactive::ChordsReactiveService> = 
+            Box::new(crate::infrastructure::reaper_chords_reactive::ReaperChordsReactiveService::new(
+                chords_streams,
+            ));
+        fts::chords::reactive::irpc::ChartApi::spawn(chords_service_box)
+    };
     
     // Create setlist stream API (on main thread)
     let setlist_api = match stream_service.create_stream_api() {
@@ -112,7 +121,9 @@ pub fn start_iroh_server(
     // Extract handler data before exposing (expose consumes the API)
     let transport_handler_data = transport_api.take_handler_data();
     let tracks_handler_data = tracks_api.take_handler_data();
+    #[cfg(feature = "lyrics")]
     let lyrics_handler_data = lyrics_api.take_handler_data();
+    #[cfg(feature = "keyflow")]
     let chart_handler_data = chart_api.take_handler_data();
     
     // Expose all handlers (on main thread)
@@ -142,6 +153,7 @@ pub fn start_iroh_server(
         }
     };
     
+    #[cfg(feature = "lyrics")]
     let lyrics_handler = match lyrics_api.expose() {
         Ok(handler) => handler,
         Err(e) => {
@@ -150,6 +162,7 @@ pub fn start_iroh_server(
         }
     };
     
+    #[cfg(feature = "keyflow")]
     let chart_handler = match chart_api.expose() {
         Ok(handler) => handler,
         Err(e) => {
@@ -330,105 +343,111 @@ pub fn start_iroh_server(
                 });
             }
             
-            if let Some((rx, lyrics_broadcast, active_slide_broadcast, annotations_broadcast)) = lyrics_handler_data {
-                let lyrics_broadcast_clone = lyrics_broadcast.clone();
-                let active_slide_broadcast_clone = active_slide_broadcast.clone();
-                let annotations_broadcast_clone = annotations_broadcast.clone();
-                
-                tokio::spawn(async move {
-                    use fts::lyrics::reactive::irpc::LyricsMessage;
-                    use irpc::WithChannels;
-                    let mut rx = rx;
-                    info!("[Lyrics Handler] Started listening for lyrics subscription requests");
-                    while let Ok(msg_opt) = rx.recv().await {
-                        match msg_opt {
-                            Some(msg) => {
-                                info!("[Lyrics Handler] Received message: {:?}", std::mem::discriminant(&msg));
-                                match msg {
-                                    LyricsMessage::SubscribeLyrics(WithChannels { tx, .. }) => {
-                                        info!("[Lyrics Handler] ✅ Client subscribed to lyrics stream");
-                                        let mut lyrics_rx = lyrics_broadcast_clone.subscribe();
-                                        let mut active_slide_rx = active_slide_broadcast_clone.subscribe();
-                                        let mut annotations_rx = annotations_broadcast_clone.subscribe();
+            #[cfg(feature = "lyrics")]
+            {
+                if let Some((rx, lyrics_broadcast, active_slide_broadcast, annotations_broadcast)) = lyrics_handler_data {
+                    let lyrics_broadcast_clone = lyrics_broadcast.clone();
+                    let active_slide_broadcast_clone = active_slide_broadcast.clone();
+                    let annotations_broadcast_clone = annotations_broadcast.clone();
+                    
+                    tokio::spawn(async move {
+                        use fts::lyrics::reactive::irpc::LyricsMessage;
+                        use irpc::WithChannels;
+                        let mut rx = rx;
+                        info!("[Lyrics Handler] Started listening for lyrics subscription requests");
+                        while let Ok(msg_opt) = rx.recv().await {
+                            match msg_opt {
+                                Some(msg) => {
+                                    info!("[Lyrics Handler] Received message: {:?}", std::mem::discriminant(&msg));
+                                    match msg {
+                                        LyricsMessage::SubscribeLyrics(WithChannels { tx, .. }) => {
+                                            info!("[Lyrics Handler] ✅ Client subscribed to lyrics stream");
+                                            let mut lyrics_rx = lyrics_broadcast_clone.subscribe();
+                                            let mut active_slide_rx = active_slide_broadcast_clone.subscribe();
+                                            let mut annotations_rx = annotations_broadcast_clone.subscribe();
 
-                                        tokio::spawn(async move {
-                                            info!("[Lyrics Handler] Started forwarding lyrics updates to client");
-                                            loop {
-                                                tokio::select! {
-                                                    Ok(msg) = lyrics_rx.recv() => {
-                                                        if tx.send(msg).await.is_err() { 
-                                                            warn!("[Lyrics Handler] Client disconnected (lyrics_rx)");
-                                                            break; 
+                                            tokio::spawn(async move {
+                                                info!("[Lyrics Handler] Started forwarding lyrics updates to client");
+                                                loop {
+                                                    tokio::select! {
+                                                        Ok(msg) = lyrics_rx.recv() => {
+                                                            if tx.send(msg).await.is_err() { 
+                                                                warn!("[Lyrics Handler] Client disconnected (lyrics_rx)");
+                                                                break; 
+                                                            }
                                                         }
-                                                    }
-                                                    Ok(msg) = active_slide_rx.recv() => {
-                                                        if tx.send(msg).await.is_err() { 
-                                                            warn!("[Lyrics Handler] Client disconnected (active_slide_rx)");
-                                                            break; 
+                                                        Ok(msg) = active_slide_rx.recv() => {
+                                                            if tx.send(msg).await.is_err() { 
+                                                                warn!("[Lyrics Handler] Client disconnected (active_slide_rx)");
+                                                                break; 
+                                                            }
                                                         }
-                                                    }
-                                                    Ok(msg) = annotations_rx.recv() => {
-                                                        if tx.send(msg).await.is_err() { 
-                                                            warn!("[Lyrics Handler] Client disconnected (annotations_rx)");
-                                                            break; 
+                                                        Ok(msg) = annotations_rx.recv() => {
+                                                            if tx.send(msg).await.is_err() { 
+                                                                warn!("[Lyrics Handler] Client disconnected (annotations_rx)");
+                                                                break; 
+                                                            }
                                                         }
+                                                        else => break,
                                                     }
-                                                    else => break,
                                                 }
-                                            }
-                                            info!("[Lyrics Handler] Stopped forwarding lyrics updates to client");
-                                        });
-                                    }
-                                }
-                            }
-                            None => {
-                                warn!("[Lyrics Handler] Message channel closed");
-                                break;
-                            }
-                        }
-                    }
-                    warn!("[Lyrics Handler] Handler loop ended");
-                });
-            }
-            
-            if let Some((rx, chart_broadcast)) = chart_handler_data {
-                let chart_broadcast_clone = chart_broadcast.clone();
-                
-                tokio::spawn(async move {
-                    use fts::chords::reactive::irpc::ChartUpdateMessage;
-                    use irpc::WithChannels;
-                    let mut rx = rx;
-                    info!("[Chart Handler] Started listening for chart subscription requests");
-                    while let Ok(msg_opt) = rx.recv().await {
-                        match msg_opt {
-                            Some(fts::chords::reactive::irpc::ChartMessage::SubscribeChart(WithChannels { tx, .. })) => {
-                                info!("[Chart Handler] ✅ Client subscribed to chart stream");
-                                let mut chart_rx = chart_broadcast_clone.subscribe();
-
-                                tokio::spawn(async move {
-                                    info!("[Chart Handler] Started forwarding chart updates to client");
-                                    loop {
-                                        tokio::select! {
-                                            Ok(msg) = chart_rx.recv() => {
-                                                if tx.send(msg).await.is_err() { 
-                                                    warn!("[Chart Handler] Client disconnected (chart_rx)");
-                                                    break; 
-                                                }
-                                            }
-                                            else => break,
+                                                info!("[Lyrics Handler] Stopped forwarding lyrics updates to client");
+                                            });
                                         }
                                     }
-                                    info!("[Chart Handler] Stopped forwarding chart updates to client");
-                                });
-                            }
-                            None => {
-                                warn!("[Chart Handler] Message channel closed");
-                                break;
+                                }
+                                None => {
+                                    warn!("[Lyrics Handler] Message channel closed");
+                                    break;
+                                }
                             }
                         }
-                    }
-                    warn!("[Chart Handler] Handler loop ended");
-                });
+                        warn!("[Lyrics Handler] Handler loop ended");
+                    });
+                }
+            }
+            
+            #[cfg(feature = "keyflow")]
+            {
+                if let Some((rx, chart_broadcast)) = chart_handler_data {
+                    let chart_broadcast_clone = chart_broadcast.clone();
+                    
+                    tokio::spawn(async move {
+                        use fts::chords::reactive::irpc::ChartUpdateMessage;
+                        use irpc::WithChannels;
+                        let mut rx = rx;
+                        info!("[Chart Handler] Started listening for chart subscription requests");
+                        while let Ok(msg_opt) = rx.recv().await {
+                            match msg_opt {
+                                Some(fts::chords::reactive::irpc::ChartMessage::SubscribeChart(WithChannels { tx, .. })) => {
+                                    info!("[Chart Handler] ✅ Client subscribed to chart stream");
+                                    let mut chart_rx = chart_broadcast_clone.subscribe();
+
+                                    tokio::spawn(async move {
+                                        info!("[Chart Handler] Started forwarding chart updates to client");
+                                        loop {
+                                            tokio::select! {
+                                                Ok(msg) = chart_rx.recv() => {
+                                                    if tx.send(msg).await.is_err() { 
+                                                        warn!("[Chart Handler] Client disconnected (chart_rx)");
+                                                        break; 
+                                                    }
+                                                }
+                                                else => break,
+                                            }
+                                        }
+                                        info!("[Chart Handler] Stopped forwarding chart updates to client");
+                                    });
+                                }
+                                None => {
+                                    warn!("[Chart Handler] Message channel closed");
+                                    break;
+                                }
+                            }
+                        }
+                        warn!("[Chart Handler] Handler loop ended");
+                    });
+                }
             }
             
             // Create IROH endpoint
@@ -442,13 +461,22 @@ pub fn start_iroh_server(
             let endpoint_id = endpoint.id();
                     
             // Build router with all protocols - each has its own ALPN
-            let _router = iroh::protocol::Router::builder(endpoint.clone())
+            let mut router_builder = iroh::protocol::Router::builder(endpoint.clone())
                 .accept(alpn::TRANSPORT.to_vec(), transport_handler)
                 .accept(alpn::TRACKS.to_vec(), tracks_handler)
-                .accept(alpn::SETLIST.to_vec(), setlist_handler)
-                .accept(alpn::LYRICS.to_vec(), lyrics_handler)
-                .accept(alpn::CHART.to_vec(), chart_handler)
-                .spawn();
+                .accept(alpn::SETLIST.to_vec(), setlist_handler);
+            
+            #[cfg(feature = "lyrics")]
+            {
+                router_builder = router_builder.accept(alpn::LYRICS.to_vec(), lyrics_handler);
+            }
+            
+            #[cfg(feature = "keyflow")]
+            {
+                router_builder = router_builder.accept(alpn::CHART.to_vec(), chart_handler);
+            }
+            
+            let _router = router_builder.spawn();
             
             // Store endpoint ID for client discovery
             if let Err(e) = peer_2_peer::iroh_connection::store_endpoint_id(endpoint_id) {
@@ -460,7 +488,9 @@ pub fn start_iroh_server(
             info!("Transport ALPN: {:?}", String::from_utf8_lossy(alpn::TRANSPORT));
             info!("Tracks ALPN: {:?}", String::from_utf8_lossy(alpn::TRACKS));
             info!("Setlist ALPN: {:?}", String::from_utf8_lossy(alpn::SETLIST));
+            #[cfg(feature = "lyrics")]
             info!("Lyrics ALPN: {:?}", String::from_utf8_lossy(alpn::LYRICS));
+            #[cfg(feature = "keyflow")]
             info!("Chart ALPN: {:?}", String::from_utf8_lossy(alpn::CHART));
                     
             // Keep router alive - it handles all connections

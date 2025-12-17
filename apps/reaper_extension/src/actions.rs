@@ -8,7 +8,36 @@ use reaper_high::{Project, Reaper, BookmarkType};
 use reaper_medium::ProjectRef;
 use tracing::{info, warn};
 use daw::transport::{TransportActions, PlayState};
+#[cfg(feature = "lyrics")]
 use crate::lyrics;
+
+/// About FastTrackStudio action handler - shows information about the extension
+fn about_fasttrackstudio_handler() {
+    let reaper = Reaper::get();
+    let about_message = r#"
+====================================
+FastTrackStudio REAPER Extension
+====================================
+
+FastTrackStudio is a comprehensive music production
+and live performance tool integrated with REAPER.
+
+Features:
+  • Setlist management
+  • Live track navigation
+  • Lyrics synchronization
+  • Chord detection and chart building
+  • Keyboard input interception
+  • Real-time state synchronization
+
+For more information, visit:
+  https://github.com/FastTrackStudio
+
+====================================
+"#;
+    reaper.show_console_msg(about_message);
+    info!("About FastTrackStudio action executed");
+}
 
 /// Dummy action handler - shows a message in REAPER console
 fn dummy_action_handler() {
@@ -934,93 +963,134 @@ fn log_tempo_time_sig_changes_handler() {
 }
 
 /// Create text items from lyrics input - one bar per slide
+#[cfg(feature = "lyrics")]
 fn create_text_items_from_lyrics_handler() {
-    lyrics::write::create_text_items_from_lyrics("".to_string()).unwrap_or_else(|e| {
+    crate::lyrics::write::create_text_items_from_lyrics("".to_string()).unwrap_or_else(|e| {
         tracing::error!("Failed to create text items from lyrics: {}", e);
     });
 }
 
 /// Register all actions for FastTrackStudio extension
 pub fn register_all_actions() {
-    let actions = vec![
+    // Always register "About" action so menu is always available
+    let about_action = vec![
         ActionDef {
-            command_id: "FTS_DEV_DUMMY_ACTION",
-            display_name: "Dummy Action".to_string(),
-            handler: dummy_action_handler,
-            appears_in_menu: true, // Show in menu
+            command_id: "FTS_ABOUT",
+            display_name: "About FastTrackStudio".to_string(),
+            handler: about_fasttrackstudio_handler,
+            appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
-        },
-        ActionDef {
-            command_id: "FTS_DEV_LOG_OPEN_PROJECTS",
-            display_name: "Log Open Projects".to_string(),
-            handler: log_open_projects_handler,
-            appears_in_menu: true, // Show in menu
-            section: crate::infrastructure::action_registry::ActionSection::Main,
-        },
-        ActionDef {
-            command_id: "FTS_DEV_LOG_CURRENT_MARKERS",
-            display_name: "Log Current Project Markers".to_string(),
-            handler: log_current_project_markers_handler,
-            appears_in_menu: true, // Show in menu
-            section: crate::infrastructure::action_registry::ActionSection::Main,
-        },
-        ActionDef {
-            command_id: "FTS_DEV_LOG_CURRENT_REGIONS",
-            display_name: "Log Current Project Regions".to_string(),
-            handler: log_current_project_regions_handler,
-            appears_in_menu: true, // Show in menu
-            section: crate::infrastructure::action_registry::ActionSection::Main,
-        },
-        ActionDef {
-            command_id: "FTS_DEV_LOG_REGION_COLORS",
-            display_name: "Log Region Colors (Debug)".to_string(),
-            handler: log_region_colors_handler,
-            appears_in_menu: true, // Show in menu
-            section: crate::infrastructure::action_registry::ActionSection::Main,
-        },
-        ActionDef {
-            command_id: "FTS_DEV_BUILD_SETLIST",
-            display_name: "Build Setlist from Open Projects".to_string(),
-            handler: build_setlist_from_projects_handler,
-            appears_in_menu: true, // Show in menu
-            section: crate::infrastructure::action_registry::ActionSection::Main,
-        },
-        ActionDef {
-            command_id: "FTS_DEV_LOG_SETLIST_SONGS",
-            display_name: "Log Setlist Songs".to_string(),
-            handler: log_setlist_songs_handler,
-            appears_in_menu: true, // Show in menu
-            section: crate::infrastructure::action_registry::ActionSection::Main,
-        },
-        ActionDef {
-            command_id: "FTS_DEV_LOG_CURRENT_SONG",
-            display_name: "Log Current Song Details".to_string(),
-            handler: log_current_song_details_handler,
-            appears_in_menu: true, // Show in menu
-            section: crate::infrastructure::action_registry::ActionSection::Main,
-        },
-        ActionDef {
-            command_id: "FTS_DEV_LOG_TEMPO_TIME_SIG",
-            display_name: "Log Tempo and Time Signature Changes".to_string(),
-            handler: log_tempo_time_sig_changes_handler,
-            appears_in_menu: true, // Show in menu
-            section: crate::infrastructure::action_registry::ActionSection::Main,
-        },
-        ActionDef {
-            command_id: "FTS_DEV_LOG_PROJECT_MEASURE_OFFSET",
-            display_name: "Log Project Measure Offset".to_string(),
-            handler: log_project_measure_offset_handler,
-            appears_in_menu: true, // Show in menu
-            section: crate::infrastructure::action_registry::ActionSection::Main,
-        },
-        ActionDef {
-            command_id: "FTS_DEV_LOG_CURRENT_MUSICAL_POSITION",
-            display_name: "Log Current Musical Position".to_string(),
-            handler: log_current_musical_position_handler,
-            appears_in_menu: true, // Show in menu
-            section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
         },
     ];
+    register_actions(&about_action, "FastTrackStudio");
     
-    register_actions(&actions, "FastTrackStudio");
+    // Register dev actions (if dev feature is enabled)
+    #[cfg(feature = "dev")]
+    {
+        let dev_actions = vec![
+            ActionDef {
+                command_id: "FTS_DEV_DUMMY_ACTION",
+                display_name: "Dummy Action".to_string(),
+                handler: dummy_action_handler,
+                appears_in_menu: true, // Show in menu
+                section: crate::infrastructure::action_registry::ActionSection::Main,
+                ..Default::default()
+            },
+            ActionDef {
+                command_id: "FTS_DEV_LOG_OPEN_PROJECTS",
+                display_name: "Log Open Projects".to_string(),
+                handler: log_open_projects_handler,
+                appears_in_menu: true, // Show in menu
+                section: crate::infrastructure::action_registry::ActionSection::Main,
+                ..Default::default()
+            },
+            ActionDef {
+                command_id: "FTS_DEV_LOG_CURRENT_MARKERS",
+                display_name: "Log Current Project Markers".to_string(),
+                handler: log_current_project_markers_handler,
+                appears_in_menu: true, // Show in menu
+                section: crate::infrastructure::action_registry::ActionSection::Main,
+                ..Default::default()
+            },
+            ActionDef {
+                command_id: "FTS_DEV_LOG_CURRENT_REGIONS",
+                display_name: "Log Current Project Regions".to_string(),
+                handler: log_current_project_regions_handler,
+                appears_in_menu: true, // Show in menu
+                section: crate::infrastructure::action_registry::ActionSection::Main,
+                ..Default::default()
+            },
+            ActionDef {
+                command_id: "FTS_DEV_LOG_REGION_COLORS",
+                display_name: "Log Region Colors (Debug)".to_string(),
+                handler: log_region_colors_handler,
+                appears_in_menu: true, // Show in menu
+                section: crate::infrastructure::action_registry::ActionSection::Main,
+                ..Default::default()
+            },
+            ActionDef {
+                command_id: "FTS_DEV_BUILD_SETLIST",
+                display_name: "Build Setlist from Open Projects".to_string(),
+                handler: build_setlist_from_projects_handler,
+                appears_in_menu: true, // Show in menu
+                section: crate::infrastructure::action_registry::ActionSection::Main,
+                ..Default::default()
+            },
+            ActionDef {
+                command_id: "FTS_DEV_LOG_SETLIST_SONGS",
+                display_name: "Log Setlist Songs".to_string(),
+                handler: log_setlist_songs_handler,
+                appears_in_menu: true, // Show in menu
+                section: crate::infrastructure::action_registry::ActionSection::Main,
+                ..Default::default()
+            },
+            ActionDef {
+                command_id: "FTS_DEV_LOG_CURRENT_SONG",
+                display_name: "Log Current Song Details".to_string(),
+                handler: log_current_song_details_handler,
+                appears_in_menu: true, // Show in menu
+                section: crate::infrastructure::action_registry::ActionSection::Main,
+                ..Default::default()
+            },
+            ActionDef {
+                command_id: "FTS_DEV_LOG_TEMPO_TIME_SIG",
+                display_name: "Log Tempo and Time Signature Changes".to_string(),
+                handler: log_tempo_time_sig_changes_handler,
+                appears_in_menu: true, // Show in menu
+                section: crate::infrastructure::action_registry::ActionSection::Main,
+                ..Default::default()
+            },
+            ActionDef {
+                command_id: "FTS_DEV_LOG_PROJECT_MEASURE_OFFSET",
+                display_name: "Log Project Measure Offset".to_string(),
+                handler: log_project_measure_offset_handler,
+                appears_in_menu: true, // Show in menu
+                section: crate::infrastructure::action_registry::ActionSection::Main,
+                ..Default::default()
+            },
+            ActionDef {
+                command_id: "FTS_DEV_LOG_CURRENT_MUSICAL_POSITION",
+                display_name: "Log Current Musical Position".to_string(),
+                handler: log_current_musical_position_handler,
+                appears_in_menu: true, // Show in menu
+                section: crate::infrastructure::action_registry::ActionSection::Main,
+                ..Default::default()
+            },
+        ];
+        
+        register_actions(&dev_actions, "FastTrackStudio");
+    }
+    
+    // Register chart/keyflow actions (if keyflow feature is enabled)
+    #[cfg(feature = "keyflow")]
+    {
+        crate::chart::actions::register_chart_actions();
+    }
+    
+    // Register FTS-Input actions (if input feature is enabled)
+    #[cfg(feature = "input")]
+    {
+        crate::input::actions::register_input_actions();
+    }
 }

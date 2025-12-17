@@ -93,10 +93,14 @@ impl HookCustomMenu for FastTrackStudioMenuHook {
 ///   "FTS_LIVE_SETLIST_PLAY" -> ("Live", "Tracks")
 ///   "FTS_VM_CREATE_GROUP" -> ("Visibility Manager", None)
 ///   "FTS_LYRICS_READ_FROM_REAPER" -> ("Lyrics", None)
+///   "FTS_COMMANDS_TOGGLE" -> ("Commands", None)
 ///   "FTS_DEV_LOG_PROJECTS" -> ("Dev", None)
 ///   "FTS_DEBUG_TEST" -> ("General", None)
 fn extract_category_from_command_id(command_id: &str) -> (String, Option<String>) {
-    if command_id.starts_with("FTS_LIVE_") {
+    if command_id.starts_with("FTS_ABOUT") {
+        // Return "General" so it appears directly in root menu, not in a submenu
+        ("General".to_string(), None)
+    } else if command_id.starts_with("FTS_LIVE_") {
         // All FTS_LIVE_ actions are currently tracks-related
         // In the future, we could parse FTS_LIVE_TRACKS_* vs FTS_LIVE_OTHER_* etc.
         ("Live".to_string(), Some("Tracks".to_string()))
@@ -104,8 +108,15 @@ fn extract_category_from_command_id(command_id: &str) -> (String, Option<String>
         ("Visibility Manager".to_string(), None)
     } else if command_id.starts_with("FTS_LYRICS_") {
         ("Lyrics".to_string(), None)
+    } else if command_id.starts_with("FTS_INPUT_") {
+        ("Input".to_string(), None)
+    } else if command_id.starts_with("FTS_KEYFLOW_") {
+        ("Keyflow".to_string(), None)
     } else if command_id.starts_with("FTS_DEV_") {
         ("Dev".to_string(), None)
+    } else if command_id.starts_with("FTS_CHART_") {
+        // Legacy chart actions - map to Keyflow
+        ("Keyflow".to_string(), None)
     } else {
         ("General".to_string(), None)
     }
@@ -155,10 +166,12 @@ fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
     }
     
     // Build menu entries: nested submenus for categories with subcategories, then General actions directly
-    let mut menu_entries = Vec::new();
+    // We'll build categorized menus first, then prepend General actions
+    let mut categorized_menu_entries = Vec::new();
     
-    // Define category order (non-General categories first, then General, then Dev)
-    let category_order = vec!["Live", "Visibility Manager", "Lyrics", "Dev"];
+    // Define category order (other categories, then Dev)
+    // Note: "General" category is handled separately to appear directly in root menu
+    let category_order = vec!["Live", "Visibility Manager", "Lyrics", "Input", "Keyflow", "Dev"];
     
     // Add categorized submenus
     for category_name in &category_order {
@@ -209,35 +222,57 @@ fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
                 }
                 
                 if !category_menu_entries.is_empty() {
-                    menu_entries.push(menu(category_name.to_string(), category_menu_entries));
+                    categorized_menu_entries.push(menu(category_name.to_string(), category_menu_entries));
                 }
             }
         }
     }
     
-    // Add separator if we have categorized menus and General actions
-    if !menu_entries.is_empty() && categorized.contains_key("General") {
-        menu_entries.push(separator());
-    }
+    // Build final menu: General actions first (directly in root), then categorized submenus
+    let mut menu_entries = Vec::new();
     
     // Add General actions directly (not in a submenu)
+    // Separate "About" actions to appear first, then other General actions
     if let Some(general_subcategories) = categorized.remove("General") {
+        let mut about_actions = Vec::new();
+        let mut other_general_actions = Vec::new();
+        
         for (_, general_actions) in general_subcategories {
             for action in general_actions {
-        let entry = item(
-            action.display_name.clone(),
-            action.command_id.to_string(),
-        );
-        
-        debug!(
-            command_id = %action.command_id,
-                    "Adding General action to menu"
-        );
-        
-        menu_entries.push(entry);
+                let entry = item(
+                    action.display_name.clone(),
+                    action.command_id.to_string(),
+                );
+                
+                if action.command_id.starts_with("FTS_ABOUT") {
+                    about_actions.push(entry);
+                } else {
+                    other_general_actions.push(entry);
+                }
             }
         }
+        
+        // Add "About" actions first
+        let has_about = !about_actions.is_empty();
+        let has_other_general = !other_general_actions.is_empty();
+        menu_entries.extend(about_actions);
+        
+        // Add separator if we have About actions and other items
+        if has_about && (has_other_general || !categorized_menu_entries.is_empty()) {
+            menu_entries.push(separator());
+        }
+        
+        // Add other General actions
+        menu_entries.extend(other_general_actions);
+        
+        // Add separator if we have General actions and categorized menus
+        if (has_about || has_other_general) && !categorized_menu_entries.is_empty() {
+            menu_entries.push(separator());
+        }
     }
+    
+    // Add categorized submenus after General actions
+    menu_entries.extend(categorized_menu_entries);
     
     // Add any remaining uncategorized actions
     for (category_name, subcategories) in categorized {

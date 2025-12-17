@@ -16,7 +16,9 @@ pub mod reactive_app_state;
 pub mod reaper_transport_reactive;
 pub mod reaper_track_reactive;
 pub mod reaper_track_command;
+#[cfg(feature = "lyrics")]
 pub mod reaper_lyrics_reactive;
+#[cfg(feature = "keyflow")]
 pub mod reaper_chords_reactive;
 pub mod formatted_logging;
 

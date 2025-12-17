@@ -19,7 +19,9 @@ use daw::transport::reactive::TransportReactiveService;
 use daw::tracks::reactive::TrackReactiveService;
 use fts::setlist::SetlistApi;
 use fts::setlist::reactive::{SetlistReactiveStreams, SetlistReactiveService};
+#[cfg(feature = "lyrics")]
 use fts::lyrics::{Lyrics, LyricsAnnotations};
+#[cfg(feature = "lyrics")]
 use fts::lyrics::reactive::{LyricsReactiveService, LyricsStreams};
 
 /// Centralized application state
@@ -73,11 +75,13 @@ impl ReactiveAppStateStreams {
         self.daw.transport.transport_changed.borrow().clone()
     }
     
+    #[cfg(feature = "lyrics")]
     #[allow(unused)]
     pub fn song_lyrics_changed(&self) -> rxrust::prelude::LocalSubject<'static, (usize, Lyrics), ()> {
         self.setlist.lyrics.lyrics_changed.borrow().clone()
     }
     
+    #[cfg(feature = "lyrics")]
     #[allow(unused)]
     pub fn song_lyrics_annotations_changed(&self) -> rxrust::prelude::LocalSubject<'static, (usize, LyricsAnnotations), ()> {
         self.setlist.lyrics.lyrics_annotations_changed.borrow().clone()
@@ -137,10 +141,12 @@ pub struct ReactiveAppStateService {
     /// Lyrics reactive service (manages lyrics and active slide for songs)
     /// Note: Uses `Arc` to allow cloning for IRPC API creation
     /// Reactive services are not `Send` or `Sync` (reactive streams use `Rc<RefCell<...>>` and are main-thread only)
+    #[cfg(feature = "lyrics")]
     pub lyrics_service: Arc<dyn LyricsReactiveService>,
     
     /// Concrete REAPER lyrics service (for calling REAPER-specific methods)
     /// This is the same instance as lyrics_service, but typed for convenience
+    #[cfg(feature = "lyrics")]
     pub(crate) reaper_lyrics_service: Option<Arc<crate::infrastructure::reaper_lyrics_reactive::ReaperLyricsReactiveService>>,
     
     /// Reactive streams (composed from domain services)
@@ -177,12 +183,15 @@ impl ReactiveAppStateService {
             )
         );
         
-        let lyrics_streams = LyricsStreams::new();
-        let reaper_lyrics = Arc::new(
-            crate::infrastructure::reaper_lyrics_reactive::ReaperLyricsReactiveService::new(
-                lyrics_streams.clone(),
+        #[cfg(feature = "lyrics")]
+        let reaper_lyrics = {
+            let lyrics_streams = LyricsStreams::new();
+            Arc::new(
+                crate::infrastructure::reaper_lyrics_reactive::ReaperLyricsReactiveService::new(
+                    lyrics_streams.clone(),
+                )
             )
-        );
+        };
         
         Self {
             setlist: None,
@@ -191,7 +200,9 @@ impl ReactiveAppStateService {
             reaper_transport_service: Some(reaper_transport),
             reaper_track_service: Some(reaper_track),
             setlist_service: SetlistReactiveService::new(setlist_streams.clone()),
+            #[cfg(feature = "lyrics")]
             lyrics_service: reaper_lyrics.clone() as Arc<dyn LyricsReactiveService>,
+            #[cfg(feature = "lyrics")]
             reaper_lyrics_service: Some(reaper_lyrics),
             streams: ReactiveAppStateStreams {
                 daw: daw_streams,
@@ -212,10 +223,13 @@ impl ReactiveAppStateService {
             project: ProjectStreams::new(),
         };
         
-        let lyrics_streams = LyricsStreams::new();
-        let default_lyrics = Arc::new(
-            fts::lyrics::reactive::DefaultLyricsReactiveService::new(lyrics_streams)
-        ) as Arc<dyn LyricsReactiveService>;
+        #[cfg(feature = "lyrics")]
+        let default_lyrics = {
+            let lyrics_streams = LyricsStreams::new();
+            Arc::new(
+                fts::lyrics::reactive::DefaultLyricsReactiveService::new(lyrics_streams)
+            ) as Arc<dyn LyricsReactiveService>
+        };
         
         Self {
             setlist: None,
@@ -224,7 +238,9 @@ impl ReactiveAppStateService {
             reaper_transport_service: None,
             reaper_track_service: None,
             setlist_service: SetlistReactiveService::new(setlist_streams.clone()),
+            #[cfg(feature = "lyrics")]
             lyrics_service: default_lyrics,
+            #[cfg(feature = "lyrics")]
             reaper_lyrics_service: None,
             streams: ReactiveAppStateStreams {
                 daw: daw_streams,

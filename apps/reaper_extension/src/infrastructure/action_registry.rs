@@ -110,6 +110,10 @@ pub struct ActionDef {
     
     /// Section where this action should be registered (default: Main)
     pub section: ActionSection,
+    
+    /// Optional function to get toggle state (for toggleable actions)
+    /// Omit this field or use `..Default::default()` to use None
+    pub toggle_state: Option<fn() -> bool>,
 }
 
 impl Default for ActionDef {
@@ -120,6 +124,7 @@ impl Default for ActionDef {
             handler: || {},
             appears_in_menu: false,
             section: ActionSection::Main,
+            toggle_state: None,
         }
     }
 }
@@ -137,6 +142,7 @@ pub fn action_def(
         handler,
         appears_in_menu,
         section: ActionSection::Main,
+        toggle_state: None,
     }
 }
 
@@ -163,12 +169,30 @@ impl ActionDef {
             format!("FTS / Visibility Manager: {}", self.display_name)
         } else if self.command_id.starts_with("FTS_DEV_") {
             format!("FTS / Dev: {}", self.display_name)
+        } else if self.command_id.starts_with("FTS_CHART_") {
+            format!("FTS / Chart: {}", self.display_name)
+        } else if self.command_id.starts_with("FTS_INPUT_") {
+            format!("FTS / Input: {}", self.display_name)
         } else {
             format!("FTS: {}", self.display_name)
         };
 
         // Register to main section using high-level API
         if self.section == ActionSection::Main {
+            // Determine action kind (toggleable or not)
+            let action_kind = if let Some(toggle_getter) = self.toggle_state {
+                // Create a closure that calls the toggle state getter function
+                // This will be called by REAPER to query the current toggle state
+                // We need to capture the function pointer and call it each time
+                let toggle_fn = move || {
+                    // Call the function pointer to get current state
+                    toggle_getter()
+                };
+                ActionKind::Toggleable(Box::new(toggle_fn))
+            } else {
+                ActionKind::NotToggleable
+            };
+            
             let registered_action = Reaper::get().register_action(
                 self.command_id,
                 action_name.clone(),
@@ -177,7 +201,7 @@ impl ActionDef {
                     debug!(command_id = %command_id, "Executing action");
                     handler();
                 },
-                ActionKind::NotToggleable,
+                action_kind,
             );
 
             // Store the RegisteredAction to keep it alive
