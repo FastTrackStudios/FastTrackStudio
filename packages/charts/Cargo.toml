@@ -18,4 +18,5 @@ colored = "3.0.0"
 flate2 = "1.0"
 base64 = "0.22"
 pathdiff = "0.2"
+regex = "1.11"
 keyflow = { path = "../../packages/keyflow" }

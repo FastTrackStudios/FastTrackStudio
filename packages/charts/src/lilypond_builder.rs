@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::path::Path;
 
 /// Generates inlined utility content instead of include statements
 /// This eliminates all path issues by directly embedding the content
@@ -7,7 +8,6 @@ pub fn generate_inlined_utility_content(output_dir: &str) -> String {
     // Use the full list of utility files with inline mode
     let utility_files = vec![
         "third-party/esmuflily/ly/esmufl.ily",
-        "third-party/esmuflily/ly/cosmufl.ily",
         "fonts.ly",
         "chord-display.ly",
         "note-placement.ly",
@@ -97,25 +97,47 @@ pub fn generate_minimal_utility_content(output_dir: &str) -> String {
 pub fn generate_utility_content(output_dir: &str, include_mode: bool, utility_files: &[&str]) -> String {
     let current_dir = env::current_dir().expect("Failed to get current directory");
     
-    // Find the FTS-Extensions root directory by looking for Cargo.toml
+    // Find the charts package directory by looking for packages/charts/resources/utils/lilypond
     let mut utils_dir = String::new();
     let mut search_dir = current_dir.clone();
     
     loop {
-        let cargo_toml_path = search_dir.join("Cargo.toml");
-        let charts_dir = search_dir.join("charts");
+        // Check for packages/charts/resources/utils/lilypond structure
+        let charts_resources = search_dir.join("packages").join("charts").join("resources").join("utils").join("lilypond");
+        if charts_resources.exists() {
+            utils_dir = charts_resources.to_string_lossy().to_string();
+            break;
+        }
         
-        if cargo_toml_path.exists() && charts_dir.exists() {
-            // Found FTS-Extensions root
-            utils_dir = charts_dir.join("resources/utils/lilypond").to_string_lossy().to_string();
+        // Also check for charts/resources/utils/lilypond (direct charts directory)
+        let charts_dir = search_dir.join("charts");
+        let charts_resources_alt = charts_dir.join("resources").join("utils").join("lilypond");
+        if charts_resources_alt.exists() {
+            utils_dir = charts_resources_alt.to_string_lossy().to_string();
+            break;
+        }
+        
+        // Check if we're already in the charts package directory
+        let current_charts = search_dir.join("resources").join("utils").join("lilypond");
+        if current_charts.exists() {
+            utils_dir = current_charts.to_string_lossy().to_string();
             break;
         }
         
         if let Some(parent) = search_dir.parent() {
             search_dir = parent.to_path_buf();
         } else {
-            // Fallback to relative path
-            utils_dir = "charts/resources/utils/lilypond".to_string();
+            // Fallback: try to find from CARGO_MANIFEST_DIR if available
+            if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
+                let manifest_path = std::path::Path::new(&manifest_dir);
+                let charts_resources = manifest_path.join("resources").join("utils").join("lilypond");
+                if charts_resources.exists() {
+                    utils_dir = charts_resources.to_string_lossy().to_string();
+                    break;
+                }
+            }
+            // Last fallback: relative path from workspace root
+            utils_dir = "packages/charts/resources/utils/lilypond".to_string();
             break;
         }
     }
@@ -129,41 +151,156 @@ pub fn generate_utility_content(output_dir: &str, include_mode: bool, utility_fi
     
     if include_mode {
         // Generate relative include statements
-        let output_path = std::path::Path::new(output_dir);
-        let utils_path = std::path::Path::new(&utils_dir);
+        let output_path = Path::new(output_dir);
+        let utils_path = Path::new(&utils_dir);
         
-        // Calculate relative path from output to utils
-        let relative_path = if let Some(rel_path) = pathdiff::diff_paths(utils_path, output_path) {
-            rel_path.to_string_lossy().to_string()
+        // Calculate relative path from output directory to utils directory
+        // pathdiff::diff_paths(from, to) calculates: path from 'to' to 'from'
+        // So we want: utils_path relative to output_path
+        let relative_path = if let (Ok(output_abs), Ok(utils_abs)) = (output_path.canonicalize(), utils_path.canonicalize()) {
+            // Calculate relative path using canonicalized absolute paths
+            pathdiff::diff_paths(&utils_abs, &output_abs)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_else(|| {
+                    // If pathdiff fails, try direct calculation
+                    pathdiff::diff_paths(utils_path, output_path)
+                        .map(|p| p.to_string_lossy().replace('\\', "/"))
+                        .unwrap_or_else(|| utils_dir.clone())
+                })
         } else {
-            // Fallback: use absolute path
-            utils_dir.clone()
+            // If canonicalization fails, try direct relative path calculation
+            pathdiff::diff_paths(utils_path, output_path)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_else(|| utils_dir.clone())
         };
         
         for file in utility_files {
-            let include_path = if relative_path.is_empty() {
+            let include_path = if relative_path.is_empty() || relative_path == "." {
                 format!("{}", file)
             } else {
-                format!("{}/{}", relative_path, file)
+                // Ensure path ends with / before appending filename
+                let base = if relative_path.ends_with('/') {
+                    relative_path.clone()
+                } else {
+                    format!("{}/", relative_path)
+                };
+                format!("{}{}", base, file)
             };
             content.push_str(&format!(r#"\include "{}"
 
 "#, include_path));
         }
     } else {
-        // Inline each utility file
-        for file in utility_files {
-            let file_path = format!("{}/{}", utils_dir, file);
-            match std::fs::read_to_string(&file_path) {
-                Ok(file_content) => {
-                    content.push_str(&format!("\n% === {} ===\n", file));
+        // Inline each utility file, resolving nested includes recursively
+        let mut processed_files = std::collections::HashSet::new();
+        
+        fn inline_file_recursive(
+            file_path: &Path,
+            utils_dir: &Path,
+            content: &mut String,
+            processed: &mut std::collections::HashSet<String>,
+        ) {
+            let file_path_str = file_path.to_string_lossy().to_string();
+            if processed.contains(&file_path_str) {
+                return; // Avoid circular includes
+            }
+            processed.insert(file_path_str.clone());
+            
+            match fs::read_to_string(file_path) {
+                Ok(mut file_content) => {
+                    // Process \include statements in the file content and recursively inline them
+                    let include_pattern = regex::Regex::new(r#"\\include\s+"([^"]+)"#).unwrap();
+                    let mut replacements = Vec::new();
+                    
+                    for cap in include_pattern.captures_iter(&file_content) {
+                        let include_path = cap.get(1).unwrap().as_str();
+                        let full_match = cap.get(0).unwrap();
+                        
+                        // Skip system includes like "english.ly"
+                        if include_path == "english.ly" {
+                            continue;
+                        }
+                        
+                        // Resolve the include path relative to the current file's directory
+                        let current_file_dir = file_path.parent().unwrap_or(Path::new(""));
+                        let resolved_path = if include_path.starts_with("../") {
+                            // Relative path - resolve from current file's directory
+                            current_file_dir.join(include_path)
+                        } else if include_path.contains('/') {
+                            // Path with directory - try from current file dir first, then utils_dir
+                            let from_current = current_file_dir.join(include_path);
+                            if from_current.exists() {
+                                from_current
+                            } else {
+                                utils_dir.join(include_path)
+                            }
+                        } else {
+                            // Just filename - resolve from current file's directory
+                            current_file_dir.join(include_path)
+                        };
+                        
+                        // Try multiple resolution strategies
+                        let mut found_path = None;
+                        
+                        // Strategy 1: Try the resolved path directly
+                        if resolved_path.exists() {
+                            found_path = Some(resolved_path);
+                        } else if let Ok(canonical) = resolved_path.canonicalize() {
+                            // Strategy 2: Try canonicalized path
+                            if canonical.exists() {
+                                found_path = Some(canonical);
+                            }
+                        }
+                        
+                        // Strategy 3: Try relative to utils_dir if not found
+                        if found_path.is_none() {
+                            let utils_path = utils_dir.join(include_path);
+                            if utils_path.exists() {
+                                found_path = Some(utils_path);
+                            } else if let Ok(canonical) = utils_path.canonicalize() {
+                                if canonical.exists() {
+                                    found_path = Some(canonical);
+                                }
+                            }
+                        }
+                        
+                        // If we found the file, recursively inline it
+                        if let Some(found) = found_path {
+                            let canonical_str = found.to_string_lossy().to_string();
+                            if !processed.contains(&canonical_str) {
+                                // Recursively inline the included file
+                                let mut included_content = String::new();
+                                inline_file_recursive(&found, utils_dir, &mut included_content, processed);
+                                replacements.push((
+                                    full_match.start(),
+                                    full_match.end(),
+                                    format!("\n% === Inlined from: {} ===\n{}", include_path, included_content)
+                                ));
+                            }
+                        } else {
+                            println!("Warning: Could not find included file: {} (searched from {})", include_path, file_path.display());
+                        }
+                    }
+                    
+                    // Apply replacements in reverse order to maintain indices
+                    for (start, end, replacement) in replacements.into_iter().rev() {
+                        file_content.replace_range(start..end, &replacement);
+                    }
+                    
+                    content.push_str(&format!("\n% === {} ===\n", file_path_str));
                     content.push_str(&file_content);
                     content.push_str("\n\n");
                 }
                 Err(e) => {
-                    println!("Warning: Could not read {}: {}", file_path, e);
+                    println!("Warning: Could not read {}: {}", file_path.display(), e);
                 }
             }
+        }
+        
+        let utils_path = Path::new(&utils_dir);
+        for file in utility_files {
+            let file_path = utils_path.join(file);
+            inline_file_recursive(&file_path, utils_path, &mut content, &mut processed_files);
         }
     }
     
