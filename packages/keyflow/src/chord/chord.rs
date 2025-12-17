@@ -1549,6 +1549,127 @@ impl Chord {
     }
 }
 
+impl Chord {
+    /// Convert this chord to LilyPond chordmode notation
+    /// 
+    /// # Arguments
+    /// * `key` - Optional key context for resolving scale degrees and roman numerals
+    /// 
+    /// # Returns
+    /// LilyPond chord notation string (e.g., "cis:maj7", "ces:m7")
+    pub fn to_lilypond(&self, key: Option<&crate::key::Key>) -> String {
+        // Convert root to LilyPond format
+        let root_str = self.root.to_lilypond(key);
+        
+        // Build chord quality suffix
+        let mut suffix = String::new();
+        
+        // Quality
+        match self.quality {
+            ChordQuality::Major => {
+                // Major is default, no suffix needed for triads
+            }
+            ChordQuality::Minor => {
+                suffix.push_str(":m");
+            }
+            ChordQuality::Diminished => {
+                suffix.push_str(":dim");
+            }
+            ChordQuality::Augmented => {
+                suffix.push_str(":aug");
+            }
+            ChordQuality::Suspended(_) => {
+                suffix.push_str(":sus");
+            }
+            ChordQuality::Power => {
+                suffix.push_str(":5");
+            }
+        }
+        
+        // Family (seventh type)
+        if let Some(family) = &self.family {
+            match family {
+                ChordFamily::Major7 => {
+                    if suffix.is_empty() {
+                        suffix.push_str(":maj7");
+                    } else {
+                        suffix.push_str("maj7");
+                    }
+                }
+                ChordFamily::Dominant7 => {
+                    if suffix.is_empty() {
+                        suffix.push_str(":7");
+                    } else {
+                        suffix.push_str("7");
+                    }
+                }
+                ChordFamily::Minor7 => {
+                    // Already has :m, just add 7
+                    suffix.push_str("7");
+                }
+                ChordFamily::MinorMajor7 => {
+                    // Already has :m, add maj7
+                    suffix.push_str("maj7");
+                }
+                ChordFamily::HalfDiminished => {
+                    if suffix.is_empty() {
+                        suffix.push_str(":m7.5-");
+                    } else {
+                        suffix.push_str("7.5-");
+                    }
+                }
+                ChordFamily::FullyDiminished => {
+                    if suffix.is_empty() {
+                        suffix.push_str(":dim7");
+                    } else {
+                        suffix.push_str("dim7");
+                    }
+                }
+            }
+        }
+        
+        // Extensions
+        if self.extensions.has_any() {
+            if self.extensions.ninth.is_some() {
+                suffix.push_str("9");
+            }
+            if self.extensions.eleventh.is_some() {
+                suffix.push_str("11");
+            }
+            if self.extensions.thirteenth.is_some() {
+                suffix.push_str("13");
+            }
+        }
+        
+        // Alterations (simplified)
+        for alt in &self.alterations {
+            match alt.degree {
+                ChordDegree::Fifth => {
+                    if alt.interval.semitones() == 8 {
+                        suffix.push_str("5+");
+                    } else if alt.interval.semitones() == 6 {
+                        suffix.push_str("5-");
+                    }
+                }
+                _ => {
+                    // Other alterations could be added here
+                }
+            }
+        }
+        
+        // Bass note (slash chord)
+        if let Some(bass) = &self.bass {
+            if let Some(bass_note) = bass.resolved_note() {
+                suffix.push_str(&format!("/{}", bass_note.to_lilypond()));
+            } else if let Some(bass_note) = bass.resolve(key) {
+                suffix.push_str(&format!("/{}", bass_note.to_lilypond()));
+            }
+        }
+        
+        format!("{}{}", root_str, suffix)
+    }
+}
+
 impl std::fmt::Display for Chord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Root
@@ -1559,12 +1680,20 @@ impl std::fmt::Display for Chord {
         let is_six_nine_chord = is_sixth_chord && self.additions.contains(&ChordDegree::Ninth);
 
         // Quality (uses its own Display which outputs the symbol)
+        // Special case: Power chord with only Second addition displays as "2" not "52"
+        // So we skip displaying the quality "5" in this case
+        let is_power_with_second = self.quality == ChordQuality::Power 
+            && self.additions.len() == 1 
+            && self.additions.contains(&ChordDegree::Second)
+            && self.family.is_none();
+        
         // For major sixth chords, we need to show "maj" explicitly (Cmaj6, not C6)
         // EXCEPT for 6/9 chords which stay as C6/9 (not Cmaj6/9)
         // For minor sixth chords, "m" is already shown by the quality
         if is_sixth_chord && !is_six_nine_chord && self.quality == ChordQuality::Major {
             write!(f, "maj")?;
-        } else {
+        } else if !is_power_with_second {
+            // Skip quality display for Power+Second (will show as "2" in additions)
             write!(f, "{}", self.quality)?;
         }
 
@@ -1724,6 +1853,16 @@ impl std::fmt::Display for Chord {
             }
         } else {
             // Normal addition display
+            // Special case: Power chord with only Second addition displays as "2" not "5add2"
+            let is_power_with_second = self.quality == ChordQuality::Power 
+                && self.additions.len() == 1 
+                && self.additions.contains(&ChordDegree::Second)
+                && self.family.is_none();
+            
+            if is_power_with_second {
+                // Display as "2" (e.g., "D2") not "5add2"
+                write!(f, "2")?;
+            } else {
             for addition in &self.additions {
                 if *addition == ChordDegree::Sixth && is_sixth_chord {
                     // Display as "6" for sixth chords (C6, Cm6)
@@ -1731,6 +1870,7 @@ impl std::fmt::Display for Chord {
                 } else {
                     // Display with "add" prefix for other additions
                     write!(f, "add{}", addition)?;
+                    }
                 }
             }
         }

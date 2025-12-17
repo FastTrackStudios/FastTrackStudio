@@ -11,6 +11,7 @@ colored = "3.0"
 regex = "1.11.3"
 daw = { path = "../../modules/daw" }
 uuid = { version = "1.0", features = ["serde", "v4"] }
+helgoboss-midi = "0.4.0"
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

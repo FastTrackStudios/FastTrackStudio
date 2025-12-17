@@ -80,6 +80,53 @@ impl ChordInstance {
         self.commands.push(command);
         self
     }
+
+    /// Convert this chord instance to LilyPond chordmode notation
+    /// 
+    /// # Arguments
+    /// * `key` - Optional key context for resolving scale degrees and roman numerals
+    /// 
+    /// # Returns
+    /// LilyPond chord notation with optional duration (e.g., "cis:maj74", "des:m78", "c:maj72.")
+    /// In LilyPond, durations are appended directly: c4, c2, c1, c4. (for dotted)
+    pub fn to_lilypond(&self, key: Option<&crate::key::Key>) -> String {
+        // Convert chord to LilyPond format
+        let chord_str = self.parsed.to_lilypond(key);
+        
+        // Add duration if specified
+        // In LilyPond chordmode, duration comes directly after the chord: c4, c2, c1, c4.
+        if let Some(duration) = self.rhythm_to_lilypond_duration() {
+            format!("{}{}", chord_str, duration)
+        } else {
+            chord_str
+        }
+    }
+
+    /// Convert rhythm to LilyPond duration notation
+    /// Returns duration string that can be appended directly to chord (e.g., "4", "2", "1", "4.")
+    fn rhythm_to_lilypond_duration(&self) -> Option<String> {
+        use crate::chord::{ChordRhythm, LilySyntax};
+        
+        match &self.rhythm {
+            ChordRhythm::Lily { duration, dotted, .. } => {
+                let dur_str = match duration {
+                    LilySyntax::Whole => "1",
+                    LilySyntax::Half => "2",
+                    LilySyntax::Quarter => "4",
+                    LilySyntax::Eighth => "8",
+                    LilySyntax::Sixteenth => "16",
+                    LilySyntax::ThirtySecond => "32",
+                };
+                if *dotted {
+                    // Dotted duration: "4." not ".4"
+                    Some(format!("{}.", dur_str))
+                } else {
+                    Some(dur_str.to_string())
+                }
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Represents a single measure with chords

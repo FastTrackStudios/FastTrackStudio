@@ -9,22 +9,69 @@ struct MeasureGroup {
     pattern_length: usize, // Number of measures in the pattern before repeat
 }
 
-// ANSI color codes for beautiful terminal output
+// Plain text formatters (no colors for easier log reading)
 mod colors {
-    pub const RESET: &str = "\x1b[0m";
-    pub const BOLD: &str = "\x1b[1m";
-    pub const DIM: &str = "\x1b[2m";
+    pub const RESET: &str = "";
+    pub const BOLD: &str = "";
+    pub const DIM: &str = "";
+    pub const METADATA: &str = "";
+    pub const SECTION: &str = "";
+    pub const DURATION: &str = "";
+    pub const CHORD: &str = "";
+    pub const KEY_SIG: &str = "";
+    pub const TIME_SIG: &str = "";
+    pub const TEMPO: &str = "";
+    pub const MEASURE_NUM: &str = "";
+    pub const BORDER: &str = "";
+    
+    // String formatters that return plain strings
+    pub fn format_metadata(s: &str) -> String {
+        s.to_string()
+    }
+    
+    pub fn format_section(s: &str) -> String {
+        s.to_string()
+    }
+    
+    pub fn format_duration(s: &str) -> String {
+        s.to_string()
+    }
+    
+    pub fn format_chord(s: &str) -> String {
+        // Convert "maj" to "M" in chord symbols (e.g., "2maj" -> "2M", "Cmaj7" -> "CM7")
+        s.replace("maj", "M")
+    }
+    
+    pub fn format_key_sig(s: &str) -> String {
+        s.to_string()
+    }
+    
+    pub fn format_time_sig(s: &str) -> String {
+        s.to_string()
+    }
+    
+    pub fn format_tempo(s: &str) -> String {
+        s.to_string()
+    }
+    
+    pub fn format_border(s: &str) -> String {
+        s.to_string()
+    }
+    
+    pub fn format_dim(s: &str) -> String {
+        s.to_string()
+    }
+}
 
-    // Semantic colors for different information types
-    pub const METADATA: &str = "\x1b[96m"; // Bright Cyan - titles, artists
-    pub const SECTION: &str = "\x1b[95m"; // Bright Magenta - section names
-    pub const DURATION: &str = "\x1b[93m"; // Bright Yellow - measure counts, positions
-    pub const CHORD: &str = "\x1b[92m"; // Bright Green - chord symbols
-    pub const KEY_SIG: &str = "\x1b[94m"; // Bright Blue - keys and key changes
-    pub const TIME_SIG: &str = "\x1b[91m"; // Bright Red - time signatures
-    pub const TEMPO: &str = "\x1b[33m"; // Yellow - tempo markings
-    pub const MEASURE_NUM: &str = "\x1b[90m"; // Dark Gray - measure numbers
-    pub const BORDER: &str = "\x1b[37m"; // White - borders and dividers
+/// Format a chord symbol for display, converting "maj" to "M"
+/// 
+/// Examples:
+/// - "2maj" -> "2M"
+/// - "Cmaj7" -> "CM7"
+/// - "Dm" -> "Dm" (unchanged)
+pub fn format_chord(s: &str) -> String {
+    // Convert "maj" to "M" in chord symbols (e.g., "2maj" -> "2M", "Cmaj7" -> "CM7")
+    s.replace("maj", "M")
 }
 
 impl Chart {
@@ -163,11 +210,9 @@ impl Chart {
                     for cue in &measure.text_cues {
                         write!(
                             f,
-                            "{}@{} \"{}\"{} ",
-                            "\x1b[38;5;208m", // Orange color for cue markers
+                            "@{} \"{}\" ",
                             cue.group,
-                            cue.text,
-                            reset
+                            cue.text
                         )?;
                     }
                 }
@@ -197,15 +242,6 @@ impl Chart {
                             chord_text.push('\'');
                         }
                     }
-                    
-                    // Show position and duration for debugging
-                    let pos = &chord.position.total_duration;
-                    let dur = &chord.duration;
-                    chord_text.push_str(&format!(
-                        " [pos:{}:{}:{} dur:{}:{}:{}]",
-                        pos.measure, pos.beat, pos.subdivision,
-                        dur.measure, dur.beat, dur.subdivision
-                    ));
                     
                     chord_parts.push(chord_text);
                 }
@@ -300,155 +336,64 @@ impl Chart {
 
 impl std::fmt::Display for Chart {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use colors::*;
-
-        // Calculate dynamic border width based on content
-        let content_width = self.calculate_content_width();
-        let border_width = content_width.max(55); // Minimum width for header/metadata lines
-        
-        // Top border
-        let top_border = "═".repeat(border_width - 2); // -2 for corner chars
-        writeln!(
-            f,
-            "{}{}╔{}╗{}",
-            BORDER, BOLD, top_border, RESET
-        )?;
-
-        // Title and artist (METADATA color)
+        // Simple title
         if let Some(ref title) = self.metadata.title {
-            write!(
-                f,
-                "{}{}║{} {}{}{}",
-                BORDER, BOLD, RESET, METADATA, BOLD, title
-            )?;
-            if let Some(ref artist) = self.metadata.artist {
-                write!(f, " {} by {}{}", RESET, METADATA, artist)?;
-            }
-            writeln!(f, "{}", RESET)?;
+            writeln!(f, "{}", title)?;
         }
 
-        // Tempo, time signature, key on a styled line
-        if self.tempo.is_some() || self.time_signature.is_some() || self.initial_key.is_some() {
-            write!(f, "{}{}║{} ", BORDER, BOLD, RESET)?;
+        // Sections - one line per section
+        for section in &self.sections {
+            // Section header
+            write!(f, "{}: ", section.section.display_name())?;
 
-            if let Some(ref tempo) = self.tempo {
-                write!(f, "{}♩ = {}{} bpm  ", TEMPO, tempo.bpm, RESET)?;
-            }
-            if let Some(ref ts) = self.time_signature {
-                write!(
-                    f,
-                    "{}{}{}/{}{}  ",
-                    TIME_SIG, BOLD, ts.numerator, ts.denominator, RESET
-                )?;
-            }
-            if let Some(ref key) = self.initial_key {
-                write!(f, "{}Key: {}{}", KEY_SIG, key.root().name(), RESET)?;
-            }
-            writeln!(f)?;
-        }
-
-        // Middle border
-        let middle_border = "═".repeat(border_width - 2);
-        writeln!(
-            f,
-            "{}{}╠{}╣{}",
-            BORDER, BOLD, middle_border, RESET
-        )?;
-
-        // Sections
-        // Calculate cumulative measure counts for position tracking
-        let mut cumulative_measures = 0u32;
-        
-        for (section_idx, section) in self.sections.iter().enumerate() {
-            if section_idx > 0 {
-                writeln!(
-                    f,
-                    "{}{}║{}   {}───────────────────────────────────────────────────────────{}",
-                    BORDER, BOLD, RESET, DIM, RESET
-                )?;
-            }
-
-            // Section header (SECTION color)
-            write!(
-                f,
-                "{}{}║{} {}{}{}{}",
-                BORDER,
-                BOLD,
-                RESET,
-                SECTION,
-                BOLD,
-                section.section.display_name(),
-                RESET
-            )?;
-
-            // Measure count (DURATION color)
-            if let Some(count) = section.section.measure_count {
-                write!(f, " {}[{} measures]{}", DURATION, count, RESET)?;
-            }
-            writeln!(f)?;
-
-            // Show measures with chords using grid-based display
-            if !section.measures.is_empty() {
-                let has_chords = section.measures.iter().any(|m| !m.chords.is_empty());
-                
-                // Check if next section has pushed chords that belong to last measure of this section
-                let next_section_first_measure_chords = if section_idx + 1 < self.sections.len() {
-                    let next_section = &self.sections[section_idx + 1];
-                    let last_measure_abs = cumulative_measures + section.measures.len() as u32 - 1;
-                    
-                    // Check if next section's first measure has pushed chords
-                    if !next_section.measures.is_empty() {
-                        let next_first_measure = &next_section.measures[0];
-                        let pushed_chords: Vec<_> = next_first_measure.chords.iter()
-                            .filter(|chord| {
-                                let chord_abs_measures = chord.position.total_duration.measure.max(0) as u32;
-                                // If chord belongs to previous measure (pushed from start of next section), include it
-                                // Check that it's actually a push (not pull) and that it's in the previous measure
-                                if let Some((is_push, _)) = chord.push_pull {
-                                    is_push && chord_abs_measures == last_measure_abs
-                                } else {
-                                    false
-                                }
-                            })
-                            .collect();
-                        if !pushed_chords.is_empty() {
-                            Some(pushed_chords)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                if has_chords {
-                    Self::display_measures_grid_with_next_section(
-                        f, 
-                        &section.measures, 
-                        cumulative_measures,
-                        next_section_first_measure_chords.as_deref(),
-                        BORDER, 
-                        BOLD, 
-                        RESET, 
-                        CHORD, 
-                        DIM
-                    )?;
+            // Collect all chords from all measures in this section
+            let mut all_chords = Vec::new();
+            for measure in &section.measures {
+                if measure.chords.is_empty() {
+                    continue;
                 }
+
+                // Collect chord names for this measure
+                let mut chord_names = Vec::new();
+                for chord in &measure.chords {
+                    let mut chord_text = String::new();
+                    
+                    // Push/pull notation
+                    if let Some((is_push, _amount)) = chord.push_pull {
+                        if is_push {
+                            chord_text.push('\'');
+                        }
+                    }
+                    
+                    chord_text.push_str(&chord.full_symbol);
+                    
+                    // Bass note for slash chords
+                    if let Some(ref bass) = chord.parsed.bass {
+                        chord_text.push_str(&format!("/{}", bass));
+                    }
+                    
+                    // Pull notation
+                    if let Some((is_push, _amount)) = chord.push_pull {
+                        if !is_push {
+                            chord_text.push('\'');
+                        }
+                    }
+                    
+                    chord_names.push(chord_text);
+                }
+                
+                if !chord_names.is_empty() {
+                    all_chords.push(chord_names.join(" "));
+                    }
             }
             
-            // Update cumulative measure count for next section
-            cumulative_measures += section.measures.len() as u32;
+            // Print all chords separated by |
+            if !all_chords.is_empty() {
+                writeln!(f, "{}", all_chords.join(" | "))?;
+            } else {
+                writeln!(f)?;
+            }
         }
-
-        // Bottom border
-        let bottom_border = "═".repeat(border_width - 2);
-        writeln!(
-            f,
-            "{}{}╚{}╝{}",
-            BORDER, BOLD, bottom_border, RESET
-        )?;
 
         Ok(())
     }

@@ -243,6 +243,16 @@ impl Note for MusicalNote {
 }
 
 impl MusicalNote {
+    /// Convert this note to LilyPond notation
+    /// 
+    /// Uses English syntax: "s" for sharps and "f" for flats
+    /// Examples: C# -> cs, Db -> df, F -> f
+    pub fn to_lilypond(&self) -> String {
+        let name = self.name.to_lowercase();
+        // English syntax: s for sharp, f for flat
+        name.replace("#", "s").replace("b", "f")
+    }
+
     /// Get the letter name from a note (e.g., "C", "D", "E")
     pub fn letter(&self) -> char {
         self.name.chars().next().unwrap_or('C')

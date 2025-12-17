@@ -5,7 +5,7 @@
 
 // Re-export DAW primitives
 pub use daw::primitives::{
-    Duration, MusicalDuration, MusicalPosition, Position, TimeDuration, TimePosition,
+    Duration, MusicalDuration, MusicalPosition, Position, PPQDuration, PPQPosition, TimeDuration, TimePosition,
     TimeSignature,
 };
 pub use daw::transport::Tempo;

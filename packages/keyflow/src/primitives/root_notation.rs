@@ -230,6 +230,28 @@ impl RootNotation {
     pub fn clone_notation(&self) -> Self {
         self.clone()
     }
+
+    /// Convert this root notation to LilyPond format
+    /// 
+    /// # Arguments
+    /// * `key` - Optional key context for resolving scale degrees and roman numerals
+    /// 
+    /// # Returns
+    /// LilyPond note name (e.g., "cis", "des", "f")
+    pub fn to_lilypond(&self, key: Option<&crate::key::Key>) -> String {
+        // Try to resolve the note
+        if let Some(note) = self.resolve(key) {
+            return note.to_lilypond();
+        }
+        
+        // Fallback: if it's already resolved, use it
+        if let Some(note) = self.resolved_note() {
+            return note.to_lilypond();
+        }
+        
+        // Last resort: use a placeholder
+        "c".to_string()
+    }
 }
 
 impl fmt::Display for RootNotation {

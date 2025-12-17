@@ -96,6 +96,21 @@ impl Key {
         format!("{} {}", self.root.name(), self.mode.name())
     }
 
+    /// Convert this key to LilyPond notation
+    /// 
+    /// # Returns
+    /// LilyPond key notation (e.g., "\\key cis \\major", "\\key des \\minor")
+    pub fn to_lilypond(&self) -> String {
+        use crate::key::scale::ScaleMode;
+        let root = self.root().to_lilypond();
+        let mode = if self.mode == ScaleMode::ionian() {
+            "\\major"
+        } else {
+            "\\minor"
+        };
+        format!("\\key {} {}", root, mode)
+    }
+
     /// Get a short name (e.g., "C", "Am", "D Dor")
     pub fn short_name(&self) -> String {
         if self.mode == ScaleMode::ionian() {

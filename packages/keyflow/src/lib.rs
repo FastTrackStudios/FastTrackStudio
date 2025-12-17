@@ -27,4 +27,4 @@ pub use primitives::{
     RootNotation, ScaleDegreeToken,
 };
 pub use sections::{Section, SectionNumberer, SectionType};
-pub use time::{AbsolutePosition, Duration, DurationTrait, MusicalDuration, MusicalPosition, Position, Tempo, TimeDuration, TimePosition, TimeSignature};
+pub use time::{AbsolutePosition, Duration, DurationTrait, MusicalDuration, MusicalPosition, Position, PPQDuration, PPQPosition, Tempo, TimeDuration, TimePosition, TimeSignature};
