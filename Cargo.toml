@@ -2,6 +2,7 @@
 members = [
     "apps/reaper_extension",
     "libs/macros",
+    "libs/pdf",
     "libs/swell-ui",
     "modules/daw",
     "modules/fts",
