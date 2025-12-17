@@ -1,0 +1,26 @@
+{
+	"folders": [
+		{
+			"path": "../../../.."
+		},
+		{
+			"path": "../../../../../lib-ref/staff"
+		},
+		{
+			"path": "../../../../../../../../Music/FTS-REAPER/Scripts"
+		},
+		{
+			"path": "../../../../../lib-ref/CSICode"
+		},
+		{
+			"path": "../../../../../lib-ref/iroh-libs"
+		},
+		{
+			"path": "../../../../../lib-ref/rust-pdf-viewer"
+		},
+		{
+			"path": "../../../../../lib-ref/FTS-Charting"
+		}
+	],
+	"settings": {}
+}
