@@ -1,6 +1,7 @@
 pub mod layout;
 pub mod transport;
 pub mod progress;
+pub mod section_progress;
 pub mod song;
 pub mod sidebar_items;
 pub mod mode_toggle;
@@ -14,11 +15,13 @@ pub mod slider;
 pub mod ruler;
 pub mod tcp;
 pub mod chords;
+pub mod chord_tab;
 
 // Re-export commonly used components
 pub use layout::{TopBar, Sidebar, MainContent, EditViewMode};
 pub use transport::{TransportControlBar, ConnectionStatus};
-pub use progress::{SongProgressBar, SectionProgressBar, SegmentedProgressBar, CompactProgressBar, ProgressSection, TempoMarker};
+pub use progress::{SongProgressBar, SegmentedProgressBar, CompactProgressBar, ProgressSection, TempoMarker, MeasureIndicator, TimeSignatureCard, TempoCard};
+pub use section_progress::SectionProgressBar;
 pub use song::{SongTitle, FadedSongTitle};
 pub use mode_toggle::ModeToggle;
 pub use lyrics::{LyricsView, LyricsEditView, PerformancePreview};
@@ -31,4 +34,5 @@ pub use slider::Slider;
 pub use ruler::{Ruler, MeasureInfo};
 pub use tcp::TrackControlPanel;
 pub use chords::{ChordsView, ChordsViewProps};
+pub use chord_tab::{ChordTabView, ChordTabViewProps};
 

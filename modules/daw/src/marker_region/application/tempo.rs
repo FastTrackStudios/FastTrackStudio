@@ -6,12 +6,13 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::fmt;
+use crate::primitives::Position;
 
 /// A tempo/time signature change point
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct TempoTimePoint {
-    /// Position in seconds when this change occurs
-    pub position: f64,
+    /// Position where this change occurs (includes both time and musical position)
+    pub position: Position,
     /// Tempo in BPM
     pub tempo: f64,
     /// Envelope shape (0=linear, 1=square, etc.)
@@ -28,7 +29,7 @@ pub struct TempoTimePoint {
 
 impl TempoTimePoint {
     /// Create a new tempo/time signature point
-    pub fn new(position: f64, tempo: f64) -> Self {
+    pub fn new(position: Position, tempo: f64) -> Self {
         Self {
             position,
             tempo,
@@ -40,9 +41,14 @@ impl TempoTimePoint {
         }
     }
 
+    /// Create a new tempo/time signature point from seconds (for convenience)
+    pub fn from_seconds(position_seconds: f64, tempo: f64) -> Self {
+        Self::new(Position::from_seconds(position_seconds), tempo)
+    }
+
     /// Create a new tempo/time signature point with full information
     pub fn new_full(
-        position: f64,
+        position: Position,
         tempo: f64,
         shape: Option<i32>,
         time_signature: Option<(i32, i32)>,
@@ -60,6 +66,37 @@ impl TempoTimePoint {
             metronome_pattern,
         }
     }
+    
+    /// Create a new tempo/time signature point with full information from seconds (for convenience)
+    pub fn new_full_from_seconds(
+        position_seconds: f64,
+        tempo: f64,
+        shape: Option<i32>,
+        time_signature: Option<(i32, i32)>,
+        selected: Option<bool>,
+        bezier_tension: Option<f64>,
+        metronome_pattern: Option<String>,
+    ) -> Self {
+        Self::new_full(
+            Position::from_seconds(position_seconds),
+            tempo,
+            shape,
+            time_signature,
+            selected,
+            bezier_tension,
+            metronome_pattern,
+        )
+    }
+    
+    /// Get the position in seconds (for convenience)
+    pub fn position_seconds(&self) -> f64 {
+        self.position.time.to_seconds()
+    }
+    
+    /// Get the musical position (measure, beat, subdivision)
+    pub fn musical_position(&self) -> &crate::primitives::MusicalPosition {
+        &self.position.musical
+    }
 
     /// Get time signature as a string (e.g., "4/4")
     pub fn time_signature_string(&self) -> String {
@@ -73,7 +110,7 @@ impl TempoTimePoint {
 
 impl fmt::Display for TempoTimePoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Tempo Change at {:.3}s:", self.position)?;
+        writeln!(f, "Tempo Change at {:.3}s:", self.position_seconds())?;
         writeln!(f, "  Tempo: {:.1} BPM", self.tempo)?;
         if let Some((num, den)) = self.time_signature {
             writeln!(f, "  Time Signature: {}/{}", num, den)?;
@@ -121,8 +158,8 @@ impl TempoTimeEnvelope {
         self.points.push(point);
         // Keep points sorted by position
         self.points.sort_by(|a, b| {
-            a.position
-                .partial_cmp(&b.position)
+            a.position_seconds()
+                .partial_cmp(&b.position_seconds())
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
@@ -134,7 +171,7 @@ impl TempoTimeEnvelope {
         let mut current_time_sig = self.default_time_signature;
 
         for point in &self.points {
-            if point.position <= time {
+            if point.position_seconds() <= time {
                 current_tempo = point.tempo;
                 if let Some(time_sig) = point.time_signature {
                     current_time_sig = time_sig;
@@ -160,14 +197,15 @@ impl TempoTimeEnvelope {
         let mut current_tempo = self.default_tempo;
 
         for point in &self.points {
-            if point.position <= time {
+            let point_time = point.position_seconds();
+            if point_time <= time {
                 // Add beats for the time segment before this point
-                let segment_duration = point.position - last_time;
+                let segment_duration = point_time - last_time;
                 let segment_beats = segment_duration * current_tempo / 60.0;
                 total_beats += segment_beats;
 
                 // Update for next segment
-                last_time = point.position;
+                last_time = point_time;
                 current_tempo = point.tempo;
             } else {
                 // This point is after our target time, add final segment
@@ -218,9 +256,10 @@ impl TempoTimeEnvelope {
         let max_measures = 1000.0;
 
         for point in &self.points {
-            if point.position <= time {
+            let point_time = point.position_seconds();
+            if point_time <= time {
                 // Add beats for the time segment before this point
-                let segment_duration = point.position - last_time;
+                let segment_duration = point_time - last_time;
 
                 // Calculate effective tempo based on time signature
                 // Convert tempo to quarter note equivalents based on the note value
@@ -242,7 +281,7 @@ impl TempoTimeEnvelope {
                 }
 
                 // Update for next segment
-                last_time = point.position;
+                last_time = point_time;
                 current_tempo = point.tempo;
                 if let Some(time_sig) = point.time_signature {
                     current_time_sig = time_sig;

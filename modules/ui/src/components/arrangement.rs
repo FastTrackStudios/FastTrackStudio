@@ -939,7 +939,7 @@ fn calculate_measures(song: &Song) -> Vec<MeasureInfo> {
         // Check if we've hit a tempo/time signature change
         while tempo_change_idx < tempo_changes.len() {
             let change = &tempo_changes[tempo_change_idx];
-            let change_time = song_start + change.position;
+            let change_time = song_start + change.position_seconds();
             
             if change_time > current_time {
                 break;

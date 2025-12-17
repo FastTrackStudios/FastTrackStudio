@@ -212,21 +212,80 @@ impl fmt::Display for TimePosition {
     }
 }
 
-#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+/// PPQ (Parts Per Quarter note) position
+/// Represents a position in PPQ ticks, commonly used in MIDI sequencing
+#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Hash)]
+pub struct PPQPosition {
+    pub ppq: i64,
+}
+
+impl PPQPosition {
+    pub fn new(ppq: i64) -> Self {
+        Self { ppq }
+    }
+
+    pub fn zero() -> Self {
+        Self { ppq: 0 }
+    }
+
+    /// Convert PPQ position to musical position using PPQ resolution and time signature
+    ///
+    /// # Arguments
+    /// * `ppq_resolution` - PPQ resolution (typically 480 or 960)
+    /// * `time_signature` - Time signature (numerator/denominator)
+    ///
+    /// # Returns
+    /// A `MusicalPosition` representing the equivalent musical position
+    pub fn to_musical_position(&self, ppq_resolution: f64, time_signature: TimeSignature) -> MusicalPosition {
+        let beats_per_measure = time_signature.numerator as f64;
+        let total_beats = self.ppq as f64 / ppq_resolution;
+        
+        let measures = (total_beats / beats_per_measure).floor() as i32;
+        let beats_in_measure = (total_beats % beats_per_measure).floor() as i32;
+        let subdivision = ((total_beats % 1.0) * 1000.0).round() as i32;
+        
+        MusicalPosition::try_new(measures, beats_in_measure, subdivision.clamp(0, 999))
+            .unwrap_or_else(|_| MusicalPosition::start())
+    }
+
+    /// Convert PPQ position to time position using PPQ resolution and BPM
+    ///
+    /// # Arguments
+    /// * `ppq_resolution` - PPQ resolution (typically 480 or 960)
+    /// * `bpm` - Beats per minute (tempo)
+    ///
+    /// # Returns
+    /// A `TimePosition` representing the equivalent time position
+    pub fn to_time_position(&self, ppq_resolution: f64, bpm: f64) -> TimePosition {
+        let total_beats = self.ppq as f64 / ppq_resolution;
+        let total_seconds = total_beats * (60.0 / bpm);
+        TimePosition::from_seconds(total_seconds)
+    }
+}
+
+impl fmt::Display for PPQPosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} PPQ", self.ppq)
+    }
+}
+
+#[derive(Type, Serialize, Deserialize, Debug, Clone)]
 pub struct Position {
     pub musical: MusicalPosition,
     pub time: TimePosition,
+    pub ppq: Option<PPQPosition>,
 }
 
 impl Position {
     pub fn new(musical: MusicalPosition, time: TimePosition) -> Self {
-        Self { musical, time }
+        Self { musical, time, ppq: None }
     }
 
     pub fn from_musical(musical: MusicalPosition) -> Self {
         Self {
             musical,
             time: TimePosition::start(),
+            ppq: None,
         }
     }
 
@@ -234,12 +293,14 @@ impl Position {
         Self {
             musical: MusicalPosition::start(),
             time,
+            ppq: None,
         }
     }
 
     pub fn from_seconds(total_seconds: f64) -> Self {
         Self {
             musical: MusicalPosition::start(),
+            ppq: None,
             time: TimePosition::from_seconds(total_seconds),
         }
     }
@@ -248,6 +309,7 @@ impl Position {
         Self {
             musical: MusicalPosition::start(),
             time: TimePosition::start(),
+            ppq: None,
         }
     }
 
@@ -270,6 +332,20 @@ impl Default for Position {
 impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} ({})", self.musical_position_string(), self.time)
+    }
+}
+
+impl PartialEq for Position {
+    fn eq(&self, other: &Self) -> bool {
+        self.time.to_seconds() == other.time.to_seconds()
+    }
+}
+
+impl Eq for Position {}
+
+impl PartialOrd for Position {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.time.to_seconds().partial_cmp(&other.time.to_seconds())
     }
 }
 
@@ -397,6 +473,7 @@ impl MusicalDuration {
             subdivision: 0,
         }
     }
+    
 
     /// Convert musical duration to time duration using BPM and time signature
     ///
@@ -474,6 +551,63 @@ impl fmt::Display for MusicalDuration {
             self.beat,
             self.subdivision
         )
+    }
+}
+
+/// PPQ (Parts Per Quarter note) duration
+/// Represents a duration in PPQ ticks, commonly used in MIDI sequencing
+#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Hash)]
+pub struct PPQDuration {
+    pub ppq: i64,
+}
+
+impl PPQDuration {
+    pub fn new(ppq: i64) -> Self {
+        Self { ppq }
+    }
+
+    pub fn zero() -> Self {
+        Self { ppq: 0 }
+    }
+
+    /// Convert PPQ duration to musical duration using PPQ resolution and time signature
+    ///
+    /// # Arguments
+    /// * `ppq_resolution` - PPQ resolution (typically 480 or 960)
+    /// * `time_signature` - Time signature (numerator/denominator)
+    ///
+    /// # Returns
+    /// A `MusicalDuration` representing the equivalent musical duration
+    pub fn to_musical_duration(&self, ppq_resolution: f64, time_signature: TimeSignature) -> MusicalDuration {
+        let beats_per_measure = time_signature.numerator as f64;
+        let total_beats = self.ppq as f64 / ppq_resolution;
+        
+        let measures = (total_beats / beats_per_measure).floor() as i32;
+        let beats_in_measure = (total_beats % beats_per_measure).floor() as i32;
+        let subdivision = ((total_beats % 1.0) * 1000.0).round() as i32;
+        
+        MusicalDuration::try_new(measures, beats_in_measure, subdivision.clamp(0, 999))
+            .unwrap_or_else(|_| MusicalDuration::zero())
+    }
+
+    /// Convert PPQ duration to time duration using PPQ resolution and BPM
+    ///
+    /// # Arguments
+    /// * `ppq_resolution` - PPQ resolution (typically 480 or 960)
+    /// * `bpm` - Beats per minute (tempo)
+    ///
+    /// # Returns
+    /// A `TimeDuration` representing the equivalent time duration
+    pub fn to_time_duration(&self, ppq_resolution: f64, bpm: f64) -> TimeDuration {
+        let total_beats = self.ppq as f64 / ppq_resolution;
+        let total_seconds = total_beats * (60.0 / bpm);
+        TimeDuration::from_seconds(total_seconds)
+    }
+}
+
+impl fmt::Display for PPQDuration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} PPQ", self.ppq)
     }
 }
 
@@ -605,17 +739,19 @@ impl fmt::Display for TimeDuration {
 pub struct Duration {
     pub musical: MusicalDuration,
     pub time: TimeDuration,
+    pub ppq: Option<PPQDuration>,
 }
 
 impl Duration {
     pub fn new(musical: MusicalDuration, time: TimeDuration) -> Self {
-        Self { musical, time }
+        Self { musical, time, ppq: None }
     }
 
     pub fn from_musical(musical: MusicalDuration) -> Self {
         Self {
             musical,
             time: TimeDuration::zero(),
+            ppq: None,
         }
     }
 
@@ -623,6 +759,7 @@ impl Duration {
         Self {
             musical: MusicalDuration::zero(),
             time,
+            ppq: None,
         }
     }
 
@@ -630,6 +767,7 @@ impl Duration {
         Self {
             musical: MusicalDuration::zero(),
             time: TimeDuration::from_seconds(total_seconds),
+            ppq: None,
         }
     }
 
@@ -637,6 +775,7 @@ impl Duration {
         Self {
             musical: MusicalDuration::zero(),
             time: TimeDuration::zero(),
+            ppq: None,
         }
     }
 

@@ -1,5 +1,5 @@
 //! Token parsing for RPP format
-//! 
+//!
 //! This module implements token parsing that closely matches WDL's LineParser approach:
 //! - Space/tab delimited tokens
 //! - Three quote types: ", ', `
@@ -9,7 +9,7 @@
 
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take_while1, take_while},
+    bytes::complete::{tag, take_while, take_while1},
     character::complete::{one_of, space0, space1},
     combinator::{map, opt, recognize},
     sequence::{delimited, preceded},
@@ -56,7 +56,7 @@ impl Token {
             _ => None,
         }
     }
-    
+
     /// Get the numeric value if this is a number token
     pub fn as_number(&self) -> Option<f64> {
         match self {
@@ -76,7 +76,11 @@ impl fmt::Display for Token {
             Token::Float(fl) => write!(f, "{}", fl),
             Token::HexInteger(h) => write!(f, "0x{:X}", h),
             Token::MidiEvent { time, bytes } => {
-                write!(f, "E {} {:02X} {:02X} {:02X}", time, bytes[0], bytes[1], bytes[2])
+                write!(
+                    f,
+                    "E {} {:02X} {:02X} {:02X}",
+                    time, bytes[0], bytes[1], bytes[2]
+                )
             }
             Token::Identifier(id) => write!(f, "{}", id),
         }
@@ -89,27 +93,28 @@ fn quoted_string(input: &str) -> IResult<&str, (String, QuoteType)> {
         // Double quotes: "text" (including empty strings)
         map(
             delimited(tag("\""), take_while(|c| c != '"'), tag("\"")),
-            |s: &str| (s.to_string(), QuoteType::Double)
+            |s: &str| (s.to_string(), QuoteType::Double),
         ),
         // Single quotes: 'text' (including empty strings)
         map(
             delimited(tag("'"), take_while(|c| c != '\''), tag("'")),
-            |s: &str| (s.to_string(), QuoteType::Single)
+            |s: &str| (s.to_string(), QuoteType::Single),
         ),
         // Backticks: `text` (including empty strings)
         map(
             delimited(tag("`"), take_while(|c| c != '`'), tag("`")),
-            |s: &str| (s.to_string(), QuoteType::Backtick)
+            |s: &str| (s.to_string(), QuoteType::Backtick),
         ),
-    )).parse(input)
+    ))
+    .parse(input)
 }
 
 /// Parse a hex byte (two hex digits)
 fn hex_byte(input: &str) -> IResult<&str, u8> {
-    map(
-        take_while1(|c: char| c.is_ascii_hexdigit()),
-        |s: &str| u8::from_str_radix(s, 16).unwrap_or(0)
-    ).parse(input)
+    map(take_while1(|c: char| c.is_ascii_hexdigit()), |s: &str| {
+        u8::from_str_radix(s, 16).unwrap_or(0)
+    })
+    .parse(input)
 }
 
 /// Parse a MIDI event: E/e + time + 3 space-separated hex bytes
@@ -125,54 +130,64 @@ fn midi_event(input: &str) -> IResult<&str, Token> {
     let (input, byte2) = hex_byte(input)?;
     let (input, _) = space1(input)?;
     let (input, byte3) = hex_byte(input)?;
-    
-    Ok((input, Token::MidiEvent {
-        time,
-        bytes: [byte1, byte2, byte3],
-    }))
+
+    Ok((
+        input,
+        Token::MidiEvent {
+            time,
+            bytes: [byte1, byte2, byte3],
+        },
+    ))
 }
 
 /// Parse a hex integer with 0x prefix (matching WDL's gettoken_int)
 fn hex_integer(input: &str) -> IResult<&str, Token> {
     map(
         preceded(tag("0x"), take_while1(|c: char| c.is_ascii_hexdigit())),
-        |s: &str| Token::HexInteger(u64::from_str_radix(s, 16).unwrap_or(0))
-    ).parse(input)
+        |s: &str| Token::HexInteger(u64::from_str_radix(s, 16).unwrap_or(0)),
+    )
+    .parse(input)
 }
 
 /// Parse a number (integer or float) - this handles the ambiguity between integers and floats
 fn number(input: &str) -> IResult<&str, Token> {
     // First, recognize a complete number (including decimal point)
-    let (remaining, num_str) = recognize(
-        (
-            opt(nom::character::complete::char('-')),
+    let (remaining, num_str) = recognize((
+        opt(nom::character::complete::char('-')),
+        nom::character::complete::digit1,
+        opt(nom::sequence::preceded(
+            nom::character::complete::one_of(".,"),
             nom::character::complete::digit1,
-            opt(nom::sequence::preceded(
-                nom::character::complete::one_of(".,"),
-                nom::character::complete::digit1
-            )),
-            opt(nom::sequence::preceded(
-                nom::character::complete::one_of("eE"),
-                (
-                    opt(nom::character::complete::one_of("+-")),
-                    nom::character::complete::digit1,
-                )
-            )),
-        )
-    ).parse(input)?;
-    
+        )),
+        opt(nom::sequence::preceded(
+            nom::character::complete::one_of("eE"),
+            (
+                opt(nom::character::complete::one_of("+-")),
+                nom::character::complete::digit1,
+            ),
+        )),
+    ))
+    .parse(input)?;
+
     // Check if this is actually a standalone number (followed by whitespace or end)
     if !remaining.is_empty() && !remaining.chars().next().unwrap().is_whitespace() {
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Tag,
+        )));
     }
-    
+
     // Convert commas to dots like WDL does
     let normalized = num_str.replace(',', ".");
-    
+
     // Try to parse as integer first, then as float
     if let Ok(int_val) = normalized.parse::<i64>() {
         // Check if it's actually a float (has decimal point or scientific notation)
-        if num_str.contains('.') || num_str.contains(',') || num_str.contains('e') || num_str.contains('E') {
+        if num_str.contains('.')
+            || num_str.contains(',')
+            || num_str.contains('e')
+            || num_str.contains('E')
+        {
             Ok((remaining, Token::Float(int_val as f64)))
         } else {
             Ok((remaining, Token::Integer(int_val)))
@@ -188,14 +203,30 @@ fn number(input: &str) -> IResult<&str, Token> {
 /// This should not match single characters that could be MIDI event markers
 fn identifier(input: &str) -> IResult<&str, Token> {
     // First check if this could be a MIDI event (E/e followed by space)
-    if input.len() >= 2 && (input.starts_with('E') || input.starts_with('e')) && (input.chars().nth(1) == Some(' ') || input.chars().nth(1) == Some('\t')) {
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)));
+    if input.len() >= 2
+        && (input.starts_with('E') || input.starts_with('e'))
+        && (input.chars().nth(1) == Some(' ') || input.chars().nth(1) == Some('\t'))
+    {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Tag,
+        )));
     }
-    
+
     map(
-        take_while1(|c: char| !c.is_whitespace() && c != '>' && c != '<' && c != '"' && c != '\'' && c != '`' && c != '#' && c != ';'),
-        |s: &str| Token::Identifier(s.to_string())
-    ).parse(input)
+        take_while1(|c: char| {
+            !c.is_whitespace()
+                && c != '>'
+                && c != '<'
+                && c != '"'
+                && c != '\''
+                && c != '`'
+                && c != '#'
+                && c != ';'
+        }),
+        |s: &str| Token::Identifier(s.to_string()),
+    )
+    .parse(input)
 }
 
 /// Parse a single token from input (matching WDL's token parsing order)
@@ -210,20 +241,21 @@ pub fn parse_token(input: &str) -> IResult<&str, Token> {
         number,
         // Identifiers last
         identifier,
-    )).parse(input)
+    ))
+    .parse(input)
 }
 
 /// Parse a line of space-separated tokens (matching WDL's LineParser)
 pub fn parse_token_line(input: &str) -> IResult<&str, Vec<Token>> {
     // Skip leading whitespace
     let (input, _) = space0(input)?;
-    
+
     // Parse tokens separated by whitespace
     let (input, tokens) = nom::multi::separated_list1(space1, parse_token).parse(input)?;
-    
+
     // Skip trailing whitespace
     let (input, _) = space0(input)?;
-    
+
     Ok((input, tokens))
 }
 
@@ -235,17 +267,26 @@ mod tests {
     fn test_quoted_strings() {
         assert_eq!(
             parse_token("\"hello world\""),
-            Ok(("", Token::String("hello world".to_string(), QuoteType::Double)))
+            Ok((
+                "",
+                Token::String("hello world".to_string(), QuoteType::Double)
+            ))
         );
-        
+
         assert_eq!(
             parse_token("'single quotes'"),
-            Ok(("", Token::String("single quotes".to_string(), QuoteType::Single)))
+            Ok((
+                "",
+                Token::String("single quotes".to_string(), QuoteType::Single)
+            ))
         );
-        
+
         assert_eq!(
             parse_token("`backticks`"),
-            Ok(("", Token::String("backticks".to_string(), QuoteType::Backtick)))
+            Ok((
+                "",
+                Token::String("backticks".to_string(), QuoteType::Backtick)
+            ))
         );
     }
 
@@ -262,12 +303,24 @@ mod tests {
     fn test_midi_events() {
         assert_eq!(
             parse_token("E 480 90 3f 60"),
-            Ok(("", Token::MidiEvent { time: 480, bytes: [0x90, 0x3f, 0x60] }))
+            Ok((
+                "",
+                Token::MidiEvent {
+                    time: 480,
+                    bytes: [0x90, 0x3f, 0x60]
+                }
+            ))
         );
-        
+
         assert_eq!(
             parse_token("e 120 80 3f 00"),
-            Ok(("", Token::MidiEvent { time: 120, bytes: [0x80, 0x3f, 0x00] }))
+            Ok((
+                "",
+                Token::MidiEvent {
+                    time: 120,
+                    bytes: [0x80, 0x3f, 0x00]
+                }
+            ))
         );
     }
 
@@ -278,14 +331,13 @@ mod tests {
         assert_eq!(hex_byte("60"), Ok(("", 0x60)));
     }
 
-
     #[test]
     fn test_identifiers() {
         assert_eq!(
             parse_token("TRACK"),
             Ok(("", Token::Identifier("TRACK".to_string())))
         );
-        
+
         assert_eq!(
             parse_token("VOL"),
             Ok(("", Token::Identifier("VOL".to_string())))
@@ -296,13 +348,16 @@ mod tests {
     fn test_token_line() {
         let result = parse_token_line("NAME \"Track 1\" VOL 1.0 0.0");
         assert!(result.is_ok());
-        
+
         let (remaining, tokens) = result.unwrap();
         assert_eq!(remaining, "");
         assert_eq!(tokens.len(), 5);
-        
+
         assert_eq!(tokens[0], Token::Identifier("NAME".to_string()));
-        assert_eq!(tokens[1], Token::String("Track 1".to_string(), QuoteType::Double));
+        assert_eq!(
+            tokens[1],
+            Token::String("Track 1".to_string(), QuoteType::Double)
+        );
         assert_eq!(tokens[2], Token::Identifier("VOL".to_string()));
         assert_eq!(tokens[3], Token::Float(1.0));
         assert_eq!(tokens[4], Token::Float(0.0));
@@ -312,11 +367,15 @@ mod tests {
     fn test_whitespace_handling() {
         let result = parse_token_line("  NAME  \"Track 1\"  ");
         assert!(result.is_ok());
-        
+
         let (remaining, tokens) = result.unwrap();
         assert_eq!(remaining, "");
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0], Token::Identifier("NAME".to_string()));
-        assert_eq!(tokens[1], Token::String("Track 1".to_string(), QuoteType::Double));
+        assert_eq!(
+            tokens[1],
+            Token::String("Track 1".to_string(), QuoteType::Double)
+        );
     }
 }
+

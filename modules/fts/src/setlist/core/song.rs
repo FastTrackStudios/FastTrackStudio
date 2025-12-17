@@ -61,6 +61,10 @@ pub struct Song {
     /// Chart data for this song (optional)
     /// Contains chord progressions, sections, key changes, and time signature changes
     pub chart: Option<Chart>,
+    /// Measure positions for this song
+    /// Each measure has a Position with both MusicalPosition and TimePosition
+    /// This allows clients to display measures correctly without complex tempo calculations
+    pub measure_positions: Vec<Position>,
 }
 
 impl Song {
@@ -89,6 +93,7 @@ impl Song {
             starting_time_signature: None,
             lyrics: None,
             chart: None,
+            measure_positions: Vec::new(),
         })
     }
 
@@ -139,6 +144,7 @@ impl Song {
             starting_time_signature: None,
             lyrics: None,
             chart: None,
+            measure_positions: Vec::new(),
         })
     }
 
@@ -459,7 +465,7 @@ impl Song {
         self.tempo_time_sig_changes.push(change);
         // Keep sorted by position
         self.tempo_time_sig_changes.sort_by(|a, b| {
-            a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal)
+            a.position_seconds().partial_cmp(&b.position_seconds()).unwrap_or(std::cmp::Ordering::Equal)
         });
     }
 
@@ -468,7 +474,7 @@ impl Song {
         self.tempo_time_sig_changes = changes;
         // Keep sorted by position
         self.tempo_time_sig_changes.sort_by(|a, b| {
-            a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal)
+            a.position_seconds().partial_cmp(&b.position_seconds()).unwrap_or(std::cmp::Ordering::Equal)
         });
     }
 
@@ -762,6 +768,7 @@ impl Clone for Song {
             starting_time_signature: self.starting_time_signature.clone(),
             lyrics: self.lyrics.clone(),
             chart: self.chart.clone(),
+            measure_positions: self.measure_positions.clone(),
         }
     }
 }

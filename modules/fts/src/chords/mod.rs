@@ -5,6 +5,9 @@
 
 pub mod types;
 
+#[cfg(feature = "dioxus")]
+pub mod infra;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod reactive;
 
@@ -18,4 +21,7 @@ pub use reactive::{
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use reactive::irpc::{ChartApi, ChartUpdateMessage};
+
+#[cfg(feature = "dioxus")]
+pub use infra::CHART_STATE as CHART_STATE_SIGNAL;
 

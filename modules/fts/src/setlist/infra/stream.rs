@@ -62,10 +62,13 @@ pub enum SetlistUpdateMessage {
     
     /// Update active indices (which song/section/slide is currently active)
     /// Sent frequently as playback progresses
+    /// Also includes progress values (0.0 to 1.0) for the active song and section
     ActiveIndices {
         active_song_index: Option<usize>,
         active_section_index: Option<usize>,
         active_slide_index: Option<usize>,
+        song_progress: Option<f64>, // 0.0 to 1.0, linear time-based progress through active song
+        section_progress: Option<f64>, // 0.0 to 1.0, linear time-based progress through active section
     },
     
     /// Update song metadata (name, sections, lyrics structure, etc.)
@@ -148,6 +151,13 @@ pub struct SeekToTime {
     pub time_seconds: f64, // Time position relative to song start
 }
 
+/// Seek to a specific musical position within a song
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeekToMusicalPosition {
+    pub song_index: usize,
+    pub musical_position: daw::primitives::MusicalPosition,
+}
+
 /// Toggle loop for current song
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToggleLoop;
@@ -217,6 +227,9 @@ pub enum SetlistStreamProtocol {
     /// Seek to a specific time position within a song
     #[rpc(tx=oneshot::Sender<Result<(), String>>)]
     SeekToTime(SeekToTime),
+    /// Seek to a specific musical position within a song
+    #[rpc(tx=oneshot::Sender<Result<(), String>>)]
+    SeekToMusicalPosition(SeekToMusicalPosition),
     /// Toggle loop for current song
     #[rpc(tx=oneshot::Sender<Result<(), String>>)]
     ToggleLoop(ToggleLoop),
@@ -264,6 +277,9 @@ pub trait SetlistCommandHandler: Send + Sync {
     
     /// Seek to a specific time position within a song
     async fn seek_to_time(&self, song_index: usize, time_seconds: f64) -> Result<(), String>;
+    
+    /// Seek to a specific musical position within a song
+    async fn seek_to_musical_position(&self, song_index: usize, musical_position: daw::primitives::MusicalPosition) -> Result<(), String>;
     
     /// Toggle loop for current song
     async fn toggle_loop(&self) -> Result<(), String>;
@@ -504,6 +520,8 @@ impl SetlistStreamActor {
                     active_song_index: setlist_api.active_song_index(),
                     active_section_index: setlist_api.active_section_index(),
                     active_slide_index: setlist_api.active_slide_index(),
+                    song_progress: setlist_api.song_progress,
+                    section_progress: setlist_api.section_progress,
                 }
             },
             Err(e) => {
@@ -512,6 +530,8 @@ impl SetlistStreamActor {
                     active_song_index: None,
                     active_section_index: None,
                     active_slide_index: None,
+                    song_progress: None,
+                    section_progress: None,
                 }
             }
         };
@@ -931,6 +951,21 @@ impl SetlistStreamActor {
                     }
                 });
             }
+            SetlistStreamMessage::SeekToMusicalPosition(cmd) => {
+                let WithChannels { tx, inner, span, .. } = cmd;
+                let handler = self.command_handler.clone();
+                tokio::task::spawn(async move {
+                    let _entered = span.enter();
+                    let result = if let Some(handler) = handler {
+                        handler.seek_to_musical_position(inner.song_index, inner.musical_position).await
+                    } else {
+                        Err("Command handler not available".to_string())
+                    };
+                    if let Err(e) = tx.send(result).await {
+                        warn!("Failed to send seek to musical position response: {}", e);
+                    }
+                });
+            }
             SetlistStreamMessage::SeekToTime(cmd) => {
                 let WithChannels { tx, inner, span, .. } = cmd;
                 let handler = self.command_handler.clone();
@@ -1045,6 +1080,8 @@ impl SetlistStreamActor {
         let mut prev_tracks: HashMap<usize, Vec<daw::tracks::Track>> = HashMap::new();
         let mut prev_transport: HashMap<usize, Transport> = HashMap::new();
         let mut prev_active_indices: (Option<usize>, Option<usize>, Option<usize>) = (None, None, None);
+        let mut prev_song_progress: Option<f64> = None;
+        let mut prev_section_progress: Option<f64> = None;
         
         // Poll as fast as possible - update whenever state changes
         let mut interval = time::interval(time::Duration::from_millis(8)); // ~120Hz polling
@@ -1120,6 +1157,8 @@ impl SetlistStreamActor {
                         // Store initial state
                         prev_setlist_structure = Some(setlist.clone());
                         prev_active_indices = current_active_indices;
+                        prev_song_progress = setlist_api.song_progress;
+                        prev_section_progress = setlist_api.section_progress;
                         
                         tracing::info!("[Setlist Stream] Sent initial full setlist update with {} songs", setlist.songs.len());
                         continue;
@@ -1161,17 +1200,26 @@ impl SetlistStreamActor {
                         prev_setlist_structure = Some(setlist.clone());
                     }
                     
-                    // Check for active indices changes (frequent updates during playback)
-                    if prev_active_indices != current_active_indices {
+                    // Check for active indices OR progress changes (frequent updates during playback)
+                    let indices_changed = prev_active_indices != current_active_indices;
+                    let song_progress_changed = prev_song_progress != setlist_api.song_progress;
+                    let section_progress_changed = prev_section_progress != setlist_api.section_progress;
+                    
+                    if indices_changed || song_progress_changed || section_progress_changed {
+                        // Get progress from current setlist API (we already have it from the match above)
                         let update = SetlistUpdateMessage::ActiveIndices {
                             active_song_index: current_active_indices.0,
                             active_section_index: current_active_indices.1,
                             active_slide_index: current_active_indices.2,
+                            song_progress: setlist_api.song_progress,
+                            section_progress: setlist_api.section_progress,
                         };
                         if broadcast_tx.send(update).is_ok() {
                             SEND_COUNT.fetch_add(1, Ordering::Relaxed);
                         }
                         prev_active_indices = current_active_indices;
+                        prev_song_progress = setlist_api.song_progress;
+                        prev_section_progress = setlist_api.section_progress;
                     }
                     
                     // Check for track changes per song
@@ -1451,6 +1499,26 @@ impl SetlistStreamApi {
         }
     }
     
+    /// Seek to a specific musical position within a song
+    pub async fn seek_to_musical_position(&self, song_index: usize, musical_position: daw::primitives::MusicalPosition) -> irpc::Result<Result<(), String>> {
+        let msg = SeekToMusicalPosition { song_index, musical_position };
+        let rx = match self.inner.request().await? {
+            Request::Local(request) => {
+                let (tx, rx) = oneshot::channel();
+                request.send((msg, tx)).await?;
+                rx
+            }
+            Request::Remote(request) => {
+                let (_tx, rx) = request.write(msg).await?;
+                rx.into()
+            }
+        };
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(e) => Ok(Err(format!("Request failed: {}", e))),
+        }
+    }
+
     /// Seek to a specific time position within a song
     pub async fn seek_to_time(&self, song_index: usize, time_seconds: f64) -> irpc::Result<Result<(), String>> {
         let msg = SeekToTime { song_index, time_seconds };
