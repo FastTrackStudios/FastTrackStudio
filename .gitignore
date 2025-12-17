@@ -70,3 +70,9 @@ node_modules/
 # Flamegraph outputs
 flamegraph.svg
 perf.data*
+
+# PDFium library (large binary, should be downloaded separately)
+/lib/libpdfium.*
+/lib/*.dylib
+/lib/*.so
+/lib/*.dll

@@ -21,11 +21,63 @@ DEFAULT_BUILD_MODE := "debug"
 build-extension:
     #!/usr/bin/env bash
     set -euo pipefail
+    
+    # Save command-line EXTENSION_FEATURES if set (before loading .env)
+    CMD_LINE_FEATURES="${EXTENSION_FEATURES:-}"
+    
+    # Load .env file if it exists
+    if [ -f .env ]; then set -a; source .env; set +a; fi
+    
+    # Command-line override takes precedence over .env
+    if [[ -n "$CMD_LINE_FEATURES" ]]; then
+        EXTENSION_FEATURES="$CMD_LINE_FEATURES"
+    fi
+    
     BUILD_MODE="${BUILD_MODE:-debug}"
-    if [[ "$BUILD_MODE" == "release" ]]; then
-        cargo build --package reaper_extension --release
+    
+    # Build with features from .env (or default)
+    # EXTENSION_FEATURES can be:
+    #   - "all" or empty: use default features from Cargo.toml
+    #   - "none": use --no-default-features
+    #   - comma-separated list: use --features "feature1,feature2"
+    # Default to "all" if not set
+    EXTENSION_FEATURES="${EXTENSION_FEATURES:-all}"
+    
+    # Debug: show what we're using
+    echo "🔍 EXTENSION_FEATURES: [$EXTENSION_FEATURES]"
+    
+    if [[ "$EXTENSION_FEATURES" == "none" ]]; then
+        echo "🔧 Building extension with NO features (completely transparent)"
+        if [[ "$BUILD_MODE" == "release" ]]; then
+            cargo build --package reaper_extension --release --no-default-features
+        else
+            cargo build --package reaper_extension --no-default-features
+        fi
+    elif [[ "$EXTENSION_FEATURES" == "all" ]]; then
+        # "all" = default features
+        echo "🔧 Building extension with default features"
+        if [[ "$BUILD_MODE" == "release" ]]; then
+            cargo build --package reaper_extension --release
+        else
+            cargo build --package reaper_extension
+        fi
+    elif [[ -z "$EXTENSION_FEATURES" ]]; then
+        # Empty string = default features (shouldn't happen due to default above, but handle it)
+        echo "🔧 Building extension with default features (empty EXTENSION_FEATURES)"
+        if [[ "$BUILD_MODE" == "release" ]]; then
+            cargo build --package reaper_extension --release
+        else
+            cargo build --package reaper_extension
+        fi
     else
-        cargo build --package reaper_extension
+        # Handle comma-separated feature list
+        # Use --no-default-features to exclude defaults, then add only the specified features
+        echo "🔧 Building extension with features: $EXTENSION_FEATURES (excluding defaults)"
+        if [[ "$BUILD_MODE" == "release" ]]; then
+            cargo build --package reaper_extension --release --no-default-features --features "$EXTENSION_FEATURES"
+        else
+            cargo build --package reaper_extension --no-default-features --features "$EXTENSION_FEATURES"
+        fi
     fi
 
 # Install the REAPER extension to the specified REAPER path
@@ -62,10 +114,18 @@ install-extension: build-extension
         exit 1
     fi
     
-    # Copy the extension (must start with reaper_ prefix for REAPER)
-    cp "$EXTENSION_FILE" "$EXTENSION_DIR/$TARGET_NAME"
+    # Remove existing file/symlink if it exists
+    if [[ -L "$EXTENSION_DIR/$TARGET_NAME" ]] || [[ -f "$EXTENSION_DIR/$TARGET_NAME" ]]; then
+        rm -f "$EXTENSION_DIR/$TARGET_NAME"
+    fi
     
-    echo "✅ Extension installed to: $EXTENSION_DIR/$TARGET_NAME"
+    # Get absolute path to the extension file
+    ABS_EXTENSION_FILE="$(cd "$(dirname "$EXTENSION_FILE")" && pwd)/$(basename "$EXTENSION_FILE")"
+    
+    # Create symlink to the extension (for development - automatically updates on rebuild)
+    ln -s "$ABS_EXTENSION_FILE" "$EXTENSION_DIR/$TARGET_NAME"
+    
+    echo "✅ Extension symlinked to: $EXTENSION_DIR/$TARGET_NAME"
     echo "📁 Source: $EXTENSION_FILE"
     echo ""
     echo "🚀 Now start REAPER and check the console for our message!"
@@ -357,12 +417,15 @@ help:
     echo "  REAPER_PATH         REAPER resource directory"
     echo "  REAPER_EXECUTABLE   REAPER executable path"
     echo "  BUILD_MODE          Set to 'release' for release builds"
+    echo "  EXTENSION_FEATURES  Extension features: 'all' (default), 'none', or comma-separated list"
     echo ""
     echo "Examples:"
     echo "  just build-extension"
     echo "  just link-extension"
     echo "  BUILD_MODE=release just build-all"
     echo "  REAPER_PATH=/custom/path just install-extension"
+    echo "  EXTENSION_FEATURES=none just build-extension  # Build without input feature"
+    echo "  EXTENSION_FEATURES=input just build-extension  # Build with only input feature"
     echo ""
     echo "Setup:"
     echo "  cp .env.example .env  # Create .env file from template"
