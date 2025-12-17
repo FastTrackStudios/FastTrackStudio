@@ -1,0 +1,15 @@
+[package]
+name = "pdf"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+pdfium-render = "0.8"
+anyhow = { workspace = true }
+image = "0.25"
+base64 = "0.22"
+serde = { workspace = true }
+tracing = { workspace = true }
+
