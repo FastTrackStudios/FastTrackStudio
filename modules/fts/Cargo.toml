@@ -42,7 +42,7 @@ default-features = true
 # RPP file parsing (optional)
 [features]
 default = []
-reaper = []
+reaper = ["dep:reaper-high", "dep:reaper-medium", "dep:reaper-low", "dep:enumflags2"]
 rpp = ["dep:rpp-parser"]
 dioxus = ["dep:dioxus"]
 full = ["reaper", "rpp"]
@@ -51,12 +51,29 @@ full = ["reaper", "rpp"]
 version = "0.1"
 optional = true
 
+# REAPER dependencies (optional, enabled by reaper feature)
+[dependencies.reaper-high]
+workspace = true
+optional = true
+
+[dependencies.reaper-medium]
+workspace = true
+optional = true
+
+[dependencies.reaper-low]
+workspace = true
+optional = true
+
+[dependencies.enumflags2]
+version = "0.7"
+optional = true
+
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = "3.0"
 colored = "2.1"
 reqwest = { version = "0.11", features = ["json"] }
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "allow"  # Required for low-level REAPER API calls in reaper feature
 

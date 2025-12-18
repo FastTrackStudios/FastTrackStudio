@@ -59,6 +59,10 @@ branch = "master"
 features = ["palette"]
 package = "reaper-common-types"
 
+[workspace.dependencies.reaper-high]
+git = "https://github.com/helgoboss/reaper-rs.git"
+branch = "master"
+
 [workspace.dependencies.reaper-low]
 git = "https://github.com/helgoboss/reaper-rs.git"
 branch = "master"
