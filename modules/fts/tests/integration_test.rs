@@ -4,6 +4,8 @@
 //! All integration tests are organized in the `integration/` subdirectory.
 
 mod naming;
+mod template;
 
 // Re-export tests so they run
 pub use naming::*;
+pub use template::*;
