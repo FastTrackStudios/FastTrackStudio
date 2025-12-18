@@ -5,6 +5,7 @@
 //! its default tracklist, and categories combine groups.
 
 use daw::tracks::Track;
+use crate::smart_template::core::traits::GroupExt;
 use crate::smart_template::presets::{
     drums, bass, guitar_electric, guitar_acoustic, keys, synths, vocals
 };
@@ -15,20 +16,20 @@ use crate::smart_template::presets::{
 
 /// Default tracklist for Drums category
 pub fn default_drums_tracklist() -> Vec<Track> {
-    drums::default_tracklist()
+    drums::DrumKit::get_default_tracklist()
 }
 
 /// Default tracklist for Guitars category
 pub fn default_guitars_tracklist() -> Vec<Track> {
     let mut all_tracks = Vec::new();
-    all_tracks.extend(guitar_electric::default_tracklist());
-    all_tracks.extend(guitar_acoustic::default_tracklist());
+    all_tracks.extend(guitar_electric::GuitarElectric::get_default_tracklist());
+    all_tracks.extend(guitar_acoustic::GuitarAcoustic::get_default_tracklist());
     all_tracks
 }
 
 /// Default tracklist for Vocals category
 pub fn default_vocals_category_tracklist() -> Vec<Track> {
-    vocals::default_tracklist()
+    vocals::Vocals::get_default_tracklist()
 }
 
 // ============================================================================
@@ -43,16 +44,16 @@ pub fn default_tracklist() -> Vec<Track> {
     all_tracks.extend(default_drums_tracklist());
     
     // Bass
-    all_tracks.extend(bass::default_tracklist());
+    all_tracks.extend(bass::Bass::get_default_tracklist());
     
     // Guitars category
     all_tracks.extend(default_guitars_tracklist());
     
     // Keys
-    all_tracks.extend(keys::default_tracklist());
+    all_tracks.extend(keys::Keys::get_default_tracklist());
     
     // Synths
-    all_tracks.extend(synths::default_tracklist());
+    all_tracks.extend(synths::Synths::get_default_tracklist());
     
     // Vocals category
     all_tracks.extend(default_vocals_category_tracklist());
