@@ -1,15 +1,13 @@
 //! Core module
 //!
-//! Contains core types, traits, and engines for the smart template system.
+//! Contains core traits, data models, and engines.
 
-pub mod template;
 pub mod traits;
-pub mod template_engine;
-pub mod group_engine;
-pub mod visibility_engine;
+pub mod models;
+pub mod engines;
 
-pub use template::*;
 pub use traits::*;
-pub use template_engine::*;
-pub use group_engine::*;
-pub use visibility_engine::*;
+pub use models::*;
+pub use engines::template_engine::*;
+pub use engines::group_engine::*;
+pub use engines::visibility_engine::*;

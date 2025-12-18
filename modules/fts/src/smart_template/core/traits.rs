@@ -1,42 +1,68 @@
 //! Core traits
 //!
-//! Traits for template generation and building.
+//! Traits for parsing, matching, templates, and group configurations.
 
-use crate::smart_template::core::template::Template;
+use crate::smart_template::core::models::template::Template;
+use crate::smart_template::core::models::group_config::GroupConfig;
+use crate::smart_template::core::models::template_config::InheritanceMode;
+use crate::smart_template::features::naming::track_name::TrackNameLike;
+use crate::smart_template::features::matching::matcher::MatchResult;
+use daw::tracks::{TrackName, Track};
 
-/// Trait for generating templates from configurations
-///
-/// Implementations of this trait create template structures from configuration
-/// data, which can then be used for matching and track creation.
-pub trait TemplateGenerator: Send + Sync {
-    /// The configuration type this generator works with
-    type Config;
+/// Trait for parsing track names into structured data
+pub trait Parser: Send + Sync {
+    /// The output type (must implement TrackNameLike)
+    type Output: TrackNameLike;
     
-    /// Error type for generation operations
+    /// Error type for parsing operations
     type Error: std::error::Error + Send + Sync;
     
-    /// Generate a template from a configuration
-    fn generate(&self, config: &Self::Config) -> Result<Template, Self::Error>;
+    /// Parse a track name string into structured data
+    fn parse(&self, name: &str) -> Result<Self::Output, Self::Error>;
+}
+
+/// Trait for matching parsed track names to template tracks
+pub trait Matcher: Send + Sync {
+    /// The track name type (must implement TrackNameLike)
+    type TrackName: TrackNameLike;
     
-    /// Get the name/identifier of this generator
+    /// Error type for matching operations
+    type Error: std::error::Error + Send + Sync;
+    
+    /// Find the best match for a parsed track name in the template
+    fn find_best_match(&self, track_name: &Self::TrackName) -> Option<MatchResult>;
+    
+    /// Find an existing match or create a new track name for the parsed track
+    fn find_or_create_track(&mut self, track_name: &Self::TrackName, base_name: Option<&str>) -> Result<(TrackName, bool), Self::Error>;
+}
+
+/// Trait for objects that can provide a track structure template
+pub trait TemplateSource: Send + Sync {
+    /// Generate the template structure
+    fn template(&self) -> Template;
+}
+
+/// Trait for providing group identity and configuration
+pub trait Group: Send + Sync {
+    /// Get the name of this group
     fn name(&self) -> &str;
+    
+    /// Get the configuration for this group
+    fn config(&self) -> &GroupConfig;
+    
+    /// Get the default track list for this group
+    fn default_tracklist(&self) -> Vec<Track>;
 }
 
 /// Track identifier type (platform-specific)
 pub type TrackId = String;
 
-/// Trait for building tracks from templates
-///
-/// Implementations of this trait can create tracks in a DAW from template
-/// configurations, including copying properties from template tracks.
+/// Trait for building tracks from templates in a DAW
 pub trait TemplateBuilder: Send + Sync {
     /// Error type for building operations
     type Error: std::error::Error + Send + Sync;
     
     /// Create a track from a template track
-    ///
-    /// This creates a new track with the given name, optionally as a child of
-    /// a parent track, and copies properties from the template track.
     fn create_track_from_template(
         &self,
         template_track_id: &str,
@@ -45,9 +71,6 @@ pub trait TemplateBuilder: Send + Sync {
     ) -> Result<TrackId, Self::Error>;
     
     /// Copy track properties from one track to another
-    ///
-    /// This copies FX, sends, receives, and other properties from the source
-    /// track to the destination track.
     fn copy_track_properties(
         &self,
         source_track_id: &str,
@@ -55,5 +78,28 @@ pub trait TemplateBuilder: Send + Sync {
     ) -> Result<(), Self::Error>;
     
     /// Get the name/identifier of this builder
+    fn name(&self) -> &str;
+}
+
+/// Trait for loading configurations
+pub trait ConfigLoader: Send + Sync {
+    /// The configuration type this loader produces
+    type Config;
+    
+    /// Error type for loading operations
+    type Error: std::error::Error + Send + Sync;
+    
+    /// Load configuration from a source
+    fn load(&self, source: &str) -> Result<Self::Config, Self::Error>;
+    
+    /// Load configuration with inheritance
+    fn load_with_inheritance(
+        &self,
+        defaults: &str,
+        overrides: &str,
+        mode: InheritanceMode,
+    ) -> Result<Self::Config, Self::Error>;
+    
+    /// Get the name/identifier of this loader
     fn name(&self) -> &str;
 }
