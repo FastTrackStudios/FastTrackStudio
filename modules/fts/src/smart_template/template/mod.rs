@@ -1,7 +1,7 @@
 //! Template module
 //!
-//! Contains template-related functionality including configuration and template management.
+//! Contains template-specific logic for generation, building, and default lists.
 
-pub mod config;
+pub mod default_list;
 
-pub use config::*;
+pub use default_list::*;
