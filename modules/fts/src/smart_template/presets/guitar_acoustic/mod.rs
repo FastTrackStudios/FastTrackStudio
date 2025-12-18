@@ -97,3 +97,13 @@ pub enum GuitarAcousticMatchError {
     #[error("Match error: {0}")]
     Other(String),
 }
+
+/// Returns the default guitar acoustic track list as a Vec<Track>
+pub fn default_tracklist() -> Vec<Track> {
+    GuitarAcoustic::new().default_tracklist()
+}
+
+/// Returns the default guitar acoustic track list as a Template
+pub fn default_tracks() -> Vec<Template> {
+    vec![GuitarAcoustic::new().template()]
+}

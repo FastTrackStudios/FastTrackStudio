@@ -1,7 +1,7 @@
 //! Drum Kit template generator and matcher implementation
 
-use crate::smart_template::features::matching::matcher::{Matcher, MatchResult, MatchType};
-use crate::smart_template::core::traits::{Group, TemplateSource};
+use crate::smart_template::core::traits::{Group, TemplateSource, Matcher};
+use crate::smart_template::features::matching::matcher::{MatchResult, MatchType};
 use crate::smart_template::core::models::template::Template;
 use crate::smart_template::utils::track_helpers::{create_track, TrackExt};
 use crate::smart_template::core::models::group_config::GroupConfig;

@@ -5,7 +5,7 @@
 /// Trait for types that represent parsed track names
 ///
 /// This allows different track name representations to work with the parser system.
-pub trait TrackNameLike: Clone + Send + Sync {
+pub trait TrackNameLike: Send + Sync {
     /// Get the group prefix if available
     fn group_prefix(&self) -> Option<&str>;
     

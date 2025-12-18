@@ -5,7 +5,7 @@
 
 use crate::smart_template::features::naming::track_name::TrackNameLike;
 use crate::smart_template::core::models::template::Template;
-use crate::smart_template::core::models::types::TrackName;
+use daw::tracks::TrackName;
 use daw::tracks::Track;
 use std::collections::HashMap;
 

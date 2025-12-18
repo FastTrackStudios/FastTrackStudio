@@ -97,3 +97,13 @@ pub enum KeysMatchError {
     #[error("Match error: {0}")]
     Other(String),
 }
+
+/// Returns the default keys track list as a Vec<Track>
+pub fn default_tracklist() -> Vec<Track> {
+    Keys::new().default_tracklist()
+}
+
+/// Returns the default keys track list as a Template
+pub fn default_tracks() -> Vec<Template> {
+    vec![Keys::new().template()]
+}

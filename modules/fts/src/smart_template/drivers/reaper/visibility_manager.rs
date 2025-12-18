@@ -6,7 +6,7 @@
 use crate::smart_template::features::visibility::traits::{VisibilityManager, VisibilityState};
 use crate::smart_template::core::models::template::Template;
 use crate::smart_template::core::models::group_mode::GroupMode;
-use crate::smart_template::core::models::types::TrackName;
+use daw::tracks::TrackName;
 use std::collections::HashMap;
 use std::sync::Mutex;
 

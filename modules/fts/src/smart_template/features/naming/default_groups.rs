@@ -11,14 +11,14 @@ use crate::smart_template::presets::drums::{
     Cymbals,
     Room,
 };
-use crate::smart_template::presets::bass::naming::BassParser;
-use crate::smart_template::presets::guitar_electric::naming::GuitarElectricParser;
-use crate::smart_template::presets::guitar_acoustic::naming::GuitarAcousticParser;
-use crate::smart_template::presets::keys::naming::KeysParser;
-use crate::smart_template::presets::synths::naming::SynthsParser;
+use crate::smart_template::presets::bass::Bass;
+use crate::smart_template::presets::guitar_electric::GuitarElectric;
+use crate::smart_template::presets::guitar_acoustic::GuitarAcoustic;
+use crate::smart_template::presets::keys::Keys;
+use crate::smart_template::presets::synths::Synths;
 use crate::smart_template::presets::vocals::{
-    VocalsParser,
-    BGVsParser,
+    Vocals,
+    BGVs,
 };
 
 /// Create all default groups as GroupConfig
@@ -35,21 +35,21 @@ pub fn create_default_groups() -> Vec<GroupConfig> {
         Room::new().config,
         
         // Bass group
-        BassParser::default_bass_config(),
+        Bass::new().config,
         
         // Guitar groups
-        GuitarElectricParser::default_guitar_electric_config(),
-        GuitarAcousticParser::default_guitar_acoustic_config(),
+        GuitarElectric::new().config,
+        GuitarAcoustic::new().config,
         
         // Keys group
-        KeysParser::default_keys_config(),
+        Keys::new().config,
         
         // Synths group
-        SynthsParser::default_synths_config(),
+        Synths::new().config,
         
         // Vocals groups
-        VocalsParser::default_vocals_config(),
-        BGVsParser::default_bgvs_config(),
+        Vocals::new().config,
+        BGVs::new().config,
     ];
     
     // Add NOT_SORTED group last as catch-all (lowest priority)

@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use daw::tracks::Track;
+use daw::tracks::{Track, TrackGuid};
 
 /// Insert mode for tracks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,7 +109,7 @@ impl GroupConfig {
         }
         
         let mut track = Track::new(name.unwrap_or_default());
-        track.guid = guid;
+        track.guid = guid.map(TrackGuid);
         Some(track)
     }
 }

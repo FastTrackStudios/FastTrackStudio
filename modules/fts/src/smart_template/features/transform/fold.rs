@@ -6,7 +6,7 @@
 
 use crate::smart_template::core::models::template::Template;
 use crate::smart_template::utils::track_helpers::TrackExt;
-use crate::smart_template::core::models::types::TrackName;
+use daw::tracks::TrackName;
 use daw::tracks::Track;
 use std::collections::{HashMap, HashSet};
 
@@ -239,8 +239,8 @@ pub trait TemplateFolder {
     }
     
     /// Transform template name
-    fn transform_template_name(&mut self, name: &str, _context: &FoldContext) -> String {
-        name.to_string() // Default: no change
+    fn transform_template_name(&mut self, name: &TrackName, _context: &FoldContext) -> TrackName {
+        name.clone() // Default: no change
     }
 }
 
@@ -417,14 +417,14 @@ impl TemplateFolder for ModeFilterFolder {
         }
     }
     
-    fn transform_template_name(&mut self, name: &str, _context: &FoldContext) -> String {
-        format!("{} ({})", name, self.mode.as_str())
+    fn transform_template_name(&mut self, name: &TrackName, _context: &FoldContext) -> TrackName {
+        TrackName::from(format!("{} ({})", name.0, self.mode.as_str()))
     }
 }
 
 /// Folder that renames tracks
 pub struct TrackRenamerFolder {
-    rename_map: HashMap<String, String>,
+    rename_map: HashMap<TrackName, TrackName>,
 }
 
 impl TrackRenamerFolder {
@@ -434,7 +434,7 @@ impl TrackRenamerFolder {
         }
     }
     
-    pub fn add_rename(&mut self, from: impl Into<String>, to: impl Into<String>) {
+    pub fn add_rename(&mut self, from: impl Into<TrackName>, to: impl Into<TrackName>) {
         self.rename_map.insert(from.into(), to.into());
     }
 }
@@ -503,8 +503,8 @@ impl TemplateFolder for TrackPropertyModifier {
 ///
 /// This allows you to apply multiple transformations in sequence.
 pub struct ComposedFolder<F1, F2> {
-    first: F1,
-    second: F2,
+    pub first: F1,
+    pub second: F2,
 }
 
 impl<F1: TemplateFolder, F2: TemplateFolder> TemplateFolder for ComposedFolder<F1, F2> {
@@ -531,8 +531,8 @@ mod tests {
     #[test]
     fn test_auto_increment_group_folder() {
         // Create a template with "Snare" and "Snare 2"
-        let mut template = Template {
-            name: "Test".to_string(),
+        let template = Template {
+            name: TrackName::from("Test"),
             tracks: vec![
                 create_track("Snare", Some("BUS"), None, &[]),
                 create_track("Snare 2", None, Some("Snare"), &[]),
@@ -544,7 +544,7 @@ mod tests {
         let result = template.fold(folder);
         
         // "Snare 2" should now be a separate group (no parent or parent is itself)
-        let snare_2 = result.tracks.iter().find(|t| t.name == "Snare 2").unwrap();
+        let snare_2 = result.tracks.iter().find(|t| t.name.0 == "Snare 2").unwrap();
         // The parent should be cleared or set to itself
         assert!(snare_2.parent_name().is_none() || snare_2.parent_name() == Some("Snare 2"));
     }
@@ -552,7 +552,7 @@ mod tests {
     #[test]
     fn test_mode_filter_folder() {
         let template = Template {
-            name: "Test".to_string(),
+            name: TrackName::from("Test"),
             tracks: vec![
                 create_track("Track 1", None, None, &[GroupMode::Full]),
                 create_track("Track 2", None, None, &[GroupMode::Recording]),
@@ -563,13 +563,13 @@ mod tests {
         let result = template.fold(folder);
         
         assert_eq!(result.tracks.len(), 1);
-        assert_eq!(result.tracks[0].name, "Track 2");
+        assert_eq!(result.tracks[0].name.0, "Track 2");
     }
     
     #[test]
     fn test_composed_folders() {
         let template = Template {
-            name: "Test".to_string(),
+            name: TrackName::from("Test"),
             tracks: vec![
                 create_track("Old Name", None, None, &[]),
             ],
@@ -589,7 +589,7 @@ mod tests {
         
         let result = composed.fold_template(template);
         
-        assert_eq!(result.tracks[0].name, "New Name");
+        assert_eq!(result.tracks[0].name.0, "New Name");
         assert_eq!(result.tracks[0].volume, 0.8);
     }
 }

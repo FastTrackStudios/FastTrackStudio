@@ -3,7 +3,6 @@
 use crate::smart_template::features::naming::item_properties::ItemProperties;
 use crate::smart_template::features::naming::item_properties_parser::ItemPropertiesParser;
 use crate::smart_template::core::models::group_config::{GroupConfig, InsertMode, PatternCategory};
-use crate::smart_template::core::traits::Parser;
 use std::collections::HashMap;
 use super::Kick;
 

@@ -5,7 +5,7 @@
 //! 2. Match them to existing tracks
 //! 3. Handle playlists (fixed item lanes in REAPER) for playlist variations
 
-use crate::smart_template::features::naming::parser::Parser;
+use crate::smart_template::core::traits::Parser;
 use crate::smart_template::core::models::template::Template;
 use crate::smart_template::features::matching::matcher::{TrackMatcher, TrackMatch};
 use crate::smart_template::features::naming::track_name::TrackNameLike;
@@ -78,7 +78,7 @@ impl TrackMatchingService {
         let mut groups = HashMap::new();
         
         for track in tracks {
-            let normalized = TrackMatcher::normalize_track_name(&track.name);
+            let normalized = TrackMatcher::normalize_track_name(&track.name.0);
             groups
                 .entry(normalized)
                 .or_insert_with(Vec::new)
@@ -113,7 +113,7 @@ impl TrackMatchingService {
         let mut groups = HashMap::new();
         
         for (idx, track) in tracks.iter().enumerate() {
-            let normalized = TrackMatcher::normalize_track_name(&track.name);
+            let normalized = TrackMatcher::normalize_track_name(&track.name.0);
             groups
                 .entry(normalized)
                 .or_insert_with(Vec::new)

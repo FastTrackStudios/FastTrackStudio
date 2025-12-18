@@ -1,6 +1,6 @@
 //! Room template implementation
 
-use crate::smart_template::features::matching::matcher::{MatchResult, MatchType};
+use crate::smart_template::features::matching::matcher::MatchResult;
 use crate::smart_template::core::models::template::Template;
 use crate::smart_template::utils::track_helpers::create_track;
 use crate::smart_template::features::naming::item_properties::ItemProperties;

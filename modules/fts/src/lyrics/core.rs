@@ -407,7 +407,7 @@ impl Word {
     /// assert_eq!(word.syllables.len(), 2);
     /// ```
     pub fn from_text(text: &str) -> Self {
-        use crate::syllables::syllables_in_word;
+        use crate::lyrics::syllables::syllables_in_word;
         
         // Get estimated syllable count
         let expected_count = syllables_in_word(text);
@@ -854,7 +854,7 @@ mod tests {
     #[test]
     fn test_syllable_text_content() {
         // Test that syllables actually contain text segments
-        use crate::syllables::syllables_in_word;
+        use crate::lyrics::syllables::syllables_in_word;
         
         let test_cases: Vec<(&str, Vec<&str>)> = vec![
             ("hello", vec!["hel", "lo"]),
@@ -935,7 +935,7 @@ mod tests {
     #[test]
     fn test_split_line_into_words_syllable_text() {
         // Test that split_line_into_words returns words with actual syllable text
-        use crate::syllables::syllables_in_word;
+        use crate::lyrics::syllables::syllables_in_word;
         
         let line = "Hello beautiful supercalifragilistic";
         let words = split_line_into_words(line);

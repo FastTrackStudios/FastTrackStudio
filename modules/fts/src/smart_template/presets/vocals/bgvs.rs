@@ -1,13 +1,10 @@
-use crate::smart_template::core::models::group_config::GroupConfig;
+use crate::smart_template::core::models::group_config::{GroupConfig, InsertMode};
 use crate::smart_template::core::models::template::Template;
 use crate::smart_template::core::traits::{Group, TemplateSource, Parser, Matcher};
 use crate::smart_template::features::naming::item_properties::ItemProperties;
+use crate::smart_template::features::naming::item_properties_parser::ItemPropertiesParser;
 use crate::smart_template::features::matching::matcher::MatchResult;
 use daw::tracks::{TrackName, Track};
-
-pub mod naming;
-
-pub use naming::*;
 
 /// BGVs instrument consolidated struct
 pub struct BGVs {
@@ -18,7 +15,7 @@ pub struct BGVs {
 impl BGVs {
     /// Create a new BGVs instrument with default config and template
     pub fn new() -> Self {
-        let config = naming::default_bgvs_config();
+        let config = default_bgvs_config();
         let template = Template {
             name: TrackName::from("BGVs"),
             tracks: vec![
@@ -60,10 +57,10 @@ impl TemplateSource for BGVs {
 
 impl Parser for BGVs {
     type Output = ItemProperties;
-    type Error = naming::BGVsParseError;
+    type Error = BGVsParseError;
 
     fn parse(&self, name: &str) -> Result<Self::Output, Self::Error> {
-        naming::parse_bgvs(self, name)
+        parse_bgvs(self, name)
     }
 }
 
@@ -89,6 +86,55 @@ impl Matcher for BGVs {
         self.template.tracks.push(crate::smart_template::utils::track_helpers::create_track(&new_track_name.0, None, Some("BGVs"), &[]));
         Ok((new_track_name, false))
     }
+}
+
+/// Get the default BGVs group configuration
+pub fn default_bgvs_config() -> GroupConfig {
+    GroupConfig {
+        name: "BGVs".to_string(),
+        prefix: "BGV".to_string(),
+        patterns: vec!["bgv".to_string(), "bkg".to_string(), "back".to_string(), "backing".to_string()],
+        negative_patterns: vec![],
+        parent_track: None,
+        destination_track: None,
+        insert_mode: Some(InsertMode::Increment),
+        increment_start: Some(1),
+        only_number_when_multiple: Some(true),
+        create_if_missing: Some(true),
+        ..Default::default()
+    }
+}
+
+/// Parse a track name into BGVs properties
+pub fn parse_bgvs(bgvs: &BGVs, name: &str) -> Result<ItemProperties, BGVsParseError> {
+    let parser = ItemPropertiesParser::new();
+    let props = parser.parse(name);
+    
+    let is_bgvs = props.group_prefix.as_deref() == Some("BGVs")
+        || props.sub_type.as_ref()
+            .map(|st| st.iter().any(|s| s.eq_ignore_ascii_case("BGV") || s.eq_ignore_ascii_case("BGVs")))
+            .unwrap_or(false)
+        || props.original_name.as_ref()
+            .map(|n| {
+                let name_lower = n.to_lowercase();
+                bgvs.config.patterns.iter()
+                    .any(|p| name_lower.contains(&p.to_lowercase()))
+            })
+            .unwrap_or(false);
+    
+    if !is_bgvs {
+        return Err(BGVsParseError::NotBGVsTrack);
+    }
+    
+    Ok(props)
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum BGVsParseError {
+    #[error("Track name does not match BGVs patterns")]
+    NotBGVsTrack,
+    #[error("Parse error: {0}")]
+    Other(String),
 }
 
 #[derive(Debug, thiserror::Error)]

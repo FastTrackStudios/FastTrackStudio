@@ -19,8 +19,8 @@ pub struct Template {
 
 impl Template {
     /// Create a new TemplateBuilder for this template
-    pub fn builder(name: impl Into<String>) -> super::builder::TemplateBuilder {
-        super::builder::TemplateBuilder::new(name)
+    pub fn builder(name: impl Into<String>) -> crate::smart_template::core::models::builder::TemplateBuilder {
+        crate::smart_template::core::models::builder::TemplateBuilder::new(name)
     }
 
     /// Filter tracks by group mode

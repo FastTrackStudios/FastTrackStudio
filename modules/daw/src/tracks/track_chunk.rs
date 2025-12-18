@@ -5,7 +5,7 @@
 //!
 //! This parser converts REAPER state chunk format to daw::tracks::Track structs.
 
-use crate::tracks::Track;
+use crate::tracks::{Track, TrackGuid};
 use crate::tracks::api::folder::{TcpFolderState, McpFolderState, FolderDepthChange};
 use crate::tracks::api::solo::SoloMode;
 use crate::tracks::api::automation::AutomationMode;
@@ -209,7 +209,7 @@ pub fn parse_track_chunk(chunk: &str, default_index: usize) -> Result<ParsedTrac
                         .trim_matches('}')
                         .to_string();
                     if !guid.is_empty() {
-                        parsed.guid = Some(guid);
+                        parsed.guid = Some(TrackGuid(guid));
                     }
                 }
             }
@@ -248,7 +248,7 @@ pub struct ParsedTrackChunk {
     peak_color: Option<i32>,
     beat: Option<TrackTimebase>,
     invert_phase: bool,
-    pub guid: Option<String>,
+    pub guid: Option<TrackGuid>,
 }
 
 impl ParsedTrackChunk {

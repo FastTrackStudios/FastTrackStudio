@@ -97,3 +97,13 @@ pub enum GuitarElectricMatchError {
     #[error("Match error: {0}")]
     Other(String),
 }
+
+/// Returns the default guitar electric track list as a Vec<Track>
+pub fn default_tracklist() -> Vec<Track> {
+    GuitarElectric::new().default_tracklist()
+}
+
+/// Returns the default guitar electric track list as a Template
+pub fn default_tracks() -> Vec<Template> {
+    vec![GuitarElectric::new().template()]
+}

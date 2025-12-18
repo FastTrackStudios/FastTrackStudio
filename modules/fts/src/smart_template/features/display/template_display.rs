@@ -53,7 +53,7 @@ impl Template {
         // Track type (only if not already in the name)
         if let Some(track_type) = track.track_type() {
             let type_suffix = format!(" ({})", track_type);
-            if !track.name.ends_with(&type_suffix) {
+            if !track.name.0.ends_with(&type_suffix) {
                 write!(f, " ({})", track_type)?;
             }
         }
@@ -79,7 +79,7 @@ impl Template {
             .iter()
             .filter(|t| {
                 if let Some(parent_name) = t.parent_name() {
-                    if parent_name == track.name {
+                    if parent_name == track.name.0 {
                         // Additional check: if parent has a type, prefer children that match the parent's type context
                         // For now, just match by name - the visited set will prevent infinite loops
                         return true;
@@ -198,12 +198,12 @@ impl Template {
         }
         let connector = if is_last { "└── " } else { "├── " };
         output.push_str(&format!("{}{}", prefix, connector));
-        output.push_str(&track.name);
+        output.push_str(&track.name.0);
         
         // Track type (only if not already in the name)
         if let Some(track_type) = track.track_type() {
             let type_suffix = format!(" ({})", track_type);
-            if !track.name.ends_with(&type_suffix) {
+            if !track.name.0.ends_with(&type_suffix) {
                 output.push_str(&format!(" ({})", track_type));
             }
         }
@@ -224,7 +224,7 @@ impl Template {
         
         let children: Vec<&Track> = self.tracks
             .iter()
-            .filter(|t| t.parent_name().map(|p| p == track.name).unwrap_or(false))
+            .filter(|t| t.parent_name().map(|p| p == track.name.0).unwrap_or(false))
             .collect();
         
         for (i, child) in children.iter().enumerate() {
@@ -256,7 +256,7 @@ impl Template {
             visited.insert(idx);
         }
         let connector = if is_last { "└── " } else { "├── " };
-        output.push_str(&format!("{}{}{}\n", prefix, connector, track.name));
+        output.push_str(&format!("{}{}{}\n", prefix, connector, track.name.0));
         
         let child_prefix = if is_last {
             format!("{}    ", prefix)
@@ -266,7 +266,7 @@ impl Template {
         
         let children: Vec<&Track> = self.tracks
             .iter()
-            .filter(|t| t.parent_name().map(|p| p == track.name).unwrap_or(false))
+            .filter(|t| t.parent_name().map(|p| p == track.name.0).unwrap_or(false))
             .collect();
         
         for (i, child) in children.iter().enumerate() {

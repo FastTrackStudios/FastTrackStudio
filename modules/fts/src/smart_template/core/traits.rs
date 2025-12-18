@@ -50,7 +50,7 @@ pub trait Group: Send + Sync {
     /// Get the configuration for this group
     fn config(&self) -> &GroupConfig;
     
-    /// Get the default track list for this group
+    /// Get the default track list for this group (typically derived from template)
     fn default_tracklist(&self) -> Vec<Track>;
 }
 
@@ -58,7 +58,7 @@ pub trait Group: Send + Sync {
 pub type TrackId = String;
 
 /// Trait for building tracks from templates in a DAW
-pub trait TemplateBuilder: Send + Sync {
+pub trait DawTemplateBuilder: Send + Sync {
     /// Error type for building operations
     type Error: std::error::Error + Send + Sync;
     

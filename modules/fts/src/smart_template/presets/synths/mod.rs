@@ -97,3 +97,13 @@ pub enum SynthsMatchError {
     #[error("Match error: {0}")]
     Other(String),
 }
+
+/// Returns the default synths track list as a Vec<Track>
+pub fn default_tracklist() -> Vec<Track> {
+    Synths::new().default_tracklist()
+}
+
+/// Returns the default synths track list as a Template
+pub fn default_tracks() -> Vec<Template> {
+    vec![Synths::new().template()]
+}

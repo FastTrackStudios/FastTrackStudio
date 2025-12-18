@@ -6,11 +6,11 @@
 use crate::smart_template::presets::drums::{
     Kick, Snare, Tom, Cymbals, Room,
 };
-use crate::smart_template::features::naming::parser::Parser;
+use crate::smart_template::core::traits::Parser;
 use crate::smart_template::core::models::template::Template;
 use crate::smart_template::utils::track_helpers::{create_track, TrackExt};
 use crate::smart_template::features::transform::fold::*;
-use daw::tracks::Track;
+use daw::tracks::{Track, TrackName};
 
 /// Parse track names into a template structure
 ///
@@ -68,7 +68,7 @@ pub fn parse_fts_structure_with_folders(track_names: &[&str], folders: DefaultFo
     // Group tracks by their group name to build hierarchy
     let mut all_tracks = Vec::new();
     let mut current_group: Option<String> = None;
-    let mut current_group_tracks = Vec::new();
+    let mut current_group_tracks: Vec<Track> = Vec::new();
     
     for track in parsed_tracks {
         let track_group = track.get_group().unwrap_or_default();
@@ -116,7 +116,7 @@ pub fn parse_fts_structure_with_folders(track_names: &[&str], folders: DefaultFo
         let bus_name = format!("{}", group_name.chars().next().unwrap().to_uppercase().collect::<String>() + &group_name[1..]);
         let sum_name = format!("{} (SUM)", bus_name);
         
-        let group_tracks = std::mem::take(&mut current_group_tracks);
+        let group_tracks: Vec<Track> = std::mem::take(&mut current_group_tracks);
         
         let mut bus_track = Track::new(bus_name);
         bus_track.is_folder = true;
@@ -290,7 +290,8 @@ mod tests {
         let track_names = &["Kick In", "Kick Out", "Snare Top", "Snare Bottom"];
         let template = parse_fts_structure(track_names);
         
-        assert_eq!(template.tracks.len(), 4);
+        // Structure is BUS -> SUM -> tracks
+        assert_eq!(template.tracks.len(), 4 + 4); // 2 sets of BUS/SUM + 4 tracks
         assert!(template.tracks.iter().any(|t| t.name.0 == "Kick In"));
         assert!(template.tracks.iter().any(|t| t.name.0 == "Snare Top"));
     }

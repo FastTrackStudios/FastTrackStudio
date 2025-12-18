@@ -12,8 +12,6 @@ pub mod chords;
 pub mod smart_template;
 
 // Re-export commonly used types
-pub use setlist::*;
-pub use lyrics::*;
-pub use chords::*;
-pub use smart_template::*;
-
+pub use setlist::{Setlist, SetlistApi, Song};
+pub use lyrics::Lyrics;
+pub use smart_template::{Template, Group, Parser, Matcher};
