@@ -7,15 +7,36 @@ use daw::tracks::TrackName;
 use super::ElectricKeys;
 
 impl TemplateSource for ElectricKeys {
-    fn template(&self) -> Template {
-        Template::builder("Electric Keys")
+    fn full_template(&self) -> Template {
+        Template::builder("Electric Keys Full")
             .bus("Electric Keys")
                 .track("Rhodes")
                 .track("Wurli")
-                .track("Digital")
-                .track("Keys")
+                .track("Digital Keys")
             .end()
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Electric Keys Default")
+            .bus("Electric Keys")
+                .track("Rhodes")
+                .track("Wurli")
+                .track("Digital Keys")
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Electric Keys Minimal")
+            .track("Rhodes")
+            .track("Wurli")
+            .track("Digital Keys")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

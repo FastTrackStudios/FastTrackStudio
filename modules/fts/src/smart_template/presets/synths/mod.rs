@@ -3,6 +3,7 @@ pub mod chord;
 pub mod pad;
 pub mod arp;
 pub mod fx;
+pub mod keys;
 pub mod naming;
 pub mod template;
 
@@ -11,6 +12,7 @@ pub use chord::Chord;
 pub use pad::Pad;
 pub use arp::Arp;
 pub use fx::FX;
+pub use keys::Keys;
 
 /// Synths instrument consolidated struct
 pub struct Synths {}

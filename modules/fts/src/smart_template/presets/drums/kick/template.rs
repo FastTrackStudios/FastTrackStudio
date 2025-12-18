@@ -14,10 +14,40 @@ use std::sync::{Mutex, OnceLock};
 static TEMPLATE: OnceLock<Mutex<Template>> = OnceLock::new();
 
 impl TemplateSource for Kick {
+    fn full_template(&self) -> Template {
+        Template::builder("Kick Full")
+            .bus("Kick")
+                .sum("Kick (SUM)")
+                    .track("Kick In")
+                    .track("Kick Out")
+                    .track("Kick Trig")
+                .end()
+                .track("Kick Sub")
+                .track("Kick Ambient")
+            .end()
+            .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Kick Default")
+            .bus("Kick")
+                .track("Kick In")
+                .track("Kick Out")
+                .track("Kick Trig")
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Kick Minimal")
+            .track("Kick In")
+            .track("Kick Out")
+            .track("Kick Trig")
+            .build()
+    }
+
     fn template(&self) -> Template {
-        TEMPLATE.get_or_init(|| {
-            Mutex::new(generate_kick_structure())
-        }).lock().unwrap().clone()
+        self.full_template()
     }
 }
 

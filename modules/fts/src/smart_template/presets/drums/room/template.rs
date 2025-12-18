@@ -8,8 +8,36 @@ use daw::tracks::TrackName;
 use super::Room;
 
 impl TemplateSource for Room {
+    fn full_template(&self) -> Template {
+        Template::builder("Rooms Full")
+            .bus("Rooms")
+                .track("Rooms Close")
+                .track("Rooms Far")
+                .track("Room Mono")
+            .end()
+            .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Rooms Default")
+            .bus("Rooms")
+                .track("Rooms Close")
+                .track("Rooms Far")
+                .track("Room Mono")
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Rooms Minimal")
+            .track("Rooms Close")
+            .track("Rooms Far")
+            .track("Room Mono")
+            .build()
+    }
+
     fn template(&self) -> Template {
-        generate_room_structure()
+        self.full_template()
     }
 }
 

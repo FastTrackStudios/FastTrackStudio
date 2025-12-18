@@ -7,8 +7,8 @@ use daw::tracks::TrackName;
 use super::Organ;
 
 impl TemplateSource for Organ {
-    fn template(&self) -> Template {
-        Template::builder("Organ")
+    fn full_template(&self) -> Template {
+        Template::builder("Organ Full")
             .bus("Organ")
                 .track("B3")
                 .track("Pipe")
@@ -16,6 +16,30 @@ impl TemplateSource for Organ {
                 .track("Organ")
             .end()
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Organ Default")
+            .bus("Organ")
+                .track("B3")
+                .track("Pipe")
+                .track("Transistor")
+                .track("Organ")
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Organ Minimal")
+            .track("B3")
+            .track("Pipe")
+            .track("Transistor")
+            .track("Organ")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

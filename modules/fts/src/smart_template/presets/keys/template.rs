@@ -12,16 +12,42 @@ use super::harpsichord::Harpsichord;
 use super::clavichord::Clavichord;
 
 impl TemplateSource for Keys {
-    fn template(&self) -> Template {
-        Template::builder("Keys")
+    fn full_template(&self) -> Template {
+        Template::builder("Keys Full")
             .bus("Keys")
-                .add_template(Piano::new().template())
-                .add_template(ElectricKeys::new().template())
-                .add_template(Organ::new().template())
-                .add_template(Harpsichord::new().template())
-                .add_template(Clavichord::new().template())
+                .add_template(Piano::new().full_template())
+                .add_template(ElectricKeys::new().full_template())
+                .add_template(Organ::new().full_template())
+                .add_template(Harpsichord::new().full_template())
+                .add_template(Clavichord::new().full_template())
             .end()
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Keys Default")
+            .bus("Keys")
+                .add_template(Piano::new().default_template())
+                .add_template(ElectricKeys::new().default_template())
+                .add_template(Organ::new().default_template())
+                .add_template(Harpsichord::new().default_template())
+                .add_template(Clavichord::new().default_template())
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Keys Minimal")
+            .add_template(Piano::new().minimal_template())
+            .add_template(ElectricKeys::new().minimal_template())
+            .add_template(Organ::new().minimal_template())
+            .add_template(Harpsichord::new().minimal_template())
+            .add_template(Clavichord::new().minimal_template())
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

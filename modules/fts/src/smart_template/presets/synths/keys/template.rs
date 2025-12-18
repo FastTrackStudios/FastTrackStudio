@@ -4,28 +4,24 @@ use crate::smart_template::features::naming::item_properties::ItemProperties;
 use crate::smart_template::features::matching::matcher::MatchResult;
 use crate::smart_template::core::errors::TemplateMatchError;
 use daw::tracks::TrackName;
-use super::Vocals;
+use super::Keys;
 
-impl TemplateSource for Vocals {
+impl TemplateSource for Keys {
     fn full_template(&self) -> Template {
-        Template::builder("Vocals Full")
-            .bus("Vocals")
-                .track("Lead Vocal")
-            .end()
+        Template::builder("Keys Full")
+            .track("Keys")
             .build()
     }
 
     fn default_template(&self) -> Template {
-        Template::builder("Vocals Default")
-            .bus("Vocals")
-                .track("Lead Vocal")
-            .end()
+        Template::builder("Keys Default")
+            .track("Keys")
             .build()
     }
 
     fn minimal_template(&self) -> Template {
-        Template::builder("Vocals Minimal")
-            .track("Lead Vocal")
+        Template::builder("Keys Minimal")
+            .track("Keys")
             .build()
     }
 
@@ -34,7 +30,7 @@ impl TemplateSource for Vocals {
     }
 }
 
-impl Matcher for Vocals {
+impl Matcher for Keys {
     type TrackName = ItemProperties;
     type Error = TemplateMatchError;
 
@@ -42,7 +38,7 @@ impl Matcher for Vocals {
         crate::smart_template::features::matching::matcher::helpers::instrument_find_best_match(
             &self.template(),
             track_name,
-            "Vocals",
+            "Keys",
         )
     }
 
@@ -50,8 +46,7 @@ impl Matcher for Vocals {
         if let Some(result) = self.find_best_match(track_name) {
             return Ok((result.track_name, result.use_takes));
         }
-        
-        let name = base_name.unwrap_or("Vocals");
+        let name = base_name.unwrap_or("Keys");
         Ok((TrackName::from(name), false))
     }
 }

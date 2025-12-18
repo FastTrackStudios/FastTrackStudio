@@ -10,18 +10,48 @@ use super::chord::Chord;
 use super::pad::Pad;
 use super::arp::Arp;
 use super::fx::FX;
+use super::keys::Keys;
 
 impl TemplateSource for Synths {
-    fn template(&self) -> Template {
-        Template::builder("Synths")
+    fn full_template(&self) -> Template {
+        Template::builder("Synths Full")
             .bus("Synths")
-                .add_template(Lead::new().template())
-                .add_template(Chord::new().template())
-                .add_template(Pad::new().template())
-                .add_template(Arp::new().template())
-                .add_template(FX::new().template())
+                .add_template(Lead::new().full_template())
+                .add_template(Chord::new().full_template())
+                .add_template(Pad::new().full_template())
+                .add_template(Arp::new().full_template())
+                .add_template(Keys::new().full_template())
+                .add_template(FX::new().full_template())
             .end()
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Synths Default")
+            .bus("Synths")
+                .add_template(Lead::new().default_template())
+                .add_template(Chord::new().default_template())
+                .add_template(Pad::new().default_template())
+                .add_template(Arp::new().default_template())
+                .add_template(Keys::new().default_template())
+                .add_template(FX::new().default_template())
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Synths Minimal")
+            .add_template(Lead::new().minimal_template())
+            .add_template(Chord::new().minimal_template())
+            .add_template(Pad::new().minimal_template())
+            .add_template(Arp::new().minimal_template())
+            .add_template(Keys::new().minimal_template())
+            .add_template(FX::new().minimal_template())
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

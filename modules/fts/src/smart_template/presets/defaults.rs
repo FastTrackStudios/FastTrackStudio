@@ -33,30 +33,50 @@ pub fn default_vocals_category_tracklist() -> Vec<Track> {
 }
 
 // ============================================================================
-// Top-Level Default Tracklist
+// Top-Level Default Tracklists
 // ============================================================================
+
+/// Build the full track list for all groups (maximum detail)
+pub fn full_tracklist() -> Vec<Track> {
+    let mut all_tracks = Vec::new();
+    
+    all_tracks.extend(drums::DrumKit::get_full_template().tracks);
+    all_tracks.extend(bass::Bass::get_full_template().tracks);
+    all_tracks.extend(guitar_electric::GuitarElectric::get_full_template().tracks);
+    all_tracks.extend(guitar_acoustic::GuitarAcoustic::get_full_template().tracks);
+    all_tracks.extend(keys::Keys::get_full_template().tracks);
+    all_tracks.extend(synths::Synths::get_full_template().tracks);
+    all_tracks.extend(vocals::Vocals::get_full_template().tracks);
+    
+    all_tracks
+}
 
 /// Build the default track list for all groups
 pub fn default_tracklist() -> Vec<Track> {
     let mut all_tracks = Vec::new();
     
-    // Drums category
-    all_tracks.extend(default_drums_tracklist());
+    all_tracks.extend(drums::DrumKit::get_default_template().tracks);
+    all_tracks.extend(bass::Bass::get_default_template().tracks);
+    all_tracks.extend(guitar_electric::GuitarElectric::get_default_template().tracks);
+    all_tracks.extend(guitar_acoustic::GuitarAcoustic::get_default_template().tracks);
+    all_tracks.extend(keys::Keys::get_default_template().tracks);
+    all_tracks.extend(synths::Synths::get_default_template().tracks);
+    all_tracks.extend(vocals::Vocals::get_default_template().tracks);
     
-    // Bass
-    all_tracks.extend(bass::Bass::get_default_tracklist());
+    all_tracks
+}
+
+/// Build the minimal track list for all groups (only essential tracks)
+pub fn minimal_tracklist() -> Vec<Track> {
+    let mut all_tracks = Vec::new();
     
-    // Guitars category
-    all_tracks.extend(default_guitars_tracklist());
-    
-    // Keys
-    all_tracks.extend(keys::Keys::get_default_tracklist());
-    
-    // Synths
-    all_tracks.extend(synths::Synths::get_default_tracklist());
-    
-    // Vocals category
-    all_tracks.extend(default_vocals_category_tracklist());
+    all_tracks.extend(drums::DrumKit::get_minimal_template().tracks);
+    all_tracks.extend(bass::Bass::get_minimal_template().tracks);
+    all_tracks.extend(guitar_electric::GuitarElectric::get_minimal_template().tracks);
+    all_tracks.extend(guitar_acoustic::GuitarAcoustic::get_minimal_template().tracks);
+    all_tracks.extend(keys::Keys::get_minimal_template().tracks);
+    all_tracks.extend(synths::Synths::get_minimal_template().tracks);
+    all_tracks.extend(vocals::Vocals::get_minimal_template().tracks);
     
     all_tracks
 }
@@ -77,15 +97,22 @@ mod tests {
     use daw::tracks::PrintTrackTree;
     
     #[test]
-    fn test_default_tracklist() {
-        let tracks = default_tracklist();
-        let tree = tracks.print_tree();
-        println!("{}", tree);
+    fn test_tracklist_levels() {
+        // Full
+        let full = full_tracklist();
+        println!("FULL HIERARCHY:\n{}", full.print_tree());
+        assert!(full.iter().any(|t| t.name.0 == "Kick (SUM)"));
         
-        // Verify the tree contains expected track names
-        assert!(tree.contains("Kick"));
-        assert!(tree.contains("Snare"));
-        assert!(tree.contains("Bass"));
-        assert!(tree.contains("Lead Vocal"));
+        // Default
+        let default = default_tracklist();
+        println!("DEFAULT HIERARCHY:\n{}", default.print_tree());
+        // Default should have Kick folder but maybe not Sum folder depending on implementation
+        assert!(default.iter().any(|t| t.name.0 == "Kick"));
+        
+        // Minimal
+        let minimal = minimal_tracklist();
+        println!("MINIMAL HIERARCHY:\n{}", minimal.print_tree());
+        // Minimal should have Kick In directly
+        assert!(minimal.iter().any(|t| t.name.0 == "Kick In"));
     }
 }

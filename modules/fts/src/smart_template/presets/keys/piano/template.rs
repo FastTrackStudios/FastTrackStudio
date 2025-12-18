@@ -7,13 +7,33 @@ use daw::tracks::TrackName;
 use super::Piano;
 
 impl TemplateSource for Piano {
-    fn template(&self) -> Template {
-        Template::builder("Piano")
+    fn full_template(&self) -> Template {
+        Template::builder("Piano Full")
             .bus("Piano")
                 .track("Grand")
                 .track("Upright")
             .end()
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Piano Default")
+            .bus("Piano")
+                .track("Grand")
+                .track("Upright")
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Piano Minimal")
+            .track("Grand")
+            .track("Upright")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

@@ -7,10 +7,26 @@ use daw::tracks::TrackName;
 use super::Harpsichord;
 
 impl TemplateSource for Harpsichord {
-    fn template(&self) -> Template {
-        Template::builder("Harpsichord")
+    fn full_template(&self) -> Template {
+        Template::builder("Harpsichord Full")
             .track("Harpsichord")
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Harpsichord Default")
+            .track("Harpsichord")
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Harpsichord Minimal")
+            .track("Harpsichord")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

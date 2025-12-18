@@ -7,8 +7,8 @@ use daw::tracks::TrackName;
 use super::Bass;
 
 impl TemplateSource for Bass {
-    fn template(&self) -> Template {
-        Template::builder("Bass")
+    fn full_template(&self) -> Template {
+        Template::builder("Bass Full")
             .bus("Bass")
                 .bus("Guitar")
                     .track("DI")
@@ -19,6 +19,26 @@ impl TemplateSource for Bass {
                 .end()
             .end()
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Bass Default")
+            .bus("Bass")
+                .track("DI")
+                .track("Amp")
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Bass Minimal")
+            .track("DI")
+            .track("Amp")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

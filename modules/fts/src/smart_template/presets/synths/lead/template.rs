@@ -7,10 +7,26 @@ use daw::tracks::TrackName;
 use super::Lead;
 
 impl TemplateSource for Lead {
-    fn template(&self) -> Template {
-        Template::builder("Lead")
+    fn full_template(&self) -> Template {
+        Template::builder("Lead Full")
             .track("Lead")
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Lead Default")
+            .track("Lead")
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Lead Minimal")
+            .track("Lead")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

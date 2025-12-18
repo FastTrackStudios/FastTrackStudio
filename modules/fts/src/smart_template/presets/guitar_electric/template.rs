@@ -8,8 +8,8 @@ use daw::tracks::TrackName;
 use super::GuitarElectric;
 
 impl TemplateSource for GuitarElectric {
-    fn template(&self) -> Template {
-        let mut builder = Template::builder("Guitar Electric")
+    fn full_template(&self) -> Template {
+        let mut builder = Template::builder("Guitar Electric Full")
             .with_mode(self.mode)
             .bus("GTR Electric");
 
@@ -41,6 +41,25 @@ impl TemplateSource for GuitarElectric {
         }
 
         builder.build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Guitar Electric Default")
+            .with_mode(self.mode)
+            .bus("GTR Electric")
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Guitar Electric Minimal")
+            .with_mode(self.mode)
+            .track("NO-FX")
+            .track("DI")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

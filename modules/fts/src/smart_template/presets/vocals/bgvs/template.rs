@@ -7,13 +7,33 @@ use daw::tracks::TrackName;
 use super::BGVs;
 
 impl TemplateSource for BGVs {
-    fn template(&self) -> Template {
-        Template::builder("BGVs")
+    fn full_template(&self) -> Template {
+        Template::builder("BGVs Full")
             .bus("BGVs")
                 .track("BGV 1")
                 .track("BGV 2")
             .end()
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("BGVs Default")
+            .bus("BGVs")
+                .track("BGV 1")
+                .track("BGV 2")
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("BGVs Minimal")
+            .track("BGV 1")
+            .track("BGV 2")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

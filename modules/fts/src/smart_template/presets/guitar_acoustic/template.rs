@@ -8,8 +8,8 @@ use daw::tracks::TrackName;
 use super::GuitarAcoustic;
 
 impl TemplateSource for GuitarAcoustic {
-    fn template(&self) -> Template {
-        let mut builder = Template::builder("Guitar Acoustic")
+    fn full_template(&self) -> Template {
+        let mut builder = Template::builder("Guitar Acoustic Full")
             .with_mode(self.mode)
             .bus("GTR Acoustic");
 
@@ -37,6 +37,25 @@ impl TemplateSource for GuitarAcoustic {
         }
 
         builder.build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Guitar Acoustic Default")
+            .with_mode(self.mode)
+            .bus("GTR Acoustic")
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Guitar Acoustic Minimal")
+            .with_mode(self.mode)
+            .track("Mic")
+            .track("DI")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

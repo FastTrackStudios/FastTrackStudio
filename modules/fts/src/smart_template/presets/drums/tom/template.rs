@@ -13,10 +13,36 @@ use std::sync::{Mutex, OnceLock};
 static TEMPLATE: OnceLock<Mutex<Template>> = OnceLock::new();
 
 impl TemplateSource for Tom {
+    fn full_template(&self) -> Template {
+        Template::builder("Tom Full")
+            .bus("Tom")
+                .track("T1")
+                .track("T2")
+                .track("T3")
+            .end()
+            .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Tom Default")
+            .bus("Tom")
+                .track("T1")
+                .track("T2")
+                .track("T3")
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Tom Minimal")
+            .track("T1")
+            .track("T2")
+            .track("T3")
+            .build()
+    }
+
     fn template(&self) -> Template {
-        TEMPLATE.get_or_init(|| {
-            Mutex::new(generate_tom_structure())
-        }).lock().unwrap().clone()
+        self.full_template()
     }
 }
 

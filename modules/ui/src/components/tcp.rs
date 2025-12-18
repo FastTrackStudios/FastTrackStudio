@@ -22,37 +22,51 @@ pub fn TrackControlPanel(
     /// Callback when track solo is toggled: (project_name, track_index, new_solo_mode)
     on_track_solo: Option<Callback<(String, usize, daw::tracks::api::solo::SoloMode)>>,
 ) -> Element {
-                // Compute visible tracks (filter out children of collapsed folders)
-                let collapsed_state = collapsed_folders();
-                let visible_indices: Vec<usize> = tracks.iter().enumerate()
-                    .filter_map(|(idx, track)| {
-                        // Check all ancestor folders (walk backwards through tracks)
-                        // A track is hidden if ANY of its ancestor folders is collapsed
-                        // We need to check all ancestors, not just the immediate parent,
-                        // because a grandparent could be collapsed even if parent is not
-                        for check_idx in (0..idx).rev() {
-                            let check_track = &tracks[check_idx];
-                            
-                            // Skip tracks that are not ancestors (same or higher depth)
-                            if check_track.track_depth.value() >= track.track_depth.value() {
-                                continue;
-                            }
-                            
-                            // This is a potential ancestor - check if it's a folder
-                            if check_track.is_folder {
-                                // Check if this ancestor folder is collapsed
-                                if collapsed_state.get(check_idx).copied().unwrap_or(false) {
-                                    // Found a collapsed ancestor - hide this track
-                                    return None;
-                                        }
-                                // Continue checking - don't break, as we need to check all ancestors
-                            }
-                        }
-                        
-                        // No collapsed ancestor folders found - track is visible
-                        Some(idx)
-                    })
-                    .collect();
+    // Pre-calculate absolute depths for all tracks
+    let tracks_for_memo = tracks.clone();
+    let absolute_depths = use_memo(move || {
+        let mut depths = Vec::with_capacity(tracks_for_memo.len());
+        let mut running_depth = 0;
+        for track in tracks_for_memo.iter() {
+            depths.push(running_depth as u32);
+            running_depth += track.folder_depth_change.to_reaper_value();
+            if running_depth < 0 { running_depth = 0; }
+        }
+        depths
+    });
+
+    // Compute visible tracks (filter out children of collapsed folders)
+    let collapsed_state = collapsed_folders();
+    let visible_indices: Vec<usize> = tracks.iter().enumerate()
+        .filter_map(|(idx, track)| {
+            let depths = absolute_depths();
+            let current_depth = depths[idx];
+            
+            // Check all ancestor folders (walk backwards through tracks)
+            // A track is hidden if ANY of its ancestor folders is collapsed
+            for check_idx in (0..idx).rev() {
+                let check_depth = depths[check_idx];
+                
+                // Skip tracks that are not ancestors (same or higher depth)
+                if check_depth >= current_depth {
+                    continue;
+                }
+                
+                // This is a potential ancestor - check if it's a folder
+                let check_track = &tracks[check_idx];
+                if check_track.is_folder {
+                    // Check if this ancestor folder is collapsed
+                    if collapsed_state.get(check_idx).copied().unwrap_or(false) {
+                        // Found a collapsed ancestor - hide this track
+                        return None;
+                    }
+                }
+            }
+            
+            // No collapsed ancestor folders found - track is visible
+            Some(idx)
+        })
+        .collect();
                 
     rsx! {
         div {
@@ -69,6 +83,7 @@ pub fn TrackControlPanel(
             // Tracks list - extends to fill remaining space, even with no tracks
             TrackList {
                 tracks: tracks.clone(),
+                absolute_depths: absolute_depths.clone(),
                 visible_indices: visible_indices.clone(),
                 track_heights: track_heights.clone(),
                 collapsed_folders: collapsed_folders.clone(),
@@ -86,6 +101,7 @@ pub fn TrackControlPanel(
 #[component]
 fn TrackList(
     tracks: Vec<Track>,
+    absolute_depths: Memo<Vec<u32>>,
     visible_indices: Vec<usize>,
     track_heights: Memo<Vec<f64>>,
     collapsed_folders: Signal<Vec<bool>>,
@@ -97,10 +113,12 @@ fn TrackList(
 ) -> Element {
     // Precompute which tracks have children (for collapse button visibility)
     // A track has children if any following track has higher depth
-    let tracks_with_children: Vec<bool> = tracks.iter().enumerate().map(|(idx, track)| {
+    let tracks_with_children: Vec<bool> = tracks.iter().enumerate().map(|(idx, _track)| {
+        let depths = absolute_depths();
+        let current_depth = depths[idx];
         // Check if any following track has higher depth
-        tracks.iter().skip(idx + 1).any(|next_track| {
-            next_track.track_depth.value() > track.track_depth.value()
+        depths.iter().skip(idx + 1).any(|&next_depth| {
+            next_depth > current_depth
         })
     }).collect();
     
@@ -111,6 +129,7 @@ fn TrackList(
                 TrackRow {
                     track: tracks[*original_idx].clone(),
                     original_idx: *original_idx,
+                    depth: absolute_depths()[*original_idx],
                     has_children: tracks_with_children[*original_idx],
                     track_heights: track_heights.clone(),
                     collapsed_folders: collapsed_folders.clone(),
@@ -130,6 +149,7 @@ fn TrackList(
 fn TrackRow(
     track: Track,
     original_idx: usize,
+    depth: u32,
     has_children: bool,
     track_heights: Memo<Vec<f64>>,
     collapsed_folders: Signal<Vec<bool>>,
@@ -146,7 +166,7 @@ fn TrackRow(
                                 format!("rgb({}, {}, {})", r, g, b)
                             }).unwrap_or_else(|| "transparent".to_string());
                             
-                            let indent_px = (track.track_depth.value() * 20) as f64; // 20px per depth level for better spacing
+                            let indent_px = (depth * 20) as f64; // 20px per depth level for better spacing
     let collapsed_state = collapsed_folders();
     let is_collapsed = collapsed_state.get(original_idx).copied().unwrap_or(false);
     let track_height = track_heights().get(original_idx).copied().unwrap_or(64.0);
@@ -176,8 +196,8 @@ fn TrackRow(
                                     track_color
                                 ),
             // Depth indicator lines (vertical lines showing hierarchy) - more subtle
-                    if track.track_depth.is_nested() {
-                        for depth_level in 0..track.track_depth.value() {
+                    if depth > 0 {
+                        for depth_level in 0..depth {
                     div {
                         key: "{depth_level}",
                         class: "absolute top-0 bottom-0 w-0.5 bg-border/15",
@@ -211,7 +231,7 @@ fn TrackRow(
                                         }
                                     } else {
                     // Show depth connector for non-folder tracks without children (horizontal line connecting to parent)
-                    if track.track_depth.is_nested() {
+                    if depth > 0 {
                         div {
                             class: "w-6 h-6 flex items-center justify-center flex-shrink-0",
                             div {
@@ -275,10 +295,10 @@ fn TrackRow(
                                     div {
                     class: "flex-1 text-sm text-foreground truncate flex items-center gap-2 min-w-0 pl-1",
                     // Show depth indicator for nested tracks - more visible
-                    if track.track_depth.is_nested() {
+                    if depth > 0 {
                         div {
                             class: "flex-shrink-0 flex items-center gap-1",
-                            for depth_idx in 0..track.track_depth.value() {
+                            for depth_idx in 0..depth {
                                 div {
                                     key: "{depth_idx}",
                                     class: "w-1.5 h-1.5 rounded-full bg-foreground/25",

@@ -7,10 +7,26 @@ use daw::tracks::TrackName;
 use super::Chord;
 
 impl TemplateSource for Chord {
-    fn template(&self) -> Template {
-        Template::builder("Chord")
+    fn full_template(&self) -> Template {
+        Template::builder("Chord Full")
             .track("Chord")
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Chord Default")
+            .track("Chord")
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Chord Minimal")
+            .track("Chord")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

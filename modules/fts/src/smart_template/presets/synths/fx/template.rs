@@ -7,10 +7,26 @@ use daw::tracks::TrackName;
 use super::FX;
 
 impl TemplateSource for FX {
-    fn template(&self) -> Template {
-        Template::builder("FX")
+    fn full_template(&self) -> Template {
+        Template::builder("FX Full")
             .track("FX")
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("FX Default")
+            .track("FX")
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("FX Minimal")
+            .track("FX")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

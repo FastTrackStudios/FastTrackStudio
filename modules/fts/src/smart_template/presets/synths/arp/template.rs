@@ -7,10 +7,26 @@ use daw::tracks::TrackName;
 use super::Arp;
 
 impl TemplateSource for Arp {
-    fn template(&self) -> Template {
-        Template::builder("Arp")
+    fn full_template(&self) -> Template {
+        Template::builder("Arp Full")
             .track("Arp")
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Arp Default")
+            .track("Arp")
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Arp Minimal")
+            .track("Arp")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

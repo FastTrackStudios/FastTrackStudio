@@ -7,10 +7,26 @@ use daw::tracks::TrackName;
 use super::Clavichord;
 
 impl TemplateSource for Clavichord {
-    fn template(&self) -> Template {
-        Template::builder("Clavichord")
+    fn full_template(&self) -> Template {
+        Template::builder("Clavichord Full")
             .track("Clavichord")
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Clavichord Default")
+            .track("Clavichord")
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Clavichord Minimal")
+            .track("Clavichord")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 

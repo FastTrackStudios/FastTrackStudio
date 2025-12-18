@@ -75,7 +75,6 @@ impl ReaperTrackReactiveService {
                         project_id = %project.id(),
                         track_index,
                         track_name = %track.name,
-                        track_depth = track.track_depth.value(),
                         "Read track from REAPER, calling update_track"
                     );
                     // Update using the trait method (this will only emit if changed)
@@ -240,7 +239,6 @@ impl TrackReactiveService for ReaperTrackReactiveService {
             track_index,
             track_name = %track.name,
             track_color = ?track.color,
-            track_depth = track.track_depth.value(),
             "update_track called - track data from REAPER"
         );
         
@@ -292,8 +290,8 @@ impl TrackReactiveService for ReaperTrackReactiveService {
                 if old_track.is_folder != track.is_folder {
                     changes.push(format!("is_folder: {} → {}", old_track.is_folder, track.is_folder));
                 }
-                if old_track.track_depth != track.track_depth {
-                    changes.push(format!("track_depth: {} → {}", old_track.track_depth.value(), track.track_depth.value()));
+                if old_track.folder_depth_change != track.folder_depth_change {
+                    changes.push(format!("folder_depth_change: {:?} → {:?}", old_track.folder_depth_change, track.folder_depth_change));
                 }
                 
                 let any_changed = !changes.is_empty();
@@ -321,7 +319,6 @@ impl TrackReactiveService for ReaperTrackReactiveService {
                 project_id = %project_id,
                 track_index,
                 track_name = %track.name,
-                track_depth = track.track_depth.value(),
                 changes = ?changes,
                 "Emitting track change to reactive stream"
             );

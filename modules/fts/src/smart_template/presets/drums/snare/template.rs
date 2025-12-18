@@ -12,10 +12,38 @@ use std::sync::{Mutex, OnceLock};
 static TEMPLATE: OnceLock<Mutex<Template>> = OnceLock::new();
 
 impl TemplateSource for Snare {
+    fn full_template(&self) -> Template {
+        Template::builder("Snare Full")
+            .bus("Snare")
+                .sum("Snare (SUM)")
+                    .track("Snare Top")
+                    .track("Snare Bottom")
+                    .track("Snare Trig")
+                .end()
+            .end()
+            .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Snare Default")
+            .bus("Snare")
+                .track("Snare Top")
+                .track("Snare Bottom")
+                .track("Snare Trig")
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Snare Minimal")
+            .track("Snare Top")
+            .track("Snare Bottom")
+            .track("Snare Trig")
+            .build()
+    }
+
     fn template(&self) -> Template {
-        TEMPLATE.get_or_init(|| {
-            Mutex::new(generate_snare_structure())
-        }).lock().unwrap().clone()
+        self.full_template()
     }
 }
 

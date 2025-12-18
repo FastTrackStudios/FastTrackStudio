@@ -3,7 +3,7 @@
 use crate::smart_template::core::traits::{Group, TemplateSource, Matcher};
 use crate::smart_template::features::matching::matcher::MatchResult;
 use crate::smart_template::core::models::template::Template;
-use crate::smart_template::utils::track_helpers::{create_track, TrackExt};
+use crate::smart_template::utils::track_helpers::TrackExt;
 use crate::smart_template::core::models::group_config::GroupConfig;
 use crate::smart_template::presets::drums::kick::Kick;
 use crate::smart_template::presets::drums::snare::Snare;
@@ -47,35 +47,42 @@ impl Group for DrumKit {
 }
 
 impl TemplateSource for DrumKit {
+    fn full_template(&self) -> Template {
+        Template::builder("Drum Kit Full")
+            .bus("Drum Kit")
+                .add_template(Kick::new().full_template())
+                .add_template(Snare::new().full_template())
+                .add_template(Tom::new().full_template())
+                .add_template(Cymbals::new().full_template())
+                .add_template(Room::new().full_template())
+            .end()
+            .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Drum Kit Default")
+            .bus("Drum Kit")
+                .add_template(Kick::new().default_template())
+                .add_template(Snare::new().default_template())
+                .add_template(Tom::new().default_template())
+                .add_template(Cymbals::new().default_template())
+                .add_template(Room::new().default_template())
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Drum Kit Minimal")
+            .add_template(Kick::new().minimal_template())
+            .add_template(Snare::new().minimal_template())
+            .add_template(Tom::new().minimal_template())
+            .add_template(Cymbals::new().minimal_template())
+            .add_template(Room::new().minimal_template())
+            .build()
+    }
+
     fn template(&self) -> Template {
-        let mut tracks = Vec::new();
-        
-        // Drum Kit (BUS) - top-level parent
-        tracks.push(create_track("Drum Kit", Some("BUS"), None, &[]));
-        
-        // Combine all instrument templates
-        let instrument_templates = vec![
-            Kick::new().template(),
-            Snare::new().template(),
-            Tom::new().template(),
-            Cymbals::new().template(),
-            Room::new().template(),
-        ];
-        
-        for inst_template in instrument_templates {
-            for mut track in inst_template.tracks {
-                // If the track has no parent, make it a child of Drum Kit
-                if track.parent_name().is_none() {
-                    track.set_parent_name("Drum Kit");
-                }
-                tracks.push(track);
-            }
-        }
-        
-        Template {
-            name: TrackName::from("Drum Kit"),
-            tracks,
-        }
+        self.full_template()
     }
 }
 

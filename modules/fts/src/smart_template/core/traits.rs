@@ -38,8 +38,23 @@ pub trait Matcher: Send + Sync {
 
 /// Trait for objects that can provide a track structure template
 pub trait TemplateSource: Send + Sync {
-    /// Generate the template structure
-    fn template(&self) -> Template;
+    /// Generate the full template structure with all possible tracks and levels
+    fn full_template(&self) -> Template;
+
+    /// Generate the default template structure (optimized for a clean starting point)
+    fn default_template(&self) -> Template {
+        self.full_template()
+    }
+
+    /// Generate the minimal template structure (only the essential tracks)
+    fn minimal_template(&self) -> Template {
+        self.default_template()
+    }
+
+    /// Generate the template structure (legacy compatibility - defaults to default_template)
+    fn template(&self) -> Template {
+        self.default_template()
+    }
 }
 
 /// Trait for providing group identity and configuration
@@ -61,8 +76,32 @@ pub trait GroupExt: Group + Default {
         Self::default().default_tracklist()
     }
 
-    /// Get the template without needing an existing instance
+    /// Get the full template without needing an existing instance
+    fn get_full_template() -> Template 
+    where 
+        Self: TemplateSource 
+    {
+        Self::default().full_template()
+    }
+
+    /// Get the default template without needing an existing instance
     fn get_default_template() -> Template 
+    where 
+        Self: TemplateSource 
+    {
+        Self::default().default_template()
+    }
+
+    /// Get the minimal template without needing an existing instance
+    fn get_minimal_template() -> Template 
+    where 
+        Self: TemplateSource 
+    {
+        Self::default().minimal_template()
+    }
+
+    /// Get the template without needing an existing instance (legacy compatibility)
+    fn get_template() -> Template 
     where 
         Self: TemplateSource 
     {

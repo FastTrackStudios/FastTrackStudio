@@ -8,12 +8,11 @@ use crate::chords::reactive::ChordsReactiveService;
 use irpc::{
     channel::mpsc,
     rpc::RemoteService,
-    rpc_requests, Client, WithChannels,
+    rpc_requests, Client ,
 };
 use serde::{Deserialize, Serialize};
 use iroh::{protocol::ProtocolHandler, Endpoint, EndpointAddr};
 use irpc_iroh::{IrohLazyRemoteConnection, IrohProtocol};
-use rxrust::prelude::*;
 use tokio::sync::broadcast;
 
 /// Chart changed message
@@ -58,7 +57,6 @@ impl ChartApi {
     /// For now, we'll need to convert ChordsData to Chart or extend the service.
     pub fn spawn(service: Box<dyn ChordsReactiveService>) -> Self {
         let (tx, rx) = mpsc::channel(16);
-        let streams = service.streams().clone();
 
         // Create broadcast channel for chart stream
         let (chart_broadcast, _) = broadcast::channel(1000);

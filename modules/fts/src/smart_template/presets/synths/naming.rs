@@ -15,7 +15,7 @@ impl Group for Synths {
         GroupConfig {
             name: "Synths".to_string(),
             prefix: "SYN".to_string(),
-            patterns: vec!["synth".to_string(), "pad".to_string(), "lead".to_string(), "arp".to_string()],
+            patterns: vec!["synth".to_string(), "pad".to_string(), "lead".to_string(), "arp".to_string(), "keys".to_string()],
             ..Default::default()
         }
     }

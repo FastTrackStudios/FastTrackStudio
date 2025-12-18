@@ -12,10 +12,36 @@ use std::sync::{Mutex, OnceLock};
 static TEMPLATE: OnceLock<Mutex<Template>> = OnceLock::new();
 
 impl TemplateSource for Cymbals {
+    fn full_template(&self) -> Template {
+        Template::builder("Cymbals Full")
+            .bus("Cymbals")
+                .track("Hi-Hat")
+                .track("Ride")
+                .track("OH")
+            .end()
+            .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Cymbals Default")
+            .bus("Cymbals")
+                .track("Hi-Hat")
+                .track("Ride")
+                .track("OH")
+            .end()
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Cymbals Minimal")
+            .track("Hi-Hat")
+            .track("Ride")
+            .track("OH")
+            .build()
+    }
+
     fn template(&self) -> Template {
-        TEMPLATE.get_or_init(|| {
-            Mutex::new(generate_cymbals_structure())
-        }).lock().unwrap().clone()
+        self.full_template()
     }
 }
 

@@ -7,10 +7,26 @@ use daw::tracks::TrackName;
 use super::Pad;
 
 impl TemplateSource for Pad {
-    fn template(&self) -> Template {
-        Template::builder("Pad")
+    fn full_template(&self) -> Template {
+        Template::builder("Pad Full")
             .track("Pad")
             .build()
+    }
+
+    fn default_template(&self) -> Template {
+        Template::builder("Pad Default")
+            .track("Pad")
+            .build()
+    }
+
+    fn minimal_template(&self) -> Template {
+        Template::builder("Pad Minimal")
+            .track("Pad")
+            .build()
+    }
+
+    fn template(&self) -> Template {
+        self.full_template()
     }
 }
 
