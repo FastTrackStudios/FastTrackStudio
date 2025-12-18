@@ -18,7 +18,7 @@ pub trait Parser: Send + Sync {
     type Error: std::error::Error + Send + Sync;
     
     /// Parse a track name string into structured data
-    fn parse(&self, name: &str) -> Result<Self::Output, Self::Error>;
+    fn parse_item_properties(&self, name: &str) -> Result<Self::Output, Self::Error>;
 }
 
 /// Trait for matching parsed track names to template tracks
@@ -45,14 +45,32 @@ pub trait TemplateSource: Send + Sync {
 /// Trait for providing group identity and configuration
 pub trait Group: Send + Sync {
     /// Get the name of this group
-    fn name(&self) -> &str;
+    fn group_name(&self) -> &str;
     
     /// Get the configuration for this group
-    fn config(&self) -> &GroupConfig;
+    fn group_config(&self) -> GroupConfig;
     
     /// Get the default track list for this group (typically derived from template)
     fn default_tracklist(&self) -> Vec<Track>;
 }
+
+/// Extension trait for Group to provide static-like helpers
+pub trait GroupExt: Group + Default {
+    /// Get the default track list without needing an existing instance
+    fn get_default_tracklist() -> Vec<Track> {
+        Self::default().default_tracklist()
+    }
+
+    /// Get the template without needing an existing instance
+    fn get_default_template() -> Template 
+    where 
+        Self: TemplateSource 
+    {
+        Self::default().template()
+    }
+}
+
+impl<T: Group + Default> GroupExt for T {}
 
 /// Track identifier type (platform-specific)
 pub type TrackId = String;

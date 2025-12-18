@@ -5,8 +5,10 @@
 pub mod traits;
 pub mod models;
 pub mod engines;
+pub mod errors;
 
 pub use traits::*;
+pub use errors::*;
 pub use models::template::Template;
 pub use models::group_config::{GroupConfig, InsertMode, PatternCategory};
 pub use models::template_config::{TemplateConfig, InheritanceMode};
