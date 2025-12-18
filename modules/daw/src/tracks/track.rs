@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use derive_builder::Builder;
 use std::collections::HashMap;
 use crate::tracks::api::folder::{TcpFolderState, McpFolderState, TrackDepth, FolderDepthChange};
 use crate::tracks::api::automation::AutomationMode;
@@ -22,7 +23,8 @@ use crate::tracks::fx_chain::FxChain;
 /// This struct contains all fields from the REAPER track state chunk,
 /// including basic properties, volume/pan, mute/solo, folder settings,
 /// fixed lanes, record settings, receives, hardware outputs, and more.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Builder)]
+#[builder(setter(into, strip_option), build_fn(skip))]
 pub struct Track {
     // === Basic Track Properties ===
     /// Unique identifier for this track
@@ -187,9 +189,36 @@ pub struct Track {
     // === Metadata ===
     /// Optional metadata
     pub metadata: HashMap<String, String>,
+    
+    // === Extension State ===
+    /// Extension-specific state data (ExtState)
+    /// This is a flexible metadata field that can store arbitrary data.
+    /// Typically used for storing structured data like "FTS-Item-Properties" as JSON or other formats.
+    pub ext_state: Option<String>,
+}
+
+impl Default for Track {
+    fn default() -> Self {
+        Self::new(String::new())
+    }
 }
 
 impl Track {
+    /// Create a new track builder
+    /// 
+    /// This provides a fluent interface for building tracks:
+    /// ```rust
+    /// let track = Track::builder()
+    ///     .name("My Track")
+    ///     .id(some_uuid)
+    ///     .metadata(some_metadata)
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn builder() -> TrackBuilder {
+        TrackBuilder::default()
+    }
+    
     /// Create a new track
     pub fn new(name: String) -> Self {
         Self {
@@ -295,6 +324,9 @@ impl Track {
             
             // Metadata
             metadata: HashMap::new(),
+            
+            // Extension state
+            ext_state: None,
         }
     }
 
@@ -318,6 +350,82 @@ impl Track {
     /// Remove metadata value
     pub fn remove_metadata(&mut self, key: &str) -> Option<String> {
         self.metadata.remove(key)
+    }
+
+    /// Get FTS-Item-Properties from ext_state
+    /// 
+    /// This retrieves the FTS-Item-Properties data stored in the ext_state field.
+    /// The data is stored as a string (typically JSON) and can be parsed as needed.
+    pub fn get_fts_item_properties(&self) -> Option<&str> {
+        self.ext_state.as_deref()
+    }
+
+    /// Set FTS-Item-Properties in ext_state
+    /// 
+    /// This stores FTS-Item-Properties data in the ext_state field.
+    /// The data should be serialized (e.g., as JSON) before being stored.
+    pub fn set_fts_item_properties<S: Into<String>>(&mut self, properties: S) {
+        self.ext_state = Some(properties.into());
+    }
+
+    /// Remove FTS-Item-Properties from ext_state
+    pub fn remove_fts_item_properties(&mut self) -> Option<String> {
+        self.ext_state.take()
+    }
+}
+
+impl TrackBuilder {
+    /// Build a Track with sensible defaults
+    /// 
+    /// This custom build method uses `Track::default()` to set all defaults,
+    /// then applies any values provided via the builder.
+    /// 
+    /// Panics if required fields (like `name`) are not set. This makes the API
+    /// infallible when all required fields are provided.
+    pub fn build(self) -> Track {
+        let name = self.name.expect("Track name is required - use .name() to set it");
+        
+        // Start with defaults
+        let mut track = Track::default();
+        track.name = name;
+        
+        // Override with any builder-provided values
+        // Builder fields for Option<T> are Option<Option<T>> (outer Option = was it set, inner = the value)
+        // We need to flatten them
+        if let Some(id) = self.id {
+            track.id = id;
+        }
+        // Merge metadata if provided
+        if let Some(metadata) = self.metadata {
+            for (k, v) in metadata {
+                track.metadata.insert(k, v);
+            }
+        }
+        
+        track
+    }
+    
+    /// Add child tracks using folder properties
+    ///
+    /// This method automatically builds the parent track, then adds children with proper
+    /// folder depth properties. Accepts either a single Track or Vec<Track>.
+    /// Returns a Vec<Track> in the correct order.
+    ///
+    /// # Example
+    /// ```rust
+    /// use daw::tracks::AddChild;
+    /// 
+    /// let kick_in = Track::builder().name("Kick In").add_child(vec![]); // Empty vec for leaf
+    /// let kick_bus = Track::builder().name("Kick").add_child(kick_in);
+    /// let drum_bus = Track::builder().name("Drums").add_child(kick_bus);
+    /// ```
+    pub fn add_child<T>(self, children: T) -> Vec<Track>
+    where
+        T: Into<Vec<Track>>,
+    {
+        use crate::tracks::AddChild;
+        let parent = self.build();
+        parent.add_child(children)
     }
 }
 

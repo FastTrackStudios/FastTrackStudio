@@ -1,14 +1,18 @@
 //! Track module - contains structures and functionality for managing tracks
 
 pub mod track;
+pub mod track_list;
 pub mod api;
 pub mod item;
 pub mod envelope;
 pub mod fx_chain;
 pub mod track_chunk;
 pub mod reactive;
+pub mod hierarchy_builder;
 
 pub use track::Track;
+pub use track_list::{AddChild, PrintTrackTree, IntoTrackVec};
+pub use hierarchy_builder::{TrackHierarchyBuilder, build_hierarchy, build_track_hierarchy};
 pub use track_chunk::{parse_track_chunk, ParsedTrackChunk};
 pub use api::folder::{TcpFolderState, McpFolderState};
 pub use api::automation::AutomationMode;
