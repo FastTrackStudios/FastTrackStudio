@@ -40,7 +40,7 @@ impl ReaperTransportReactiveService {
         // Get the Project<Transport> from the setlist for the current REAPER project
         if let Some(project) = self.get_project_from_reaper(reaper_project) {
             // Read transport from REAPER
-            let transport_adapter = crate::implementation::transport::ReaperTransport::new(reaper_project);
+            let transport_adapter = fts::setlist::infra::reaper::ReaperTransport::new(reaper_project);
             if let Ok(transport) = transport_adapter.read_transport() {
                 // Update using the trait method (this will only emit if changed)
                 self.update_transport(&project, transport);

@@ -2,8 +2,8 @@
 
 use crate::infrastructure::action_registry::{ActionDef, register_actions};
 use crate::implementation::project::create_reaper_project_wrapper;
-use crate::implementation::markers::{read_markers_from_project, read_regions_from_project};
-use crate::implementation::setlist::{build_setlist_from_open_projects, build_song_from_current_project};
+use fts::setlist::infra::reaper::{read_markers_from_project, read_regions_from_project};
+use fts::setlist::infra::traits::SetlistBuilder;
 use reaper_high::{Project, Reaper, BookmarkType};
 use reaper_medium::ProjectRef;
 use tracing::{info, warn};
@@ -352,7 +352,7 @@ pub fn build_setlist_from_projects_handler() {
     info!("Building setlist from open REAPER projects...");
     reaper.show_console_msg("\n=== FastTrackStudio: Building Setlist from Open Projects ===\n");
     
-    match build_setlist_from_open_projects(None) {
+    match reaper.build_setlist_from_open_projects(None) {
         Ok(setlist) => {
             let song_count = setlist.song_count();
             reaper.show_console_msg(format!("Built setlist with {} song(s):\n\n", song_count).as_str());
@@ -462,7 +462,7 @@ fn log_setlist_songs_handler() {
     info!("Building and logging setlist songs...");
     reaper.show_console_msg("\n=== FastTrackStudio: Setlist Songs ===\n");
     
-    match build_setlist_from_open_projects(None) {
+    match reaper.build_setlist_from_open_projects(None) {
         Ok(setlist) => {
             let song_count = setlist.song_count();
             if song_count == 0 {
@@ -529,7 +529,7 @@ fn log_current_song_details_handler() {
     info!("Building and logging current song details...");
     reaper.show_console_msg("\n=== FastTrackStudio: Current Song Details ===\n");
     
-    match build_song_from_current_project() {
+    match reaper.build_song_from_current_project() {
         Ok(song) => {
             reaper.show_console_msg(format!("Song: {}\n\n", song.name).as_str());
             info!(song_name = %song.name, "Logging current song details");
@@ -745,7 +745,7 @@ fn log_current_musical_position_handler() {
     reaper.show_console_msg("\n=== FastTrackStudio: Current Musical Position ===\n");
     
     // Get transport info to get current playhead position
-    let transport_adapter = crate::implementation::transport::ReaperTransport::new(current_project.clone());
+    let transport_adapter = fts::setlist::infra::reaper::ReaperTransport::new(current_project.clone());
     
     match transport_adapter.read_transport() {
         Ok(transport) => {
@@ -965,7 +965,7 @@ fn log_tempo_time_sig_changes_handler() {
 /// Create text items from lyrics input - one bar per slide
 #[cfg(feature = "lyrics")]
 fn create_text_items_from_lyrics_handler() {
-    crate::lyrics::write::create_text_items_from_lyrics("".to_string()).unwrap_or_else(|e| {
+    fts::lyrics::infra::reaper::write::create_text_items_from_lyrics("".to_string()).unwrap_or_else(|e| {
         tracing::error!("Failed to create text items from lyrics: {}", e);
     });
 }

@@ -4,7 +4,8 @@
 
 use std::sync::Arc;
 use fts::setlist::SetlistStreamApi;
-use crate::core::{ReaperSetlistStateProvider, ReaperSetlistCommandHandler};
+use fts::setlist::infra::reaper::ReaperSetlistStateProvider;
+use crate::core::ReaperSetlistCommandHandler;
 use crate::services::{SetlistService, CommandService, SeekService};
 use tracing::info;
 

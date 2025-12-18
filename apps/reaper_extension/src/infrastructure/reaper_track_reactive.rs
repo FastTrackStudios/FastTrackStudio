@@ -37,7 +37,7 @@ impl ReaperTrackReactiveService {
         // Get the Project<Transport> from the setlist
         if let Some(project) = self.get_project_from_reaper(reaper_project) {
             // Read tracks from REAPER
-            let tracks = crate::implementation::tracks::get_all_tracks(&reaper_project);
+            let tracks = fts::setlist::infra::reaper::get_all_tracks(&reaper_project);
             // Update using the trait method (this will only emit if changed)
             self.update_tracks(&project, tracks);
         }
@@ -70,7 +70,7 @@ impl ReaperTrackReactiveService {
                 self.update_tracks_from_reaper(reaper_project);
             } else {
                 // Read the specific track from REAPER
-                if let Some(track) = crate::implementation::tracks::get_track(&reaper_project, track_index) {
+                if let Some(track) = fts::setlist::infra::reaper::get_track(&reaper_project, track_index) {
                     info!(
                         project_id = %project.id(),
                         track_index,

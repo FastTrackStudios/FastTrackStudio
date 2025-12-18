@@ -5,7 +5,7 @@
 
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use crate::implementation::setlist::build_setlist_from_open_projects;
+use fts::setlist::infra::traits::SetlistBuilder;
 #[cfg(feature = "live")]
 use crate::live::tracks::tab_navigation::TabNavigator;
 #[cfg(feature = "live")]
@@ -83,8 +83,9 @@ impl SeekService {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
         
-        // Build setlist to find the song
-        let setlist = build_setlist_from_open_projects(None)
+        // Build setlist to find the song - use trait method on Reaper (operates on all open projects)
+        let reaper = Reaper::get();
+        let setlist = reaper.build_setlist_from_open_projects(None)
             .map_err(|e| format!("Failed to build setlist: {}", e))?;
         
         if song_index >= setlist.songs.len() {

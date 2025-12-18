@@ -189,7 +189,7 @@ pub fn init_reactive_stream_subscriptions(
     rx: &ControlSurfaceRx,
     track_service: Option<std::sync::Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>>,
 ) {
-    use crate::implementation::tracks::{invalidate_track_cache, invalidate_all_track_caches};
+    use fts::setlist::infra::reaper::{invalidate_track_cache, invalidate_all_track_caches};
     use fts::setlist::infra::stream::{get_broadcast_sender, get_state_provider, SetlistUpdateMessage};
     use reaper_high::Reaper;
     use rxrust::prelude::*;

@@ -126,7 +126,7 @@ impl SmoothSeekHandler {
         let project_context = project.context();
         
         // Get current play position using transport adapter
-        use crate::implementation::transport::ReaperTransport;
+        use fts::setlist::infra::reaper::ReaperTransport;
         let transport = ReaperTransport::new(project.clone());
         let current_pos = transport.read_transport()
             .ok()

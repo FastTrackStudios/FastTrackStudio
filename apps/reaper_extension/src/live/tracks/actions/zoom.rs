@@ -2,11 +2,10 @@
 //!
 //! Actions for zooming the arrange view to song regions and markers
 
-use crate::implementation::setlist::build_song_from_current_project;
-use crate::implementation::markers::read_markers_from_project;
-use reaper_high::Project;
+use fts::setlist::infra::reaper::read_markers_from_project;
+use fts::setlist::infra::traits::SetlistBuilder;
+use reaper_high::{Project, Reaper};
 use reaper_medium::{PositionInSeconds, ProjectContext};
-use reaper_high::Reaper;
 use tracing::{info, warn};
 
 /// Find Count-In marker position in a project
@@ -48,7 +47,10 @@ pub fn zoom_horizontally_to_song() {
     };
     
     // Use FastTrackStudio's song building to find the song region end
-    let song_region_end_pos = match build_song_from_current_project() {
+    // Use the trait method directly on the current project
+    // Use trait method on Reaper (operates on current project)
+    let reaper = Reaper::get();
+    let song_region_end_pos = match reaper.build_song_from_current_project() {
         Ok(song) => {
             // Use song_region_end() to get the actual song region end marker position
             // This is the end of the song region, which usually extends past the =END marker

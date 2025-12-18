@@ -1,3 +1,8 @@
 //! Infrastructure modules for lyrics
 //! 
-//! Currently empty - lyrics stream functionality is integrated into setlist stream
+//! This module contains infrastructure concerns for lyrics operations.
+
+pub mod traits;
+
+#[cfg(feature = "reaper")]
+pub mod reaper;

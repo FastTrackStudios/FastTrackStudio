@@ -38,7 +38,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 thiserror = "2.0.17"
 daw = { path = "../../modules/daw" }
-fts = { path = "../../modules/fts" }
+fts = { path = "../../modules/fts", features = ["reaper"] }
 keyflow = { path = "../../packages/keyflow" }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 enumflags2 = "0.7"

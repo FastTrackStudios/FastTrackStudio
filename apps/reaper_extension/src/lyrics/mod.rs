@@ -1,14 +1,16 @@
 //! REAPER integration for lyrics functionality
 //!
-//! This module provides functions to read and write lyrics data from/to REAPER projects.
-//! It handles finding the LYRICS folder, SLIDES track, and MIDI tracks with syllable data.
+//! This module provides REAPER-specific actions and re-exports implementations from fts.
+//! The actual read/write/stream implementations are in `fts::lyrics::infra::reaper`.
 
-pub mod read;
-pub mod write;
 mod actions;
 #[cfg(debug_assertions)]
 mod dev_actions;
-pub mod stream;
+
+// Re-export implementations from fts module
+pub use fts::lyrics::infra::reaper::read::{read_lyrics_from_reaper, find_folder_tracks, find_track_by_name};
+pub use fts::lyrics::infra::reaper::write::{create_text_items_from_lyrics, update_lyrics_in_reaper};
+pub use fts::lyrics::infra::reaper::stream::ReaperLyricsCommandHandler;
 
 pub use actions::register_lyrics_actions;
 #[cfg(debug_assertions)]

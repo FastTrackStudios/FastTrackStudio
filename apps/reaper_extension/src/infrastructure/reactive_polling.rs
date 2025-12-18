@@ -159,7 +159,7 @@ impl ReactivePollingService {
             // Poll full transport state
             // Project is Copy, so we can use it directly
             let transport = {
-                let transport_adapter = crate::implementation::transport::ReaperTransport::new(project);
+                let transport_adapter = fts::setlist::infra::reaper::ReaperTransport::new(project);
                 transport_adapter.read_transport().ok()
             };
             let transport_changed = if let Some(ref new_transport) = transport {

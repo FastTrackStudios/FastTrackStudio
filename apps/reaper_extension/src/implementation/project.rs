@@ -4,7 +4,7 @@
 
 use daw::project::Project;
 use reaper_high::Project as ReaperProject;
-use crate::implementation::transport::ReaperTransport;
+use fts::setlist::infra::reaper::ReaperTransport;
 
 /// REAPER project wrapper that implements TransportActions
 pub type ReaperProjectWrapper = Project<ReaperTransport>;

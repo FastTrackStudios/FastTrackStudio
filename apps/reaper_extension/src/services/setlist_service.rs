@@ -4,9 +4,10 @@
 
 use std::sync::{Arc, Mutex};
 use fts::setlist::SetlistApi;
-use crate::implementation::setlist::build_setlist_from_open_projects;
+use fts::setlist::infra::traits::SetlistBuilder;
 use crate::infrastructure::reactive_polling::ReactivePollingService;
 use tracing::info;
+use reaper_high::Reaper;
 
 /// Service for managing setlist state
 #[derive(Debug)]
@@ -35,12 +36,14 @@ impl SetlistService {
         
         // Build setlist from open projects - this reads fresh transport info for each song
         // Each song's transport_info field is populated with current transport state
-        let setlist = build_setlist_from_open_projects(None)?;
+        // Use the trait method directly on the Reaper instance (operates on all open projects)
+        let reaper = Reaper::get();
+        let setlist = reaper.build_setlist_from_open_projects(None)?;
         
         // Get current project name and transport position to determine active song
         let reaper = reaper_high::Reaper::get();
         let current_project = reaper.current_project();
-        let transport_adapter = crate::implementation::transport::ReaperTransport::new(current_project.clone());
+        let transport_adapter = fts::setlist::infra::reaper::ReaperTransport::new(current_project.clone());
         
         // Get project name
         let project_name = {

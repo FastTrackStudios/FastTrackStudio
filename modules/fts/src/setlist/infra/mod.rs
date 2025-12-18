@@ -10,4 +10,8 @@ pub mod dioxus;
 pub mod dioxus_impl;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod stream;
+pub mod traits;
+
+#[cfg(feature = "reaper")]
+pub mod reaper;
 

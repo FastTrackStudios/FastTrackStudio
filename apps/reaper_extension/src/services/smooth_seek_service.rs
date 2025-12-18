@@ -4,7 +4,7 @@
 
 use reaper_high::{Reaper, Project};
 use reaper_medium::{ProjectRef, PositionInSeconds};
-use crate::implementation::transport::ReaperTransport;
+use fts::setlist::infra::reaper::ReaperTransport;
 #[cfg(feature = "live")]
 use crate::live::tracks::smooth_seek::get_smooth_seek_handler;
 use tracing::warn;

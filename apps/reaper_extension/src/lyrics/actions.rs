@@ -1,7 +1,7 @@
 //! Lyrics actions for REAPER extension
 
 use crate::infrastructure::action_registry::{ActionDef, register_actions};
-use crate::lyrics::{read::read_lyrics_from_reaper, write::create_text_items_from_lyrics};
+use fts::lyrics::infra::reaper::{read_lyrics_from_reaper, create_text_items_from_lyrics};
 use reaper_high::Reaper;
 use tracing::{info, error};
 

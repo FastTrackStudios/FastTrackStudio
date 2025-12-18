@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use fts::setlist::{TransportCommand, NavigationCommand};
 use crate::infrastructure::action_registry::get_command_id;
 use reaper_medium::{CommandId, ProjectContext};
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 
 /// Command execution request
 enum CommandRequest {
@@ -136,24 +136,27 @@ impl CommandService {
                 Ok(())
             }
             CommandRequest::SeekToSong(song_index) => {
-                #[cfg(feature = "live")]
-                {
-                    use crate::live::tracks::actions::go_to_song;
-                    go_to_song(song_index);
-                    info!("Executed seek to song: {}", song_index);
-                    Ok(())
-                }
-                #[cfg(not(feature = "live"))]
-                {
-                    warn!("SeekToSong command requires 'live' feature");
-                    Err("Live feature not enabled".to_string())
-                }
+                // Use the trait method directly - it handles all the logic
+                use fts::setlist::infra::traits::SeekAdapter;
+                use reaper_high::Reaper;
+                
+                let reaper = Reaper::get();
+                let current_project = reaper.current_project();
+                
+                current_project.seek_to_song(song_index)
+                    .map_err(|e| {
+                        error!(error = %e, song_index, "Failed to seek to song");
+                        e
+                    })?;
+                
+                info!(song_index, "Executed seek to song");
+                Ok(())
             }
             CommandRequest::SeekToMusicalPosition(song_index, musical_position) => {
                 #[cfg(feature = "live")]
                 {
                     // Convert musical position to time using REAPER's tempo map
-                    use crate::implementation::setlist::build_setlist_from_open_projects;
+                    use fts::setlist::infra::traits::SetlistBuilder;
                     use crate::live::tracks::tab_navigation::TabNavigator;
                     use reaper_high::{Reaper, Project};
                     use reaper_medium::{ProjectRef, PositionInSeconds, SetEditCurPosOptions, PositionInBeats, MeasureMode};
@@ -162,8 +165,8 @@ impl CommandService {
                     let reaper = Reaper::get();
                     let medium_reaper = reaper.medium_reaper();
                     
-                    // Build setlist to find the song
-                    let setlist = build_setlist_from_open_projects(None)
+                    // Build setlist to find the song - use trait method on Reaper (operates on all open projects)
+                    let setlist = reaper.build_setlist_from_open_projects(None)
                         .map_err(|e| format!("Failed to build setlist: {}", e))?;
                     
                     if song_index >= setlist.songs.len() {
@@ -280,7 +283,7 @@ impl CommandService {
                     // Delegate to SeekService for time-based seeks
                     // For now, we'll implement it here since SeekService handles section seeks
                     // TODO: Move this to SeekService
-                    use crate::implementation::setlist::build_setlist_from_open_projects;
+                    use fts::setlist::infra::traits::SetlistBuilder;
                     use crate::live::tracks::tab_navigation::TabNavigator;
                 use reaper_high::{Reaper, Project};
                 use reaper_medium::{ProjectRef, PositionInSeconds, SetEditCurPosOptions};
@@ -288,8 +291,8 @@ impl CommandService {
                 let reaper = Reaper::get();
                 let medium_reaper = reaper.medium_reaper();
                 
-                // Build setlist to find the song
-                let setlist = build_setlist_from_open_projects(None)
+                // Build setlist to find the song - use trait method on Reaper (operates on all open projects)
+                let setlist = reaper.build_setlist_from_open_projects(None)
                     .map_err(|e| format!("Failed to build setlist: {}", e))?;
                 
                 if song_index >= setlist.songs.len() {

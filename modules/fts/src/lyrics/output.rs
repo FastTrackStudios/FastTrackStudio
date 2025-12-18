@@ -509,7 +509,7 @@ pub struct MidiEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::parse_lyrics;
+    use crate::lyrics::parser::parse_lyrics;
 
     #[test]
     fn test_lyric_sheet() {

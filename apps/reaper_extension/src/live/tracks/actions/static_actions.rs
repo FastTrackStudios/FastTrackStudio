@@ -6,9 +6,8 @@
 use super::zoom::zoom_horizontally_to_song;
 use super::navigation::{go_to_previous_song, go_to_next_song, go_to_next_section, go_to_previous_section, go_to_next_section_song_smart, go_to_previous_section_song_smart};
 use crate::infrastructure::action_registry::{ActionDef, register_actions, get_registered_actions_storage};
-use crate::implementation::setlist::build_setlist_from_open_projects;
-use crate::implementation::markers::read_markers_from_project;
-use crate::implementation::transport::ReaperTransport;
+use fts::setlist::infra::reaper::{read_markers_from_project, ReaperTransport};
+use fts::setlist::infra::traits::SetlistBuilder;
 use crate::live::tracks::tab_navigation::TabNavigator;
 use reaper_high::{Reaper, Project, ActionKind};
 use reaper_medium::{PositionInSeconds, ProjectRef, SetEditCurPosOptions};
@@ -198,8 +197,8 @@ fn reset_to_beginning_of_setlist() {
     
     info!("Reset to Beginning of Setlist action executed");
     
-    // Build setlist from tabs
-    let setlist = match build_setlist_from_open_projects(None) {
+    // Build setlist from tabs - use trait method on Reaper (operates on all open projects)
+    let setlist = match reaper.build_setlist_from_open_projects(None) {
         Ok(s) => s,
         Err(e) => {
             warn!(error = %e, "Failed to build setlist for reset");

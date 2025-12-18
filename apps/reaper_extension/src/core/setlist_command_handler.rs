@@ -62,7 +62,7 @@ impl SetlistCommandHandler for ReaperSetlistCommandHandler {
         #[cfg(feature = "lyrics")]
         {
             // Use the lyrics stream handler implementation
-            use crate::lyrics::stream::ReaperLyricsCommandHandler;
+            use fts::lyrics::infra::reaper::stream::ReaperLyricsCommandHandler;
             let handler = ReaperLyricsCommandHandler::new();
             handler.advance_syllable().await
         }
@@ -76,7 +76,7 @@ impl SetlistCommandHandler for ReaperSetlistCommandHandler {
         #[cfg(feature = "lyrics")]
         {
             // Use the lyrics stream handler implementation
-            use crate::lyrics::stream::ReaperLyricsCommandHandler;
+            use fts::lyrics::infra::reaper::stream::ReaperLyricsCommandHandler;
             let handler = ReaperLyricsCommandHandler::new();
             handler.get_lyrics_state().await
         }
@@ -90,7 +90,7 @@ impl SetlistCommandHandler for ReaperSetlistCommandHandler {
         #[cfg(feature = "lyrics")]
         {
             // Use the lyrics stream handler implementation
-            use crate::lyrics::stream::ReaperLyricsCommandHandler;
+            use fts::lyrics::infra::reaper::stream::ReaperLyricsCommandHandler;
             let handler = ReaperLyricsCommandHandler::new();
             handler.assign_syllable_to_note(syllable_text).await
         }
@@ -103,9 +103,49 @@ impl SetlistCommandHandler for ReaperSetlistCommandHandler {
     async fn update_lyrics(&self, song_index: usize, lyrics: fts::lyrics::core::Lyrics) -> Result<(), String> {
         #[cfg(feature = "lyrics")]
         {
-            // Update lyrics in REAPER project
-            use crate::lyrics::write::update_lyrics_in_reaper;
-            update_lyrics_in_reaper(song_index, lyrics)
+            // Update lyrics using the trait method
+            use fts::lyrics::infra::traits::LyricsWriter;
+            use fts::setlist::infra::traits::SetlistBuilder;
+            use reaper_high::Reaper;
+            
+            // Get the project for this song by building setlist and finding the project
+            let reaper = Reaper::get();
+            let setlist = reaper.build_setlist_from_open_projects(None)
+                .map_err(|e| format!("Failed to build setlist: {}", e))?;
+            
+            if song_index >= setlist.songs.len() {
+                return Err(format!("Song index {} out of range", song_index));
+            }
+            
+            // Find the project for this song
+            let song = &setlist.songs[song_index];
+            let project_name = song.project_name_from_metadata();
+            let medium_reaper = reaper.medium_reaper();
+            
+            let mut target_project = None;
+            for i in 0..128u32 {
+                if let Some(result) = medium_reaper.enum_projects(reaper_medium::ProjectRef::Tab(i), 512) {
+                    let tab_name = result.file_path.as_ref()
+                        .and_then(|p| p.as_std_path().file_stem())
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| format!("Tab {}", i));
+                    
+                    let normalized_tab = tab_name.to_uppercase().replace('_', "-");
+                    let normalized_target = project_name.to_uppercase().replace('_', "-");
+                    
+                    if normalized_tab == normalized_target {
+                        target_project = Some(reaper_high::Project::new(result.project));
+                        break;
+                    }
+                }
+            }
+            
+            let project = target_project.ok_or_else(|| format!("Could not find project for song: {}", project_name))?;
+            
+            // Use the trait method
+            project.update_lyrics_in_project(song_index, lyrics)
+                .map_err(|e| format!("Failed to update lyrics: {}", e))
         }
         #[cfg(not(feature = "lyrics"))]
         {

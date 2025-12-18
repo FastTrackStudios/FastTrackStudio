@@ -330,10 +330,10 @@ impl DerivedLyrics {
     pub fn from_sheet_and_annotations(
         sheet: &LyricsSheet,
         annotations: LyricsAnnotations,
-        parser_config: crate::parser::ParserConfig,
-    ) -> Result<Self, crate::parser::ParseError> {
+        parser_config: crate::lyrics::parser::ParserConfig,
+    ) -> Result<Self, crate::lyrics::parser::ParseError> {
         // Parse the raw text
-        let mut lyrics = crate::parser::parse_lyrics_with_config(
+        let mut lyrics = crate::lyrics::parser::parse_lyrics_with_config(
             &sheet.raw_text,
             sheet.song_name.clone(),
             parser_config,
@@ -379,10 +379,10 @@ impl DerivedLyrics {
     pub fn update_source(
         &mut self,
         new_text: String,
-        parser_config: crate::parser::ParserConfig,
-    ) -> Result<ReconciliationResult, crate::parser::ParseError> {
+        parser_config: crate::lyrics::parser::ParserConfig,
+    ) -> Result<ReconciliationResult, crate::lyrics::parser::ParseError> {
         // Parse new text
-        let new_lyrics = crate::parser::parse_lyrics_with_config(
+        let new_lyrics = crate::lyrics::parser::parse_lyrics_with_config(
             &new_text,
             self.lyrics.song_name.clone(),
             parser_config,

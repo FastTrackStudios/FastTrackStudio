@@ -2,8 +2,8 @@
 //!
 //! Actions for navigating between songs and sections in the setlist
 
-use crate::implementation::setlist::build_setlist_from_open_projects;
-use crate::implementation::markers::read_markers_from_project;
+use fts::setlist::infra::reaper::read_markers_from_project;
+use fts::setlist::infra::traits::SetlistBuilder;
 use crate::live::tracks::actions::zoom::zoom_horizontally_to_song;
 use crate::live::tracks::tab_navigation::TabNavigator;
 use reaper_high::{BookmarkType, Project, Reaper};
@@ -18,41 +18,23 @@ fn find_count_in_marker(project: &Project) -> Option<f64> {
         .map(|m| m.position.time.to_seconds())
 }
 
-/// Helper: Switch to a project tab by index using TabNavigator
+// Use shared helper functions from fts module instead of duplicating
+use fts::setlist::infra::reaper::{find_tab_index_by_project_name as find_tab_index_helper, switch_to_tab as switch_to_tab_helper};
+
+/// Helper: Switch to a project tab by index
+/// Uses the shared helper from fts module, but converts to Result<(), String> for compatibility
 fn switch_to_tab(tab_index: u32) -> Result<(), String> {
-    let tab_navigator = TabNavigator::new();
-    tab_navigator.switch_to_tab(tab_index as usize)
-        .map_err(|e| e.to_string())
+    switch_to_tab_helper(tab_index as usize)
+        .map(|_| ())
+        .map_err(|e| e)
 }
 
 /// Helper: Find tab index for a project name
+/// Uses the shared helper from fts module, but converts to Option<u32> for compatibility
 fn find_tab_index_by_project_name(project_name: &str) -> Option<u32> {
-    let reaper = Reaper::get();
-    let medium_reaper = reaper.medium_reaper();
-    
-    for i in 0..128u32 {
-        if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
-            let tab_name = if let Some(file_path) = result.file_path.as_ref() {
-                file_path
-                    .as_std_path()
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| format!("Tab {}", i))
-            } else {
-                format!("Tab {}", i)
-            };
-            
-            // Normalize names for comparison (handle both hyphens and underscores)
-            let normalized_tab = tab_name.to_uppercase().replace('_', "-");
-            let normalized_target = project_name.to_uppercase().replace('_', "-");
-            
-            if normalized_tab == normalized_target {
-                return Some(i);
-            }
-        }
-    }
-    None
+    find_tab_index_helper(project_name)
+        .ok()
+        .map(|idx| idx as u32)
 }
 
 /// Go to previous song in setlist
@@ -62,8 +44,8 @@ pub fn go_to_previous_song() {
     
     info!("Go To Previous Song action executed");
     
-    // Build setlist
-    let setlist = match build_setlist_from_open_projects(None) {
+    // Build setlist - use trait method on Reaper (operates on all open projects)
+    let setlist = match reaper.build_setlist_from_open_projects(None) {
         Ok(s) => s,
         Err(e) => {
             warn!(error = %e, "Failed to build setlist");
@@ -156,8 +138,8 @@ pub fn go_to_song(song_index: usize) {
     
     info!(song_index, "Go To Song action executed");
     
-    // Build setlist
-    let setlist = match build_setlist_from_open_projects(None) {
+    // Build setlist - use trait method on Reaper (operates on all open projects)
+    let setlist = match reaper.build_setlist_from_open_projects(None) {
         Ok(s) => s,
         Err(e) => {
             warn!(error = %e, "Failed to build setlist");
@@ -239,8 +221,8 @@ pub fn go_to_next_song() {
     
     info!("Go To Next Song action executed");
     
-    // Build setlist
-    let setlist = match build_setlist_from_open_projects(None) {
+    // Build setlist - use trait method on Reaper (operates on all open projects)
+    let setlist = match reaper.build_setlist_from_open_projects(None) {
         Ok(s) => s,
         Err(e) => {
             warn!(error = %e, "Failed to build setlist");
@@ -870,8 +852,8 @@ pub fn go_to_previous_section_song_smart() {
                 // At or before Count-In, go to previous song's LAST section
                 info!("At or before Count-In, going to previous song's last section");
                 
-                // Build setlist to find previous song
-                let setlist = match build_setlist_from_open_projects(None) {
+                // Build setlist to find previous song - use trait method on Reaper (operates on all open projects)
+                let setlist = match reaper.build_setlist_from_open_projects(None) {
                     Ok(s) => s,
                     Err(e) => {
                         warn!(error = %e, "Failed to build setlist for smart previous");
@@ -989,8 +971,8 @@ pub fn go_to_previous_section_song_smart() {
                     // Similar logic as above but without Count-In check
                     info!("At first section start (no Count-In), going to previous song's last section");
                     
-                    // Build setlist to find previous song
-                    let setlist = match build_setlist_from_open_projects(None) {
+                    // Build setlist to find previous song - use trait method on Reaper (operates on all open projects)
+                    let setlist = match reaper.build_setlist_from_open_projects(None) {
                         Ok(s) => s,
                         Err(e) => {
                             warn!(error = %e, "Failed to build setlist for smart previous");

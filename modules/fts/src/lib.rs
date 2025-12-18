@@ -10,7 +10,6 @@ pub mod setlist;
 pub mod lyrics;
 pub mod chords;
 pub mod smart_template;
-pub mod smart_template_legacy;
 
 // Re-export commonly used types
 pub use setlist::*;

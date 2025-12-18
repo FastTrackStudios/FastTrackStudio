@@ -8,9 +8,9 @@ use keyflow::key::Key;
 use keyflow::primitives::RootNotation;
 use keyflow::sections::{Section, SectionType};
 use keyflow::time::{AbsolutePosition, MusicalDuration, MusicalPosition, PPQDuration, PPQPosition, Tempo, TimeSignature};
-use reaper_high::{Reaper, Project};
+use reaper_high::{Project, Reaper};
 use reaper_medium::{MediaItemTake, ProjectRef};
-use crate::implementation::setlist::build_setlist_from_open_projects;
+use fts::setlist::infra::traits::SetlistBuilder;
 use tracing::warn;
 
 /// Build a Chart from detected chords
@@ -53,7 +53,9 @@ pub fn build_chart_from_chords(
     // We'll get the time signature from the song's starting_time_signature if available
     let time_sig = {
         // Try to get time signature from setlist (which reads from tempo/time sig markers)
-        if let Ok(setlist) = build_setlist_from_open_projects(None) {
+        // Use the trait method directly on the Reaper instance (operates on all open projects)
+        let reaper = Reaper::get();
+        if let Ok(setlist) = reaper.build_setlist_from_open_projects(None) {
             // Find the current song by project name (reuse project_name from above)
             if let Some(ref name) = project_name {
                 if let Some(song) = setlist.songs.iter().find(|s| s.name == *name) {
@@ -93,7 +95,9 @@ pub fn build_chart_from_chords(
     }
     
     // Get setlist and find current song
-    let song_sections = if let Ok(setlist) = build_setlist_from_open_projects(None) {
+    // Use the trait method directly on the Reaper instance (operates on all open projects)
+    let reaper = Reaper::get();
+    let song_sections = if let Ok(setlist) = reaper.build_setlist_from_open_projects(None) {
         project_name.and_then(|name| {
             setlist.songs.iter().find(|song| {
                 song.name == name || song.name.contains(&name) || name.contains(&song.name)
