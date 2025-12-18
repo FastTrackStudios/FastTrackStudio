@@ -1,23 +1,22 @@
 use crate::smart_template::features::naming::item_properties::ItemProperties;
 use crate::smart_template::features::naming::item_properties_parser::ItemPropertiesParser;
 use crate::smart_template::core::models::group_config::{GroupConfig, InsertMode};
-use super::Tom;
-
 use crate::smart_template::core::traits::{Group, Parser, TemplateSource};
 use crate::smart_template::core::errors::TemplateParseError;
 use daw::tracks::Track;
+use super::BGVs;
 
-impl Group for Tom {
+impl Group for BGVs {
     fn group_name(&self) -> &str {
-        "Tom"
+        "BGVs"
     }
 
     fn group_config(&self) -> GroupConfig {
         GroupConfig {
-            name: "Tom".to_string(),
-            prefix: "Tom".to_string(),
-            patterns: vec!["tom".to_string(), "t1".to_string(), "t2".to_string(), "t3".to_string(), "ft".to_string()],
-            negative_patterns: vec![],
+            name: "BGVs".to_string(),
+            prefix: "BGV".to_string(),
+            patterns: vec!["bgv".to_string(), "backing".to_string(), "bck".to_string()],
+            negative_patterns: vec!["lead".to_string()],
             parent_track: None,
             destination_track: None,
             insert_mode: Some(InsertMode::Increment),
@@ -33,7 +32,7 @@ impl Group for Tom {
     }
 }
 
-impl Parser for Tom {
+impl Parser for BGVs {
     type Output = ItemProperties;
     type Error = TemplateParseError;
 
@@ -42,9 +41,9 @@ impl Parser for Tom {
         let props = parser.parse_item_properties(name);
         
         let config = self.group_config();
-        let is_tom = props.group_prefix.as_deref() == Some("Tom")
+        let is_bgvs = props.group_prefix.as_deref() == Some("BGVs")
             || props.sub_type.as_ref()
-                .map(|st| st.iter().any(|s| s.eq_ignore_ascii_case("Tom")))
+                .map(|st| st.iter().any(|s| s.eq_ignore_ascii_case("BGV") || s.eq_ignore_ascii_case("Backing")))
                 .unwrap_or(false)
             || props.original_name.as_ref()
                 .map(|n| {
@@ -54,8 +53,8 @@ impl Parser for Tom {
                 })
                 .unwrap_or(false);
         
-        if !is_tom {
-            return Err(TemplateParseError::NotMatch("Tom".to_string()));
+        if !is_bgvs {
+            return Err(TemplateParseError::NotMatch("BGVs".to_string()));
         }
         
         Ok(props)

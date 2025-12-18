@@ -1,29 +1,23 @@
 use crate::smart_template::features::naming::item_properties::ItemProperties;
 use crate::smart_template::features::naming::item_properties_parser::ItemPropertiesParser;
-use crate::smart_template::core::models::group_config::{GroupConfig, InsertMode};
-use super::Tom;
+use crate::smart_template::core::models::group_config::GroupConfig;
+use super::FX;
 
-use crate::smart_template::core::traits::{Group, Parser, TemplateSource};
-use crate::smart_template::core::errors::TemplateParseError;
-use daw::tracks::Track;
+use crate::smart_template::core::traits::{Group, Parser, Matcher, TemplateSource};
+use crate::smart_template::features::matching::matcher::MatchResult;
+use crate::smart_template::core::errors::{TemplateParseError, TemplateMatchError};
+use daw::tracks::{Track, TrackName};
 
-impl Group for Tom {
+impl Group for FX {
     fn group_name(&self) -> &str {
-        "Tom"
+        "FX"
     }
 
     fn group_config(&self) -> GroupConfig {
         GroupConfig {
-            name: "Tom".to_string(),
-            prefix: "Tom".to_string(),
-            patterns: vec!["tom".to_string(), "t1".to_string(), "t2".to_string(), "t3".to_string(), "ft".to_string()],
-            negative_patterns: vec![],
-            parent_track: None,
-            destination_track: None,
-            insert_mode: Some(InsertMode::Increment),
-            increment_start: Some(1),
-            only_number_when_multiple: Some(true),
-            create_if_missing: Some(true),
+            name: "FX".to_string(),
+            prefix: "SFX".to_string(),
+            patterns: vec!["fx".to_string(), "sfx".to_string(), "synth fx".to_string(), "effect".to_string()],
             ..Default::default()
         }
     }
@@ -33,7 +27,7 @@ impl Group for Tom {
     }
 }
 
-impl Parser for Tom {
+impl Parser for FX {
     type Output = ItemProperties;
     type Error = TemplateParseError;
 
@@ -42,9 +36,9 @@ impl Parser for Tom {
         let props = parser.parse_item_properties(name);
         
         let config = self.group_config();
-        let is_tom = props.group_prefix.as_deref() == Some("Tom")
+        let is_fx = props.group_prefix.as_deref() == Some("FX")
             || props.sub_type.as_ref()
-                .map(|st| st.iter().any(|s| s.eq_ignore_ascii_case("Tom")))
+                .map(|st| st.iter().any(|s| s.eq_ignore_ascii_case("FX")))
                 .unwrap_or(false)
             || props.original_name.as_ref()
                 .map(|n| {
@@ -54,10 +48,11 @@ impl Parser for Tom {
                 })
                 .unwrap_or(false);
         
-        if !is_tom {
-            return Err(TemplateParseError::NotMatch("Tom".to_string()));
+        if !is_fx {
+            return Err(TemplateParseError::NotMatch("FX".to_string()));
         }
         
         Ok(props)
     }
 }
+

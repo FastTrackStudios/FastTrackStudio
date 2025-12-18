@@ -1,19 +1,20 @@
 use crate::smart_template::core::models::template::Template;
-use crate::smart_template::core::models::GroupMode;
 use crate::smart_template::core::traits::{TemplateSource, Matcher};
 use crate::smart_template::features::naming::item_properties::ItemProperties;
 use crate::smart_template::features::matching::matcher::MatchResult;
 use crate::smart_template::core::errors::TemplateMatchError;
 use daw::tracks::TrackName;
-use super::Room;
+use super::Clavichord;
 
-impl TemplateSource for Room {
+impl TemplateSource for Clavichord {
     fn template(&self) -> Template {
-        generate_room_structure()
+        Template::builder("Clavichord")
+            .track("Clavichord")
+            .build()
     }
 }
 
-impl Matcher for Room {
+impl Matcher for Clavichord {
     type TrackName = ItemProperties;
     type Error = TemplateMatchError;
 
@@ -21,7 +22,7 @@ impl Matcher for Room {
         crate::smart_template::features::matching::matcher::helpers::instrument_find_best_match(
             &self.template(),
             track_name,
-            "Rooms",
+            "Clavichord",
         )
     }
 
@@ -30,17 +31,7 @@ impl Matcher for Room {
             return Ok((result.track_name, result.use_takes));
         }
         
-        let name = base_name.unwrap_or("Rooms");
+        let name = base_name.unwrap_or("Clavichord");
         Ok((TrackName::from(name), false))
     }
-}
-
-pub fn generate_room_structure() -> Template {
-    Template::builder("Rooms")
-        .bus("Rooms")
-            .track("Rooms Close").modes(&[GroupMode::Full, GroupMode::Recording])
-            .track("Rooms Far").modes(&[GroupMode::Full, GroupMode::Recording])
-            .track("Room Mono").modes(&[GroupMode::Full, GroupMode::Recording])
-        .end()
-        .build()
 }

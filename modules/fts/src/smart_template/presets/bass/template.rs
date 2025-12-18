@@ -1,51 +1,36 @@
-//! Tom template implementation
-
 use crate::smart_template::core::models::template::Template;
-use crate::smart_template::core::models::GroupMode;
 use crate::smart_template::core::traits::{TemplateSource, Matcher};
 use crate::smart_template::features::naming::item_properties::ItemProperties;
 use crate::smart_template::features::matching::matcher::MatchResult;
 use crate::smart_template::core::errors::TemplateMatchError;
-use daw::tracks::{TrackName};
-use super::Tom;
-use std::sync::{Mutex, OnceLock};
+use daw::tracks::TrackName;
+use super::Bass;
 
-static TEMPLATE: OnceLock<Mutex<Template>> = OnceLock::new();
-
-impl TemplateSource for Tom {
+impl TemplateSource for Bass {
     fn template(&self) -> Template {
-        TEMPLATE.get_or_init(|| {
-            Mutex::new(generate_tom_structure())
-        }).lock().unwrap().clone()
+        Template::builder("Bass")
+            .bus("Bass")
+                .bus("Guitar")
+                    .track("DI")
+                    .track("Amp")
+                .end()
+                .bus("Synth")
+                    .track("Bass Synth")
+                .end()
+            .end()
+            .build()
     }
 }
 
-/// Generate the default Tom track structure
-pub fn generate_tom_structure() -> Template {
-    Template::builder("Tom")
-        .bus("Tom")
-            .track("Tom 1").modes(&[GroupMode::Full, GroupMode::Recording])
-            .track("Tom 2").modes(&[GroupMode::Full, GroupMode::Recording])
-            .track("Tom 3").modes(&[GroupMode::Full, GroupMode::Recording])
-        .end()
-        .build()
-}
-
-
-impl Matcher for Tom {
+impl Matcher for Bass {
     type TrackName = ItemProperties;
     type Error = TemplateMatchError;
 
     fn find_best_match(&self, track_name: &Self::TrackName) -> Option<MatchResult> {
-        let search_name = match track_name.increment.as_ref() {
-            Some(inc) => format!("Tom {}", inc),
-            None => "Tom".to_string(),
-        };
-        
         crate::smart_template::features::matching::matcher::helpers::instrument_find_best_match(
             &self.template(),
             track_name,
-            &search_name,
+            "Bass",
         )
     }
 
@@ -57,10 +42,7 @@ impl Matcher for Tom {
         let new_track_name = TrackName::from(base_name
             .map(|s| s.to_string())
             .unwrap_or_else(|| {
-                match track_name.increment.as_ref() {
-                    Some(inc) => format!("Tom {}", inc),
-                    None => "Tom".to_string(),
-                }
+                track_name.original_name.clone().unwrap_or_else(|| "Bass".to_string())
             }));
         
         Ok((new_track_name, false))
