@@ -1,10 +1,9 @@
 use crate::smart_template::core::models::group_config::GroupConfig;
-use crate::smart_template::core::traits::{Group, Parser, Matcher, TemplateSource};
+use crate::smart_template::core::traits::{Group, Parser,  TemplateSource};
 use crate::smart_template::features::naming::item_properties::ItemProperties;
 use crate::smart_template::features::naming::item_properties_parser::ItemPropertiesParser;
-use crate::smart_template::features::matching::matcher::MatchResult;
-use crate::smart_template::core::errors::{TemplateParseError, TemplateMatchError};
-use daw::tracks::{Track, TrackName};
+use crate::smart_template::core::errors::{TemplateParseError };
+use daw::tracks::{Track };
 use super::Organ;
 
 impl Group for Organ {

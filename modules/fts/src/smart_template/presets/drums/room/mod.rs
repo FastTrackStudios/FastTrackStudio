@@ -1,10 +1,6 @@
 pub mod naming;
 pub mod template;
 
-pub use naming::*;
-pub use template::*;
-
-/// Room instrument consolidated struct
 pub struct Room {}
 
 impl Room {

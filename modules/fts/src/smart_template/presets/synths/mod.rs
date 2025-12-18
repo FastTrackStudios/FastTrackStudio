@@ -11,8 +11,6 @@ pub use chord::Chord;
 pub use pad::Pad;
 pub use arp::Arp;
 pub use fx::FX;
-pub use naming::*;
-pub use template::*;
 
 /// Synths instrument consolidated struct
 pub struct Synths {}

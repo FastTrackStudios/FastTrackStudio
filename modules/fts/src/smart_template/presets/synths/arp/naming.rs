@@ -3,10 +3,9 @@ use crate::smart_template::features::naming::item_properties_parser::ItemPropert
 use crate::smart_template::core::models::group_config::GroupConfig;
 use super::Arp;
 
-use crate::smart_template::core::traits::{Group, Parser, Matcher, TemplateSource};
-use crate::smart_template::features::matching::matcher::MatchResult;
-use crate::smart_template::core::errors::{TemplateParseError, TemplateMatchError};
-use daw::tracks::{Track, TrackName};
+use crate::smart_template::core::traits::{Group, Parser , TemplateSource};
+use crate::smart_template::core::errors::{TemplateParseError };
+use daw::tracks::{Track };
 
 impl Group for Arp {
     fn group_name(&self) -> &str {

@@ -3,8 +3,6 @@ use crate::smart_template::core::models::organization::OrganizationMode;
 pub mod naming;
 pub mod template;
 
-pub use naming::*;
-pub use template::*;
 
 /// Guitar Acoustic instrument
 pub struct GuitarAcoustic {

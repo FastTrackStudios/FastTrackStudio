@@ -1,8 +1,6 @@
 pub mod template;
 pub mod naming;
 
-pub use naming::*;
-pub use template::*;
 
 /// Synth Pad instrument
 pub struct Pad {}

@@ -11,10 +11,7 @@ pub use electric_keys::ElectricKeys;
 pub use organ::Organ;
 pub use harpsichord::Harpsichord;
 pub use clavichord::Clavichord;
-pub use naming::*;
-pub use template::*;
 
-/// Keys instrument consolidated struct
 pub struct Keys {}
 
 impl Keys {

@@ -10,11 +10,6 @@ pub mod room;
 
 pub mod drum_kit;
 
-use daw::tracks::Track;
-use crate::smart_template::core::models::template::Template;
-use crate::smart_template::core::traits::{Group, TemplateSource};
-
-// Re-export instrument-specific structs
 pub use kick::Kick;
 pub use snare::Snare;
 pub use tom::{Tom, TomMapper};

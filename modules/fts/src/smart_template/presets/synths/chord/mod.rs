@@ -1,8 +1,6 @@
 pub mod template;
 pub mod naming;
 
-pub use naming::*;
-pub use template::*;
 
 /// Synth Chord instrument
 pub struct Chord {}

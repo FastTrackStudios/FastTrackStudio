@@ -1,8 +1,6 @@
 pub mod template;
 pub mod naming;
 
-pub use naming::*;
-pub use template::*;
 
 /// Synth FX instrument
 pub struct FX {}
