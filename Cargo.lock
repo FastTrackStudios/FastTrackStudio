@@ -1808,6 +1808,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
+ "colored 2.2.0",
  "derive_builder",
  "enum-iterator",
  "futures-util",

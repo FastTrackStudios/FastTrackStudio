@@ -9,8 +9,10 @@ pub mod fx_chain;
 pub mod track_chunk;
 pub mod reactive;
 pub mod hierarchy_builder;
+pub mod types;
 
 pub use track::Track;
+pub use types::{TrackName, TrackGuid, MetadataKey};
 pub use track_list::{AddChild, PrintTrackTree, IntoTrackVec};
 pub use hierarchy_builder::{TrackHierarchyBuilder, build_hierarchy, build_track_hierarchy};
 pub use track_chunk::{parse_track_chunk, ParsedTrackChunk};

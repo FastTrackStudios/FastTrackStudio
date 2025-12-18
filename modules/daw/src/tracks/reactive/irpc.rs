@@ -155,7 +155,6 @@ impl TrackApi {
                     track_index,
                     track_name = %track.name,
                     track_color = ?track.color,
-                    track_depth = track.track_depth.value(),
                     "🎵 [Tracks Service] Track changed - emitting to API"
                 );
                 let _ = tx.send(TrackUpdateMessage::TrackChanged(TrackChangedMessage {

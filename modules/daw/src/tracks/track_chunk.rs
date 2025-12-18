@@ -6,7 +6,7 @@
 //! This parser converts REAPER state chunk format to daw::tracks::Track structs.
 
 use crate::tracks::Track;
-use crate::tracks::api::folder::{TcpFolderState, McpFolderState, TrackDepth, FolderDepthChange};
+use crate::tracks::api::folder::{TcpFolderState, McpFolderState, FolderDepthChange};
 use crate::tracks::api::solo::SoloMode;
 use crate::tracks::api::automation::AutomationMode;
 use crate::tracks::api::timebase::TrackTimebase;
@@ -242,7 +242,6 @@ pub struct ParsedTrackChunk {
     is_folder: bool,
     folder_state_tcp: Option<TcpFolderState>,
     folder_state_mcp: Option<McpFolderState>,
-    track_depth: TrackDepth,
     folder_depth_change: FolderDepthChange,
     bus_compact: Option<BusCompactSettings>,
     locked: bool,
@@ -273,7 +272,6 @@ impl ParsedTrackChunk {
             is_folder: false,
             folder_state_tcp: None,
             folder_state_mcp: None,
-            track_depth: TrackDepth::default(),
             folder_depth_change: FolderDepthChange::Normal,
             bus_compact: None,
             locked: false,
@@ -306,7 +304,6 @@ impl ParsedTrackChunk {
         track.is_folder = self.is_folder;
         track.folder_state_tcp = self.folder_state_tcp;
         track.folder_state_mcp = self.folder_state_mcp;
-        track.track_depth = self.track_depth;
         track.folder_depth_change = self.folder_depth_change;
         track.bus_compact = self.bus_compact;
         track.selected = selected;

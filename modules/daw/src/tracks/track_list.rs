@@ -107,7 +107,7 @@ impl AddChild for Vec<Track> {
         
         // Find the position of the track with the given name
         let insert_pos = self.iter()
-            .position(|t| t.name == after_track_name)?;
+            .position(|t| t.name.0 == after_track_name)?;
         
         // Insert children after the found track
         // We need to adjust folder_depth_change for the inserted tracks
@@ -122,13 +122,12 @@ impl AddChild for Vec<Track> {
         // For now, let's insert the children right after the track
         // and adjust the closing logic
         
-        // Calculate the depth for inserted children
-        let insert_depth = after_track.track_depth;
+        // Calculate the depth for inserted children (depth is calculated, not stored)
+        // The depth will be calculated correctly when the tree is printed
         
-        // Update depths and folder_depth_change for inserted children
+        // Update folder_depth_change for inserted children
         let mut inserted_children = children_vec;
         for child in &mut inserted_children {
-            child.track_depth = insert_depth;
             // Preserve folder starts, but set normal tracks appropriately
             if !child.is_folder && child.folder_depth_change != FolderDepthChange::FolderStart {
                 child.folder_depth_change = FolderDepthChange::Normal;
@@ -205,16 +204,122 @@ impl PrintTrackTree for Vec<Track> {
 
 impl PrintTrackTree for &[Track] {
     fn print_tree(&self) -> String {
+        use colored::Colorize;
+        
         let tracks = self;
         
         if tracks.is_empty() {
             return "(empty track list)\n".to_string();
         }
         
+        // Folder icon
+        const FOLDER_ICON: &str = "📁";
+        
+        // Helper function to calculate depth for a track at a given index
+        fn calculate_depth_at(tracks: &[Track], index: usize) -> u32 {
+            Track::calculate_depth(tracks, index)
+        }
+        
+        // Helper function to determine group color based on track
+        // Also takes parent track name for better context
+        fn get_group_color(track: &Track, parent_name: Option<&str>) -> Option<colored::ColoredString> {
+            use colored::Colorize;
+            
+            // Try to parse ItemProperties from ext_state
+            if let Some(ref ext_state) = track.ext_state {
+                if let Ok(props) = serde_json::from_str::<serde_json::Value>(ext_state) {
+                    if let Some(group_prefix) = props.get("group_prefix").and_then(|v| v.as_str()) {
+                        return match group_prefix {
+                            "Kick" | "Snare" | "Tom" | "Cymbals" | "Room" | "K" | "S" | "T" | "C" | "R" => {
+                                Some(track.name.0.red().bold())
+                            },
+                            "Bass" | "B" => Some(track.name.0.yellow().bold()),
+                            "Guitar Electric" | "GTR E" | "G E" => Some(track.name.0.blue().bold()),
+                            "Guitar Acoustic" | "GTR A" | "G A" => {
+                                Some(track.name.0.truecolor(46, 139, 87).bold()) // Sea green
+                            },
+                            "Keys" => Some(track.name.0.green().bold()),
+                            "Synths" => Some(track.name.0.purple().bold()),
+                            "Vocals" | "V" => Some(track.name.0.truecolor(255, 192, 203).bold()), // Pink
+                            "BGVs" | "V BGVs" => Some(track.name.0.purple().bold()),
+                            _ => None,
+                        };
+                    }
+                }
+            }
+            
+            // Fallback: infer from track name and parent context
+            let name_lower = track.name.to_lowercase();
+            let parent_lower = parent_name.map(|s| s.to_lowercase());
+            
+            // Drums: Red
+            if name_lower == "kick" || name_lower == "snare" || name_lower == "tom" || 
+               name_lower == "cymbals" || name_lower == "room" || name_lower == "sum" ||
+               name_lower == "in" || name_lower == "out" || name_lower == "trig" ||
+               name_lower == "top" || name_lower == "bottom" || name_lower == "verb" ||
+               name_lower == "sub" || name_lower == "amb" || name_lower == "rooms" ||
+               name_lower == "highhat" || name_lower == "oh" || name_lower == "ride" ||
+               name_lower == "1" || name_lower == "2" ||
+               parent_lower.as_ref().map_or(false, |p| {
+                   p == "kick" || p == "snare" || p == "tom" || p == "cymbals" || p == "room" || p == "sum"
+               }) {
+                return Some(track.name.0.red().bold());
+            }
+            
+            // Bass: Yellow
+            if name_lower == "di" || name_lower == "amp" ||
+               parent_lower.as_ref().map_or(false, |p| p.contains("bass")) {
+                return Some(track.name.0.yellow().bold());
+            }
+            
+            // Guitar Electric: Blue
+            if name_lower == "clean" || name_lower == "crunch" || name_lower == "lead" {
+                return Some(track.name.0.blue().bold());
+            }
+            
+            // Guitar Acoustic: Sea Green
+            if name_lower == "main" || name_lower == "verse" || name_lower == "chorus" {
+                // Check if we're in a guitar context - for now assume acoustic if it's these names
+                return Some(track.name.0.truecolor(46, 139, 87).bold()); // Sea green
+            }
+            
+            // Keys: Green
+            if name_lower == "piano" || name_lower == "electric" || name_lower == "organ" {
+                return Some(track.name.0.green().bold());
+            }
+            
+            // Synths: Purple
+            if name_lower == "pad" || name_lower == "bass" {
+                return Some(track.name.0.purple().bold());
+            }
+            
+            // Vocals: Pink
+            if name_lower == "main" || name_lower == "double" {
+                // Could be vocals or acoustic guitar - need better context
+                // For now, if it's "main" or "double" without other context, assume vocals
+                return Some(track.name.0.truecolor(255, 192, 203).bold()); // Pink
+            }
+            
+            // BGVs: Purple
+            if name_lower == "soprano" || name_lower == "alto" || name_lower == "tenor" || name_lower == "unison" {
+                return Some(track.name.0.purple().bold());
+            }
+            
+            None
+        }
+        
         let mut output = String::new();
         
+        // Track parent names for context
+        let mut parent_stack: Vec<&str> = Vec::new();
+        
         for (i, track) in tracks.iter().enumerate() {
-            let depth = track.track_depth.value() as usize;
+            let depth = calculate_depth_at(tracks, i) as usize;
+            
+            // Update parent stack based on depth
+            while parent_stack.len() > depth {
+                parent_stack.pop();
+            }
             
             // Build prefix based on depth
             let prefix = "    ".repeat(depth);
@@ -224,7 +329,7 @@ impl PrintTrackTree for &[Track] {
                 let next_track_at_same_or_lower = tracks.iter()
                     .enumerate()
                     .skip(i + 1)
-                    .find(|(_, t)| t.track_depth.value() as usize <= depth);
+                    .find(|(j, _)| calculate_depth_at(tracks, *j) as usize <= depth);
                 
                 next_track_at_same_or_lower.is_none() || 
                 track.folder_depth_change.closes_levels()
@@ -232,15 +337,28 @@ impl PrintTrackTree for &[Track] {
             
             let connector = if is_last_at_depth { "└── " } else { "├── " };
             
-            // Write the track
-            output.push_str(&format!("{}{}{}", prefix, connector, track.name));
+            // Color the connector (tree lines) in bright black (gray)
+            let colored_connector = connector.bright_black();
             
-            // Show folder indicator
+            // Get parent name for context
+            let parent_name = parent_stack.last().copied();
+            
+            // Get group color or use default
+            let colored_name = get_group_color(track, parent_name)
+                .unwrap_or_else(|| track.name.0.normal());
+            
+            // Format with folder icon after name if it's a folder
             if track.is_folder {
-                output.push_str(" [folder]");
+                output.push_str(&format!("{}{}{} {}\n", 
+                    prefix, colored_connector, colored_name, FOLDER_ICON));
+                // Add to parent stack
+                if parent_stack.len() <= depth {
+                    parent_stack.push(&track.name.0);
+                }
+            } else {
+                output.push_str(&format!("{}{}{}\n", 
+                    prefix, colored_connector, colored_name));
             }
-            
-            output.push('\n');
         }
         
         output

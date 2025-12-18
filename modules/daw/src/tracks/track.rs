@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use derive_builder::Builder;
 use std::collections::HashMap;
-use crate::tracks::api::folder::{TcpFolderState, McpFolderState, TrackDepth, FolderDepthChange};
+use crate::tracks::api::folder::{TcpFolderState, McpFolderState, FolderDepthChange};
 use crate::tracks::api::automation::AutomationMode;
 use crate::tracks::api::free_mode::FreeMode;
 use crate::tracks::api::fixed_lanes::{FixedLanesSettings, LaneSoloSettings, LaneRecordSettings, LaneNameSettings};
@@ -17,6 +17,7 @@ use crate::tracks::envelope::ExtensionData;
 use crate::tracks::item::Item;
 use crate::tracks::envelope::Envelope;
 use crate::tracks::fx_chain::FxChain;
+use crate::tracks::types::{TrackName, TrackGuid, MetadataKey};
 
 /// Represents a track in a project
 /// 
@@ -30,11 +31,11 @@ pub struct Track {
     /// Unique identifier for this track
     pub id: Option<uuid::Uuid>,
     /// Track name (NAME)
-    pub name: String,
+    pub name: TrackName,
     /// Track index in the project
     pub index: Option<usize>,
     /// Track GUID (TRACKID) - REAPER track id
-    pub guid: Option<String>,
+    pub guid: Option<TrackGuid>,
     /// Whether track controls are locked (LOCK)
     pub locked: bool,
     /// Peak color (PEAKCOL) - default is 16576
@@ -71,9 +72,6 @@ pub struct Track {
     pub folder_state_tcp: Option<TcpFolderState>,
     /// Folder state for MCP (Mixer Control Panel)
     pub folder_state_mcp: Option<McpFolderState>,
-    /// Track depth (for folder hierarchy) - absolute cumulative nesting level
-    /// This is calculated by summing all folder_depth_change values from track 0
-    pub track_depth: TrackDepth,
     /// Folder depth change - relative change from previous track (from ISBUS field 2)
     /// - 0 = normal track
     /// - 1 = folder parent (starts new folder)
@@ -188,7 +186,7 @@ pub struct Track {
     
     // === Metadata ===
     /// Optional metadata
-    pub metadata: HashMap<String, String>,
+    pub metadata: HashMap<MetadataKey, String>,
     
     // === Extension State ===
     /// Extension-specific state data (ExtState)
@@ -199,11 +197,54 @@ pub struct Track {
 
 impl Default for Track {
     fn default() -> Self {
-        Self::new(String::new())
+        Self::new(TrackName::default())
     }
 }
 
 impl Track {
+    /// Calculate the track depth by summing folder_depth_change values from previous tracks
+    /// 
+    /// This calculates the absolute cumulative nesting level by iterating through
+    /// all tracks from the beginning up to (but not including) the current track,
+    /// and summing their folder_depth_change values.
+    /// 
+    /// The depth represents how many folder levels deep this track is:
+    /// - 0 = top-level track (not in any folder)
+    /// - 1 = inside one folder
+    /// - 2 = inside two nested folders
+    /// - etc.
+    /// 
+    /// # Arguments
+    /// * `tracks` - The full list of tracks (must include this track)
+    /// * `index` - The index of this track in the list
+    /// 
+    /// # Returns
+    /// The calculated depth (0 = top-level, 1 = inside one folder, etc.)
+    pub fn calculate_depth(tracks: &[Track], index: usize) -> u32 {
+        let mut depth = 0i32;
+        // Sum folder_depth_change from all previous tracks (not including current)
+        for i in 0..index.min(tracks.len()) {
+            depth += tracks[i].folder_depth_change.to_reaper_value();
+        }
+        depth.max(0) as u32
+    }
+    
+    /// Calculate the track depth for this track within a track list
+    /// 
+    /// This is a convenience method that finds this track in the list and calculates its depth.
+    /// 
+    /// # Arguments
+    /// * `tracks` - The full list of tracks (must include this track)
+    /// 
+    /// # Returns
+    /// The calculated depth, or 0 if the track is not found
+    pub fn depth_in_list(&self, tracks: &[Track]) -> u32 {
+        tracks.iter()
+            .position(|t| std::ptr::eq(t, self))
+            .map(|idx| Self::calculate_depth(tracks, idx))
+            .unwrap_or(0)
+    }
+    
     /// Create a new track builder
     /// 
     /// This provides a fluent interface for building tracks:
@@ -220,11 +261,11 @@ impl Track {
     }
     
     /// Create a new track
-    pub fn new(name: String) -> Self {
+    pub fn new(name: impl Into<TrackName>) -> Self {
         Self {
             // Basic properties
             id: None,
-            name,
+            name: name.into(),
             index: None,
             guid: None,
             locked: false,
@@ -249,7 +290,6 @@ impl Track {
             invert_phase: false,
             folder_state_tcp: None,
             folder_state_mcp: None,
-            track_depth: TrackDepth::default(),
             folder_depth_change: FolderDepthChange::Normal,
             is_folder: false,
             bus_compact: None,
@@ -331,25 +371,25 @@ impl Track {
     }
 
     /// Create a new track with ID
-    pub fn with_id(id: uuid::Uuid, name: String) -> Self {
+    pub fn with_id(id: uuid::Uuid, name: impl Into<TrackName>) -> Self {
         let mut track = Self::new(name);
         track.id = Some(id);
         track
     }
 
     /// Get metadata value
-    pub fn get_metadata(&self, key: &str) -> Option<&String> {
-        self.metadata.get(key)
+    pub fn get_metadata(&self, key: impl Into<MetadataKey>) -> Option<&String> {
+        self.metadata.get(&key.into())
     }
 
     /// Set metadata value
-    pub fn set_metadata<K: Into<String>, V: Into<String>>(&mut self, key: K, value: V) {
+    pub fn set_metadata<K: Into<MetadataKey>, V: Into<String>>(&mut self, key: K, value: V) {
         self.metadata.insert(key.into(), value.into());
     }
 
     /// Remove metadata value
-    pub fn remove_metadata(&mut self, key: &str) -> Option<String> {
-        self.metadata.remove(key)
+    pub fn remove_metadata(&mut self, key: impl Into<MetadataKey>) -> Option<String> {
+        self.metadata.remove(&key.into())
     }
 
     /// Get FTS-Item-Properties from ext_state
@@ -395,6 +435,11 @@ impl TrackBuilder {
         if let Some(id) = self.id {
             track.id = id;
         }
+        
+        if let Some(guid) = self.guid {
+            track.guid = guid;
+        }
+
         // Merge metadata if provided
         if let Some(metadata) = self.metadata {
             for (k, v) in metadata {
