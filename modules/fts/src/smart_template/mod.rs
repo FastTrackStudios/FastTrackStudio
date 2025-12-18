@@ -11,6 +11,7 @@ pub mod utils;
 
 // Re-export core types for convenience
 pub use core::traits::*;
+pub use core::errors::*;
 pub use core::models::template::Template;
 pub use core::models::group_config::{GroupConfig, InsertMode, PatternCategory};
 pub use core::models::template_config::TemplateConfig;

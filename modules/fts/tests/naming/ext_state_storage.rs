@@ -3,7 +3,7 @@
 //! This test verifies that ItemProperties can be correctly serialized to JSON
 //! and stored in Track.ext_state, then deserialized back.
 
-use fts::smart_template::naming::{
+use fts::smart_template::{
     parse_fts_item_properties,
     ItemProperties,
     TrackItemPropertiesExt,
@@ -16,20 +16,15 @@ fn test_store_and_retrieve_item_properties() {
     let props = parse_fts_item_properties(track_name, None);
     
     // Create a track
-    let mut track = {
-        let mut builder = Track::builder();
-        builder
-            .name(track_name.to_string())
-            .volume(1.0)
-            .pan(0.0)
-            .muted(false)
-            .solo_state(daw::tracks::api::solo::SoloMode::Off)
-            .automation_mode(daw::tracks::api::automation::AutomationMode::TrimRead)
-            .invert_phase(false)
-            .show_in_mixer(true)
-            .show_in_track_list(true);
-        builder.build()
-    };
+    let mut track = Track::new(track_name);
+    track.volume = 1.0;
+    track.pan = 0.0;
+    track.muted = false;
+    track.solo_state = daw::tracks::api::solo::SoloMode::Off;
+    track.automation_mode = daw::tracks::api::automation::AutomationMode::TrimRead;
+    track.invert_phase = false;
+    track.show_in_mixer = true;
+    track.show_in_track_list = true;
     
     // Store ItemProperties in ext_state
     track.set_item_properties(&props)
@@ -66,20 +61,7 @@ fn test_store_and_retrieve_item_properties() {
 #[test]
 fn test_store_multiple_times_overwrites() {
     let track_name = "Bass Guitar DI";
-    let mut track = {
-        let mut builder = Track::builder();
-        builder
-            .name(track_name.to_string())
-            .volume(1.0)
-            .pan(0.0)
-            .muted(false)
-            .solo_state(daw::tracks::api::solo::SoloMode::Off)
-            .automation_mode(daw::tracks::api::automation::AutomationMode::TrimRead)
-            .invert_phase(false)
-            .show_in_mixer(true)
-            .show_in_track_list(true);
-        builder.build()
-    };
+    let mut track = Track::new(track_name);
     
     // Store first ItemProperties
     let props1 = parse_fts_item_properties("Bass Guitar DI", None);
@@ -102,20 +84,7 @@ fn test_store_multiple_times_overwrites() {
 
 #[test]
 fn test_get_item_properties_returns_none_when_not_set() {
-    let track = {
-        let mut builder = Track::builder();
-        builder
-            .name("Test Track".to_string())
-            .volume(1.0)
-            .pan(0.0)
-            .muted(false)
-            .solo_state(daw::tracks::api::solo::SoloMode::Off)
-            .automation_mode(daw::tracks::api::automation::AutomationMode::TrimRead)
-            .invert_phase(false)
-            .show_in_mixer(true)
-            .show_in_track_list(true);
-        builder.build()
-    };
+    let track = Track::new("Test Track");
     
     // Should return None when ext_state is not set
     assert_eq!(track.get_item_properties(), None);
@@ -123,20 +92,7 @@ fn test_get_item_properties_returns_none_when_not_set() {
 
 #[test]
 fn test_parse_and_store_convenience_method() {
-    let mut track = {
-        let mut builder = Track::builder();
-        builder
-            .name("GTR E Clean".to_string())
-            .volume(1.0)
-            .pan(0.0)
-            .muted(false)
-            .solo_state(daw::tracks::api::solo::SoloMode::Off)
-            .automation_mode(daw::tracks::api::automation::AutomationMode::TrimRead)
-            .invert_phase(false)
-            .show_in_mixer(true)
-            .show_in_track_list(true);
-        builder.build()
-    };
+    let mut track = Track::new("GTR E Clean");
     
     // Use the convenience method to parse and store
     track.parse_and_store_item_properties()
@@ -148,8 +104,6 @@ fn test_parse_and_store_convenience_method() {
     
     // Verify it parsed correctly
     assert_eq!(retrieved.group_prefix, Some("GTR".to_string()));
-    // Note: arrangement might not be extracted if "E" is matched first
-    // The parser should still work, so we just verify group_prefix was set
     assert_eq!(retrieved.original_name, Some("GTR E Clean".to_string()));
 }
 

@@ -1,20 +1,19 @@
-pub mod naming;
 pub mod template;
+pub mod naming;
 
 pub use naming::*;
 pub use template::*;
 
-/// Room instrument consolidated struct
-pub struct Room {}
+/// Synth Lead instrument
+pub struct Lead {}
 
-impl Room {
-    /// Create a new Room instrument
+impl Lead {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl Default for Room {
+impl Default for Lead {
     fn default() -> Self {
         Self::new()
     }

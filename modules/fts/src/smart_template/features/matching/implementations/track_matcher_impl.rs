@@ -42,7 +42,7 @@ impl TrackMatchingService {
         P::Output: TrackNameLike,
     {
         // Parse the track name
-        let parsed = parser.parse(track_name).ok()?;
+        let parsed = parser .parse_item_properties(track_name).ok()?;
         
         // Match to existing tracks
         let match_result = self.matcher.match_track(&parsed, template)?;

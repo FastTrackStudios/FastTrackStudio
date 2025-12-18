@@ -42,7 +42,7 @@ impl TrackItemPropertiesExt for Track {
     
     fn parse_and_store_item_properties(&mut self) -> Result<(), serde_json::Error> {
         let parser = ItemPropertiesParser::new();
-        let props = parser.parse(&self.name.0);
+        let props = parser .parse_item_properties(&self.name.0);
         self.set_item_properties(&props)
     }
 }

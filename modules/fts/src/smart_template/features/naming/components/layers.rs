@@ -35,7 +35,7 @@ impl Default for LayersParser {
 }
 
 impl ComponentParser for LayersParser {
-    fn parse(&self, context: &mut ParseContext) -> ComponentParseResult {
+    fn parse_item_properties(&self, context: &mut ParseContext) -> ComponentParseResult {
         // First check group-specific patterns
         if let Some(patterns) = self.group_patterns(context) {
             for pattern in &patterns {

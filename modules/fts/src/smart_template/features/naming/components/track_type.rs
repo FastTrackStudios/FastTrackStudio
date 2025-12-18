@@ -40,7 +40,7 @@ impl Default for TrackTypeParser {
 }
 
 impl ComponentParser for TrackTypeParser {
-    fn parse(&self, context: &mut ParseContext) -> ComponentParseResult {
+    fn parse_item_properties(&self, context: &mut ParseContext) -> ComponentParseResult {
         // First, try to extract from parentheses
         if let Some(captures) = TRACK_TYPE_REGEX.captures(context.original_name) {
             if let Some(track_type_match) = captures.get(2) {

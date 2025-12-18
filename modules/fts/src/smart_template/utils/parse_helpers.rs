@@ -42,15 +42,15 @@ pub fn parse_fts_structure_with_folders(track_names: &[&str], folders: DefaultFo
     let mut parsed_tracks = Vec::new();
     
     for track_name in track_names {
-        let group = if kick.parse(track_name).is_ok() {
+        let group = if kick .parse_item_properties(track_name).is_ok() {
             Some("kick")
-        } else if snare.parse(track_name).is_ok() {
+        } else if snare .parse_item_properties(track_name).is_ok() {
             Some("snare")
-        } else if tom.parse(track_name).is_ok() {
+        } else if tom .parse_item_properties(track_name).is_ok() {
             Some("tom")
-        } else if cymbals.parse(track_name).is_ok() {
+        } else if cymbals .parse_item_properties(track_name).is_ok() {
             Some("cymbals")
-        } else if room.parse(track_name).is_ok() {
+        } else if room .parse_item_properties(track_name).is_ok() {
             Some("room")
         } else {
             None

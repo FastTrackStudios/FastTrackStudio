@@ -1,7 +1,7 @@
 //! Drum Kit template generator and matcher implementation
 
 use crate::smart_template::core::traits::{Group, TemplateSource, Matcher};
-use crate::smart_template::features::matching::matcher::{MatchResult, MatchType};
+use crate::smart_template::features::matching::matcher::MatchResult;
 use crate::smart_template::core::models::template::Template;
 use crate::smart_template::utils::track_helpers::{create_track, TrackExt};
 use crate::smart_template::core::models::group_config::GroupConfig;
@@ -10,33 +10,44 @@ use crate::smart_template::presets::drums::snare::Snare;
 use crate::smart_template::presets::drums::tom::Tom;
 use crate::smart_template::presets::drums::cymbals::Cymbals;
 use crate::smart_template::presets::drums::room::Room;
+use crate::smart_template::core::errors::{TemplateMatchError};
 use daw::tracks::{TrackName, Track};
 
 /// Drum Kit consolidated struct
-pub struct DrumKit {
-    pub config: GroupConfig,
-    pub template: Template,
-}
+pub struct DrumKit {}
 
 impl DrumKit {
     /// Create a new Drum Kit instrument
     pub fn new() -> Self {
-        let config = GroupConfig {
-            name: "Drum Kit".to_string(),
-            ..Default::default()
-        };
-        let mut drum_kit = Self {
-            config,
-            template: Template {
-                name: TrackName::from("Drum Kit"),
-                tracks: Vec::new(),
-            },
-        };
-        drum_kit.template = drum_kit.generate_template();
-        drum_kit
+        Self {}
+    }
+}
+
+impl Default for DrumKit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Group for DrumKit {
+    fn group_name(&self) -> &str {
+        "Drum Kit"
     }
 
-    fn generate_template(&self) -> Template {
+    fn group_config(&self) -> GroupConfig {
+        GroupConfig {
+            name: "Drum Kit".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn default_tracklist(&self) -> Vec<Track> {
+        self.template().tracks
+    }
+}
+
+impl TemplateSource for DrumKit {
+    fn template(&self) -> Template {
         let mut tracks = Vec::new();
         
         // Drum Kit (BUS) - top-level parent
@@ -68,54 +79,29 @@ impl DrumKit {
     }
 }
 
-impl Default for DrumKit {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Group for DrumKit {
-    fn name(&self) -> &str {
-        "Drum Kit"
-    }
-
-    fn config(&self) -> &GroupConfig {
-        &self.config
-    }
-
-    fn default_tracklist(&self) -> Vec<Track> {
-        self.template.tracks.clone()
-    }
-}
-
-impl TemplateSource for DrumKit {
-    fn template(&self) -> Template {
-        self.template.clone()
-    }
-}
-
 impl Matcher for DrumKit {
     type TrackName = crate::smart_template::features::naming::item_properties::ItemProperties;
-    type Error = DrumKitMatchError;
+    type Error = TemplateMatchError;
     
     fn find_best_match(&self, track_name: &Self::TrackName) -> Option<MatchResult> {
         let search_name = track_name.original_name.as_deref().unwrap_or("");
+        let template = self.template();
         
-        if let Some(track) = self.template.tracks.iter()
+        if let Some(track) = template.tracks.iter()
             .find(|t| t.name.eq_ignore_case(search_name)) {
             return Some(MatchResult {
                 track_name: track.name.clone(),
-                match_type: MatchType::Exact,
+                match_type: crate::smart_template::features::matching::matcher::MatchType::Exact,
                 score: 100,
                 use_takes: false,
             });
         }
         
-        if let Some(track) = self.template.tracks.iter()
+        if let Some(track) = template.tracks.iter()
             .find(|t| t.name.contains_ignore_case(search_name)) {
             return Some(MatchResult {
                 track_name: track.name.clone(),
-                match_type: MatchType::Partial,
+                match_type: crate::smart_template::features::matching::matcher::MatchType::Partial,
                 score: 60,
                 use_takes: false,
             });
@@ -135,19 +121,6 @@ impl Matcher for DrumKit {
                 track_name.original_name.clone().unwrap_or_else(|| "Unknown".to_string())
             }));
         
-        self.template.tracks.push(create_track(
-            &new_track_name.0,
-            None,
-            Some("Drum Kit"),
-            &[],
-        ));
-        
         Ok((new_track_name, false))
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum DrumKitMatchError {
-    #[error("Match error: {0}")]
-    Other(String),
 }

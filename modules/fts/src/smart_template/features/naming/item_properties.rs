@@ -1,5 +1,5 @@
 //! Track name domain model
-//! 
+//!
 //! Represents the structured naming convention components for audio tracks and files.
 //! This is a pure domain model with no parsing logic.
 
@@ -20,7 +20,7 @@ pub enum ComponentType {
     Arrangement,
     /// Section of the song (e.g., "Intro", "Verse", "Chorus")
     Section,
-    /// Layer information (e.g., "DBL", "OCT", "L", "R")
+    /// Layer information (e.g., "DBL", "OCT")
     Layers,
     /// Multi-mic positions (e.g., "Top", "Bottom", "In", "Out")
     MultiMic,
@@ -44,50 +44,50 @@ pub enum ComponentType {
 pub struct ItemProperties {
     /// Recording tag (e.g., "PASS-01", "TAKE-02", "REC-01")
     pub rec_tag: Option<String>,
-    
+
     /// Group prefix (e.g., "D", "GTR", "Bass", "SY")
     pub group_prefix: Option<String>,
-    
+
     /// Sub-types within the group (e.g., ["Kick"], ["SY"], ["Electric"])
     pub sub_type: Option<Vec<String>>,
-    
+
     /// Performer name (e.g., "Cody", "Joshua", "Sarah")
     pub performer: Option<String>,
-    
+
     /// Arrangement style (e.g., "Rhythm", "Solo", "Amb", "Crunch")
     pub arrangement: Option<String>,
-    
+
     /// Section of the song (e.g., "Intro", "Verse", "Chorus", "Bridge")
     pub section: Option<String>,
-    
+
     /// Layer information (e.g., "DBL", "OCT", "L", "R", "Stereo")
     pub layers: Option<String>,
-    
+
     /// Multi-mic positions (e.g., ["Top", "Bottom"], ["In", "Out"], ["Close", "Room"])
     pub multi_mic: Option<Vec<String>>,
-    
+
     /// Effect/send indicators (e.g., ["Verb"], ["Delay"], ["Chorus", "Verb"])
     pub effect: Option<Vec<String>>,
-    
+
     /// Increment number for numbered instances (e.g., "1", "2" for Tom 1, Tom 2)
     pub increment: Option<String>,
-    
+
     /// Channel information (e.g., "L", "R", "C", "Left", "Right")
     pub channel: Option<String>,
-    
+
     /// Playlist identifier (e.g., ".1", ".2", ".3", ".A", ".B")
     pub playlist: Option<String>,
-    
+
     /// Track type indicator (e.g., "BUS", "SUM", "MIDI", "DI", "NOFX")
     pub track_type: Option<String>,
-    
+
     /// Words that didn't match any known patterns (for validation/debugging)
     pub unparsed_words: Option<Vec<String>>,
-    
+
     /// Original input string before parsing (preserves full context for later analysis)
     /// This allows removing context based on matched group, but still checking the original context later
     pub original_name: Option<String>,
-    
+
     /// File extension if parsed from a filename (e.g., ".wav", ".aiff", ".flac")
     /// This is typically not included in string formatting output
     pub file_extension: Option<String>,
@@ -98,7 +98,7 @@ impl ItemProperties {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Check if the track name is empty (has no meaningful components)
     pub fn is_empty(&self) -> bool {
         self.rec_tag.is_none()
@@ -115,9 +115,9 @@ impl ItemProperties {
             && self.playlist.is_none()
             && self.track_type.is_none()
             && self.unparsed_words.is_none()
-            // Note: original_name is not checked as it's metadata, not a component
+        // Note: original_name is not checked as it's metadata, not a component
     }
-    
+
     /// Check if a specific component type is present
     pub fn has_component(&self, component_type: ComponentType) -> bool {
         match component_type {
@@ -137,7 +137,7 @@ impl ItemProperties {
             ComponentType::Unknown => false,
         }
     }
-    
+
     /// Get the value of a component as a string (for display purposes)
     pub fn get_component_value(&self, component_type: ComponentType) -> Option<String> {
         match component_type {
@@ -157,34 +157,60 @@ impl ItemProperties {
             ComponentType::Unknown => None,
         }
     }
-    
+
     /// Count the number of components that are present
     pub fn component_count(&self) -> usize {
         let mut count = 0;
-        if self.rec_tag.is_some() { count += 1; }
-        if self.group_prefix.is_some() { count += 1; }
-        if self.sub_type.is_some() { count += 1; }
-        if self.performer.is_some() { count += 1; }
-        if self.arrangement.is_some() { count += 1; }
-        if self.section.is_some() { count += 1; }
-        if self.layers.is_some() { count += 1; }
-        if self.multi_mic.is_some() { count += 1; }
-        if self.effect.is_some() { count += 1; }
-        if self.increment.is_some() { count += 1; }
-        if self.channel.is_some() { count += 1; }
-        if self.playlist.is_some() { count += 1; }
-        if self.track_type.is_some() { count += 1; }
+        if self.rec_tag.is_some() {
+            count += 1;
+        }
+        if self.group_prefix.is_some() {
+            count += 1;
+        }
+        if self.sub_type.is_some() {
+            count += 1;
+        }
+        if self.performer.is_some() {
+            count += 1;
+        }
+        if self.arrangement.is_some() {
+            count += 1;
+        }
+        if self.section.is_some() {
+            count += 1;
+        }
+        if self.layers.is_some() {
+            count += 1;
+        }
+        if self.multi_mic.is_some() {
+            count += 1;
+        }
+        if self.effect.is_some() {
+            count += 1;
+        }
+        if self.increment.is_some() {
+            count += 1;
+        }
+        if self.channel.is_some() {
+            count += 1;
+        }
+        if self.playlist.is_some() {
+            count += 1;
+        }
+        if self.track_type.is_some() {
+            count += 1;
+        }
         count
     }
-    
+
     /// Basic validation: checks if the track name has at least one meaningful component
-    /// 
+    ///
     /// This is a simple validation that can be expanded by parsers with more
     /// domain-specific validation logic.
     pub fn is_valid(&self) -> bool {
         !self.is_empty()
     }
-    
+
     /// Check if this track name represents a valid file (has extension or meaningful content)
     pub fn is_valid_file(&self) -> bool {
         self.file_extension.is_some() || !self.is_empty()
@@ -196,13 +222,12 @@ impl crate::smart_template::features::naming::track_name::TrackNameLike for Item
     fn group_prefix(&self) -> Option<&str> {
         self.group_prefix.as_deref()
     }
-    
+
     fn sub_type(&self) -> Option<&[String]> {
         self.sub_type.as_deref()
     }
-    
+
     fn original_name(&self) -> Option<&str> {
         self.original_name.as_deref()
     }
 }
-

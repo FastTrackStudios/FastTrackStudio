@@ -27,7 +27,7 @@ impl Default for PlaylistParser {
 }
 
 impl ComponentParser for PlaylistParser {
-    fn parse(&self, context: &mut ParseContext) -> ComponentParseResult {
+    fn parse_item_properties(&self, context: &mut ParseContext) -> ComponentParseResult {
         // Match playlist patterns at the end of the name
         if let Some(captures) = PLAYLIST_REGEX.captures(context.original_name) {
             if let Some(matched) = captures.get(0) {

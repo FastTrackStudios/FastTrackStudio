@@ -37,7 +37,7 @@ impl Default for RecTagParser {
 }
 
 impl ComponentParser for RecTagParser {
-    fn parse(&self, context: &mut ParseContext) -> ComponentParseResult {
+    fn parse_item_properties(&self, context: &mut ParseContext) -> ComponentParseResult {
         // Try to match RecTag pattern using regex
         if let Some(captures) = REC_TAG_REGEX.captures(context.original_name) {
             if let Some(full_match) = captures.get(0) {

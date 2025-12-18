@@ -5,10 +5,123 @@
 //! (context) while producing a new template (immutable and stateless).
 
 use crate::smart_template::core::models::template::Template;
+use crate::smart_template::core::models::organization::OrganizationMode;
 use crate::smart_template::utils::track_helpers::TrackExt;
+use crate::smart_template::features::naming::track_ext::TrackItemPropertiesExt;
 use daw::tracks::TrackName;
 use daw::tracks::Track;
 use std::collections::{HashMap, HashSet};
+
+/// Folder that reorganizes a template based on OrganizationMode
+/// 
+/// This folder rebuilds the hierarchy from scratch using the ItemProperties
+/// attached to each track.
+pub struct OrganizationFolder {
+    pub mode: OrganizationMode,
+    pub root_name: String,
+}
+
+impl OrganizationFolder {
+    pub fn new(mode: OrganizationMode, root_name: impl Into<String>) -> Self {
+        Self {
+            mode,
+            root_name: root_name.into(),
+        }
+    }
+}
+
+impl TemplateFolder for OrganizationFolder {
+    fn fold_template(&mut self, template: Template) -> Template {
+        // Reorganizing requires a complete rebuild of the hierarchy.
+        // We treat all tracks as a flat list of "sources" and rebuild the tree.
+        
+        let mut builder = Template::builder(&self.root_name)
+            .with_mode(self.mode)
+            .bus(&self.root_name);
+            
+        // 1. Group tracks by their logical "Entry" (Performer + Arrangement)
+        let mut entries: HashMap<(Option<String>, Option<String>), Vec<Track>> = HashMap::new();
+        
+        for track in template.tracks {
+            // Only process tracks that have ItemProperties (ignore structural folders from old template)
+            if let Some(props) = track.get_item_properties() {
+                // If it's a technical source (multi_mic) or has a layer, it's a leaf/branch we want to preserve
+                if props.multi_mic.is_some() || props.layers.is_some() || props.arrangement.is_some() || props.performer.is_some() {
+                    let key = (props.performer.clone(), props.arrangement.clone());
+                    entries.entry(key).or_default().push(track);
+                }
+            }
+        }
+        
+        // 2. Rebuild the hierarchy using the TemplateBuilder's entry logic
+        // Sort entries to keep output consistent
+        let mut sorted_keys: Vec<_> = entries.keys().cloned().collect();
+        sorted_keys.sort_by(|a, b| {
+            match (&a.0, &b.0) {
+                (Some(pa), Some(pb)) if pa != pb => pa.cmp(pb),
+                _ => a.1.cmp(&b.1),
+            }
+        });
+
+        for key in sorted_keys {
+            let tracks = entries.get(&key).unwrap();
+            let (performer, arrangement) = key;
+            
+            if let Some(ref p) = performer {
+                builder = builder.with_performer(p);
+            }
+            
+            if let Some(ref a) = arrangement {
+                // Determine layers and sources for this entry
+                let mut layers = HashSet::new();
+                let mut sources = HashSet::new();
+                
+                for t in tracks {
+                    if let Some(props) = t.get_item_properties() {
+                        if let Some(l) = props.layers {
+                            layers.insert(l);
+                        }
+                        if let Some(mics) = props.multi_mic {
+                            for mic in mics {
+                                sources.insert(mic);
+                            }
+                        }
+                    }
+                }
+                
+                let layer_vec: Vec<String> = layers.into_iter().collect();
+                let layer_refs: Vec<&str> = layer_vec.iter().map(|s| s.as_str()).collect();
+                
+                let source_vec: Vec<String> = sources.into_iter().collect();
+                let source_refs: Vec<&str> = source_vec.iter().map(|s| s.as_str()).collect();
+                
+                builder = builder.entry(a, &layer_refs, &source_refs);
+            } else if let Some(ref p) = performer {
+                // No arrangement, but has performer. 
+                if self.mode == OrganizationMode::ByArrangement {
+                    builder = builder.bus(p);
+                    for track in tracks {
+                        let name = if track.name.0 == "Track" || track.name.0.is_empty() {
+                            "GTR".to_string()
+                        } else {
+                            track.name.0.clone()
+                        };
+                        builder = builder.track(name);
+                    }
+                    builder = builder.end();
+                } else {
+                    builder = builder.performer(p);
+                    for track in tracks {
+                        builder = builder.track(track.name.0.clone());
+                    }
+                    builder = builder.end();
+                }
+            }
+        }
+        
+        builder.build()
+    }
+}
 
 /// Context for folding operations
 ///

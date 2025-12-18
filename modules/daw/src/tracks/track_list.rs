@@ -215,149 +215,291 @@ impl PrintTrackTree for &[Track] {
         // Folder icon
         const FOLDER_ICON: &str = "📁";
         
-        // Helper function to calculate depth for a track at a given index
-        fn calculate_depth_at(tracks: &[Track], index: usize) -> u32 {
-            Track::calculate_depth(tracks, index)
-        }
-        
         // Helper function to determine group color based on track
-        // Also takes parent track name for better context
-        fn get_group_color(track: &Track, parent_name: Option<&str>) -> Option<colored::ColoredString> {
+        // Also takes parent track names for better context
+        fn get_group_color(track: &Track, display_name: &str, parent_stack: &[String]) -> Option<colored::ColoredString> {
             use colored::Colorize;
+            use crate::tracks::MetadataKey;
             
             // Try to parse ItemProperties from ext_state
             if let Some(ref ext_state) = track.ext_state {
                 if let Ok(props) = serde_json::from_str::<serde_json::Value>(ext_state) {
                     if let Some(group_prefix) = props.get("group_prefix").and_then(|v| v.as_str()) {
-                        return match group_prefix {
-                            "Kick" | "Snare" | "Tom" | "Cymbals" | "Room" | "K" | "S" | "T" | "C" | "R" => {
-                                Some(track.name.0.red().bold())
-                            },
-                            "Bass" | "B" => Some(track.name.0.yellow().bold()),
-                            "Guitar Electric" | "GTR E" | "G E" => Some(track.name.0.blue().bold()),
-                            "Guitar Acoustic" | "GTR A" | "G A" => {
-                                Some(track.name.0.truecolor(46, 139, 87).bold()) // Sea green
-                            },
-                            "Keys" => Some(track.name.0.green().bold()),
-                            "Synths" => Some(track.name.0.purple().bold()),
-                            "Vocals" | "V" => Some(track.name.0.truecolor(255, 192, 203).bold()), // Pink
-                            "BGVs" | "V BGVs" => Some(track.name.0.purple().bold()),
-                            _ => None,
-                        };
+                        let group_prefix = group_prefix.to_lowercase();
+                        if group_prefix.contains("kick") || group_prefix.contains("snare") || 
+                           group_prefix.contains("tom") || group_prefix.contains("cymbal") || 
+                           group_prefix.contains("room") || group_prefix == "k" || 
+                           group_prefix == "s" || group_prefix == "t" || 
+                           group_prefix == "c" || group_prefix == "r" {
+                            return Some(display_name.red().bold());
+                        }
+                        if group_prefix.contains("bass") || group_prefix == "b" {
+                            return Some(display_name.yellow().bold());
+                        }
+                        if group_prefix.contains("guitar electric") || group_prefix.contains("gtr e") {
+                            return Some(display_name.blue().bold());
+                        }
+                        if group_prefix.contains("guitar acoustic") || group_prefix.contains("gtr a") {
+                            return Some(display_name.truecolor(0, 128, 128).bold());
+                        }
+                        if group_prefix.contains("keys") {
+                            return Some(display_name.green().bold());
+                        }
+                        if group_prefix.contains("synth") {
+                            return Some(display_name.purple().bold());
+                        }
+                        if group_prefix.contains("vocal") || group_prefix == "v" {
+                            if group_prefix.contains("bgv") {
+                                return Some(display_name.purple().bold());
+                            }
+                            return Some(display_name.truecolor(255, 192, 203).bold());
+                        }
                     }
                 }
             }
             
-            // Fallback: infer from track name and parent context
-            let name_lower = track.name.to_lowercase();
-            let parent_lower = parent_name.map(|s| s.to_lowercase());
+            // Try to use metadata or parent stack context
+            let parent_meta = track.metadata.get(&crate::tracks::MetadataKey::from(crate::tracks::MetadataKey::PARENT)).map(|s| s.to_lowercase());
             
-            // Drums: Red
-            if name_lower == "kick" || name_lower == "snare" || name_lower == "tom" || 
-               name_lower == "cymbals" || name_lower == "room" || name_lower == "sum" ||
+            // Check for drum context
+            let is_drum_context = parent_stack.iter().any(|p| {
+                let p = p.to_lowercase();
+                p.contains("kick") || p.contains("snare") || p.contains("tom") || 
+                p.contains("cymbal") || p.contains("room") || p.contains("drum")
+            }) || parent_meta.as_ref().map_or(false, |p| {
+                p.contains("kick") || p.contains("snare") || p.contains("tom") || 
+                p.contains("cymbal") || p.contains("room") || p.contains("drum")
+            });
+
+            if is_drum_context {
+                return Some(display_name.red().bold());
+            }
+
+            // Check for bass context
+            let is_bass_context = parent_stack.iter().any(|p| p.to_lowercase().contains("bass")) ||
+                                parent_meta.as_ref().map_or(false, |p| p.contains("bass"));
+            
+            if is_bass_context {
+                return Some(display_name.yellow().bold());
+            }
+
+            // Check for guitar context
+            let is_guitar_context = parent_stack.iter().any(|p| {
+                let p = p.to_lowercase();
+                p.contains("guitar") || p.contains("gtr")
+            }) || parent_meta.as_ref().map_or(false, |p| {
+                p.contains("guitar") || p.contains("gtr")
+            });
+
+            if is_guitar_context {
+                let is_acoustic = parent_stack.iter().any(|p| p.to_lowercase().contains("acoustic")) ||
+                                 parent_meta.as_ref().map_or(false, |p| p.contains("acoustic"));
+                if is_acoustic {
+                    return Some(display_name.truecolor(0, 128, 128).bold());
+                }
+                return Some(display_name.blue().bold());
+            }
+
+            // Check for keys context
+            let is_keys_context = parent_stack.iter().any(|p| {
+                let p = p.to_lowercase();
+                p.contains("keys") || p.contains("piano")
+            }) || parent_meta.as_ref().map_or(false, |p| {
+                p.contains("keys") || p.contains("piano")
+            });
+
+            if is_keys_context {
+                return Some(display_name.green().bold());
+            }
+
+            // Check for synth context
+            let is_synth_context = parent_stack.iter().any(|p| p.to_lowercase().contains("synth")) ||
+                                 parent_meta.as_ref().map_or(false, |p| p.contains("synth"));
+            
+            if is_synth_context {
+                return Some(display_name.purple().bold());
+            }
+
+            // Check for vocal context
+            let is_vocal_context = parent_stack.iter().any(|p| p.to_lowercase().contains("vocal") || p.to_lowercase() == "v" || p.to_lowercase() == "vocals") ||
+                                 parent_meta.as_ref().map_or(false, |p| p.contains("vocal") || p == "v" || p == "vocals");
+            
+            if is_vocal_context {
+                let is_bgv = parent_stack.iter().any(|p| p.to_lowercase().contains("bgv")) ||
+                            parent_meta.as_ref().map_or(false, |p| p.contains("bgv"));
+                if is_bgv {
+                    return Some(display_name.purple().bold());
+                }
+                return Some(display_name.truecolor(255, 192, 203).bold());
+            }
+
+            // Fallback: infer from track name itself
+            let name_lower = display_name.to_lowercase();
+            
+            if name_lower.contains("kick") || name_lower.contains("snare") || 
+               name_lower.contains("tom") || name_lower.contains("cymbal") || 
+               name_lower.contains("room") || name_lower.contains("drum") ||
                name_lower == "in" || name_lower == "out" || name_lower == "trig" ||
                name_lower == "top" || name_lower == "bottom" || name_lower == "verb" ||
                name_lower == "sub" || name_lower == "amb" || name_lower == "rooms" ||
                name_lower == "highhat" || name_lower == "oh" || name_lower == "ride" ||
-               name_lower == "1" || name_lower == "2" ||
-               parent_lower.as_ref().map_or(false, |p| {
-                   p == "kick" || p == "snare" || p == "tom" || p == "cymbals" || p == "room" || p == "sum"
-               }) {
-                return Some(track.name.0.red().bold());
+               name_lower == "1" || name_lower == "2" {
+                return Some(display_name.red().bold());
             }
             
-            // Bass: Yellow
-            if name_lower == "di" || name_lower == "amp" ||
-               parent_lower.as_ref().map_or(false, |p| p.contains("bass")) {
-                return Some(track.name.0.yellow().bold());
+            if name_lower.contains("bass") || name_lower == "di" || name_lower == "amp" {
+                return Some(display_name.yellow().bold());
             }
             
-            // Guitar Electric: Blue
-            if name_lower == "clean" || name_lower == "crunch" || name_lower == "lead" {
-                return Some(track.name.0.blue().bold());
+            if name_lower.contains("guitar") || name_lower.contains("gtr") {
+                if name_lower.contains("acoustic") {
+                    return Some(display_name.truecolor(0, 128, 128).bold()); // Sea green
+                }
+                return Some(display_name.blue().bold());
             }
             
-            // Guitar Acoustic: Sea Green
-            if name_lower == "main" || name_lower == "verse" || name_lower == "chorus" {
-                // Check if we're in a guitar context - for now assume acoustic if it's these names
-                return Some(track.name.0.truecolor(46, 139, 87).bold()); // Sea green
+            if name_lower.contains("piano") || name_lower.contains("keys") || name_lower.contains("organ") {
+                return Some(display_name.green().bold());
             }
             
-            // Keys: Green
-            if name_lower == "piano" || name_lower == "electric" || name_lower == "organ" {
-                return Some(track.name.0.green().bold());
+            if name_lower.contains("synth") || name_lower.contains("pad") {
+                return Some(display_name.purple().bold());
             }
             
-            // Synths: Purple
-            if name_lower == "pad" || name_lower == "bass" {
-                return Some(track.name.0.purple().bold());
-            }
-            
-            // Vocals: Pink
-            if name_lower == "main" || name_lower == "double" {
-                // Could be vocals or acoustic guitar - need better context
-                // For now, if it's "main" or "double" without other context, assume vocals
-                return Some(track.name.0.truecolor(255, 192, 203).bold()); // Pink
-            }
-            
-            // BGVs: Purple
-            if name_lower == "soprano" || name_lower == "alto" || name_lower == "tenor" || name_lower == "unison" {
-                return Some(track.name.0.purple().bold());
+            if name_lower.contains("vocal") || name_lower == "lead" || name_lower == "double" {
+                if name_lower.contains("bgv") {
+                    return Some(display_name.purple().bold());
+                }
+                return Some(display_name.truecolor(255, 192, 203).bold()); // Pink
             }
             
             None
         }
         
         let mut output = String::new();
+        let mut parent_stack: Vec<String> = Vec::new();
         
-        // Track parent names for context
-        let mut parent_stack: Vec<&str> = Vec::new();
-        
+        // Pre-calculate absolute depths for all tracks
+        let mut absolute_depths = Vec::with_capacity(tracks.len());
+        let mut running_depth = 0;
+        for track in tracks.iter() {
+            absolute_depths.push(running_depth);
+            running_depth += track.folder_depth_change.to_reaper_value();
+            if running_depth < 0 { running_depth = 0; }
+        }
+
         for (i, track) in tracks.iter().enumerate() {
-            let depth = calculate_depth_at(tracks, i) as usize;
+            let depth = absolute_depths[i] as usize;
             
-            // Update parent stack based on depth
+            // Update parent stack
             while parent_stack.len() > depth {
                 parent_stack.pop();
             }
             
-            // Build prefix based on depth
-            let prefix = "    ".repeat(depth);
-            
-            // Determine if this is the last track at this depth
-            let is_last_at_depth = {
-                let next_track_at_same_or_lower = tracks.iter()
-                    .enumerate()
-                    .skip(i + 1)
-                    .find(|(j, _)| calculate_depth_at(tracks, *j) as usize <= depth);
-                
-                next_track_at_same_or_lower.is_none() || 
-                track.folder_depth_change.closes_levels()
+            // Determine if this is the last track at this depth (among its siblings)
+            let is_last = {
+                let mut found_sibling = false;
+                for j in (i + 1)..tracks.len() {
+                    let next_depth = absolute_depths[j] as usize;
+                    if next_depth < depth {
+                        break; // End of this folder
+                    }
+                    if next_depth == depth {
+                        found_sibling = true;
+                        break;
+                    }
+                }
+                !found_sibling
             };
             
-            let connector = if is_last_at_depth { "└── " } else { "├── " };
+            // Build prefix
+            let mut prefix = String::new();
+            for j in 0..depth {
+                // Check if any track at depth j later in the list is a sibling of the parent at depth j
+                let has_more_siblings_at_depth = {
+                    let mut found = false;
+                    for k in (i + 1)..tracks.len() {
+                        let next_depth = absolute_depths[k] as usize;
+                        if next_depth < j {
+                            break;
+                        }
+                        if next_depth == j {
+                            found = true;
+                            break;
+                        }
+                    }
+                    found
+                };
+                
+                if has_more_siblings_at_depth {
+                    prefix.push_str("│   ");
+                } else {
+                    prefix.push_str("    ");
+                }
+            }
             
-            // Color the connector (tree lines) in bright black (gray)
+            let connector = if is_last { "└── " } else { "├── " };
             let colored_connector = connector.bright_black();
             
-            // Get parent name for context
-            let parent_name = parent_stack.last().copied();
-            
-            // Get group color or use default
-            let colored_name = get_group_color(track, parent_name)
-                .unwrap_or_else(|| track.name.0.normal());
-            
-            // Format with folder icon after name if it's a folder
-            if track.is_folder {
-                output.push_str(&format!("{}{}{} {}\n", 
-                    prefix, colored_connector, colored_name, FOLDER_ICON));
-                // Add to parent stack
-                if parent_stack.len() <= depth {
-                    parent_stack.push(&track.name.0);
+            // Shorten name if it starts with a parent's name
+            let mut display_name = track.name.0.clone();
+            if !parent_stack.is_empty() {
+                for parent in parent_stack.iter().rev() {
+                    let parent_clean = parent
+                        .replace(" (SUM)", "")
+                        .replace(" (BUS)", "")
+                        .replace(" Sum", "")
+                        .replace(" Bus", "");
+                    
+                    let parent_lower = parent_clean.to_lowercase();
+                    let search_prefixes = vec![
+                        parent_lower.clone() + " ",
+                        if parent_lower.ends_with('s') {
+                            parent_lower[..parent_lower.len()-1].to_string() + " "
+                        } else {
+                            parent_lower.clone() + "s "
+                        }
+                    ];
+
+                    let mut found_prefix = false;
+                    for prefix in search_prefixes {
+                        if display_name.to_lowercase().starts_with(&prefix) {
+                            let remaining = &display_name[prefix.len()..];
+                            if remaining.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                                // If it's numeric, use first char of parent as prefix (e.g., Tom 1 -> T1)
+                                if let Some(first_char) = parent_clean.chars().next() {
+                                    display_name = format!("{}{}", first_char.to_uppercase(), remaining);
+                                } else {
+                                    display_name = remaining.to_string();
+                                }
+                            } else {
+                                display_name = remaining.to_string();
+                            }
+                            found_prefix = true;
+                            break;
+                        }
+                    }
+                    if found_prefix { break; }
                 }
+            }
+            
+            // Clean up common labels for display
+            display_name = display_name
+                .replace(" (SUM)", " Sum")
+                .replace("(SUM)", "Sum")
+                .replace(" (BUS)", " Bus")
+                .replace("(BUS)", "Bus");
+            
+            display_name = display_name.trim().to_string();
+
+            let colored_name = get_group_color(track, &display_name, &parent_stack)
+                .unwrap_or_else(|| display_name.normal());
+            
+            if track.is_folder {
+                output.push_str(&format!("{}{}{} {}\n", prefix, colored_connector, colored_name, FOLDER_ICON));
+                parent_stack.push(track.name.0.clone());
             } else {
-                output.push_str(&format!("{}{}{}\n", 
-                    prefix, colored_connector, colored_name));
+                output.push_str(&format!("{}{}{}\n", prefix, colored_connector, colored_name));
             }
         }
         

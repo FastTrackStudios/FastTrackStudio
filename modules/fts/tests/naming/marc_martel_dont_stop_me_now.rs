@@ -5,8 +5,8 @@
 //! It also verifies that tracks match correctly with existing tracks and tracks
 //! are created when needed.
 
-use daw::tracks::Track;
-use fts::smart_template::naming::{
+use daw::tracks::{Track, TrackName};
+use fts::smart_template::{
     parse_fts_item_properties, ItemProperties, TrackItemPropertiesExt,
 };
 
@@ -257,8 +257,6 @@ fn test_cases() -> Vec<TestCase> {
     ]
 }
 
-use fts::smart_template::core::models::types::TrackName;
-
 /// Track match result showing which track matched and if it was created
 #[derive(Debug, Clone)]
 pub struct TrackMatchResult {
@@ -331,18 +329,7 @@ fn print_track_list(results: &[TrackMatchResult]) -> String {
 #[test]
 fn test_marc_martel_dont_stop_me_now() {
     // Existing track list (empty for this test - all tracks will be created)
-    let existing_tracks: Vec<Track> = vec![
-        // Example: if we had one snare track already
-        // {
-        //     let mut track = Track::builder()
-        //         .name("Snare Top".to_string())
-        //         .solo_state(daw::tracks::api::solo::SoloMode::Off)
-        //         .build();
-        //     let props = get_expected_properties("Snare Top");
-        //     track.set_item_properties(&props).unwrap();
-        //     track
-        // },
-    ];
+    let existing_tracks: Vec<Track> = vec![];
 
     // Get test cases
     let test_cases = test_cases();
@@ -399,7 +386,6 @@ fn test_marc_martel_dont_stop_me_now() {
     println!("Track Matching Results:\n{}", track_list);
 
     // Verify that all tracks would be created (since existing_tracks is empty)
-    // In a real scenario, you'd check that some match and some are created
     for result in &results {
         assert!(
             result.was_created,
@@ -415,13 +401,13 @@ fn test_marc_martel_with_existing_tracks() {
     let test_cases = test_cases();
 
     // Create some existing tracks
-    let mut kick_in_track = Track::new("Kick In".to_string());
+    let mut kick_in_track = Track::new("Kick In");
     let kick_in_test_case = test_cases.iter().find(|tc| tc.name == "Kick In").unwrap();
     kick_in_track
         .set_item_properties(&kick_in_test_case.expected)
         .unwrap();
 
-    let mut snare_top_track = Track::new("Snare Top".to_string());
+    let mut snare_top_track = Track::new("Snare Top");
     let snare_top_test_case = test_cases.iter().find(|tc| tc.name == "Snare Top").unwrap();
     snare_top_track
         .set_item_properties(&snare_top_test_case.expected)

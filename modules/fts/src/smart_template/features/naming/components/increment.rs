@@ -59,7 +59,7 @@ impl Default for IncrementParser {
 }
 
 impl ComponentParser for IncrementParser {
-    fn parse(&self, context: &mut ParseContext) -> ComponentParseResult {
+    fn parse_item_properties(&self, context: &mut ParseContext) -> ComponentParseResult {
         // Only parse increments if the group supports them
         if !self.supports_increment {
             return ComponentParseResult::Skipped;

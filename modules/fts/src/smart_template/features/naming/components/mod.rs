@@ -100,7 +100,7 @@ pub trait ComponentParser: Send + Sync {
     /// 
     /// Returns the parsed value if found, or None if not found.
     /// Updates the context to mark matched words.
-    fn parse(&self, context: &mut ParseContext) -> ComponentParseResult;
+    fn parse_item_properties(&self, context: &mut ParseContext) -> ComponentParseResult;
     
     /// Get default patterns/reference list for this component
     fn default_patterns(&self) -> Vec<String>;

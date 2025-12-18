@@ -4,6 +4,7 @@
 //! These are used by the parser to match track names to groups.
 
 use crate::smart_template::core::models::group_config::GroupConfig;
+use crate::smart_template::core::traits::Group;
 use crate::smart_template::presets::drums::{
     Kick,
     Snare,
@@ -28,28 +29,28 @@ use crate::smart_template::presets::vocals::{
 pub fn create_default_groups() -> Vec<GroupConfig> {
     let mut groups = vec![
         // Drum kit groups
-        Kick::new().config,
-        Snare::new().config,
-        Tom::new().config,
-        Cymbals::new().config,
-        Room::new().config,
+        Kick::new().group_config(),
+        Snare::new().group_config(),
+        Tom::new().group_config(),
+        Cymbals::new().group_config(),
+        Room::new().group_config(),
         
         // Bass group
-        Bass::new().config,
+        Bass::new().group_config(),
         
         // Guitar groups
-        GuitarElectric::new().config,
-        GuitarAcoustic::new().config,
+        GuitarElectric::new().group_config(),
+        GuitarAcoustic::new().group_config(),
         
         // Keys group
-        Keys::new().config,
+        Keys::new().group_config(),
         
         // Synths group
-        Synths::new().config,
+        Synths::new().group_config(),
         
         // Vocals groups
-        Vocals::new().config,
-        BGVs::new().config,
+        Vocals::new().group_config(),
+        BGVs::new().group_config(),
     ];
     
     // Add NOT_SORTED group last as catch-all (lowest priority)

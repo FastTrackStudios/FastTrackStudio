@@ -17,12 +17,12 @@ impl TrackNameExtractor for ItemProperties {
     fn get_sub_type(&self) -> Option<&str> {
         self.sub_type.as_ref()
             .and_then(|v| v.first())
-            .map(|s| s.as_str())
+            .map(|s: &String| s.as_str())
     }
     
     fn get_increment(&self) -> Option<u32> {
         self.increment.as_ref()
-            .and_then(|s| s.parse::<u32>().ok())
+            .and_then(|s: &String| s.parse::<u32>().ok())
     }
     
     fn get_original_name(&self) -> &str {
@@ -69,7 +69,7 @@ impl TomMapper {
         result.unified_name
             .split_whitespace()
             .last()
-            .and_then(|s| s.parse::<u32>().ok())
+            .and_then(|s: &str| s.parse::<u32>().ok())
             .unwrap_or(1)
     }
     

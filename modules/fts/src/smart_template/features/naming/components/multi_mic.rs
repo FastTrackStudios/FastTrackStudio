@@ -36,7 +36,7 @@ impl Default for MultiMicParser {
 }
 
 impl ComponentParser for MultiMicParser {
-    fn parse(&self, context: &mut ParseContext) -> ComponentParseResult {
+    fn parse_item_properties(&self, context: &mut ParseContext) -> ComponentParseResult {
         // First, check group-specific multi-mic descriptors (like Kick's In/Out/Trig/Sub/Ambient)
         if let Some(config) = context.group_config {
             if let Some(pattern_categories) = &config.pattern_categories {

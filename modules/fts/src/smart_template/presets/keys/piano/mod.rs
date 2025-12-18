@@ -1,17 +1,17 @@
 pub mod naming;
 pub mod template;
 
-/// Cymbals instrument
-pub struct Cymbals {}
+/// Piano instrument
+pub struct Piano {}
 
-impl Cymbals {
-    /// Create a new Cymbals instrument
+impl Piano {
+    /// Create a new Piano instrument
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl Default for Cymbals {
+impl Default for Piano {
     fn default() -> Self {
         Self::new()
     }

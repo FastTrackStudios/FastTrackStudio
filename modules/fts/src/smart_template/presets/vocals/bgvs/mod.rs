@@ -1,17 +1,17 @@
 pub mod naming;
 pub mod template;
 
-/// Cymbals instrument
-pub struct Cymbals {}
+/// Backing Vocals instrument
+pub struct BGVs {}
 
-impl Cymbals {
-    /// Create a new Cymbals instrument
+impl BGVs {
+    /// Create a new BGVs instrument
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl Default for Cymbals {
+impl Default for BGVs {
     fn default() -> Self {
         Self::new()
     }

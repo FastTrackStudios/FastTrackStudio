@@ -42,7 +42,7 @@ impl Default for PerformerParser {
 }
 
 impl ComponentParser for PerformerParser {
-    fn parse(&self, context: &mut ParseContext) -> ComponentParseResult {
+    fn parse_item_properties(&self, context: &mut ParseContext) -> ComponentParseResult {
         // Combine default and additional names
         let all_names: Vec<String> = self.default_patterns()
             .into_iter()

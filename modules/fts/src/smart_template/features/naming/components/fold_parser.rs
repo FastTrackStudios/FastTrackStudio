@@ -98,7 +98,7 @@ impl ComponentFoldParser {
     /// - MultiMic: Found("In") → props.multi_mic = Some(vec!["In"])
     /// - Playlist: Found(".02") → props.playlist = Some(".02")
     /// - Result: ItemProperties with all components
-    pub fn parse(&self, name: &str, group_config: Option<&GroupConfig>) -> ItemProperties {
+    pub fn parse_item_properties(&self, name: &str, group_config: Option<&GroupConfig>) -> ItemProperties {
         let mut context = ParseContext::new(name);
         if let Some(config) = group_config {
             context = context.with_group_config(config);
@@ -148,7 +148,7 @@ impl ComponentFoldParser {
         for component_type in &self.component_order.order {
             match component_type {
                 ComponentOrderType::RecTag => {
-                    if let ComponentParseResult::Found(value) = self.rec_tag.parse(&mut context) {
+                    if let ComponentParseResult::Found(value) = self.rec_tag .parse_item_properties(&mut context) {
                         props.rec_tag = Some(value);
                     }
                 }
@@ -161,22 +161,22 @@ impl ComponentFoldParser {
                     // This is just a placeholder in the order
                 }
                 ComponentOrderType::Performer => {
-                    if let ComponentParseResult::Found(value) = self.performer.parse(&mut context) {
+                    if let ComponentParseResult::Found(value) = self.performer .parse_item_properties(&mut context) {
                         props.performer = Some(value);
                     }
                 }
                 ComponentOrderType::Arrangement => {
-                    if let ComponentParseResult::Found(value) = self.arrangement.parse(&mut context) {
+                    if let ComponentParseResult::Found(value) = self.arrangement .parse_item_properties(&mut context) {
                         props.arrangement = Some(value);
                     }
                 }
                 ComponentOrderType::Section => {
-                    if let ComponentParseResult::Found(value) = self.section.parse(&mut context) {
+                    if let ComponentParseResult::Found(value) = self.section .parse_item_properties(&mut context) {
                         props.section = Some(value);
                     }
                 }
                 ComponentOrderType::Layers => {
-                    if let ComponentParseResult::Found(value) = self.layers.parse(&mut context) {
+                    if let ComponentParseResult::Found(value) = self.layers .parse_item_properties(&mut context) {
                         props.layers = Some(value);
                     }
                 }
@@ -184,7 +184,7 @@ impl ComponentFoldParser {
                     // MultiMic can return multiple values, so we collect them
                     let mut multi_mic_values = Vec::new();
                     loop {
-                        match self.multi_mic.parse(&mut context) {
+                        match self.multi_mic .parse_item_properties(&mut context) {
                             ComponentParseResult::Found(value) => {
                                 multi_mic_values.push(value);
                             }
@@ -201,7 +201,7 @@ impl ComponentFoldParser {
                     // Effect can return multiple values
                     let mut effect_values = Vec::new();
                     loop {
-                        match self.effect.parse(&mut context) {
+                        match self.effect .parse_item_properties(&mut context) {
                             ComponentParseResult::Found(value) => {
                                 effect_values.push(value);
                             }
@@ -215,22 +215,22 @@ impl ComponentFoldParser {
                     }
                 }
                 ComponentOrderType::Increment => {
-                    if let ComponentParseResult::Found(value) = self.increment.parse(&mut context) {
+                    if let ComponentParseResult::Found(value) = self.increment .parse_item_properties(&mut context) {
                         props.increment = Some(value);
                     }
                 }
                 ComponentOrderType::Channel => {
-                    if let ComponentParseResult::Found(value) = self.channel.parse(&mut context) {
+                    if let ComponentParseResult::Found(value) = self.channel .parse_item_properties(&mut context) {
                         props.channel = Some(value);
                     }
                 }
                 ComponentOrderType::Playlist => {
-                    if let ComponentParseResult::Found(value) = self.playlist.parse(&mut context) {
+                    if let ComponentParseResult::Found(value) = self.playlist .parse_item_properties(&mut context) {
                         props.playlist = Some(value);
                     }
                 }
                 ComponentOrderType::TrackType => {
-                    if let ComponentParseResult::Found(value) = self.track_type.parse(&mut context) {
+                    if let ComponentParseResult::Found(value) = self.track_type .parse_item_properties(&mut context) {
                         props.track_type = Some(value);
                     }
                 }

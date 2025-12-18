@@ -65,7 +65,7 @@ impl ItemPropertiesParser {
     /// 3. Return complete ItemProperties
     /// 
     /// If no group matches, the NOT_SORTED group will be used (if present).
-    pub fn parse(&self, name: &str) -> ItemProperties {
+    pub fn parse_item_properties(&self, name: &str) -> ItemProperties {
         // Phase 1: Group Matching (Fold over groups)
         let mut matched_group = self.group_folder.fold_groups(name, &self.groups);
         
@@ -78,7 +78,7 @@ impl ItemPropertiesParser {
         
         // Phase 2: Component Parsing (Fold over components)
         // ComponentFoldParser will extract group_prefix and sub_type from matched_group
-        self.component_parser.parse(name, matched_group)
+        self.component_parser.parse_item_properties(name, matched_group)
     }
 }
 
@@ -112,5 +112,5 @@ pub fn parse_fts_item_properties(name: &str, groups: Option<Vec<GroupConfig>>) -
         ItemPropertiesParser::new()
     };
     
-    parser.parse(name)
+    parser.parse_item_properties(name)
 }

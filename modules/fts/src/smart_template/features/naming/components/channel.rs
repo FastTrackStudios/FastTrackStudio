@@ -34,7 +34,7 @@ impl Default for ChannelParser {
 }
 
 impl ComponentParser for ChannelParser {
-    fn parse(&self, context: &mut ParseContext) -> ComponentParseResult {
+    fn parse_item_properties(&self, context: &mut ParseContext) -> ComponentParseResult {
         // Channel patterns typically appear at the end of the name
         for pattern in self.default_patterns() {
             let pattern_lower = pattern.to_lowercase();
