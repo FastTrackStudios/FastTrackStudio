@@ -35,38 +35,38 @@ pub fn TrackControlPanel(
         depths
     });
 
-    // Compute visible tracks (filter out children of collapsed folders)
-    let collapsed_state = collapsed_folders();
-    let visible_indices: Vec<usize> = tracks.iter().enumerate()
-        .filter_map(|(idx, track)| {
+                // Compute visible tracks (filter out children of collapsed folders)
+                let collapsed_state = collapsed_folders();
+                let visible_indices: Vec<usize> = tracks.iter().enumerate()
+                    .filter_map(|(idx, track)| {
             let depths = absolute_depths();
             let current_depth = depths[idx];
             
-            // Check all ancestor folders (walk backwards through tracks)
-            // A track is hidden if ANY of its ancestor folders is collapsed
-            for check_idx in (0..idx).rev() {
+                        // Check all ancestor folders (walk backwards through tracks)
+                        // A track is hidden if ANY of its ancestor folders is collapsed
+                        for check_idx in (0..idx).rev() {
                 let check_depth = depths[check_idx];
-                
-                // Skip tracks that are not ancestors (same or higher depth)
+                            
+                            // Skip tracks that are not ancestors (same or higher depth)
                 if check_depth >= current_depth {
-                    continue;
-                }
-                
-                // This is a potential ancestor - check if it's a folder
+                                continue;
+                            }
+                            
+                            // This is a potential ancestor - check if it's a folder
                 let check_track = &tracks[check_idx];
-                if check_track.is_folder {
-                    // Check if this ancestor folder is collapsed
-                    if collapsed_state.get(check_idx).copied().unwrap_or(false) {
-                        // Found a collapsed ancestor - hide this track
-                        return None;
-                    }
-                }
-            }
-            
-            // No collapsed ancestor folders found - track is visible
-            Some(idx)
-        })
-        .collect();
+                            if check_track.is_folder {
+                                // Check if this ancestor folder is collapsed
+                                if collapsed_state.get(check_idx).copied().unwrap_or(false) {
+                                    // Found a collapsed ancestor - hide this track
+                                    return None;
+                                        }
+                            }
+                        }
+                        
+                        // No collapsed ancestor folders found - track is visible
+                        Some(idx)
+                    })
+                    .collect();
                 
     rsx! {
         div {
