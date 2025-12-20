@@ -12,10 +12,16 @@ impl From<Kick> for ItemMetadataGroup {
             .patterns(["In", "Out", "Top", "Bottom"])
             .build();
 
+        // Define SUM tagged collection - items matching these patterns will be grouped together
+        let sum_collection = ItemMetadataGroup::builder("SUM")
+            .patterns(["In", "Out", "Trig"])
+            .build();
+
         // Use the convenience method - extension trait is in scope via prelude
         ItemMetadataGroup::builder("Kick")
             .patterns(["kick", "kik", "bd", "bassdrum", "bass_drum"])
             .multi_mic(multi_mic)
+            .tagged_collection(sum_collection)
             .build()
     }
 }
@@ -49,6 +55,7 @@ mod tests {
                 .original_name(input)
                 .last_group("Kick")
                 .multi_mic("In")
+                .tagged_collection("SUM")
                 .build();
             (input, expected)
         }
@@ -59,6 +66,7 @@ mod tests {
                 .original_name(input)
                 .last_group("Kick")
                 .multi_mic("Out")
+                .tagged_collection("SUM")
                 .build();
             (input, expected)
         }
@@ -102,6 +110,20 @@ mod tests {
         }
 
         #[test]
+        fn kick_in_matches_sum_tagged_collection() {
+            let input = "Kick In";
+            let config = isolated_config();
+            let parser = Parser::new(config);
+            let item = parser.parse(input.to_string()).unwrap();
+
+            assert_eq!(
+                item.metadata.tagged_collection,
+                Some(vec!["SUM".to_string()]),
+                "Kick In should match SUM tagged collection"
+            );
+        }
+
+        #[test]
         fn kick_out_parses_multi_mic_field() {
             let (input, mut expected) = test_cases::kick_out_parses_multi_mic();
             let config = isolated_config();
@@ -111,6 +133,20 @@ mod tests {
             // Update expected to match actual group trail from parser
             expected.group = item.metadata.group.clone();
             assert_eq!(item.metadata, expected, "Isolated config: 'Kick Out' should parse multi_mic field as ['Out']");
+        }
+
+        #[test]
+        fn kick_out_matches_sum_tagged_collection() {
+            let input = "Kick Out";
+            let config = isolated_config();
+            let parser = Parser::new(config);
+            let item = parser.parse(input.to_string()).unwrap();
+
+            assert_eq!(
+                item.metadata.tagged_collection,
+                Some(vec!["SUM".to_string()]),
+                "Kick Out should match SUM tagged collection"
+            );
         }
     }
 
@@ -151,6 +187,20 @@ mod tests {
         }
 
         #[test]
+        fn kick_in_matches_sum_tagged_collection() {
+            let input = "Kick In";
+            let config = default_config();
+            let parser = Parser::new(config);
+            let item = parser.parse(input.to_string()).unwrap();
+
+            assert_eq!(
+                item.metadata.tagged_collection,
+                Some(vec!["SUM".to_string()]),
+                "Kick In should match SUM tagged collection in integration config"
+            );
+        }
+
+        #[test]
         fn kick_out_parses_multi_mic_field() {
             let (input, mut expected) = test_cases::kick_out_parses_multi_mic();
             let config = default_config();
@@ -164,6 +214,20 @@ mod tests {
             // Test display name - integration config has "D" prefix from "Drums" group
             let display_name = monarchy::to_display_name(&item, &config);
             assert_eq!(display_name, "D Kick Out", "Integration config: display name should be 'D Kick Out' (with prefix)");
+        }
+
+        #[test]
+        fn kick_out_matches_sum_tagged_collection() {
+            let input = "Kick Out";
+            let config = default_config();
+            let parser = Parser::new(config);
+            let item = parser.parse(input.to_string()).unwrap();
+
+            assert_eq!(
+                item.metadata.tagged_collection,
+                Some(vec!["SUM".to_string()]),
+                "Kick Out should match SUM tagged collection in integration config"
+            );
         }
     }
 }
