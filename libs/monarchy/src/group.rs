@@ -93,9 +93,18 @@ pub struct Group<M: Metadata> {
     /// Priority for matching (higher = checked first)
     pub priority: i32,
 
+    /// Optional tagged collection group - items matching this group's patterns
+    /// will be moved to a subfolder if there are also non-matching items
+    /// Tagged collections work at the pattern matching level, not metadata field level
+    /// Example: If tagged collection has patterns ["In", "Out", "Trig"] and we have
+    /// items "In", "Out", "Trig", "Ambient", then "In", "Out", "Trig" go into
+    /// a subfolder named after the tagged collection, and "Ambient" stays at parent level
+    pub tagged_collection: Option<Box<Group<M>>>,
+
     /// Optional variant field - items with different values for this field
-    /// will be kept as separate variants within the same group
-    pub tagged_collection: Option<M::Field>,
+    /// will be kept together in the same structure but grouped by variant value
+    /// for client-side handling (e.g., different lanes on the same track)
+    pub variants: Option<M::Field>,
 
     /// If true, this group's children are promoted to the parent level in the output
     /// The group still exists for matching/organization but doesn't create nesting
@@ -157,6 +166,7 @@ impl<M: Metadata> GroupBuilder<M> {
                 groups: Vec::new(),
                 priority: 0,
                 tagged_collection: None,
+                variants: None,
                 transparent: false,
                 metadata_only: false,
             },
@@ -263,10 +273,21 @@ impl<M: Metadata> GroupBuilder<M> {
         self
     }
 
+    /// Set a tagged collection group for this group
+    /// Items matching the tagged collection's patterns will be moved to a subfolder
+    /// if there are also non-matching items. If all items match, they stay at current level.
+    /// Tagged collections work at the pattern matching level, allowing cross-field collections
+    /// (e.g., "In" from multi_mic and "DBL" from layers can be in the same collection)
+    pub fn tagged_collection(mut self, collection_group: Group<M>) -> Self {
+        self.group.tagged_collection = Some(Box::new(collection_group));
+        self
+    }
+
     /// Set the variant field for this group
-    /// Items with different values for this field will be kept as separate variants
-    pub fn variant_field(mut self, field: M::Field) -> Self {
-        self.group.tagged_collection = Some(field);
+    /// Items with different values for this field will be kept together in the same structure
+    /// but grouped by variant value for client-side handling (e.g., different lanes on the same track)
+    pub fn variants(mut self, field: M::Field) -> Self {
+        self.group.variants = Some(field);
         self
     }
 
@@ -275,7 +296,7 @@ impl<M: Metadata> GroupBuilder<M> {
         let variant_fields = M::variant_fields();
         if !variant_fields.is_empty() {
             // Use the first variant field if multiple are defined
-            self.group.tagged_collection = Some(variant_fields[0].clone());
+            self.group.variants = Some(variant_fields[0].clone());
         }
         self
     }

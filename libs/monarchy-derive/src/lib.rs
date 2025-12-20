@@ -36,7 +36,10 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields, Ident, Type};
 ///
 /// Supports attributes:
 /// - `#[metadata(skip)]` - Exclude field from metadata
-/// - `#[monarchy(variant)]` - Mark field as a variant differentiator
+/// - `#[monarchy(variant)]` - Mark field as a variant (for grouping items that are identical except for this field)
+/// 
+/// Note: Tagged collections are now defined at the group level using `.tagged_collection(group)`
+/// and work at the pattern matching level, not the metadata field level.
 #[proc_macro_derive(Metadata, attributes(metadata, monarchy))]
 pub fn derive_metadata(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

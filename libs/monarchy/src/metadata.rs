@@ -28,7 +28,9 @@ pub trait Metadata: Clone + Default + Send + Sync + 'static {
     /// Get all available fields for this metadata type
     fn fields() -> Vec<Self::Field>;
 
-    /// Get fields marked as variants (for differentiating similar items)
+    /// Get fields marked as variants (for grouping items that are identical except for this field)
+    /// Variants are kept together in the same structure but grouped by variant value
+    /// for client-side handling (e.g., different lanes on the same track)
     fn variant_fields() -> Vec<Self::Field> {
         Vec::new() // Default: no variant fields
     }
