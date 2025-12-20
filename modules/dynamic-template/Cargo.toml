@@ -1,0 +1,35 @@
+[package]
+name = "dynamic-template"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Dynamic template system using monarchy for hierarchical organization"
+keywords = ["template", "dynamic", "hierarchy", "organization", "fasttrack"]
+categories = ["template-engine", "web-programming"]
+
+[dependencies]
+monarchy = { path = "../../libs/monarchy" }
+daw = { path = "../daw" }
+serde = { workspace = true }
+serde_json = "1.0"
+toml = "0.8"
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+handlebars = "6.0"
+tera = "1.19"
+regex = "1.10"
+walkdir = "2.4"
+glob = "0.3"
+once_cell = "1.19"
+
+[dev-dependencies]
+tempfile = "3.8"
+pretty_assertions = "1.4"
+insta = "1.34"
+
+[features]
+default = ["handlebars-engine", "tera-engine"]
+handlebars-engine = []
+tera-engine = []
+hot-reload = []
