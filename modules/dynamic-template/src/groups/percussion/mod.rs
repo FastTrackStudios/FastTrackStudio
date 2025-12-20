@@ -33,7 +33,7 @@ impl From<Percussion> for Group<ItemMetadata> {
                 "bells",
             ])
             // Exclude drum kit items
-            .excludes(vec!["drum", "kick", "snare", "hihat", "cymbal", "tom"])
+            .exclude(vec!["drum", "kick", "snare", "hihat", "cymbal", "tom"])
             .build()
     }
 }

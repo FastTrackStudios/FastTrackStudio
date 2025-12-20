@@ -20,7 +20,7 @@ impl From<Bass> for Group<ItemMetadata> {
             .prefix("Bass")
             .patterns(vec!["bass"])
             // Negative patterns to avoid matching bass drums
-            .excludes(vec!["bassdrum", "bass_drum", "bd", "kick"])
+            .exclude(vec!["bassdrum", "bass_drum", "bd", "kick"])
             .group(BassGuitar)
             .group(SynthBass)
             .group(UprightBass)
