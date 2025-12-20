@@ -27,6 +27,7 @@ version = "0.1.0"
 authors = ["Cody Wright"]
 license = "MIT OR Apache-2.0"
 edition = "2021"
+repository = "https://github.com/codywright/FastTrackStudio"
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -118,6 +119,16 @@ features = [
     "winuser",
     "uxtheme",
 ]
+
+[workspace.dependencies.syn]
+version = "2.0"
+features = ["full", "extra-traits"]
+
+[workspace.dependencies.quote]
+version = "1.0"
+
+[workspace.dependencies.proc-macro2]
+version = "1.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
