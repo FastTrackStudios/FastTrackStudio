@@ -1,8 +1,26 @@
 //! Group definitions for the dynamic template system
 
+pub mod bass;
+pub mod choir;
 pub mod drums;
+pub mod effects;
+pub mod guitars;
+pub mod keys;
+pub mod orchestra;
+pub mod percussion;
+pub mod synths;
+pub mod vocals;
 
-// Re-export the top-level Drums container
-// Individual kits and drum types should be accessed through their respective modules
-// e.g., drums::drum_kit::Kick, drums::electronic_kit::Kick
+// Re-export the top-level containers
+// Individual types should be accessed through their respective modules
+// e.g., drums::drum_kit::Kick, bass::bass_guitar::BassGuitar, guitars::electric_guitar::ElectricGuitar
+pub use bass::Bass;
+pub use choir::Choir;
 pub use drums::Drums;
+pub use effects::Effects;
+pub use guitars::Guitars;
+pub use keys::Keys;
+pub use orchestra::Orchestra;
+pub use percussion::Percussion;
+pub use synths::Synths;
+pub use vocals::Vocals;
