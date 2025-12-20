@@ -1,5 +1,67 @@
-use crate::Metadata;
+use crate::{IntoField, Metadata};
 use serde::{Deserialize, Serialize};
+
+/// Helper trait to convert single items or collections into a Vec
+/// 
+/// This allows builder methods to accept both single items and collections:
+/// - Single item: `"pattern"` or `field` or `group`
+/// - Collection: `vec!["pattern1", "pattern2"]` or `[field1, field2]` or `[group1, group2]`
+pub trait IntoVec<T> {
+    fn into_vec(self) -> Vec<T>;
+}
+
+// Implementation for single item
+impl<T> IntoVec<T> for T {
+    fn into_vec(self) -> Vec<T> {
+        vec![self]
+    }
+}
+
+// Implementation for Vec<T>
+impl<T> IntoVec<T> for Vec<T> {
+    fn into_vec(self) -> Vec<T> {
+        self
+    }
+}
+
+// Implementation for arrays [T; N]
+impl<T, const N: usize> IntoVec<T> for [T; N] {
+    fn into_vec(self) -> Vec<T> {
+        self.into_iter().collect()
+    }
+}
+
+// Implementation for slices &[T]
+impl<T: Clone> IntoVec<T> for &[T] {
+    fn into_vec(self) -> Vec<T> {
+        self.to_vec()
+    }
+}
+
+// Special implementation for patterns: convert &str and collections of &str to Vec<String>
+impl IntoVec<String> for &str {
+    fn into_vec(self) -> Vec<String> {
+        vec![self.to_string()]
+    }
+}
+
+impl IntoVec<String> for Vec<&str> {
+    fn into_vec(self) -> Vec<String> {
+        self.into_iter().map(|s| s.to_string()).collect()
+    }
+}
+
+impl<const N: usize> IntoVec<String> for [&str; N] {
+    fn into_vec(self) -> Vec<String> {
+        self.into_iter().map(|s| s.to_string()).collect()
+    }
+}
+
+impl IntoVec<String> for &[&str] {
+    fn into_vec(self) -> Vec<String> {
+        self.iter().map(|s| (*s).to_string()).collect()
+    }
+}
 
 /// Defines a group pattern for organizing items
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -33,7 +95,7 @@ pub struct Group<M: Metadata> {
 
     /// Optional variant field - items with different values for this field
     /// will be kept as separate variants within the same group
-    pub variant_field: Option<M::Field>,
+    pub tagged_collection: Option<M::Field>,
 
     /// If true, this group's children are promoted to the parent level in the output
     /// The group still exists for matching/organization but doesn't create nesting
@@ -43,21 +105,7 @@ pub struct Group<M: Metadata> {
 impl<M: Metadata> Group<M> {
     /// Start building a new group - this is the only way to create a Group
     pub fn builder(name: impl Into<String>) -> GroupBuilder<M> {
-        GroupBuilder {
-            group: Group {
-                name: name.into(),
-                prefix: None,
-                inherit_prefix: true,
-                blocked_prefixes: Vec::new(),
-                patterns: Vec::new(),
-                negative_patterns: Vec::new(),
-                metadata_fields: Vec::new(),
-                groups: Vec::new(),
-                priority: 0,
-                variant_field: None,
-                transparent: false,
-            },
-        }
+        GroupBuilder::new(name)
     }
 
     /// Check if a string matches this group's patterns
@@ -66,7 +114,8 @@ impl<M: Metadata> Group<M> {
 
         // Check negative patterns first
         for pattern in &self.negative_patterns {
-            if text_lower.contains(&pattern.to_lowercase()) {
+            let pattern_lower = pattern.to_lowercase();
+            if text_lower.contains(&pattern_lower) {
                 return false;
             }
         }
@@ -78,7 +127,8 @@ impl<M: Metadata> Group<M> {
         }
 
         for pattern in &self.patterns {
-            if text_lower.contains(&pattern.to_lowercase()) {
+            let pattern_lower = pattern.to_lowercase();
+            if text_lower.contains(&pattern_lower) {
                 return true;
             }
         }
@@ -87,49 +137,88 @@ impl<M: Metadata> Group<M> {
     }
 }
 
+impl<M: Metadata> GroupBuilder<M> {
+    /// Create a new GroupBuilder with the given name
+    pub fn new(name: impl Into<String>) -> Self {
+        GroupBuilder {
+            group: Group {
+                name: name.into(),
+                prefix: None,
+                inherit_prefix: true,
+                blocked_prefixes: Vec::new(),
+                patterns: Vec::new(),
+                negative_patterns: Vec::new(),
+                metadata_fields: Vec::new(),
+                groups: Vec::new(),
+                priority: 0,
+                tagged_collection: None,
+                transparent: false,
+            },
+        }
+    }
+}
+
 /// Builder for creating Groups with a fluent API
 pub struct GroupBuilder<M: Metadata> {
-    group: Group<M>,
+    /// The group being built (public for extension traits)
+    pub group: Group<M>,
 }
 
 impl<M: Metadata> GroupBuilder<M> {
-    /// Add a pattern to match
-    pub fn pattern(mut self, pattern: impl Into<String>) -> Self {
-        self.group.patterns.push(pattern.into());
+    /// Add patterns to match (accepts single pattern or collection)
+    pub fn patterns<P>(mut self, patterns: P) -> Self
+    where
+        P: IntoVec<String>,
+    {
+        self.group.patterns.extend(patterns.into_vec());
         self
     }
 
-    /// Add multiple patterns to match
-    pub fn patterns(mut self, patterns: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.group
-            .patterns
-            .extend(patterns.into_iter().map(|p| p.into()));
+    /// Add exclusion patterns (accepts single pattern or collection)
+    pub fn exclude<P>(mut self, patterns: P) -> Self
+    where
+        P: IntoVec<String>,
+    {
+        self.group.negative_patterns.extend(patterns.into_vec());
         self
     }
 
-    /// Add a negative pattern (exclusion)
-    pub fn exclude(mut self, pattern: impl Into<String>) -> Self {
-        self.group.negative_patterns.push(pattern.into());
+    /// Add metadata fields this group cares about (accepts single field or collection)
+    pub fn field<F>(mut self, fields: F) -> Self
+    where
+        F: IntoVec<M::Field>,
+    {
+        self.group.metadata_fields.extend(fields.into_vec());
         self
     }
 
-    /// Add multiple negative patterns
-    pub fn excludes(mut self, patterns: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.group
-            .negative_patterns
-            .extend(patterns.into_iter().map(|p| p.into()));
-        self
-    }
-
-    /// Add a metadata field this group cares about
-    pub fn field(mut self, field: M::Field) -> Self {
+    /// Add configuration for a specific metadata field
+    /// 
+    /// This is a generic method that works with any metadata field.
+    /// The derive macro generates convenience methods (like `.multi_mic()`) that call this.
+    /// 
+    /// # Example
+    /// 
+    /// ```ignore
+    /// Group::builder("Kick")
+    ///     .metadata_field(ItemMetadataField::MultiMic, multi_mic_group)
+    ///     .build()
+    /// ```
+    pub fn metadata_field<F>(mut self, field: M::Field, field_group: F) -> Self
+    where
+        F: IntoField<M>,
+    {
+        let field_group = field_group.into_field();
         self.group.metadata_fields.push(field);
-        self
-    }
-
-    /// Add multiple metadata fields
-    pub fn fields(mut self, fields: impl IntoIterator<Item = M::Field>) -> Self {
-        self.group.metadata_fields.extend(fields);
+        self.group.patterns.extend(field_group.patterns);
+        self.group.negative_patterns.extend(field_group.negative_patterns);
+        if let Some(prefix) = field_group.prefix {
+            self.group.prefix = Some(prefix);
+        }
+        self.group.groups.extend(field_group.groups);
+        if field_group.priority > self.group.priority {
+            self.group.priority = field_group.priority;
+        }
         self
     }
 
@@ -145,35 +234,26 @@ impl<M: Metadata> GroupBuilder<M> {
         self
     }
 
-    /// Block specific prefixes from being inherited
-    pub fn block_prefix(mut self, prefix: impl Into<String>) -> Self {
-        self.group.blocked_prefixes.push(prefix.into());
-        self
-    }
-
-    /// Block multiple prefixes from being inherited
-    pub fn block_prefixes(mut self, prefixes: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.group
-            .blocked_prefixes
-            .extend(prefixes.into_iter().map(|p| p.into()));
-        self
-    }
-
-    /// Add a nested group
-    pub fn group<G>(mut self, group: G) -> Self
+    /// Block prefixes from being inherited (accepts single prefix or collection)
+    pub fn block_prefix<P>(mut self, prefixes: P) -> Self
     where
-        G: Into<Group<M>>,
+        P: IntoVec<String>,
     {
-        self.group.groups.push(group.into());
+        self.group.blocked_prefixes.extend(prefixes.into_vec());
         self
     }
 
-    /// Add multiple nested groups
-    pub fn groups<G>(mut self, groups: impl IntoIterator<Item = G>) -> Self
+    /// Add nested groups (accepts single group or collection)
+    /// 
+    /// Accepts anything that can be converted to Group<M>:
+    /// - Single group: `Group<M>` or anything implementing `Into<Group<M>>`
+    /// - Collections: `Vec<G>` or `[G; N]` where `G: Into<Group<M>>`
+    pub fn group<G, I>(mut self, groups: G) -> Self
     where
-        G: Into<Group<M>>,
+        G: IntoVec<I>,
+        I: Into<Group<M>>,
     {
-        self.group.groups.extend(groups.into_iter().map(Into::into));
+        self.group.groups.extend(groups.into_vec().into_iter().map(Into::into));
         self
     }
 
@@ -186,7 +266,7 @@ impl<M: Metadata> GroupBuilder<M> {
     /// Set the variant field for this group
     /// Items with different values for this field will be kept as separate variants
     pub fn variant_field(mut self, field: M::Field) -> Self {
-        self.group.variant_field = Some(field);
+        self.group.tagged_collection = Some(field);
         self
     }
 
@@ -195,7 +275,7 @@ impl<M: Metadata> GroupBuilder<M> {
         let variant_fields = M::variant_fields();
         if !variant_fields.is_empty() {
             // Use the first variant field if multiple are defined
-            self.group.variant_field = Some(variant_fields[0].clone());
+            self.group.tagged_collection = Some(variant_fields[0].clone());
         }
         self
     }

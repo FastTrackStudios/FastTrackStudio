@@ -100,7 +100,7 @@ impl<M: Metadata> Organizer<M> {
             .collect();
 
         // Handle variant fields if specified
-        if let Some(ref variant_field) = group.variant_field {
+        if let Some(ref variant_field) = group.tagged_collection {
             // Group items by their variant field value
             let mut variants: std::collections::HashMap<String, Vec<Item<M>>> =
                 std::collections::HashMap::new();
