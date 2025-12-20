@@ -5,10 +5,11 @@
 //! It also verifies that tracks match correctly with existing tracks and tracks
 //! are created when needed.
 
-use daw::tracks::{Track, TrackName};
+use daw::tracks::{Track, TrackName, PrintTrackTree};
 use fts::smart_template::{
     parse_fts_item_properties, ItemProperties, TrackItemPropertiesExt,
 };
+use fts::smart_template::utils::{generate_minimal_structure, GenerateFtsTracklist};
 
 /// Test case for track name parsing
 ///
@@ -442,4 +443,57 @@ fn test_marc_martel_with_existing_tracks() {
         "Track Matching Results with Existing Tracks:\n{}",
         track_list
     );
+}
+
+
+#[test]
+fn test_marc_martel_generate_minimal_structure() {
+    // Get test cases
+    let test_cases = test_cases();
+    
+    // Get track names from test cases
+    let track_names: Vec<String> = test_cases.iter().map(|tc| tc.name.to_string()).collect();
+    
+    // Generate minimal structure using the new API
+    let generated_tracks = track_names.generate_fts_tracklist();
+    
+    // Print the generated structure
+    println!("Generated Minimal Structure:\n{}", generated_tracks.print_tree());
+    
+    // Verify structure is minimal (e.g., Sum folder only exists if needed)
+    // For Kick: If we have In, Out, Trig but no Sub/Ambient, no Sum folder
+    // If we have Sub or Ambient, Sum folder should exist
+    
+    let has_kick_sub = generated_tracks.iter().any(|t| t.name.0.contains("Sub"));
+    let has_kick_ambient = generated_tracks.iter().any(|t| t.name.0.contains("Ambient"));
+    let has_kick_sum_folder = generated_tracks.iter().any(|t| t.name.0 == "Kick (SUM)");
+    
+    // Sum folder should only exist if we have Sub or Ambient
+    assert_eq!(
+        has_kick_sum_folder,
+        has_kick_sub || has_kick_ambient,
+        "Kick (SUM) folder should only exist if Sub or Ambient tracks exist"
+    );
+    
+    // Verify all expected tracks are present
+    let expected_tracks = vec![
+        "Kick In",
+        "Kick Out", 
+        "Kick Trig", // from "Kick Sample"
+        "Snare Top",
+        "Snare Bottom",
+        "Snare Trig", // from "Snare Sample"
+        "T1", // from "Tom1"
+        "T2", // from "Tom2"
+        "Hi-Hat", // from "HighHat"
+        "OH",
+    ];
+    
+    for expected in expected_tracks {
+        assert!(
+            generated_tracks.iter().any(|t| t.name.0 == expected),
+            "Expected track '{}' not found in generated structure",
+            expected
+        );
+    }
 }
