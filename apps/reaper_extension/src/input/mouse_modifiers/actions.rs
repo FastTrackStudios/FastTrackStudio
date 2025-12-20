@@ -30,7 +30,7 @@ impl ActionSection {
             other => ActionSection::Other(other),
         }
     }
-    
+
     /// Get character representation
     pub fn to_char(self) -> char {
         match self {
@@ -40,7 +40,7 @@ impl ActionSection {
             ActionSection::Other(c) => c,
         }
     }
-    
+
     /// Get display name
     pub fn display_name(self) -> &'static str {
         match self {
@@ -89,19 +89,19 @@ impl MouseModifierAction {
             original_string,
         }
     }
-    
+
     /// Parse action string (e.g., "1 m", "13 m", "2 e")
     pub fn parse(action_str: &str) -> Result<Self, String> {
         let trimmed = action_str.trim();
-        
+
         // Handle empty or reset values
         if trimmed.is_empty() || trimmed == "0" || trimmed == "-1" {
             return Err("Empty or reset action".to_string());
         }
-        
+
         // Try to parse as "ID section" format
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        
+
         if parts.len() >= 2 {
             // Format: "ID section" (e.g., "1 m", "13 m")
             if let Ok(command_id) = parts[0].parse::<u32>() {
@@ -127,7 +127,7 @@ impl MouseModifierAction {
                 }
             }
         }
-        
+
         // If parsing fails, store as-is
         Ok(Self {
             command_id: 0,
@@ -135,12 +135,7 @@ impl MouseModifierAction {
             original_string: trimmed.to_string(),
         })
     }
-    
-    /// Get the action string representation
-    pub fn to_string(&self) -> String {
-        self.original_string.clone()
-    }
-    
+
     /// Check if this is an empty/reset action
     pub fn is_empty(&self) -> bool {
         self.original_string.trim().is_empty()
@@ -184,7 +179,9 @@ pub fn get_action_display_name(
     // Try REAPER's API lookup (for custom actions that might have named IDs)
     if action.command_id > 0 {
         let cmd_id = reaper_medium::CommandId::new(action.command_id);
-        if let Some(name_str) = medium_reaper.reverse_named_command_lookup(cmd_id, |s| s.to_string()) {
+        if let Some(name_str) =
+            medium_reaper.reverse_named_command_lookup(cmd_id, |s| s.to_string())
+        {
             // If we got a name from API, return it (remove leading underscore if present)
             let name = if name_str.starts_with('_') {
                 name_str[1..].to_string()
@@ -197,7 +194,7 @@ pub fn get_action_display_name(
             }
         }
     }
-    
+
     // If API lookup fails, return the action ID string
     // For proper display names, use get_mouse_modifier_name with context
     action.original_string.clone()

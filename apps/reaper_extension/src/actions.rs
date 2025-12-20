@@ -865,9 +865,10 @@ fn log_tempo_time_sig_changes_handler() {
             let tempo_changed = (tempo - prev_tempo).abs() > 0.01; // Allow small floating point differences
             let time_sig_changed = match (&prev_time_sig, time_sig) {
                 (Some(prev), Some(current)) => prev != current,
-                (None, Some(_)) => true,
-                (Some(_), None) => false, // Time sig removed, but we'll still show it
-                (None, None) => false,
+                (opt_prev, Some(_)) if opt_prev.is_none() => true,
+                (Some(_), opt_current) if opt_current.is_none() => false, // Time sig removed, but we'll still show it
+                (opt_prev, opt_current) if opt_prev.is_none() && opt_current.is_none() => false,
+                _ => false,
             };
             
             // Only include if tempo or time signature actually changed
@@ -920,9 +921,10 @@ fn log_tempo_time_sig_changes_handler() {
                 // Check if time signature changed from previous
                 let time_sig_changed = match (&display_prev_time_sig, time_sig) {
                     (Some(prev), Some(current)) => prev != current,
-                    (None, Some(_)) => true,
-                    (Some(_), None) => true,
-                    (None, None) => false,
+                    (opt_prev, Some(_)) if opt_prev.is_none() => true,
+                    (Some(_), opt_current) if opt_current.is_none() => true,
+                    (opt_prev, opt_current) if opt_prev.is_none() && opt_current.is_none() => false,
+                    _ => false,
                 };
                 
                 if time_sig_changed {

@@ -3,11 +3,11 @@
 //! Provides a unified way to register actions with REAPER.
 
 use reaper_high::{ActionKind, Reaper, RegisteredAction};
-use reaper_medium::{CommandId, HookCommand2, SectionContext, ActionValueChange, WindowContext};
-use tracing::{debug, warn};
-use std::sync::{OnceLock, Mutex};
+use reaper_medium::{ActionValueChange, CommandId, HookCommand2, SectionContext, WindowContext};
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::sync::{Mutex, OnceLock};
+use tracing::{debug, warn};
 
 /// Global storage for registered actions (keeps them alive)
 static REGISTERED_ACTIONS: OnceLock<Mutex<Vec<RegisteredAction>>> = OnceLock::new();
@@ -35,9 +35,15 @@ impl HookCommand2 for MidiEditorActionHook {
         if let SectionContext::Sec(section_info) = section {
             if section_info.unique_id().get() == 32060 {
                 // Check if this is one of our registered MIDI editor actions
-                if let Ok(handlers) = MIDI_EDITOR_HANDLERS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+                if let Ok(handlers) = MIDI_EDITOR_HANDLERS
+                    .get_or_init(|| Mutex::new(HashMap::new()))
+                    .lock()
+                {
                     if let Some(handler) = handlers.get(&command_id) {
-                        debug!(command_id = command_id.get(), "Executing MIDI editor action");
+                        debug!(
+                            command_id = command_id.get(),
+                            "Executing MIDI editor action"
+                        );
                         handler();
                         return true; // We handled it
                     }
@@ -98,19 +104,19 @@ impl ActionSection {
 pub struct ActionDef {
     /// Command ID (must be unique)
     pub command_id: &'static str,
-    
+
     /// Display name shown in REAPER
     pub display_name: String,
-    
+
     /// Function to execute when action is invoked
     pub handler: fn(),
-    
+
     /// Whether this action should appear in the menu
     pub appears_in_menu: bool,
-    
+
     /// Section where this action should be registered (default: Main)
     pub section: ActionSection,
-    
+
     /// Optional function to get toggle state (for toggleable actions)
     /// Omit this field or use `..Default::default()` to use None
     pub toggle_state: Option<fn() -> bool>,
@@ -152,7 +158,7 @@ impl ActionDef {
         let handler = self.handler;
         let command_id = self.command_id;
         let section_id = self.section.section_id();
-        
+
         debug!(
             command_id = %self.command_id,
             display_name = %self.display_name,
@@ -192,7 +198,7 @@ impl ActionDef {
             } else {
                 ActionKind::NotToggleable
             };
-            
+
             let registered_action = Reaper::get().register_action(
                 self.command_id,
                 action_name.clone(),
@@ -219,7 +225,7 @@ impl ActionDef {
             self.register_to_section(section_id, &action_name, handler, command_id);
         }
     }
-    
+
     /// Register action to a specific section using custom_action registration
     fn register_to_section(
         &self,
@@ -232,11 +238,11 @@ impl ActionDef {
             let reaper = Reaper::get();
             let medium_reaper = reaper.medium_reaper();
             let low_reaper = medium_reaper.low();
-            
+
             // Create custom_action_register_t structure
             let id_str_cstring = CString::new(command_id).expect("CString::new failed");
             let name_cstring = CString::new(action_name).expect("CString::new failed");
-            
+
             #[repr(C)]
             struct CustomActionRegister {
                 unique_section_id: i32,
@@ -244,14 +250,14 @@ impl ActionDef {
                 name: *const std::os::raw::c_char,
                 extra: *mut std::ffi::c_void,
             }
-            
+
             let mut custom_action_reg = CustomActionRegister {
                 unique_section_id: section_id,
                 id_str: id_str_cstring.as_ptr(),
                 name: name_cstring.as_ptr(),
                 extra: std::ptr::null_mut(),
             };
-            
+
             // Register the custom action using plugin_register
             let custom_action_str = CString::new("custom_action").expect("CString::new failed");
             let cmd_id = low_reaper.plugin_register(
@@ -259,7 +265,7 @@ impl ActionDef {
                 &mut custom_action_reg as *mut _ as *mut std::ffi::c_void,
             );
             std::mem::forget(custom_action_str); // Keep alive
-            
+
             if cmd_id == 0 {
                 warn!(
                     command_id = %command_id,
@@ -268,23 +274,29 @@ impl ActionDef {
                 );
                 return;
             }
-            
+
             let command_id_value = CommandId::new(cmd_id as u32);
-            
+
             // Store command ID for lookup
-            if let Ok(mut map) = COMMAND_IDS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+            if let Ok(mut map) = COMMAND_IDS
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+            {
                 map.insert(command_id, command_id_value);
             }
-            
+
             // Store handler for this command ID
-            if let Ok(mut handlers) = MIDI_EDITOR_HANDLERS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+            if let Ok(mut handlers) = MIDI_EDITOR_HANDLERS
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+            {
                 handlers.insert(command_id_value, handler);
             }
-            
+
             // Keep the CStrings alive (they need to persist)
             std::mem::forget(id_str_cstring);
             std::mem::forget(name_cstring);
-            
+
             debug!(
                 command_id = %command_id,
                 action_name = %action_name,
@@ -302,20 +314,20 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
     if let Ok(mut defs_storage) = get_action_defs_storage().lock() {
         defs_storage.extend(actions.iter().cloned());
     }
-    
+
     debug!(
         module = %module_name,
         action_count = actions.len(),
         "Starting action registration for module"
     );
-    
+
     if actions.is_empty() {
         tracing::warn!(module = %module_name, "No actions to register for module");
         return;
     }
-    
+
     let mut success_count = 0;
-    
+
     for (index, action) in actions.iter().enumerate() {
         debug!(
             module = %module_name,
@@ -326,7 +338,7 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
             index + 1,
             actions.len()
         );
-        
+
         match std::panic::catch_unwind(|| {
             action.register();
             true
@@ -365,7 +377,7 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
         success_count,
         actions.len()
     );
-    
+
     // Wake up REAPER so that registered actions appear in the action list
     if let Err(e) = Reaper::get().wake_up() {
         tracing::warn!(
@@ -376,7 +388,7 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
     } else {
         debug!(module = %module_name, "REAPER woken up after action registration");
     }
-    
+
     // Look up and store command IDs for all registered actions (must be done on main thread)
     // This allows background threads to trigger actions without calling REAPER APIs
     let medium_reaper = Reaper::get().medium_reaper();
@@ -415,17 +427,17 @@ impl ActionRegistry {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         Ok(Self)
     }
-    
+
     /// Register all actions
     pub fn register_all(&self) -> Result<(), Box<dyn std::error::Error>> {
         // Register actions from modules
         crate::actions::register_all_actions();
-        
+
         // Wake up REAPER so actions are available
         if let Err(e) = Reaper::get().wake_up() {
             warn!("Failed to wake up REAPER: {}", e);
         }
-        
+
         Ok(())
     }
 }

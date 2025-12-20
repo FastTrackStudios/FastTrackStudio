@@ -204,56 +204,54 @@ pub fn build_songs_from_project_with_cache(
             // Find the song region that contains this SONGSTART marker
             let song_region = find_song_region_for_marker(start_marker, markers, regions);
             
-            match song_region {
-                Some(region) => {
-                    // Debug: Log the found song region and its color
-                    debug!(
-                        region_name = %region.name,
-                        region_color = ?region.color,
-                        start_marker_pos = start_marker.position_seconds(),
-                        "Found song region for SONGSTART marker"
-                    );
-                    
-                    // Extract song name from region name before building
-                    let (song_name, _) = parse_song_name(&region.name);
-                    
-                    // Check if song already exists in cached setlist
-                    if let Some(existing) = existing_setlist {
-                        if let Some(existing_song) = existing.songs.iter().find(|s| {
-                            s.name == song_name && 
-                            s.metadata.get("project_name").map(|s| s.as_str()) == Some(project_name)
-                        }) {
-                            debug!(
-                                song_name = %song_name,
-                                project_name = %project_name,
-                                "Song already exists in cached setlist, reusing without rebuild"
-                            );
-                            songs.push(Ok(existing_song.clone()));
-                            continue;
-                        }
-                    }
-                    
-                    // Build song from this region
-                    match build_song_from_region(
-                        &region.name,
-                        start_marker,
-                        &region,
-                        SongBuildContext {
-                            all_markers: markers,
-                            all_regions: regions,
-                            project: *project,
-                            project_path,
-                            project_name: Some(project_name),
-                        },
-                    ) {
-                        Ok(song) => songs.push(Ok(song)),
-                        Err(e) => {
-                            warn!(error = %e, region_name = %region.name, "Failed to build song from region");
-                            songs.push(Err(e));
-                        }
+            if let Some(region) = song_region {
+                // Debug: Log the found song region and its color
+                debug!(
+                    region_name = %region.name,
+                    region_color = ?region.color,
+                    start_marker_pos = start_marker.position_seconds(),
+                    "Found song region for SONGSTART marker"
+                );
+                
+                // Extract song name from region name before building
+                let (song_name, _) = parse_song_name(&region.name);
+                
+                // Check if song already exists in cached setlist
+                if let Some(existing) = existing_setlist {
+                    if let Some(existing_song) = existing.songs.iter().find(|s| {
+                        s.name == song_name && 
+                        s.metadata.get("project_name").map(|s| s.as_str()) == Some(project_name)
+                    }) {
+                        debug!(
+                            song_name = %song_name,
+                            project_name = %project_name,
+                            "Song already exists in cached setlist, reusing without rebuild"
+                        );
+                        songs.push(Ok(existing_song.clone()));
+                        continue;
                     }
                 }
-                None => {
+                
+                // Build song from this region
+                match build_song_from_region(
+                    &region.name,
+                    start_marker,
+                    &region,
+                    SongBuildContext {
+                        all_markers: markers,
+                        all_regions: regions,
+                        project: *project,
+                        project_path,
+                        project_name: Some(project_name),
+                    },
+                ) {
+                    Ok(song) => songs.push(Ok(song)),
+                    Err(e) => {
+                        warn!(error = %e, region_name = %region.name, "Failed to build song from region");
+                        songs.push(Err(e));
+                    }
+                }
+            } else {
                     // No song region found, create a song from markers alone
                     // Look for SONGEND or =END to find the song boundaries
                     let song_end = markers.iter().find(|m| {
@@ -308,7 +306,6 @@ pub fn build_songs_from_project_with_cache(
                             songs.push(Err(e));
                         }
                     }
-                }
             }
         }
     } else {
@@ -533,7 +530,7 @@ pub fn build_songs_from_project_with_cache(
 }
 
 /// Context for building a song from a region
-struct SongBuildContext<'a> {
+pub struct SongBuildContext<'a> {
     all_markers: &'a [Marker],
     all_regions: &'a [Region],
     project: Project,
