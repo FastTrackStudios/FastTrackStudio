@@ -16,8 +16,8 @@ use electronic_kit::ElectronicKit;
 /// Top-level drums group containing all drum kit types
 pub struct Drums;
 
-impl Into<Group<ItemMetadata>> for Drums {
-    fn into(self) -> Group<ItemMetadata> {
+impl From<Drums> for Group<ItemMetadata> {
+    fn from(_val: Drums) -> Self {
         Group::builder("Drums")
             .prefix("D")
             // No patterns - this is just a container group

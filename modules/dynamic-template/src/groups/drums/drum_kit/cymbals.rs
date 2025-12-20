@@ -6,8 +6,8 @@ use monarchy::Group;
 /// Cymbals group
 pub struct Cymbals;
 
-impl Into<Group<ItemMetadata>> for Cymbals {
-    fn into(self) -> Group<ItemMetadata> {
+impl From<Cymbals> for Group<ItemMetadata> {
+    fn from(_val: Cymbals) -> Self {
         Group::builder("Cymbals")
             .patterns(vec![
                 "cymbal",

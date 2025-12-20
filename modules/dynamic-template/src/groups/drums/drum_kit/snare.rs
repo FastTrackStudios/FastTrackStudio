@@ -6,8 +6,8 @@ use monarchy::Group;
 /// Snare drum group
 pub struct Snare;
 
-impl Into<Group<ItemMetadata>> for Snare {
-    fn into(self) -> Group<ItemMetadata> {
+impl From<Snare> for Group<ItemMetadata> {
+    fn from(_val: Snare) -> Self {
         Group::builder("Snare")
             .patterns(vec!["snare", "snr", "sn"])
             .build()

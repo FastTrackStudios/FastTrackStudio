@@ -6,8 +6,8 @@ use monarchy::Group;
 /// Room/ambient drums group
 pub struct Room;
 
-impl Into<Group<ItemMetadata>> for Room {
-    fn into(self) -> Group<ItemMetadata> {
+impl From<Room> for Group<ItemMetadata> {
+    fn from(_val: Room) -> Self {
         Group::builder("Room")
             .patterns(vec![
                 "room", "rooms", "amb", "ambient", "ambience", "mono", "stereo", "wide", "crush",

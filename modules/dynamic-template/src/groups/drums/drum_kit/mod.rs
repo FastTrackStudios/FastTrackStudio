@@ -18,8 +18,8 @@ pub use tom::Tom;
 /// Drum kit container group that includes all drum subgroups
 pub struct DrumKit;
 
-impl Into<Group<ItemMetadata>> for DrumKit {
-    fn into(self) -> Group<ItemMetadata> {
+impl From<DrumKit> for Group<ItemMetadata> {
+    fn from(_val: DrumKit) -> Self {
         Group::builder("Drum Kit")
             .patterns(vec!["d_", "drum", "kit", "drums"])
             .block_prefix("D") // Avoid "D Drum Kit" redundancy

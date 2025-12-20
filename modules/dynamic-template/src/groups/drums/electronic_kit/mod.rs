@@ -19,8 +19,8 @@ use monarchy::Group;
 /// Electronic drum kit container group
 pub struct ElectronicKit;
 
-impl Into<Group<ItemMetadata>> for ElectronicKit {
-    fn into(self) -> Group<ItemMetadata> {
+impl From<ElectronicKit> for Group<ItemMetadata> {
+    fn from(_val: ElectronicKit) -> Self {
         Group::builder("Electronic Drums")
             .patterns(vec![
                 "electronic",
