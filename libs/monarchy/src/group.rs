@@ -100,6 +100,11 @@ pub struct Group<M: Metadata> {
     /// If true, this group's children are promoted to the parent level in the output
     /// The group still exists for matching/organization but doesn't create nesting
     pub transparent: bool,
+
+    /// If true, this group is used only for metadata extraction and does not create
+    /// a structure node in the hierarchy. It will always match (or match with very
+    /// low priority) to extract metadata fields like Section, MultiMic, etc.
+    pub metadata_only: bool,
 }
 
 impl<M: Metadata> Group<M> {
@@ -153,6 +158,7 @@ impl<M: Metadata> GroupBuilder<M> {
                 priority: 0,
                 tagged_collection: None,
                 transparent: false,
+                metadata_only: false,
             },
         }
     }
@@ -284,6 +290,19 @@ impl<M: Metadata> GroupBuilder<M> {
     /// Use this when you want logical grouping without creating nested output structures
     pub fn transparent(mut self) -> Self {
         self.group.transparent = true;
+        self
+    }
+
+    /// Mark this group as metadata-only - it will extract metadata but not create
+    /// a structure node in the hierarchy. Use this for global metadata field patterns
+    /// like Section, MultiMic, etc. that should apply across all groups.
+    pub fn metadata_only(mut self) -> Self {
+        self.group.metadata_only = true;
+        // Metadata-only groups should have very low priority so they don't interfere
+        // with regular group matching, but still get checked for metadata extraction
+        if self.group.priority == 0 {
+            self.group.priority = -1000;
+        }
         self
     }
 
