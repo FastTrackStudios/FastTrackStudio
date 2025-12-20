@@ -15,83 +15,112 @@ Implement parsing logic in `libs/monarchy/src/parser.rs` to extract metadata fro
 **Changes:**
 - After setting `matched_group`, also set it in metadata using the `group` field
 - Set `original_name` field in metadata to the input string
-- Need to find the Field enum variant for "group" and "original_name"
+- Use `M::fields()` to iterate and find the correct Field enum variants
 
 **Implementation:**
 ```rust
 // After line 38 where matched_group is set:
 if let Some(ref group_name) = matched_group {
-    // Find the "group" field enum variant
-    // Set it in metadata: metadata.set(ItemMetadataField::Group, ItemMetadataValue::Group(group_name.clone()))
+    // Iterate over all fields to find "group" field
+    for field in M::fields() {
+        let field_str = format!("{:?}", field);
+        if field_str == "Group" || field_str.to_lowercase() == "group" {
+            // Create Value variant - need to match on field to create correct Value
+            // This will require matching on the Field enum
+            metadata.set(field, create_value_for_field(field, group_name.clone()));
+            break;
+        }
+    }
 }
 
-// Set original_name
-// metadata.set(ItemMetadataField::OriginalName, ItemMetadataValue::OriginalName(input.clone()))
+// Set original_name similarly
+for field in M::fields() {
+    let field_str = format!("{:?}", field);
+    if field_str == "OriginalName" || field_str.to_lowercase() == "original_name" {
+        metadata.set(field, create_value_for_field(field, input.clone()));
+        break;
+    }
+}
 ```
 
-**Challenge:** Need to dynamically find Field enum variants. Options:
-- Use `M::fields()` to iterate and find by name
-- Or add a helper method to Metadata trait to get field by name
-- Or use a match on all possible fields (not scalable)
+**Note:** We'll need a helper function `create_value_for_field` that matches on Field enum to create the correct Value variant.
 
-**Recommendation:** Add helper method to Metadata trait or use string-based field lookup.
-
-### Step 1.2: Implement basic `extract_field_value` for direct patterns
+### Step 1.2: Implement `extract_field_value` using field iteration
 **Location:** `libs/monarchy/src/parser.rs` - `extract_field_value()` method
 
 **Current state:** Returns `None`
 
-**Initial implementation:**
-- Check if any of the group's patterns match the input
-- For String fields: return the matched pattern (or first match)
-- For Vec<String> fields: collect all matching patterns
+**Approach:** Use `M::fields()` to iterate over all possible fields and match based on field configurations.
 
-**Example for "Kick In":**
-- Group "Kick" matches
-- Field `multi_mic` is in `group.metadata_fields`
-- Need to check nested groups in `group.groups` for the `multi_mic` group
-- The `multi_mic` group has patterns `["In", "Out", "Top", "Bottom"]`
-- "In" matches, so return `ItemMetadataValue::MultiMic(vec!["In".to_string()])`
+**Key insight:** We have the full `config` available in the parser, and the `group` parameter contains:
+- `group.metadata_fields` - list of fields this group cares about
+- `group.groups` - nested groups that correspond to those fields
+
+**Implementation strategy:**
+1. Check if the field is in `group.metadata_fields` (if not, return None)
+2. Find the nested group in `group.groups` that corresponds to this field
+3. Extract matching patterns from that nested group
+4. Convert to appropriate Value type
+
+**Example for "Kick In" with `multi_mic` field:**
+- Group "Kick" matches, `group.metadata_fields` contains `[ItemMetadataField::MultiMic]`
+- Find nested group in `group.groups` named "MultiMic" (or matching field name)
+- The nested group has patterns `["In", "Out", "Top", "Bottom"]`
+- Check which patterns match "Kick In" -> "In" matches
+- Return `ItemMetadataValue::MultiMic(vec!["In".to_string()])`
 
 ## Phase 2: Nested Group Extraction
 
-### Step 2.1: Find nested groups for a field
+### Step 2.1: Find nested groups for a field using field iteration
 **Location:** `libs/monarchy/src/parser.rs` - `extract_field_value()` method
 
-**Problem:** When extracting `multi_mic` field, we need to find the nested group that was configured via `.multi_mic(multi_mic_group)`.
+**Approach:** Use `M::fields()` to iterate and match field configurations.
 
 **Current structure:**
-- `group.metadata_fields` contains `[ItemMetadataField::MultiMic]`
-- `group.groups` contains the nested `multi_mic` Group
-- But we need to know which nested group corresponds to which field
-
-**Solution options:**
-1. **Store field-to-group mapping in Group struct** (requires Group changes)
-2. **Search nested groups by matching field name** (hacky, but works)
-3. **Store field groups separately** (requires Group changes)
-
-**Recommendation:** For now, search `group.groups` for a group that matches the field name pattern. The nested group name is "MultiMic" and the field is `MultiMic`, so we can match by name.
+- `group.metadata_fields` contains `[ItemMetadataField::MultiMic]` - fields this group cares about
+- `group.groups` contains nested groups - one for each field in `metadata_fields`
+- The nested group name should match the field name (e.g., "MultiMic" group for `MultiMic` field)
 
 **Implementation:**
 ```rust
-fn find_nested_group_for_field(
+fn extract_field_value(
     &self,
+    input: &str,
     field: &M::Field,
-    parent_group: &Group<M>
-) -> Option<&Group<M>> {
-    // Convert field enum to string representation
+    group: &Group<M>,
+) -> Option<M::Value> {
+    // First check if this field is in the group's metadata_fields
+    if !group.metadata_fields.contains(field) {
+        return None;
+    }
+    
+    // Convert field enum to string to find matching nested group
     let field_name = format!("{:?}", field);
     
-    // Search nested groups for one that matches the field name
-    for nested_group in &parent_group.groups {
-        if nested_group.name == field_name || 
-           nested_group.name.to_lowercase() == field_name.to_lowercase() {
-            return Some(nested_group);
-        }
+    // Find nested group that matches this field
+    // The nested group name should match the field name
+    let nested_group = group.groups.iter()
+        .find(|g| {
+            g.name == field_name || 
+            g.name.to_lowercase() == field_name.to_lowercase() ||
+            g.name.to_lowercase().replace("_", "") == field_name.to_lowercase().replace("_", "")
+        })?;
+    
+    // Extract matching patterns from nested group
+    let matches = self.extract_patterns_from_group(input, nested_group);
+    
+    if matches.is_empty() {
+        return None;
     }
-    None
+    
+    // Convert matches to Value based on field type
+    self.create_value_for_field(field, matches)
 }
 ```
+
+**Note:** We need helper methods:
+- `extract_patterns_from_group()` - finds which patterns match
+- `create_value_for_field()` - converts matches to correct Value variant
 
 ### Step 2.2: Extract values from nested group patterns
 **Location:** `libs/monarchy/src/parser.rs` - `extract_field_value()` method
@@ -118,23 +147,34 @@ fn find_nested_group_for_field(
 
 ## Phase 3: Value Type Handling
 
-### Step 3.1: Determine field type from Field enum
-**Location:** `libs/monarchy/src/parser.rs` - `extract_field_value()` method
+### Step 3.1: Create Value from Field using pattern matching
+**Location:** `libs/monarchy/src/parser.rs` - `create_value_for_field()` helper method
 
-**Problem:** Need to know if a field is `Option<String>` or `Option<Vec<String>>` to create the correct Value enum variant.
+**Problem:** Need to create the correct Value enum variant based on Field enum and extracted matches.
 
-**Solution:** Use pattern matching on the Field enum and create corresponding Value enum variants. The derive macro generates matching variants, so we can match on Field and construct Value.
+**Solution:** Use exhaustive pattern matching on the Field enum. Since we're in the monarchy crate and working with generic `M::Field` and `M::Value`, we can't directly match. However, we can:
 
-**Implementation approach:**
-- Match on `field` to determine which Value variant to create
-- For each field, check the nested group patterns
-- Create appropriate Value based on field type
+1. **Use the Metadata trait's get/set methods** - These already handle the conversion
+2. **Match on field string representation** - Convert Field to string, match, create Value
+3. **Use a helper that works with the actual type** - For ItemMetadata specifically
 
-**Challenge:** This requires knowing all possible fields at compile time, which we do via the Field enum.
+**Better approach:** Since we're generic over `M: Metadata`, we need a way to construct Values. The Metadata trait doesn't provide a way to construct Values from strings.
 
-**Alternative:** Use a helper trait or method that maps Field -> expected Value type. But this might be complex.
+**Recommended solution:** 
+- For now, we'll need to work with the actual ItemMetadata type in dynamic-template
+- Or add a helper method to Metadata trait: `fn create_value(field: &Self::Field, value: String) -> Option<Self::Value>`
+- Or use a match on Field enum variants (requires knowing all variants at compile time)
 
-**Simpler approach:** For now, hardcode the logic for known fields, or use a match statement that covers all Field variants.
+**Practical implementation:**
+Since we're parsing ItemMetadata specifically, we can use a match statement that covers all ItemMetadataField variants. For a truly generic solution, we'd need to extend the Metadata trait.
+
+**For Vec<String> fields (multi_mic, effect, unparsed_words):**
+- Collect all matching patterns into Vec<String>
+- Create Value variant with that Vec
+
+**For String fields (everything else):**
+- Take first matching pattern (or all if multiple)
+- Create Value variant with that String
 
 ## Phase 4: Testing and Refinement
 
@@ -156,12 +196,34 @@ fn find_nested_group_for_field(
 
 ## Implementation Order
 
-1. **Set `group` and `original_name`** (Step 1.1) - Simplest, gets basic fields working
-2. **Basic pattern matching** (Step 1.2) - Extract direct patterns from group
-3. **Nested group finding** (Step 2.1) - Find which nested group corresponds to a field
-4. **Nested group extraction** (Step 2.2) - Extract values from nested group patterns
-5. **Value type handling** (Step 3.1) - Properly construct Value enum variants
+1. **Set `group` and `original_name`** (Step 1.1) - Use `M::fields()` to find and set these fields
+2. **Implement `extract_field_value` with field iteration** (Step 1.2) - Use `M::fields()` and `group.metadata_fields` to find relevant fields
+3. **Find nested groups for fields** (Step 2.1) - Match nested group names to field names
+4. **Extract patterns from nested groups** (Step 2.2) - Check which patterns match the input
+5. **Create Value variants** (Step 3.1) - Convert extracted patterns to correct Value enum variants
 6. **Testing** (Phase 4) - Verify everything works
+
+## Key Implementation Details
+
+### Using M::fields() for Field Discovery
+- Iterate over `M::fields()` to find fields by name
+- Match field string representation (`format!("{:?}", field)`) to field names
+- Use this for both `group`/`original_name` and custom fields
+
+### Using group.metadata_fields
+- Only process fields that are in `group.metadata_fields`
+- This tells us which fields this group cares about
+- For each field, find its corresponding nested group in `group.groups`
+
+### Nested Group Matching
+- Nested group name should match field name (e.g., "MultiMic" for `MultiMic` field)
+- Handle case variations and underscore differences
+- The nested group contains the patterns to match against
+
+### Pattern Extraction
+- For each pattern in nested group, check if it matches the input
+- Use case-insensitive matching (already handled by `Group::matches()`)
+- Collect all matches for Vec<String> fields, first match for String fields
 
 ## Key Challenges
 
