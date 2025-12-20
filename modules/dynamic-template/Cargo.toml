@@ -33,3 +33,6 @@ default = ["handlebars-engine", "tera-engine"]
 handlebars-engine = []
 tera-engine = []
 hot-reload = []
+
+[lints]
+workspace = true

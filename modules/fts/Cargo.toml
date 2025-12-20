@@ -76,4 +76,5 @@ reqwest = { version = "0.11", features = ["json"] }
 
 [lints.rust]
 unsafe_code = "allow"  # Required for low-level REAPER API calls in reaper feature
+unused = { level = "allow", priority = -1 }
 

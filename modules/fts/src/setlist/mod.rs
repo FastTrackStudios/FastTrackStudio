@@ -58,7 +58,7 @@ pub fn validate_setlist(setlist: &Setlist) -> Result<(), SetlistError> {
 }
 
 pub fn parse_section_type(input: &str) -> Result<SectionType, SetlistError> {
-    SectionType::from_str(input)
+    SectionType::parse(input)
         .map_err(|e| SetlistError::invalid_section(&e))
 }
 

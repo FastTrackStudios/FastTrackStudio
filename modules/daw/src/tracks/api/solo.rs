@@ -9,8 +9,10 @@ pub struct Hidden<T>(pub T);
 
 /// Track solo mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum SoloMode {
     /// No solo
+    #[default]
     Off,
     /// Solo (default mode)
     Solo,
@@ -65,9 +67,4 @@ impl fmt::Display for SoloMode {
     }
 }
 
-impl Default for SoloMode {
-    fn default() -> Self {
-        SoloMode::Off
-    }
-}
 

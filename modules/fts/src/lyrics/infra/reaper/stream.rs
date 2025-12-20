@@ -278,7 +278,7 @@ impl ReaperLyricsCommandHandler {
         };
         
         // Get the first syllable (we'll improve this to track progress later)
-        let (word_idx, syl_idx, syllable) = syllables[0];
+        let (_word_idx, syl_idx, syllable) = syllables[0];
         let syllable_text = syllable.text.clone();
         
         // Assign syllable to MIDI note

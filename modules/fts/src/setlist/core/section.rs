@@ -140,22 +140,22 @@ mod tests {
 
     #[test]
     fn test_section_type_parsing() {
-        assert_eq!(SectionType::from_str("verse").unwrap(), SectionType::Verse);
-        assert_eq!(SectionType::from_str("CH").unwrap(), SectionType::Chorus);
+        assert_eq!(SectionType::parse("verse").unwrap(), SectionType::Verse);
+        assert_eq!(SectionType::parse("CH").unwrap(), SectionType::Chorus);
         assert_eq!(
-            SectionType::from_str("pre-chorus").unwrap(),
+            SectionType::parse("pre-chorus").unwrap(),
             SectionType::Pre(Box::new(SectionType::Chorus))
         );
 
         // Test fuzzy matching
-        assert_eq!(SectionType::from_str("vrse").unwrap(), SectionType::Verse);
+        assert_eq!(SectionType::parse("vrse").unwrap(), SectionType::Verse);
         assert_eq!(
-            SectionType::from_str("chorous").unwrap(),
+            SectionType::parse("chorous").unwrap(),
             SectionType::Chorus
         );
 
         // Test error case
-        assert!(SectionType::from_str("invalid").is_err());
+        assert!(SectionType::parse("invalid").is_err());
     }
 
     #[test]

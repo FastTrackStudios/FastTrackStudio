@@ -1,5 +1,4 @@
 use crate::chart::Chart;
-use crate::primitives::Note;
 
 /// Represents a group of measures with optional repeat annotation
 #[derive(Debug)]
@@ -74,6 +73,27 @@ pub fn format_chord(s: &str) -> String {
     s.replace("maj", "M")
 }
 
+/// Formatting options for chart display
+struct Formatting {
+    border: &'static str,
+    bold: &'static str,
+    reset: &'static str,
+    chord_color: &'static str,
+    dim: &'static str,
+}
+
+impl Formatting {
+    fn default() -> Self {
+        Self {
+            border: colors::BORDER,
+            bold: colors::BOLD,
+            reset: colors::RESET,
+            chord_color: colors::CHORD,
+            dim: colors::DIM,
+        }
+    }
+}
+
 impl Chart {
     /// Display measures using a grid-based system
     /// - 4 measures per line
@@ -84,14 +104,9 @@ impl Chart {
         f: &mut std::fmt::Formatter<'_>,
         measures: &[crate::chart::types::Measure],
         section_start_measures: u32,
-        border: &str,
-        bold: &str,
-        reset: &str,
-        chord_color: &str,
-        dim: &str,
     ) -> std::fmt::Result {
         Self::display_measures_grid_with_next_section(
-            f, measures, section_start_measures, None, border, bold, reset, chord_color, dim
+            f, measures, section_start_measures, None
         )
     }
     
@@ -100,12 +115,8 @@ impl Chart {
         measures: &[crate::chart::types::Measure],
         section_start_measures: u32,
         next_section_first_measure_chords: Option<&[&crate::chart::types::ChordInstance]>,
-        border: &str,
-        bold: &str,
-        reset: &str,
-        chord_color: &str,
-        dim: &str,
     ) -> std::fmt::Result {
+        let fmt = Formatting::default();
         const MEASURES_PER_LINE: usize = 4;
         const SLOTS_PER_MEASURE: usize = 16; // 16th notes in 4/4 time
         const CHARS_PER_SLOT: usize = 4; // Fixed width per slot - accommodates chords like "2maj" (4 chars)
@@ -122,7 +133,7 @@ impl Chart {
 
         while measure_idx < measures.len() {
             // Start a new line
-            write!(f, "{}{}║{} ", border, bold, reset)?;
+            write!(f, "{}{}║{} ", fmt.border, fmt.bold, fmt.reset)?;
 
             // Determine how many measures to show on this line
             let measures_on_line = MEASURES_PER_LINE.min(measures.len() - measure_idx);
@@ -145,7 +156,7 @@ impl Chart {
                         // If this chord belongs to the last measure of current section (pushed from next section)
                         if chord_abs_measures == last_measure_abs {
                             let chord_abs_beats = chord.position.total_duration.beat.max(0) as u32;
-                            let chord_abs_subdivisions = chord.position.total_duration.subdivision.max(0).min(999) as u32;
+                            let chord_abs_subdivisions = chord.position.total_duration.subdivision.clamp(0, 999) as u32;
                             let beats_in_slots = chord_abs_beats as usize * slots_per_beat;
                             let subdivisions_in_slots = (chord_abs_subdivisions as usize * SLOTS_PER_MEASURE) / (beats_per_measure * 1000);
                             let slot = beats_in_slots + subdivisions_in_slots;
@@ -160,14 +171,14 @@ impl Chart {
             
             // Collect all chords from all measures on this line, then place them by their actual position
             for (m_idx, measure) in measures[measure_idx..line_end_idx].iter().enumerate() {
-                let measure_abs_measures = section_start_measures + (measure_idx + m_idx) as u32;
+                let _measure_abs_measures = section_start_measures + (measure_idx + m_idx) as u32;
                 
                 for chord in &measure.chords {
                     // Calculate position within the measure
                     // chord.position.total_duration is absolute from song start
                     let chord_abs_measures = chord.position.total_duration.measure.max(0) as u32;
                     let chord_abs_beats = chord.position.total_duration.beat.max(0) as u32;
-                    let chord_abs_subdivisions = chord.position.total_duration.subdivision.max(0).min(999) as u32;
+                    let chord_abs_subdivisions = chord.position.total_duration.subdivision.clamp(0, 999) as u32;
                     
                     // Determine which measure on this line this chord belongs to based on its position
                     // Chords can be pushed into previous measures, so check all measures on this line
@@ -247,13 +258,13 @@ impl Chart {
                 }
                 
                 if !chord_parts.is_empty() {
-                    write!(f, "{}{}{}", chord_color, bold, chord_parts.join(" "))?;
-                    write!(f, "{}", reset)?;
+                    write!(f, "{}{}{}", fmt.chord_color, fmt.bold, chord_parts.join(" "))?;
+                    write!(f, "{}", fmt.reset)?;
                 }
 
                 // Measure separator (except for last measure on line)
                 if measure_idx_in_line < measures_on_line - 1 {
-                    write!(f, " {}|{} ", dim, reset)?;
+                    write!(f, " {}|{} ", fmt.dim, fmt.reset)?;
                 }
             }
             writeln!(f)?;
@@ -315,7 +326,7 @@ impl Chart {
         const CHARS_PER_SLOT: usize = 2;
         
         // Get time signature (default to 4/4 if not set)
-        let time_sig = self.time_signature.unwrap_or_else(|| crate::time::TimeSignature::common_time());
+        let time_sig = self.time_signature.unwrap_or_else(crate::time::TimeSignature::common_time);
         let beats_per_measure = time_sig.numerator as usize;
         let slots_per_measure = 16; // 16th notes (works for 4/4, adjust for other time sigs if needed)
         

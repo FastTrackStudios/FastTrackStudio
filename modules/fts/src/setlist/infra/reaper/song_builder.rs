@@ -238,11 +238,13 @@ pub fn build_songs_from_project_with_cache(
                         &region.name,
                         start_marker,
                         &region,
-                        markers,
-                        regions,
-                        project,
-                        project_path,
-                        Some(project_name),
+                        SongBuildContext {
+                            all_markers: markers,
+                            all_regions: regions,
+                            project: *project,
+                            project_path,
+                            project_name: Some(project_name),
+                        },
                     ) {
                         Ok(song) => songs.push(Ok(song)),
                         Err(e) => {
@@ -292,11 +294,13 @@ pub fn build_songs_from_project_with_cache(
                         &synthetic_region.name,
                         start_marker,
                         &synthetic_region,
-                        markers,
-                        regions,
-                        project,
-                        project_path,
-                        Some(project_name),
+                        SongBuildContext {
+                            all_markers: markers,
+                            all_regions: regions,
+                            project: *project,
+                            project_path,
+                            project_name: Some(project_name),
+                        },
                     ) {
                         Ok(song) => songs.push(Ok(song)),
                         Err(e) => {
@@ -342,11 +346,13 @@ pub fn build_songs_from_project_with_cache(
                         &region.name,
                         &synthetic_marker,
                         &region,
-                        markers,
-                        regions,
-                        project,
-                        project_path,
-                        Some(project_name),
+                        SongBuildContext {
+                            all_markers: markers,
+                            all_regions: regions,
+                            project: *project,
+                            project_path,
+                            project_name: Some(project_name),
+                        },
                     ) {
                         Ok(song) => songs.push(Ok(song)),
                         Err(e) => {
@@ -368,11 +374,13 @@ pub fn build_songs_from_project_with_cache(
                         &synthetic_region.name,
                         &synthetic_marker,
                         &synthetic_region,
-                        markers,
-                        regions,
-                        project,
-                        project_path,
-                        Some(project_name),
+                        SongBuildContext {
+                            all_markers: markers,
+                            all_regions: regions,
+                            project: *project,
+                            project_path,
+                            project_name: Some(project_name),
+                        },
                     ) {
                         Ok(song) => songs.push(Ok(song)),
                         Err(e) => {
@@ -404,11 +412,13 @@ pub fn build_songs_from_project_with_cache(
                             &region.name,
                             &synthetic_marker,
                             region,
-                            markers,
-                            regions,
-                            project,
-                            project_path,
-                            Some(project_name),
+                            SongBuildContext {
+                                all_markers: markers,
+                                all_regions: regions,
+                                project: *project,
+                                project_path,
+                                project_name: Some(project_name),
+                            },
                         ) {
                             Ok(song) => songs.push(Ok(song)),
                             Err(e) => {
@@ -442,11 +452,13 @@ pub fn build_songs_from_project_with_cache(
                                     &region.name,
                                     &synthetic_marker,
                                     region,
-                                    markers,
-                                    regions,
-                                    project,
-                                    project_path,
-                                    Some(project_name),
+                                    SongBuildContext {
+                                        all_markers: markers,
+                                        all_regions: regions,
+                                        project: *project,
+                                        project_path,
+                                        project_name: Some(project_name),
+                                    },
                                 ) {
                                     Ok(song) => songs.push(Ok(song)),
                                     Err(e) => {
@@ -498,11 +510,13 @@ pub fn build_songs_from_project_with_cache(
                         &region.name,
                         start_marker,
                         &region,
-                        markers,
-                        regions,
-                        project,
-                        project_path,
-                        Some(project_name),
+                        SongBuildContext {
+                            all_markers: markers,
+                            all_regions: regions,
+                            project: *project,
+                            project_path,
+                            project_name: Some(project_name),
+                        },
                     ) {
                         Ok(song) => songs.push(Ok(song)),
                         Err(e) => {
@@ -518,16 +532,21 @@ pub fn build_songs_from_project_with_cache(
     songs
 }
 
+/// Context for building a song from a region
+struct SongBuildContext<'a> {
+    all_markers: &'a [Marker],
+    all_regions: &'a [Region],
+    project: Project,
+    project_path: Option<&'a std::path::Path>,
+    project_name: Option<&'a str>,
+}
+
 /// Build a song from a specific song region
 pub fn build_song_from_region(
     song_name: &str,
     start_marker: &Marker,
     song_region: &Region,
-    all_markers: &[Marker],
-    all_regions: &[Region],
-    project: &Project,
-    project_path: Option<&std::path::Path>,
-    project_name: Option<&str>,
+    context: SongBuildContext<'_>,
 ) -> Result<Song, SetlistError> {
     // Parse song name to extract actual song name and artist
     let (parsed_song_name, artist_from_region) = parse_song_name(song_name);
@@ -535,7 +554,7 @@ pub fn build_song_from_region(
     // If no artist found in region name, try to extract from project name
     let artist = if artist_from_region.is_some() {
         artist_from_region
-    } else if let Some(proj_name) = project_name {
+    } else if let Some(proj_name) = context.project_name {
         // Try to parse artist from project name
         let (_, artist_from_project) = parse_song_name(proj_name);
         artist_from_project
@@ -551,7 +570,7 @@ pub fn build_song_from_region(
     }
     
     // Store project name in metadata
-    if let Some(proj_name) = project_name {
+    if let Some(proj_name) = context.project_name {
         song.metadata.insert("project_name".to_string(), proj_name.to_string());
     }
     
@@ -563,7 +582,7 @@ pub fn build_song_from_region(
     
     // Find special markers within this song region
     // Count-In marker
-    if let Some(marker) = all_markers.iter().find(|m| {
+    if let Some(marker) = context.all_markers.iter().find(|m| {
         m.name.trim().eq_ignore_ascii_case("Count-In") &&
         m.position_seconds() >= song_region.start_seconds() &&
         m.position_seconds() <= song_region.end_seconds()
@@ -572,7 +591,7 @@ pub fn build_song_from_region(
     }
     
     // =START marker (RENDERSTART)
-    if let Some(marker) = all_markers.iter().find(|m| {
+    if let Some(marker) = context.all_markers.iter().find(|m| {
         m.name.trim() == "=START" &&
         m.position_seconds() >= song_region.start_seconds() &&
         m.position_seconds() <= song_region.end_seconds()
@@ -581,7 +600,7 @@ pub fn build_song_from_region(
     }
     
     // SONGEND marker
-    if let Some(marker) = all_markers.iter().find(|m| {
+    if let Some(marker) = context.all_markers.iter().find(|m| {
         m.name.trim().eq_ignore_ascii_case("SONGEND") &&
         m.position_seconds() >= song_region.start_seconds() &&
         m.position_seconds() <= song_region.end_seconds()
@@ -590,7 +609,7 @@ pub fn build_song_from_region(
     }
     
     // =END marker (RENDEREND)
-    if let Some(marker) = all_markers.iter().find(|m| {
+    if let Some(marker) = context.all_markers.iter().find(|m| {
         m.name.trim() == "=END" &&
         m.position_seconds() >= song_region.start_seconds() &&
         m.position_seconds() <= song_region.end_seconds()
@@ -641,7 +660,7 @@ pub fn build_song_from_region(
     song.set_song_region_end_marker(end_marker);
     
     // Build sections from regions
-    let sections = build_sections_from_regions(all_regions, &song, song_region);
+    let sections = build_sections_from_regions(context.all_regions, &song, song_region);
     
     // Add sections to song
     for section in sections {
@@ -663,12 +682,12 @@ pub fn build_song_from_region(
         .unwrap_or(song_region.start_seconds());
     
     // Read tempo/time signature changes from the project and filter to song range
-    let all_tempo_changes = read_tempo_time_sig_markers_from_project(project);
+    let all_tempo_changes = read_tempo_time_sig_markers_from_project(&context.project);
     
     // Get project default tempo and time signature (we'll need these for calculating musical positions)
-    let project_tempo = project.tempo().bpm().get();
+    let project_tempo = context.project.tempo().bpm().get();
     let zero_pos = PositionInSeconds::ZERO;
-    let beat_info = project.beat_info_at(zero_pos);
+    let beat_info = context.project.beat_info_at(zero_pos);
     let project_time_sig = (
         beat_info.time_signature.numerator.get() as i32,
         beat_info.time_signature.denominator.get() as i32,
@@ -776,7 +795,7 @@ pub fn build_song_from_region(
     // Read lyrics from the project (if reaper feature is enabled)
     #[cfg(feature = "reaper")]
     {
-        match read_lyrics_from_project(project.clone()) {
+        match read_lyrics_from_project(context.project) {
             Ok(lyrics_data) => {
                 match convert_lyrics_data_to_lyrics(lyrics_data, parsed_song_name.clone(), &song) {
                     Ok(lyrics) => {
@@ -799,23 +818,23 @@ pub fn build_song_from_region(
     // This ensures transport state (playhead position, play state, tempo, etc.) and all track information is included in the setlist
     use super::transport::ReaperTransport;
     
-    let reaper_project = project.clone();
-    let transport_adapter = ReaperTransport::new(reaper_project.clone());
+    let reaper_project = context.project;
+    let transport_adapter = ReaperTransport::new(reaper_project);
     
     // Read current transport state and tracks
     match transport_adapter.read_transport() {
         Ok(transport) => {
             // Create a Project<Transport> with the current transport state
-            let project_name_str = project_name.unwrap_or(parsed_song_name.as_str());
+            let project_name_str = context.project_name.unwrap_or(parsed_song_name.as_str());
             let mut project_with_transport = daw::project::Project::new(project_name_str, transport);
-            if let Some(path) = project_path {
+            if let Some(path) = context.project_path {
                 project_with_transport.set_path(path.to_string_lossy().to_string());
             }
             
             // Read lightweight track summaries (performant approach, similar to CSI)
             // Only essential track info is included - no items, envelopes, FX chains, etc.
             use super::tracks::get_track_summaries;
-            let track_summaries = get_track_summaries(project);
+            let track_summaries = get_track_summaries(&context.project);
             // Convert summaries to minimal tracks for Project compatibility
             let minimal_tracks: Vec<daw::tracks::Track> = track_summaries
                 .iter()
@@ -834,7 +853,7 @@ pub fn build_song_from_region(
     // Calculate measure positions for this song
     // This provides both MusicalPosition and TimePosition for each measure
     // so clients can display measures correctly without complex tempo calculations
-    song.measure_positions = calculate_measure_positions(project, &song);
+    song.measure_positions = calculate_measure_positions(&context.project, &song);
     
     Ok(song)
 }
@@ -980,7 +999,7 @@ pub fn build_song_from_project_simple(
     use super::transport::ReaperTransport;
     
     let reaper_project = project.clone();
-    let transport_adapter = ReaperTransport::new(reaper_project.clone());
+    let transport_adapter = ReaperTransport::new(reaper_project);
     
     // Read current transport state and tracks
     match transport_adapter.read_transport() {
@@ -1013,7 +1032,7 @@ pub fn build_song_from_project_simple(
     // Calculate measure positions for this song
     // This provides both MusicalPosition and TimePosition for each measure
     // so clients can display measures correctly without complex tempo calculations
-    song.measure_positions = calculate_measure_positions(project, &song);
+    song.measure_positions = calculate_measure_positions(&project, &song);
     
     Ok(song)
 }

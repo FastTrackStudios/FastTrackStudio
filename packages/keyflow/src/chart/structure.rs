@@ -10,7 +10,7 @@ use crate::key::Key;
 use crate::metadata::SongMetadata;
 use crate::primitives::Note;
 use crate::sections::Section;
-use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition, Tempo, TimeSignature};
+use crate::time::{AbsolutePosition, MusicalPosition, Tempo, TimeSignature};
 use serde::{Deserialize, Serialize};
 
 /// The complete parsed chart structure
@@ -301,7 +301,7 @@ impl Chart {
                 } else {
                     // Empty measure - just add separator if not last
                     if measure_idx < section.measures.len() - 1 {
-                        output.push_str("|");
+                        output.push('|');
                     }
                 }
 

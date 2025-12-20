@@ -109,7 +109,7 @@ impl ReaperTransport {
         let play_beats_since_measure = play_beat_info.beats_since_measure.get();
         let play_beat = play_beats_since_measure.floor() as i32;
         let play_subdivision = ((play_beats_since_measure - play_beats_since_measure.floor()) * 1000.0).round() as i32;
-        let play_subdivision = play_subdivision.max(0).min(999);
+        let play_subdivision = play_subdivision.clamp(0, 999);
         
         let play_musical = MusicalPosition::try_new(play_measure, play_beat, play_subdivision)
             .map_err(|e| TransportError::NotReady(format!("Invalid musical position: {}", e)))?;
@@ -124,7 +124,7 @@ impl ReaperTransport {
         let edit_beats_since_measure = edit_beat_info.beats_since_measure.get();
         let edit_beat = edit_beats_since_measure.floor() as i32;
         let edit_subdivision = ((edit_beats_since_measure - edit_beats_since_measure.floor()) * 1000.0).round() as i32;
-        let edit_subdivision = edit_subdivision.max(0).min(999);
+        let edit_subdivision = edit_subdivision.clamp(0, 999);
         
         let edit_musical = MusicalPosition::try_new(edit_measure, edit_beat, edit_subdivision)
             .map_err(|e| TransportError::NotReady(format!("Invalid musical position: {}", e)))?;

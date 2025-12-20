@@ -17,3 +17,6 @@ convert_case = "0.6"
 
 [dev-dependencies]
 monarchy = { path = "../monarchy" }
+
+[lints]
+workspace = true

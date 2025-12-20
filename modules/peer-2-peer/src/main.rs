@@ -174,8 +174,8 @@ async fn main() -> Result<()> {
     
     // Build router with both irpc and gossip protocols
     let router = Router::builder(endpoint.clone())
-        .accept(IRPC_ALPN.to_vec(), irpc_protocol)
-        .accept(GOSSIP_ALPN.to_vec(), gossip.clone())
+        .accept(IRPC_ALPN, irpc_protocol)
+        .accept(GOSSIP_ALPN, gossip.clone())
         .spawn();
 
     // Spawn discovery task

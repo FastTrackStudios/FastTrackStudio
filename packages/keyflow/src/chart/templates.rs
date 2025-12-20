@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_transposition_interval_calculation() {
-        use crate::primitives::{MusicalNote, Note};
+        use crate::primitives::MusicalNote;
 
         let c_major = Key::major(MusicalNote::c());
         let g_major = Key::major(MusicalNote::g());

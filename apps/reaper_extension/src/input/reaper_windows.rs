@@ -80,7 +80,7 @@ fn search_children(
                 parent,
                 return_hwnd.unwrap_or(std::ptr::null_mut()),
                 std::ptr::null(),
-                name_cstr.as_ptr() as *const i8,
+                name_cstr.as_ptr(),
             )
         };
         
@@ -172,7 +172,7 @@ fn find_in_reaper_dockers(name: &str, medium_reaper: &MediumReaper) -> Option<HW
         swell.FindWindowEx(
             main_hwnd.as_ptr(),
             std::ptr::null_mut(),
-            docker_class.as_ptr() as *const i8,
+            docker_class.as_ptr(),
             std::ptr::null(),
         )
     };
@@ -187,7 +187,7 @@ fn find_in_reaper_dockers(name: &str, medium_reaper: &MediumReaper) -> Option<HW
             swell.FindWindowEx(
                 main_hwnd.as_ptr(),
                 docker,
-                docker_class.as_ptr() as *const i8,
+                docker_class.as_ptr(),
                 std::ptr::null(),
             )
         };
@@ -334,7 +334,7 @@ pub fn get_tcp_wnd(medium_reaper: &MediumReaper) -> (Option<HWND>, bool) {
                 swell.FindWindowEx(
                     main_hwnd.as_ptr(),
                     std::ptr::null_mut(),
-                    class.as_ptr() as *const i8,
+                    class.as_ptr(),
                     std::ptr::null(),
                 )
             }
@@ -627,7 +627,7 @@ pub fn get_mixer_master_wnd(mixer_hwnd: HWND, medium_reaper: &MediumReaper) -> O
             swell.FindWindowEx(
                 mixer_hwnd,
                 std::ptr::null_mut(),
-                class.as_ptr() as *const i8,
+                class.as_ptr(),
                 std::ptr::null(),
             )
         };
@@ -658,7 +658,7 @@ pub fn get_mcp_wnd(medium_reaper: &MediumReaper) -> (Option<HWND>, bool) {
             swell.FindWindowEx(
                 mixer_hwnd,
                 std::ptr::null_mut(),
-                class.as_ptr() as *const i8,
+                class.as_ptr(),
                 std::ptr::null(),
             )
         }

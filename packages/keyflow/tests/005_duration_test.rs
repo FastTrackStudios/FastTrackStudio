@@ -1,7 +1,7 @@
 use keyflow::chart::Chart;
 use keyflow::chord::ChordRhythm;
 use keyflow::sections::SectionType;
-use keyflow::time::Duration; // Trait for to_beats() method
+// Duration trait removed - unused
 
 /// Test 1: Basic duration syntax with underscore notation (_4, _2, _8)
 /// Tests that:
@@ -271,7 +271,7 @@ Gmaj7_4. Cmaj7_2. Dm7_8.
     assert_eq!(chord1.full_symbol, "Gmaj7");
     match &chord1.rhythm {
         ChordRhythm::Lily { dotted, .. } => {
-            assert_eq!(*dotted, true);
+            assert!(*dotted);
             assert_eq!(chord1.duration.to_beats(chart.time_signature.unwrap()), 1.5);
         }
         _ => panic!("Expected Lily duration with dot"),
@@ -285,7 +285,7 @@ Gmaj7_4. Cmaj7_2. Dm7_8.
     assert_eq!(chord2.full_symbol, "Cmaj7");
     match &chord2.rhythm {
         ChordRhythm::Lily { dotted, .. } => {
-            assert_eq!(*dotted, true);
+            assert!(*dotted);
             assert_eq!(chord2.duration.to_beats(chart.time_signature.unwrap()), 3.0);
         }
         _ => panic!("Expected Lily duration with dot"),
@@ -295,7 +295,7 @@ Gmaj7_4. Cmaj7_2. Dm7_8.
     assert_eq!(chord3.full_symbol, "Dm7");
     match &chord3.rhythm {
         ChordRhythm::Lily { dotted, .. } => {
-            assert_eq!(*dotted, true);
+            assert!(*dotted);
             assert_eq!(
                 chord3.duration.to_beats(chart.time_signature.unwrap()),
                 0.75

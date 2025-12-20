@@ -65,7 +65,7 @@ impl SectionType {
     /// - "verse", "Verse", "VERSE", "vs", "VS", "vErSe", "vrse" -> Verse
     /// - "chorus", "Chorus", "CHORUS", "ch", "CH", "chorous", "corus" -> Chorus
     /// - etc.
-    pub fn from_str(s: &str) -> Result<Self, String> {
+    pub fn parse(s: &str) -> Result<Self, String> {
         let s_lower = s.to_lowercase();
         let s_lower = s_lower.trim();
 
@@ -82,13 +82,13 @@ impl SectionType {
 
         // Try fuzzy matching for common typos and variations
         // Verse variations
-        if Self::fuzzy_match(&s_lower, "verse", &["vrse", "verce", "vers", "versa"]) {
+        if Self::fuzzy_match(s_lower, "verse", &["vrse", "verce", "vers", "versa"]) {
             return Ok(SectionType::Verse);
         }
 
         // Chorus variations
         if Self::fuzzy_match(
-            &s_lower,
+            s_lower,
             "chorus",
             &["chorous", "corus", "chrous", "chors", "chor"],
         ) {
@@ -96,13 +96,13 @@ impl SectionType {
         }
 
         // Bridge variations
-        if Self::fuzzy_match(&s_lower, "bridge", &["bridg", "brige", "brid"]) {
+        if Self::fuzzy_match(s_lower, "bridge", &["bridg", "brige", "brid"]) {
             return Ok(SectionType::Bridge);
         }
 
         // Intro variations - handle "introduction", "intro", etc.
         if Self::fuzzy_match(
-            &s_lower,
+            s_lower,
             "intro",
             &["intr", "int", "introo", "introduction"],
         ) {
@@ -115,7 +115,7 @@ impl SectionType {
 
         // Outro variations - handle "outroduction", "outro", etc.
         if Self::fuzzy_match(
-            &s_lower,
+            s_lower,
             "outro",
             &["outr", "out", "outroo", "outroduction"],
         ) {
@@ -128,7 +128,7 @@ impl SectionType {
 
         // Instrumental variations
         if Self::fuzzy_match(
-            &s_lower,
+            s_lower,
             "instrumental",
             &["instumental", "instrumantal", "instrument"],
         ) {
@@ -137,12 +137,12 @@ impl SectionType {
 
         // Try to parse Pre/Post
         if let Some(rest) = s_lower.strip_prefix("pre-") {
-            if let Ok(inner) = Self::from_str(rest) {
+            if let Ok(inner) = Self::parse(rest) {
                 return Ok(SectionType::Pre(Box::new(inner)));
             }
         }
         if let Some(rest) = s_lower.strip_prefix("post-") {
-            if let Ok(inner) = Self::from_str(rest) {
+            if let Ok(inner) = Self::parse(rest) {
                 return Ok(SectionType::Post(Box::new(inner)));
             }
         }
@@ -190,7 +190,7 @@ impl SectionType {
     /// Supports:
     /// - Standard sections: "VS 16", "Intro 4", etc.
     /// - Custom sections with brackets: "[Hits]", "[SOLO Keys] 8", etc.
-    pub fn parse(input: &str) -> Option<(Self, Option<usize>)> {
+    pub fn parse_with_measure_count(input: &str) -> Option<(Self, Option<usize>)> {
         let input = input.trim();
         
         // Check for custom section with brackets: [Hits] or [SOLO Keys] 8
@@ -302,43 +302,43 @@ mod tests {
     #[test]
     fn test_parse_section_markers() {
         assert_eq!(
-            SectionType::parse("vs 4"),
+            SectionType::parse_with_measure_count("vs 4"),
             Some((SectionType::Verse, Some(4)))
         );
         assert_eq!(
-            SectionType::parse("ch 8"),
+            SectionType::parse_with_measure_count("ch 8"),
             Some((SectionType::Chorus, Some(8)))
         );
         assert_eq!(
-            SectionType::parse("intro 2"),
+            SectionType::parse_with_measure_count("intro 2"),
             Some((SectionType::Intro, Some(2)))
         );
-        assert_eq!(SectionType::parse("br"), Some((SectionType::Bridge, None)));
+        assert_eq!(SectionType::parse_with_measure_count("br"), Some((SectionType::Bridge, None)));
     }
 
     #[test]
     fn test_parse_invalid() {
-        assert_eq!(SectionType::parse("invalid"), None);
-        assert_eq!(SectionType::parse(""), None);
+        assert_eq!(SectionType::parse_with_measure_count("invalid"), None);
+        assert_eq!(SectionType::parse_with_measure_count(""), None);
     }
 
     #[test]
     fn test_parse_custom_sections() {
         // Custom section with brackets
         assert_eq!(
-            SectionType::parse("[Hits]"),
+            SectionType::parse_with_measure_count("[Hits]"),
             Some((SectionType::Custom("Hits".to_string()), None))
         );
         
         // Custom section with brackets and measure count
         assert_eq!(
-            SectionType::parse("[SOLO Keys] 8"),
+            SectionType::parse_with_measure_count("[SOLO Keys] 8"),
             Some((SectionType::Custom("SOLO Keys".to_string()), Some(8)))
         );
         
         // Custom section with brackets, no measure count
         assert_eq!(
-            SectionType::parse("[Bridge Out]"),
+            SectionType::parse_with_measure_count("[Bridge Out]"),
             Some((SectionType::Custom("Bridge Out".to_string()), None))
         );
     }

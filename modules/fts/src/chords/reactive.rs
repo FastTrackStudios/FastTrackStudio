@@ -35,17 +35,10 @@ impl ChordsStreams {
 
 /// State managed by the chords reactive service
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct ChordsReactiveState {
     /// Chords for each project (project_name -> chords)
     pub chords: HashMap<String, ChordsData>,
-}
-
-impl Default for ChordsReactiveState {
-    fn default() -> Self {
-        Self {
-            chords: HashMap::new(),
-        }
-    }
 }
 
 /// Trait for chords reactive service implementations

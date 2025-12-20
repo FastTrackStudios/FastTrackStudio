@@ -44,4 +44,4 @@ server = ["dioxus/server"]
 resources = ["../../lib/libpdfium.dylib"]
 
 [lints.rust]
-unused = "allow"  # Allow unused items (variables/functions will be used later)
+unused = { level = "allow", priority = -1 }

@@ -3,7 +3,7 @@
 //! Defines chords with quality, family, extensions, alterations, and parsing
 
 pub mod alteration;
-pub mod chord;
+pub mod definition;
 pub mod degree;
 pub mod duration;
 pub mod error;
@@ -15,7 +15,7 @@ pub mod root;
 pub mod semitone_sequence;
 
 pub use alteration::Alteration;
-pub use chord::Chord;
+pub use definition::Chord;
 pub use degree::ChordDegree;
 pub use duration::{ChordRhythm, LilySyntax, PushPullAmount};
 pub use error::{ChordParseError, ChordParseErrors};

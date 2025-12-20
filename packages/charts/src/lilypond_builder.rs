@@ -176,7 +176,7 @@ pub fn generate_utility_content(output_dir: &str, include_mode: bool, utility_fi
         
         for file in utility_files {
             let include_path = if relative_path.is_empty() || relative_path == "." {
-                format!("{}", file)
+                file.to_string()
             } else {
                 // Ensure path ends with / before appending filename
                 let base = if relative_path.ends_with('/') {

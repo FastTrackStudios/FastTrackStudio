@@ -162,10 +162,8 @@ fn analyze_chord_structure(semitones: &[u8]) -> Result<ChordInfo> {
         ChordQuality::Major => {
             if has_major_seventh {
                 Some(ChordFamily::Major7)
-            } else if has_minor_seventh {
-                Some(ChordFamily::Dominant7)
-            } else if has_dim_seventh {
-                Some(ChordFamily::Dominant7) // Rare but possible
+            } else if has_minor_seventh || has_dim_seventh {
+                Some(ChordFamily::Dominant7) // Minor or dim seventh -> Dominant7
             } else {
                 None
             }
@@ -173,10 +171,8 @@ fn analyze_chord_structure(semitones: &[u8]) -> Result<ChordInfo> {
         ChordQuality::Minor => {
             if has_major_seventh {
                 Some(ChordFamily::MinorMajor7)
-            } else if has_minor_seventh {
-                Some(ChordFamily::Minor7)
-            } else if has_dim_seventh {
-                Some(ChordFamily::Minor7) // Rare
+            } else if has_minor_seventh || has_dim_seventh {
+                Some(ChordFamily::Minor7) // Minor or dim seventh -> Minor7
             } else {
                 None
             }

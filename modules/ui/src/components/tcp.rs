@@ -343,7 +343,7 @@ fn TrackRow(
                             let max_height = 256.0;
                             
                             // Cycle through common heights: 32, 48, 64, 96, 128
-                            let heights = vec![32.0, 48.0, 64.0, 96.0, 128.0, 192.0, 256.0];
+                            let heights = [32.0, 48.0, 64.0, 96.0, 128.0, 192.0, 256.0];
                             let current = start_height;
                             
                             // Find next height in sequence

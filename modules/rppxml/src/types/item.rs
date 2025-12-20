@@ -68,20 +68,10 @@ impl From<i32> for ChannelMode {
             2 => ChannelMode::MonoDownmix,
             3 => ChannelMode::MonoLeft,
             4 => ChannelMode::MonoRight,
-            5..=194 => {
-                if value <= 66 {
-                    ChannelMode::MonoChannel((value - 2) as u8) // 5-66 -> 3-64
-                } else {
-                    ChannelMode::MonoChannel((value - 66) as u8) // 131-194 -> 65-128
-                }
-            }
-            67..=257 => {
-                if value <= 130 {
-                    ChannelMode::StereChannel((value - 66) as u8) // 67-130 -> 1-64
-                } else {
-                    ChannelMode::StereChannel((value - 128) as u8) // 195-257 -> 67-128
-                }
-            }
+            5..=66 => ChannelMode::MonoChannel((value - 2) as u8), // 5-66 -> 3-64
+            67..=130 => ChannelMode::StereChannel((value - 66) as u8), // 67-130 -> 1-64
+            131..=194 => ChannelMode::MonoChannel((value - 66) as u8), // 131-194 -> 65-128
+            195..=257 => ChannelMode::StereChannel((value - 128) as u8), // 195-257 -> 67-128
             _ => ChannelMode::Unknown(value),
         }
     }
@@ -1064,9 +1054,9 @@ mod tests {
         assert_eq!(item.position, 0.5);
         assert_eq!(item.snap_offset, 0.0);
         assert_eq!(item.length, 1.256);
-        assert_eq!(item.loop_source, true);
-        assert_eq!(item.play_all_takes, false);
-        assert_eq!(item.selected, true);
+        assert!(item.loop_source);
+        assert!(!item.play_all_takes);
+        assert!(item.selected);
         assert_eq!(item.name, "01-250919_0416.wav");
         assert_eq!(item.item_id, Some(3));
         assert_eq!(item.rec_pass, Some(1));
@@ -1095,7 +1085,7 @@ mod tests {
         // Verify mute settings
         assert!(item.mute.is_some());
         let mute = item.mute.unwrap();
-        assert_eq!(mute.muted, false);
+        assert!(!mute.muted);
         assert_eq!(mute.solo_state, SoloState::NotSoloed);
         
         // Verify volpan settings
@@ -1110,7 +1100,7 @@ mod tests {
         assert!(item.playrate.is_some());
         let playrate = item.playrate.unwrap();
         assert_eq!(playrate.rate, 1.0);
-        assert_eq!(playrate.preserve_pitch, true);
+        assert!(playrate.preserve_pitch);
         assert_eq!(playrate.pitch_adjust, 0.0);
         assert_eq!(playrate.pitch_mode, PitchMode::ProjectDefault);
         
@@ -1119,7 +1109,7 @@ mod tests {
         
         // First take (implicit, not selected)
         let take1 = &item.takes[0];
-        assert_eq!(take1.is_selected, false);
+        assert!(!take1.is_selected);
         assert_eq!(take1.name, "");
         assert_eq!(take1.rec_pass, None);
         assert!(take1.source.is_some());
@@ -1129,19 +1119,19 @@ mod tests {
         
         // Second take (selected)
         let take2 = &item.takes[1];
-        assert_eq!(take2.is_selected, true);
+        assert!(take2.is_selected);
         assert_eq!(take2.name, "01-250919_0416-01.wav");
         assert_eq!(take2.rec_pass, Some(2));
         
         // Third take
         let take3 = &item.takes[2];
-        assert_eq!(take3.is_selected, false);
+        assert!(!take3.is_selected);
         assert_eq!(take3.name, "01-250919_0416-02.wav");
         assert_eq!(take3.rec_pass, Some(3));
         
         // Fourth take
         let take4 = &item.takes[3];
-        assert_eq!(take4.is_selected, false);
+        assert!(!take4.is_selected);
         assert_eq!(take4.name, "01-250919_0416-03.wav");
         assert_eq!(take4.rec_pass, Some(4));
         
@@ -1184,15 +1174,15 @@ mod tests {
         // Verify basic properties
         assert_eq!(item.position, 0.0);
         assert_eq!(item.length, 145.5);
-        assert_eq!(item.loop_source, false);
-        assert_eq!(item.play_all_takes, false);
-        assert_eq!(item.selected, true);
+        assert!(!item.loop_source);
+        assert!(!item.play_all_takes);
+        assert!(item.selected);
         assert_eq!(item.name, "Simple Item");
         assert_eq!(item.takes.len(), 1);
         
         // Verify the single take
         let take = &item.takes[0];
-        assert_eq!(take.is_selected, false);
+        assert!(!take.is_selected);
         assert!(take.source.is_some());
         let source = take.source.as_ref().unwrap();
         assert_eq!(source.source_type, SourceType::Wave);

@@ -5,10 +5,12 @@ use std::fmt;
 
 /// Quantize to position
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum QuantizeToPos {
     /// Previous position
     Previous = -1,
     /// Nearest position
+    #[default]
     Nearest = 0,
     /// Next position
     Next = 1,
@@ -41,16 +43,13 @@ impl fmt::Display for QuantizeToPos {
     }
 }
 
-impl Default for QuantizeToPos {
-    fn default() -> Self {
-        QuantizeToPos::Nearest
-    }
-}
 
 /// Record path
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum RecordPath {
     /// Primary path
+    #[default]
     Primary = 0,
     /// Secondary path
     Secondary = 1,
@@ -85,11 +84,6 @@ impl fmt::Display for RecordPath {
     }
 }
 
-impl Default for RecordPath {
-    fn default() -> Self {
-        RecordPath::Primary
-    }
-}
 
 /// Input quantize settings for tracks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

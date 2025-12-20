@@ -120,12 +120,12 @@ pub fn time_to_beat_position_structured(
             }
             
             // Calculate final position with bounds checking
-            let measure = (current_measure.floor() as i32 + 1).max(1).min(1000);
+            let measure = (current_measure.floor() as i32 + 1).clamp(1, 1000);
             let beat_in_measure = ((current_measure - current_measure.floor()) * beats_per_measure + 1.0) as i32;
-            let beat_in_measure = beat_in_measure.max(1).min(beats_per_measure as i32);
+            let beat_in_measure = beat_in_measure.clamp(1, beats_per_measure as i32);
             let beat_fraction = (current_measure - current_measure.floor()) * beats_per_measure;
             let subbeat = (beat_fraction * 100.0).round() as i32;
-            let subbeat = subbeat.max(0).min(99);
+            let subbeat = subbeat.clamp(0, 99);
             
             return (measure, beat_in_measure, subbeat);
         }
@@ -152,12 +152,12 @@ pub fn time_to_beat_position_structured(
     }
     
     // Calculate final position with bounds checking
-    let measure = (current_measure.floor() as i32 + 1).max(1).min(1000);
+    let measure = (current_measure.floor() as i32 + 1).clamp(1, 1000);
     let beat_in_measure = ((current_measure - current_measure.floor()) * current_time_sig.0 as f64 + 1.0) as i32;
-    let beat_in_measure = beat_in_measure.max(1).min(current_time_sig.0);
+    let beat_in_measure = beat_in_measure.clamp(1, current_time_sig.0);
     let beat_fraction = (current_measure - current_measure.floor()) * current_time_sig.0 as f64;
     let subbeat = (beat_fraction * 100.0).round() as i32;
-    let subbeat = subbeat.max(0).min(99);
+    let subbeat = subbeat.clamp(0, 99);
     
     (measure, beat_in_measure, subbeat)
 }
@@ -276,12 +276,12 @@ mod tests {
                 current_beat_fraction += segment_beats;
                 
                 // Handle measure/beat overflow
-                let beats_per_measure = current_time_sig.0 as f64;
+                let _beats_per_measure = current_time_sig.0 as f64;
                 while current_beat_fraction >= 1.0 {
                     println!("      Overflow: fraction {:.15} >= 1.0, advancing beat from {} to {}", current_beat_fraction, current_beat, current_beat + 1);
                     current_beat_fraction -= 1.0;
                     current_beat += 1;
-                    if current_beat >= current_time_sig.0 + 1 {
+                    if current_beat > current_time_sig.0 {
                         println!("      Beat {} > {}, advancing measure from {} to {}", current_beat, current_time_sig.0, current_measure, current_measure + 1);
                         current_beat = 1;
                         current_measure += 1;
@@ -315,11 +315,11 @@ mod tests {
                 current_beat_fraction += segment_beats;
                 
                 // Handle measure/beat overflow
-                let beats_per_measure = current_time_sig.0 as f64;
+                let _beats_per_measure = current_time_sig.0 as f64;
                 while current_beat_fraction >= 1.0 {
                     current_beat_fraction -= 1.0;
                     current_beat += 1;
-                    if current_beat >= current_time_sig.0 + 1 {
+                    if current_beat > current_time_sig.0 {
                         current_beat = 1;
                         current_measure += 1;
                     }
@@ -350,11 +350,11 @@ mod tests {
             current_beat_fraction += segment_beats;
             
                 // Handle measure/beat overflow
-                let beats_per_measure = current_time_sig.0 as f64;
+                let _beats_per_measure = current_time_sig.0 as f64;
                 while current_beat_fraction >= 1.0 {
                     current_beat_fraction -= 1.0;
                     current_beat += 1;
-                    if current_beat >= current_time_sig.0 + 1 {
+                    if current_beat > current_time_sig.0 {
                         current_beat = 1;
                         current_measure += 1;
                     }
@@ -555,7 +555,6 @@ mod tests {
                    expected_ratio, num, denom, tempo_ratio);
         }
     }
-    use crate::types::time_tempo::TempoTimePoint;
     
     
     

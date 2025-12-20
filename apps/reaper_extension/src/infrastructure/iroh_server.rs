@@ -462,18 +462,18 @@ pub fn start_iroh_server(
                     
             // Build router with all protocols - each has its own ALPN
             let mut router_builder = iroh::protocol::Router::builder(endpoint.clone())
-                .accept(alpn::TRANSPORT.to_vec(), transport_handler)
-                .accept(alpn::TRACKS.to_vec(), tracks_handler)
-                .accept(alpn::SETLIST.to_vec(), setlist_handler);
+                .accept(alpn::TRANSPORT, transport_handler)
+                .accept(alpn::TRACKS, tracks_handler)
+                .accept(alpn::SETLIST, setlist_handler);
             
             #[cfg(feature = "lyrics")]
             {
-                router_builder = router_builder.accept(alpn::LYRICS.to_vec(), lyrics_handler);
+                router_builder = router_builder.accept(alpn::LYRICS, lyrics_handler);
             }
             
             #[cfg(feature = "keyflow")]
             {
-                router_builder = router_builder.accept(alpn::CHART.to_vec(), chart_handler);
+                router_builder = router_builder.accept(alpn::CHART, chart_handler);
             }
             
             let _router = router_builder.spawn();

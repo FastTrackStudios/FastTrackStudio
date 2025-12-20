@@ -63,7 +63,7 @@ pub trait MarkerRegionSource: MarkerSource + RegionSource + Send + Sync {
         Ok(points
             .into_iter()
             .filter(|p| p.position_seconds() < before_seconds)
-            .last())
+            .next_back())
     }
 
     /// Get markers and regions within a specific time range

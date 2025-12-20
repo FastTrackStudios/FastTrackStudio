@@ -67,6 +67,7 @@ impl Default for DurationType {
 
 /// A representation of the dot(s) on a note.
 #[derive(PartialEq, Debug)]
+#[derive(Default)]
 pub struct Dots {
     dots: u8,
 }
@@ -83,11 +84,6 @@ impl Dots {
     }
 }
 
-impl Default for Dots {
-    fn default() -> Self {
-        Self { dots: 0 }
-    }
-}
 
 impl Display for Dots {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -104,6 +100,12 @@ pub struct Rhythm {
     pub dots: Dots,
     /// The duration type (Note or Rest).
     pub duration_type: DurationType,
+}
+
+impl Default for Rhythm {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Rhythm {

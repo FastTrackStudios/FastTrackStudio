@@ -265,7 +265,7 @@ impl MarkerRegionCollection {
         // Group markers by ID
         let mut markers_by_id: std::collections::HashMap<i32, Vec<MarkerRegion>> = std::collections::HashMap::new();
         for marker in self.markers.iter() {
-            markers_by_id.entry(marker.id).or_insert_with(Vec::new).push(marker.clone());
+            markers_by_id.entry(marker.id).or_default().push(marker.clone());
         }
         
         // Process each ID group
@@ -296,8 +296,8 @@ impl MarkerRegionCollection {
                         };
                         
                         // Remove the start and end markers from all collections
-                        self.all.retain(|m| !(m.id == start.id && m.position == start.position) && !(m.id == end.id && m.position == end.position));
-                        self.markers.retain(|m| !(m.id == start.id && m.position == start.position) && !(m.id == end.id && m.position == end.position));
+                        self.all.retain(|m| (m.id != start.id || m.position != start.position) && (m.id != end.id || m.position != end.position));
+                        self.markers.retain(|m| (m.id != start.id || m.position != start.position) && (m.id != end.id || m.position != end.position));
                         
                         // Add the region
                         self.all.push(region.clone());

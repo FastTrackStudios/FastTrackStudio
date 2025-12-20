@@ -12,20 +12,15 @@ use std::sync::{Arc, Mutex, OnceLock};
 use tracing::{debug, info, warn};
 
 /// Quantize level for smooth seeking
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SmoothSeekQuantize {
     /// Quantize to next measure (default)
+    #[default]
     Measure,
     /// Quantize to next beat (based on time signature denominator)
     Beat,
     /// Quantize to next half-beat (e.g., quarter notes in 4/4, eighth notes in 6/8)
     HalfBeat,
-}
-
-impl Default for SmoothSeekQuantize {
-    fn default() -> Self {
-        SmoothSeekQuantize::Measure
-    }
 }
 
 /// A queued smooth seek operation

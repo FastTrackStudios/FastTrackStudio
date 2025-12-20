@@ -2,10 +2,34 @@
 //!
 //! Song metadata parsing and representation
 
-pub mod metadata;
 pub mod parser;
 
-pub use metadata::SongMetadata;
+use serde::{Deserialize, Serialize};
+
+/// Song Metadata
+///
+/// Represents song information like title, artist, composer, etc.
+
+/// Complete song metadata
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct SongMetadata {
+    pub title: Option<String>,
+    pub subtitle: Option<String>,
+    pub artist: Option<String>,
+    pub composer: Option<String>,
+    pub writer: Option<String>,
+    pub arranger: Option<String>,
+    pub lyricist: Option<String>,
+    pub copyright: Option<String>,
+    pub year: Option<u16>,
+    pub tempo: Option<u32>,
+}
+
+impl SongMetadata {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
 
 #[cfg(test)]
 mod tests {

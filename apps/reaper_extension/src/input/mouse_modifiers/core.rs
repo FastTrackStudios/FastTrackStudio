@@ -59,7 +59,7 @@ impl MouseModifierFlag {
     }
     
     /// Convert to REAPER modifier flag (0-15)
-    pub fn to_flag(&self) -> i32 {
+    pub fn to_flag(self) -> i32 {
         let mut flag = 0;
         if self.shift { flag |= 1; }
         if self.control { flag |= 2; }
@@ -80,7 +80,7 @@ impl MouseModifierFlag {
     
     /// Add 1024 bit for no-move/no-select flags
     pub fn with_options(&self, no_move: bool, no_select: bool) -> i32 {
-        let mut flag = self.to_flag();
+        let mut flag = (*self).to_flag();
         flag |= 1024; // Enable options bit
         if no_move { flag |= 1 << 10; } // Bit 10 = no-move
         if no_select { flag |= 2 << 10; } // Bit 11 = no-select
@@ -88,7 +88,7 @@ impl MouseModifierFlag {
     }
     
     /// Get human-readable description of modifier combination
-    pub fn to_string(&self) -> String {
+    pub fn to_string(self) -> String {
         if !self.shift && !self.control && !self.alt && !self.win {
             "Default action".to_string()
         } else {

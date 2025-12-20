@@ -45,18 +45,12 @@ impl TransportStreams {
 
 /// State managed by the transport reactive service
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct TransportReactiveState {
     /// Transport state for each project (project_name -> transport)
     pub transport: HashMap<String, Transport>,
 }
 
-impl Default for TransportReactiveState {
-    fn default() -> Self {
-        Self {
-            transport: HashMap::new(),
-        }
-    }
-}
 
 /// Trait for transport reactive service implementations
 /// 

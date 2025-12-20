@@ -442,7 +442,7 @@ mod tests {
             HarmonizationDepth::Elevenths,
             HarmonizationDepth::Thirteenths,
         ] {
-            let harmonization = ScaleHarmonization::new(mode.clone(), root.clone(), depth);
+            let harmonization = ScaleHarmonization::new(mode, root.clone(), depth);
             assert_eq!(harmonization.chords.len(), 7);
 
             // All chords should have been successfully created
@@ -676,7 +676,7 @@ mod tests {
         let mode = ScaleMode::ionian();
         let root = c_note();
         let analysis =
-            analyze_scale_harmony(mode.clone(), root.clone(), HarmonizationDepth::Triads);
+            analyze_scale_harmony(mode, root.clone(), HarmonizationDepth::Triads);
 
         assert!(!analysis.is_empty());
         assert!(analysis.contains("Ionian"));
@@ -727,8 +727,8 @@ mod tests {
             ScaleHarmonization::new(mode, root.clone(), HarmonizationDepth::Sevenths);
 
         // Expected note names for C Ionian (C major scale)
-        let expected_notes = vec!["C", "D", "E", "F", "G", "A", "B"];
-        let expected_romans = vec!["I", "ii", "iii", "IV", "V", "vi", "vii°"];
+        let expected_notes = ["C", "D", "E", "F", "G", "A", "B"];
+        let expected_romans = ["I", "ii", "iii", "IV", "V", "vi", "vii°"];
 
         for (i, ((chord, expected_note), expected_roman)) in harmonization
             .chords
@@ -771,8 +771,8 @@ mod tests {
             ScaleHarmonization::new(mode, root.clone(), HarmonizationDepth::Sevenths);
 
         // Expected note names for C Dorian
-        let expected_notes = vec!["C", "D", "Eb", "F", "G", "A", "Bb"];
-        let expected_romans = vec!["i", "ii", "III", "IV", "v", "vi°", "VII"];
+        let expected_notes = ["C", "D", "Eb", "F", "G", "A", "Bb"];
+        let expected_romans = ["i", "ii", "III", "IV", "v", "vi°", "VII"];
 
         for (i, ((chord, expected_note), expected_roman)) in harmonization
             .chords
@@ -811,9 +811,9 @@ mod tests {
             ScaleHarmonization::new(mode, root.clone(), HarmonizationDepth::Sevenths);
 
         // Expected note names for C Phrygian (uses all 7 letters)
-        let expected_notes = vec!["C", "Db", "Eb", "F", "G", "Ab", "Bb"];
+        let expected_notes = ["C", "Db", "Eb", "F", "G", "Ab", "Bb"];
         // Phrygian: i(min), II(maj), III(maj/dom7), iv(min), v°(dim), VI(maj), VII(min)
-        let expected_romans = vec!["i", "II", "III", "iv", "v°", "VI", "vii"];
+        let expected_romans = ["i", "II", "III", "iv", "v°", "VI", "vii"];
 
         for (i, ((chord, expected_note), expected_roman)) in harmonization
             .chords
@@ -852,8 +852,8 @@ mod tests {
             ScaleHarmonization::new(mode, root.clone(), HarmonizationDepth::Sevenths);
 
         // Expected note names for C Lydian (uses all 7 letters)
-        let expected_notes = vec!["C", "D", "E", "F#", "G", "A", "B"];
-        let expected_romans = vec!["I", "II", "iii", "iv°", "V", "vi", "vii"];
+        let expected_notes = ["C", "D", "E", "F#", "G", "A", "B"];
+        let expected_romans = ["I", "II", "iii", "iv°", "V", "vi", "vii"];
 
         for (i, ((chord, expected_note), expected_roman)) in harmonization
             .chords
@@ -892,8 +892,8 @@ mod tests {
             ScaleHarmonization::new(mode, root.clone(), HarmonizationDepth::Sevenths);
 
         // Expected note names for C Mixolydian
-        let expected_notes = vec!["C", "D", "E", "F", "G", "A", "Bb"];
-        let expected_romans = vec!["I", "ii", "iii°", "IV", "v", "vi", "VII"];
+        let expected_notes = ["C", "D", "E", "F", "G", "A", "Bb"];
+        let expected_romans = ["I", "ii", "iii°", "IV", "v", "vi", "VII"];
 
         for (i, ((chord, expected_note), expected_roman)) in harmonization
             .chords
@@ -932,8 +932,8 @@ mod tests {
             ScaleHarmonization::new(mode, root.clone(), HarmonizationDepth::Sevenths);
 
         // Expected note names for C Aeolian (C natural minor)
-        let expected_notes = vec!["C", "D", "Eb", "F", "G", "Ab", "Bb"];
-        let expected_romans = vec!["i", "ii°", "III", "iv", "v", "VI", "VII"];
+        let expected_notes = ["C", "D", "Eb", "F", "G", "Ab", "Bb"];
+        let expected_romans = ["i", "ii°", "III", "iv", "v", "VI", "VII"];
 
         for (i, ((chord, expected_note), expected_roman)) in harmonization
             .chords
@@ -972,9 +972,9 @@ mod tests {
             ScaleHarmonization::new(mode, root.clone(), HarmonizationDepth::Sevenths);
 
         // Expected note names for C Locrian (uses all 7 letters)
-        let expected_notes = vec!["C", "Db", "Eb", "F", "Gb", "Ab", "Bb"];
+        let expected_notes = ["C", "Db", "Eb", "F", "Gb", "Ab", "Bb"];
         // Locrian: i°(dim), II(maj), III(min), iv(min), V(maj), VI(maj/dom7), VII(min)
-        let expected_romans = vec!["i°", "II", "iii", "iv", "V", "VI", "vii"];
+        let expected_romans = ["i°", "II", "iii", "iv", "V", "VI", "vii"];
 
         for (i, ((chord, expected_note), expected_roman)) in harmonization
             .chords

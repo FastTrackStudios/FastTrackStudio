@@ -1,6 +1,5 @@
 //! Media item data structures for REAPER
 
-use super::item_properties::ItemProperties;
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -69,20 +68,10 @@ impl From<i32> for ChannelMode {
             2 => ChannelMode::MonoDownmix,
             3 => ChannelMode::MonoLeft,
             4 => ChannelMode::MonoRight,
-            5..=194 => {
-                if value <= 66 {
-                    ChannelMode::MonoChannel((value - 2) as u8) // 5-66 -> 3-64
-                } else {
-                    ChannelMode::MonoChannel((value - 66) as u8) // 131-194 -> 65-128
-                }
-            }
-            67..=257 => {
-                if value <= 130 {
-                    ChannelMode::StereChannel((value - 66) as u8) // 67-130 -> 1-64
-                } else {
-                    ChannelMode::StereChannel((value - 128) as u8) // 195-257 -> 67-128
-                }
-            }
+            5..=66 => ChannelMode::MonoChannel((value - 2) as u8), // 5-66 -> 3-64
+            67..=130 => ChannelMode::StereChannel((value - 66) as u8), // 67-130 -> 1-64
+            131..=194 => ChannelMode::MonoChannel((value - 66) as u8), // 131-194 -> 65-128
+            195..=257 => ChannelMode::StereChannel((value - 128) as u8), // 195-257 -> 67-128
             _ => ChannelMode::Unknown(value),
         }
     }
@@ -276,9 +265,6 @@ pub struct Item {
     // Item ID
     pub id: Uuid,
 
-    // Item properties (FTS naming convention)
-    pub properties: ItemProperties,
-
     // Basic item properties
     pub position: f64,              // POSITION - Position on timeline in seconds
     pub snap_offset: f64,           // SNAPOFFS - Snap offset in seconds
@@ -378,7 +364,6 @@ impl Default for Item {
     fn default() -> Self {
         Self {
             id: Uuid::new_v4(),
-            properties: ItemProperties::default(),
             position: 0.0,
             snap_offset: 0.0,
             length: 0.0,

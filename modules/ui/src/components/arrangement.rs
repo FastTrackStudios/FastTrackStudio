@@ -70,7 +70,7 @@ pub fn ArrangementView(
             
             // Calculate timeline start (include count-in if present)
             let timeline_start = song.count_in_marker.as_ref()
-                .and_then(|m| Some(m.position.time.to_seconds()))
+                .map(|m| m.position.time.to_seconds())
                 .unwrap_or(song_start);
             
             let song_duration = song_end - timeline_start;
@@ -88,7 +88,7 @@ pub fn ArrangementView(
                 // Convert to zoom level (base_pixels_per_second = 10.0)
                 let base_pps = 10.0;
                 let calculated_zoom = required_pps / base_pps;
-                let clamped_zoom = calculated_zoom.max(0.1).min(10.0);
+                let clamped_zoom = calculated_zoom.clamp(0.1, 10.0);
                 
                 clamped_zoom
             } else {
@@ -206,14 +206,14 @@ pub fn ArrangementView(
             let song_start = song.effective_start();
             // Calculate timeline start (count-in start if present, otherwise song_start)
             let timeline_start = song.count_in_marker.as_ref()
-                .and_then(|m| Some(m.position.time.to_seconds()))
+                .map(|m| m.position.time.to_seconds())
                 .unwrap_or(song_start);
             
             let mut sections: Vec<_> = Vec::new();
             
             // Add count-in section if it exists
             if let Some(count_in_seconds) = song.count_in_marker.as_ref()
-                .and_then(|m| Some(m.position.time.to_seconds())) {
+                .map(|m| m.position.time.to_seconds()) {
                 let count_in_start = count_in_seconds;
                 let count_in_end = song_start;
                 if count_in_start < count_in_end {
@@ -440,7 +440,7 @@ pub fn ArrangementView(
             let base_height = new_height / zoom;
             let min_height = 32.0 / zoom;
             let max_height = 256.0 / zoom;
-            let clamped_height = base_height.max(min_height).min(max_height);
+            let clamped_height = base_height.clamp(min_height, max_height);
             
             if track_idx < heights.len() {
                 heights[track_idx] = clamped_height;
@@ -467,7 +467,7 @@ pub fn ArrangementView(
             
             // Calculate timeline start (include count-in if present)
             let timeline_start = song.count_in_marker.as_ref()
-                .and_then(|m| Some(m.position.time.to_seconds()))
+                .map(|m| m.position.time.to_seconds())
                 .unwrap_or(song_start);
             
             let duration = song_end - timeline_start;
@@ -605,7 +605,7 @@ pub fn ArrangementView(
                                     wheel_evt.prevent_default();
                                     let delta = wheel_evt.delta_y();
                                     let zoom_delta = if delta < 0.0 { 1.1 } else { 0.9 };
-                                    let new_zoom = (zoom_level() * zoom_delta).max(0.1).min(10.0);
+                                    let new_zoom = (zoom_level() * zoom_delta).clamp(0.1, 10.0);
                                     zoom_level.set(new_zoom);
                                 }
                             }
@@ -621,7 +621,7 @@ pub fn ArrangementView(
                             let song_end = song.effective_end();
                             let song_start = song.effective_start();
                             let timeline_start = song.count_in_marker.as_ref()
-                                .and_then(|m| Some(m.position.time.to_seconds()))
+                                .map(|m| m.position.time.to_seconds())
                                 .unwrap_or(song_start);
                             let pps = pixels_per_second();
                             let song_end_px = (song_end - timeline_start) * pps;
@@ -678,7 +678,7 @@ pub fn ArrangementView(
                             {
                                 let timeline_start = active_song().as_ref().map(|s| {
                                     s.count_in_marker.as_ref()
-                                        .and_then(|m| Some(m.position.time.to_seconds()))
+                                        .map(|m| m.position.time.to_seconds())
                                         .unwrap_or(s.effective_start())
                                 }).unwrap_or(0.0);
                                 let pps = pixels_per_second();
@@ -707,7 +707,7 @@ pub fn ArrangementView(
                             {
                                 let timeline_start = active_song().as_ref().map(|s| {
                                     s.count_in_marker.as_ref()
-                                        .and_then(|m| Some(m.position.time.to_seconds()))
+                                        .map(|m| m.position.time.to_seconds())
                                         .unwrap_or(s.effective_start())
                                 }).unwrap_or(0.0);
                                 let pps = pixels_per_second();
@@ -779,7 +779,7 @@ pub fn ArrangementView(
                             {
                                 let timeline_start_val = active_song().as_ref().map(|s| {
                                     s.count_in_marker.as_ref()
-                                        .and_then(|m| Some(m.position.time.to_seconds()))
+                                        .map(|m| m.position.time.to_seconds())
                                         .unwrap_or(s.effective_start())
                                 }).unwrap_or(0.0);
                                 let pps_val = pixels_per_second();
@@ -883,7 +883,7 @@ fn calculate_measures(song: &Song) -> Vec<MeasureInfo> {
     
     // Get timeline start (count-in start if present, otherwise song_start)
     let timeline_start = song.count_in_marker.as_ref()
-        .and_then(|m| Some(m.position.time.to_seconds()))
+        .map(|m| m.position.time.to_seconds())
         .unwrap_or(song_start);
     
     // Sort tempo/time signature changes by position

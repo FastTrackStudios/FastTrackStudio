@@ -69,7 +69,7 @@ pub fn parse_root(tokens: &[Token]) -> Result<RootParseResult, ParseError> {
     Err(ParseError::NoValidParser {
         context: format!(
             "Unable to parse root from tokens starting with: {:?}",
-            tokens.get(0)
+            tokens.first()
         ),
     })
 }

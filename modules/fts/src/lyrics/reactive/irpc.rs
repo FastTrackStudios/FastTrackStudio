@@ -7,7 +7,7 @@ use crate::lyrics::source::LyricsAnnotations;
 use irpc::{
     channel::mpsc,
     rpc::RemoteService,
-    rpc_requests, Client, WithChannels,
+    rpc_requests, Client,
 };
 use serde::{Deserialize, Serialize};
 use iroh::{protocol::ProtocolHandler, Endpoint, EndpointAddr};

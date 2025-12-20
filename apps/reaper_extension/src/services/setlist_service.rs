@@ -202,7 +202,7 @@ impl SetlistService {
                 let song_duration = song_end - song_start;
                 
                 if song_duration > 0.0 && transport_position >= song_start {
-                    let progress = ((transport_position - song_start) / song_duration).max(0.0).min(1.0);
+                    let progress = ((transport_position - song_start) / song_duration).clamp(0.0, 1.0);
                     progress
                 } else {
                     0.0
@@ -246,7 +246,7 @@ impl SetlistService {
                         let section_duration = section_end - section_start;
                         
                         if section_duration > 0.0 && transport_position >= section_start {
-                            let progress = ((transport_position - section_start) / section_duration).max(0.0).min(1.0);
+                            let progress = ((transport_position - section_start) / section_duration).clamp(0.0, 1.0);
                             Some(progress)
                         } else {
                             Some(0.0)

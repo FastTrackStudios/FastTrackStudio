@@ -335,7 +335,7 @@ pub fn get_tracks(project: &Project, indices: &[usize]) -> Vec<Track> {
     for &index in indices {
         if let Some(reaper_track) = project.track_by_index(index as u32) {
             let cumulative_depth = cumulative_depths.get(index).copied().unwrap_or(0);
-            if let Ok(mut track) = get_track_from_chunk(&reaper_track, index ) {
+            if let Ok(track) = get_track_from_chunk(&reaper_track, index ) {
                 // Override track_depth with calculated cumulative depth
                 tracks.push(track);
             }

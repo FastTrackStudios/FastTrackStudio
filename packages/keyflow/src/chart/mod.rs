@@ -2,7 +2,7 @@
 //!
 //! Complete chart parsing and representation
 
-pub mod chart;
+pub mod structure;
 pub mod commands;
 pub mod cues;
 pub mod display;
@@ -15,7 +15,7 @@ pub mod types;
 #[macro_use]
 pub mod r#macro;
 
-pub use chart::Chart;
+pub use structure::Chart;
 pub use commands::Command;
 pub use cues::{InstrumentGroup, TextCue};
 pub use memory::ChordMemory;

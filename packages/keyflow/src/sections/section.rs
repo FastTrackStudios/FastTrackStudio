@@ -127,7 +127,7 @@ impl Section {
         name: String,
         number: Option<u32>,
     ) -> Result<Self, String> {
-        use daw::primitives::{TimePosition, TimeSignature};
+        use daw::primitives::TimeSignature;
         
         Self::from_seconds_with_tempo(
             section_type,

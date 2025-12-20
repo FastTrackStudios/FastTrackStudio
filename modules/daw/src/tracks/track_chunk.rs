@@ -188,7 +188,7 @@ pub fn parse_track_chunk(chunk: &str, default_index: usize) -> Result<ParsedTrac
                     // REAPER color format: 0xBBGGRR (BGR, not RGB)
                     // Convert to RGB packed format: (r << 16) | (g << 8) | b
                     if color_val != 0 {
-                        let r = ((color_val >> 0) & 0xFF) as u8;
+                        let r = (color_val & 0xFF) as u8;
                         let g = ((color_val >> 8) & 0xFF) as u8;
                         let b = ((color_val >> 16) & 0xFF) as u8;
                         // Pack as RGB: (r << 16) | (g << 8) | b

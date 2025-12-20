@@ -221,7 +221,7 @@ impl Chart {
         output.push_str("    \n");
         output.push_str("    \\autoInlineBreaks {\n");
         output.push_str("        \\rh{\n");
-        output.push_str("\n");
+        output.push('\n');
         
         // Generate section markers and rhythm notation
         for (_section_idx, section) in self.sections.iter().enumerate() {

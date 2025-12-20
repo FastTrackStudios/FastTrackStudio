@@ -308,10 +308,10 @@ impl TempoTimeEnvelope {
                 }
 
                 // Calculate final position with bounds checking
-                let measure = (current_measure.floor() as i32 + 1).max(1).min(1000);
+                let measure = (current_measure.floor() as i32 + 1).clamp(1, 1000);
                 let beat_in_measure =
                     ((current_measure - current_measure.floor()) * beats_per_measure + 1.0) as i32;
-                let beat_in_measure = beat_in_measure.max(1).min(beats_per_measure as i32);
+                let beat_in_measure = beat_in_measure.clamp(1, beats_per_measure as i32);
                 let beat_fraction = (current_measure - current_measure.floor()) * beats_per_measure;
 
                 return (measure, beat_in_measure, beat_fraction);
@@ -340,10 +340,10 @@ impl TempoTimeEnvelope {
         }
 
         // Calculate final position with bounds checking
-        let measure = (current_measure.floor() as i32 + 1).max(1).min(1000);
+        let measure = (current_measure.floor() as i32 + 1).clamp(1, 1000);
         let beat_in_measure =
             ((current_measure - current_measure.floor()) * current_time_sig.0 as f64 + 1.0) as i32;
-        let beat_in_measure = beat_in_measure.max(1).min(current_time_sig.0);
+        let beat_in_measure = beat_in_measure.clamp(1, current_time_sig.0);
         let beat_fraction = (current_measure - current_measure.floor()) * current_time_sig.0 as f64;
 
         (measure, beat_in_measure, beat_fraction)

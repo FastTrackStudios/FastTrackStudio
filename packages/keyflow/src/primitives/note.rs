@@ -90,7 +90,7 @@ impl MusicalNote {
         };
 
         // Handle accidentals
-        let mut semitone: i32 = base_semitone as i32;
+        let mut semitone: i32 = base_semitone;
         let mut i = 1;
         while i < chars.len() {
             match chars[i] {
@@ -100,7 +100,7 @@ impl MusicalNote {
             }
             i += 1;
         }
-        let semitone = ((semitone % 12 + 12) % 12) as u8;
+        let semitone = semitone.rem_euclid(12) as u8;
 
         Some(Self::new(s.to_string(), semitone))
     }

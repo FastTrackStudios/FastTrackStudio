@@ -27,7 +27,7 @@ fn format_musical_position(pos: f64) -> String {
         let beats_since_measure = beat_info.beats_since_measure.get();
         let beat = beats_since_measure.floor() as i32;
         let subdivision = ((beats_since_measure - beats_since_measure.floor()) * 1000.0).round() as i32;
-        let subdivision = subdivision.max(0).min(999);
+        let subdivision = subdivision.clamp(0, 999);
         format!("{}.{}.{:03}", measure, beat, subdivision)
     } else {
         String::new()

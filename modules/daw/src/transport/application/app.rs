@@ -22,13 +22,13 @@ fn transition_to(transport: &mut Transport, next: PlayState) -> Result<(), Trans
 fn can_transition(current: PlayState, next: PlayState) -> bool {
     use PlayState::*;
 
-    match (current, next) {
-        (Stopped, Playing) | (Stopped, Recording) => true,
-        (Playing, Paused) | (Playing, Recording) | (Playing, Stopped) => true,
-        (Paused, Playing) | (Paused, Stopped) => true,
-        (Recording, Playing) | (Recording, Paused) | (Recording, Stopped) => true,
-        _ => false,
-    }
+    matches!(
+        (current, next),
+        (Stopped, Playing | Recording)
+            | (Playing, Paused | Recording | Stopped)
+            | (Paused, Playing | Stopped)
+            | (Recording, Playing | Paused | Stopped)
+    )
 }
 
 fn set_tempo_inner(transport: &mut Transport, tempo: Tempo) -> Result<(), TransportError> {

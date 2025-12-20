@@ -7,7 +7,7 @@
 //! 2. Content phase: Parse sections and their measures
 //! 3. Post-processing: Auto-number sections, finalize positions
 
-use super::chart::Chart;
+use super::Chart;
 use super::cues::TextCue;
 use super::types::{ChartSection, ChordInstance, KeyChange, Measure};
 use crate::chord::{Chord, ChordRhythm, PushPullAmount};
@@ -15,7 +15,7 @@ use crate::key::Key;
 use crate::metadata::SongMetadata;
 use crate::parsing::Lexer;
 use crate::sections::{Section, SectionNumberer, SectionType};
-use crate::time::DurationTrait; // Import Duration trait for to_beats()
+// DurationTrait removed - unused
 use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition, Tempo, TimeSignature};
 use crate::RootNotation;
 
@@ -231,9 +231,9 @@ impl Chart {
     ///           "C" -> (0, "C")
     fn extract_leading_apostrophes(token: &str) -> (usize, &str) {
         let mut count = 0;
-        let mut chars = token.chars();
+        let chars = token.chars();
 
-        while let Some(ch) = chars.next() {
+        for ch in chars {
             if ch == '\'' {
                 count += 1;
             } else {
@@ -255,7 +255,7 @@ impl Chart {
         // First, find where the chord part ends and rhythm notation begins
         // Rhythm notation: /, _, or more apostrophes
         let rhythm_start = token
-            .find(|c: char| c == '/' || c == '_')
+            .find(['/', '_'])
             .unwrap_or(token.len());
 
         // Only extract apostrophes between chord and rhythm
@@ -308,7 +308,7 @@ impl Chart {
                     // This looks like a slash chord
                     // Extract just the bass note (stop at any rhythm notation)
                     let bass_end = after_slash
-                        .find(|c: char| c == '/' || c == '_' || c == '\'')
+                        .find(['/', '_', '\''])
                         .unwrap_or(after_slash.len());
                     return (&token[..slash_pos], Some(&after_slash[..bass_end]));
                 }
@@ -562,13 +562,13 @@ impl Chart {
 
             // Check for subsection prefix (^)
             let (is_subsection, section_marker) = if marker_part.starts_with('^') {
-                (true, &marker_part[1..])
+                (true, marker_part.strip_prefix('^').unwrap_or(marker_part))
             } else {
                 (false, marker_part)
             };
 
             // Check if this is a section marker (based on marker part only)
-            if let Some((section_type, measure_count)) = SectionType::parse(section_marker) {
+            if let Some((section_type, measure_count)) = SectionType::parse_with_measure_count(section_marker) {
                 if let Some(content) = inline_content {
                     // Handle inline content separated by comma
                     let mut section =
@@ -667,7 +667,7 @@ impl Chart {
             } else {
                 (line.trim(), None)
             };
-            if SectionType::parse(marker_part).is_some() {
+            if SectionType::parse_with_measure_count(marker_part).is_some() {
                 break;
             }
 
@@ -846,7 +846,6 @@ impl Chart {
         section_type: &SectionType,
         section_measure_count: Option<usize>,
     ) -> Result<Vec<Measure>, String> {
-        use crate::time::DurationTrait;
 
         let mut time_sig = self.time_signature.unwrap_or(TimeSignature::common_time());
         let mut beats_per_measure = time_sig.numerator as f64;
@@ -857,7 +856,7 @@ impl Chart {
         // Preprocess: Calculate automatic durations for chords between measure separators
         // If chords are between | separators, split the measure evenly
         // e.g., "| G C |" → "G_2 C_2", "G C | D" → "G_2 C_2 D_1"
-        let line_with_auto_durations = Self::apply_auto_durations_between_separators(&line_to_parse, beats_per_measure);
+        let line_with_auto_durations = Self::apply_auto_durations_between_separators(line_to_parse, beats_per_measure);
 
         let tokens_str: Vec<&str> = line_with_auto_durations.split_whitespace().collect();
         let mut measures: Vec<Measure> = Vec::new();
@@ -996,7 +995,7 @@ impl Chart {
                             current_measure = Measure::new();
                             current_measure.time_signature = (time_sig.numerator as u8, time_sig.denominator as u8);
                             current_measure_beats = 0.0;
-                            measure_was_created_by_separator = false; // Auto-created, not by separator
+                            let _measure_was_created_by_separator = false; // Auto-created, not by separator
                         }
                     }
                     just_processed_separator = false; // Reset flag after processing chord
@@ -1128,7 +1127,7 @@ impl Chart {
 
         // Check for one-time override (prefix !)
         let (is_override, token_clean) = if token.starts_with('!') {
-            (true, &token[1..])
+            (true, token.strip_prefix('!').unwrap_or(token))
         } else {
             (false, token)
         };
@@ -1382,7 +1381,6 @@ impl Chart {
     /// Calculate absolute positions for all elements in the chart
     /// This accumulates durations as we traverse sections and measures
     fn calculate_absolute_positions(&mut self) {
-        use crate::time::DurationTrait;
 
         // Start at position 0.0.0
         let mut current_position = MusicalDuration::new(0, 0, 0); // DAW uses i32
@@ -1444,13 +1442,13 @@ impl Chart {
                         // Create position in previous measure
                         let total_beats = (adjusted_measure_num.max(0) as f64 * beats_per_measure) + position_in_prev_measure.max(0.0);
                         let measure = (total_beats / beats_per_measure).floor() as i32;
-                        let beat = ((total_beats % beats_per_measure).floor() as i32);
+                        let beat = (total_beats % beats_per_measure).floor() as i32;
                         let subdivision = (((total_beats % beats_per_measure) % 1.0) * 1000.0).round() as i32;
                         MusicalPosition::try_new(measure, beat, subdivision.clamp(0, 999))
                             .unwrap_or_else(|_| MusicalPosition::start())
                     } else {
                         let measure = (adjusted_position_beats.max(0.0) / beats_per_measure).floor() as i32;
-                        let beat = ((adjusted_position_beats.max(0.0) % beats_per_measure).floor() as i32);
+                        let beat = (adjusted_position_beats.max(0.0) % beats_per_measure).floor() as i32;
                         let subdivision = (((adjusted_position_beats.max(0.0) % beats_per_measure) % 1.0) * 1000.0).round() as i32;
                         MusicalPosition::try_new(measure, beat, subdivision.clamp(0, 999))
                             .unwrap_or_else(|_| MusicalPosition::start())
@@ -1481,7 +1479,7 @@ impl Chart {
 mod tests {
     use super::*;
     use crate::primitives::{MusicalNote, Note};
-    use crate::time::Duration;
+    
 
     #[test]
     fn test_parse_simple_chord_line() {

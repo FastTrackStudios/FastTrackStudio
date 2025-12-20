@@ -5,13 +5,6 @@ edition = "2021"
 description = "A high-performance RPP (REAPER Project) file format parser using nom - generic parsing without REAPER-specific types"
 license = "MIT"
 
-[[example]]
-name = "01_print_track_hierarchy"
-path = "examples/01_print_track_hierarchy.rs"
-
-[[example]]
-name = "02_parse_markers_regions"
-path = "examples/02_parse_markers_regions.rs"
 
 [dependencies]
 # Parser dependencies
@@ -21,3 +14,6 @@ nom = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
+
+[lints]
+workspace = true

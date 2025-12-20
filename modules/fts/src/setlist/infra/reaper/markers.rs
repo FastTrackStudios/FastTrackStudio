@@ -64,7 +64,7 @@ pub fn read_markers_from_project(project: &Project) -> Result<Vec<Marker>, Strin
                 let beats_since_measure = beat_info.beats_since_measure.get();
                 let beat = beats_since_measure.floor() as i32;
                 let subdivision = ((beats_since_measure - beats_since_measure.floor()) * 1000.0).round() as i32;
-                let subdivision = subdivision.max(0).min(999);
+                let subdivision = subdivision.clamp(0, 999);
                 
                 let musical = MusicalPosition::try_new(measure, beat, subdivision)
                     .map_err(|e| format!("Invalid musical position: {}", e))?;
@@ -136,7 +136,7 @@ pub fn read_regions_from_project(project: &Project) -> Result<Vec<Region>, Strin
                     let start_beats_since_measure = start_beat_info.beats_since_measure.get();
                     let start_beat = start_beats_since_measure.floor() as i32;
                     let start_subdivision = ((start_beats_since_measure - start_beats_since_measure.floor()) * 1000.0).round() as i32;
-                    let start_subdivision = start_subdivision.max(0).min(999);
+                    let start_subdivision = start_subdivision.clamp(0, 999);
                     
                     let start_musical = MusicalPosition::try_new(start_measure, start_beat, start_subdivision)
                         .map_err(|e| format!("Invalid musical position: {}", e))?;
@@ -150,7 +150,7 @@ pub fn read_regions_from_project(project: &Project) -> Result<Vec<Region>, Strin
                     let end_beats_since_measure = end_beat_info.beats_since_measure.get();
                     let end_beat = end_beats_since_measure.floor() as i32;
                     let end_subdivision = ((end_beats_since_measure - end_beats_since_measure.floor()) * 1000.0).round() as i32;
-                    let end_subdivision = end_subdivision.max(0).min(999);
+                    let end_subdivision = end_subdivision.clamp(0, 999);
                     
                     let end_musical = MusicalPosition::try_new(end_measure, end_beat, end_subdivision)
                         .map_err(|e| format!("Invalid musical position: {}", e))?;

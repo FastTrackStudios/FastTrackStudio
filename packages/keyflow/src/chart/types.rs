@@ -7,7 +7,7 @@ use super::cues::TextCue;
 use crate::chord::{Chord, ChordRhythm, PushPullAmount};
 use crate::primitives::RootNotation;
 use crate::sections::Section;
-use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition};
+use crate::time::{AbsolutePosition, MusicalDuration};
 use serde::{Deserialize, Serialize};
 
 /// Represents a chord instance with position and timing information

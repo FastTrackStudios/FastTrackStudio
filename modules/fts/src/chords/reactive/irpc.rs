@@ -55,7 +55,7 @@ impl ChartApi {
     /// Note: This currently uses ChordsReactiveService, but in the future
     /// we should create a ChartReactiveService that directly streams Chart updates.
     /// For now, we'll need to convert ChordsData to Chart or extend the service.
-    pub fn spawn(service: Box<dyn ChordsReactiveService>) -> Self {
+    pub fn spawn(_service: Box<dyn ChordsReactiveService>) -> Self {
         let (tx, rx) = mpsc::channel(16);
 
         // Create broadcast channel for chart stream

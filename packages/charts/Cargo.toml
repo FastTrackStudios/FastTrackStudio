@@ -20,3 +20,6 @@ base64 = "0.22"
 pathdiff = "0.2"
 regex = "1.11"
 keyflow = { path = "../../packages/keyflow" }
+
+[lints]
+workspace = true

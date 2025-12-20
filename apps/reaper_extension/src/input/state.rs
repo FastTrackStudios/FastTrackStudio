@@ -5,9 +5,10 @@
 use std::sync::{Mutex, OnceLock};
 
 /// The current mode of the input system
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
     /// Normal mode - standard operations
+    #[default]
     Normal,
     /// Visual timeline mode - motions extend time selection
     VisualTimeline,
@@ -15,16 +16,11 @@ pub enum Mode {
     VisualTrack,
 }
 
-impl Default for Mode {
-    fn default() -> Self {
-        Mode::Normal
-    }
-}
-
 /// The context where commands are executed
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Context {
     /// Main arrange view
+    #[default]
     Main,
     /// MIDI editor
     Midi,
@@ -38,12 +34,6 @@ pub enum Context {
     CrossfadeEditor,
     /// Global (applies to both main and midi)
     Global,
-}
-
-impl Default for Context {
-    fn default() -> Self {
-        Context::Main
-    }
 }
 
 /// A single keypress in a sequence

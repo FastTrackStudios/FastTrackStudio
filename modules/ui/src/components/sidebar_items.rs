@@ -28,7 +28,7 @@ pub fn VerticalProgressBar(
                 class: "absolute top-0 left-0 right-0 rounded-full transition-all duration-300 ease-in-out",
                 style: format!(
                     "height: {}%; background-color: {}; opacity: 0.8;",
-                    progress.max(0.0).min(100.0),
+                    progress.clamp(0.0, 100.0),
                     bright_color
                 ),
             }

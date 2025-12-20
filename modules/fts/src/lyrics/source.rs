@@ -5,10 +5,9 @@
 //! - `LyricsAnnotations` stores user edits (timing, notes, slide breaks)
 //! - Everything else is derived dynamically from these two
 
-use super::core::{LyricLine, LyricSection, Lyrics, Syllable, Word};
+use super::core::Lyrics;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Duration;
 use uuid::Uuid;
 use thiserror::Error;
 

@@ -65,7 +65,7 @@ intro, 1/ 4->/ 5/ 1/
     // Second chord should have accent from shorthand
     if measure.chords.len() >= 2 {
         assert!(
-            measure.chords[1].commands.len() > 0,
+            !measure.chords[1].commands.is_empty(),
             "Second chord should have commands"
         );
         assert_eq!(measure.chords[1].commands[0], Command::Accent);
@@ -125,7 +125,7 @@ intro, 1/ 4/ /accent 5/ 1/
     // Second chord should have accent from /accent command
     if measure.chords.len() >= 2 {
         assert!(
-            measure.chords[1].commands.len() > 0,
+            !measure.chords[1].commands.is_empty(),
             "Second chord should have commands"
         );
         assert_eq!(measure.chords[1].commands[0], Command::Accent);

@@ -13,6 +13,7 @@ pub use item_metadata::ItemMetadata;
 pub type DynamicTemplateConfig = Config<ItemMetadata>;
 
 /// Dynamic template system for organizing DAW items
+#[derive(Default)]
 pub struct DynamicTemplate;
 
 impl DynamicTemplate {
@@ -45,9 +46,11 @@ pub trait ItemToString {
 
 impl ItemToString for Item {
     fn to_monarchy_string(self) -> String {
-        self.properties
-            .original_name
-            .unwrap_or_else(|| self.id.to_string())
+        if self.name.is_empty() {
+            self.id.to_string()
+        } else {
+            self.name
+        }
     }
 }
 

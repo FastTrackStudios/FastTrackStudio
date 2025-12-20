@@ -48,7 +48,7 @@ pub fn parse_project_header(input: &str) -> IResult<&str, (f64, String, i64)> {
             parse_token_line,
         ),
         |(_, _, tokens)| {
-            let version = tokens.get(0)
+            let version = tokens.first()
                 .and_then(|t| t.as_number())
                 .unwrap_or(0.1);
             

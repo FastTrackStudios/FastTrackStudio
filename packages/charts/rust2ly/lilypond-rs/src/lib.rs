@@ -102,11 +102,7 @@ pub fn compile(input_file: &str) -> bool {
 pub fn is_lilypond_file(filename: &str) -> bool {
     match Path::new(filename).extension() {
         Some(ex) => {
-            if ex == "ly" {
-                true
-            } else {
-                false
-            }
+            ex == "ly"
         }
         None => false,
     }
@@ -116,6 +112,12 @@ pub fn is_lilypond_file(filename: &str) -> bool {
 #[derive(PartialEq, Debug)]
 pub struct LilyPond {
     pub notes: Vec<NoteName>,
+}
+
+impl Default for LilyPond {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LilyPond {
@@ -163,7 +165,7 @@ pub enum NoteNameLanguage {
     /// - Note names: `c`, `d`, `e`, `f`, `g`, `a`, `b`
     ///
     /// - Accidentals: `s`, `f`, `ss`, `ff`, `-sharp`, `-flat`, `-sharpsharp`,
-    /// `-flatflat`
+    ///   `-flatflat`
     ///
     English,
     /// Dutch note names and accidentals.

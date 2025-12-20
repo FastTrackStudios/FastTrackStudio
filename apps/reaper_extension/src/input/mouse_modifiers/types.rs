@@ -217,7 +217,7 @@ pub enum TrackInteraction {
 
 impl MouseModifierContext {
     /// Get the internal REAPER context string (e.g., "MM_CTX_ITEM")
-    pub fn to_reaper_string(&self) -> &'static str {
+    pub fn to_reaper_string(self) -> &'static str {
         match self {
             MouseModifierContext::ArrangeView(ArrangeViewInteraction::Middle(MouseButtonInput::MiddleDrag)) => "MM_CTX_ARRANGE_MMOUSE",
             MouseModifierContext::ArrangeView(ArrangeViewInteraction::Middle(MouseButtonInput::MiddleClick)) => "MM_CTX_ARRANGE_MMOUSE_CLK",
@@ -530,8 +530,8 @@ pub enum ModifierFlag {
 
 impl ModifierFlag {
     /// Convert to numeric flag value (0-15)
-    pub fn to_flag(&self) -> i32 {
-        *self as i32
+    pub fn to_flag(self) -> i32 {
+        self as i32
     }
     
     /// Create from numeric flag value (0-15)
@@ -563,7 +563,7 @@ impl ModifierFlag {
     }
     
     /// Convert to MouseModifierFlag struct
-    pub fn to_mouse_modifier_flag(&self) -> MouseModifierFlag {
+    pub fn to_mouse_modifier_flag(self) -> MouseModifierFlag {
         MouseModifierFlag::from_flag(self.to_flag())
     }
     

@@ -12,3 +12,6 @@ paste = "1.0"
 [dev-dependencies]
 # For testing the generated code
 trybuild = "1.0"
+
+[lints]
+workspace = true

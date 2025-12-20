@@ -80,10 +80,7 @@ impl<M: Metadata> Organizer<M> {
             current_prefixes.clear();
         } else {
             // Filter out blocked prefixes even if we don't have our own prefix
-            current_prefixes = current_prefixes
-                .into_iter()
-                .filter(|p| !group.blocked_prefixes.contains(p))
-                .collect();
+            current_prefixes.retain(|p| !group.blocked_prefixes.contains(p));
         }
 
         // Create the display name with prefixes
@@ -119,7 +116,7 @@ impl<M: Metadata> Organizer<M> {
 
                 variants
                     .entry(variant_key.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(item);
             }
 

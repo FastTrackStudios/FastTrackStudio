@@ -20,7 +20,7 @@ pub enum InstrumentGroup {
 
 impl InstrumentGroup {
     /// Parse an instrument group from a string
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "all" => InstrumentGroup::All,
             "keys" | "key" | "keyboard" | "piano" => InstrumentGroup::Keys,
@@ -81,7 +81,7 @@ impl TextCue {
             // Find the closing quote
             if let Some(quote_end) = rest.find('"') {
                 let text = rest[..quote_end].to_string();
-                let group = InstrumentGroup::from_str(group_str);
+                let group = InstrumentGroup::parse(group_str);
 
                 Ok(TextCue::new(group, text))
             } else {
@@ -105,14 +105,14 @@ mod tests {
 
     #[test]
     fn test_instrument_group_parsing() {
-        assert_eq!(InstrumentGroup::from_str("keys"), InstrumentGroup::Keys);
-        assert_eq!(InstrumentGroup::from_str("DRUMS"), InstrumentGroup::Drums);
-        assert_eq!(InstrumentGroup::from_str("bass"), InstrumentGroup::Bass);
-        assert_eq!(InstrumentGroup::from_str("guitar"), InstrumentGroup::Guitar);
-        assert_eq!(InstrumentGroup::from_str("vocals"), InstrumentGroup::Vocals);
-        assert_eq!(InstrumentGroup::from_str("all"), InstrumentGroup::All);
+        assert_eq!(InstrumentGroup::parse("keys"), InstrumentGroup::Keys);
+        assert_eq!(InstrumentGroup::parse("DRUMS"), InstrumentGroup::Drums);
+        assert_eq!(InstrumentGroup::parse("bass"), InstrumentGroup::Bass);
+        assert_eq!(InstrumentGroup::parse("guitar"), InstrumentGroup::Guitar);
+        assert_eq!(InstrumentGroup::parse("vocals"), InstrumentGroup::Vocals);
+        assert_eq!(InstrumentGroup::parse("all"), InstrumentGroup::All);
 
-        match InstrumentGroup::from_str("synth") {
+        match InstrumentGroup::parse("synth") {
             InstrumentGroup::Custom(name) => assert_eq!(name, "synth"),
             _ => panic!("Expected Custom variant"),
         }

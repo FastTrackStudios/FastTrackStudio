@@ -279,6 +279,12 @@ pub struct ProjectProperties {
     pub custom_properties: HashMap<String, Vec<Token>>,
 }
 
+impl Default for ProjectProperties {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProjectProperties {
     /// Create empty project properties
     pub fn new() -> Self {
@@ -372,7 +378,7 @@ impl ProjectProperties {
                         if let RppBlockContent::Content(tokens) = content {
                             if let Some(property_name) = tokens.first() {
                                 if let Some(name) = property_name.as_string() {
-                                    properties.parse_property(&name, &tokens[1..]);
+                                    properties.parse_property(name, &tokens[1..]);
                                 }
                             }
                         }
@@ -402,7 +408,7 @@ impl ProjectProperties {
             if let RppBlockContent::Content(tokens) = content {
                 if let Some(property_name) = tokens.first() {
                     if let Some(name) = property_name.as_string() {
-                        match name.as_ref() {
+                        match name {
                             "VOL" => {
                                 if tokens.len() >= 3 {
                                     if let (Some(a), Some(b)) = (tokens[1].as_number(), tokens[2].as_number()) {
@@ -499,7 +505,7 @@ impl ProjectProperties {
             if let RppBlockContent::Content(tokens) = content {
                 if let Some(property_name) = tokens.first() {
                     if let Some(name) = property_name.as_string() {
-                        match name.as_ref() {
+                        match name {
                             "EGUID" => {
                                 if let Some(val) = tokens.get(1).and_then(|t| t.as_string()) {
                                     envelope.guid = Some(val.to_string());

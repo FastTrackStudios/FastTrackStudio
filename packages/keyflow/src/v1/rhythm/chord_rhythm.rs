@@ -11,7 +11,7 @@
 // - Inline syntax (r{...}, \rhythm)
 
 use super::rhythm::ParsedRhythm;
-use crate::chord::chord::ChordData;
+use crate::v1::chord::chord::ChordData;
 
 /// Represents a slash rhythm token
 #[derive(Debug, Clone, PartialEq)]

@@ -1,4 +1,4 @@
-use crate::chord::chord::ChordData;
+use crate::v1::chord::chord::ChordData;
 use crate::parsing::{ParseResult, MiniParser};
 use crate::parsing::common::{Token, TokenStream, TokenType};
 use crate::primitives::note::Note;

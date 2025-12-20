@@ -31,3 +31,6 @@ path = "examples/intermediate/all_along_the_watchtower.rs"
 [[example]]
 name = "well_jacob_collier"
 path = "examples/intermediate/well_jacob_collier.rs"
+
+[lints]
+workspace = true

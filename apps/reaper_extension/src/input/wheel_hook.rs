@@ -369,7 +369,7 @@ pub fn check_and_hook_midi_editors() {
                 tracing::warn!("Failed to hook MIDI editor window: {}", e);
             } else {
                 info!("Hooked MIDI editor window for wheel events");
-                reaper.show_console_msg(format!("🎹 Hooked MIDI editor window for wheel events\n"));
+                reaper.show_console_msg("🎹 Hooked MIDI editor window for wheel events\n".to_string());
             }
         }
     }

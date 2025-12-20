@@ -1,7 +1,7 @@
 use keyflow::chart::Chart;
 use keyflow::chord::ChordRhythm;
 use keyflow::sections::SectionType;
-use keyflow::time::Duration; // Trait for to_beats() method
+// Duration trait removed - unused
 
 /// Test 1: Duration with all root formats (note names, scale degrees, Roman numerals)
 /// Tests that:
@@ -609,7 +609,7 @@ I_2. IV_2. vi_2. V_2.
     let first_chord = &chorus.measures[0].chords[0];
     match &first_chord.rhythm {
         ChordRhythm::Lily { dotted, .. } => {
-            assert_eq!(*dotted, true);
+            assert!(*dotted);
             // Dotted half note = 3 beats
             assert_eq!(
                 first_chord.duration.to_beats(chart.time_signature.unwrap()),

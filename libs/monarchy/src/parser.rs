@@ -27,7 +27,7 @@ impl<M: Metadata> Parser<M> {
 
                 // Extract metadata based on the group's fields
                 for field in &group.metadata_fields {
-                    if let Some(value) = self.extract_field_value(&input, field, &group) {
+                    if let Some(value) = self.extract_field_value(&input, field, group) {
                         metadata.set(field.clone(), value);
                     }
                 }
@@ -38,11 +38,8 @@ impl<M: Metadata> Parser<M> {
 
         // Handle unmatched items based on fallback strategy
         if matched_group.is_none() {
-            match self.config.fallback_strategy {
-                crate::config::FallbackStrategy::Reject => {
-                    return Err(MonarchyError::NoMatch(input));
-                }
-                _ => {}
+            if let crate::config::FallbackStrategy::Reject = self.config.fallback_strategy {
+                return Err(MonarchyError::NoMatch(input));
             }
         }
 

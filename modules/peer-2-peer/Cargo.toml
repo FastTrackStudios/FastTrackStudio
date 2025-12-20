@@ -47,14 +47,5 @@ n0-error = "0.1.0"
 name = "peer-2-peer"
 path = "src/main.rs"
 
-[[example]]
-name = "unix_socket_example"
-path = "examples/unix_socket_example.rs"
-
-[[example]]
-name = "log_forwarding"
-path = "examples/log_forwarding.rs"
-
-[[example]]
-name = "test_local_socket"
-path = "examples/test_local_socket.rs"
+[lints]
+workspace = true

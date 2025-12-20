@@ -14,7 +14,7 @@ pub struct Note {
 
 /// - TODO shorthand for creating a new note with pitch and duration
 /// - TODO also need to create staff, time signature, key signature, chord
-/// before we have a minimum viable product
+///   before we have a minimum viable product
 impl Note {
     /// Construct a new note
     ///

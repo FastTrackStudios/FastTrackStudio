@@ -72,7 +72,7 @@ pub fn read_lyrics_from_project(project: Project) -> Result<LyricsData, LyricsRe
     let reaper = Reaper::get();
     
     // Find LYRICS folder
-    let lyrics_folder_tracks = find_folder_tracks(project.clone(), "LYRICS")
+    let lyrics_folder_tracks = find_folder_tracks(project, "LYRICS")
         .ok_or(LyricsReadError::LyricsFolderNotFound)?;
     
     // Find SLIDES track

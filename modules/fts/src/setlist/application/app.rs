@@ -4,7 +4,7 @@
 //! higher-level workflows (sample data generation, persistence helpers, etc.) without
 //! introducing an additional wrapper or provider.
 
-use crate::setlist::core::{Section, SectionType, Setlist, SetlistError, Song};
+use crate::setlist::core::{SectionType, Setlist, SetlistError, Song};
 use chrono::Utc;
 use daw::marker_region::core::Marker;
 use std::path::Path;

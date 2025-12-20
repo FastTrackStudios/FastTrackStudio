@@ -304,7 +304,7 @@ impl LyricLine {
                 }
             } else {
                 // Regular text - collect until we hit a parenthesis
-                let mut regular_start = current_pos;
+                let regular_start = current_pos;
                 while current_pos < chars.len() && chars[current_pos] != '(' {
                     current_pos += 1;
                 }

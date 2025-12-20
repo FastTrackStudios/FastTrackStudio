@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use tracing::info;
 
 /// State managed by the setlist reactive service
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SetlistReactiveState {
     /// Current setlist structure
     pub setlist: Option<Setlist>,
@@ -27,17 +27,6 @@ pub struct SetlistReactiveState {
     
     /// Active slide index
     pub active_slide_index: Option<usize>,
-}
-
-impl Default for SetlistReactiveState {
-    fn default() -> Self {
-        Self {
-            setlist: None,
-            active_song_index: None,
-            active_section_index: None,
-            active_slide_index: None,
-        }
-    }
 }
 
 /// Service that manages setlist reactive state and streams

@@ -35,7 +35,7 @@ pub fn build_track_hierarchy(specs: Vec<(&str, bool)>) -> Vec<Track> {
     // Close any open folders at the end
     if open_folders > 0 && !tracks.is_empty() {
         if let Some(last_track) = tracks.last_mut() {
-            last_track.folder_depth_change = FolderDepthChange::ClosesLevels(-(open_folders as i32));
+            last_track.folder_depth_change = FolderDepthChange::ClosesLevels(-open_folders);
         }
     }
     

@@ -21,3 +21,6 @@ monarchy_derive = { path = "../monarchy-derive" }
 [features]
 default = ["derive"]
 derive = []
+
+[lints]
+workspace = true

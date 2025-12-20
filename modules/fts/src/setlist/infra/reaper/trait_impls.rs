@@ -633,7 +633,7 @@ impl LyricsReader for ReaperProject {
         
         info!("Reading lyrics from project");
         
-        let reaper_data: ReaperLyricsData = read_lyrics_from_project(self.clone())
+        let reaper_data: ReaperLyricsData = read_lyrics_from_project(*self)
             .map_err(|e: ReaperLyricsReadError| {
                 let error = match e {
                     ReaperLyricsReadError::LyricsFolderNotFound => LyricsReadError::LyricsFolderNotFound,

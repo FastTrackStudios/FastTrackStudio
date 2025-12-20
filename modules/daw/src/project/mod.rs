@@ -1,5 +1,5 @@
-mod project;
+mod core;
 mod router;
 
-pub use project::{Project };
+pub use core::Project;
 pub use router::create_project_http_router;

@@ -321,18 +321,18 @@ pub fn log_all_modifiers(medium_reaper: &MediumReaper) {
     }
     
     // Show summary
-    reaper.show_console_msg(format!("=== Summary ===\n"));
+    reaper.show_console_msg("=== Summary ===\n".to_string());
     reaper.show_console_msg(format!("Found {} modifier assignments across {} contexts\n", total_found, contexts_with_modifiers));
     
     // Show unmapped contexts if any
     if !contexts_without_modifiers.is_empty() {
-        reaper.show_console_msg(format!("\nUnmapped contexts (no modifiers assigned):\n"));
+        reaper.show_console_msg("\nUnmapped contexts (no modifiers assigned):\n".to_string());
         for (display_name, context) in &contexts_without_modifiers {
             reaper.show_console_msg(format!("  {} ({})\n", display_name, context));
         }
     }
     
-    reaper.show_console_msg(format!("\n=== End Mouse Modifiers ===\n\n"));
+    reaper.show_console_msg("\n=== End Mouse Modifiers ===\n\n".to_string());
 }
 
 /// Extract the button input from a context enum

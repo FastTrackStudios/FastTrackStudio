@@ -7,13 +7,13 @@
 //! Each language module must define the following public members:
 //!
 //! - `pub static LANGUAGE_STRING: &str`: The string to be used by LilyPond to
-//! select the language, e.g. `"english"` or `"nederlands"`.
+//!   select the language, e.g. `"english"` or `"nederlands"`.
 //! - `pub static NOTE_REGEX: &str`: A regular expression string which is used
-//! to compile
-//! `lilypond::lilypond_objects::lilypond_note::LILYPOND_NOTE_REGEX`. The string
-//! must define five named capture groups as described in that documentation.
+//!   to compile
+//!   `lilypond::lilypond_objects::lilypond_note::LILYPOND_NOTE_REGEX`. The string
+//!   must define five named capture groups as described in that documentation.
 //! - `pub fn from(note: &note) -> String`: A function that generates a string
-//! from the data in the note object according to the chosen language.
+//!   from the data in the note object according to the chosen language.
 
 use crate::{
     lilypond_objects::lilypond_note::LilyPondNote, notation::note::Note, NoteNameLanguage,

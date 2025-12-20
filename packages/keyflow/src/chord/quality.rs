@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 
 /// Basic chord quality - the fundamental triad structure
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ChordQuality {
     /// Major triad (1, 3, 5) - C, E, G
+    #[default]
     Major,
     /// Minor triad (1, b3, 5) - C, Eb, G
     Minor,
@@ -24,18 +26,15 @@ pub enum ChordQuality {
 
 /// Type of suspended chord
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum SuspendedType {
     /// Sus2 - suspended 2nd (1, 2, 5) - C, D, G
     Second,
     /// Sus4 - suspended 4th (1, 4, 5) - C, F, G (default)
+    #[default]
     Fourth,
 }
 
-impl Default for SuspendedType {
-    fn default() -> Self {
-        SuspendedType::Fourth // sus defaults to sus4
-    }
-}
 
 impl ChordQuality {
     /// Get the intervals that define this quality
@@ -99,11 +98,6 @@ impl ChordQuality {
     }
 }
 
-impl Default for ChordQuality {
-    fn default() -> Self {
-        ChordQuality::Major
-    }
-}
 
 impl std::fmt::Display for ChordQuality {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

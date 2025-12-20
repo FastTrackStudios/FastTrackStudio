@@ -19,14 +19,14 @@ impl LyricSheet {
         // Add each section
         for section in &lyrics.sections {
             output.push_str(&format!("[{}]\n", section.name));
-            output.push_str("\n");
+            output.push('\n');
 
             for line in &section.lines {
                 output.push_str(&line.display_text());
-                output.push_str("\n");
+                output.push('\n');
             }
 
-            output.push_str("\n");
+            output.push('\n');
         }
 
         output
@@ -267,7 +267,7 @@ impl Slides {
                     // Check for custom slide break at this position
                     let absolute_line_idx = pattern_start + line_idx;
                     let has_custom_break = derived
-                        .and_then(|d| Some(d.is_custom_slide_break(section_idx, absolute_line_idx)))
+                        .map(|d| d.is_custom_slide_break(section_idx, absolute_line_idx))
                         .unwrap_or(false);
 
                     // If there's a custom break and we already have lines, finish current slide

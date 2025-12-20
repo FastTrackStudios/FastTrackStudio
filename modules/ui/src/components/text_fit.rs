@@ -2,22 +2,17 @@ use dioxus::prelude::*;
 use tracing::{debug, info};
 
 /// Mode for text fitting algorithm
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum TextFitMode {
     /// Text fills width, no wrapping
     Oneline,
     /// Text fills width, wraps to multiple lines if needed
+    #[default]
     Multiline,
     /// Text fills both width and height, allows wrapping
     Box,
     /// Text fills both width and height, no wrapping
     BoxOneline,
-}
-
-impl Default for TextFitMode {
-    fn default() -> Self {
-        TextFitMode::Multiline
-    }
 }
 
 /// Props for the TextFit component

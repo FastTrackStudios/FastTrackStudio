@@ -905,7 +905,7 @@ fn log_tempo_time_sig_changes_handler() {
                 let beats_since_measure = beat_info.beats_since_measure.get();
                 let beat = beats_since_measure.floor() as i32;
                 let subdivision = ((beats_since_measure - beats_since_measure.floor()) * 1000.0).round() as i32;
-                let subdivision = subdivision.max(0).min(999);
+                let subdivision = subdivision.clamp(0, 999);
                 let musical_pos = format!("{}.{}.{:03}", measure, beat, subdivision);
                 
                 // Determine what changed from previous value

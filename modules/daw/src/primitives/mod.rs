@@ -12,7 +12,7 @@ pub struct MusicalPosition {
 impl MusicalPosition {
     pub fn new(measure: i32, beat: i32, subdivision: i32) -> Self {
         assert!(
-            subdivision >= 0 && subdivision <= 999,
+            (0..=999).contains(&subdivision),
             "Subdivision must be in range 0-999, got {}",
             subdivision
         );
@@ -24,7 +24,7 @@ impl MusicalPosition {
     }
 
     pub fn try_new(measure: i32, beat: i32, subdivision: i32) -> Result<Self, String> {
-        if subdivision < 0 || subdivision > 999 {
+        if !(0..=999).contains(&subdivision) {
             return Err(format!(
                 "Subdivision must be in range 0-999, got {}",
                 subdivision
@@ -102,12 +102,12 @@ pub struct TimePosition {
 impl TimePosition {
     pub fn new(minutes: i32, seconds: i32, milliseconds: i32) -> Self {
         assert!(
-            seconds >= 0 && seconds <= 59,
+            (0..=59).contains(&seconds),
             "Seconds must be in range 0-59, got {}",
             seconds
         );
         assert!(
-            milliseconds >= 0 && milliseconds <= 999,
+            (0..=999).contains(&milliseconds),
             "Milliseconds must be in range 0-999, got {}",
             milliseconds
         );
@@ -119,10 +119,10 @@ impl TimePosition {
     }
 
     pub fn try_new(minutes: i32, seconds: i32, milliseconds: i32) -> Result<Self, String> {
-        if seconds < 0 || seconds > 59 {
+        if !(0..=59).contains(&seconds) {
             return Err(format!("Seconds must be in range 0-59, got {}", seconds));
         }
-        if milliseconds < 0 || milliseconds > 999 {
+        if !(0..=999).contains(&milliseconds) {
             return Err(format!(
                 "Milliseconds must be in range 0-999, got {}",
                 milliseconds
@@ -441,7 +441,7 @@ pub struct MusicalDuration {
 impl MusicalDuration {
     pub fn new(measure: i32, beat: i32, subdivision: i32) -> Self {
         assert!(
-            subdivision >= 0 && subdivision <= 999,
+            (0..=999).contains(&subdivision),
             "Subdivision must be in range 0-999, got {}",
             subdivision
         );
@@ -453,7 +453,7 @@ impl MusicalDuration {
     }
 
     pub fn try_new(measure: i32, beat: i32, subdivision: i32) -> Result<Self, String> {
-        if subdivision < 0 || subdivision > 999 {
+        if !(0..=999).contains(&subdivision) {
             return Err(format!(
                 "Subdivision must be in range 0-999, got {}",
                 subdivision
@@ -514,7 +514,7 @@ impl MusicalDuration {
         let beats_per_measure = time_signature.numerator as f64;
         self.measure.max(0) as f64 * beats_per_measure
             + self.beat.max(0) as f64
-            + self.subdivision.max(0).min(999) as f64 / 1000.0
+            + self.subdivision.clamp(0, 999) as f64 / 1000.0
     }
 
     /// Create a musical duration from total beats
@@ -623,12 +623,12 @@ pub struct TimeDuration {
 impl TimeDuration {
     pub fn new(minutes: i32, seconds: i32, milliseconds: i32) -> Self {
         assert!(
-            seconds >= 0 && seconds <= 59,
+            (0..=59).contains(&seconds),
             "Seconds must be in range 0-59, got {}",
             seconds
         );
         assert!(
-            milliseconds >= 0 && milliseconds <= 999,
+            (0..=999).contains(&milliseconds),
             "Milliseconds must be in range 0-999, got {}",
             milliseconds
         );
@@ -640,10 +640,10 @@ impl TimeDuration {
     }
 
     pub fn try_new(minutes: i32, seconds: i32, milliseconds: i32) -> Result<Self, String> {
-        if seconds < 0 || seconds > 59 {
+        if !(0..=59).contains(&seconds) {
             return Err(format!("Seconds must be in range 0-59, got {}", seconds));
         }
-        if milliseconds < 0 || milliseconds > 999 {
+        if !(0..=999).contains(&milliseconds) {
             return Err(format!(
                 "Milliseconds must be in range 0-999, got {}",
                 milliseconds

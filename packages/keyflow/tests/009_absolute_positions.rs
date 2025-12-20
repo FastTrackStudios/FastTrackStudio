@@ -1,5 +1,5 @@
 use keyflow::chart::Chart;
-use keyflow::time::Duration;
+// Duration trait removed - unused
 
 #[test]
 fn test_section_padding_to_declared_length() {

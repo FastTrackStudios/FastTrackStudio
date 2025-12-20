@@ -47,7 +47,7 @@ pub fn parse_section_type_from_name(name: &str) -> Option<SectionType> {
     let name = name.trim();
     
     // Try exact match first
-    if let Ok(section_type) = SectionType::from_str(name) {
+    if let Ok(section_type) = SectionType::parse(name) {
         return Some(section_type);
     }
     
@@ -57,7 +57,7 @@ pub fn parse_section_type_from_name(name: &str) -> Option<SectionType> {
     let parts: Vec<&str> = name.split_whitespace().collect();
     if let Some(prefix) = parts.first() {
         // Try matching the prefix
-        if let Ok(section_type) = SectionType::from_str(prefix) {
+        if let Ok(section_type) = SectionType::parse(prefix) {
             return Some(section_type);
         }
     }

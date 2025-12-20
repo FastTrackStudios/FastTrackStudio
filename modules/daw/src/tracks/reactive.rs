@@ -46,18 +46,12 @@ impl TrackStreams {
 
 /// State managed by the track reactive service
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct TrackReactiveState {
     /// Tracks for each project (project_name -> tracks)
     pub tracks: HashMap<String, Vec<Track>>,
 }
 
-impl Default for TrackReactiveState {
-    fn default() -> Self {
-        Self {
-            tracks: HashMap::new(),
-        }
-    }
-}
 
 /// Trait for track reactive service implementations
 /// 
@@ -165,7 +159,7 @@ impl TrackReactiveService for DefaultTrackReactiveService {
         let project_id = project.id().to_string();
         {
             let mut state = self.state.lock().unwrap();
-            let tracks = state.tracks.entry(project_id.clone()).or_insert_with(Vec::new);
+            let tracks = state.tracks.entry(project_id.clone()).or_default();
             if track_index <= tracks.len() {
                 tracks.insert(track_index, track.clone());
             }

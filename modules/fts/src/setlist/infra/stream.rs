@@ -997,7 +997,7 @@ impl SetlistStreamActor {
                 });
             }
             SetlistStreamMessage::AdvanceSyllable(cmd) => {
-                let WithChannels { tx, inner, span, .. } = cmd;
+                let WithChannels { tx, inner: _inner, span, .. } = cmd;
                 let handler = self.command_handler.clone();
                 tokio::task::spawn(async move {
                     let _entered = span.enter();
@@ -1012,7 +1012,7 @@ impl SetlistStreamActor {
                 });
             }
             SetlistStreamMessage::GetLyricsState(cmd) => {
-                let WithChannels { tx, inner, span, .. } = cmd;
+                let WithChannels { tx, inner: _inner, span, .. } = cmd;
                 let handler = self.command_handler.clone();
                 tokio::task::spawn(async move {
                     let _entered = span.enter();

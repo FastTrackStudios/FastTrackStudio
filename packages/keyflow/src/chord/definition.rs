@@ -527,7 +527,7 @@ impl Chord {
                     if !found_root {
                         // Not in scale - use enharmonic spelling
                         let note = MusicalNote::enharmonic_from_root(
-                            &target_root,
+                            target_root,
                             transposed_root_semitone,
                             1,
                         );
@@ -549,7 +549,7 @@ impl Chord {
                     if !found_in_scale {
                         // Not in scale - use enharmonic spelling
                         let note = MusicalNote::enharmonic_from_root(
-                            &target_root,
+                            target_root,
                             new_semitone,
                             semantic_interval,
                         );
@@ -732,7 +732,7 @@ impl Chord {
                         (ChordDegree::Thirteenth, 8) => Some(Interval::FlatThirteenth),
                         (ChordDegree::Thirteenth, 9) => Some(Interval::Thirteenth),
                         // Everything else use from_semitones
-                        _ => Interval::from_semitones((semitone_diff % 12) as u8),
+                        _ => Interval::from_semitones(semitone_diff % 12),
                     };
 
                     if let Some(interval) = interval {
@@ -872,7 +872,7 @@ impl Chord {
                 } else if self.extensions.eleventh.is_some() {
                     desc.push_str("11");
                 } else if self.extensions.ninth.is_some() {
-                    desc.push_str("9");
+                    desc.push('9');
                 }
                 if let Some(qual) = self.extensions.ninth {
                     if qual != ExtensionQuality::Natural {
@@ -942,7 +942,7 @@ impl Chord {
         } else {
             for addition in &self.additions {
                 if *addition == ChordDegree::Sixth && is_sixth_chord {
-                    desc.push_str("6");
+                    desc.push('6');
                 } else {
                     desc.push_str(&format!("add{}", addition));
                 }
@@ -1600,12 +1600,12 @@ impl Chord {
                     if suffix.is_empty() {
                         suffix.push_str(":7");
                     } else {
-                        suffix.push_str("7");
+                        suffix.push('7');
                     }
                 }
                 ChordFamily::Minor7 => {
                     // Already has :m, just add 7
-                    suffix.push_str("7");
+                    suffix.push('7');
                 }
                 ChordFamily::MinorMajor7 => {
                     // Already has :m, add maj7
@@ -1631,7 +1631,7 @@ impl Chord {
         // Extensions
         if self.extensions.has_any() {
             if self.extensions.ninth.is_some() {
-                suffix.push_str("9");
+                suffix.push('9');
             }
             if self.extensions.eleventh.is_some() {
                 suffix.push_str("11");

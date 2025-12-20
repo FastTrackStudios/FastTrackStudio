@@ -20,7 +20,7 @@ pub fn Slider(
     on_change: Option<Callback<f64>>,
 ) -> Element {
     let current_value = value();
-    let clamped_value = current_value.max(min).min(max);
+    let clamped_value = current_value.clamp(min, max);
     let percentage = ((clamped_value - min) / (max - min) * 100.0).max(0.0).min(100.0);
     
     rsx! {
@@ -57,7 +57,7 @@ pub fn Slider(
                         value: "{clamped_value}",
                         oninput: move |evt| {
                             if let Ok(val) = evt.value().parse::<f64>() {
-                                let clamped = val.max(min).min(max);
+                                let clamped = val.clamp(min, max);
                                 value.set(clamped);
                                 if let Some(callback) = on_change {
                                     callback.call(clamped);

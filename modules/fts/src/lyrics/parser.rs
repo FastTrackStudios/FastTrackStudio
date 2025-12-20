@@ -121,7 +121,7 @@ pub fn parse_lyrics_with_config(
 /// Split lyrics into lead and background vocal tracks
 fn split_lead_background(
     lyrics: Lyrics,
-    config: &ParserConfig,
+    _config: &ParserConfig,
 ) -> Result<Lyrics, ParseError> {
     // For now, we'll mark parenthetical parts as background vocals
     // In the future, we could create separate Lyrics objects or add metadata
@@ -215,7 +215,7 @@ I'm breathing, I'm breathing, I think I'm reading you well"#;
     #[test]
     fn test_parser_config_default() {
         let config = ParserConfig::default();
-        assert_eq!(config.split_lead_background, false);
+        assert!(!config.split_lead_background);
         assert_eq!(config.background_vocal_pattern, BackgroundVocalPattern::Parenthetical);
     }
 

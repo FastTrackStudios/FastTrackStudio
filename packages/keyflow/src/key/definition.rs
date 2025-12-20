@@ -64,7 +64,7 @@ impl Key {
 
     /// Get the note for a specific scale degree (1-7)
     pub fn get_scale_degree(&self, degree: u8) -> Option<MusicalNote> {
-        if degree < 1 || degree > 7 {
+        if !(1..=7).contains(&degree) {
             return None;
         }
 

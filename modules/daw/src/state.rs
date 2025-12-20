@@ -13,6 +13,7 @@ use std::collections::HashMap;
 /// This is useful for clients that need to read both transport and tracks state together.
 /// Individual services manage their own state separately.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct DawReactiveState {
     /// Transport state for each project (project_name -> transport)
     pub transport: HashMap<String, Transport>,
@@ -24,13 +25,4 @@ pub struct DawReactiveState {
     pub active_project_id: Option<String>,
 }
 
-impl Default for DawReactiveState {
-    fn default() -> Self {
-        Self {
-            transport: HashMap::new(),
-            tracks: HashMap::new(),
-            active_project_id: None,
-        }
-    }
-}
 

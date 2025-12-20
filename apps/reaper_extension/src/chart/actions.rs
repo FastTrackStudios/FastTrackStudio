@@ -582,9 +582,9 @@ fn debug_midi_and_sections_handler() {
                 chord_musical_dur
             ));
         } else {
-            debug_output.push_str(&format!("         → No chord detected\n"));
+            debug_output.push_str("         → No chord detected\n");
         }
-        debug_output.push_str("\n");
+        debug_output.push('\n');
     }
 
     if notes_by_time.len() > 30 {
@@ -737,7 +737,7 @@ fn debug_midi_and_sections_handler() {
                         ));
                     }
 
-                    debug_output.push_str("\n");
+                    debug_output.push('\n');
                 }
             } else {
                 debug_output.push_str(&format!("Song '{}' not found in setlist\n", name));

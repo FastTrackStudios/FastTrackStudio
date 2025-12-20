@@ -32,7 +32,7 @@ pub enum BlockType {
 
 impl BlockType {
     /// Create a BlockType from a string
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_uppercase().as_str() {
             "REAPER_PROJECT" => BlockType::Project,
             "TRACK" => BlockType::Track,
@@ -144,7 +144,7 @@ pub fn parse_block(input: &str) -> IResult<&str, RppBlock> {
     // Skip leading whitespace/newlines before the block start
     let (input, _) = multispace0(input)?;
     let (input, (name, params)) = block_start(input)?;
-    let block_type = BlockType::from_str(&name);
+    let block_type = BlockType::parse(&name);
     
     // Skip leading whitespace/newlines
     let (input, _) = multispace0(input)?;
@@ -241,10 +241,10 @@ VOL 1.0 0.0
 
     #[test]
     fn test_block_type_from_str() {
-        assert_eq!(BlockType::from_str("TRACK"), BlockType::Track);
-        assert_eq!(BlockType::from_str("ITEM"), BlockType::Item);
-        assert_eq!(BlockType::from_str("VOLENV2"), BlockType::Envelope);
-        assert_eq!(BlockType::from_str("FXCHAIN"), BlockType::FxChain);
-        assert_eq!(BlockType::from_str("CUSTOM"), BlockType::Other("CUSTOM".to_string()));
+        assert_eq!(BlockType::parse("TRACK"), BlockType::Track);
+        assert_eq!(BlockType::parse("ITEM"), BlockType::Item);
+        assert_eq!(BlockType::parse("VOLENV2"), BlockType::Envelope);
+        assert_eq!(BlockType::parse("FXCHAIN"), BlockType::FxChain);
+        assert_eq!(BlockType::parse("CUSTOM"), BlockType::Other("CUSTOM".to_string()));
     }
 }

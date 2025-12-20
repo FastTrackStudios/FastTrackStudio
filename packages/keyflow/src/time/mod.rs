@@ -59,7 +59,7 @@ impl AbsolutePosition {
 
     /// Get subdivisions as u32 (for backward compatibility)
     pub fn subdivisions(&self) -> u32 {
-        self.total_duration.subdivision.max(0).min(999) as u32
+        self.total_duration.subdivision.clamp(0, 999) as u32
     }
 }
 
@@ -108,14 +108,14 @@ impl DurationTrait for MusicalDuration {
     }
 
     fn subdivisions(&self) -> u32 {
-        self.subdivision.max(0).min(999) as u32
+        self.subdivision.clamp(0, 999) as u32
     }
 
     fn to_beats(&self, time_sig: TimeSignature) -> f64 {
         let beats_per_measure = time_sig.numerator as f64;
         self.measure.max(0) as f64 * beats_per_measure
             + self.beat.max(0) as f64
-            + self.subdivision.max(0).min(999) as f64 / 1000.0
+            + self.subdivision.clamp(0, 999) as f64 / 1000.0
     }
 
     fn add(&self, other: &dyn DurationTrait, time_sig: TimeSignature) -> Box<dyn DurationTrait> {
@@ -154,7 +154,7 @@ pub mod conversion {
         (
             md.measure.max(0) as u32,
             md.beat.max(0) as u32,
-            md.subdivision.max(0).min(999) as u32,
+            md.subdivision.clamp(0, 999) as u32,
         )
     }
 }

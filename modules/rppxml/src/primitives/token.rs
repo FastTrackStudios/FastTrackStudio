@@ -294,8 +294,14 @@ mod tests {
     fn test_numbers() {
         assert_eq!(parse_token("42"), Ok(("", Token::Integer(42))));
         assert_eq!(parse_token("-17"), Ok(("", Token::Integer(-17))));
-        assert_eq!(parse_token("3.14"), Ok(("", Token::Float(3.14))));
-        assert_eq!(parse_token("3,14"), Ok(("", Token::Float(3.14)))); // WDL converts commas to dots
+        assert_eq!(
+            parse_token("3.14"),
+            Ok(("", Token::Float(std::f64::consts::PI)))
+        );
+        assert_eq!(
+            parse_token("3,14"),
+            Ok(("", Token::Float(std::f64::consts::PI)))
+        ); // WDL converts commas to dots
         assert_eq!(parse_token("0xFF"), Ok(("", Token::HexInteger(255))));
     }
 
@@ -378,4 +384,3 @@ mod tests {
         );
     }
 }
-

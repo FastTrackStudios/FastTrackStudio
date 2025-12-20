@@ -2,7 +2,7 @@
 //!
 //! Parses song metadata from chart input
 
-use super::metadata::SongMetadata;
+use super::SongMetadata;
 
 impl SongMetadata {
     /// Parse a title/artist line

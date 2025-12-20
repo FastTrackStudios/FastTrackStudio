@@ -642,7 +642,7 @@ fn try_build_chord_with_root(
             
             // Also handle case where we have a 4th pitch class but it wasn't detected as extension
             // If we have both 3rd and 4th in same octave, it should be add4
-            if chord.family.is_none() && third_and_fourth_same_octave && !chord.extensions.eleventh.is_some() {
+            if chord.family.is_none() && third_and_fourth_same_octave && chord.extensions.eleventh.is_none() {
                 // We have 3rd and 4th in same octave, but no 11th extension detected
                 // This means it should be add4 (use Fourth, not Eleventh)
                 if !chord.additions.contains(&ChordDegree::Fourth) {
@@ -1044,12 +1044,12 @@ mod tests {
         // Must detect exactly one F#m7 chord - this is a critical test
         assert!(!chords.is_empty(), "MUST detect F#m7. Got {} chords: {:?}", 
                 chords.len(), 
-                chords.iter().map(|c| format!("{} (root: {})", c.chord.to_string(), c.root_pitch)).collect::<Vec<_>>());
+                chords.iter().map(|c| format!("{} (root: {})", c.chord, c.root_pitch)).collect::<Vec<_>>());
         
         // Should have exactly one chord
         assert_eq!(chords.len(), 1, "Should detect exactly one chord, got {}: {:?}", 
                 chords.len(),
-                chords.iter().map(|c| format!("{} (root: {})", c.chord.to_string(), c.root_pitch)).collect::<Vec<_>>());
+                chords.iter().map(|c| format!("{} (root: {})", c.chord, c.root_pitch)).collect::<Vec<_>>());
         
         let chord = &chords[0];
         let chord_name = chord.chord.to_string();
@@ -1103,7 +1103,7 @@ mod tests {
         
         assert!(!f_sharp_m7_chords.is_empty(), 
                 "MUST detect at least one F#m7 chord. Found chords: {:?}", 
-                chords.iter().map(|c| format!("{} (root: {}, start: {})", c.chord.to_string(), c.root_pitch, c.start_ppq)).collect::<Vec<_>>());
+                chords.iter().map(|c| format!("{} (root: {}, start: {})", c.chord, c.root_pitch, c.start_ppq)).collect::<Vec<_>>());
         
         // Check the second chord (at 72000) - this is the one that's failing in REAPER
         let second_chord = chords.iter()
@@ -1111,7 +1111,7 @@ mod tests {
         
         assert!(second_chord.is_some(), 
                 "MUST detect F#m7 chord starting at 72000. Found chords: {:?}", 
-                chords.iter().map(|c| format!("{} (root: {}, start: {})", c.chord.to_string(), c.root_pitch, c.start_ppq)).collect::<Vec<_>>());
+                chords.iter().map(|c| format!("{} (root: {}, start: {})", c.chord, c.root_pitch, c.start_ppq)).collect::<Vec<_>>());
         
         let chord = second_chord.unwrap();
         let chord_name = chord.chord.to_string();
@@ -1160,7 +1160,7 @@ mod tests {
         
         assert!(!d2_chords.is_empty(), 
                 "MUST detect at least one D2 chord. Found chords: {:?}", 
-                chords.iter().map(|c| format!("{} (root: {}, start: {})", c.chord.to_string(), c.root_pitch, c.start_ppq)).collect::<Vec<_>>());
+                chords.iter().map(|c| format!("{} (root: {}, start: {})", c.chord, c.root_pitch, c.start_ppq)).collect::<Vec<_>>());
         
         // Check the second chord (at 83520) - this is the one that's failing in REAPER
         let second_chord = chords.iter()
@@ -1168,7 +1168,7 @@ mod tests {
         
         assert!(second_chord.is_some(), 
                 "MUST detect D2 chord starting at 83520. Found chords: {:?}", 
-                chords.iter().map(|c| format!("{} (root: {}, start: {})", c.chord.to_string(), c.root_pitch, c.start_ppq)).collect::<Vec<_>>());
+                chords.iter().map(|c| format!("{} (root: {}, start: {})", c.chord, c.root_pitch, c.start_ppq)).collect::<Vec<_>>());
         
         let chord = second_chord.unwrap();
         let chord_name = chord.chord.to_string();

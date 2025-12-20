@@ -460,7 +460,7 @@ pub fn SegmentedProgressBar(
                         "absolute left-0 top-0 h-full z-10 pointer-events-none"
                     },
                     style: {
-                        let progress = current_progress.max(0.0).min(100.0);
+                        let progress = current_progress.clamp(0.0, 100.0);
                         // Dark overlay starts from the progress point and covers the rest
                         // Add border-radius on the right side for rounded corners
                         format!(
@@ -535,7 +535,7 @@ pub fn CompactProgressBar(
                     class: "absolute left-0 top-0 h-full transition-all duration-100 ease-linear",
                     style: format!(
                         "width: {}%; background-color: {}; opacity: 0.8;",
-                        progress.max(0.0).min(100.0),
+                        progress.clamp(0.0, 100.0),
                         bright_color
                     ),
                 }

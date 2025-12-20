@@ -202,7 +202,7 @@ fn reset_to_beginning_of_setlist() {
         Ok(s) => s,
         Err(e) => {
             warn!(error = %e, "Failed to build setlist for reset");
-            reaper.show_console_msg(format!("Reset to Beginning of Setlist: Failed to build setlist\n"));
+            reaper.show_console_msg("Reset to Beginning of Setlist: Failed to build setlist\n".to_string());
             return;
         }
     };

@@ -107,6 +107,12 @@ impl SectionNumberer {
     }
 }
 
+impl Default for SectionNumberer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,11 +233,5 @@ mod tests {
         // Third verse is not consecutive, so it's Verse 2
         assert_eq!(sections[3].number, Some(2));
         assert_eq!(sections[3].split_letter, None);
-    }
-}
-
-impl Default for SectionNumberer {
-    fn default() -> Self {
-        Self::new()
     }
 }

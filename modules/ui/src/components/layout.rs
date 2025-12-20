@@ -440,10 +440,10 @@ pub fn MainContent(
             
             if has_count_in_section {
                 let count_in_start_percent = if total_duration > 0.0 {
-                    ((count_in_start - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+                    ((count_in_start - total_start) / total_duration * 100.0).clamp(0.0, 100.0)
                 } else { 0.0 };
                 let count_in_end_percent = if total_duration > 0.0 {
-                    ((song_start - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+                    ((song_start - total_start) / total_duration * 100.0).clamp(0.0, 100.0)
                 } else { 0.0 };
                 
                 sections.push(ProgressSection {
@@ -457,7 +457,7 @@ pub fn MainContent(
             // Calculate ending section start percent first (if it exists) to avoid overlap
             let ending_start_percent = if has_ending_section {
                 if total_duration > 0.0 {
-                    ((song_end - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+                    ((song_end - total_start) / total_duration * 100.0).clamp(0.0, 100.0)
                 } else {
                     0.0
                 }
@@ -469,10 +469,10 @@ pub fn MainContent(
             for section in song.sections.iter() {
                 if let (Some(section_start), Some(section_end)) = (section.start_seconds(), section.end_seconds()) {
                     let section_start_percent = if total_duration > 0.0 {
-                        ((section_start - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+                        ((section_start - total_start) / total_duration * 100.0).clamp(0.0, 100.0)
                     } else { 0.0 };
                     let mut section_end_percent = if total_duration > 0.0 {
-                        ((section_end - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+                        ((section_end - total_start) / total_duration * 100.0).clamp(0.0, 100.0)
                     } else { 0.0 };
                     
                     // If there's an ending section and this section ends at or after song_end,
@@ -494,7 +494,7 @@ pub fn MainContent(
             // Add ending section (red) if it exists - this is always the last section
             if has_ending_section {
                 let ending_end_percent = if total_duration > 0.0 {
-                    ((ending_pos - total_start) / total_duration * 100.0).max(0.0).min(100.0)
+                    ((ending_pos - total_start) / total_duration * 100.0).clamp(0.0, 100.0)
                 } else { 100.0 };
                 
                 sections.push(ProgressSection {
@@ -631,7 +631,7 @@ pub fn MainContent(
                     // point.position is song-relative, convert to absolute time
                     let marker_position_absolute = song_start + point.position_seconds();
                     let marker_percent = if song_duration > 0.0 {
-                        ((marker_position_absolute - total_start) / song_duration * 100.0).max(0.0).min(100.0)
+                        ((marker_position_absolute - total_start) / song_duration * 100.0).clamp(0.0, 100.0)
                     } else { 0.0 };
                     
                     // Skip adding markers at 0% since we already added them at the start
@@ -1012,10 +1012,10 @@ pub fn MainContent(
         
         // Calculate section position in song timeline (percent)
         let section_start_percent = if song_duration > 0.0 {
-            ((section_start - total_start) / song_duration * 100.0).max(0.0).min(100.0)
+            ((section_start - total_start) / song_duration * 100.0).clamp(0.0, 100.0)
         } else { 0.0 };
         let section_end_percent = if song_duration > 0.0 {
-            ((section_end - total_start) / song_duration * 100.0).max(0.0).min(100.0)
+            ((section_end - total_start) / song_duration * 100.0).clamp(0.0, 100.0)
         } else { 100.0 };
         let section_width_percent = section_end_percent - section_start_percent;
         
@@ -1075,7 +1075,7 @@ pub fn MainContent(
                     
                     // Calculate position within section (0-100%) based on time
                     let measure_progress_in_section = if section_duration > 0.0 {
-                        ((measure_time - section_start_time) / section_duration * 100.0).max(0.0).min(100.0)
+                        ((measure_time - section_start_time) / section_duration * 100.0).clamp(0.0, 100.0)
                     } else {
                         0.0
                     };
@@ -1217,7 +1217,7 @@ pub fn MainContent(
                     
                     // Calculate position based on cumulative quarter notes / total quarter notes
                     let measure_progress_in_section = if total_quarter_notes > 0.0 {
-                        (cumulative_quarter_notes / total_quarter_notes * 100.0).max(0.0).min(100.0)
+                        (cumulative_quarter_notes / total_quarter_notes * 100.0).clamp(0.0, 100.0)
                     } else {
                         0.0
                     };
@@ -1311,7 +1311,7 @@ pub fn MainContent(
                     
                     // Calculate position based on cumulative quarter notes / total quarter notes
                     let measure_progress_in_section = if total_quarter_notes > 0.0 {
-                        (cumulative_quarter_notes / total_quarter_notes * 100.0).max(0.0).min(100.0)
+                        (cumulative_quarter_notes / total_quarter_notes * 100.0).clamp(0.0, 100.0)
                     } else {
                         0.0
                     };
@@ -1397,7 +1397,7 @@ pub fn MainContent(
                 
                 // Calculate position based on cumulative quarter notes / total quarter notes
                 let measure_progress_in_section = if total_quarter_notes > 0.0 {
-                    (cumulative_quarter_notes / total_quarter_notes * 100.0).max(0.0).min(100.0)
+                    (cumulative_quarter_notes / total_quarter_notes * 100.0).clamp(0.0, 100.0)
                 } else {
                     0.0
                 };

@@ -5,8 +5,10 @@ use std::fmt;
 
 /// Track timebase (BEAT) - how the track handles time
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum TrackTimebase {
     /// Use project default timebase (-1)
+    #[default]
     ProjectDefault,
     /// Time-based (0)
     Time,
@@ -55,9 +57,4 @@ impl fmt::Display for TrackTimebase {
     }
 }
 
-impl Default for TrackTimebase {
-    fn default() -> Self {
-        TrackTimebase::ProjectDefault
-    }
-}
 

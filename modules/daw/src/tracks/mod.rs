@@ -5,7 +5,6 @@ pub mod envelope;
 pub mod fx_chain;
 pub mod hierarchy_builder;
 pub mod item;
-pub mod item_properties;
 pub mod reactive;
 pub mod track;
 pub mod track_chunk;
@@ -27,7 +26,6 @@ pub use envelope::{AutomationItem, Envelope, EnvelopePoint, EnvelopePointShape, 
 pub use fx_chain::{FxChain, Plugin};
 pub use hierarchy_builder::{build_hierarchy, build_track_hierarchy, TrackHierarchyBuilder};
 pub use item::Item;
-pub use item_properties::{IntoItem, ItemProperties, ItemPropertiesBuilder};
 pub use reactive::irpc::{TrackApi, TrackProtocol, TrackUpdateMessage};
 pub use reactive::{
     DefaultTrackReactiveService, EventStreamSubject as TrackEventStreamSubject,

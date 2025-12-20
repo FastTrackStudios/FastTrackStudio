@@ -41,3 +41,6 @@ default = []
 [lib]
 name = "services"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

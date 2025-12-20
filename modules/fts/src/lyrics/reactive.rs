@@ -43,22 +43,13 @@ impl LyricsStreams {
 }
 
 /// State managed by the lyrics reactive service
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LyricsReactiveState {
     /// Lyrics for each song (song_name -> lyrics)
     pub lyrics: HashMap<String, Lyrics>,
     
     /// Active slide index for each song (song_name -> slide_index)
     pub active_slide_index: HashMap<String, Option<usize>>,
-}
-
-impl Default for LyricsReactiveState {
-    fn default() -> Self {
-        Self {
-            lyrics: HashMap::new(),
-            active_slide_index: HashMap::new(),
-        }
-    }
 }
 
 /// Trait for lyrics reactive service implementations

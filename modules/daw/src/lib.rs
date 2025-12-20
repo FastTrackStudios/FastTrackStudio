@@ -7,7 +7,6 @@
 //! - `tracks`: Track and item management
 //! - `project`: Project structure and management
 //! - `mix_fx`: Mixing and FX functionality
-//! - `instruments`: Instrument definitions
 
 pub mod primitives;
 
@@ -20,7 +19,6 @@ pub mod marker_region;
 pub mod tracks;
 pub mod project;
 pub mod mix_fx;
-pub mod instruments;
 pub mod streams;
 pub mod state;
 

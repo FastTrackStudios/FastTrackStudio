@@ -41,7 +41,7 @@ impl ChordMemory {
         let section_key = section_type.full_name();
         self.section_specific
             .entry(section_key)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(root.to_lowercase(), full_symbol.to_string());
     }
 
@@ -75,7 +75,7 @@ impl ChordMemory {
     ) -> String {
         // Determine if this chord has explicit quality information
         // Strip rhythm notation (/, _, ') from token before checking length
-        let token_chord_part = if let Some(pos) = token.find(|c| c == '/' || c == '_' || c == '\'')
+        let token_chord_part = if let Some(pos) = token.find(['/', '_', '\''])
         {
             &token[..pos]
         } else {
@@ -136,7 +136,7 @@ impl ChordMemory {
 
         // Check if this is a scale degree (1-7)
         if let Ok(degree) = root.parse::<usize>() {
-            if degree >= 1 && degree <= 7 {
+            if (1..=7).contains(&degree) {
                 if let Some(_chord) = chords.get(degree - 1) {
                     // For scale degrees, the quality is implied by the key
                     // Don't append any quality suffix - just return the root

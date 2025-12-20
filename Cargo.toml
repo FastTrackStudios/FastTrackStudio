@@ -132,7 +132,6 @@ version = "1.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
-
-[workspace.lints.rust.unused]
-level = "allow"
-priority = -1
+# Allow unused code for now - will clean up later
+# This allows unused variables, imports, functions, etc. without causing build failures
+unused = { level = "allow", priority = -1 }

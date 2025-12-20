@@ -45,8 +45,6 @@
 //!
 //! The crate includes examples demonstrating different aspects of RPP parsing:
 //!
-//! - `01_print_track_hierarchy`: Shows how to display track folder hierarchy with proper indentation
-//! - `02_parse_markers_regions`: Demonstrates parsing and displaying markers and regions
 //!
 //! Run any example with: `cargo run --example <example_name>`
 
@@ -83,7 +81,7 @@ mod tests {
         // Verify we can extract folder information
         for block in &project.blocks {
             if block.block_type == BlockType::Track {
-                // This demonstrates the same logic used in 01_print_track_hierarchy
+                // Track folder hierarchy display logic
                 let mut folder_state = 0;
                 let mut indentation = 0;
                 

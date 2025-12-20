@@ -25,7 +25,7 @@ impl IntoTrackVec for Vec<Track> {
     }
 }
 
-impl<'a> IntoTrackVec for &'a [Track] {
+impl IntoTrackVec for &[Track] {
     fn into_track_vec(self) -> Vec<Track> {
         self.to_vec()
     }
@@ -172,7 +172,7 @@ impl AddChild for Vec<Track> {
         if let Some(last_track) = before.last_mut() {
             // If it's not already closing, make it close
             if !last_track.folder_depth_change.closes_levels() && open_levels > 0 {
-                last_track.folder_depth_change = FolderDepthChange::ClosesLevels(-(open_levels as i32));
+                last_track.folder_depth_change = FolderDepthChange::ClosesLevels(-open_levels);
             }
         }
         
@@ -269,7 +269,7 @@ impl PrintTrackTree for &[Track] {
                 let p = p.to_lowercase();
                 p.contains("kick") || p.contains("snare") || p.contains("tom") || 
                 p.contains("cymbal") || p.contains("room") || p.contains("drum")
-            }) || parent_meta.as_ref().map_or(false, |p| {
+            }) || parent_meta.as_ref().is_some_and(|p| {
                 p.contains("kick") || p.contains("snare") || p.contains("tom") || 
                 p.contains("cymbal") || p.contains("room") || p.contains("drum")
             });
@@ -280,7 +280,7 @@ impl PrintTrackTree for &[Track] {
 
             // Check for bass context
             let is_bass_context = parent_stack.iter().any(|p| p.to_lowercase().contains("bass")) ||
-                                parent_meta.as_ref().map_or(false, |p| p.contains("bass"));
+                                parent_meta.as_ref().is_some_and(|p| p.contains("bass"));
             
             if is_bass_context {
                 return Some(display_name.yellow().bold());
@@ -290,7 +290,7 @@ impl PrintTrackTree for &[Track] {
             let is_percussion_context = parent_stack.iter().any(|p| {
                 let p = p.to_lowercase();
                 p.contains("percussion") || p.contains("perc")
-            }) || parent_meta.as_ref().map_or(false, |p| {
+            }) || parent_meta.as_ref().is_some_and(|p| {
                 p.contains("percussion") || p.contains("perc")
             });
             
@@ -302,13 +302,13 @@ impl PrintTrackTree for &[Track] {
             let is_guitar_context = parent_stack.iter().any(|p| {
                 let p = p.to_lowercase();
                 p.contains("guitar") || p.contains("gtr")
-            }) || parent_meta.as_ref().map_or(false, |p| {
+            }) || parent_meta.as_ref().is_some_and(|p| {
                 p.contains("guitar") || p.contains("gtr")
             });
 
             if is_guitar_context {
                 let is_acoustic = parent_stack.iter().any(|p| p.to_lowercase().contains("acoustic")) ||
-                                 parent_meta.as_ref().map_or(false, |p| p.contains("acoustic"));
+                                 parent_meta.as_ref().is_some_and(|p| p.contains("acoustic"));
                 if is_acoustic {
                     return Some(display_name.truecolor(0, 128, 128).bold());
                 }
@@ -319,7 +319,7 @@ impl PrintTrackTree for &[Track] {
             let is_keys_context = parent_stack.iter().any(|p| {
                 let p = p.to_lowercase();
                 p.contains("keys") || p.contains("piano")
-            }) || parent_meta.as_ref().map_or(false, |p| {
+            }) || parent_meta.as_ref().is_some_and(|p| {
                 p.contains("keys") || p.contains("piano")
             });
 
@@ -329,7 +329,7 @@ impl PrintTrackTree for &[Track] {
 
             // Check for synth context
             let is_synth_context = parent_stack.iter().any(|p| p.to_lowercase().contains("synth")) ||
-                                 parent_meta.as_ref().map_or(false, |p| p.contains("synth"));
+                                 parent_meta.as_ref().is_some_and(|p| p.contains("synth"));
             
             if is_synth_context {
                 return Some(display_name.purple().bold());
@@ -337,11 +337,11 @@ impl PrintTrackTree for &[Track] {
 
             // Check for vocal context
             let is_vocal_context = parent_stack.iter().any(|p| p.to_lowercase().contains("vocal") || p.to_lowercase() == "v" || p.to_lowercase() == "vocals") ||
-                                 parent_meta.as_ref().map_or(false, |p| p.contains("vocal") || p == "v" || p == "vocals");
+                                 parent_meta.as_ref().is_some_and(|p| p.contains("vocal") || p == "v" || p == "vocals");
             
             if is_vocal_context {
                 let is_bgv = parent_stack.iter().any(|p| p.to_lowercase().contains("bgv")) ||
-                            parent_meta.as_ref().map_or(false, |p| p.contains("bgv"));
+                            parent_meta.as_ref().is_some_and(|p| p.contains("bgv"));
                 if is_bgv {
                     return Some(display_name.purple().bold());
                 }
@@ -488,7 +488,7 @@ impl PrintTrackTree for &[Track] {
                     for prefix in search_prefixes {
                         if display_name.to_lowercase().starts_with(&prefix) {
                             let remaining = &display_name[prefix.len()..];
-                            if remaining.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                            if remaining.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                                 // If it's numeric, use first char of parent as prefix (e.g., Tom 1 -> T1)
                                 if let Some(first_char) = parent_clean.chars().next() {
                                     display_name = format!("{}{}", first_char.to_uppercase(), remaining);
@@ -553,39 +553,37 @@ impl PrintTrackTree for &[Track] {
                     output.push_str(&format!("{}{}{} {} : {}\n", prefix, colored_connector, colored_name, FOLDER_ICON, items_str));
                 }
                 parent_stack.push(track.name.0.clone());
+            } else if track.items.is_empty() {
+                output.push_str(&format!("{}{}{}\n", prefix, colored_connector, colored_name));
             } else {
-                if track.items.is_empty() {
-                    output.push_str(&format!("{}{}{}\n", prefix, colored_connector, colored_name));
-                } else {
-                    // Collect item names
-                    let item_names: Vec<String> = track.items.iter().map(|item| {
-                        if !item.name.is_empty() {
-                            item.name.clone()
-                        } else if let Some(first_take) = item.takes.first() {
-                            if let Some(ref source) = first_take.source {
-                                source.file_path.clone()
-                            } else if !first_take.name.is_empty() {
-                                first_take.name.clone()
-                            } else {
-                                "Item".to_string()
-                            }
+                // Collect item names
+                let item_names: Vec<String> = track.items.iter().map(|item| {
+                    if !item.name.is_empty() {
+                        item.name.clone()
+                    } else if let Some(first_take) = item.takes.first() {
+                        if let Some(ref source) = first_take.source {
+                            source.file_path.clone()
+                        } else if !first_take.name.is_empty() {
+                            first_take.name.clone()
                         } else {
                             "Item".to_string()
                         }
-                    }).collect();
-                    
-                    // Format with colored items
-                    let colored_items: Vec<colored::ColoredString> = item_names.iter()
-                        .map(|name| name.cyan().bold())
-                        .collect();
-                    
-                    let items_str = colored_items.iter()
-                        .map(|c| c.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    
-                    output.push_str(&format!("{}{}{} : {}\n", prefix, colored_connector, colored_name, items_str));
-                }
+                    } else {
+                        "Item".to_string()
+                    }
+                }).collect();
+                
+                // Format with colored items
+                let colored_items: Vec<colored::ColoredString> = item_names.iter()
+                    .map(|name| name.cyan().bold())
+                    .collect();
+                
+                let items_str = colored_items.iter()
+                    .map(|c| c.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                
+                output.push_str(&format!("{}{}{} : {}\n", prefix, colored_connector, colored_name, items_str));
             }
         }
         
