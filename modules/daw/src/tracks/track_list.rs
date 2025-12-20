@@ -236,6 +236,9 @@ impl PrintTrackTree for &[Track] {
                         if group_prefix.contains("bass") || group_prefix == "b" {
                             return Some(display_name.yellow().bold());
                         }
+                        if group_prefix.contains("percussion") || group_prefix.contains("perc") {
+                            return Some(display_name.truecolor(255, 165, 0).bold()); // Orange
+                        }
                         if group_prefix.contains("guitar electric") || group_prefix.contains("gtr e") {
                             return Some(display_name.blue().bold());
                         }
@@ -281,6 +284,18 @@ impl PrintTrackTree for &[Track] {
             
             if is_bass_context {
                 return Some(display_name.yellow().bold());
+            }
+
+            // Check for percussion context
+            let is_percussion_context = parent_stack.iter().any(|p| {
+                let p = p.to_lowercase();
+                p.contains("percussion") || p.contains("perc")
+            }) || parent_meta.as_ref().map_or(false, |p| {
+                p.contains("percussion") || p.contains("perc")
+            });
+            
+            if is_percussion_context {
+                return Some(display_name.truecolor(255, 165, 0).bold()); // Orange
             }
 
             // Check for guitar context
@@ -349,6 +364,14 @@ impl PrintTrackTree for &[Track] {
             
             if name_lower.contains("bass") || name_lower == "di" || name_lower == "amp" {
                 return Some(display_name.yellow().bold());
+            }
+            
+            if name_lower.contains("percussion") || name_lower.contains("perc") || 
+               name_lower.contains("shaker") || name_lower.contains("tambourine") ||
+               name_lower.contains("conga") || name_lower.contains("bongo") ||
+               name_lower.contains("cowbell") || name_lower.contains("woodblock") ||
+               name_lower.contains("clap") {
+                return Some(display_name.truecolor(255, 165, 0).bold()); // Orange
             }
             
             if name_lower.contains("guitar") || name_lower.contains("gtr") {
@@ -495,11 +518,74 @@ impl PrintTrackTree for &[Track] {
             let colored_name = get_group_color(track, &display_name, &parent_stack)
                 .unwrap_or_else(|| display_name.normal());
             
+            // Build item display with colored items
             if track.is_folder {
-                output.push_str(&format!("{}{}{} {}\n", prefix, colored_connector, colored_name, FOLDER_ICON));
+                if track.items.is_empty() {
+                    output.push_str(&format!("{}{}{} {}\n", prefix, colored_connector, colored_name, FOLDER_ICON));
+                } else {
+                    // Collect item names
+                    let item_names: Vec<String> = track.items.iter().map(|item| {
+                        if !item.name.is_empty() {
+                            item.name.clone()
+                        } else if let Some(first_take) = item.takes.first() {
+                            if let Some(ref source) = first_take.source {
+                                source.file_path.clone()
+                            } else if !first_take.name.is_empty() {
+                                first_take.name.clone()
+                            } else {
+                                "Item".to_string()
+                            }
+                        } else {
+                            "Item".to_string()
+                        }
+                    }).collect();
+                    
+                    // Format with colored items
+                    let colored_items: Vec<colored::ColoredString> = item_names.iter()
+                        .map(|name| name.cyan().bold())
+                        .collect();
+                    
+                    let items_str = colored_items.iter()
+                        .map(|c| c.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    
+                    output.push_str(&format!("{}{}{} {} : {}\n", prefix, colored_connector, colored_name, FOLDER_ICON, items_str));
+                }
                 parent_stack.push(track.name.0.clone());
             } else {
-                output.push_str(&format!("{}{}{}\n", prefix, colored_connector, colored_name));
+                if track.items.is_empty() {
+                    output.push_str(&format!("{}{}{}\n", prefix, colored_connector, colored_name));
+                } else {
+                    // Collect item names
+                    let item_names: Vec<String> = track.items.iter().map(|item| {
+                        if !item.name.is_empty() {
+                            item.name.clone()
+                        } else if let Some(first_take) = item.takes.first() {
+                            if let Some(ref source) = first_take.source {
+                                source.file_path.clone()
+                            } else if !first_take.name.is_empty() {
+                                first_take.name.clone()
+                            } else {
+                                "Item".to_string()
+                            }
+                        } else {
+                            "Item".to_string()
+                        }
+                    }).collect();
+                    
+                    // Format with colored items
+                    let colored_items: Vec<colored::ColoredString> = item_names.iter()
+                        .map(|name| name.cyan().bold())
+                        .collect();
+                    
+                    let items_str = colored_items.iter()
+                        .map(|c| c.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    
+                    output.push_str(&format!("{}{}{} : {}\n", prefix, colored_connector, colored_name, items_str));
+                }
             }
         }
         
