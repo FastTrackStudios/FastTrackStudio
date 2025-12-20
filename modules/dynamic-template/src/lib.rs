@@ -5,6 +5,7 @@ use monarchy::*;
 
 mod groups;
 mod item_metadata;
+mod metadata_patterns;
 
 pub use groups::{
     Bass, Choir, Drums, Effects, Guitars, Keys, Orchestra, Percussion, Synths, Vocals,
@@ -24,9 +25,13 @@ impl DynamicTemplate {
     }
 }
 
+
 /// Creates a default configuration for the dynamic template system
 pub fn default_config() -> DynamicTemplateConfig {
     Config::builder()
+        // Add metadata field patterns first (metadata-only group)
+        .group(metadata_patterns::default_metadata_field_patterns())
+        // Then add regular groups
         .group(Drums)
         .group(Percussion)
         .group(Bass)
