@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use derive_builder::Builder;
 use std::collections::HashMap;
+use colored::Colorize;
 use crate::tracks::api::folder::{TcpFolderState, McpFolderState, FolderDepthChange};
 use crate::tracks::api::automation::AutomationMode;
 use crate::tracks::api::free_mode::FreeMode;
@@ -411,6 +412,348 @@ impl Track {
     /// Remove FTS-Item-Properties from ext_state
     pub fn remove_fts_item_properties(&mut self) -> Option<String> {
         self.ext_state.take()
+    }
+}
+
+/// Display a track list in hierarchical format
+/// 
+/// Prints and returns a String representation of tracks with their items in a tree structure:
+/// ```
+/// Trackname: [Item1, Item2]
+/// -Trackname: [Item3]
+/// --Trackname: [Item4, Item5]
+/// ```
+/// 
+/// This function both prints the output and returns the string, so you can use it directly
+/// in tests or capture the output for further processing.
+/// 
+/// This function is designed to be extended with colors and other formatting features.
+/// 
+/// # Example
+/// ```rust
+/// let tracks = vec![
+///     Track::builder().name("Drums").add_child(vec![
+///         Track::builder().name("Kick").add_child(vec![
+///             Track::new("Kick In")
+///         ])
+///     ])
+/// ];
+/// display_tracklist(&tracks); // Prints and returns the string
+/// ```
+pub fn display_tracklist(tracks: &[Track]) -> String {
+    let mut output = String::new();
+    let mut depth = 0i32;
+    
+    for track in tracks {
+        // Calculate indentation prefix (depth represents how many levels deep we are)
+        // Depth is calculated BEFORE applying this track's folder_depth_change
+        let prefix = if depth > 0 {
+            "-".repeat(depth as usize)
+        } else {
+            String::new()
+        };
+        
+        // Color track name (cyan for tracks, can be customized later based on track type)
+        let track_name = track.name.0.color("cyan").bold();
+        output.push_str(&format!("{}{}", prefix, track_name));
+        
+        // Add items if any
+        if !track.items.is_empty() {
+            output.push_str(&": [".to_string());
+            for (j, item) in track.items.iter().enumerate() {
+                if j > 0 {
+                    output.push_str(", ");
+                }
+                // Color item names (yellow for items, can be customized later based on item type)
+                let item_name = if !item.name.is_empty() {
+                    item.name.color("yellow")
+                } else {
+                    format!("Item {}", j + 1).color("yellow")
+                };
+                output.push_str(&item_name.to_string());
+            }
+            output.push_str(&"]".to_string());
+        }
+        
+        output.push('\n');
+        
+        // Update depth AFTER printing (for next track)
+        depth += track.folder_depth_change.to_reaper_value();
+    }
+    
+    // Print the output
+    print!("{}", output);
+    
+    output
+}
+
+/// Helper trait to convert single items or collections into an iterator of Items
+/// 
+/// This allows the builder to accept both single items and collections:
+/// - Single item: `"Kick In"` 
+/// - Collection: `vec!["Kick In", "Kick Out"]`
+pub trait IntoItems {
+    type Iter: Iterator<Item = Item>;
+    fn into_items(self) -> Self::Iter;
+}
+
+// Implementation for single &str
+impl IntoItems for &str {
+    type Iter = std::iter::Once<Item>;
+    fn into_items(self) -> Self::Iter {
+        std::iter::once(Item::from(self))
+    }
+}
+
+// Implementation for single String
+impl IntoItems for String {
+    type Iter = std::iter::Once<Item>;
+    fn into_items(self) -> Self::Iter {
+        std::iter::once(Item::from(self))
+    }
+}
+
+// Implementation for single Item
+impl IntoItems for Item {
+    type Iter = std::iter::Once<Item>;
+    fn into_items(self) -> Self::Iter {
+        std::iter::once(self)
+    }
+}
+
+// Implementation for Vec<T> where T: Into<Item>
+impl<T> IntoItems for Vec<T>
+where
+    T: Into<Item>,
+{
+    type Iter = std::iter::Map<std::vec::IntoIter<T>, fn(T) -> Item>;
+    fn into_items(self) -> Self::Iter {
+        self.into_iter().map(|item| item.into())
+    }
+}
+
+// Implementation for arrays [T; N] where T: Into<Item>
+impl<T, const N: usize> IntoItems for [T; N]
+where
+    T: Into<Item>,
+{
+    type Iter = std::iter::Map<std::array::IntoIter<T, N>, fn(T) -> Item>;
+    fn into_items(self) -> Self::Iter {
+        self.into_iter().map(|item| item.into())
+    }
+}
+
+/// Builder for constructing expected track structures in tests
+/// 
+/// # Example
+/// ```rust
+/// let expected = TrackStructureBuilder::new()
+///     .track("Kick", "Kick In")  // Single item
+///     .build();
+/// 
+/// // Or with multiple items:
+/// let expected = TrackStructureBuilder::new()
+///     .track("Kick", vec!["Kick In", "Kick Out"])
+///     .build();
+/// 
+/// // Or with folders:
+/// let expected = TrackStructureBuilder::new()
+///     .folder("Kick")
+///         .track("In", "Kick In")
+///         .track("Out", "Kick Out")
+///     .end()
+///     .build();
+/// ```
+pub struct TrackStructureBuilder {
+    tracks: Vec<Track>,
+    folder_stack: Vec<usize>, // Indices of folder tracks that are still open
+}
+
+impl TrackStructureBuilder {
+    pub fn new() -> Self {
+        Self {
+            tracks: Vec::new(),
+            folder_stack: Vec::new(),
+        }
+    }
+    
+    /// Add a track with items
+    /// 
+    /// Items can be a single item or a collection of items, both implementing Into<Item>
+    /// 
+    /// # Example
+    /// ```rust
+    /// .track("Kick", "Kick In")  // Single item (string)
+    /// .track("Snare", vec!["Snare Top", "Snare Bottom"])  // Multiple items
+    /// ```
+    pub fn track<I>(mut self, name: impl Into<TrackName>, items: I) -> Self
+    where
+        I: IntoItems,
+    {
+        let mut track = Track::new(name);
+        track.items = items.into_items().collect();
+        self.tracks.push(track);
+        self
+    }
+    
+    /// Start a folder (creates a folder track)
+    pub fn folder(mut self, name: impl Into<TrackName>) -> Self {
+        let mut track = Track::new(name);
+        track.is_folder = true;
+        track.folder_depth_change = FolderDepthChange::FolderStart;
+        let index = self.tracks.len();
+        self.tracks.push(track);
+        self.folder_stack.push(index);
+        self
+    }
+    
+    /// End the current folder (closes the most recent folder)
+    pub fn end(mut self) -> Self {
+        if let Some(_folder_index) = self.folder_stack.pop() {
+            // The folder is already marked as a folder start
+            // We don't need to do anything else since the folder structure
+            // is handled by folder_depth_change
+        }
+        self
+    }
+    
+    /// Build the final Vec<Track>
+    pub fn build(self) -> Vec<Track> {
+        self.tracks
+    }
+}
+
+impl Default for TrackStructureBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tracks::item::Item;
+    use crate::tracks::AddChild;
+    
+    /// Strip ANSI color codes from a string for testing
+    fn strip_ansi_codes(s: &str) -> String {
+        // Remove ANSI escape sequences manually (simpler than regex dependency)
+        let mut result = String::new();
+        let mut chars = s.chars().peekable();
+        
+        while let Some(ch) = chars.next() {
+            if ch == '\x1b' || ch == '\u{1b}' {
+                // Skip until we find 'm' (end of ANSI sequence)
+                while let Some(&next) = chars.peek() {
+                    if next == 'm' {
+                        chars.next(); // consume 'm'
+                        break;
+                    }
+                    chars.next();
+                }
+            } else {
+                result.push(ch);
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn test_display_tracklist_simple() {
+        let tracks = TrackStructureBuilder::new()
+            .track("Kick In", vec!["Kick In.wav", "Kick In Alt.wav"])
+            .build();
+        
+        let output = display_tracklist(&tracks);
+        
+        // Strip ANSI codes for comparison
+        let stripped = strip_ansi_codes(&output);
+        assert_eq!(stripped, "Kick In: [Kick In.wav, Kick In Alt.wav]\n");
+    }
+
+    #[test]
+    fn test_display_tracklist_hierarchy() {
+        // Create a hierarchy: Drums -> Kick -> Kick In
+        let tracks = TrackStructureBuilder::new()
+            .folder("Drums")
+                .folder("Kick")
+                    .track("Kick In", "Kick In.wav")
+                .end()
+            .end()
+            .build();
+        
+        let output = display_tracklist(&tracks);
+        
+        // Expected output:
+        // Drums
+        // -Kick
+        // --Kick In: [Kick In.wav]
+        let expected = "Drums\n-Kick\n--Kick In: [Kick In.wav]\n";
+        // Strip ANSI codes for comparison
+        let stripped = strip_ansi_codes(&output);
+        assert_eq!(stripped, expected);
+    }
+
+    #[test]
+    fn test_display_tracklist_multiple_items() {
+        // Create tracks with multiple items
+        let tracks = TrackStructureBuilder::new()
+            .folder("Drums")
+                .track("Kick", "Kick In.wav")
+                .track("Snare", vec!["Snare Top.wav", "Snare Bottom.wav", "Snare Room.wav"])
+            .end()
+            .build();
+        
+        let output = display_tracklist(&tracks);
+        
+        // Expected output:
+        // Drums
+        // -Snare: [Snare Top.wav, Snare Bottom.wav, Snare Room.wav]
+        // -Kick: [Kick In.wav]
+        let expected = "Drums\n-Snare: [Snare Top.wav, Snare Bottom.wav, Snare Room.wav]\n-Kick: [Kick In.wav]\n";
+        // Strip ANSI codes for comparison
+        let stripped = strip_ansi_codes(&output);
+        assert_eq!(stripped, expected);
+    }
+
+    #[test]
+    fn test_display_tracklist_empty_items() {
+        // Create a track with no items
+        let tracks = TrackStructureBuilder::new()
+            .track("Empty Track", Vec::<&str>::new())
+            .build();
+        
+        let output = display_tracklist(&tracks);
+        
+        // Strip ANSI codes for comparison
+        let stripped = strip_ansi_codes(&output);
+        assert_eq!(stripped, "Empty Track\n");
+    }
+
+    #[test]
+    fn test_display_tracklist_nested_folders() {
+        // Create a deeply nested structure: Drums -> Percussion -> Shakers -> Shaker 1
+        let tracks = TrackStructureBuilder::new()
+            .folder("Drums")
+                .folder("Percussion")
+                    .folder("Shakers")
+                        .track("Shaker 1", "Shaker 1.wav")
+                    .end()
+                .end()
+            .end()
+            .build();
+        
+        let output = display_tracklist(&tracks);
+        
+        // Expected output:
+        // Drums
+        // -Percussion
+        // --Shakers
+        // ---Shaker 1: [Shaker 1.wav]
+        let expected = "Drums\n-Percussion\n--Shakers\n---Shaker 1: [Shaker 1.wav]\n";
+        // Strip ANSI codes for comparison
+        let stripped = strip_ansi_codes(&output);
+        assert_eq!(stripped, expected);
     }
 }
 

@@ -423,3 +423,15 @@ impl Item {
         })
     }
 }
+
+impl From<String> for Item {
+    fn from(name: String) -> Self {
+        Self::with_name(name)
+    }
+}
+
+impl From<&str> for Item {
+    fn from(name: &str) -> Self {
+        Self::with_name(name.to_string())
+    }
+}

@@ -1,4 +1,6 @@
 use daw::tracks::item::Item;
+use daw::tracks::{Track, TrackName, AddChild};
+use daw::tracks::api::folder::FolderDepthChange;
 use monarchy::*;
 
 mod groups;
@@ -52,6 +54,217 @@ impl ItemToString for Item {
             self.name
         }
     }
+}
+
+/// Trait for organizing DAW Items into Tracks using monarchy sort
+/// 
+/// This trait accepts anything that can be converted into DAW Items,
+/// allowing you to pass strings directly or pre-constructed Items.
+pub trait OrganizeIntoTracks {
+    /// Organize items into tracks using the provided configuration
+    /// 
+    /// If `existing_tracks` is provided, items will be matched to existing tracks
+    /// and new tracks will only be created when needed.
+    fn organize_into_tracks(
+        self,
+        config: &DynamicTemplateConfig,
+        existing_tracks: Option<&[Track]>,
+    ) -> monarchy::Result<Vec<Track>>;
+}
+
+impl<T> OrganizeIntoTracks for Vec<T>
+where
+    T: Into<Item>,
+{
+    fn organize_into_tracks(
+        self,
+        config: &DynamicTemplateConfig,
+        existing_tracks: Option<&[Track]>,
+    ) -> monarchy::Result<Vec<Track>> {
+        // Convert input to DAW Items
+        let items: Vec<Item> = self.into_iter().map(|t| t.into()).collect();
+        
+        // Create a mapping from item string to original DAW Item
+        let item_map: std::collections::HashMap<String, Vec<Item>> = items.into_iter()
+            .fold(std::collections::HashMap::new(), |mut map, item| {
+                let key = if item.name.is_empty() {
+                    item.id.to_string()
+                } else {
+                    item.name.clone()
+                };
+                map.entry(key).or_insert_with(Vec::new).push(item);
+                map
+            });
+        
+        // Convert DAW Items to strings for monarchy sort
+        let input_strings: Vec<String> = item_map.keys().cloned().collect();
+        
+        // Perform monarchy sort (clone config since monarchy_sort takes ownership)
+        // If existing tracks are provided, monarchy can use them via Target trait
+        let structure = monarchy_sort(input_strings, config.clone())?;
+        
+        // Convert Structure to Tracks, preserving original DAW Items
+        let mut new_tracks = structure_to_tracks_with_items(&structure, &item_map, false);
+        
+        // Merge with existing tracks if provided
+        if let Some(existing) = existing_tracks {
+            new_tracks = merge_tracks(existing, new_tracks);
+        }
+        
+        Ok(new_tracks)
+    }
+}
+
+/// Implement Target trait for Vec<Track> so monarchy can work with existing tracks
+impl Target<ItemMetadata> for Vec<Track> {
+    fn existing_items(&self) -> Vec<monarchy::Item<ItemMetadata>> {
+        // Extract items from existing tracks and convert to monarchy Items
+        self.iter()
+            .flat_map(|track| {
+                track.items.iter().map(|item| {
+                    monarchy::Item {
+                        id: item.id.to_string(),
+                        original: if item.name.is_empty() {
+                            item.id.to_string()
+                        } else {
+                            item.name.clone()
+                        },
+                        metadata: ItemMetadata::default(), // Could parse metadata from item if needed
+                        matched_group: None,
+                    }
+                })
+            })
+            .collect()
+    }
+}
+
+/// Merge new tracks with existing tracks, matching by name and adding items to existing tracks
+fn merge_tracks(existing: &[Track], new: Vec<Track>) -> Vec<Track> {
+    let mut result: Vec<Track> = existing.to_vec();
+    let mut existing_names: std::collections::HashSet<String> = existing
+        .iter()
+        .map(|t| t.name.0.clone())
+        .collect();
+    
+    for mut new_track in new {
+        if existing_names.contains(&new_track.name.0) {
+            // Find existing track and merge items
+            if let Some(existing_track) = result.iter_mut().find(|t| t.name.0 == new_track.name.0) {
+                existing_track.items.extend(new_track.items);
+            }
+        } else {
+            // New track, add it
+            existing_names.insert(new_track.name.0.clone());
+            result.push(new_track);
+        }
+    }
+    
+    result
+}
+
+/// Trait for converting monarchy Structure to Vec<Track>
+/// 
+/// This recursively converts the hierarchical Structure into a flat Vec<Track>
+/// where folder relationships are represented using folder_depth_change.
+pub trait IntoTracks<M: Metadata> {
+    /// Convert the Structure to a Vec<Track>
+    /// 
+    /// # Example
+    /// ```rust
+    /// let structure = monarchy_sort(vec!["Kick In"], default_config())?;
+    /// let tracks: Vec<Track> = structure.to_tracks();
+    /// // Result: [Track { name: "Drums", is_folder: true, ... }, Track { name: "Kick", is_folder: true, ... }, Track { name: "Kick In", ... }]
+    /// ```
+    fn to_tracks(self) -> Vec<Track>;
+}
+
+impl<M: Metadata> IntoTracks<M> for Structure<M> {
+    fn to_tracks(self) -> Vec<Track> {
+        structure_to_tracks(&self, false)
+    }
+}
+
+/// Helper function to recursively convert Structure to Tracks with original DAW Items
+fn structure_to_tracks_with_items<M: Metadata>(
+    structure: &Structure<M>,
+    item_map: &std::collections::HashMap<String, Vec<Item>>,
+    skip_root: bool,
+) -> Vec<Track> {
+    // Skip root if it's just a container (name is "root" or empty)
+    if skip_root || structure.name == "root" || structure.name.is_empty() {
+        // Process all children and flatten
+        let mut tracks = Vec::new();
+        for child in &structure.children {
+            tracks.extend(structure_to_tracks_with_items(child, item_map, false));
+        }
+        return tracks;
+    }
+
+    // Create a track for this structure node
+    let mut track = Track::new(structure.name.clone());
+    
+    // Add items from monarchy structure to the track
+    for monarchy_item in &structure.items {
+        if let Some(daw_items) = item_map.get(&monarchy_item.original) {
+            track.items.extend(daw_items.clone());
+        }
+    }
+    
+    // If this structure has children, it's a folder
+    if !structure.children.is_empty() {
+        track.is_folder = true;
+        track.folder_depth_change = FolderDepthChange::FolderStart;
+        
+        // Recursively convert children
+        let mut child_tracks = Vec::new();
+        for child in &structure.children {
+            child_tracks.extend(structure_to_tracks_with_items(child, item_map, false));
+        }
+        
+        // Use add_child to properly set up folder hierarchy
+        return track.add_child(child_tracks);
+    }
+    
+    // If this structure has items but no children, it's a leaf track
+    vec![track]
+}
+
+/// Helper function to recursively convert Structure to Tracks (without preserving items)
+fn structure_to_tracks<M: Metadata>(structure: &Structure<M>, skip_root: bool) -> Vec<Track> {
+    // Skip root if it's just a container (name is "root" or empty)
+    if skip_root || structure.name == "root" || structure.name.is_empty() {
+        // Process all children and flatten
+        let mut tracks = Vec::new();
+        for child in &structure.children {
+            tracks.extend(structure_to_tracks(child, false));
+        }
+        return tracks;
+    }
+
+    // Create a track for this structure node
+    let mut track = Track::new(structure.name.clone());
+    
+    // If this structure has children, it's a folder
+    if !structure.children.is_empty() {
+        track.is_folder = true;
+        track.folder_depth_change = FolderDepthChange::FolderStart;
+        
+        // Recursively convert children
+        let mut child_tracks = Vec::new();
+        for child in &structure.children {
+            child_tracks.extend(structure_to_tracks(child, false));
+        }
+        
+        // Use add_child to properly set up folder hierarchy
+        return track.add_child(child_tracks);
+    }
+    
+    // If this structure has items but no children, it's a leaf track
+    // Note: The items from monarchy are just strings, not DAW Items
+    // You may want to convert them to DAW Items separately if needed
+    // For now, we just create the track with the name
+    
+    vec![track]
 }
 
 #[cfg(test)]
