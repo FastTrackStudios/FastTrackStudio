@@ -149,7 +149,7 @@ async fn connect_with_retry() {
                 info!("[Tracks Connection] Retrying immediately after connection loss...");
             }
             Err(e) => {
-                if retry_count == 1 || retry_count % 10 == 0 {
+                if retry_count == 1 || retry_count.is_multiple_of(10) {
                     warn!(
                         "[Tracks Connection] Connection attempt {} failed: {}",
                         retry_count, e

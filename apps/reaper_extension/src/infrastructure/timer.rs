@@ -26,7 +26,7 @@ pub fn register_timer(session: &mut ReaperSession, callback: TimerCallback) -> R
         Err(e) => {
             error!("❌❌❌ FAILED to register polling timer callback: {}", e);
             error!("❌ Timer will NOT work! Error details: {:?}", e);
-            Err(std::io::Error::other(format!("Failed to register timer: {}", e)))
+            Err(Box::new(std::io::Error::other(format!("Failed to register timer: {}", e))))
         }
     }
 }

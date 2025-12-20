@@ -25,6 +25,7 @@ use fts::setlist::infra::reaper::{find_tab_index_by_project_name as find_tab_ind
 /// Uses the shared helper from fts module, but converts to Result<(), String> for compatibility
 fn switch_to_tab(tab_index: u32) -> Result<(), String> {
     switch_to_tab_helper(tab_index as usize)
+        .map(|_| ())
         .map_err(|e| e)
 }
 
