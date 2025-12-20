@@ -220,7 +220,7 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
                         }
                     }
                 }
-                Ok(None) => {
+                Ok(none) => {
                     warn!("[Chart Connection] Stream ended normally");
                     break;
                 }

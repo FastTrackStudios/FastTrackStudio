@@ -33,8 +33,9 @@ iroh = { version = "0.95", features = ["discovery-local-network"] }
 n0-future = "0.3.0"
 
 [features]
-default = ["desktop"]
+default = ["desktop", "dioxus"]
 desktop = ["dioxus/desktop" ]
+dioxus = []  # Feature flag for dioxus-specific code
 # Server feature - defined but not enabled by default
 # Will be re-enabled incrementally when server features are added back
 server = ["dioxus/server"]
