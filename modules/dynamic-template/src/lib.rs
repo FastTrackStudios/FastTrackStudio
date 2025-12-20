@@ -37,7 +37,6 @@ pub fn default_config() -> DynamicTemplateConfig {
         .group(Choir)
         .group(Orchestra)
         .group(Effects)
-        .fallback(FallbackStrategy::CreateMisc)
         .build()
 }
 

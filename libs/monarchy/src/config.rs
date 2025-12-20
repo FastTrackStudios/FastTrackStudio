@@ -48,11 +48,13 @@ pub enum FallbackStrategy {
 
 impl<M: Metadata> Config<M> {
     /// Start building a new config - this is the only way to create a Config
+    /// 
+    /// Default fallback strategy is `CreateMisc` - unmatched items will be placed in a "Misc" group.
     pub fn builder() -> ConfigBuilder<M> {
         ConfigBuilder {
             groups: Vec::new(),
             parser_rules: ParserRules::default(),
-            fallback_strategy: FallbackStrategy::PlaceAtRoot,
+            fallback_strategy: FallbackStrategy::CreateMisc,
         }
     }
 }
