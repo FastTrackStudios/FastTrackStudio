@@ -23,30 +23,32 @@ impl From<Kick> for ItemMetadataGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{default_config, DynamicTemplateConfig, OrganizeIntoTracks};
-    use daw::tracks::TrackStructureBuilder;
-    use monarchy::Config;
+    use crate::{default_config, DynamicTemplateConfig};
+    use monarchy::{Config, Parser};
 
-    /// Shared test cases - define expected structures once
+    /// Shared test cases - define input strings and expected metadata once
     mod test_cases {
         use super::*;
-        use daw::tracks::TrackStructureBuilder;
+        use crate::item_metadata::ItemMetadataBuilder;
 
-        pub fn single_item_creates_track_at_deepest_group_level() -> (Vec<&'static str>, daw::tracks::TrackStructureBuilder) {
-            let items = vec!["Kick In"];
-            let expected = TrackStructureBuilder::new()
-                .track("Kick", "Kick In");
-            (items, expected)
+        pub fn kick_in_parses_multi_mic() -> (&'static str, ItemMetadata) {
+            let input = "Kick In";
+            let expected = ItemMetadataBuilder::new()
+                .original_name(input)
+                .group("Kick")
+                .multi_mic("In")
+                .build();
+            (input, expected)
         }
 
-        pub fn multiple_items_of_same_subgroup_create_folder_with_subtracks() -> (Vec<&'static str>, daw::tracks::TrackStructureBuilder) {
-            let items = vec!["Kick In", "Kick Out"];
-            let expected = TrackStructureBuilder::new()
-                .folder("Kick")
-                    .track("In", "Kick In")
-                    .track("Out", "Kick Out")
-                .end();
-            (items, expected)
+        pub fn kick_out_parses_multi_mic() -> (&'static str, ItemMetadata) {
+            let input = "Kick Out";
+            let expected = ItemMetadataBuilder::new()
+                .original_name(input)
+                .group("Kick")
+                .multi_mic("Out")
+                .build();
+            (input, expected)
         }
     }
 
@@ -62,23 +64,23 @@ mod tests {
         }
 
         #[test]
-        fn single_item_creates_track_at_deepest_group_level() {
-            let (items, expected_builder) = test_cases::single_item_creates_track_at_deepest_group_level();
+        fn kick_in_parses_multi_mic_field() {
+            let (input, expected) = test_cases::kick_in_parses_multi_mic();
             let config = isolated_config();
-            let tracks = items.organize_into_tracks(&config, None).unwrap();
-            let expected = expected_builder.build();
+            let parser = Parser::new(config);
+            let item = parser.parse(input.to_string()).unwrap();
 
-            assert_eq!(tracks, expected, "Isolated config: single item should create Kick track");
+            assert_eq!(item.metadata, expected, "Isolated config: 'Kick In' should parse multi_mic field as ['In']");
         }
 
         #[test]
-        fn multiple_items_of_same_subgroup_create_folder_with_subtracks() {
-            let (items, expected_builder) = test_cases::multiple_items_of_same_subgroup_create_folder_with_subtracks();
+        fn kick_out_parses_multi_mic_field() {
+            let (input, expected) = test_cases::kick_out_parses_multi_mic();
             let config = isolated_config();
-            let tracks = items.organize_into_tracks(&config, None).unwrap();
-            let expected = expected_builder.build();
+            let parser = Parser::new(config);
+            let item = parser.parse(input.to_string()).unwrap();
 
-            assert_eq!(tracks, expected, "Isolated config: multiple items should create Kick folder with subtracks");
+            assert_eq!(item.metadata, expected, "Isolated config: 'Kick Out' should parse multi_mic field as ['Out']");
         }
     }
 
@@ -87,23 +89,23 @@ mod tests {
         use super::*;
 
         #[test]
-        fn single_item_creates_track_at_deepest_group_level() {
-            let (items, expected_builder) = test_cases::single_item_creates_track_at_deepest_group_level();
+        fn kick_in_parses_multi_mic_field() {
+            let (input, expected) = test_cases::kick_in_parses_multi_mic();
             let config = default_config();
-            let tracks = items.organize_into_tracks(&config, None).unwrap();
-            let expected = expected_builder.build();
+            let parser = Parser::new(config);
+            let item = parser.parse(input.to_string()).unwrap();
 
-            assert_eq!(tracks, expected, "Integration config: single item should create Kick track");
+            assert_eq!(item.metadata, expected, "Integration config: 'Kick In' should parse multi_mic field as ['In']");
         }
 
         #[test]
-        fn multiple_items_of_same_subgroup_create_folder_with_subtracks() {
-            let (items, expected_builder) = test_cases::multiple_items_of_same_subgroup_create_folder_with_subtracks();
+        fn kick_out_parses_multi_mic_field() {
+            let (input, expected) = test_cases::kick_out_parses_multi_mic();
             let config = default_config();
-            let tracks = items.organize_into_tracks(&config, None).unwrap();
-            let expected = expected_builder.build();
+            let parser = Parser::new(config);
+            let item = parser.parse(input.to_string()).unwrap();
 
-            assert_eq!(tracks, expected, "Integration config: multiple items should create Kick folder with subtracks");
+            assert_eq!(item.metadata, expected, "Integration config: 'Kick Out' should parse multi_mic field as ['Out']");
         }
     }
 }
