@@ -18,7 +18,7 @@ impl From<Trombones> for Group<ItemMetadata> {
             .patterns(vec!["trombone", "trombones", "tbn"])
             // Make transparent so Electric GTR and Acoustic GTR appear at top level
             .transparent()
-            .group(Trombones)
+            .group(Trombone)
             .group(BassTrombone)
             .build()
     }
