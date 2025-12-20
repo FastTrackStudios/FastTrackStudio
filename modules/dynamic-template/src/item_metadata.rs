@@ -12,10 +12,10 @@ pub struct ItemMetadata {
     /// Recording tag (e.g., "PASS-01", "TAKE-02", "REC-01")
     pub rec_tag: Option<String>,
 
-    /// The deepest/most specific group that matched this item (e.g., "Kick", "Snare", "Bass Guitar")
-    /// This is the group name from the Group<ItemMetadata> that matched, not parent groups.
-    /// Parent groups can be inferred by looking up this group in the config.
-    pub group: Option<String>,
+    /// Full hierarchy of groups that matched, from top-level to most specific
+    /// Example: ["Drums", "Drum_Kit", "Kick"]
+    /// The last element is the most specific group that matched
+    pub group: Option<Vec<String>>,
 
     /// Performer name (e.g., "Cody", "Joshua", "Sarah")
     pub performer: Option<String>,
@@ -69,7 +69,7 @@ pub type ItemMetadataGroup = Group<ItemMetadata>;
 #[derive(Default, Clone)]
 pub struct ItemMetadataBuilder {
     rec_tag: Option<String>,
-    group: Option<String>,
+    group: Option<Vec<String>>,
     performer: Option<String>,
     arrangement: Option<String>,
     section: Option<String>,
@@ -97,9 +97,21 @@ impl ItemMetadataBuilder {
         self
     }
 
-    /// Set the group name
-    pub fn group(mut self, value: impl Into<String>) -> Self {
-        self.group = Some(value.into());
+    /// Set the group trail (accepts single string, Vec<String>, array, etc.)
+    /// Single string will be converted to a single-element vector
+    pub fn group<T>(mut self, value: T) -> Self
+    where
+        T: IntoVec<String>,
+    {
+        self.group = Some(value.into_vec());
+        self
+    }
+
+    /// Set the last group in the trail (most specific group)
+    /// This is a convenience method for tests where you only care about the final group,
+    /// not the full hierarchy. The group trail will be set to a single-element vector.
+    pub fn last_group(mut self, group_name: impl Into<String>) -> Self {
+        self.group = Some(vec![group_name.into()]);
         self
     }
 

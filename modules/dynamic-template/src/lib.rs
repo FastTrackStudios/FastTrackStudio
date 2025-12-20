@@ -134,7 +134,7 @@ impl Target<ItemMetadata> for Vec<Track> {
                             item.name.clone()
                         },
                         metadata: ItemMetadata::default(), // Could parse metadata from item if needed
-                        matched_group: None,
+                        matched_groups: Vec::new(), // Empty for items converted from DAW Items
                     }
                 })
             })
