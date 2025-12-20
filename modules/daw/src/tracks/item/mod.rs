@@ -1,7 +1,10 @@
 //! Media item data structures for REAPER
 
+use super::item_properties::ItemProperties;
+use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use uuid::Uuid;
 
 /// Fade curve types for items
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,7 +56,7 @@ pub enum ChannelMode {
     MonoDownmix = 2,
     MonoLeft = 3,
     MonoRight = 4,
-    MonoChannel(u8), // 5-194 for mono channels 3-128
+    MonoChannel(u8),  // 5-194 for mono channels 3-128
     StereChannel(u8), // 67-257 for stereo channels 1-128
     Unknown(i32),
 }
@@ -108,14 +111,14 @@ pub enum PitchMode {
     SoundTouchPreset1 = 0,
     SoundTouchPreset2 = 1,
     SoundTouchPreset3 = 2,
-    DiracLE(u8),                    // 0-31 presets (65536-65567)
-    LowQualityWindowed(u8),         // 0-47 presets (131072-131119)
-    ElastiquePro(u8),               // 0-31 presets (196608-196639)
-    ElastiqueEfficient(u8),         // 0-3 presets (262144-262147)
-    ElastiqueSoloist(u8),           // 0-3 presets (327680-327683)
-    Elastique21Pro(u8),             // 0-31 presets (393216-393247)
-    Elastique21Efficient(u8),       // 0-3 presets (458752-458755)
-    Elastique21Soloist(u8),         // 0-3 presets (524288-524291)
+    DiracLE(u8),              // 0-31 presets (65536-65567)
+    LowQualityWindowed(u8),   // 0-47 presets (131072-131119)
+    ElastiquePro(u8),         // 0-31 presets (196608-196639)
+    ElastiqueEfficient(u8),   // 0-3 presets (262144-262147)
+    ElastiqueSoloist(u8),     // 0-3 presets (327680-327683)
+    Elastique21Pro(u8),       // 0-31 presets (393216-393247)
+    Elastique21Efficient(u8), // 0-3 presets (458752-458755)
+    Elastique21Soloist(u8),   // 0-3 presets (524288-524291)
     Unknown(i32),
 }
 
@@ -147,13 +150,25 @@ impl fmt::Display for PitchMode {
             PitchMode::SoundTouchPreset2 => write!(f, "Sound Touch (Preset 2)"),
             PitchMode::SoundTouchPreset3 => write!(f, "Sound Touch (Preset 3)"),
             PitchMode::DiracLE(preset) => write!(f, "Dirac LE (Preset {})", preset + 1),
-            PitchMode::LowQualityWindowed(preset) => write!(f, "Low Quality Windowed (Preset {})", preset + 1),
+            PitchMode::LowQualityWindowed(preset) => {
+                write!(f, "Low Quality Windowed (Preset {})", preset + 1)
+            }
             PitchMode::ElastiquePro(preset) => write!(f, "élastique Pro (Preset {})", preset + 1),
-            PitchMode::ElastiqueEfficient(preset) => write!(f, "élastique Efficient (Preset {})", preset + 1),
-            PitchMode::ElastiqueSoloist(preset) => write!(f, "élastique SOLOIST (Preset {})", preset + 1),
-            PitchMode::Elastique21Pro(preset) => write!(f, "élastique 2.1 Pro (Preset {})", preset + 1),
-            PitchMode::Elastique21Efficient(preset) => write!(f, "élastique 2.1 Efficient (Preset {})", preset + 1),
-            PitchMode::Elastique21Soloist(preset) => write!(f, "élastique 2.1 SOLOIST (Preset {})", preset + 1),
+            PitchMode::ElastiqueEfficient(preset) => {
+                write!(f, "élastique Efficient (Preset {})", preset + 1)
+            }
+            PitchMode::ElastiqueSoloist(preset) => {
+                write!(f, "élastique SOLOIST (Preset {})", preset + 1)
+            }
+            PitchMode::Elastique21Pro(preset) => {
+                write!(f, "élastique 2.1 Pro (Preset {})", preset + 1)
+            }
+            PitchMode::Elastique21Efficient(preset) => {
+                write!(f, "élastique 2.1 Efficient (Preset {})", preset + 1)
+            }
+            PitchMode::Elastique21Soloist(preset) => {
+                write!(f, "élastique 2.1 SOLOIST (Preset {})", preset + 1)
+            }
             PitchMode::Unknown(val) => write!(f, "Unknown({})", val),
         }
     }
@@ -255,38 +270,45 @@ impl fmt::Display for ItemTimebase {
 }
 
 /// A REAPER media item
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Builder)]
+#[builder(setter(into), default)]
 pub struct Item {
+    // Item ID
+    pub id: Uuid,
+
+    // Item properties (FTS naming convention)
+    pub properties: ItemProperties,
+
     // Basic item properties
-    pub position: f64,                    // POSITION - Position on timeline in seconds
-    pub snap_offset: f64,                 // SNAPOFFS - Snap offset in seconds
-    pub length: f64,                      // LENGTH - Item length in seconds
-    pub loop_source: bool,                // LOOP - Loop source flag
-    pub play_all_takes: bool,             // ALLTAKES - Play all takes flag
-    pub color: Option<i32>,               // COLOR - Item color (optional)
-    pub beat: Option<ItemTimebase>,       // BEAT - Item timebase (optional)
-    pub selected: bool,                   // SEL - Is item selected
-    
+    pub position: f64,              // POSITION - Position on timeline in seconds
+    pub snap_offset: f64,           // SNAPOFFS - Snap offset in seconds
+    pub length: f64,                // LENGTH - Item length in seconds
+    pub loop_source: bool,          // LOOP - Loop source flag
+    pub play_all_takes: bool,       // ALLTAKES - Play all takes flag
+    pub color: Option<i32>,         // COLOR - Item color (optional)
+    pub beat: Option<ItemTimebase>, // BEAT - Item timebase (optional)
+    pub selected: bool,             // SEL - Is item selected
+
     // Fade settings
-    pub fade_in: Option<FadeSettings>,    // FADEIN - Fade in settings
-    pub fade_out: Option<FadeSettings>,   // FADEOUT - Fade out settings
-    
+    pub fade_in: Option<FadeSettings>,  // FADEIN - Fade in settings
+    pub fade_out: Option<FadeSettings>, // FADEOUT - Fade out settings
+
     // Mute/Solo settings
-    pub mute: Option<MuteSettings>,       // MUTE - Mute and solo settings
-    
+    pub mute: Option<MuteSettings>, // MUTE - Mute and solo settings
+
     // Item identification
-    pub item_guid: Option<String>,        // IGUID - Item GUID
-    pub item_id: Option<i32>,             // IID - Item ordinal number (deprecated)
-    
+    pub item_guid: Option<String>, // IGUID - Item GUID
+    pub item_id: Option<i32>,      // IID - Item ordinal number (deprecated)
+
     // Item properties
-    pub name: String,                     // NAME - Item name
-    pub volpan: Option<VolPanSettings>,   // VOLPAN - Volume and pan settings
-    pub slip_offset: f64,                 // SOFFS - Slip offset in seconds
+    pub name: String,                       // NAME - Item name
+    pub volpan: Option<VolPanSettings>,     // VOLPAN - Volume and pan settings
+    pub slip_offset: f64,                   // SOFFS - Slip offset in seconds
     pub playrate: Option<PlayRateSettings>, // PLAYRATE - Play rate settings
-    pub channel_mode: ChannelMode,        // CHANMODE - Channel mode
-    pub take_guid: Option<String>,        // GUID - Take GUID
-    pub rec_pass: Option<i32>,            // RECPASS - Recording pass number
-    
+    pub channel_mode: ChannelMode,          // CHANMODE - Channel mode
+    pub take_guid: Option<String>,          // GUID - Take GUID
+    pub rec_pass: Option<i32>,              // RECPASS - Recording pass number
+
     // Takes
     pub takes: Vec<Take>,
 }
@@ -294,68 +316,69 @@ pub struct Item {
 /// Fade settings for an item
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FadeSettings {
-    pub curve_type: FadeCurveType,        // field 1 - fade curve type
-    pub time: f64,                        // field 2 - fade time in seconds
-    pub unknown_field_3: f64,             // field 3 - unknown
-    pub unknown_field_4: i32,             // field 4 - unknown
-    pub unknown_field_5: i32,             // field 5 - unknown
-    pub unknown_field_6: i32,             // field 6 - unknown
-    pub unknown_field_7: i32,             // field 7 - unknown
+    pub curve_type: FadeCurveType, // field 1 - fade curve type
+    pub time: f64,                 // field 2 - fade time in seconds
+    pub unknown_field_3: f64,      // field 3 - unknown
+    pub unknown_field_4: i32,      // field 4 - unknown
+    pub unknown_field_5: i32,      // field 5 - unknown
+    pub unknown_field_6: i32,      // field 6 - unknown
+    pub unknown_field_7: i32,      // field 7 - unknown
 }
 
 /// Mute and solo settings for an item
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MuteSettings {
-    pub muted: bool,                      // field 1 - item is muted
-    pub solo_state: SoloState,            // field 2 - solo state (-1, 0, 1)
+    pub muted: bool,           // field 1 - item is muted
+    pub solo_state: SoloState, // field 2 - solo state (-1, 0, 1)
 }
 
 /// Volume and pan settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VolPanSettings {
-    pub item_trim: f64,                   // field 1 - item trim (1.0 = 0 dB)
-    pub take_pan: f64,                    // field 2 - take pan (-1.0 to 1.0)
-    pub take_volume: f64,                 // field 3 - take volume
-    pub take_pan_law: f64,                // field 4 - take pan law
+    pub item_trim: f64,    // field 1 - item trim (1.0 = 0 dB)
+    pub take_pan: f64,     // field 2 - take pan (-1.0 to 1.0)
+    pub take_volume: f64,  // field 3 - take volume
+    pub take_pan_law: f64, // field 4 - take pan law
 }
 
 /// Play rate settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlayRateSettings {
-    pub rate: f64,                        // field 1 - play rate
-    pub preserve_pitch: bool,             // field 2 - preserve pitch while changing rate
-    pub pitch_adjust: f64,                // field 3 - pitch adjust in semitones.cents
-    pub pitch_mode: PitchMode,            // field 4 - pitch shifting/time stretch mode
-    pub unknown_field_5: i32,             // field 5 - unknown
-    pub unknown_field_6: f64,             // field 6 - unknown
+    pub rate: f64,             // field 1 - play rate
+    pub preserve_pitch: bool,  // field 2 - preserve pitch while changing rate
+    pub pitch_adjust: f64,     // field 3 - pitch adjust in semitones.cents
+    pub pitch_mode: PitchMode, // field 4 - pitch shifting/time stretch mode
+    pub unknown_field_5: i32,  // field 5 - unknown
+    pub unknown_field_6: f64,  // field 6 - unknown
 }
 
 /// A take within a media item
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Take {
-    pub is_selected: bool,                // TAKE SEL - Is this take selected
-    pub name: String,                     // NAME - Take name
-    pub volpan: Option<VolPanSettings>,   // TAKEVOLPAN - Take volume and pan
-    pub slip_offset: f64,                 // SOFFS - Take slip offset
+    pub is_selected: bool,                  // TAKE SEL - Is this take selected
+    pub name: String,                       // NAME - Take name
+    pub volpan: Option<VolPanSettings>,     // TAKEVOLPAN - Take volume and pan
+    pub slip_offset: f64,                   // SOFFS - Take slip offset
     pub playrate: Option<PlayRateSettings>, // PLAYRATE - Take play rate
-    pub channel_mode: ChannelMode,        // CHANMODE - Take channel mode
-    pub take_color: Option<i32>,          // TAKECOLOR - Take color
-    pub take_guid: Option<String>,        // GUID - Take GUID
-    pub rec_pass: Option<i32>,            // RECPASS - Recording pass number
-    pub source: Option<SourceBlock>,      // SOURCE block
+    pub channel_mode: ChannelMode,          // CHANMODE - Take channel mode
+    pub take_color: Option<i32>,            // TAKECOLOR - Take color
+    pub take_guid: Option<String>,          // GUID - Take GUID
+    pub rec_pass: Option<i32>,              // RECPASS - Recording pass number
+    pub source: Option<SourceBlock>,        // SOURCE block
 }
 
 /// Source block for a take
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceBlock {
-    pub source_type: SourceType,          // WAVE, MIDI, etc.
-    pub file_path: String,                // FILE - Source file path
+    pub source_type: SourceType, // WAVE, MIDI, etc.
+    pub file_path: String,       // FILE - Source file path
 }
 
-impl Item {
-    /// Create a new empty item
-    pub fn new(name: String) -> Self {
+impl Default for Item {
+    fn default() -> Self {
         Self {
+            id: Uuid::new_v4(),
+            properties: ItemProperties::default(),
             position: 0.0,
             snap_offset: 0.0,
             length: 0.0,
@@ -369,7 +392,7 @@ impl Item {
             mute: None,
             item_guid: None,
             item_id: None,
-            name,
+            name: String::new(),
             volpan: None,
             slip_offset: 0.0,
             playrate: None,
@@ -379,11 +402,27 @@ impl Item {
             takes: Vec::new(),
         }
     }
+}
+
+impl Item {
+    /// Create a new empty item
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a new item with a name
+    pub fn with_name(name: String) -> Self {
+        Self {
+            name,
+            ..Self::default()
+        }
+    }
 
     /// Check if this item is an audio item (has a WAVE source)
     pub fn is_audio(&self) -> bool {
         self.takes.iter().any(|take| {
-            take.source.as_ref()
+            take.source
+                .as_ref()
                 .map(|s| matches!(s.source_type, SourceType::Wave | SourceType::OfflineWave))
                 .unwrap_or(false)
         })
@@ -392,10 +431,10 @@ impl Item {
     /// Check if this item is a MIDI item (has a MIDI source)
     pub fn is_midi(&self) -> bool {
         self.takes.iter().any(|take| {
-            take.source.as_ref()
+            take.source
+                .as_ref()
                 .map(|s| matches!(s.source_type, SourceType::Midi))
                 .unwrap_or(false)
         })
     }
 }
-
