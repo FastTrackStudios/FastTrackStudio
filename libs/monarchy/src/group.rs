@@ -34,6 +34,10 @@ pub struct Group<M: Metadata> {
     /// Optional variant field - items with different values for this field
     /// will be kept as separate variants within the same group
     pub variant_field: Option<M::Field>,
+
+    /// If true, this group's children are promoted to the parent level in the output
+    /// The group still exists for matching/organization but doesn't create nesting
+    pub transparent: bool,
 }
 
 impl<M: Metadata> Group<M> {
@@ -51,6 +55,7 @@ impl<M: Metadata> Group<M> {
                 groups: Vec::new(),
                 priority: 0,
                 variant_field: None,
+                transparent: false,
             },
         }
     }
@@ -192,6 +197,13 @@ impl<M: Metadata> GroupBuilder<M> {
             // Use the first variant field if multiple are defined
             self.group.variant_field = Some(variant_fields[0].clone());
         }
+        self
+    }
+
+    /// Make this group transparent - its children will be promoted to parent level
+    /// Use this when you want logical grouping without creating nested output structures
+    pub fn transparent(mut self) -> Self {
+        self.group.transparent = true;
         self
     }
 
