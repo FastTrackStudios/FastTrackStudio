@@ -28,7 +28,7 @@ impl<M: Metadata> Organizer<M> {
         // Handle unmatched items based on fallback strategy
         let unmatched: Vec<Item<M>> = items
             .into_iter()
-            .filter(|item| item.matched_group.is_none())
+            .filter(|item| item.matched_groups.is_empty())
             .collect();
 
         if !unmatched.is_empty() {
@@ -94,10 +94,10 @@ impl<M: Metadata> Organizer<M> {
 
         let mut structure = Structure::with_display_name(&group.name, display_name);
 
-        // Find items that matched this group
+        // Find items that matched this group (check if last element in trail matches)
         let group_items: Vec<Item<M>> = all_items
             .iter()
-            .filter(|item| item.matched_group.as_ref() == Some(&group.name))
+            .filter(|item| item.matched_groups.last().map(|g| &g.name) == Some(&group.name))
             .cloned()
             .collect();
 
