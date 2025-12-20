@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod error;
+pub mod field;
 pub mod group;
 pub mod metadata;
 pub mod organizer;
@@ -14,6 +15,7 @@ pub mod test_utils;
 // Core exports
 pub use config::{Config, ConfigBuilder, FallbackStrategy, ParserRules};
 pub use error::{MonarchyError, Result};
+pub use field::{IntoField, MetadataField};
 pub use group::{Group, GroupBuilder};
 pub use metadata::Metadata;
 pub use organizer::Organizer;
@@ -21,8 +23,10 @@ pub use parser::Parser;
 pub use structure::Structure;
 pub use test_utils::StructureAssertions;
 
-// Re-export the derive macro
-pub use monarchy_derive::Metadata as MetadataDerive;
+// Re-export the derive macros
+// Note: Metadata derive macro shares the same name as the Metadata trait - this is the standard Rust pattern
+// (like serde::Serialize trait and serde::Serialize derive macro)
+pub use monarchy_derive::{Metadata, MetadataBuilder};
 
 // Re-export serde traits for derive usage
 pub use serde::{Deserialize, Serialize};

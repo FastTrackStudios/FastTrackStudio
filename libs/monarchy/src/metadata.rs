@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
-// Re-export the derive macro
-pub use monarchy_derive::Metadata;
-
 /// Core trait that defines metadata for sortable items
+/// 
+/// The derive macro is re-exported at the crate root with the same name.
+/// This follows the standard Rust pattern (like serde::Serialize).
 pub trait Metadata: Clone + Default + Send + Sync + 'static {
     /// The field type used as keys for this metadata
     type Field: Clone
