@@ -60,6 +60,14 @@ impl<M: Metadata> Parser<M> {
                     metadata.set(field.clone(), value);
                 }
             }
+
+            // Check if item matches any tagged collections in this group
+            // An item can match multiple tagged collections, so we append to a vector
+            if let Some(ref tagged_collection_group) = group.tagged_collection {
+                if tagged_collection_group.matches(&input) {
+                    self.add_tagged_collection_field(&mut metadata, &tagged_collection_group.name);
+                }
+            }
         }
 
         // Set original_name in metadata
@@ -208,6 +216,55 @@ impl<M: Metadata> Parser<M> {
             let normalized = field_str.to_lowercase().replace("_", "");
             if normalized == "originalname" || normalized == "original_name" {
                 if let Some(value) = M::create_string_value(&field, original_name.to_string()) {
+                    metadata.set(field, value);
+                }
+                break;
+            }
+        }
+    }
+
+    /// Add a tagged collection to the tagged_collection field in metadata
+    /// This appends to a vector since an item can match multiple tagged collections
+    fn add_tagged_collection_field(&self, metadata: &mut M, collection_name: &str) {
+        for field in M::fields() {
+            let field_str = format!("{:?}", field);
+            // Match "TaggedCollection" or "tagged_collection" (case-insensitive, handle snake_case)
+            let normalized = field_str.to_lowercase().replace("_", "");
+            if normalized == "taggedcollection" || normalized == "tagged_collection" {
+                // Try to get existing value (should be Vec<String>)
+                let existing = metadata.get(&field);
+                let mut collections = if let Some(value) = existing {
+                    // Try to extract Vec<String> from the value
+                    // The value is an enum variant, so we need to format it and parse
+                    let value_str = format!("{:?}", value);
+                    // Extract from enum variant like "TaggedCollection([\"SUM\"])"
+                    if let Some(start) = value_str.find('[') {
+                        if let Some(end) = value_str.rfind(']') {
+                            let inner = &value_str[start + 1..end];
+                            // Parse the vector content
+                            let mut vec: Vec<String> = inner
+                                .split(',')
+                                .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            vec.push(collection_name.to_string());
+                            vec
+                        } else {
+                            vec![collection_name.to_string()]
+                        }
+                    } else {
+                        vec![collection_name.to_string()]
+                    }
+                } else {
+                    vec![collection_name.to_string()]
+                };
+                
+                // Remove duplicates and sort for consistency
+                collections.sort();
+                collections.dedup();
+                
+                // Set the updated vector
+                if let Some(value) = M::create_vec_string_value(&field, collections) {
                     metadata.set(field, value);
                 }
                 break;

@@ -47,6 +47,10 @@ pub struct ItemMetadata {
     /// Track type indicator (e.g., "BUS", "SUM", "MIDI", "DI", "NOFX")
     pub track_type: Option<String>,
 
+    /// Tagged collections that this item matches (e.g., ["SUM"] if it matches a tagged collection's patterns)
+    /// An item can match multiple tagged collections
+    pub tagged_collection: Option<Vec<String>>,
+
     /// Words that didn't match any known patterns (for validation/debugging)
     pub unparsed_words: Option<Vec<String>>,
 
@@ -80,6 +84,7 @@ pub struct ItemMetadataBuilder {
     channel: Option<String>,
     playlist: Option<String>,
     track_type: Option<String>,
+    tagged_collection: Option<Vec<String>>,
     unparsed_words: Option<Vec<String>>,
     original_name: Option<String>,
     file_extension: Option<String>,
@@ -181,6 +186,16 @@ impl ItemMetadataBuilder {
         self
     }
 
+    /// Set tagged collection names (accepts single string, Vec<String>, array, etc.)
+    /// An item can match multiple tagged collections
+    pub fn tagged_collection<T>(mut self, value: T) -> Self
+    where
+        T: IntoVec<String>,
+    {
+        self.tagged_collection = Some(value.into_vec());
+        self
+    }
+
     /// Set unparsed words (accepts single string, Vec<String>, array, etc.)
     pub fn unparsed_words<T>(mut self, value: T) -> Self
     where
@@ -217,6 +232,7 @@ impl ItemMetadataBuilder {
             channel: self.channel,
             playlist: self.playlist,
             track_type: self.track_type,
+            tagged_collection: self.tagged_collection,
             unparsed_words: self.unparsed_words,
             original_name: self.original_name,
             file_extension: self.file_extension,
