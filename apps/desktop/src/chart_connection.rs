@@ -17,20 +17,21 @@ use fts::chords::{ChartApi, ChartUpdateMessage};
 // For now, we'll use the full path
 use keyflow::Chart;
 
+use std::collections::HashMap;
+
 // Cached chart API (for making RPC calls)
 static CHART_API: OnceLock<std::sync::Mutex<Option<ChartApi>>> = OnceLock::new();
 // Connection status channel for UI updates
 static CONNECTION_STATUS: OnceLock<tokio::sync::watch::Sender<bool>> = OnceLock::new();
 
 // Global signals for chart state (project_name -> chart)
-static CHART_STATE: OnceLock<GlobalSignal<std::collections::HashMap<String, Chart>>> =
-    OnceLock::new();
+static CHART_STATE: OnceLock<GlobalSignal<HashMap<String, Chart>>> = OnceLock::new();
 
 /// Initialize the chart API storage and signals
 #[cfg(not(target_arch = "wasm32"))]
 fn init_chart_storage() {
     CHART_API.get_or_init(|| std::sync::Mutex::new(None));
-    CHART_STATE.get_or_init(|| Signal::global(|| std::collections::HashMap::new()));
+    CHART_STATE.get_or_init(|| Signal::global(HashMap::new));
 }
 
 /// Get a receiver for connection status updates
@@ -40,8 +41,7 @@ pub fn get_connection_status_receiver() -> Option<tokio::sync::watch::Receiver<b
 }
 
 /// Get the current chart state signal
-pub fn get_chart_state() -> Option<&'static GlobalSignal<std::collections::HashMap<String, Chart>>>
-{
+pub fn get_chart_state() -> Option<&'static GlobalSignal<HashMap<String, Chart>>> {
     CHART_STATE.get()
 }
 
@@ -111,7 +111,7 @@ async fn connect_with_retry() {
 
                 // Clear the chart state when disconnected
                 if let Some(state) = CHART_STATE.get() {
-                    *state.write() = std::collections::HashMap::new();
+                    *state.write() = HashMap::new();
                 }
 
                 // Clear the API instance
@@ -129,7 +129,7 @@ async fn connect_with_retry() {
                 info!("[Chart Connection] Retrying immediately after connection loss...");
             }
             Err(e) => {
-                if retry_count == 1 || retry_count % 10 == 0 {
+                if retry_count == 1 || retry_count.is_multiple_of(10) {
                     warn!(
                         "[Chart Connection] Connection attempt {} failed: {}",
                         retry_count, e

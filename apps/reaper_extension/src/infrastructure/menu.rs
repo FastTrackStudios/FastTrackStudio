@@ -14,7 +14,7 @@ use crate::infrastructure::action_registry::get_all_registered_actions;
 /// Must be called after actions are registered and REAPER is woken up
 pub fn register_extension_menu() -> anyhow::Result<()> {
     // Safely get Reaper instance - if it panics, return an error
-    let reaper = std::panic::catch_unwind(|| Reaper::get())
+    let reaper = std::panic::catch_unwind(Reaper::get)
         .map_err(|_| anyhow::anyhow!("Reaper::get() panicked - Reaper not available globally yet"))?;
     
     reaper.medium_reaper().add_extensions_main_menu();

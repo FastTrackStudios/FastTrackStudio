@@ -4,17 +4,12 @@
 //! and processes incoming state updates
 
 use anyhow::Result;
-use irpc::{
-    channel::mpsc,
-    Client, Request,
-};
-use irpc_iroh::client;
 use iroh::{Endpoint, EndpointId};
+use irpc::{channel::mpsc, Client, Request};
+use irpc_iroh::client;
 use peer_2_peer::{
     iroh_connection::{create_reaper_client, discover_reaper_endpoint, REAPER_ALPN},
-    reaper_api::{
-        ClientRequest, Connect, ReaperProtocol, ReaperStateUpdate, TransportCommand,
-    },
+    reaper_api::{ClientRequest, Connect, ReaperProtocol, ReaperStateUpdate, TransportCommand},
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -22,7 +17,6 @@ use tracing::{info, warn};
 
 /// Callback type for handling REAPER state updates
 pub type StateUpdateHandler = Arc<dyn Fn(ReaperStateUpdate) + Send + Sync>;
-
 
 /// REAPER connection manager
 #[derive(Clone)]
@@ -51,7 +45,10 @@ impl ReaperCommandSender {
     pub async fn send(&self, request: ClientRequest) -> Result<(), String> {
         let guard = self.sender.lock().await;
         if let Some(ref sender) = *guard {
-            sender.send(request).await.map_err(|e| format!("Failed to send command: {}", e))?;
+            sender
+                .send(request)
+                .await
+                .map_err(|e| format!("Failed to send command: {}", e))?;
             Ok(())
         } else {
             Err("Not connected to REAPER".to_string())
@@ -66,10 +63,14 @@ impl ReaperCommandSender {
 
 impl ReaperConnection {
     /// Create a new REAPER connection manager
-    pub fn new() -> (Self, tokio::sync::watch::Receiver<bool>, ReaperCommandSender) {
+    pub fn new() -> (
+        Self,
+        tokio::sync::watch::Receiver<bool>,
+        ReaperCommandSender,
+    ) {
         let (connected_tx, connected_rx) = tokio::sync::watch::channel(false);
         let command_sender = Arc::new(Mutex::new(None));
-        
+
         let connection = Self {
             command_sender: command_sender.clone(),
             state_update_handler: Arc::new(Mutex::new(None)),
@@ -78,11 +79,11 @@ impl ReaperConnection {
             endpoint_id: Arc::new(Mutex::new(None)),
             client_endpoint: Arc::new(Mutex::new(None)),
         };
-        
+
         let command_sender_wrapper = ReaperCommandSender {
             sender: command_sender,
         };
-        
+
         (connection, connected_rx, command_sender_wrapper)
     }
 
@@ -93,10 +94,10 @@ impl ReaperConnection {
     }
 
     /// Start the connection to REAPER using IROH with automatic reconnection
-    /// 
+    ///
     /// Uses MDNS discovery to find the REAPER extension endpoint ID.
     /// Automatically retries connection with exponential backoff on failure.
-    /// 
+    ///
     /// Following iroh best practices: creates the endpoint once and reuses it
     /// for all connection attempts, only creating new connections on retries.
     pub async fn start(&self) -> Result<()> {
@@ -106,28 +107,28 @@ impl ReaperConnection {
             let mut cached_endpoint = self.client_endpoint.lock().await;
             *cached_endpoint = Some(endpoint);
         }
-        
+
         let self_clone = self.clone();
         tokio::spawn(async move {
             self_clone.connect_with_retry().await;
         });
         Ok(())
     }
-    
+
     /// Connect with automatic retry logic
-    /// 
+    ///
     /// Reuses the cached endpoint for all connection attempts.
     async fn connect_with_retry(&self) {
         let mut retry_count = 0u32;
-        
-            loop {
+
+        loop {
             retry_count += 1;
-            
+
             match self.try_connect().await {
                 Ok(()) => {
                     info!("[DESKTOP] Successfully connected to REAPER");
                     retry_count = 0;
-                    
+
                     // Wait for connection to close before retrying
                     // The connection tasks will update the status when they detect closure
                     let mut connected_rx = (*self.connected_rx).clone();
@@ -139,38 +140,42 @@ impl ReaperConnection {
                     }
                 }
                 Err(e) => {
-                    if retry_count % 10 == 0 {
-                    warn!("[DESKTOP] Connection attempt {} failed: {}", retry_count, e);
+                    if retry_count.is_multiple_of(10) {
+                        warn!("[DESKTOP] Connection attempt {} failed: {}", retry_count, e);
                         // After many failures, clear endpoint ID cache to allow rediscovery
                         // (in case REAPER restarted with a new endpoint ID)
                         // Note: we keep the endpoint itself as it's long-lived
-                        if retry_count % 50 == 0 {
-                            info!("[DESKTOP] Clearing endpoint ID cache after {} failed attempts", retry_count);
+                        if retry_count.is_multiple_of(50) {
+                            info!(
+                                "[DESKTOP] Clearing endpoint ID cache after {} failed attempts",
+                                retry_count
+                            );
                             *self.endpoint_id.lock().await = None;
                         }
                     }
-                    
+
                     // Update connection status
                     self.connected_tx.send(false).ok();
-                    
+
                     // Retry every 1 second
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             }
         }
     }
-    
+
     /// Attempt a single connection to REAPER
-    /// 
+    ///
     /// Reuses the cached endpoint and only creates a new connection.
     async fn try_connect(&self) -> Result<()> {
         // Get the cached endpoint (should exist from start())
         let client_endpoint = {
             let cached_endpoint = self.client_endpoint.lock().await;
-            cached_endpoint.clone()
+            cached_endpoint
+                .clone()
                 .ok_or_else(|| anyhow::anyhow!("Endpoint not initialized. Call start() first."))?
         };
-        
+
         // Get or discover REAPER endpoint ID (cache after first discovery)
         let endpoint_id = {
             let mut cached_id = self.endpoint_id.lock().await;
@@ -185,20 +190,30 @@ impl ReaperConnection {
                 id
             }
         };
-        
+
         // Create IROH client
         let client: Client<ReaperProtocol> = client(client_endpoint, endpoint_id, REAPER_ALPN);
-        
+
         // Open bidirectional connection with timeout
         let msg = Connect;
         let connection_timeout = tokio::time::Duration::from_secs(5); // 5 second timeout for initial connection
-        let (command_tx, mut state_rx): (mpsc::Sender<ClientRequest>, mpsc::Receiver<ReaperStateUpdate>) = match tokio::time::timeout(connection_timeout, client.request()).await {
+        let (command_tx, mut state_rx): (
+            mpsc::Sender<ClientRequest>,
+            mpsc::Receiver<ReaperStateUpdate>,
+        ) = match tokio::time::timeout(connection_timeout, client.request()).await {
             Ok(Ok(Request::Remote(request))) => {
                 // Also timeout the write operation
                 match tokio::time::timeout(connection_timeout, request.write(msg)).await {
                     Ok(Ok((tx, rx))) => (tx.into(), rx.into()),
-                    Ok(Err(e)) => return Err(anyhow::anyhow!("Failed to write connection message: {}", e)),
-                    Err(_) => return Err(anyhow::anyhow!("Timeout writing connection message after {:?}", connection_timeout)),
+                    Ok(Err(e)) => {
+                        return Err(anyhow::anyhow!("Failed to write connection message: {}", e))
+                    }
+                    Err(_) => {
+                        return Err(anyhow::anyhow!(
+                            "Timeout writing connection message after {:?}",
+                            connection_timeout
+                        ))
+                    }
                 }
             }
             Ok(Ok(Request::Local(_))) => {
@@ -211,17 +226,17 @@ impl ReaperConnection {
                 return Err(anyhow::anyhow!("Connection timeout after {:?} - REAPER extension may not be running or network issue", connection_timeout));
             }
         };
-        
+
         // Store command sender
         {
             let mut guard = self.command_sender.lock().await;
             *guard = Some(command_tx);
         }
-        
+
         // Update connection status
         self.connected_tx.send(true).ok();
         info!("[DESKTOP] Connected to REAPER RPC server");
-        
+
         // Spawn task to receive state updates with fast connection health checking
         let handler = self.state_update_handler.clone();
         let connected_tx_for_updates = self.connected_tx.clone();
@@ -229,12 +244,12 @@ impl ReaperConnection {
             info!("[DESKTOP] Starting state update receive loop");
             let mut update_count = 0u64;
             let health_check_interval = tokio::time::Duration::from_millis(33); // ~30Hz for checking
-            // Connection timeout: 1 second - should receive data at 30Hz so this is reasonable
+                                                                                // Connection timeout: 1 second - should receive data at 30Hz so this is reasonable
             let connection_timeout = tokio::time::Duration::from_secs(1);
-            
+
             // Shared last received time for health checking
             let last_received = Arc::new(Mutex::new(tokio::time::Instant::now()));
-            
+
             // Spawn a health check task that runs at 30Hz to check connection status
             // This doesn't require sending data - it just checks if we've received data recently
             let connected_tx_for_health = connected_tx_for_updates.clone();
@@ -246,13 +261,16 @@ impl ReaperConnection {
                     // Check if we haven't received anything recently
                     let guard = last_received_for_health.lock().await;
                     if guard.elapsed() > connection_timeout {
-                        warn!("[DESKTOP] Connection health check failed - no data received for {:?}", guard.elapsed());
+                        warn!(
+                            "[DESKTOP] Connection health check failed - no data received for {:?}",
+                            guard.elapsed()
+                        );
                         connected_tx_for_health.send(false).ok();
                         break;
                     }
                 }
             });
-            
+
             loop {
                 // Use timeout to detect if connection is dead
                 // This will timeout after 35s if no data is received, which is longer than heartbeat interval
@@ -262,29 +280,39 @@ impl ReaperConnection {
                         {
                             let mut guard = last_received.lock().await;
                             *guard = tokio::time::Instant::now();
-                                        }
+                        }
                         update_count += 1;
-                        
+
                         match &update {
                             ReaperStateUpdate::Heartbeat => {
-                                info!("[DESKTOP] 💓 Received heartbeat #{} from REAPER", update_count);
-                                        }
-                                        _ => {
-                                info!("[DESKTOP] Received state update #{}: {:?}", update_count, std::mem::discriminant(&update));
-                                        }
-                                    }
-                                    
-                                    // Call handler if set
+                                info!(
+                                    "[DESKTOP] 💓 Received heartbeat #{} from REAPER",
+                                    update_count
+                                );
+                            }
+                            _ => {
+                                info!(
+                                    "[DESKTOP] Received state update #{}: {:?}",
+                                    update_count,
+                                    std::mem::discriminant(&update)
+                                );
+                            }
+                        }
+
+                        // Call handler if set
                         let handler_guard = handler.lock().await;
                         if let Some(ref handler_fn) = *handler_guard {
                             handler_fn(update);
-                                    } else {
+                        } else {
                             warn!("[DESKTOP] No handler set for state update");
                         }
                     }
                     Ok(Ok(None)) => {
                         // Channel closed
-                        info!("[DESKTOP] State update stream closed (received {} updates)", update_count);
+                        info!(
+                            "[DESKTOP] State update stream closed (received {} updates)",
+                            update_count
+                        );
                         connected_tx_for_updates.send(false).ok();
                         break;
                     }
@@ -296,14 +324,17 @@ impl ReaperConnection {
                     }
                     Err(_) => {
                         // Timeout - connection appears dead
-                        warn!("[DESKTOP] Connection timeout - no data received for {:?}", connection_timeout);
+                        warn!(
+                            "[DESKTOP] Connection timeout - no data received for {:?}",
+                            connection_timeout
+                        );
                         connected_tx_for_updates.send(false).ok();
                         break;
                     }
                 }
             }
         });
-        
+
         // Spawn task to send periodic heartbeats from client to server at 30Hz
         let command_sender_for_heartbeat = self.command_sender.clone();
         let connected_for_heartbeat = self.connected_tx.clone();
@@ -312,7 +343,7 @@ impl ReaperConnection {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(33)); // ~30Hz
             let mut tick_count = 0u64;
             let mut connected_rx = (*connected_rx_for_heartbeat).clone();
-            
+
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
@@ -321,7 +352,7 @@ impl ReaperConnection {
                             info!("[DESKTOP] Connection lost, stopping heartbeat");
                                     break;
                                 }
-                        
+
                         tick_count += 1;
                         let guard = command_sender_for_heartbeat.lock().await;
                         if let Some(ref sender) = *guard {
@@ -347,11 +378,11 @@ impl ReaperConnection {
                 }
             }
         });
-        
+
         Ok(())
     }
-    }
-    
+}
+
 /// Default handler for state updates (logs them)
 fn handle_state_update_default(update: ReaperStateUpdate) {
     match update {
@@ -363,8 +394,10 @@ fn handle_state_update_default(update: ReaperStateUpdate) {
             // Ignored - setlist is now handled via SETLIST global signal
         }
         ReaperStateUpdate::TransportState(state) => {
-            info!("[DESKTOP] TransportState update - playing: {}, position: {:.2}s", 
-                state.is_playing, state.position_seconds);
+            info!(
+                "[DESKTOP] TransportState update - playing: {}, position: {:.2}s",
+                state.is_playing, state.position_seconds
+            );
         }
     }
 }
