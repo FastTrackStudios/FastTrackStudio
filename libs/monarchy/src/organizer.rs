@@ -15,11 +15,13 @@ impl<M: Metadata> Organizer<M> {
     pub fn organize(&self, items: Vec<Item<M>>) -> Structure<M> {
         let mut root = Structure::new("root");
 
-        // Build structure from groups
+        // Build structure from groups (skip metadata_only groups)
         for group in &self.config.groups {
-            let group_structure = self.build_group_structure(group, &items, Vec::new());
-            if !group_structure.is_empty() {
-                root.children.push(group_structure);
+            if !group.metadata_only {
+                let group_structure = self.build_group_structure(group, &items, Vec::new());
+                if !group_structure.is_empty() {
+                    root.children.push(group_structure);
+                }
             }
         }
 

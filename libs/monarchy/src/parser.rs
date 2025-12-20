@@ -16,13 +16,25 @@ impl<M: Metadata> Parser<M> {
         let mut metadata = M::default();
         let mut matched_group = None;
 
-        // Sort groups by priority
+        // Sort groups by priority (metadata_only groups have low priority)
         let mut sorted_groups = self.config.groups.clone();
         sorted_groups.sort_by(|a, b| b.priority.cmp(&a.priority));
 
-        // Find the first matching group
+        // First, extract metadata from metadata_only groups (they always match or have low priority)
         for group in &sorted_groups {
-            if group.matches(&input) {
+            if group.metadata_only && group.matches(&input) {
+                // Extract metadata from metadata-only groups
+                for field in &group.metadata_fields {
+                    if let Some(value) = self.extract_field_value(&input, field, group) {
+                        metadata.set(field.clone(), value);
+                    }
+                }
+            }
+        }
+
+        // Find the first matching non-metadata-only group
+        for group in &sorted_groups {
+            if !group.metadata_only && group.matches(&input) {
                 matched_group = Some(group.name.clone());
 
                 // Extract metadata based on the group's fields
