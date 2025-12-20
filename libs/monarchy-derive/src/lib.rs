@@ -170,6 +170,42 @@ pub fn derive_metadata(input: TokenStream) -> TokenStream {
         quote! { #field_enum_name::#variant }
     });
 
+    // Generate create_string_value match arms
+    // Only for fields that are Option<String>, not Option<Vec<String>>
+    let create_string_arms = field_info.iter().filter_map(|info| {
+        let variant = &info.variant_name;
+        let ty = &info.field_type;
+        
+        // Check if this is Vec<String> - if so, skip (use create_vec_string_value instead)
+        if is_vec_string_type(ty) {
+            return None;
+        }
+        
+        Some(quote! {
+            #field_enum_name::#variant => {
+                Some(#value_enum_name::#variant(value))
+            }
+        })
+    });
+
+    // Generate create_vec_string_value match arms
+    // Only for fields that are Option<Vec<String>>
+    let create_vec_string_arms = field_info.iter().filter_map(|info| {
+        let variant = &info.variant_name;
+        let ty = &info.field_type;
+        
+        // Only include if this is Vec<String>
+        if !is_vec_string_type(ty) {
+            return None;
+        }
+        
+        Some(quote! {
+            #field_enum_name::#variant => {
+                Some(#value_enum_name::#variant(values))
+            }
+        })
+    });
+
     // Generate extension trait methods that call the generic metadata_field() method
     // We use an extension trait because we can't implement methods on GroupBuilder<M>
     // from outside the monarchy crate (orphan rule)
@@ -252,6 +288,20 @@ pub fn derive_metadata(input: TokenStream) -> TokenStream {
                 vec![
                     #(#variant_field_list),*
                 ]
+            }
+
+            fn create_string_value(field: &Self::Field, value: String) -> Option<Self::Value> {
+                match field {
+                    #(#create_string_arms),*
+                    _ => None,
+                }
+            }
+
+            fn create_vec_string_value(field: &Self::Field, values: Vec<String>) -> Option<Self::Value> {
+                match field {
+                    #(#create_vec_string_arms),*
+                    _ => None,
+                }
             }
         }
 
@@ -444,4 +494,25 @@ fn extract_option_type(ty: &Type) -> Option<&Type> {
         }
     }
     None
+}
+
+/// Check if a type is Vec<String>
+fn is_vec_string_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.last() {
+            if segment.ident == "Vec" {
+                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(syn::GenericArgument::Type(inner_type)) = args.args.first() {
+                        // Check if inner type is String
+                        if let Type::Path(inner_path) = inner_type {
+                            if let Some(inner_segment) = inner_path.path.segments.last() {
+                                return inner_segment.ident == "String";
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
 }

@@ -216,15 +216,9 @@ impl<M: Metadata> GroupBuilder<M> {
     {
         let field_group = field_group.into_field();
         self.group.metadata_fields.push(field);
-        self.group.patterns.extend(field_group.patterns);
-        self.group.negative_patterns.extend(field_group.negative_patterns);
-        if let Some(prefix) = field_group.prefix {
-            self.group.prefix = Some(prefix);
-        }
-        self.group.groups.extend(field_group.groups);
-        if field_group.priority > self.group.priority {
-            self.group.priority = field_group.priority;
-        }
+        // Store the field_group itself as a nested group so we can find it later
+        // This allows the parser to extract values from the field's patterns
+        self.group.groups.push(field_group);
         self
     }
 

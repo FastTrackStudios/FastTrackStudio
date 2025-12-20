@@ -32,4 +32,22 @@ pub trait Metadata: Clone + Default + Send + Sync + 'static {
     fn variant_fields() -> Vec<Self::Field> {
         Vec::new() // Default: no variant fields
     }
+
+    /// Create a Value from a string for a given field
+    /// 
+    /// This is used by the parser to create Value enum variants from extracted strings.
+    /// The default implementation returns None - specific Metadata implementations
+    /// should override this if they need string-based value creation.
+    fn create_string_value(_field: &Self::Field, _value: String) -> Option<Self::Value> {
+        None
+    }
+
+    /// Create a Value from a vector of strings for a given field
+    /// 
+    /// This is used by the parser to create Value enum variants for Vec<String> fields.
+    /// The default implementation returns None - specific Metadata implementations
+    /// should override this if they need vector-based value creation.
+    fn create_vec_string_value(_field: &Self::Field, _values: Vec<String>) -> Option<Self::Value> {
+        None
+    }
 }
