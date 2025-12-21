@@ -23,6 +23,7 @@ impl From<Drums> for Group<ItemMetadata> {
             .prefix("D")
             // No patterns - this is just a container group
             // The nested groups will handle pattern matching
+            .only_match_nested_when_parent_matches() // Prevent nested groups from matching when "Drums" doesn't match
             .group(DrumKit)
             .group(ElectronicKit)
             .group(fx::fx_group()) // Allow FX to be nested under Drums (e.g., "Drum Verb")

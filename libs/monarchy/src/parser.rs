@@ -54,6 +54,33 @@ impl<M: Metadata> Parser<M> {
                         .collect();
                     let match_count = match_details.iter().filter(|(_, matches)| *matches).count();
                     
+                    // Check if any parent group in the path has only_match_nested_when_parent_matches set
+                    // and doesn't match - if so, this path is invalid
+                    let mut invalid_path = false;
+                    for (i, group_in_path) in path.iter().enumerate() {
+                        if group_in_path.only_match_nested_when_parent_matches {
+                            // Check if this group matches
+                            let group_matches = group_in_path.matches(&input);
+                            if !group_matches {
+                                // This group doesn't match, so nested groups shouldn't be searched
+                                // But we're here, which means a nested group matched
+                                // This is only valid if this is the last group in the path (the matched group itself)
+                                if i < path.len() - 1 {
+                                    // This is not the last group, so there are nested groups
+                                    // Since this group doesn't match and has only_match_nested_when_parent_matches,
+                                    // the nested groups shouldn't have been searched
+                                    invalid_path = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if invalid_path {
+                        // Skip this path - it violates the only_match_nested_when_parent_matches rule
+                        continue;
+                    }
+                    
                     // Keep the deepest match, or if depth is equal, prefer one with more matching groups
                     let is_better = depth > deepest_depth || 
                                    (depth == deepest_depth && match_count > best_match_count);
@@ -146,6 +173,13 @@ impl<M: Metadata> Parser<M> {
         let mut deepest_matches: Vec<(&'a crate::Group<M>, Vec<&'a crate::Group<M>>)> = Vec::new();
         let mut deepest_depth = 0;
         
+        // Check if we should only search nested groups when parent matches
+        // This prevents items from matching nested groups when the parent doesn't match
+        // (e.g., "FX Reverb" shouldn't match "Drums" -> "FX" -> "Reverb" if "Drums" doesn't match)
+        // However, if the parent has no patterns (container group), we allow nested groups to be searched
+        let should_only_match_nested_when_parent_matches = group.only_match_nested_when_parent_matches;
+        let parent_has_patterns = !group.patterns.is_empty();
+        
         for nested_group in &group.groups {
             // Skip nested groups that are metadata field groups (used only for metadata extraction)
             // A metadata field group is one whose name matches a field in the parent's metadata_fields
@@ -161,6 +195,15 @@ impl<M: Metadata> Parser<M> {
                 // If this nested group requires parent match, check that parent matches first
                 if nested_group.requires_parent_match && !this_matches {
                     // Skip this nested group if parent doesn't match
+                    continue;
+                }
+                
+                // If parent group has only_match_nested_when_parent_matches set, only search nested groups if parent matches
+                // This prevents items from matching nested groups when the parent doesn't match
+                // (e.g., "FX Reverb" shouldn't match "Drums" -> "FX" -> "Reverb" if "Drums" doesn't match)
+                // For container groups with no patterns, we still enforce this rule
+                if should_only_match_nested_when_parent_matches && !this_matches {
+                    // Skip searching nested groups if parent doesn't match
                     continue;
                 }
                 

@@ -139,6 +139,17 @@ pub struct Group<M: Metadata> {
     /// Default is false, allowing groups to match independently.
     pub requires_parent_match: bool,
     
+    /// If true, nested groups under this group can only be matched if this parent group also matches.
+    /// This prevents items from matching nested groups when the parent doesn't match.
+    /// 
+    /// Example: With `only_match_nested_when_parent_matches: true` on "Drums",
+    /// "FX Reverb" will match top-level "FX" -> "Reverb", not "Drums" -> "FX" -> "Reverb",
+    /// because "Drums" doesn't match "FX Reverb".
+    /// 
+    /// Default is false, allowing nested groups to be matched even when parent doesn't match
+    /// (for backward compatibility with existing groups).
+    pub only_match_nested_when_parent_matches: bool,
+    
     /// Field value descriptors for metadata fields
     /// 
     /// This allows each metadata field value (e.g., "Out", "In", "Hi Hat", "Ride")
@@ -286,6 +297,7 @@ impl<M: Metadata> GroupBuilder<M> {
                 transparent: false,
                 metadata_only: false,
                 requires_parent_match: false,
+                only_match_nested_when_parent_matches: false,
                 field_value_descriptors: std::collections::HashMap::new(),
                 field_grouping_strategies: std::collections::HashMap::new(),
                 field_default_values: std::collections::HashMap::new(),
@@ -487,6 +499,27 @@ impl<M: Metadata> GroupBuilder<M> {
     /// if it also matches the "Electronic Kit" patterns (e.g., "electronic", "808", etc.).
     pub fn requires_parent_match(mut self) -> Self {
         self.group.requires_parent_match = true;
+        self
+    }
+    
+    /// Set `only_match_nested_when_parent_matches` to true.
+    /// 
+    /// This prevents nested groups from being matched when the parent doesn't match.
+    /// Useful for groups like "Drums" where nested "FX" should only match if "Drums" also matches.
+    /// 
+    /// # Example
+    /// 
+    /// ```ignore
+    /// Group::builder("Drums")
+    ///     .only_match_nested_when_parent_matches()
+    ///     .group(fx_group())
+    ///     .build()
+    /// ```
+    /// 
+    /// With this configuration, "FX Reverb" will match top-level "FX" -> "Reverb",
+    /// not "Drums" -> "FX" -> "Reverb", because "Drums" doesn't match "FX Reverb".
+    pub fn only_match_nested_when_parent_matches(mut self) -> Self {
+        self.group.only_match_nested_when_parent_matches = true;
         self
     }
     
