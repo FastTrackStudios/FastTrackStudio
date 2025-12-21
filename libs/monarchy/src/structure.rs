@@ -142,7 +142,9 @@ impl<M: Metadata> Structure<M> {
                  indent, self.name, self.children.len());
 
         // Now check each child - if it has only one direct child and no items, remove it
+        // BUT keep it if it has siblings (other groups at the same level) - this preserves organizational structure
         let mut new_children = Vec::new();
+        let total_siblings = self.children.len();
         for mut child in std::mem::take(&mut self.children) {
             let has_single_child = child.children.len() == 1;
             let has_no_items = child.items.is_empty();
@@ -226,15 +228,22 @@ impl<M: Metadata> Structure<M> {
             //    AND it has only one child (if it has multiple children, keep it as an organizational level), OR
             // 3. It has no items AND all its children are deepest groups (no organizational subgroups)
             //    This removes intermediate levels like "Drum Kit" when all children are deepest groups (Kick, Snare)
-            if (has_single_child && has_no_items && (!is_last_group || single_child_is_deepest)) ||
+            // BUT: Keep the group if it has siblings (other groups at the same level) - this preserves organizational structure
+            // when multiple groups exist (e.g., "Drum Kit" and "Electronic Kit" both under "Drums")
+            let has_siblings = total_siblings > 1;
+            if !has_siblings && ((has_single_child && has_no_items && (!is_last_group || single_child_is_deepest)) ||
                (has_no_items && all_children_are_last_groups && !organizes_items && has_single_child) ||
-               (has_no_items && all_children_are_deepest && !organizes_items) {
+               (has_no_items && all_children_are_deepest && !organizes_items)) {
                 eprintln!("{}[COLLAPSE] REMOVING intermediate: '{}' (promoting {} children)", 
                          indent, child.name, child.children.len());
                 // Promote all children, not just the first one
                 new_children.extend(std::mem::take(&mut child.children));
             } else {
-                eprintln!("{}[COLLAPSE] KEEPING: '{}'", indent, child.name);
+                if has_siblings {
+                    eprintln!("{}[COLLAPSE] KEEPING: '{}' (has {} siblings)", indent, child.name, total_siblings - 1);
+                } else {
+                    eprintln!("{}[COLLAPSE] KEEPING: '{}'", indent, child.name);
+                }
                 new_children.push(child);
             }
         }

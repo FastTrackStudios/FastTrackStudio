@@ -8,8 +8,8 @@ pub struct BassGuitar;
 
 impl From<BassGuitar> for Group<ItemMetadata> {
     fn from(_val: BassGuitar) -> Self {
-        Group::builder("Bass Guitar")
-            .patterns(vec!["bass_guitar", "bassguitar", "electric_bass"])
+        Group::builder("Guitar")
+            .patterns(vec!["bass_guitar", "bassguitar", "bass guitar", "electric_bass", "electric bass"])
             .build()
     }
 }
