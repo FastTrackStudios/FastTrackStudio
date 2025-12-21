@@ -611,8 +611,12 @@ impl TrackStructureBuilder {
     pub fn end(mut self) -> Self {
         if let Some(_folder_index) = self.folder_stack.pop() {
             // The folder is already marked as a folder start
-            // We don't need to do anything else since the folder structure
-            // is handled by folder_depth_change
+            // Set the last track to close the folder if it's currently Normal
+            if let Some(last_track) = self.tracks.last_mut() {
+                if last_track.folder_depth_change == FolderDepthChange::Normal {
+                    last_track.folder_depth_change = FolderDepthChange::ClosesLevels(-1);
+                }
+            }
         }
         self
     }
