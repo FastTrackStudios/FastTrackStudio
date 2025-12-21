@@ -37,7 +37,7 @@ impl From<ElectronicKit> for Group<ItemMetadata> {
                 "vst drum",
             ])
             .block_prefix("D") // Avoid "D Electronic Drums" redundancy
-            .group(Kick)
+            // .group(Kick)
             .group(Snare)
             // .group(Hat)
             // .group(Pad)
