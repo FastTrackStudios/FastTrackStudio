@@ -8,7 +8,7 @@ mod item_metadata;
 mod metadata_patterns;
 
 pub use groups::{
-    Bass, Choir, Drums, Effects, Guitars, Keys, Orchestra, Percussion, Synths, Vocals,
+    Bass, Choir, Drums, FX, Guitars, Keys, Orchestra, Percussion, Synths, Vocals,
 };
 pub use item_metadata::ItemMetadata;
 
@@ -41,7 +41,7 @@ pub fn default_config() -> DynamicTemplateConfig {
         .group(Vocals)
         .group(Choir)
         .group(Orchestra)
-        .group(Effects)
+        .group(FX)
         .build()
 }
 
