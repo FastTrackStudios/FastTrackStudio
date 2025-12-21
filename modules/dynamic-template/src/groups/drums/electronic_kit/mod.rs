@@ -3,15 +3,14 @@
 use crate::item_metadata::ItemMetadata;
 use monarchy::Group;
 
-// Electronic kit specific drum types can be added here
-// mod kick;
-// mod snare;
+mod kick;
+mod snare;
 // mod hat;
 // mod pad;
 // mod trigger;
 
-// pub use kick::Kick;
-// pub use snare::Snare;
+pub use kick::Kick;
+pub use snare::Snare;
 // pub use hat::Hat;
 // pub use pad::Pad;
 // pub use trigger::Trigger;
@@ -38,9 +37,8 @@ impl From<ElectronicKit> for Group<ItemMetadata> {
                 "vst drum",
             ])
             .block_prefix("D") // Avoid "D Electronic Drums" redundancy
-            // Electronic kit specific groups can be added here
-            // .group(Kick)
-            // .group(Snare)
+            .group(Kick)
+            .group(Snare)
             // .group(Hat)
             // .group(Pad)
             // .group(Trigger)
