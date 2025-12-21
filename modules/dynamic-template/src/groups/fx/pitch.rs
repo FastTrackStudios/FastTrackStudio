@@ -16,7 +16,7 @@ impl From<Pitch> for Group<ItemMetadata> {
                 "autotune",
                 "auto_tune",
                 "melodyne",
-                "harmony",
+                "harmony_",
                 "harmonizer",
                 "octave",
                 "octaver",
@@ -25,6 +25,8 @@ impl From<Pitch> for Group<ItemMetadata> {
                 "vocoder",
                 "talkbox",
             ])
+            // Exclude single letters to avoid conflicts with channels
+            .exclude(vec!["L", "C", "R", "l", "c", "r"])
             .build()
     }
 }

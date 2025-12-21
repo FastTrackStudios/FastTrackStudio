@@ -11,22 +11,24 @@ impl From<Distortion> for Group<ItemMetadata> {
         Group::builder("Distortion")
             .patterns(vec![
                 "distortion",
-                "dist",
+                "dist_",
                 "overdrive",
-                "drive",
+                "drive_",
                 "fuzz",
                 "saturation",
                 "saturator",
                 "bitcrusher",
                 "bitcrush",
                 "waveshaper",
-                "tube",
-                "tape",
-                "analog",
+                "tube_",
+                "tape_",
+                "analog_",
                 "crunch",
                 "grit",
                 "dirt",
             ])
+            // Exclude single letters to avoid conflicts with channels
+            .exclude(vec!["L", "C", "R", "l", "c", "r"])
             .build()
     }
 }

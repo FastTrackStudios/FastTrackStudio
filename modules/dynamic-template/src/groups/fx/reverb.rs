@@ -12,15 +12,17 @@ impl From<Reverb> for Group<ItemMetadata> {
             .patterns(vec![
                 "reverb",
                 "verb",
-                "room",
-                "hall",
-                "plate",
-                "spring",
-                "chamber",
-                "cathedral",
+                "room_",
+                "hall_",
+                "plate_",
+                "spring_",
+                "chamber_",
+                "cathedral_",
                 "ambience",
-                "space",
+                "space_",
             ])
+            // Exclude single letters to avoid conflicts with channels
+            .exclude(vec!["L", "C", "R", "l", "c", "r"])
             .build()
     }
 }

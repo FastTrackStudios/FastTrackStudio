@@ -11,7 +11,7 @@ impl From<Dynamics> for Group<ItemMetadata> {
         Group::builder("Dynamics")
             .patterns(vec![
                 "compressor",
-                "comp",
+                "comp_",
                 "limiter",
                 "gate",
                 "expander",
@@ -22,10 +22,12 @@ impl From<Dynamics> for Group<ItemMetadata> {
                 "leveler",
                 "multiband",
                 "opto",
-                "vca",
-                "fet",
-                "tube",
+                "vca_",
+                "fet_",
+                "tube_",
             ])
+            // Exclude single letters to avoid conflicts with channels
+            .exclude(vec!["L", "C", "R", "l", "c", "r"])
             .build()
     }
 }

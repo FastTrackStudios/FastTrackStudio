@@ -20,6 +20,8 @@ impl From<Delay> for Group<ItemMetadata> {
                 "dub_delay",
                 "multitap",
             ])
+            // Exclude single letters to avoid conflicts with channels
+            .exclude(vec!["L", "C", "R", "l", "c", "r"])
             .build()
     }
 }

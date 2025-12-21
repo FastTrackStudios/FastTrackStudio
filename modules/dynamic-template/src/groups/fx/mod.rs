@@ -48,6 +48,13 @@ impl From<FX> for Group<ItemMetadata> {
 pub fn fx_group() -> Group<ItemMetadata> {
     Group::builder("FX")
         .patterns(vec!["effect", "effects", "fx"])
+        // Exclude single letters and common metadata patterns to avoid conflicts
+        .exclude(vec![
+            "L", "C", "R", "l", "c", "r",
+            "Left", "Center", "Right", "left", "center", "right",
+            "Main", "DBL", "TPL", "main", "dbl", "tpl",
+            "In", "Out", "Top", "Bottom", "in", "out", "top", "bottom",
+        ])
         .group(Reverb)
         .group(Delay)
         .group(EQ)
