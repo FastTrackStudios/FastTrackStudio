@@ -30,6 +30,7 @@ impl From<FX> for Group<ItemMetadata> {
         Group::builder("FX")
             .prefix("FX")
             .patterns(vec!["effect", "effects", "fx"])
+            .priority(-1000) // Very low priority - only match when nothing else matches
             .group(Reverb)
             .group(Delay)
             .group(EQ)
@@ -45,16 +46,13 @@ impl From<FX> for Group<ItemMetadata> {
 /// 
 /// This allows effects to be attached to specific tracks.
 /// For example, "Drum Verb" will create a "Verb" child under "Drums".
+/// 
+/// FX groups have very low priority so they only match when nothing else matches
+/// (e.g., metadata fields like Performer, Section, Layers, Channels take precedence).
 pub fn fx_group() -> Group<ItemMetadata> {
     Group::builder("FX")
         .patterns(vec!["effect", "effects", "fx"])
-        // Exclude single letters and common metadata patterns to avoid conflicts
-        .exclude(vec![
-            "L", "C", "R", "l", "c", "r",
-            "Left", "Center", "Right", "left", "center", "right",
-            "Main", "DBL", "TPL", "main", "dbl", "tpl",
-            "In", "Out", "Top", "Bottom", "in", "out", "top", "bottom",
-        ])
+        .priority(-1000) // Very low priority - only match when nothing else matches
         .group(Reverb)
         .group(Delay)
         .group(EQ)

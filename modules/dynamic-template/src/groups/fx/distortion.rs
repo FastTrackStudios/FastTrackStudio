@@ -27,8 +27,7 @@ impl From<Distortion> for Group<ItemMetadata> {
                 "grit",
                 "dirt",
             ])
-            // Exclude single letters to avoid conflicts with channels
-            .exclude(vec!["L", "C", "R", "l", "c", "r"])
+            .priority(-1000) // Very low priority - only match when nothing else matches
             .build()
     }
 }

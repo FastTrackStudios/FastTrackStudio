@@ -12,7 +12,6 @@ impl From<Modulation> for Group<ItemMetadata> {
             .patterns(vec![
                 "modulation",
                 "mod_",
-                "chorus",
                 "flanger",
                 "phaser",
                 "tremolo",
@@ -24,8 +23,7 @@ impl From<Modulation> for Group<ItemMetadata> {
                 "frequency_shifter",
                 "ensemble",
             ])
-            // Exclude single letters to avoid conflicts with channels
-            .exclude(vec!["L", "C", "R", "l", "c", "r"])
+            .priority(-1000) // Very low priority - only match when nothing else matches
             .build()
     }
 }
