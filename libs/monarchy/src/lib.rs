@@ -5,6 +5,7 @@
 pub mod config;
 pub mod error;
 pub mod field;
+pub mod field_value;
 pub mod group;
 pub mod metadata;
 pub mod organizer;
@@ -16,6 +17,7 @@ pub mod test_utils;
 pub use config::{Config, ConfigBuilder, FallbackStrategy, ParserRules};
 pub use error::{MonarchyError, Result};
 pub use field::{IntoField, MetadataField};
+pub use field_value::FieldValueDescriptor;
 pub use group::{Group, GroupBuilder};
 pub use metadata::Metadata;
 pub use organizer::Organizer;

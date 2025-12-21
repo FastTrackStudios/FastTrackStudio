@@ -334,34 +334,62 @@ impl<M: Metadata> Parser<M> {
             return None;
         }
 
-        // Convert field enum to string to find matching nested group
+        // Convert field enum to string
         let field_name = format!("{:?}", field);
         
+        // First, check if we have field_value_descriptors for this field
+        // This takes precedence over nested groups
+        if let Some(descriptors) = group.field_value_descriptors.get(&field_name) {
+            // Use field value descriptors - each descriptor can match and return its value
+            let mut matches = Vec::new();
+            for descriptor in descriptors {
+                if descriptor.matches(input) {
+                    matches.push(descriptor.value.clone());
+                }
+            }
+            
+            if !matches.is_empty() {
+                // Convert matches to Value based on field type
+                // Try Vec<String> first (for fields like multi_mic), then String
+                if let Some(value) = M::create_vec_string_value(field, matches.clone()) {
+                    return Some(value);
+                }
+                
+                // For String fields, take the first match
+                if let Some(first_match) = matches.first() {
+                    if let Some(value) = M::create_string_value(field, first_match.clone()) {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+        
+        // Fall back to nested group approach (backward compatibility)
         // Find nested group that matches this field
         // The nested group name should match the field name (e.g., "MultiMic" group for MultiMic field)
-        let nested_group = group.groups.iter().find(|g| {
+        if let Some(nested_group) = group.groups.iter().find(|g| {
             let group_name_lower = g.name.to_lowercase().replace("_", "").replace(" ", "");
             let field_name_lower = field_name.to_lowercase().replace("_", "").replace(" ", "");
             group_name_lower == field_name_lower || g.name.eq_ignore_ascii_case(&field_name)
-        })?;
+        }) {
+            // Extract matching patterns from nested group
+            let matches = self.extract_patterns_from_group(input, nested_group, field);
+            
+            if matches.is_empty() {
+                return None;
+            }
 
-        // Extract matching patterns from nested group
-        let matches = self.extract_patterns_from_group(input, nested_group);
-        
-        if matches.is_empty() {
-            return None;
-        }
-
-        // Convert matches to Value based on field type
-        // Try Vec<String> first (for fields like multi_mic), then String
-        if let Some(value) = M::create_vec_string_value(field, matches.clone()) {
-            return Some(value);
-        }
-        
-        // For String fields, take the first match
-        if let Some(first_match) = matches.first() {
-            if let Some(value) = M::create_string_value(field, first_match.clone()) {
+            // Convert matches to Value based on field type
+            // Try Vec<String> first (for fields like multi_mic), then String
+            if let Some(value) = M::create_vec_string_value(field, matches.clone()) {
                 return Some(value);
+            }
+            
+            // For String fields, take the first match
+            if let Some(first_match) = matches.first() {
+                if let Some(value) = M::create_string_value(field, first_match.clone()) {
+                    return Some(value);
+                }
             }
         }
 
@@ -369,7 +397,23 @@ impl<M: Metadata> Parser<M> {
     }
 
     /// Extract matching patterns from a group
-    fn extract_patterns_from_group(&self, input: &str, group: &crate::Group<M>) -> Vec<String> {
+    /// If field_value_descriptors are available for this field, use them instead of simple patterns
+    fn extract_patterns_from_group(&self, input: &str, group: &crate::Group<M>, field: &M::Field) -> Vec<String> {
+        let field_name = format!("{:?}", field);
+        
+        // Check if we have field value descriptors for this field
+        if let Some(descriptors) = group.field_value_descriptors.get(&field_name) {
+            // Use field value descriptors - each descriptor can match and return its value
+            let mut matches = Vec::new();
+            for descriptor in descriptors {
+                if descriptor.matches(input) {
+                    matches.push(descriptor.value.clone());
+                }
+            }
+            return matches;
+        }
+        
+        // Fall back to simple pattern matching (backward compatibility)
         let input_lower = input.to_lowercase();
         let mut matches = Vec::new();
 
@@ -377,8 +421,8 @@ impl<M: Metadata> Parser<M> {
         for pattern in &group.patterns {
             let pattern_lower = pattern.to_lowercase();
             
-            // Check if pattern appears in input (word boundary aware would be better, but simple contains works for now)
-            if input_lower.contains(&pattern_lower) {
+            // Use word boundary matching (same as Group::matches)
+            if crate::group::Group::<M>::contains_word(&input_lower, &pattern_lower) {
                 matches.push(pattern.clone());
             }
         }

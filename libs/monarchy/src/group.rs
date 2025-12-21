@@ -1,4 +1,5 @@
 use crate::{IntoField, Metadata};
+use crate::field_value::FieldValueDescriptor;
 use serde::{Deserialize, Serialize};
 
 /// Helper trait to convert single items or collections into a Vec
@@ -120,6 +121,26 @@ pub struct Group<M: Metadata> {
     /// when both "Electronic Kit" and "Snare" patterns are present.
     /// Default is false, allowing groups to match independently.
     pub requires_parent_match: bool,
+    
+    /// Field value descriptors for metadata fields
+    /// 
+    /// This allows each metadata field value (e.g., "Out", "In", "Hi Hat", "Ride")
+    /// to have its own patterns and negative patterns, making them act more like separate groups.
+    /// 
+    /// The key is the field name (e.g., "MultiMic"), and the value is a list of descriptors
+    /// for each possible value of that field.
+    /// 
+    /// Example:
+    /// ```rust
+    /// field_value_descriptors: {
+    ///     "MultiMic": [
+    ///         FieldValueDescriptor { value: "Out", patterns: ["out"], negative_patterns: [] },
+    ///         FieldValueDescriptor { value: "In", patterns: ["in"], negative_patterns: [] },
+    ///         FieldValueDescriptor { value: "Hi Hat", patterns: ["hat", "hihat", "Hi-hat"], negative_patterns: [] },
+    ///     ]
+    /// }
+    /// ```
+    pub field_value_descriptors: std::collections::HashMap<String, Vec<FieldValueDescriptor>>,
 }
 
 impl<M: Metadata> Group<M> {
@@ -159,7 +180,10 @@ impl<M: Metadata> Group<M> {
     /// Check if text contains pattern as a whole word (not just as a substring)
     /// A word is defined as a sequence of alphanumeric characters
     /// The pattern must be surrounded by non-alphanumeric characters or at the start/end of the string
-    fn contains_word(text: &str, pattern: &str) -> bool {
+    /// Check if text contains pattern as a whole word (not just as a substring)
+    /// A word is defined as a sequence of alphanumeric characters
+    /// The pattern must be surrounded by non-alphanumeric characters or at the start/end of the string
+    pub fn contains_word(text: &str, pattern: &str) -> bool {
         if pattern.is_empty() {
             return false;
         }
@@ -217,6 +241,7 @@ impl<M: Metadata> GroupBuilder<M> {
                 transparent: false,
                 metadata_only: false,
                 requires_parent_match: false,
+                field_value_descriptors: std::collections::HashMap::new(),
             },
         }
     }
@@ -277,6 +302,31 @@ impl<M: Metadata> GroupBuilder<M> {
         // Store the field_group itself as a nested group so we can find it later
         // This allows the parser to extract values from the field's patterns
         self.group.groups.push(field_group);
+        self
+    }
+    
+    /// Add field value descriptors for a metadata field
+    /// 
+    /// This allows each metadata field value (e.g., "Out", "In", "Hi Hat", "Ride")
+    /// to have its own patterns and negative patterns.
+    /// 
+    /// # Example
+    /// 
+    /// ```ignore
+    /// Group::builder("Kick")
+    ///     .field_value_descriptors(
+    ///         ItemMetadataField::MultiMic,
+    ///         vec![
+    ///             FieldValueDescriptor::builder("Out").patterns(["out"]).build(),
+    ///             FieldValueDescriptor::builder("In").patterns(["in"]).build(),
+    ///         ]
+    ///     )
+    ///     .build()
+    /// ```
+    pub fn field_value_descriptors(mut self, field: M::Field, descriptors: Vec<FieldValueDescriptor>) -> Self {
+        let field_name = format!("{:?}", field);
+        self.group.metadata_fields.push(field);
+        self.group.field_value_descriptors.insert(field_name, descriptors);
         self
     }
 

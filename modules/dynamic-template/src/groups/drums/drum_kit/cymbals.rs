@@ -1,6 +1,8 @@
 //! Cymbals group definition
 
 use crate::item_metadata::prelude::*;
+use monarchy::FieldValueDescriptor;
+use crate::item_metadata::ItemMetadataField;
 
 /// Cymbals group
 pub struct Cymbals;
@@ -17,7 +19,32 @@ impl From<Cymbals> for ItemMetadataGroup {
             .multi_mic(oh_multi_mic)
             .build();
 
-        // Use the convenience method - extension trait is in scope via prelude
+        // Define cymbal types as field value descriptors
+        // Each cymbal type (Hi Hat, Ride, etc.) can have its own patterns
+        // Order matters - items will be sorted by the order of descriptors
+        let cymbal_type_descriptors = vec![
+            FieldValueDescriptor::builder("Hi Hat")
+                .patterns(["hat", "hh", "hihat", "hi-hat", "hi hat"])
+                .build(),
+            FieldValueDescriptor::builder("Ride")
+                .patterns(["ride"])
+                .build(),
+            FieldValueDescriptor::builder("Crash")
+                .patterns(["crash"])
+                .build(),
+            FieldValueDescriptor::builder("China")
+                .patterns(["china"])
+                .build(),
+            FieldValueDescriptor::builder("Splash")
+                .patterns(["splash"])
+                .build(),
+            FieldValueDescriptor::builder("Bell")
+                .patterns(["bell"])
+                .build(),
+        ];
+
+        // Use field_value_descriptors for MultiMic to distinguish cymbal types
+        // This allows "Hi Hat" and "Ride" to be separate entries
         ItemMetadataGroup::builder("Cymbals")
             .patterns([
                 "cymbal",
@@ -35,6 +62,7 @@ impl From<Cymbals> for ItemMetadataGroup {
                 "splash",
                 "bell",
             ])
+            .field_value_descriptors(ItemMetadataField::MultiMic, cymbal_type_descriptors)
             .group(oh_group)
             .build()
     }

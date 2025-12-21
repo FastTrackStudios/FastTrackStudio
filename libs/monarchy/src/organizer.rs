@@ -240,16 +240,39 @@ impl<M: Metadata> Organizer<M> {
 
                 // If we have multiple groups with different values, create sub-structures
                 // Only create sub-structures if we have 2+ different field values
-                // Try to sort by pattern order from metadata field groups if available
+                // Try to sort by pattern order from metadata field groups or field_value_descriptors if available
                 if field_groups.len() > 1 {
-                    // Try to get pattern order from metadata field groups (like "MultiMic") within this group
-                    // Look for groups that are metadata_only or have names like "MultiMic", "SUM", etc.
-                    let pattern_order: Option<Vec<String>> = group.groups.iter()
-                        .find(|g| g.name == "MultiMic" || g.name == "SUM" || g.metadata_only)
-                        .map(|g| g.patterns.clone());
+                    // First, try to get order from field_value_descriptors (for fields like MultiMic)
+                    let descriptor_order: Option<Vec<String>> = group.metadata_fields.iter()
+                        .find_map(|field| {
+                            let field_name = format!("{:?}", field);
+                            group.field_value_descriptors.get(&field_name)
+                                .map(|descriptors| descriptors.iter().map(|d| d.value.clone()).collect())
+                        });
                     
-                    // Sort field_groups by pattern order if available, otherwise preserve insertion order
-                    if let Some(ref patterns) = pattern_order {
+                    // If no descriptor order, try to get pattern order from metadata field groups (like "MultiMic") within this group
+                    // Look for groups that are metadata_only or have names like "MultiMic", "SUM", etc.
+                    let pattern_order: Option<Vec<String>> = if descriptor_order.is_none() {
+                        group.groups.iter()
+                            .find(|g| g.name == "MultiMic" || g.name == "SUM" || g.metadata_only)
+                            .map(|g| g.patterns.clone())
+                    } else {
+                        None
+                    };
+                    
+                    // Sort field_groups by descriptor order (preferred) or pattern order if available
+                    if let Some(ref order) = descriptor_order {
+                        field_groups.sort_by(|a, b| {
+                            let a_idx = order.iter().position(|v| a.0 == *v || a.0.to_lowercase() == v.to_lowercase());
+                            let b_idx = order.iter().position(|v| b.0 == *v || b.0.to_lowercase() == v.to_lowercase());
+                            match (a_idx, b_idx) {
+                                (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
+                                (Some(_), _) => std::cmp::Ordering::Less,
+                                (_, Some(_)) => std::cmp::Ordering::Greater,
+                                (_, _) => a.0.cmp(&b.0), // Fallback to alphabetical
+                            }
+                        });
+                    } else if let Some(ref patterns) = pattern_order {
                         field_groups.sort_by(|a, b| {
                             let a_idx = patterns.iter().position(|p| a.0 == *p || a.0.to_lowercase() == p.to_lowercase());
                             let b_idx = patterns.iter().position(|p| b.0 == *p || b.0.to_lowercase() == p.to_lowercase());
@@ -364,15 +387,38 @@ impl<M: Metadata> Organizer<M> {
 
         // If we have multiple groups with different values, create sub-structures
         // Only create sub-structures if we have 2+ different field values
-        // Try to sort by pattern order from metadata field groups if available
+        // Try to sort by pattern order from metadata field groups or field_value_descriptors if available
         if field_groups.len() > 1 {
-            // Try to get pattern order from metadata field groups (like "MultiMic") within this group
-            let pattern_order: Option<Vec<String>> = group.groups.iter()
-                .find(|g| g.name == "MultiMic" || g.name == "SUM" || g.metadata_only)
-                .map(|g| g.patterns.clone());
+            // First, try to get order from field_value_descriptors (for fields like MultiMic)
+            let descriptor_order: Option<Vec<String>> = group.metadata_fields.iter()
+                .find_map(|field| {
+                    let field_name = format!("{:?}", field);
+                    group.field_value_descriptors.get(&field_name)
+                        .map(|descriptors| descriptors.iter().map(|d| d.value.clone()).collect())
+                });
             
-            // Sort field_groups by pattern order if available, otherwise preserve insertion order
-            if let Some(ref patterns) = pattern_order {
+            // If no descriptor order, try to get pattern order from metadata field groups (like "MultiMic") within this group
+            let pattern_order: Option<Vec<String>> = if descriptor_order.is_none() {
+                group.groups.iter()
+                    .find(|g| g.name == "MultiMic" || g.name == "SUM" || g.metadata_only)
+                    .map(|g| g.patterns.clone())
+            } else {
+                None
+            };
+            
+            // Sort field_groups by descriptor order (preferred) or pattern order if available
+            if let Some(ref order) = descriptor_order {
+                field_groups.sort_by(|a, b| {
+                    let a_idx = order.iter().position(|v| a.0 == *v || a.0.to_lowercase() == v.to_lowercase());
+                    let b_idx = order.iter().position(|v| b.0 == *v || b.0.to_lowercase() == v.to_lowercase());
+                    match (a_idx, b_idx) {
+                        (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
+                        (Some(_), _) => std::cmp::Ordering::Less,
+                        (_, Some(_)) => std::cmp::Ordering::Greater,
+                        (_, _) => a.0.cmp(&b.0), // Fallback to alphabetical
+                    }
+                });
+            } else if let Some(ref patterns) = pattern_order {
                 field_groups.sort_by(|a, b| {
                     let a_idx = patterns.iter().position(|p| a.0 == *p || a.0.to_lowercase() == p.to_lowercase());
                     let b_idx = patterns.iter().position(|p| b.0 == *p || b.0.to_lowercase() == p.to_lowercase());

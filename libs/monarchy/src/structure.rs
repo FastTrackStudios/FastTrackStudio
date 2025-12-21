@@ -228,13 +228,16 @@ impl<M: Metadata> Structure<M> {
             //    AND it has only one child (if it has multiple children, keep it as an organizational level), OR
             // 3. It has no items AND all its children are deepest groups (no organizational subgroups)
             //    This removes intermediate levels like "Drum Kit" when all children are deepest groups (Kick, Snare)
+            // 4. It has no items AND no siblings (it's the only child of its parent) - remove it to minimize hierarchy
+            //    This removes "Drum Kit" when it's the only child of "Drums" and there are no other groups like "Electronic Kit"
             // BUT: Keep the group if it has siblings (other groups at the same level) - this preserves organizational structure
             // when multiple groups exist (e.g., "Drum Kit" and "Electronic Kit" both under "Drums")
             let has_siblings = total_siblings > 1;
             if !has_siblings && ((has_single_child && has_no_items && (!is_last_group || single_child_is_deepest)) ||
                (has_no_items && all_children_are_last_groups && !organizes_items && has_single_child) ||
-               (has_no_items && all_children_are_deepest && !organizes_items)) {
-                eprintln!("{}[COLLAPSE] REMOVING intermediate: '{}' (promoting {} children)", 
+               (has_no_items && all_children_are_deepest && !organizes_items) ||
+               (has_no_items && !has_siblings)) {
+                eprintln!("{}[COLLAPSE] REMOVING intermediate: '{}' (promoting {} children, no siblings)", 
                          indent, child.name, child.children.len());
                 // Promote all children, not just the first one
                 new_children.extend(std::mem::take(&mut child.children));
