@@ -26,7 +26,7 @@ pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
         .build();
 
     let channel = Group::builder("Channel")
-        .patterns(["L", "R", "C", "Left", "Right", "Center"])
+        .patterns(["L", "C", "R", "Left", "Center", "Right"])
         .build();
 
     let playlist = Group::builder("Playlist")
@@ -38,7 +38,7 @@ pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
         .build();
 
     let performer = Group::builder("Performer")
-        .patterns(["Cody"])
+        .patterns(["Cody", "John", "JT", "Bri"])
         .build();
 
     let rec_tag = Group::builder("RecTag")

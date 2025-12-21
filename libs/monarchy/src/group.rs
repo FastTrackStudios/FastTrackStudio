@@ -173,6 +173,19 @@ pub struct Group<M: Metadata> {
     /// }
     /// ```
     pub field_grouping_strategies: std::collections::HashMap<String, FieldGroupingStrategy>,
+    
+    /// Default values for metadata fields when items don't have the field
+    /// 
+    /// When grouping by a metadata field, items without that field will be treated
+    /// as if they have the field with the default value. This allows items without
+    /// a field to be grouped alongside items that do have the field.
+    /// 
+    /// Example: For Layers field with default "Main":
+    /// - "Guitar Clean" (no layer) → treated as "Guitar Clean" with layer "Main"
+    /// - "Guitar Clean DBL" (layer: "DBL") → grouped alongside "Main" items
+    /// 
+    /// The key is the field name (e.g., "Layers"), and the value is the default value (e.g., "Main").
+    pub field_default_values: std::collections::HashMap<String, String>,
 }
 
 impl<M: Metadata> Group<M> {
@@ -275,6 +288,7 @@ impl<M: Metadata> GroupBuilder<M> {
                 requires_parent_match: false,
                 field_value_descriptors: std::collections::HashMap::new(),
                 field_grouping_strategies: std::collections::HashMap::new(),
+                field_default_values: std::collections::HashMap::new(),
             },
         }
     }
@@ -498,6 +512,29 @@ impl<M: Metadata> GroupBuilder<M> {
     pub fn field_strategy(mut self, field: M::Field, strategy: FieldGroupingStrategy) -> Self {
         let field_name = format!("{:?}", field);
         self.group.field_grouping_strategies.insert(field_name, strategy);
+        self
+    }
+
+    /// Set the default value for a metadata field when items don't have that field
+    /// 
+    /// When grouping by a metadata field, items without that field will be treated
+    /// as if they have the field with the default value. This allows items without
+    /// a field to be grouped alongside items that do have the field.
+    /// 
+    /// # Example
+    /// 
+    /// ```ignore
+    /// Group::builder("Electric Guitar")
+    ///     .field_default_value(ItemMetadataField::Layers, "Main")
+    ///     .build()
+    /// ```
+    /// 
+    /// This means:
+    /// - "Guitar Clean" (no layer) → treated as "Guitar Clean" with layer "Main"
+    /// - "Guitar Clean DBL" (layer: "DBL") → grouped alongside "Main" items
+    pub fn field_default_value(mut self, field: M::Field, default_value: impl Into<String>) -> Self {
+        let field_name = format!("{:?}", field);
+        self.group.field_default_values.insert(field_name, default_value.into());
         self
     }
 

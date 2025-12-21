@@ -281,6 +281,9 @@ impl<M: Metadata> Organizer<M> {
         let mut field_groups: Vec<(String, Vec<Item<M>>)> = Vec::new();
         let mut items_without_field = Vec::new();
 
+        // Check if there's a default value for this field
+        let default_value = group.field_default_values.get(&field_name).cloned();
+
         for item in items {
             if let Some(value) = item.metadata.get(current_field) {
                 let value_str = self.format_metadata_value_for_grouping(&value);
@@ -289,24 +292,80 @@ impl<M: Metadata> Organizer<M> {
                 } else {
                     field_groups.push((value_str, vec![item]));
                 }
+            } else if let Some(ref default) = default_value {
+                // Item doesn't have the field, but there's a default value
+                // Treat it as if it has the field with the default value
+                if let Some(entry) = field_groups.iter_mut().find(|(key, _)| key == default) {
+                    entry.1.push(item);
+                } else {
+                    field_groups.push((default.clone(), vec![item]));
+                }
             } else {
                 items_without_field.push(item);
             }
         }
 
-        // Sort field_groups by descriptor order if available
+        // Sort field_groups by descriptor order if available, otherwise by nested group pattern order
+        // Default value should always come first if present
         if let Some(descriptors) = group.field_value_descriptors.get(&field_name) {
             let descriptor_order: Vec<String> = descriptors.iter().map(|d| d.value.clone()).collect();
             field_groups.sort_by(|a, b| {
-                let a_idx = descriptor_order.iter().position(|v| a.0 == *v || a.0.to_lowercase() == v.to_lowercase());
-                let b_idx = descriptor_order.iter().position(|v| b.0 == *v || b.0.to_lowercase() == v.to_lowercase());
-                match (a_idx, b_idx) {
-                    (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
-                    (Some(_), _) => std::cmp::Ordering::Less,
-                    (_, Some(_)) => std::cmp::Ordering::Greater,
-                    (_, _) => a.0.cmp(&b.0),
+                // Check if either is the default value - default comes first
+                let a_is_default = default_value.as_ref().map_or(false, |d| a.0 == *d || a.0.to_lowercase() == d.to_lowercase());
+                let b_is_default = default_value.as_ref().map_or(false, |d| b.0 == *d || b.0.to_lowercase() == d.to_lowercase());
+                match (a_is_default, b_is_default) {
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
+                    _ => {
+                        // Neither or both are default - use descriptor order
+                        let a_idx = descriptor_order.iter().position(|v| a.0 == *v || a.0.to_lowercase() == v.to_lowercase());
+                        let b_idx = descriptor_order.iter().position(|v| b.0 == *v || b.0.to_lowercase() == v.to_lowercase());
+                        match (a_idx, b_idx) {
+                            (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
+                            (Some(_), _) => std::cmp::Ordering::Less,
+                            (_, Some(_)) => std::cmp::Ordering::Greater,
+                            (_, _) => a.0.cmp(&b.0),
+                        }
+                    }
                 }
             });
+        } else {
+            // Fall back to nested group pattern order if available
+            // Find nested group that matches this field name
+            if let Some(nested_group) = group.groups.iter().find(|g| {
+                let group_name_lower = g.name.to_lowercase().replace("_", "").replace(" ", "");
+                let field_name_lower = field_name.to_lowercase().replace("_", "").replace(" ", "");
+                group_name_lower == field_name_lower || g.name.eq_ignore_ascii_case(&field_name)
+            }) {
+                // Use the nested group's patterns as the sort order
+                let pattern_order: Vec<String> = nested_group.patterns.clone();
+                field_groups.sort_by(|a, b| {
+                    // Check if either is the default value - default comes first
+                    let a_is_default = default_value.as_ref().map_or(false, |d| a.0 == *d || a.0.to_lowercase() == d.to_lowercase());
+                    let b_is_default = default_value.as_ref().map_or(false, |d| b.0 == *d || b.0.to_lowercase() == d.to_lowercase());
+                    match (a_is_default, b_is_default) {
+                        (true, false) => std::cmp::Ordering::Less,
+                        (false, true) => std::cmp::Ordering::Greater,
+                        _ => {
+                            // Neither or both are default - use pattern order
+                            let a_idx = pattern_order.iter().position(|v| {
+                                a.0.eq_ignore_ascii_case(v) || 
+                                a.0.to_lowercase() == v.to_lowercase()
+                            });
+                            let b_idx = pattern_order.iter().position(|v| {
+                                b.0.eq_ignore_ascii_case(v) || 
+                                b.0.to_lowercase() == v.to_lowercase()
+                            });
+                            match (a_idx, b_idx) {
+                                (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
+                                (Some(_), _) => std::cmp::Ordering::Less,
+                                (_, Some(_)) => std::cmp::Ordering::Greater,
+                                (_, _) => a.0.cmp(&b.0),
+                            }
+                        }
+                    }
+                });
+            }
         }
 
         // Apply the grouping strategy
