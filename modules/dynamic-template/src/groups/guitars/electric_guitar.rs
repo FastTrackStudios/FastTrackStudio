@@ -1,6 +1,7 @@
 //! Electric guitar group definition
 
 use crate::item_metadata::prelude::*;
+use crate::groups::fx;
 use monarchy::{FieldGroupingStrategy, FieldValueDescriptor};
 
 /// Electric guitar group
@@ -41,6 +42,7 @@ impl From<ElectricGuitar> for ItemMetadataGroup {
             // The field_value_descriptors handle the MultiMic value extraction and matching
             .field_value_descriptors(ItemMetadataField::MultiMic, multi_mic_descriptors)
             .field_strategy(ItemMetadataField::MultiMic, FieldGroupingStrategy::MainOnContainer)
+            .group(fx::fx_group()) // Allow FX to be nested under Electric Guitar (e.g., "Guitar Clean Verb")
             .build()
     }
 }

@@ -1,6 +1,7 @@
 //! Drum-related group definitions
 
 use crate::item_metadata::ItemMetadata;
+use crate::groups::fx;
 use monarchy::Group;
 
 pub mod drum_kit;
@@ -24,6 +25,7 @@ impl From<Drums> for Group<ItemMetadata> {
             // The nested groups will handle pattern matching
             .group(DrumKit)
             .group(ElectronicKit)
+            .group(fx::fx_group()) // Allow FX to be nested under Drums (e.g., "Drum Verb")
             .build()
     }
 }

@@ -1,6 +1,7 @@
 //! Bass-related group definitions
 
 use crate::item_metadata::ItemMetadata;
+use crate::groups::fx;
 use monarchy::Group;
 
 pub mod bass_guitar;
@@ -24,6 +25,7 @@ impl From<Bass> for Group<ItemMetadata> {
             .group(BassGuitar)
             .group(SynthBass)
             .group(UprightBass)
+            .group(fx::fx_group()) // Allow FX to be nested under Bass (e.g., "Bass Verb")
             .build()
     }
 }
