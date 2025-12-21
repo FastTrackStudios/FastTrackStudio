@@ -2,6 +2,23 @@ use crate::{IntoField, Metadata};
 use crate::field_value::FieldValueDescriptor;
 use serde::{Deserialize, Serialize};
 
+/// Strategy for how items should be grouped when a metadata field is present
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FieldGroupingStrategy {
+    /// Default behavior: items with the field value become children grouped by value
+    /// Items without the field stay at the current level
+    Default,
+    
+    /// MainOnContainer: items WITHOUT the field go on the folder track (container),
+    /// items WITH the field become children grouped by field value
+    /// 
+    /// Example: For MultiMic field with MainOnContainer:
+    /// - "Guitar Clean" (no MultiMic) → goes on "Clean" folder track
+    /// - "Guitar Clean Amp" (MultiMic: "Amp") → becomes child under "Clean"
+    /// - "Guitar Clean DI" (MultiMic: "DI") → becomes child under "Clean"
+    MainOnContainer,
+}
+
 /// Helper trait to convert single items or collections into a Vec
 /// 
 /// This allows builder methods to accept both single items and collections:
@@ -141,6 +158,21 @@ pub struct Group<M: Metadata> {
     /// }
     /// ```
     pub field_value_descriptors: std::collections::HashMap<String, Vec<FieldValueDescriptor>>,
+    
+    /// Field grouping strategies for metadata fields
+    /// 
+    /// This allows different metadata fields to use different grouping behaviors.
+    /// The key is the field name (e.g., "MultiMic"), and the value is the strategy to use.
+    /// 
+    /// If no strategy is specified for a field, `FieldGroupingStrategy::Default` is used.
+    /// 
+    /// Example:
+    /// ```rust
+    /// field_grouping_strategies: {
+    ///     "MultiMic": FieldGroupingStrategy::MainOnContainer,
+    /// }
+    /// ```
+    pub field_grouping_strategies: std::collections::HashMap<String, FieldGroupingStrategy>,
 }
 
 impl<M: Metadata> Group<M> {
@@ -242,6 +274,7 @@ impl<M: Metadata> GroupBuilder<M> {
                 metadata_only: false,
                 requires_parent_match: false,
                 field_value_descriptors: std::collections::HashMap::new(),
+                field_grouping_strategies: std::collections::HashMap::new(),
             },
         }
     }
@@ -440,6 +473,31 @@ impl<M: Metadata> GroupBuilder<M> {
     /// if it also matches the "Electronic Kit" patterns (e.g., "electronic", "808", etc.).
     pub fn requires_parent_match(mut self) -> Self {
         self.group.requires_parent_match = true;
+        self
+    }
+    
+    /// Set the grouping strategy for a specific metadata field
+    /// 
+    /// This allows different metadata fields to use different grouping behaviors.
+    /// The order of fields in `metadata_fields` determines their priority for grouping.
+    /// 
+    /// # Example
+    /// 
+    /// ```ignore
+    /// Group::builder("Guitar")
+    ///     .field([ItemMetadataField::Arrangement, ItemMetadataField::MultiMic])
+    ///     .field_strategy(ItemMetadataField::MultiMic, FieldGroupingStrategy::MainOnContainer)
+    ///     .build()
+    /// ```
+    /// 
+    /// With this configuration:
+    /// - Items are first grouped by Arrangement (priority 1)
+    /// - Then by MultiMic (priority 2) using MainOnContainer strategy
+    /// - Items without MultiMic go on the folder track
+    /// - Items with MultiMic become children grouped by value
+    pub fn field_strategy(mut self, field: M::Field, strategy: FieldGroupingStrategy) -> Self {
+        let field_name = format!("{:?}", field);
+        self.group.field_grouping_strategies.insert(field_name, strategy);
         self
     }
 

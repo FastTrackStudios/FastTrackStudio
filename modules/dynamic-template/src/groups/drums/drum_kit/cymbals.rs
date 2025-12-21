@@ -9,14 +9,20 @@ pub struct Cymbals;
 
 impl From<Cymbals> for ItemMetadataGroup {
     fn from(_val: Cymbals) -> Self {
-        // Define OH (overhead) positions as a nested group with L/R metadata
-        let oh_multi_mic = ItemMetadataGroup::builder("MultiMic")
-            .patterns(["L", "R", "Left", "Right"])
-            .build();
+        // Define OH (overhead) positions using field_value_descriptors to ensure L comes before R
+        // Order matters - items will be sorted by the order of descriptors
+        let oh_position_descriptors = vec![
+            FieldValueDescriptor::builder("L")
+                .patterns(["L", "Left", "left"])
+                .build(),
+            FieldValueDescriptor::builder("R")
+                .patterns(["R", "Right", "right"])
+                .build(),
+        ];
 
         let oh_group = ItemMetadataGroup::builder("OH")
             .patterns(["oh", "overhead", "overheads"])
-            .multi_mic(oh_multi_mic)
+            .field_value_descriptors(ItemMetadataField::MultiMic, oh_position_descriptors)
             .build();
 
         // Define cymbal types as field value descriptors

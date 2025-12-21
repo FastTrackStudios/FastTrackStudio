@@ -18,7 +18,7 @@ pub use config::{Config, ConfigBuilder, FallbackStrategy, ParserRules};
 pub use error::{MonarchyError, Result};
 pub use field::{IntoField, MetadataField};
 pub use field_value::FieldValueDescriptor;
-pub use group::{Group, GroupBuilder};
+pub use group::{FieldGroupingStrategy, Group, GroupBuilder};
 pub use metadata::Metadata;
 pub use organizer::Organizer;
 pub use parser::Parser;

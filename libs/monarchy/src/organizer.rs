@@ -139,9 +139,10 @@ impl<M: Metadata> Organizer<M> {
                 // Create sub-structure for tagged collection
                 let mut collection_structure = Structure::new(&tagged_collection_group.name);
                 // Group matching items by metadata fields if needed
-                let grouped_matching = self.group_items_by_metadata_fields(&matching_items, group);
+                let grouped_matching = self.group_by_metadata_fields_recursive(matching_items, group, &group.metadata_fields);
                 if grouped_matching.children.is_empty() && grouped_matching.items.is_empty() {
-                    collection_structure.items = matching_items;
+                    // If grouping didn't create structure, use the items from the grouped result
+                    collection_structure.items = grouped_matching.items;
                 } else {
                     collection_structure.children = grouped_matching.children;
                     collection_structure.items = grouped_matching.items;
@@ -149,17 +150,17 @@ impl<M: Metadata> Organizer<M> {
                 structure.children.push(collection_structure);
 
                 // Group non-matching items by metadata fields if needed
-                let grouped_non_matching = self.group_items_by_metadata_fields(&non_matching_items, group);
+                let grouped_non_matching = self.group_by_metadata_fields_recursive(non_matching_items, group, &group.metadata_fields);
                 structure.children.extend(grouped_non_matching.children);
                 structure.items = grouped_non_matching.items;
             } else if !matching_items.is_empty() {
                 // All items match - group them by metadata fields if needed
-                let grouped = self.group_items_by_metadata_fields(&matching_items, group);
+                let grouped = self.group_by_metadata_fields_recursive(matching_items, group, &group.metadata_fields);
                 structure.children = grouped.children;
                 structure.items = grouped.items;
             } else {
                 // No items match - group non-matching items by metadata fields if needed
-                let grouped = self.group_items_by_metadata_fields(&non_matching_items, group);
+                let grouped = self.group_by_metadata_fields_recursive(non_matching_items, group, &group.metadata_fields);
                 structure.children = grouped.children;
                 structure.items = grouped.items;
             }
@@ -202,106 +203,10 @@ impl<M: Metadata> Organizer<M> {
             // Check if we should group items by metadata field values
             // If multiple items have different values for metadata fields, create sub-structures
             if !group_items.is_empty() && !group.metadata_fields.is_empty() {
-                // Group items by their metadata field values
-                // Use Vec to preserve insertion order (first occurrence order)
-                let mut field_groups: Vec<(String, Vec<Item<M>>)> = Vec::new();
-                let mut items_without_field_values = Vec::new();
-
-                for item in group_items {
-                    // Get the first metadata field value (we'll group by the first field that has a value)
-                    let mut value_str_opt: Option<String> = None;
-                    for field in &group.metadata_fields {
-                        if let Some(value) = item.metadata.get(field) {
-                            // Convert value to string for grouping
-                            value_str_opt = Some(self.format_metadata_value_for_grouping(&value));
-                            eprintln!("DEBUG: Item '{}' has field value: {:?} -> '{}'", 
-                                item.original, field, value_str_opt.as_ref().unwrap());
-                            break; // Use the first field that has a value
-                        } else {
-                            eprintln!("DEBUG: Item '{}' field {:?} has no value", item.original, field);
-                        }
-                    }
-
-                    if let Some(value_str) = value_str_opt {
-                        // Find existing entry or create new one
-                        if let Some(entry) = field_groups.iter_mut().find(|(key, _)| key == &value_str) {
-                            entry.1.push(item);
-                        } else {
-                            field_groups.push((value_str, vec![item]));
-                        }
-                    } else {
-                        eprintln!("DEBUG: Item '{}' has no field values, adding to items_without_field_values", item.original);
-                        items_without_field_values.push(item);
-                    }
-                }
-                
-                eprintln!("DEBUG: Created {} field_groups, {} items_without_field_values", 
-                    field_groups.len(), items_without_field_values.len());
-
-                // If we have multiple groups with different values, create sub-structures
-                // Only create sub-structures if we have 2+ different field values
-                // Try to sort by pattern order from metadata field groups or field_value_descriptors if available
-                if field_groups.len() > 1 {
-                    // First, try to get order from field_value_descriptors (for fields like MultiMic)
-                    let descriptor_order: Option<Vec<String>> = group.metadata_fields.iter()
-                        .find_map(|field| {
-                            let field_name = format!("{:?}", field);
-                            group.field_value_descriptors.get(&field_name)
-                                .map(|descriptors| descriptors.iter().map(|d| d.value.clone()).collect())
-                        });
-                    
-                    // If no descriptor order, try to get pattern order from metadata field groups (like "MultiMic") within this group
-                    // Look for groups that are metadata_only or have names like "MultiMic", "SUM", etc.
-                    let pattern_order: Option<Vec<String>> = if descriptor_order.is_none() {
-                        group.groups.iter()
-                            .find(|g| g.name == "MultiMic" || g.name == "SUM" || g.metadata_only)
-                            .map(|g| g.patterns.clone())
-                    } else {
-                        None
-                    };
-                    
-                    // Sort field_groups by descriptor order (preferred) or pattern order if available
-                    if let Some(ref order) = descriptor_order {
-                        field_groups.sort_by(|a, b| {
-                            let a_idx = order.iter().position(|v| a.0 == *v || a.0.to_lowercase() == v.to_lowercase());
-                            let b_idx = order.iter().position(|v| b.0 == *v || b.0.to_lowercase() == v.to_lowercase());
-                            match (a_idx, b_idx) {
-                                (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
-                                (Some(_), _) => std::cmp::Ordering::Less,
-                                (_, Some(_)) => std::cmp::Ordering::Greater,
-                                (_, _) => a.0.cmp(&b.0), // Fallback to alphabetical
-                            }
-                        });
-                    } else if let Some(ref patterns) = pattern_order {
-                        field_groups.sort_by(|a, b| {
-                            let a_idx = patterns.iter().position(|p| a.0 == *p || a.0.to_lowercase() == p.to_lowercase());
-                            let b_idx = patterns.iter().position(|p| b.0 == *p || b.0.to_lowercase() == p.to_lowercase());
-                            match (a_idx, b_idx) {
-                                (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
-                                (Some(_), _) => std::cmp::Ordering::Less,
-                                (_, Some(_)) => std::cmp::Ordering::Greater,
-                                (_, _) => a.0.cmp(&b.0), // Fallback to alphabetical
-                            }
-                        });
-                    }
-                    
-                    // Create sub-structures for each unique field value
-                    for (field_key, items) in field_groups {
-                        let mut sub_structure = Structure::new(&field_key);
-                        sub_structure.items = items;
-                        structure.children.push(sub_structure);
-                    }
-
-                    // Add items without field values to the current level
-                    structure.items = items_without_field_values;
-                } else if field_groups.len() == 1 {
-                    // Only one unique value - keep items at current level (no need for sub-structure)
-                    structure.items = field_groups[0].1.clone();
-                    structure.items.extend(items_without_field_values);
-                } else {
-                    // No field values found - keep items at current level
-                    structure.items = items_without_field_values;
-                }
+                // Use recursive grouping that respects field priority order and strategies
+                let grouped = self.group_by_metadata_fields_recursive(group_items, group, &group.metadata_fields);
+                structure.items = grouped.items;
+                structure.children = grouped.children;
             } else {
                 // No metadata fields to group by - add items directly to this level
                 structure.items = group_items;
@@ -345,108 +250,145 @@ impl<M: Metadata> Organizer<M> {
         structure
     }
 
-    /// Group items by their metadata field values
+    /// Recursively group items by metadata fields in priority order
     /// 
-    /// If multiple items have different values for metadata fields, creates sub-structures.
-    /// Returns a Structure with children (if grouping occurred) and items (if not grouped or items without values).
-    fn group_items_by_metadata_fields(&self, items: &[Item<M>], group: &crate::Group<M>) -> Structure<M> {
+    /// Processes fields in the order they appear in `remaining_fields`, applying
+    /// the appropriate grouping strategy for each field.
+    fn group_by_metadata_fields_recursive(
+        &self,
+        items: Vec<Item<M>>,
+        group: &crate::Group<M>,
+        remaining_fields: &[M::Field],
+    ) -> Structure<M> {
         let mut result = Structure::new("temp");
         
-        if items.is_empty() || group.metadata_fields.is_empty() {
-            result.items = items.to_vec();
+        if items.is_empty() || remaining_fields.is_empty() {
+            result.items = items;
             return result;
         }
 
-        // Group items by their metadata field values
-        // Use Vec to preserve insertion order (first occurrence order)
+        // Get the first field (highest priority)
+        let current_field = &remaining_fields[0];
+        let remaining_fields = &remaining_fields[1..];
+        
+        let field_name = format!("{:?}", current_field);
+        let strategy = group.field_grouping_strategies
+            .get(&field_name)
+            .cloned()
+            .unwrap_or(crate::FieldGroupingStrategy::Default);
+
+        // Group items by this field's value
         let mut field_groups: Vec<(String, Vec<Item<M>>)> = Vec::new();
-        let mut items_without_field_values = Vec::new();
+        let mut items_without_field = Vec::new();
 
         for item in items {
-            // Get the first metadata field value (we'll group by the first field that has a value)
-            let mut value_str_opt: Option<String> = None;
-            for field in &group.metadata_fields {
-                if let Some(value) = item.metadata.get(field) {
-                    // Convert value to string for grouping
-                    value_str_opt = Some(self.format_metadata_value_for_grouping(&value));
-                    break; // Use the first field that has a value
-                }
-            }
-
-            if let Some(value_str) = value_str_opt {
-                // Find existing entry or create new one
+            if let Some(value) = item.metadata.get(current_field) {
+                let value_str = self.format_metadata_value_for_grouping(&value);
                 if let Some(entry) = field_groups.iter_mut().find(|(key, _)| key == &value_str) {
-                    entry.1.push(item.clone());
+                    entry.1.push(item);
                 } else {
-                    field_groups.push((value_str, vec![item.clone()]));
+                    field_groups.push((value_str, vec![item]));
                 }
             } else {
-                items_without_field_values.push(item.clone());
+                items_without_field.push(item);
             }
         }
 
-        // If we have multiple groups with different values, create sub-structures
-        // Only create sub-structures if we have 2+ different field values
-        // Try to sort by pattern order from metadata field groups or field_value_descriptors if available
-        if field_groups.len() > 1 {
-            // First, try to get order from field_value_descriptors (for fields like MultiMic)
-            let descriptor_order: Option<Vec<String>> = group.metadata_fields.iter()
-                .find_map(|field| {
-                    let field_name = format!("{:?}", field);
-                    group.field_value_descriptors.get(&field_name)
-                        .map(|descriptors| descriptors.iter().map(|d| d.value.clone()).collect())
-                });
-            
-            // If no descriptor order, try to get pattern order from metadata field groups (like "MultiMic") within this group
-            let pattern_order: Option<Vec<String>> = if descriptor_order.is_none() {
-                group.groups.iter()
-                    .find(|g| g.name == "MultiMic" || g.name == "SUM" || g.metadata_only)
-                    .map(|g| g.patterns.clone())
-            } else {
-                None
-            };
-            
-            // Sort field_groups by descriptor order (preferred) or pattern order if available
-            if let Some(ref order) = descriptor_order {
-                field_groups.sort_by(|a, b| {
-                    let a_idx = order.iter().position(|v| a.0 == *v || a.0.to_lowercase() == v.to_lowercase());
-                    let b_idx = order.iter().position(|v| b.0 == *v || b.0.to_lowercase() == v.to_lowercase());
-                    match (a_idx, b_idx) {
-                        (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
-                        (Some(_), _) => std::cmp::Ordering::Less,
-                        (_, Some(_)) => std::cmp::Ordering::Greater,
-                        (_, _) => a.0.cmp(&b.0), // Fallback to alphabetical
-                    }
-                });
-            } else if let Some(ref patterns) = pattern_order {
-                field_groups.sort_by(|a, b| {
-                    let a_idx = patterns.iter().position(|p| a.0 == *p || a.0.to_lowercase() == p.to_lowercase());
-                    let b_idx = patterns.iter().position(|p| b.0 == *p || b.0.to_lowercase() == p.to_lowercase());
-                    match (a_idx, b_idx) {
-                        (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
-                        (Some(_), _) => std::cmp::Ordering::Less,
-                        (_, Some(_)) => std::cmp::Ordering::Greater,
-                        (_, _) => a.0.cmp(&b.0), // Fallback to alphabetical
-                    }
-                });
-            }
-            
-            // Create sub-structures for each unique field value
-            for (field_key, items) in field_groups {
-                let mut sub_structure = Structure::new(&field_key);
-                sub_structure.items = items;
-                result.children.push(sub_structure);
-            }
+        // Sort field_groups by descriptor order if available
+        if let Some(descriptors) = group.field_value_descriptors.get(&field_name) {
+            let descriptor_order: Vec<String> = descriptors.iter().map(|d| d.value.clone()).collect();
+            field_groups.sort_by(|a, b| {
+                let a_idx = descriptor_order.iter().position(|v| a.0 == *v || a.0.to_lowercase() == v.to_lowercase());
+                let b_idx = descriptor_order.iter().position(|v| b.0 == *v || b.0.to_lowercase() == v.to_lowercase());
+                match (a_idx, b_idx) {
+                    (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
+                    (Some(_), _) => std::cmp::Ordering::Less,
+                    (_, Some(_)) => std::cmp::Ordering::Greater,
+                    (_, _) => a.0.cmp(&b.0),
+                }
+            });
+        }
 
-            // Add items without field values to the current level
-            result.items = items_without_field_values;
-        } else if field_groups.len() == 1 {
-            // Only one unique value - keep items at current level (no need for sub-structure)
-            result.items = field_groups[0].1.clone();
-            result.items.extend(items_without_field_values);
-        } else {
-            // No field values found - keep items at current level
-            result.items = items_without_field_values;
+        // Apply the grouping strategy
+        match strategy {
+            crate::FieldGroupingStrategy::Default => {
+                // Default: items with field values become children, items without stay at current level
+                if field_groups.len() > 1 {
+                    // Multiple values - create sub-structures
+                    for (field_key, items) in field_groups {
+                        let mut sub_structure = self.group_by_metadata_fields_recursive(items, group, remaining_fields);
+                        sub_structure.name = field_key;
+                        sub_structure.display_name = sub_structure.name.clone();
+                        result.children.push(sub_structure);
+                    }
+                    // Items without this field stay at current level, but process remaining fields
+                    if !items_without_field.is_empty() {
+                        let without_field_structure = self.group_by_metadata_fields_recursive(items_without_field, group, remaining_fields);
+                        result.items = without_field_structure.items;
+                        result.children.extend(without_field_structure.children);
+                    }
+                } else if field_groups.len() == 1 {
+                    // Only one value - check if we need to create sub-structure
+                    // If there are remaining fields or items without field, create sub-structure
+                    // Otherwise, keep at current level
+                    let (field_key, items) = field_groups.remove(0);
+                    let processed = self.group_by_metadata_fields_recursive(items, group, remaining_fields);
+                    
+                    // If there are remaining fields to process or children were created, we need a sub-structure
+                    // Also create sub-structure if there are items without this field (they'll be at current level)
+                    if !remaining_fields.is_empty() || !processed.children.is_empty() || !items_without_field.is_empty() {
+                        let mut sub_structure = processed;
+                        sub_structure.name = field_key;
+                        sub_structure.display_name = sub_structure.name.clone();
+                        result.children.push(sub_structure);
+                    } else {
+                        // No remaining fields and no children - keep at current level
+                        result.items = processed.items;
+                        result.children = processed.children;
+                    }
+                    
+                    // Also process items without field
+                    if !items_without_field.is_empty() {
+                        let without_field_structure = self.group_by_metadata_fields_recursive(items_without_field, group, remaining_fields);
+                        result.items.extend(without_field_structure.items);
+                        result.children.extend(without_field_structure.children);
+                    }
+                } else {
+                    // No field values - process remaining fields
+                    let processed = self.group_by_metadata_fields_recursive(items_without_field, group, remaining_fields);
+                    result.items = processed.items;
+                    result.children = processed.children;
+                }
+            }
+            crate::FieldGroupingStrategy::MainOnContainer => {
+                // MainOnContainer: items WITHOUT field go on folder track, items WITH field become children
+                // When MultiMic is the last field, items with MultiMic become tracks (not folders)
+                // The key: items without MultiMic go ON the folder track itself, items with MultiMic become child tracks
+                if !field_groups.is_empty() {
+                    // Items with field values become children (tracks when remaining_fields is empty)
+                    for (field_key, items) in field_groups {
+                        let sub_structure = self.group_by_metadata_fields_recursive(items, group, remaining_fields);
+                        // If remaining_fields is empty, this should be a structure with only items (will become a track)
+                        // If remaining_fields is not empty, it might have children (will become a folder)
+                        let mut sub_structure = sub_structure;
+                        sub_structure.name = field_key.clone();
+                        sub_structure.display_name = field_key;
+                        // Always add as child - Structure-to-Track conversion will handle making it a track vs folder
+                        result.children.push(sub_structure);
+                    }
+                    // Items without field go on the folder track (current level)
+                    if !items_without_field.is_empty() {
+                        let without_field_structure = self.group_by_metadata_fields_recursive(items_without_field, group, remaining_fields);
+                        result.items = without_field_structure.items;
+                        result.children.extend(without_field_structure.children);
+                    }
+                } else {
+                    // No items with field - all items go on folder track
+                    let processed = self.group_by_metadata_fields_recursive(items_without_field, group, remaining_fields);
+                    result.items = processed.items;
+                    result.children = processed.children;
+                }
+            }
         }
         
         result

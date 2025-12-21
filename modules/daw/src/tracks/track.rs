@@ -598,9 +598,20 @@ impl TrackStructureBuilder {
     
     /// Start a folder (creates a folder track)
     pub fn folder(mut self, name: impl Into<TrackName>) -> Self {
+        self.folder_with_items(name, None::<Vec<&str>>)
+    }
+    
+    /// Start a folder with items on the folder track itself
+    pub fn folder_with_items<I>(mut self, name: impl Into<TrackName>, items: Option<I>) -> Self
+    where
+        I: IntoItems,
+    {
         let mut track = Track::new(name);
         track.is_folder = true;
         track.folder_depth_change = FolderDepthChange::FolderStart;
+        if let Some(items) = items {
+            track.items = items.into_items().collect();
+        }
         let index = self.tracks.len();
         self.tracks.push(track);
         self.folder_stack.push(index);

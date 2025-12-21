@@ -230,15 +230,26 @@ impl<M: Metadata> Structure<M> {
             //    This removes intermediate levels like "Drum Kit" when all children are deepest groups (Kick, Snare)
             // 4. It has no items AND no siblings (it's the only child of its parent) - remove it to minimize hierarchy
             //    This removes "Drum Kit" when it's the only child of "Drums" and there are no other groups like "Electronic Kit"
+            // 5. It has items AND no siblings AND no children (or all children are leaf nodes) - promote items to parent
+            //    This collapses metadata field levels (like "L" channel) when they're the only child and have items
             // BUT: Keep the group if it has siblings (other groups at the same level) - this preserves organizational structure
             // when multiple groups exist (e.g., "Drum Kit" and "Electronic Kit" both under "Drums")
             let has_siblings = total_siblings > 1;
+            let has_items_but_no_children = !child.items.is_empty() && child.children.is_empty();
+            let has_items_and_only_leaf_children = !child.items.is_empty() && 
+                !child.children.is_empty() &&
+                child.children.iter().all(|c| c.children.is_empty() && c.items.is_empty());
+            
             if !has_siblings && ((has_single_child && has_no_items && (!is_last_group || single_child_is_deepest)) ||
                (has_no_items && all_children_are_last_groups && !organizes_items && has_single_child) ||
                (has_no_items && all_children_are_deepest && !organizes_items) ||
-               (has_no_items && !has_siblings)) {
-                eprintln!("{}[COLLAPSE] REMOVING intermediate: '{}' (promoting {} children, no siblings)", 
-                         indent, child.name, child.children.len());
+               (has_no_items && !has_siblings) ||
+               (has_items_but_no_children && !has_siblings) ||
+               (has_items_and_only_leaf_children && !has_siblings)) {
+                eprintln!("{}[COLLAPSE] REMOVING intermediate: '{}' (promoting {} children, {} items, no siblings)", 
+                         indent, child.name, child.children.len(), child.items.len());
+                // Promote items to parent
+                self.items.extend(std::mem::take(&mut child.items));
                 // Promote all children, not just the first one
                 new_children.extend(std::mem::take(&mut child.children));
             } else {

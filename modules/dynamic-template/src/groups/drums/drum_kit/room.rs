@@ -7,10 +7,25 @@ pub struct Room;
 
 impl From<Room> for ItemMetadataGroup {
     fn from(_val: Room) -> Self {
-        // Define room positions as a metadata field (L, R, etc.)
-        let room_position = ItemMetadataGroup::builder("MultiMic")
-            .patterns(["L", "R", "Left", "Right", "Mono", "Stereo"])
-            .build();
+        use monarchy::FieldValueDescriptor;
+        use crate::item_metadata::ItemMetadataField;
+
+        // Define room positions using field_value_descriptors to ensure L comes before R
+        // Order matters - items will be sorted by the order of descriptors
+        let room_position_descriptors = vec![
+            FieldValueDescriptor::builder("L")
+                .patterns(["L", "Left", "left"])
+                .build(),
+            FieldValueDescriptor::builder("R")
+                .patterns(["R", "Right", "right"])
+                .build(),
+            FieldValueDescriptor::builder("Mono")
+                .patterns(["Mono", "mono"])
+                .build(),
+            FieldValueDescriptor::builder("Stereo")
+                .patterns(["Stereo", "stereo"])
+                .build(),
+        ];
 
         // Use the convenience method - extension trait is in scope via prelude
         ItemMetadataGroup::builder("Rooms")
@@ -18,7 +33,7 @@ impl From<Room> for ItemMetadataGroup {
                 "room", "rooms", "amb", "ambient", "ambience", "mono", "stereo", "wide", "crush",
                 "crushed", "verb", "reverb",
             ])
-            .multi_mic(room_position)
+            .field_value_descriptors(ItemMetadataField::MultiMic, room_position_descriptors)
             .build()
     }
 }

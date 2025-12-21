@@ -18,11 +18,15 @@ pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
         .build();
 
     let arrangement = Group::builder("Arrangement")
-        .patterns(["Rhythm", "Solo", "Amb", "Big", "Little", "Crunch", "Drive", "Pad"])
+        .patterns(["Down", "Big", "Build"])
         .build();
 
     let layers = Group::builder("Layers")
-        .patterns(["DBL", "OCT", "1", "2", "3", "4", "5"])
+        .patterns(["DBL", "TPL", "Double", "Triple", "Main", "OCT", "1", "2", "3", "4", "5"])
+        .build();
+
+    let channel = Group::builder("Channel")
+        .patterns(["L", "R", "C", "Left", "Right", "Center"])
         .build();
 
     let playlist = Group::builder("Playlist")
@@ -30,7 +34,7 @@ pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
         .build();
 
     let multi_mic = Group::builder("MultiMic")
-        .patterns(["Top", "Bottom", "In", "Out", "DI", "Amp"])
+        .patterns(["Top", "Bottom", "In", "Out", "DI", "Amp", "Amplitube"])
         .build();
 
     let performer = Group::builder("Performer")
@@ -47,6 +51,7 @@ pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
         .section(section)
         .arrangement(arrangement)
         .layers(layers)
+        .channel(channel)
         .playlist(playlist)
         .multi_mic(multi_mic)
         .performer(performer)
