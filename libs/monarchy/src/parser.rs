@@ -32,18 +32,39 @@ impl<M: Metadata> Parser<M> {
         }
 
         // Find the deepest matching non-metadata-only group and its hierarchy
-        // We need to recursively check nested groups to find the most specific match
+        // We need to check all groups and find the most specific (deepest) match
+        // When depth is equal, prefer matches where more parent groups also match
+        // (this helps groups with requires_parent_match win over regular groups)
         let mut matched_groups: Vec<crate::Group<M>> = Vec::new();
         let mut matched_group: Option<&crate::Group<M>> = None;
+        let mut deepest_depth = 0;
+        let mut best_match_count = 0; // Count of how many groups in the path actually match
         
         for group in &sorted_groups {
             if !group.metadata_only {
                 // Recursively find the deepest matching group
                 if let Some((deepest_group, path)) = self.find_deepest_matching_group(group, &input, Vec::new()) {
-                    matched_group = Some(deepest_group);
-                    // Clone the groups to store them
-                    matched_groups = path.into_iter().map(|g| g.clone()).collect();
-                    break;
+                    let depth = path.len();
+                    // Count how many groups in the path actually match the input
+                    // This gives preference to matches where more parent groups match
+                    // This ensures "808 Kick" matches "Electronic Kit" -> "Kick" (2 matches)
+                    // instead of "Drum Kit" -> "Kick" (1 match, since Drum Kit doesn't match "808")
+                    let match_details: Vec<(String, bool)> = path.iter()
+                        .map(|g| (g.name.clone(), g.matches(&input)))
+                        .collect();
+                    let match_count = match_details.iter().filter(|(_, matches)| *matches).count();
+                    
+                    // Keep the deepest match, or if depth is equal, prefer one with more matching groups
+                    let is_better = depth > deepest_depth || 
+                                   (depth == deepest_depth && match_count > best_match_count);
+                    
+                    if is_better {
+                        deepest_depth = depth;
+                        best_match_count = match_count;
+                        matched_group = Some(deepest_group);
+                        // Clone the groups to store them
+                        matched_groups = path.into_iter().map(|g| g.clone()).collect();
+                    }
                 }
             }
         }
@@ -108,8 +129,21 @@ impl<M: Metadata> Parser<M> {
         // Check if this group matches
         let this_matches = group.matches(input);
         
+        // If this group requires parent match, check that the parent in the path matches
+        if group.requires_parent_match && !current_path.is_empty() {
+            // Get the parent (the group before this one in the path)
+            let parent_index = current_path.len() - 2;
+            if let Some(parent) = current_path.get(parent_index) {
+                if !parent.matches(input) {
+                    // Parent doesn't match, so this group can't match
+                    return None;
+                }
+            }
+        }
+        
         // Recursively check nested groups to find deeper matches
-        let mut deepest_match: Option<(&'a crate::Group<M>, Vec<&'a crate::Group<M>>)> = None;
+        // Collect all matches at the deepest depth, then we'll pick the best one based on match count
+        let mut deepest_matches: Vec<(&'a crate::Group<M>, Vec<&'a crate::Group<M>>)> = Vec::new();
         let mut deepest_depth = 0;
         
         for nested_group in &group.groups {
@@ -124,19 +158,35 @@ impl<M: Metadata> Parser<M> {
             
             // Only include non-metadata-field groups in the structural trail
             if !is_metadata_field_group {
+                // If this nested group requires parent match, check that parent matches first
+                if nested_group.requires_parent_match && !this_matches {
+                    // Skip this nested group if parent doesn't match
+                    continue;
+                }
+                
                 if let Some((nested_match, nested_path)) = self.find_deepest_matching_group(nested_group, input, current_path.clone()) {
                     let depth = nested_path.len();
                     if depth > deepest_depth {
                         deepest_depth = depth;
-                        deepest_match = Some((nested_match, nested_path));
+                        deepest_matches.clear();
+                        deepest_matches.push((nested_match, nested_path));
+                    } else if depth == deepest_depth {
+                        deepest_matches.push((nested_match, nested_path));
                     }
                 }
             }
         }
         
-        // If we found a deeper match, return it (this includes the current group in the path)
-        if let Some((deepest_group, deepest_path)) = deepest_match {
-            return Some((deepest_group, deepest_path));
+        // If we found deeper matches, return the one with the most matching groups in the path
+        if !deepest_matches.is_empty() {
+            // Find the match with the most groups that actually match the input
+            let best_match = deepest_matches.iter()
+                .max_by_key(|(_, path)| {
+                    path.iter().filter(|g| g.matches(input)).count()
+                })
+                .unwrap();
+            // Clone the path since we can't return a reference to a local Vec
+            return Some((best_match.0, best_match.1.clone()));
         }
         
         // Otherwise, if this group matches, return it with the full path

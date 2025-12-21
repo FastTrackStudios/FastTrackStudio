@@ -13,9 +13,11 @@ impl From<Snare> for ItemMetadataGroup {
             .build();
 
         // Use the convenience method - extension trait is in scope via prelude
+        // Require parent match so this only matches when "Electronic Kit" also matches
         ItemMetadataGroup::builder("Snare")
             .patterns(["snare", "snr", "sn"])
             .multi_mic(multi_mic)
+            .requires_parent_match()
             .build()
     }
 }

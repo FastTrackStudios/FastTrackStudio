@@ -92,6 +92,195 @@ impl<M: Metadata> Structure<M> {
         }
     }
 
+    /// Check if this structure or any of its descendants have items
+    fn has_items_recursively(&self) -> bool {
+        !self.items.is_empty() || self.children.iter().any(|c| c.has_items_recursively())
+    }
+
+    /// Enhanced collapse function that minimizes folder hierarchy while preserving detail
+    /// 
+    /// Algorithm:
+    /// 1. Start from top track
+    /// 2. Check if there's a parent -> if false, it's top level
+    /// 3. Check if there's a single direct child
+    /// 4. Keep checking the entire hierarchy down until we understand the whole structure
+    /// 5. If a top-level track has one single direct child, unless it is the last group, it should be removed
+    /// 
+    /// `is_top_level` indicates if this is a top-level group (like "Drums", "Bass", etc.)
+    /// `depth` is used for debug indentation
+    pub fn collapse_hierarchy(&mut self, is_top_level: bool) {
+        // Default implementation without config lookup (for backward compatibility)
+        self.collapse_hierarchy_with_config(is_top_level, |_| None);
+    }
+
+    /// Enhanced collapse function with config lookup to identify deepest groups
+    /// 
+    /// `find_group` is a closure that can look up a group by name in the config
+    /// to check if it has subgroups (deepest groups have no subgroups)
+    pub fn collapse_hierarchy_with_config<'a, F>(&mut self, is_top_level: bool, find_group: F)
+    where
+        F: Fn(&str) -> Option<&'a crate::Group<M>>,
+    {
+        self.collapse_hierarchy_internal(is_top_level, 0, &find_group);
+    }
+
+    /// Internal implementation with depth tracking for debugging
+    fn collapse_hierarchy_internal<'a, F>(&mut self, is_top_level: bool, depth: usize, find_group: &F)
+    where
+        F: Fn(&str) -> Option<&'a crate::Group<M>>,
+    {
+        let indent = "  ".repeat(depth);
+        eprintln!("{}[COLLAPSE] Processing: '{}' (top_level: {}, children: {}, items: {})", 
+                 indent, self.name, is_top_level, self.children.len(), self.items.len());
+
+        // First, recursively process all children from top to bottom
+        for child in &mut self.children {
+            child.collapse_hierarchy_internal(false, depth + 1, find_group);
+        }
+
+        eprintln!("{}[COLLAPSE] After recursive processing: '{}' (children: {})", 
+                 indent, self.name, self.children.len());
+
+        // Now check each child - if it has only one direct child and no items, remove it
+        let mut new_children = Vec::new();
+        for mut child in std::mem::take(&mut self.children) {
+            let has_single_child = child.children.len() == 1;
+            let has_no_items = child.items.is_empty();
+            
+            // Check if this is a "deepest group" - a group that has no organizational subgroups defined in the config
+            // Deepest groups like "Kick" should never be removed
+            // The `groups` vector contains organizational subgroups (like "Kick", "Snare" under "Drum Kit")
+            // Metadata groups (like multi_mic, MultiMic) are stored in groups but are not organizational subgroups
+            // They are used for metadata extraction, not for creating folder structure
+            let is_deepest_group = if let Some(group) = find_group(&child.name) {
+                // Known metadata field group names that should not count as organizational subgroups
+                let metadata_group_names = ["MultiMic", "SUM", "Section", "Layers", "Effect"];
+                
+                // Filter out metadata groups - these are not organizational subgroups
+                let org_subgroups: Vec<_> = group.groups.iter()
+                    .filter(|g| !g.metadata_only && !metadata_group_names.contains(&g.name.as_str()))
+                    .collect();
+                let has_no_org_subgroups = org_subgroups.is_empty();
+                
+                if !has_no_org_subgroups {
+                    eprintln!("{}[COLLAPSE] Group '{}' has {} organizational subgroups: {:?}", 
+                             indent, child.name, org_subgroups.len(), 
+                             org_subgroups.iter().map(|g| &g.name).collect::<Vec<_>>());
+                }
+                eprintln!("{}[COLLAPSE] Found group '{}' in config, has {} total subgroups, {} org subgroups (is_deepest: {})", 
+                         indent, child.name, group.groups.len(), org_subgroups.len(), has_no_org_subgroups);
+                has_no_org_subgroups
+            } else {
+                eprintln!("{}[COLLAPSE] Group '{}' NOT found in config", indent, child.name);
+                false  // If we can't find it in config, assume it's not deepest
+            };
+            
+            // A group is "last group" if it directly has items OR if all its children are leaf nodes (have items, no grandchildren)
+            let is_last_group = !child.items.is_empty() || 
+                               (child.children.iter().all(|c| !c.items.is_empty() && c.children.is_empty()));
+            // Check if this group organizes items (has children that are all leaf nodes)
+            let organizes_items = !child.children.is_empty() &&
+                child.children.iter().all(|c| !c.items.is_empty() && c.children.is_empty());
+            // Check if all children are "last groups" (organize items directly or via leaf children)
+            // BUT exclude groups that organize items themselves (like "Kick" organizing "In" and "Out")
+            let all_children_are_last_groups = !child.children.is_empty() &&
+                child.children.iter().all(|c| {
+                    !c.items.is_empty() ||  // Has items directly
+                    (c.children.iter().all(|gc| !gc.items.is_empty() && gc.children.is_empty()))  // All children are leaf nodes
+                }) && !organizes_items;  // Don't remove if this group organizes items
+            
+            eprintln!("{}[COLLAPSE] Checking child: '{}' (single_child: {}, no_items: {}, is_deepest: {}, is_last_group: {}, organizes_items: {}, all_children_last: {})", 
+                     indent, child.name, has_single_child, has_no_items, is_deepest_group, is_last_group, organizes_items, all_children_are_last_groups);
+
+            // Never remove deepest groups (like "Kick", "Snare") - they are the actual instrument groups
+            if is_deepest_group {
+                eprintln!("{}[COLLAPSE] KEEPING deepest group: '{}'", indent, child.name);
+                new_children.push(child);
+                continue;
+            }
+
+            // Check if the single child is a deepest group
+            let single_child_is_deepest = has_single_child && 
+                find_group(&child.children[0].name)
+                    .map(|g| g.groups.iter().all(|sg| sg.metadata_only || 
+                         ["MultiMic", "SUM", "Section", "Layers", "Effect"].contains(&sg.name.as_str())))
+                    .unwrap_or(false);
+
+            // Check if all children are deepest groups (have no organizational subgroups)
+            let all_children_are_deepest = !child.children.is_empty() &&
+                child.children.iter().all(|c| {
+                    find_group(&c.name)
+                        .map(|g| {
+                            let metadata_group_names = ["MultiMic", "SUM", "Section", "Layers", "Effect"];
+                            let org_subgroups: Vec<_> = g.groups.iter()
+                                .filter(|sg| !sg.metadata_only && !metadata_group_names.contains(&sg.name.as_str()))
+                                .collect();
+                            org_subgroups.is_empty()
+                        })
+                        .unwrap_or(false)
+                });
+            
+            // Remove if:
+            // 1. It has a single direct child AND no items AND (it's not the last group OR the child is a deepest group), OR
+            // 2. It has no items AND all its children are "last groups" (organize items) AND it doesn't organize items itself
+            //    AND it has only one child (if it has multiple children, keep it as an organizational level), OR
+            // 3. It has no items AND all its children are deepest groups (no organizational subgroups)
+            //    This removes intermediate levels like "Drum Kit" when all children are deepest groups (Kick, Snare)
+            if (has_single_child && has_no_items && (!is_last_group || single_child_is_deepest)) ||
+               (has_no_items && all_children_are_last_groups && !organizes_items && has_single_child) ||
+               (has_no_items && all_children_are_deepest && !organizes_items) {
+                eprintln!("{}[COLLAPSE] REMOVING intermediate: '{}' (promoting {} children)", 
+                         indent, child.name, child.children.len());
+                // Promote all children, not just the first one
+                new_children.extend(std::mem::take(&mut child.children));
+            } else {
+                eprintln!("{}[COLLAPSE] KEEPING: '{}'", indent, child.name);
+                new_children.push(child);
+            }
+        }
+        self.children = new_children;
+
+        eprintln!("{}[COLLAPSE] After removing intermediates: '{}' (children: {})", 
+                 indent, self.name, self.children.len());
+
+        // Special handling for top-level:
+        // If top-level has only 1 child and no items, remove the top-level (promote the child)
+        // ONLY if the child is a deepest group (has no organizational subgroups in config)
+        // This minimizes hierarchy when the child is a leaf group, but keeps organizational levels
+        if is_top_level && self.children.len() == 1 && self.items.is_empty() {
+            let only_child = &self.children[0];
+            let metadata_group_names = ["MultiMic", "SUM", "Section", "Layers", "Effect"];
+            let is_deepest_group = if let Some(group) = find_group(&only_child.name) {
+                let org_subgroups: Vec<_> = group.groups.iter()
+                    .filter(|g| !g.metadata_only && !metadata_group_names.contains(&g.name.as_str()))
+                    .collect();
+                org_subgroups.is_empty()
+            } else {
+                false
+            };
+            
+            eprintln!("{}[COLLAPSE] Top-level '{}' has 1 child '{}' (is_deepest: {})", 
+                     indent, self.name, only_child.name, is_deepest_group);
+            
+            // Only remove top-level if child is a deepest group (leaf group with no organizational subgroups)
+            // This keeps organizational levels like "Drums" -> "Drum Kit" -> "Kick"
+            if is_deepest_group {
+                eprintln!("{}[COLLAPSE] REMOVING top-level: '{}' (promoting deepest group '{}')", 
+                         indent, self.name, only_child.name);
+                let only_child = self.children.remove(0);
+                self.name = only_child.name;
+                self.display_name = only_child.display_name;
+                self.items = only_child.items;
+                self.children = only_child.children;
+                // The promoted child is now at top level, recursively process it
+                self.collapse_hierarchy_internal(true, depth, find_group);
+            } else {
+                eprintln!("{}[COLLAPSE] KEEPING top-level: '{}' (child is last group)", 
+                         indent, self.name);
+            }
+        }
+    }
+
     /// Print the structure as a tree to stdout
     pub fn print_tree(&self) {
         // Skip root level if it's just a container

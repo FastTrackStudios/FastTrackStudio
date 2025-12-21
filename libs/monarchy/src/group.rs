@@ -114,6 +114,12 @@ pub struct Group<M: Metadata> {
     /// a structure node in the hierarchy. It will always match (or match with very
     /// low priority) to extract metadata fields like Section, MultiMic, etc.
     pub metadata_only: bool,
+
+    /// If true, this group can only match if its parent group also matches.
+    /// This is useful for groups like "Electronic Snare" that should only match
+    /// when both "Electronic Kit" and "Snare" patterns are present.
+    /// Default is false, allowing groups to match independently.
+    pub requires_parent_match: bool,
 }
 
 impl<M: Metadata> Group<M> {
@@ -129,7 +135,7 @@ impl<M: Metadata> Group<M> {
         // Check negative patterns first
         for pattern in &self.negative_patterns {
             let pattern_lower = pattern.to_lowercase();
-            if text_lower.contains(&pattern_lower) {
+            if Self::contains_word(&text_lower, &pattern_lower) {
                 return false;
             }
         }
@@ -142,9 +148,50 @@ impl<M: Metadata> Group<M> {
 
         for pattern in &self.patterns {
             let pattern_lower = pattern.to_lowercase();
-            if text_lower.contains(&pattern_lower) {
+            if Self::contains_word(&text_lower, &pattern_lower) {
                 return true;
             }
+        }
+
+        false
+    }
+
+    /// Check if text contains pattern as a whole word (not just as a substring)
+    /// A word is defined as a sequence of alphanumeric characters
+    /// The pattern must be surrounded by non-alphanumeric characters or at the start/end of the string
+    fn contains_word(text: &str, pattern: &str) -> bool {
+        if pattern.is_empty() {
+            return false;
+        }
+
+        // Find all occurrences of the pattern
+        let mut start = 0;
+        while let Some(pos) = text[start..].find(pattern) {
+            let actual_pos = start + pos;
+            let before_pos = if actual_pos > 0 { actual_pos - 1 } else { 0 };
+            let after_pos = actual_pos + pattern.len();
+
+            // Check if character before pattern is non-alphanumeric (or at start)
+            let before_is_word_char = if actual_pos > 0 {
+                text.chars().nth(before_pos).map_or(false, |c| c.is_alphanumeric())
+            } else {
+                false // At start, so no character before
+            };
+
+            // Check if character after pattern is non-alphanumeric (or at end)
+            let after_is_word_char = if after_pos < text.len() {
+                text.chars().nth(after_pos).map_or(false, |c| c.is_alphanumeric())
+            } else {
+                false // At end, so no character after
+            };
+
+            // Pattern is a whole word if it's not surrounded by word characters
+            if !before_is_word_char && !after_is_word_char {
+                return true;
+            }
+
+            // Continue searching from after this occurrence
+            start = actual_pos + 1;
         }
 
         false
@@ -169,6 +216,7 @@ impl<M: Metadata> GroupBuilder<M> {
                 variants: None,
                 transparent: false,
                 metadata_only: false,
+                requires_parent_match: false,
             },
         }
     }
@@ -318,6 +366,30 @@ impl<M: Metadata> GroupBuilder<M> {
         if self.group.priority == 0 {
             self.group.priority = -1000;
         }
+        self
+    }
+
+    /// Require that the parent group also matches for this group to match.
+    /// 
+    /// This is useful for groups like "Electronic Snare" that should only match
+    /// when both the parent "Electronic Kit" and this "Snare" group match.
+    /// 
+    /// # Example
+    /// 
+    /// ```ignore
+    /// Group::builder("Electronic Kit")
+    ///     .group(
+    ///         Group::builder("Snare")
+    ///             .requires_parent_match()
+    ///             .build()
+    ///     )
+    ///     .build()
+    /// ```
+    /// 
+    /// With this configuration, "Snare Top" will only match the "Snare" group
+    /// if it also matches the "Electronic Kit" patterns (e.g., "electronic", "808", etc.).
+    pub fn requires_parent_match(mut self) -> Self {
+        self.group.requires_parent_match = true;
         self
     }
 

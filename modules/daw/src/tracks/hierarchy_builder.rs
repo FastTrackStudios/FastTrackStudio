@@ -55,15 +55,20 @@ pub fn build_hierarchy(mut parent: Track, children: Vec<Track>) -> Vec<Track> {
     
     for (i, mut child) in children.into_iter().enumerate() {
         if i == children_len - 1 {
-            match child.folder_depth_change {
-                FolderDepthChange::ClosesLevels(n) => {
-                    child.folder_depth_change = FolderDepthChange::ClosesLevels(n - 1);
-                }
-                FolderDepthChange::FolderStart => {
-                    child.folder_depth_change = FolderDepthChange::ClosesLevels(-1);
-                }
-                _ => {
-                    child.folder_depth_change = FolderDepthChange::ClosesLevels(-1);
+            // Last child should close the parent folder
+            if child.is_folder && child.folder_depth_change == FolderDepthChange::FolderStart {
+                // If the last child is a folder start, we'll find the actual last track
+                // (which closes that folder) and modify it to also close the parent.
+                // We'll do this after adding all children.
+            } else {
+                // Last child is not a folder - modify it to close the parent
+                match child.folder_depth_change {
+                    FolderDepthChange::ClosesLevels(n) => {
+                        child.folder_depth_change = FolderDepthChange::ClosesLevels(n - 1);
+                    }
+                    _ => {
+                        child.folder_depth_change = FolderDepthChange::ClosesLevels(-1);
+                    }
                 }
             }
         } else {
@@ -77,6 +82,32 @@ pub fn build_hierarchy(mut parent: Track, children: Vec<Track>) -> Vec<Track> {
         }
         
         all_children.push(child);
+    }
+    
+    // If the last child was a folder start, we need to find the last track within that folder
+    // and modify its closing level to also close the parent
+    if children_len > 0 {
+        if let Some(last_child) = all_children.last() {
+            if last_child.is_folder && last_child.folder_depth_change == FolderDepthChange::FolderStart {
+                // Find the last track that closes a level (the actual last track in the folder hierarchy)
+                // Search backwards to find the last non-folder-start track
+                for track in all_children.iter_mut().rev() {
+                    if track.is_folder && track.folder_depth_change == FolderDepthChange::FolderStart {
+                        continue; // Skip folder starts
+                    }
+                    // This is the last actual track - modify it to also close the parent
+                    match track.folder_depth_change {
+                        FolderDepthChange::ClosesLevels(n) => {
+                            track.folder_depth_change = FolderDepthChange::ClosesLevels(n - 1);
+                        }
+                        _ => {
+                            track.folder_depth_change = FolderDepthChange::ClosesLevels(-1);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
     }
     
     tracks.extend(all_children);

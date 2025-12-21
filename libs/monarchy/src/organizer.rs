@@ -1,4 +1,4 @@
-use crate::{Config, Item, Metadata, Structure};
+use crate::{Config, Group, Item, Metadata, Structure};
 
 /// Organizes items into hierarchical structures based on groups
 pub struct Organizer<M: Metadata> {
@@ -47,8 +47,17 @@ impl<M: Metadata> Organizer<M> {
             }
         }
 
-        // Collapse single-child nodes (only create folders when needed)
-        root.collapse_single_children();
+        // Apply enhanced collapse algorithm starting from top-level groups
+        // This replaces collapse_single_children with the new top-down algorithm
+        // Pass a closure to look up groups in the config to check if they have subgroups
+        // We need to capture self.config by reference to avoid lifetime issues
+        let config = &self.config;
+        for child in &mut root.children {
+            let find_group_fn = |name: &str| -> Option<&Group<M>> {
+                Self::find_group_in_config_static(config, name)
+            };
+            child.collapse_hierarchy_with_config(true, find_group_fn);
+        }
 
         root
     }
@@ -97,10 +106,16 @@ impl<M: Metadata> Organizer<M> {
 
         let mut structure = Structure::with_display_name(&group.name, display_name);
 
-        // Find items that matched this group (check if last element in trail matches)
+        // Find items that matched this group
+        // Check if the item's matched_groups path ends with this group
+        // The parser ensures each item only matches one group path, so we can safely
+        // check if the last group matches this group's name
         let group_items: Vec<Item<M>> = all_items
             .iter()
-            .filter(|item| item.matched_groups.last().map(|g| &g.name) == Some(&group.name))
+            .filter(|item| {
+                // Check if the last group in the matched path matches this group's name
+                item.matched_groups.last().map(|g| &g.name) == Some(&group.name)
+            })
             .cloned()
             .collect();
         
@@ -188,8 +203,8 @@ impl<M: Metadata> Organizer<M> {
             // If multiple items have different values for metadata fields, create sub-structures
             if !group_items.is_empty() && !group.metadata_fields.is_empty() {
                 // Group items by their metadata field values
-                let mut field_groups: std::collections::HashMap<String, Vec<Item<M>>> =
-                    std::collections::HashMap::new();
+                // Use Vec to preserve insertion order (first occurrence order)
+                let mut field_groups: Vec<(String, Vec<Item<M>>)> = Vec::new();
                 let mut items_without_field_values = Vec::new();
 
                 for item in group_items {
@@ -208,10 +223,12 @@ impl<M: Metadata> Organizer<M> {
                     }
 
                     if let Some(value_str) = value_str_opt {
-                        field_groups
-                            .entry(value_str)
-                            .or_default()
-                            .push(item);
+                        // Find existing entry or create new one
+                        if let Some(entry) = field_groups.iter_mut().find(|(key, _)| key == &value_str) {
+                            entry.1.push(item);
+                        } else {
+                            field_groups.push((value_str, vec![item]));
+                        }
                     } else {
                         eprintln!("DEBUG: Item '{}' has no field values, adding to items_without_field_values", item.original);
                         items_without_field_values.push(item);
@@ -223,24 +240,40 @@ impl<M: Metadata> Organizer<M> {
 
                 // If we have multiple groups with different values, create sub-structures
                 // Only create sub-structures if we have 2+ different field values
+                // Try to sort by pattern order from metadata field groups if available
                 if field_groups.len() > 1 {
+                    // Try to get pattern order from metadata field groups (like "MultiMic") within this group
+                    // Look for groups that are metadata_only or have names like "MultiMic", "SUM", etc.
+                    let pattern_order: Option<Vec<String>> = group.groups.iter()
+                        .find(|g| g.name == "MultiMic" || g.name == "SUM" || g.metadata_only)
+                        .map(|g| g.patterns.clone());
+                    
+                    // Sort field_groups by pattern order if available, otherwise preserve insertion order
+                    if let Some(ref patterns) = pattern_order {
+                        field_groups.sort_by(|a, b| {
+                            let a_idx = patterns.iter().position(|p| a.0 == *p || a.0.to_lowercase() == p.to_lowercase());
+                            let b_idx = patterns.iter().position(|p| b.0 == *p || b.0.to_lowercase() == p.to_lowercase());
+                            match (a_idx, b_idx) {
+                                (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
+                                (Some(_), _) => std::cmp::Ordering::Less,
+                                (_, Some(_)) => std::cmp::Ordering::Greater,
+                                (_, _) => a.0.cmp(&b.0), // Fallback to alphabetical
+                            }
+                        });
+                    }
+                    
                     // Create sub-structures for each unique field value
-                    let mut field_keys: Vec<String> = field_groups.keys().cloned().collect();
-                    field_keys.sort();
-
-                    for field_key in field_keys {
-                        if let Some(items) = field_groups.remove(&field_key) {
-                            let mut sub_structure = Structure::new(&field_key);
-                            sub_structure.items = items;
-                            structure.children.push(sub_structure);
-                        }
+                    for (field_key, items) in field_groups {
+                        let mut sub_structure = Structure::new(&field_key);
+                        sub_structure.items = items;
+                        structure.children.push(sub_structure);
                     }
 
                     // Add items without field values to the current level
                     structure.items = items_without_field_values;
                 } else if field_groups.len() == 1 {
                     // Only one unique value - keep items at current level (no need for sub-structure)
-                    structure.items = field_groups.values().next().unwrap().clone();
+                    structure.items = field_groups[0].1.clone();
                     structure.items.extend(items_without_field_values);
                 } else {
                     // No field values found - keep items at current level
@@ -254,8 +287,33 @@ impl<M: Metadata> Organizer<M> {
 
         // Recursively build nested groups with accumulated prefixes
         for nested_group in &group.groups {
+            // Skip metadata-only groups - they don't create structure nodes
+            if nested_group.metadata_only {
+                continue;
+            }
+            
+            // Filter items to only include those whose matched_groups path includes this parent group
+            // This ensures items matched via "Drum Kit" -> "Kick" don't also get placed in "Electronic Kit" -> "Kick"
+            let filtered_items: Vec<Item<M>> = all_items
+                .iter()
+                .filter(|item| {
+                    // Check if the item's matched_groups path includes this parent group
+                    // before the nested group. This ensures correct hierarchy matching.
+                    let matched_names: Vec<&str> = item.matched_groups.iter().map(|g| g.name.as_str()).collect();
+                    // Check if the nested group name appears in the path
+                    if let Some(nested_pos) = matched_names.iter().position(|&n| n == nested_group.name) {
+                        // Found the nested group, check if this parent group appears before it
+                        matched_names[..nested_pos].contains(&group.name.as_str())
+                    } else {
+                        // Nested group not in path, so this item doesn't belong here
+                        false
+                    }
+                })
+                .cloned()
+                .collect();
+            
             let child =
-                self.build_group_structure(nested_group, all_items, current_prefixes.clone());
+                self.build_group_structure(nested_group, &filtered_items, current_prefixes.clone());
             if !child.is_empty() {
                 structure.children.push(child);
             }
@@ -277,8 +335,8 @@ impl<M: Metadata> Organizer<M> {
         }
 
         // Group items by their metadata field values
-        let mut field_groups: std::collections::HashMap<String, Vec<Item<M>>> =
-            std::collections::HashMap::new();
+        // Use Vec to preserve insertion order (first occurrence order)
+        let mut field_groups: Vec<(String, Vec<Item<M>>)> = Vec::new();
         let mut items_without_field_values = Vec::new();
 
         for item in items {
@@ -293,10 +351,12 @@ impl<M: Metadata> Organizer<M> {
             }
 
             if let Some(value_str) = value_str_opt {
-                field_groups
-                    .entry(value_str)
-                    .or_default()
-                    .push(item.clone());
+                // Find existing entry or create new one
+                if let Some(entry) = field_groups.iter_mut().find(|(key, _)| key == &value_str) {
+                    entry.1.push(item.clone());
+                } else {
+                    field_groups.push((value_str, vec![item.clone()]));
+                }
             } else {
                 items_without_field_values.push(item.clone());
             }
@@ -304,24 +364,39 @@ impl<M: Metadata> Organizer<M> {
 
         // If we have multiple groups with different values, create sub-structures
         // Only create sub-structures if we have 2+ different field values
+        // Try to sort by pattern order from metadata field groups if available
         if field_groups.len() > 1 {
+            // Try to get pattern order from metadata field groups (like "MultiMic") within this group
+            let pattern_order: Option<Vec<String>> = group.groups.iter()
+                .find(|g| g.name == "MultiMic" || g.name == "SUM" || g.metadata_only)
+                .map(|g| g.patterns.clone());
+            
+            // Sort field_groups by pattern order if available, otherwise preserve insertion order
+            if let Some(ref patterns) = pattern_order {
+                field_groups.sort_by(|a, b| {
+                    let a_idx = patterns.iter().position(|p| a.0 == *p || a.0.to_lowercase() == p.to_lowercase());
+                    let b_idx = patterns.iter().position(|p| b.0 == *p || b.0.to_lowercase() == p.to_lowercase());
+                    match (a_idx, b_idx) {
+                        (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
+                        (Some(_), _) => std::cmp::Ordering::Less,
+                        (_, Some(_)) => std::cmp::Ordering::Greater,
+                        (_, _) => a.0.cmp(&b.0), // Fallback to alphabetical
+                    }
+                });
+            }
+            
             // Create sub-structures for each unique field value
-            let mut field_keys: Vec<String> = field_groups.keys().cloned().collect();
-            field_keys.sort();
-
-            for field_key in field_keys {
-                if let Some(items) = field_groups.remove(&field_key) {
-                    let mut sub_structure = Structure::new(&field_key);
-                    sub_structure.items = items;
-                    result.children.push(sub_structure);
-                }
+            for (field_key, items) in field_groups {
+                let mut sub_structure = Structure::new(&field_key);
+                sub_structure.items = items;
+                result.children.push(sub_structure);
             }
 
             // Add items without field values to the current level
             result.items = items_without_field_values;
         } else if field_groups.len() == 1 {
             // Only one unique value - keep items at current level (no need for sub-structure)
-            result.items = field_groups.values().next().unwrap().clone();
+            result.items = field_groups[0].1.clone();
             result.items.extend(items_without_field_values);
         } else {
             // No field values found - keep items at current level
@@ -337,5 +412,28 @@ impl<M: Metadata> Organizer<M> {
     /// Uses the format_metadata_value helper from lib.rs which handles Vec<String> properly.
     fn format_metadata_value_for_grouping(&self, value: &M::Value) -> String {
         crate::format_metadata_value::<M>(value)
+    }
+
+    /// Find a group in the config by name (recursively searches nested groups)
+    /// Static method to avoid lifetime issues with closures
+    fn find_group_in_config_static<'a>(config: &'a Config<M>, name: &str) -> Option<&'a Group<M>> {
+        fn search_group<'a, M: Metadata>(group: &'a Group<M>, name: &str) -> Option<&'a Group<M>> {
+            if group.name == name {
+                return Some(group);
+            }
+            for nested in &group.groups {
+                if let Some(found) = search_group(nested, name) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        
+        for group in &config.groups {
+            if let Some(found) = search_group(group, name) {
+                return Some(found);
+            }
+        }
+        None
     }
 }

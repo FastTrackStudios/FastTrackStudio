@@ -22,6 +22,21 @@ impl From<DrumKit> for Group<ItemMetadata> {
     fn from(_val: DrumKit) -> Self {
         Group::builder("Drum Kit")
             .patterns(vec!["d_", "drum", "kit", "drums"])
+            .exclude(vec![
+                "electronic",
+                "elec",
+                "e-kit",
+                "ekit",
+                "808",
+                "909",
+                "drum machine",
+                "machine",
+                "sample",
+                "sampled",
+                "trigger",
+                "midi drum",
+                "vst drum",
+            ])
             .block_prefix("D") // Avoid "D Drum Kit" redundancy
             .group(Kick)
             .group(Snare)
