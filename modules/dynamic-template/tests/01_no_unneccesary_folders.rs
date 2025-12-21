@@ -1,6 +1,6 @@
 use dynamic_template::*;
 use daw::tracks::item::Item;
-use daw::tracks::TrackStructureBuilder;
+use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 
 #[test]
 fn single_item_creates_track_at_deepest_group_level() {
@@ -22,7 +22,7 @@ fn single_item_creates_track_at_deepest_group_level() {
         .track("Kick", "Kick In")
         .build();
     
-    assert_eq!(tracks, expected);
+    assert_tracks_equal(&tracks, &expected).unwrap();
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn multiple_items_of_same_subgroup_create_folder_with_subtracks() {
         .end()
         .build();
     
-    assert_eq!(tracks, expected);
+    assert_tracks_equal(&tracks, &expected).unwrap();
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn multiple_subgroups_create_parent_folder_with_nested_structure() {
         .end()
         .build();
     
-    assert_eq!(tracks, expected);
+    assert_tracks_equal(&tracks, &expected).unwrap();
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn items_in_nested_groups_create_nested_track_structure() {
         .end()
         .build();
     
-    assert_eq!(tracks, expected);
+    assert_tracks_equal(&tracks, &expected).unwrap();
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn group_separator_only_created_when_multiple_sibling_groups_exist() {
         .end()
         .build();
     
-    assert_eq!(tracks, expected);
+    assert_tracks_equal(&tracks, &expected).unwrap();
 }
 
 #[test]
@@ -219,6 +219,6 @@ fn multiple_top_level_groups_create_separate_sections() {
         .end()
         .build();
     
-    assert_eq!(tracks, expected);
+    assert_tracks_equal(&tracks, &expected).unwrap();
 }
 

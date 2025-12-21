@@ -69,6 +69,29 @@ impl<M: Metadata> Structure<M> {
         self.children.iter_mut().find(|c| c.name == name)
     }
 
+    /// Collapse nodes that have exactly one child and no items
+    /// This implements the "only create folders when needed" philosophy
+    pub fn collapse_single_children(&mut self) {
+        // First, recursively collapse children
+        for child in &mut self.children {
+            child.collapse_single_children();
+        }
+
+        // If this node has exactly one child and no items, collapse it
+        if self.children.len() == 1 && self.items.is_empty() {
+            let only_child = self.children.remove(0);
+            
+            // Promote the child's properties to this node
+            self.name = only_child.name;
+            self.display_name = only_child.display_name;
+            self.items = only_child.items;
+            self.children = only_child.children;
+            
+            // Recursively collapse again in case we created another single-child situation
+            self.collapse_single_children();
+        }
+    }
+
     /// Print the structure as a tree to stdout
     pub fn print_tree(&self) {
         // Skip root level if it's just a container

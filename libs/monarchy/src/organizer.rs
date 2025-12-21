@@ -47,6 +47,9 @@ impl<M: Metadata> Organizer<M> {
             }
         }
 
+        // Collapse single-child nodes (only create folders when needed)
+        root.collapse_single_children();
+
         root
     }
 

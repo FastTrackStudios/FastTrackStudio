@@ -629,6 +629,135 @@ impl Default for TrackStructureBuilder {
     }
 }
 
+/// Compare two track lists, focusing only on structural aspects that matter for organization
+/// 
+/// This function compares:
+/// - Track names
+/// - Items (by name only, ignoring IDs and other metadata)
+/// - Folder structure (is_folder, folder_depth_change)
+/// - Overall hierarchy structure
+/// 
+/// It ignores:
+/// - IDs, GUIDs, and other metadata
+/// - Volume, pan, mute, solo, and other audio settings
+/// - Item positions, lengths, and other item metadata
+/// 
+/// Returns `Ok(())` if tracks match, or `Err(String)` with a detailed description of differences.
+/// 
+/// # Example
+/// ```rust
+/// use daw::tracks::assert_tracks_equal;
+/// 
+/// let actual = vec![Track::new("Kick")];
+/// let expected = vec![Track::new("Kick")];
+/// assert_tracks_equal(&actual, &expected).unwrap();
+/// ```
+pub fn assert_tracks_equal(actual: &[Track], expected: &[Track]) -> Result<(), String> {
+    if actual.len() != expected.len() {
+        return Err(format!(
+            "Track count mismatch: expected {} tracks, got {}",
+            expected.len(),
+            actual.len()
+        ));
+    }
+
+    let mut all_differences = Vec::new();
+
+    for (i, (actual_track, expected_track)) in actual.iter().zip(expected.iter()).enumerate() {
+        let path = format!("track[{}]", i);
+        if let Err(diff) = compare_track(actual_track, expected_track, &path) {
+            all_differences.push(diff);
+        }
+    }
+
+    if !all_differences.is_empty() {
+        return Err(format!(
+            "Track structure differences:\n{}\n\nActual structure:\n{}\nExpected structure:\n{}",
+            all_differences.join("\n"),
+            format_track_list(actual),
+            format_track_list(expected)
+        ));
+    }
+
+    Ok(())
+}
+
+/// Compare a single track's relevant properties
+fn compare_track(actual: &Track, expected: &Track, path: &str) -> Result<(), String> {
+    let mut differences = Vec::new();
+
+    // Compare name
+    if actual.name != expected.name {
+        differences.push(format!(
+            "  {}: name - expected '{}', got '{}'",
+            path, expected.name.0, actual.name.0
+        ));
+    }
+
+    // Compare folder properties
+    if actual.is_folder != expected.is_folder {
+        differences.push(format!(
+            "  {}: is_folder - expected {}, got {}",
+            path, expected.is_folder, actual.is_folder
+        ));
+    }
+
+    if actual.folder_depth_change != expected.folder_depth_change {
+        differences.push(format!(
+            "  {}: folder_depth_change - expected {:?}, got {:?}",
+            path, expected.folder_depth_change, actual.folder_depth_change
+        ));
+    }
+
+    // Compare items (by name only, ignoring IDs and other metadata)
+    let actual_item_names: Vec<&str> = actual.items.iter().map(|i| i.name.as_str()).collect();
+    let expected_item_names: Vec<&str> = expected.items.iter().map(|i| i.name.as_str()).collect();
+
+    if actual_item_names != expected_item_names {
+        differences.push(format!(
+            "  {}: items - expected {:?}, got {:?}",
+            path, expected_item_names, actual_item_names
+        ));
+    }
+
+    if !differences.is_empty() {
+        return Err(differences.join("\n"));
+    }
+
+    Ok(())
+}
+
+/// Format a track list for display in error messages
+fn format_track_list(tracks: &[Track]) -> String {
+    let mut output = String::new();
+    let mut depth = 0i32;
+    
+    for track in tracks {
+        let prefix = if depth > 0 {
+            "-".repeat(depth as usize)
+        } else {
+            String::new()
+        };
+        
+        output.push_str(&format!("{}{}", prefix, track.name.0));
+        
+        if !track.items.is_empty() {
+            let item_names: Vec<&str> = track.items.iter().map(|i| i.name.as_str()).collect();
+            output.push_str(&format!(": [{:?}]", item_names));
+        }
+        
+        if track.is_folder {
+            output.push_str(" (folder)");
+        }
+        
+        output.push('\n');
+        
+        depth += track.folder_depth_change.to_reaper_value();
+    }
+    
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

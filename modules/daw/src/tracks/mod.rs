@@ -31,7 +31,7 @@ pub use reactive::{
     DefaultTrackReactiveService, EventStreamSubject as TrackEventStreamSubject,
     TrackReactiveService, TrackReactiveState, TrackStreams,
 };
-pub use track::{Track, display_tracklist, TrackStructureBuilder, IntoItems};
+pub use track::{Track, display_tracklist, TrackStructureBuilder, IntoItems, assert_tracks_equal};
 pub use track_chunk::{parse_track_chunk, ParsedTrackChunk};
 pub use track_list::{AddChild, IntoTrackVec, PrintTrackTree};
 pub use types::{MetadataKey, TrackGuid, TrackName};
