@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn katie_ferrara_valerie_103bpm_antelope_discrete_4_multitracks() {
-    // Track list from "Katie Ferrara - Valerie 103BPM Antelope Discrete 4 Multitracks"
+fn katie_ferrara_valerie() {
+    // Track list from "Katie Ferrara - Valerie"
     let items = vec![
         "01.Kick_01-01.wav",
         "02.Snare_01-01.wav",

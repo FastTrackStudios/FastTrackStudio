@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn tears_for_fears_shout_cover_using_neumann_mt48() {
-    // Track list from "Tears For Fears - Shout Cover Using Neumann MT48"
+fn tears_for_fears_shout() {
+    // Track list from "Tears For Fears - Shout"
     let items = vec![
         "01.Kick.In.One_01-02.wav",
         "02.Kick.Room_01-02.wav",

@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn heart_of_gold_multitracks_audioscape_24bit_48k() {
-    // Track list from "Heart Of Gold Multitracks Audioscape 24Bit 48K"
+fn neil_young_heart_of_gold() {
+    // Track list from "Neil Young - Heart of Gold"
     let items = vec![
         "01.Kick OptoComp_01.wav",
         "02.Snare No Compression_01.wav",

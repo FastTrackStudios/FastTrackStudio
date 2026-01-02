@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn jared_james_nichols_multitracks() {
-    // Track list from "Jared James Nichols Multitracks"
+fn jared_james_nichols() {
+    // Track list from "Jared James Nichols - Unknown"
     let items = vec![
         "01 Kick In .wav",
         "02 Kick Out .wav",

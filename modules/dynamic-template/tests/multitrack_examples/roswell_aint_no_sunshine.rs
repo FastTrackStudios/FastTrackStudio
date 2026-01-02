@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn ain_t_no_sunshine_roswell_mini_k47x_and_mini_k67x_multtitracks_75bpm() {
-    // Track list from "Ain't No Sunshine Roswell Mini K47x and Mini K67x Multtitracks 75BPM"
+fn roswell_aint_no_sunshine() {
+    // Track list from "Roswell - Ain't No Sunshine"
     let items = vec![
         "01.Djembe Bottom 47X_01.wav",
         "02.Djembe Top 67X_01.wav",

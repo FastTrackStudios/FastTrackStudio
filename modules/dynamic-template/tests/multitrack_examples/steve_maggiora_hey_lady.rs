@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn steve_maggiora_hey_lady_multitracks() {
-    // Track list from "Steve Maggiora - Hey Lady Multitracks"
+fn steve_maggiora_hey_lady() {
+    // Track list from "Steve Maggiora - Hey Lady"
     let items = vec![
         "AD.Big Kit Gretch.83.5BPM.L.wav",
         "AD.Big Kit Gretch.83.5BPM.R.wav",

@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn james_dupre_another_love_song_128bpm() {
-    // Track list from "James Dupre - Another Love Song 128BPM"
+fn james_dupre_another_love_song() {
+    // Track list from "James Dupre - Another Love Song"
     let items = vec![
         "01.Kick_01.wav",
         "02.Kick Out_01.wav",

@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn warm_audio_2mpx_friday_i_m_in_love_cover_multitracks() {
-    // Track list from "Warm Audio 2MPX - Friday I'm In Love Cover Multitracks"
+fn the_cure_friday_im_in_love() {
+    // Track list from "The Cure - Friday I'm In Love"
     let items = vec![
         "01.Kick_01.wav",
         "02.Snare_01.wav",

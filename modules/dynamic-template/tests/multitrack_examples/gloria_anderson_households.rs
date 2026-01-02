@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn gloria_anderson_households_multitracks() {
-    // Track list from "Gloria Anderson - Households Multitracks"
+fn gloria_anderson_households() {
+    // Track list from "Gloria Anderson - Households"
     let items = vec![
         "01.Households ACO JC MIXX_01.wav",
         "02.Kick LIM_01.wav",

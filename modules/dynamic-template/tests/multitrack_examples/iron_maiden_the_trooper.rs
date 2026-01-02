@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn iron_maiden_the_trooper_stems() {
-    // Track list from "Iron+Maiden+-+The+Trooper-Stems"
+fn iron_maiden_the_trooper() {
+    // Track list from "Iron Maiden - The Trooper"
     let items = vec![
         "08-Kick-TheTrooper.wav",
         "09-Snare-TheTrooper.wav",

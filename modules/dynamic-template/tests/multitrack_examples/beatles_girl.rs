@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn covering_the_beatles_girl_multitracks() {
-    // Track list from "Covering The Beatles Girl Multitracks"
+fn beatles_girl() {
+    // Track list from "The Beatles - Girl"
     let items = vec![
         "AC GTR 1_01.wav",
         "Acoustic Guitar_TAPE .wav",

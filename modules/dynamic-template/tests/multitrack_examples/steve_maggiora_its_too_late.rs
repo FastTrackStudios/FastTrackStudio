@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn steve_maggiora_it_s_too_late_110bpm() {
-    // Track list from "Steve Maggiora - It's Too Late 110BPM"
+fn steve_maggiora_its_too_late() {
+    // Track list from "Steve Maggiora - It's Too Late"
     let items = vec![
         "01.Kick_02.wav",
         "02.SN TP_02.wav",

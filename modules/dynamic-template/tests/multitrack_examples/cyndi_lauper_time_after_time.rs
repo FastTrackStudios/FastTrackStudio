@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn time_after_time_presonus_quantum_hd_8_126bpm() {
-    // Track list from "Time After Time Presonus Quantum HD 8 126BPM"
+fn cyndi_lauper_time_after_time() {
+    // Track list from "Cyndi Lauper - Time After Time"
     let items = vec![
         "01.LV BECCA.TimeAfterTime.126bpm_01.wav",
         "02.BV LUCA.TimeAfterTime.126bpm_01.wav",

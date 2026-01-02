@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn katie_ferrara_and_steve_maggiora_how_deep_is_your_love_neve_5025() {
-    // Track list from "Katie Ferrara and Steve Maggiora - How Deep Is Your Love Neve 5025"
+fn katie_ferrara_how_deep_is_your_love() {
+    // Track list from "Katie Ferrara & Steve Maggiora - How Deep Is Your Love"
     let items = vec![
         "Acoustic SILK BLUE 100%_03.wav",
         "Acoustic SILK BLUE 50%_03.wav",

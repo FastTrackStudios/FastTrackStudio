@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn shure_sm4_hey_hey_sister_laura_clapp_davidson() {
-    // Track list from "Shure SM4 Hey Hey Sister Laura Clapp Davidson"
+fn laura_clapp_davidson_hey_hey_sister() {
+    // Track list from "Laura Clapp Davidson - Hey Hey Sister"
     let items = vec![
         "01.KICK_01.wav",
         "02.SNARE_01.wav",

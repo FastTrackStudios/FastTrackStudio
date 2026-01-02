@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn you_give_love_a_bad_name_plap_multitracks() {
-    // Track list from "You Give Love A Bad Name PLAP Multitracks"
+fn bon_jovi_you_give_love_a_bad_name() {
+    // Track list from "Bon Jovi - You Give Love a Bad Name"
     let items = vec![
         "095 Pop Tamb.L.wav",
         "095 Pop Tamb.R.wav",

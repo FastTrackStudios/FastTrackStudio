@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn don_t_let_me_down_aspen_pittman_ap1b_multitracks() {
-    // Track list from "Don't Let Me Down Aspen Pittman AP1B Multitracks"
+fn beatles_dont_let_me_down() {
+    // Track list from "The Beatles - Don't Let Me Down"
     let items = vec![
         "01.Kick_01.wav",
         "02.Snare_01.wav",

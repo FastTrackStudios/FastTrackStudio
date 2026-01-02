@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn soyuz_bomblet_layla_cover_multitracks() {
-    // Track list from "Soyuz Bomblet Layla Cover Multitracks"
+fn derek_and_the_dominos_layla() {
+    // Track list from "Derek and the Dominos - Layla"
     let items = vec![
         "01. Drums_01.wav",
         "02.Bass DI_01.wav",

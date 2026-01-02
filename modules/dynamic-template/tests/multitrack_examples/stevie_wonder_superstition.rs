@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn superstition_multitracks_zen_quadro_24bit_48k() {
-    // Track list from "Superstition Multitracks Zen Quadro 24Bit 48K"
+fn stevie_wonder_superstition() {
+    // Track list from "Stevie Wonder - Superstition"
     let items = vec![
         "001 Soprano sax_01.wav",
         "002 Alto sax_01.wav",

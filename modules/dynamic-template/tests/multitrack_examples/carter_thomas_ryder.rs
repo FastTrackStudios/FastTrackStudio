@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn carter_thomas_ryder_100bpm() {
-    // Track list from "Carter Thomas - Ryder 100BPM"
+fn carter_thomas_ryder() {
+    // Track list from "Carter Thomas - Ryder"
     let items = vec![
         "12 THROW.wav",
         "14TH THROW.wav",

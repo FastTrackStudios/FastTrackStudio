@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn steve_maggiora_bring_it_on_back_multitracks_90bpm() {
-    // Track list from "Steve Maggiora - Bring It On Back Multitracks 90BPM"
+fn steve_maggiora_bring_it_on_back() {
+    // Track list from "Steve Maggiora - Bring It On Back"
     let items = vec![
         "01 Trumpet - Bring It On Back.wav",
         "02 Trombone - Bring It On Back.wav",

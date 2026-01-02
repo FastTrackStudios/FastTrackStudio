@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn day_tripper_cover_warm_audio_wa_19_multitracks() {
-    // Track list from "Day Tripper Cover - Warm Audio Wa-19 Multitracks"
+fn beatles_day_tripper() {
+    // Track list from "The Beatles - Day Tripper"
     let items = vec![
         "bass hofner_01.wav",
         "bass hofner.Duplicate _01.wav",

@@ -1,8 +1,8 @@
 use dynamic_template::*;
 
 #[test]
-fn the_ocean_cover_multitracks() {
-    // Track list from "The Ocean Cover Multitracks"
+fn led_zeppelin_the_ocean() {
+    // Track list from "Led Zeppelin - The Ocean"
     let items = vec![
         "01.Kick_01.wav",
         "02.SNR_01.wav",

@@ -3,8 +3,8 @@ use daw::tracks::item::Item;
 use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 
 #[test]
-fn dont_stop_me_now() {
-    // Track list from "Marc Martel - Don't Stop Me Now (Cover) Multitracks"
+fn marc_martel_dont_stop_me_now() {
+    // Track list from "Marc Martel - Don't Stop Me Now"
     let items = vec![
         "Kick In",
         "Kick Out",
