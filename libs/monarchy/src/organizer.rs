@@ -1,4 +1,4 @@
-use crate::{Config, Group, Item, Metadata, Structure};
+use crate::{Config, Group, Item, Metadata, Structure, CollapseHierarchy};
 
 /// Organizes items into hierarchical structures based on groups
 pub struct Organizer<M: Metadata> {
@@ -34,9 +34,9 @@ impl<M: Metadata> Organizer<M> {
         if !unmatched.is_empty() {
             match self.config.fallback_strategy {
                 crate::config::FallbackStrategy::CreateMisc => {
-                    let mut misc = Structure::new("Misc");
-                    misc.items = unmatched;
-                    root.children.push(misc);
+                    let mut unsorted = Structure::new("Unsorted");
+                    unsorted.items = unmatched;
+                    root.children.push(unsorted);
                 }
                 crate::config::FallbackStrategy::PlaceAtRoot => {
                     root.items = unmatched;
@@ -47,17 +47,11 @@ impl<M: Metadata> Organizer<M> {
             }
         }
 
-        // Apply enhanced collapse algorithm starting from top-level groups
-        // This replaces collapse_single_children with the new top-down algorithm
-        // Pass a closure to look up groups in the config to check if they have subgroups
-        // We need to capture self.config by reference to avoid lifetime issues
-        let config = &self.config;
-        for child in &mut root.children {
-            let find_group_fn = |name: &str| -> Option<&Group<M>> {
-                Self::find_group_in_config_static(config, name)
-            };
-            child.collapse_hierarchy_with_config(true, find_group_fn);
-        }
+        // Apply enhanced collapse algorithm using the two-pass system
+        // Pass 1: Collapse intermediate groups between top-level and deepest groups
+        // Pass 2: Collapse top-level groups that have only a single child
+        let collapse = CollapseHierarchy::new(&self.config);
+        collapse.apply(&mut root);
 
         root
     }
