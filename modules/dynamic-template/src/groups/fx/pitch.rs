@@ -16,7 +16,7 @@ impl From<Pitch> for Group<ItemMetadata> {
                 "autotune",
                 "auto_tune",
                 "melodyne",
-                "harmony_",
+                "harmony",
                 "harmonizer",
                 "octave",
                 "octaver",
@@ -25,7 +25,6 @@ impl From<Pitch> for Group<ItemMetadata> {
                 "vocoder",
                 "talkbox",
             ])
-            .priority(-1000) // Very low priority - only match when nothing else matches
             .build()
     }
 }

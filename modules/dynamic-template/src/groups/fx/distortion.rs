@@ -11,23 +11,22 @@ impl From<Distortion> for Group<ItemMetadata> {
         Group::builder("Distortion")
             .patterns(vec![
                 "distortion",
-                "dist_",
+                "dist",
                 "overdrive",
-                "drive_",
+                "drive",
                 "fuzz",
                 "saturation",
                 "saturator",
                 "bitcrusher",
                 "bitcrush",
                 "waveshaper",
-                "tube_",
-                "tape_",
-                "analog_",
+                "tube",
+                "tape",
+                "analog",
                 "crunch",
                 "grit",
                 "dirt",
             ])
-            .priority(-1000) // Very low priority - only match when nothing else matches
             .build()
     }
 }

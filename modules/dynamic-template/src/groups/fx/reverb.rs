@@ -12,16 +12,15 @@ impl From<Reverb> for Group<ItemMetadata> {
             .patterns(vec![
                 "reverb",
                 "verb",
-                "room_",
-                "hall_",
-                "plate_",
-                "spring_",
-                "chamber_",
-                "cathedral_",
+                "room",
+                "hall",
+                "plate",
+                "spring",
+                "chamber",
+                "cathedral",
                 "ambience",
-                "space_",
+                "space",
             ])
-            .priority(-1000) // Very low priority - only match when nothing else matches
             .build()
     }
 }

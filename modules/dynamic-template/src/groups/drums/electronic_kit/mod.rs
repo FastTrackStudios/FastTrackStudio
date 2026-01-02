@@ -1,7 +1,6 @@
 //! Electronic drum kit group definitions
 
 use crate::item_metadata::ItemMetadata;
-use crate::groups::fx;
 use monarchy::Group;
 
 mod kick;
@@ -43,7 +42,6 @@ impl From<ElectronicKit> for Group<ItemMetadata> {
             // .group(Hat)
             // .group(Pad)
             // .group(Trigger)
-            .group(fx::fx_group()) // Allow FX to be nested under Electronic Kit
             .build()
     }
 }

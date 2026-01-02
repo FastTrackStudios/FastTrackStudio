@@ -3,7 +3,6 @@
 pub mod bass;
 pub mod choir;
 pub mod drums;
-pub mod fx;
 pub mod guitars;
 pub mod keys;
 pub mod orchestra;
@@ -17,7 +16,6 @@ pub mod vocals;
 pub use bass::Bass;
 pub use choir::Choir;
 pub use drums::Drums;
-pub use fx::FX;
 pub use guitars::Guitars;
 pub use keys::Keys;
 pub use orchestra::Orchestra;

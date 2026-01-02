@@ -2,7 +2,6 @@
 
 use crate::item_metadata::prelude::*;
 use crate::item_metadata::ItemMetadataField;
-use crate::groups::fx;
 
 /// Lead vocals group
 /// 
@@ -22,7 +21,6 @@ impl From<LeadVocals> for ItemMetadataGroup {
             .layers(ItemMetadataGroup::builder("Layers").build()) // Priority 3: Layers (uses global patterns)
             .field_default_value(ItemMetadataField::Layers, "Main") // Default layer name for items without a layer
             .channel(ItemMetadataGroup::builder("Channel").patterns(["L", "C", "R", "Left", "Center", "Right"]).build()) // Priority 4: Channel (order: L, C, R)
-            .group(fx::fx_group()) // Allow FX to be nested under Lead Vocals (e.g., "Vocal Chorus Verb")
             .build()
     }
 }

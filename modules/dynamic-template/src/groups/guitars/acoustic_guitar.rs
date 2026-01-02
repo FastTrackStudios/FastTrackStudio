@@ -1,7 +1,6 @@
 //! Acoustic guitar group definition
 
 use crate::item_metadata::ItemMetadata;
-use crate::groups::fx;
 use monarchy::Group;
 
 /// Acoustic guitar group
@@ -12,7 +11,6 @@ impl From<AcousticGuitar> for Group<ItemMetadata> {
         Group::builder("Acoustic Guitar")
             .prefix("AG")
             .patterns(vec!["acoustic"])
-            .group(fx::fx_group()) // Allow FX to be nested under Acoustic Guitar
             .build()
     }
 }

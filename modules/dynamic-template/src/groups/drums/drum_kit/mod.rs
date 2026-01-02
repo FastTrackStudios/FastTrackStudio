@@ -1,7 +1,6 @@
 //! Drum kit group definitions
 
 use crate::item_metadata::ItemMetadata;
-use crate::groups::fx;
 use monarchy::Group;
 
 mod cymbals;
@@ -44,7 +43,6 @@ impl From<DrumKit> for Group<ItemMetadata> {
             .group(Tom)
             .group(Cymbals)
             .group(Room)
-            .group(fx::fx_group()) // Allow FX to be nested under Drum Kit (e.g., "Drum Kit Verb")
             .build()
     }
 }

@@ -11,7 +11,8 @@ impl From<Modulation> for Group<ItemMetadata> {
         Group::builder("Modulation")
             .patterns(vec![
                 "modulation",
-                "mod_",
+                "mod",
+                "chorus",
                 "flanger",
                 "phaser",
                 "tremolo",
@@ -23,7 +24,6 @@ impl From<Modulation> for Group<ItemMetadata> {
                 "frequency_shifter",
                 "ensemble",
             ])
-            .priority(-1000) // Very low priority - only match when nothing else matches
             .build()
     }
 }

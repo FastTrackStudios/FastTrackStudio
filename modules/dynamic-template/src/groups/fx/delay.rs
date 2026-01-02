@@ -20,7 +20,6 @@ impl From<Delay> for Group<ItemMetadata> {
                 "dub_delay",
                 "multitap",
             ])
-            .priority(-1000) // Very low priority - only match when nothing else matches
             .build()
     }
 }

@@ -11,7 +11,7 @@ impl From<Dynamics> for Group<ItemMetadata> {
         Group::builder("Dynamics")
             .patterns(vec![
                 "compressor",
-                "comp_",
+                "comp",
                 "limiter",
                 "gate",
                 "expander",
@@ -22,11 +22,10 @@ impl From<Dynamics> for Group<ItemMetadata> {
                 "leveler",
                 "multiband",
                 "opto",
-                "vca_",
-                "fet_",
-                "tube_",
+                "vca",
+                "fet",
+                "tube",
             ])
-            .priority(-1000) // Very low priority - only match when nothing else matches
             .build()
     }
 }
