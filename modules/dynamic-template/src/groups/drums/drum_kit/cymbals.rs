@@ -21,7 +21,7 @@ impl From<Cymbals> for ItemMetadataGroup {
         ];
 
         let oh_group = ItemMetadataGroup::builder("OH")
-            .patterns(["oh", "overhead", "overheads"])
+            .patterns(["oh", "ovh", "overhead", "overheads"])
             .field_value_descriptors(ItemMetadataField::MultiMic, oh_position_descriptors)
             .build();
 
@@ -56,6 +56,7 @@ impl From<Cymbals> for ItemMetadataGroup {
                 "cymbal",
                 "cymbals",
                 "oh",
+                "ovh",
                 "overhead",
                 "overheads",
                 "hat",
