@@ -194,6 +194,9 @@ impl<M: Metadata> Group<M> {
     }
 
     /// Check if a string matches this group's patterns
+    /// 
+    /// If no patterns are specified, this returns `true` (matches everything).
+    /// This allows container groups to match when any child matches.
     pub fn matches(&self, text: &str) -> bool {
         // Check negative patterns first
         for pattern in &self.negative_patterns {
@@ -215,6 +218,11 @@ impl<M: Metadata> Group<M> {
         }
 
         false
+    }
+    
+    /// Check if this group has any patterns defined
+    pub fn has_patterns(&self) -> bool {
+        !self.patterns.is_empty()
     }
 
     /// Check if text contains pattern as a whole word (not just as a substring)

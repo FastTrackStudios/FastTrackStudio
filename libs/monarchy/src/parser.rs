@@ -191,11 +191,13 @@ impl<M: Metadata> Parser<M> {
             return Some((best_match.0, best_match.1.clone()));
         }
         
-        // Otherwise, if this group matches, return it with the full path
-        if this_matches {
+        // Otherwise, if this group matches AND has patterns, return it with the full path
+        // Groups without patterns (container groups) should only match if a child matched (handled above)
+        // This prevents items like "John Crunch" from matching "Drums" just because Drums has no patterns
+        if this_matches && group.has_patterns() {
             Some((group, current_path))
         } else {
-            // This group doesn't match and no nested groups matched, so remove it from path
+            // This group doesn't have patterns and no nested groups matched → no match
             None
         }
     }

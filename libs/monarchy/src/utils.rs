@@ -3,7 +3,8 @@
 /// Check if text contains pattern as a whole word (not just as a substring)
 /// 
 /// A word is defined as a sequence of alphanumeric characters.
-/// The pattern must be surrounded by non-alphanumeric characters or be at the start/end of the string.
+/// The pattern must be surrounded by non-alphanumeric characters, be at the start/end of the string,
+/// or be at a camelCase boundary (lowercase followed by uppercase).
 /// 
 /// # Examples
 /// 
@@ -15,6 +16,11 @@
 /// assert!(contains_word("kick", "kick"));
 /// assert!(!contains_word("kickstart", "kick"));
 /// assert!(!contains_word("sidekick", "kick"));
+/// // CamelCase support
+/// assert!(contains_word("EdCrunch", "Ed"));
+/// assert!(contains_word("EdCrunch", "Crunch"));
+/// assert!(contains_word("JohnyLead", "Johny"));
+/// assert!(contains_word("JohnyLead", "Lead"));
 /// ```
 pub fn contains_word(text: &str, pattern: &str) -> bool {
     if pattern.is_empty() {
@@ -30,22 +36,47 @@ pub fn contains_word(text: &str, pattern: &str) -> bool {
         let actual_pos = start + pos;
         let after_pos = actual_pos + pattern_lower.len();
 
-        // Check if character before pattern is non-alphanumeric (or at start)
-        let before_is_word_char = if actual_pos > 0 {
-            text.chars().nth(actual_pos - 1).map_or(false, |c| c.is_alphanumeric())
+        // Check if character before pattern is a word boundary
+        let before_is_boundary = if actual_pos > 0 {
+            let before_char = text.chars().nth(actual_pos - 1);
+            let current_char = text.chars().nth(actual_pos);
+            match (before_char, current_char) {
+                (Some(b), Some(c)) => {
+                    // Word boundary if:
+                    // 1. Before char is not alphanumeric, OR
+                    // 2. CamelCase: before is lowercase and current is uppercase
+                    !b.is_alphanumeric() || (b.is_lowercase() && c.is_uppercase())
+                }
+                _ => true
+            }
         } else {
-            false // At start, so no character before
+            true // At start, so it's a boundary
         };
 
-        // Check if character after pattern is non-alphanumeric (or at end)
-        let after_is_word_char = if after_pos < text.len() {
-            text.chars().nth(after_pos).map_or(false, |c| c.is_alphanumeric())
+        // Check if character after pattern is a word boundary
+        let after_is_boundary = if after_pos < text.len() {
+            let last_pattern_char = text.chars().nth(after_pos - 1);
+            let after_char = text.chars().nth(after_pos);
+            match (last_pattern_char, after_char) {
+                (Some(l), Some(a)) => {
+                    // Word boundary if:
+                    // 1. After char is not alphanumeric, OR
+                    // 2. CamelCase: last is lowercase/digit and after is uppercase, OR
+                    // 3. Number boundary: last is alphabetic and after is digit, OR
+                    // 4. Number boundary: last is digit and after is alphabetic
+                    !a.is_alphanumeric() || 
+                    (l.is_lowercase() && a.is_uppercase()) ||
+                    (l.is_alphabetic() && a.is_ascii_digit()) ||
+                    (l.is_ascii_digit() && a.is_alphabetic())
+                }
+                _ => true
+            }
         } else {
-            false // At end, so no character after
+            true // At end, so it's a boundary
         };
 
-        // Pattern is a whole word if it's not surrounded by word characters
-        if !before_is_word_char && !after_is_word_char {
+        // Pattern is a whole word if it's at word boundaries
+        if before_is_boundary && after_is_boundary {
             return true;
         }
 
@@ -98,5 +129,19 @@ mod tests {
     #[test]
     fn test_contains_word_pattern_longer_than_text() {
         assert!(!contains_word("ki", "kick"));
+    }
+
+    #[test]
+    fn test_contains_word_camelcase() {
+        // CamelCase: word boundaries at lowercase-to-uppercase transitions
+        assert!(contains_word("EdCrunch", "Ed"));
+        assert!(contains_word("EdCrunch", "Crunch"));
+        assert!(contains_word("JohnyLead", "Johny"));
+        assert!(contains_word("JohnyLead", "Lead"));
+        assert!(contains_word("JohnyCrunch1", "Johny"));
+        assert!(contains_word("JohnyCrunch1", "Crunch"));
+        // Should not match partial words
+        assert!(!contains_word("EdCrunch", "dCr"));
+        assert!(!contains_word("EdCrunch", "run"));
     }
 }

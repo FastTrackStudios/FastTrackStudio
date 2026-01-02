@@ -69,202 +69,6 @@ impl<M: Metadata> Structure<M> {
         self.children.iter_mut().find(|c| c.name == name)
     }
 
-    /// Collapse nodes that have exactly one child and no items
-    /// This implements the "only create folders when needed" philosophy
-    pub fn collapse_single_children(&mut self) {
-        // First, recursively collapse children
-        for child in &mut self.children {
-            child.collapse_single_children();
-        }
-
-        // If this node has exactly one child and no items, collapse it
-        if self.children.len() == 1 && self.items.is_empty() {
-            let only_child = self.children.remove(0);
-            
-            // Promote the child's properties to this node
-            self.name = only_child.name;
-            self.display_name = only_child.display_name;
-            self.items = only_child.items;
-            self.children = only_child.children;
-            
-            // Recursively collapse again in case we created another single-child situation
-            self.collapse_single_children();
-        }
-    }
-
-    /// Check if this structure or any of its descendants have items
-    fn has_items_recursively(&self) -> bool {
-        !self.items.is_empty() || self.children.iter().any(|c| c.has_items_recursively())
-    }
-
-    /// Enhanced collapse function that minimizes folder hierarchy while preserving detail
-    /// 
-    /// Algorithm:
-    /// 1. Start from top track
-    /// 2. Check if there's a parent -> if false, it's top level
-    /// 3. Check if there's a single direct child
-    /// 4. Keep checking the entire hierarchy down until we understand the whole structure
-    /// 5. If a top-level track has one single direct child, unless it is the last group, it should be removed
-    /// 
-    /// `is_top_level` indicates if this is a top-level group (like "Drums", "Bass", etc.)
-    /// `depth` is used for debug indentation
-    pub fn collapse_hierarchy(&mut self, is_top_level: bool) {
-        // Default implementation without config lookup (for backward compatibility)
-        self.collapse_hierarchy_with_config(is_top_level, |_| None);
-    }
-
-    /// Enhanced collapse function with config lookup to identify deepest groups
-    /// 
-    /// `find_group` is a closure that can look up a group by name in the config
-    /// to check if it has subgroups (deepest groups have no subgroups)
-    pub fn collapse_hierarchy_with_config<'a, F>(&mut self, is_top_level: bool, find_group: F)
-    where
-        F: Fn(&str) -> Option<&'a crate::Group<M>>,
-    {
-        self.collapse_hierarchy_internal(is_top_level, 0, &find_group);
-    }
-
-    /// Internal implementation with depth tracking
-    fn collapse_hierarchy_internal<'a, F>(&mut self, is_top_level: bool, depth: usize, find_group: &F)
-    where
-        F: Fn(&str) -> Option<&'a crate::Group<M>>,
-    {
-        // First, recursively process all children from top to bottom
-        for child in &mut self.children {
-            child.collapse_hierarchy_internal(false, depth + 1, find_group);
-        }
-
-        // Now check each child - if it has only one direct child and no items, remove it
-        // BUT keep it if it has siblings (other groups at the same level) - this preserves organizational structure
-        let mut new_children = Vec::new();
-        let total_siblings = self.children.len();
-        for mut child in std::mem::take(&mut self.children) {
-            let has_single_child = child.children.len() == 1;
-            let has_no_items = child.items.is_empty();
-            
-            // Check if this is a "deepest group" - a group that has no organizational subgroups defined in the config
-            // Deepest groups like "Kick" should never be removed
-            // The `groups` vector contains organizational subgroups (like "Kick", "Snare" under "Drum Kit")
-            // Metadata groups (like multi_mic, MultiMic) are stored in groups but are not organizational subgroups
-            // They are used for metadata extraction, not for creating folder structure
-            let is_deepest_group = if let Some(group) = find_group(&child.name) {
-                // Known metadata field group names that should not count as organizational subgroups
-                let metadata_group_names = ["MultiMic", "SUM", "Section", "Layers", "Effect"];
-                
-                // Filter out metadata groups - these are not organizational subgroups
-                let org_subgroups: Vec<_> = group.groups.iter()
-                    .filter(|g| !g.metadata_only && !metadata_group_names.contains(&g.name.as_str()))
-                    .collect();
-                org_subgroups.is_empty()
-            } else {
-                false  // If we can't find it in config, assume it's not deepest
-            };
-            
-            // A group is "last group" if it directly has items OR if all its children are leaf nodes (have items, no grandchildren)
-            let is_last_group = !child.items.is_empty() || 
-                               (child.children.iter().all(|c| !c.items.is_empty() && c.children.is_empty()));
-            // Check if this group organizes items (has children that are all leaf nodes)
-            let organizes_items = !child.children.is_empty() &&
-                child.children.iter().all(|c| !c.items.is_empty() && c.children.is_empty());
-            // Check if all children are "last groups" (organize items directly or via leaf children)
-            // BUT exclude groups that organize items themselves (like "Kick" organizing "In" and "Out")
-            let all_children_are_last_groups = !child.children.is_empty() &&
-                child.children.iter().all(|c| {
-                    !c.items.is_empty() ||  // Has items directly
-                    (c.children.iter().all(|gc| !gc.items.is_empty() && gc.children.is_empty()))  // All children are leaf nodes
-                }) && !organizes_items;  // Don't remove if this group organizes items
-
-            // Never remove deepest groups (like "Kick", "Snare") - they are the actual instrument groups
-            if is_deepest_group {
-                new_children.push(child);
-                continue;
-            }
-
-            // Check if the single child is a deepest group
-            let single_child_is_deepest = has_single_child && 
-                find_group(&child.children[0].name)
-                    .map(|g| g.groups.iter().all(|sg| sg.metadata_only || 
-                         ["MultiMic", "SUM", "Section", "Layers", "Effect"].contains(&sg.name.as_str())))
-                    .unwrap_or(false);
-
-            // Check if all children are deepest groups (have no organizational subgroups)
-            let all_children_are_deepest = !child.children.is_empty() &&
-                child.children.iter().all(|c| {
-                    find_group(&c.name)
-                        .map(|g| {
-                            let metadata_group_names = ["MultiMic", "SUM", "Section", "Layers", "Effect"];
-                            let org_subgroups: Vec<_> = g.groups.iter()
-                                .filter(|sg| !sg.metadata_only && !metadata_group_names.contains(&sg.name.as_str()))
-                                .collect();
-                            org_subgroups.is_empty()
-                        })
-                        .unwrap_or(false)
-                });
-            
-            // Remove if:
-            // 1. It has a single direct child AND no items AND (it's not the last group OR the child is a deepest group), OR
-            // 2. It has no items AND all its children are "last groups" (organize items) AND it doesn't organize items itself
-            //    AND it has only one child (if it has multiple children, keep it as an organizational level), OR
-            // 3. It has no items AND all its children are deepest groups (no organizational subgroups)
-            //    This removes intermediate levels like "Drum Kit" when all children are deepest groups (Kick, Snare)
-            // 4. It has no items AND no siblings (it's the only child of its parent) - remove it to minimize hierarchy
-            //    This removes "Drum Kit" when it's the only child of "Drums" and there are no other groups like "Electronic Kit"
-            // 5. It has items AND no siblings AND no children (or all children are leaf nodes) - promote items to parent
-            //    This collapses metadata field levels (like "L" channel) when they're the only child and have items
-            // BUT: Keep the group if it has siblings (other groups at the same level) - this preserves organizational structure
-            // when multiple groups exist (e.g., "Drum Kit" and "Electronic Kit" both under "Drums")
-            let has_siblings = total_siblings > 1;
-            let has_items_but_no_children = !child.items.is_empty() && child.children.is_empty();
-            let has_items_and_only_leaf_children = !child.items.is_empty() && 
-                !child.children.is_empty() &&
-                child.children.iter().all(|c| c.children.is_empty() && c.items.is_empty());
-            
-            if !has_siblings && ((has_single_child && has_no_items && (!is_last_group || single_child_is_deepest)) ||
-               (has_no_items && all_children_are_last_groups && !organizes_items && has_single_child) ||
-               (has_no_items && all_children_are_deepest && !organizes_items) ||
-               (has_no_items && !has_siblings) ||
-               (has_items_but_no_children && !has_siblings) ||
-               (has_items_and_only_leaf_children && !has_siblings)) {
-                // Promote items to parent
-                self.items.extend(std::mem::take(&mut child.items));
-                // Promote all children, not just the first one
-                new_children.extend(std::mem::take(&mut child.children));
-            } else {
-                new_children.push(child);
-            }
-        }
-        self.children = new_children;
-
-        // Special handling for top-level:
-        // If top-level has only 1 child and no items, remove the top-level (promote the child)
-        // ONLY if the child is a deepest group (has no organizational subgroups in config)
-        // This minimizes hierarchy when the child is a leaf group, but keeps organizational levels
-        if is_top_level && self.children.len() == 1 && self.items.is_empty() {
-            let only_child = &self.children[0];
-            let metadata_group_names = ["MultiMic", "SUM", "Section", "Layers", "Effect"];
-            let is_deepest_group = if let Some(group) = find_group(&only_child.name) {
-                let org_subgroups: Vec<_> = group.groups.iter()
-                    .filter(|g| !g.metadata_only && !metadata_group_names.contains(&g.name.as_str()))
-                    .collect();
-                org_subgroups.is_empty()
-            } else {
-                false
-            };
-            
-            // Only remove top-level if child is a deepest group (leaf group with no organizational subgroups)
-            // This keeps organizational levels like "Drums" -> "Drum Kit" -> "Kick"
-            if is_deepest_group {
-                let only_child = self.children.remove(0);
-                self.name = only_child.name;
-                self.display_name = only_child.display_name;
-                self.items = only_child.items;
-                self.children = only_child.children;
-                // The promoted child is now at top level, recursively process it
-                self.collapse_hierarchy_internal(true, depth, find_group);
-            }
-        }
-    }
-
     /// Print the structure as a tree to stdout
     pub fn print_tree(&self) {
         // Skip root level if it's just a container
@@ -404,5 +208,135 @@ impl<M: Metadata> Structure<M> {
 impl<M: Metadata> fmt::Display for Structure<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_tree_string())
+    }
+}
+
+// ============================================================================
+// Structure manipulation methods for scoped sorting workflow
+// ============================================================================
+
+impl<M: Metadata> Structure<M> {
+    /// Remove and return a child structure by name
+    /// 
+    /// Returns `Some(Structure)` if found and removed, `None` otherwise.
+    pub fn remove_child(&mut self, name: &str) -> Option<Structure<M>> {
+        if let Some(pos) = self.children.iter().position(|c| c.name == name) {
+            Some(self.children.remove(pos))
+        } else {
+            None
+        }
+    }
+    
+    /// Extract all items from this structure recursively
+    /// 
+    /// Returns all items from this node and all descendants, clearing them from the structure.
+    pub fn extract_all_items(&mut self) -> Vec<Item<M>> {
+        let mut items = std::mem::take(&mut self.items);
+        for child in &mut self.children {
+            items.extend(child.extract_all_items());
+        }
+        items
+    }
+    
+    /// Extract items from a specific child by name
+    /// 
+    /// Removes the child and returns all its items (recursively).
+    /// Returns empty Vec if child not found.
+    pub fn extract_items_from_child(&mut self, name: &str) -> Vec<Item<M>> {
+        if let Some(mut child) = self.remove_child(name) {
+            child.extract_all_items()
+        } else {
+            Vec::new()
+        }
+    }
+    
+    /// Merge another structure into this one
+    /// 
+    /// The incoming structure's children are merged with existing children by name.
+    /// If a child with the same name exists, items and grandchildren are merged recursively.
+    /// If no matching child exists, the incoming child is added as a new child.
+    pub fn merge(&mut self, other: Structure<M>) {
+        // Merge items at this level
+        self.items.extend(other.items);
+        
+        // Merge children
+        for other_child in other.children {
+            if let Some(existing_child) = self.find_child_mut(&other_child.name) {
+                // Recursively merge into existing child
+                existing_child.merge(other_child);
+            } else {
+                // Add as new child
+                self.children.push(other_child);
+            }
+        }
+    }
+    
+    /// Merge a structure into a specific child path
+    /// 
+    /// The path is a list of child names to traverse (e.g., ["Guitars", "Electric Guitar"]).
+    /// Creates intermediate nodes if they don't exist.
+    /// The structure is merged at the final path location.
+    /// 
+    /// # Example
+    /// ```ignore
+    /// // Merge into root.Guitars.Electric Guitar
+    /// root.merge_at_path(&["Guitars", "Electric Guitar"], sorted_structure);
+    /// ```
+    pub fn merge_at_path(&mut self, path: &[&str], structure: Structure<M>) {
+        if path.is_empty() {
+            // Merge directly into this node
+            self.merge(structure);
+            return;
+        }
+        
+        let target_name = path[0];
+        let remaining_path = &path[1..];
+        
+        // Find or create the target child
+        let target = if let Some(pos) = self.children.iter().position(|c| c.name == target_name) {
+            &mut self.children[pos]
+        } else {
+            // Create new intermediate node
+            self.children.push(Structure::new(target_name));
+            self.children.last_mut().unwrap()
+        };
+        
+        // Recursively merge at remaining path
+        target.merge_at_path(remaining_path, structure);
+    }
+    
+    /// Find a child structure by path (recursive)
+    /// 
+    /// Returns a reference to the structure at the given path, or None if not found.
+    pub fn find_at_path(&self, path: &[&str]) -> Option<&Structure<M>> {
+        if path.is_empty() {
+            return Some(self);
+        }
+        
+        let target_name = path[0];
+        let remaining_path = &path[1..];
+        
+        self.find_child(target_name)
+            .and_then(|child| child.find_at_path(remaining_path))
+    }
+    
+    /// Find a child structure by path (mutable, recursive)
+    pub fn find_at_path_mut(&mut self, path: &[&str]) -> Option<&mut Structure<M>> {
+        if path.is_empty() {
+            return Some(self);
+        }
+        
+        let target_name = path[0];
+        let remaining_path = &path[1..];
+        
+        self.find_child_mut(target_name)
+            .and_then(|child| child.find_at_path_mut(remaining_path))
+    }
+    
+    /// Get all items at a specific path
+    /// 
+    /// Returns references to items at the given path location.
+    pub fn items_at_path(&self, path: &[&str]) -> Option<&[Item<M>]> {
+        self.find_at_path(path).map(|s| s.items.as_slice())
     }
 }
