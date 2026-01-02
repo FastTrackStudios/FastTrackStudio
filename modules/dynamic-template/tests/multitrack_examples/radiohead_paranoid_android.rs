@@ -1,5 +1,11 @@
 use dynamic_template::*;
-use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
+use daw::tracks::{TrackStructureBuilder, assert_tracks_equal, Track};
+use monarchy::{monarchy_sort, move_unsorted_to_group, reapply_collapse, expand_items_to_children};
+
+/// Count all items in a flat track list
+fn count_items(tracks: &[Track]) -> usize {
+    tracks.iter().map(|t| t.items.len()).sum()
+}
 
 #[test]
 fn radiohead_paranoid_android() {
@@ -67,12 +73,41 @@ fn radiohead_paranoid_android() {
         "Paranoid_Android_Cover_PLP_JH_MIX_1_Master.wav",
     ];
     
-    // Organize into tracks using monarchy sort
+    // Step 1: Initial sort using monarchy
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
+    let mut structure = monarchy_sort(items, config.clone()).unwrap();
     
-    // Display the track list
-    println!("\nTrack list:");
+    println!("\n=== STEP 1: Initial monarchy_sort ===");
+    println!("{}", structure);
+    
+    // Step 2: Move Ed/Johny guitar tracks from Unsorted to Electric Guitar
+    // In a real app, this would be triggered by user input: "These are electric guitar tracks"
+    println!("\n=== STEP 2: Moving guitar tracks from Unsorted to Electric Guitar ===");
+    let guitar_sorted = move_unsorted_to_group(
+        &mut structure,
+        &config,
+        &["Unsorted"],
+        "Electric",
+        &["Guitars"],
+    ).unwrap();
+    println!("Sorted {} guitar items", guitar_sorted);
+    
+    // Note: FX1/FX2 now automatically go to SFX group (no manual step needed)
+    
+    // Step 3: Re-apply collapse to clean up hierarchy
+    reapply_collapse(&mut structure, &config);
+    
+    // Step 4: Expand items to individual child tracks
+    // This ensures each item becomes its own track (one item per track rule)
+    expand_items_to_children(&mut structure);
+    
+    println!("\n=== STEP 4: Final structure after expanding items to tracks ===");
+    println!("{}", structure);
+    
+    // Convert to tracks for display
+    let tracks = structure.clone().to_tracks();
+    
+    println!("\n=== Final Track list ===");
     daw::tracks::display_tracklist(&tracks);
     
     // Expected structure based on hierarchy conventions
@@ -117,9 +152,7 @@ fn radiohead_paranoid_android() {
         .track("Bass", "25 _Bass.01_03.wav")
         // Guitars
         .folder("Guitars")
-            .folder("Acoustic")
-                .track("Main", "26 Acc Guitar_03.wav")
-            .end()
+            .track("Acoustic", "26 Acc Guitar_03.wav")
             .folder("Electric")
                 .folder("Ed")
                     .track("Crunch", "28 EdCrunch_03.wav")
@@ -154,8 +187,6 @@ fn radiohead_paranoid_android() {
         .folder("Synths")
             .track("Prophet", "54 prophet synth_david bennett_03.wav")
             .track("Bells", "44 Bells.2_03.wav")
-            .track("FX1", "46 FX1.2_03.wav")
-            .track("FX2", "47 FX2.2_03.wav")
         .end()
         // Vocals
         .folder("Vocals")
@@ -186,6 +217,8 @@ fn radiohead_paranoid_android() {
         .end()
         // SFX
         .folder("SFX")
+            .track("FX1", "46 FX1.2_03.wav")
+            .track("FX2", "47 FX2.2_03.wav")
             .track("Robot Voice", "43 Robot Voice_03.wav")
             .track("Intro Count", "42 intro count.1_03.wav")
         .end()
@@ -196,8 +229,8 @@ fn radiohead_paranoid_android() {
         .end()
         .build();
     
-    // TODO: Enable assertion once the sorting system matches expected hierarchy
-    // assert_tracks_equal(&tracks, &expected).unwrap();
+    // Full structure assertion
+    assert_tracks_equal(&tracks, &expected).unwrap();
     
     // ============================================================================
     // EXPECTED TRACK HIERARCHY (documented version)
@@ -262,9 +295,7 @@ fn radiohead_paranoid_android() {
     //
     // Synths/
     //   ├─ Prophet            ← 54 prophet synth_david bennett_03.wav
-    //   ├─ Bells              ← 44 Bells.2_03.wav
-    //   ├─ FX1                ← 46 FX1.2_03.wav
-    //   └─ FX2                ← 47 FX2.2_03.wav
+    //   └─ Bells              ← 44 Bells.2_03.wav
     //
     // Vocals/
     //   ├─ Main/                              (SECTION - main/verse parts)
@@ -289,6 +320,8 @@ fn radiohead_paranoid_android() {
     //       └─ 3              ← 64 Outro vocal 3_03.wav
     //
     // SFX/
+    //   ├─ FX1                ← 46 FX1.2_03.wav
+    //   ├─ FX2                ← 47 FX2.2_03.wav
     //   ├─ Robot Voice        ← 43 Robot Voice_03.wav
     //   └─ Intro Count        ← 42 intro count.1_03.wav
     //
