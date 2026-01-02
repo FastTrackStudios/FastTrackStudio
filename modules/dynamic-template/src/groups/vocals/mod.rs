@@ -16,7 +16,9 @@ impl From<Vocals> for ItemMetadataGroup {
     fn from(_val: Vocals) -> Self {
         ItemMetadataGroup::builder("Vocals")
             .prefix("Vox")
-            .patterns(["vocal", "vocals", "vox", "voice"])
+            .patterns(["vocal", "vocals", "vox", "voc", "voca", "voice"])
+            // Exclude non-vocal voice effects (these should go to SFX)
+            .exclude(["robot", "vocoder", "talkbox"])
             // Make transparent so Lead Vocals and BGVs appear at top level
             .transparent()
             .group(LeadVocals)
