@@ -18,7 +18,7 @@ impl<M: Metadata> Organizer<M> {
         // Build structure from groups (skip metadata_only groups)
         for group in &self.config.groups {
             if !group.metadata_only {
-                let group_structure = self.build_group_structure(group, &items, Vec::new(), Vec::new());
+                let group_structure = self.build_group_structure(group, &items, Vec::new());
                 if !group_structure.is_empty() {
                     root.children.push(group_structure);
                 }
@@ -68,7 +68,6 @@ impl<M: Metadata> Organizer<M> {
         group: &crate::Group<M>,
         all_items: &[Item<M>],
         parent_prefixes: Vec<String>,
-        parent_path: Vec<String>,
     ) -> Structure<M> {
         // Calculate the accumulated prefixes for this group
         let mut current_prefixes = parent_prefixes.clone();
@@ -107,36 +106,15 @@ impl<M: Metadata> Organizer<M> {
 
         let mut structure = Structure::with_display_name(&group.name, display_name);
 
-        // Build the current path from root to this group
-        let mut current_path = parent_path.clone();
-        current_path.push(group.name.clone());
-
         // Find items that matched this group
-        // Check if the item's matched_groups path matches the current path from root
-        // AND that this is the deepest level (last group in the path)
-        // This ensures items are only placed in the correct location in the hierarchy
+        // Check if the item's matched_groups path ends with this group
+        // The parser ensures each item only matches one group path, so we can safely
+        // check if the last group matches this group's name
         let group_items: Vec<Item<M>> = all_items
             .iter()
             .filter(|item| {
-                // Get the names from the item's matched_groups path
-                let matched_names: Vec<&str> = item.matched_groups.iter().map(|g| g.name.as_str()).collect();
-                
-                // Items should only be placed at the deepest matching level (last group in path)
                 // Check if the last group in the matched path matches this group's name
-                let last_matches = item.matched_groups.last().map(|g| &g.name) == Some(&group.name);
-                if !last_matches {
-                    return false;
-                }
-                
-                // Also check if the item's matched path starts with the current path
-                // This ensures items are only placed in the correct hierarchy location
-                // (e.g., "Drums" -> "FX" -> "Reverb" items don't go to top-level "FX" -> "Reverb")
-                if matched_names.len() < current_path.len() {
-                    return false;
-                }
-                
-                // Check if the path matches up to this point
-                matched_names[..current_path.len()].iter().zip(current_path.iter()).all(|(a, b)| *a == b.as_str())
+                item.matched_groups.last().map(|g| &g.name) == Some(&group.name)
             })
             .cloned()
             .collect();
@@ -263,13 +241,11 @@ impl<M: Metadata> Organizer<M> {
                 .collect();
             
             let child =
-                self.build_group_structure(nested_group, &filtered_items, current_prefixes.clone(), current_path.clone());
+                self.build_group_structure(nested_group, &filtered_items, current_prefixes.clone());
             if !child.is_empty() {
                 structure.children.push(child);
             }
         }
-        
-        // Update current_path for nested groups (already done above, but keep for clarity)
 
         structure
     }
@@ -396,7 +372,7 @@ impl<M: Metadata> Organizer<M> {
         match strategy {
             crate::FieldGroupingStrategy::Default => {
                 // Default: items with field values become children, items without stay at current level
-                if field_groups.len() > 1 {
+        if field_groups.len() > 1 {
                     // Multiple values - create sub-structures
                     for (field_key, items) in field_groups {
                         let mut sub_structure = self.group_by_metadata_fields_recursive(items, group, remaining_fields);
@@ -423,13 +399,13 @@ impl<M: Metadata> Organizer<M> {
                         let mut sub_structure = processed;
                         sub_structure.name = field_key;
                         sub_structure.display_name = sub_structure.name.clone();
-                        result.children.push(sub_structure);
+                    result.children.push(sub_structure);
                     } else {
                         // No remaining fields and no children - keep at current level
                         result.items = processed.items;
                         result.children = processed.children;
-                    }
-                    
+            }
+
                     // Also process items without field
                     if !items_without_field.is_empty() {
                         let without_field_structure = self.group_by_metadata_fields_recursive(items_without_field, group, remaining_fields);
@@ -465,7 +441,7 @@ impl<M: Metadata> Organizer<M> {
                         result.items = without_field_structure.items;
                         result.children.extend(without_field_structure.children);
                     }
-                } else {
+        } else {
                     // No items with field - all items go on folder track
                     let processed = self.group_by_metadata_fields_recursive(items_without_field, group, remaining_fields);
                     result.items = processed.items;
