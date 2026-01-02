@@ -17,7 +17,7 @@ impl From<Snare> for ItemMetadataGroup {
                 .patterns(["Top", "top"])
                 .build(),
             FieldValueDescriptor::builder("Bottom")
-                .patterns(["Bottom", "bottom", "Bot", "bot"])
+                .patterns(["Bottom", "bottom", "Bot", "bot", "Btm", "btm"])
                 .build(),
             FieldValueDescriptor::builder("Side")
                 .patterns(["Side", "side"])
