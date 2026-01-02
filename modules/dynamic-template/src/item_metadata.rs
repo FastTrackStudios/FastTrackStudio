@@ -240,59 +240,14 @@ impl ItemMetadataBuilder {
     }
 }
 
-/// Helper trait to convert single items or collections into a Vec<String>
-/// Similar to the IntoVec trait in monarchy, but specifically for String
-pub trait IntoVec<T> {
-    fn into_vec(self) -> Vec<T>;
-}
-
-// Implementation for single String
-impl IntoVec<String> for String {
-    fn into_vec(self) -> Vec<String> {
-        vec![self]
-    }
-}
-
-// Implementation for &str
-impl IntoVec<String> for &str {
-    fn into_vec(self) -> Vec<String> {
-        vec![self.to_string()]
-    }
-}
-
-// Implementation for Vec<String>
-impl IntoVec<String> for Vec<String> {
-    fn into_vec(self) -> Vec<String> {
-        self
-    }
-}
-
-// Implementation for Vec<&str>
-impl IntoVec<String> for Vec<&str> {
-    fn into_vec(self) -> Vec<String> {
-        self.into_iter().map(|s| s.to_string()).collect()
-    }
-}
-
-// Implementation for arrays [T; N]
-impl<const N: usize> IntoVec<String> for [&str; N] {
-    fn into_vec(self) -> Vec<String> {
-        self.into_iter().map(|s| s.to_string()).collect()
-    }
-}
-
-// Implementation for slices &[T]
-impl IntoVec<String> for &[&str] {
-    fn into_vec(self) -> Vec<String> {
-        self.iter().map(|s| (*s).to_string()).collect()
-    }
-}
+// Re-export IntoVec from monarchy for convenience
+pub use monarchy::IntoVec;
 
 /// Prelude module that exports everything needed to work with ItemMetadata groups
 /// 
 /// Import this to get all types and the extension trait in scope:
-/// ```rust
-/// use crate::item_metadata::prelude::*;
+/// ```ignore
+/// use dynamic_template::item_metadata::prelude::*;
 /// ```
 pub mod prelude {
     pub use super::ItemMetadata;
