@@ -13,7 +13,7 @@ impl From<ElectricGuitar> for ItemMetadataGroup {
         // Define guitar-specific arrangement patterns
         // These are guitar-specific and not in the global metadata patterns
         let guitar_arrangement = ItemMetadataGroup::builder("Arrangement")
-            .patterns(["Clean", "Crunch", "Drive", "Lead", "Pick", "Chug"])
+            .patterns(["Clean", "Crunch", "Drive", "Lead", "Pick", "Chug", "Rhythm", "Solo", "Phaser", "Pitch", "Wah", "Distortion", "Overdrive"])
             .build();
         
         // Define multi-mic descriptors for guitar (Amp, DI, Amplitube)
@@ -26,17 +26,18 @@ impl From<ElectricGuitar> for ItemMetadataGroup {
                 .build(),
         ];
         
-        // Configure electric guitar with field priority: Arrangement → Layers → Channel → MultiMic
+        // Configure electric guitar with field priority: Performer → Arrangement → Layers → Channel → MultiMic
         // The order of these calls determines the priority order
         // MultiMic uses MainOnContainer strategy so base tracks go on folder, multi-mic versions become children
         // Layers uses "Main" as default value so items without a layer are grouped alongside items with layers
-        ItemMetadataGroup::builder("Electric Guitar")
+        ItemMetadataGroup::builder("Electric")
             .prefix("EG")
             .patterns(["electric", "guitar", "lead guitar", "lead_guitar", "leadguitar"])
-            .arrangement(guitar_arrangement) // Priority 1: Arrangement
-            .layers(ItemMetadataGroup::builder("Layers").build()) // Priority 2: Layers (uses global patterns)
+            .performer(ItemMetadataGroup::builder("Performer").build()) // Priority 1: Performer (uses global patterns)
+            .arrangement(guitar_arrangement) // Priority 2: Arrangement
+            .layers(ItemMetadataGroup::builder("Layers").build()) // Priority 3: Layers (uses global patterns)
             .field_default_value(ItemMetadataField::Layers, "Main") // Default layer name for items without a layer
-            .channel(ItemMetadataGroup::builder("Channel").patterns(["L", "C", "R", "Left", "Center", "Right"]).build()) // Priority 3: Channel (order: L, C, R)
+            .channel(ItemMetadataGroup::builder("Channel").patterns(["L", "C", "R", "Left", "Center", "Right"]).build()) // Priority 4: Channel (order: L, C, R)
             // Note: We use field_value_descriptors for MultiMic, so we don't need the nested .multi_mic() group
             // The field_value_descriptors handle the MultiMic value extraction and matching
             .field_value_descriptors(ItemMetadataField::MultiMic, multi_mic_descriptors)
@@ -56,7 +57,8 @@ mod tests {
     fn single_track_no_grouping_needed() {
         // Example 1: Single track - no grouping needed
         // Input: Guitar Clean DBL L
-        // Output: Guitar: Guitar Clean DBL L
+        // Output: Guitars: Guitar Clean DBL L
+        // Guitars has patterns, so the top-level name is preserved
         let items = vec!["Guitar Clean DBL L"];
         
         let config = default_config();
@@ -65,8 +67,8 @@ mod tests {
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
         
-        // Single track with no grouping - all intermediate levels (Electric Guitar, Clean, DBL, L) are collapsed
-        // Item goes directly on "Guitars" track (when a structure has items but no children, it becomes a track)
+        // Single track with no grouping - all intermediate levels are collapsed
+        // Guitars (with patterns) is kept as the name, Electric is collapsed into it
         let expected = TrackStructureBuilder::new()
             .track("Guitars", "Guitar Clean DBL L")
             .build();
@@ -76,10 +78,10 @@ mod tests {
 
     #[test]
     fn multiple_arrangements_grouped() {
-        // Example 2: Multiple arrangements - grouped under Guitar folder
+        // Example 2: Multiple arrangements - grouped under Guitars folder
         // Input: Guitar Clean, Guitar Drive
-        // Output: Guitar -> Clean, Drive
-        // Note: "Electric Guitar" is collapsed when it's an intermediate level, so Clean and Drive appear directly under "Guitars"
+        // Output: Guitars -> Clean, Drive
+        // Guitars (with patterns) is preserved, Electric is collapsed into it
         let items = vec![
             "Guitar Clean",
             "Guitar Drive",
@@ -106,8 +108,8 @@ mod tests {
     fn guitars_with_multi_mics() {
         // Example 3: Guitars with multi-mics - base track on folder, multi-mic versions as children
         // Input: Guitar Clean, Guitar Clean Amp, Guitar Clean DI
-        // Output: Guitar: [Guitar Clean] -> Amp: [Guitar Clean Amp], DI: [Guitar Clean DI]
-        // Note: Amp and DI should be TRACKS (not folders) with items
+        // Output: Electric: [Guitar Clean] -> Amp, DI
+        // Single arrangement (Clean) collapses to Electric, base item on folder, multi-mics as children
         let items = vec![
             "Guitar Clean",
             "Guitar Clean Amp",
@@ -120,14 +122,12 @@ mod tests {
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
         
-        // Note: "Clean" is collapsed, and since there's no explicit layer, items get default "Main" layer
-        // Base track goes on folder track, Amp and DI are child tracks (not folders)
+        // Guitars (with patterns) is preserved, Electric and Clean are collapsed
+        // Base track (Guitar Clean) goes on folder, Amp and DI are child tracks
         let expected = TrackStructureBuilder::new()
-            .folder("Guitars")
-                .folder_with_items("Main", Some("Guitar Clean")) // Item on folder track (default layer)
-                    .track("Amp", "Guitar Clean Amp") // Track, not folder
-                    .track("DI", "Guitar Clean DI") // Track, not folder
-                .end()
+            .folder_with_items("Guitars", Some("Guitar Clean"))
+                .track("Amp", "Guitar Clean Amp")
+                .track("DI", "Guitar Clean DI")
             .end()
             .build();
         
@@ -138,8 +138,7 @@ mod tests {
     fn multiple_arrangements_with_multi_mics() {
         // Example 3 extended: Multiple arrangements with multi-mics
         // Input: Guitar Clean, Guitar Clean Amp, Guitar Clean DI, Guitar Drive, Guitar Drive Amp, Guitar Drive DI
-        // Output: Guitar -> Clean -> Amp, DI and Drive -> Amp, DI
-        // Note: Amp and DI should be TRACKS (not folders)
+        // Output: Electric -> Clean: [base] -> Amp, DI and Drive: [base] -> Amp, DI
         let items = vec![
             "Guitar Clean",
             "Guitar Clean Amp",
@@ -155,22 +154,17 @@ mod tests {
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
         
-        // Note: "Electric Guitar" is collapsed when it's an intermediate level
-        // Since there are multiple arrangements, "Clean" and "Drive" are kept
-        // Items without explicit layer get default "Main" layer
+        // Guitars (with patterns) is preserved, Electric is collapsed
+        // Each arrangement has base item on folder, multi-mics as children
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
-                .folder("Clean")
-                    .folder_with_items("Main", Some("Guitar Clean")) // Item on folder track (default layer)
-                        .track("Amp", "Guitar Clean Amp") // Track, not folder
-                        .track("DI", "Guitar Clean DI") // Track, not folder
-                    .end()
+                .folder_with_items("Clean", Some("Guitar Clean"))
+                    .track("Amp", "Guitar Clean Amp")
+                    .track("DI", "Guitar Clean DI")
                 .end()
-                .folder("Drive")
-                    .folder_with_items("Main", Some("Guitar Drive")) // Item on folder track (default layer)
-                        .track("Amp", "Guitar Drive Amp") // Track, not folder
-                        .track("DI", "Guitar Drive DI") // Track, not folder
-                    .end()
+                .folder_with_items("Drive", Some("Guitar Drive"))
+                    .track("Amp", "Guitar Drive Amp")
+                    .track("DI", "Guitar Drive DI")
                 .end()
             .end()
             .build();
@@ -199,18 +193,17 @@ mod tests {
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
         
-        // Note: "Clean" is collapsed when it's an intermediate level, so "Main" and "DBL" appear directly under "Guitars"
-        // "Main" is the default layer name for items without a layer (like "Guitar Clean")
-        // Order should be "Main" then "DBL" (based on Layers group pattern order)
+        // Guitars (with patterns) is preserved, Electric and Clean are collapsed
+        // Main and DBL are layers directly under Guitars
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
-                .folder_with_items("Main", Some("Guitar Clean")) // Base track on folder (default layer)
-                    .track("Amp", "Guitar Clean Amp") // Track, not folder
-                    .track("DI", "Guitar Clean DI") // Track, not folder
+                .folder_with_items("Main", Some("Guitar Clean"))
+                    .track("Amp", "Guitar Clean Amp")
+                    .track("DI", "Guitar Clean DI")
                 .end()
-                .folder_with_items("DBL", Some("Guitar Clean DBL")) // Base track on folder
-                    .track("Amp", "Guitar Clean Amp DBL") // Track, not folder
-                    .track("DI", "Guitar Clean DI DBL") // Track, not folder
+                .folder_with_items("DBL", Some("Guitar Clean DBL"))
+                    .track("Amp", "Guitar Clean Amp DBL")
+                    .track("DI", "Guitar Clean DI DBL")
                 .end()
             .end()
             .build();
@@ -242,21 +235,21 @@ mod tests {
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
         
-        // Note: "Clean", "Main", and "Electric Guitar" are collapsed when they're intermediate levels
-        // Channels are directly under "Guitars" in order: L, C, R (based on Channel group pattern order)
+        // Guitars (with patterns) is preserved, Electric, Clean, Main are collapsed
+        // Channels (L, C, R) are directly under Guitars
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
-                .folder_with_items("L", Some("Guitar Clean L")) // Base track on folder
-                    .track("Amp", "Guitar Clean Amp L") // Track, not folder
-                    .track("DI", "Guitar Clean DI L") // Track, not folder
+                .folder_with_items("L", Some("Guitar Clean L"))
+                    .track("Amp", "Guitar Clean Amp L")
+                    .track("DI", "Guitar Clean DI L")
                 .end()
-                .folder_with_items("C", Some("Guitar Clean C")) // Base track on folder
-                    .track("Amp", "Guitar Clean Amp C") // Track, not folder
-                    .track("DI", "Guitar Clean DI C") // Track, not folder
+                .folder_with_items("C", Some("Guitar Clean C"))
+                    .track("Amp", "Guitar Clean Amp C")
+                    .track("DI", "Guitar Clean DI C")
                 .end()
-                .folder_with_items("R", Some("Guitar Clean R")) // Base track on folder
-                    .track("Amp", "Guitar Clean Amp R") // Track, not folder
-                    .track("DI", "Guitar Clean DI R") // Track, not folder
+                .folder_with_items("R", Some("Guitar Clean R"))
+                    .track("Amp", "Guitar Clean Amp R")
+                    .track("DI", "Guitar Clean DI R")
                 .end()
             .end()
             .build();
@@ -298,37 +291,36 @@ mod tests {
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
         
-        // Note: "Clean" and "Electric Guitar" are collapsed when they're intermediate levels
-        // "Main" and "DBL" appear directly under "Guitars"
-        // Channels are ordered L, C, R within each layer
+        // Guitars (with patterns) is preserved, Electric and Clean are collapsed
+        // Main and DBL are layers, each with channels L, C, R
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
                 .folder("Main")
-                    .folder_with_items("L", Some("Guitar Clean Main L")) // Base track on folder
-                        .track("Amp", "Guitar Clean Amp Main L") // Track, not folder
-                        .track("DI", "Guitar Clean DI Main L") // Track, not folder
+                    .folder_with_items("L", Some("Guitar Clean Main L"))
+                        .track("Amp", "Guitar Clean Amp Main L")
+                        .track("DI", "Guitar Clean DI Main L")
                     .end()
-                    .folder_with_items("C", Some("Guitar Clean Main C")) // Base track on folder
-                        .track("Amp", "Guitar Clean Amp Main C") // Track, not folder
-                        .track("DI", "Guitar Clean DI Main C") // Track, not folder
+                    .folder_with_items("C", Some("Guitar Clean Main C"))
+                        .track("Amp", "Guitar Clean Amp Main C")
+                        .track("DI", "Guitar Clean DI Main C")
                     .end()
-                    .folder_with_items("R", Some("Guitar Clean Main R")) // Base track on folder
-                        .track("Amp", "Guitar Clean Amp Main R") // Track, not folder
-                        .track("DI", "Guitar Clean DI Main R") // Track, not folder
+                    .folder_with_items("R", Some("Guitar Clean Main R"))
+                        .track("Amp", "Guitar Clean Amp Main R")
+                        .track("DI", "Guitar Clean DI Main R")
                     .end()
                 .end()
                 .folder("DBL")
-                    .folder_with_items("L", Some("Guitar Clean DBL L")) // Base track on folder
-                        .track("Amp", "Guitar Clean Amp DBL L") // Track, not folder
-                        .track("DI", "Guitar Clean DI DBL L") // Track, not folder
+                    .folder_with_items("L", Some("Guitar Clean DBL L"))
+                        .track("Amp", "Guitar Clean Amp DBL L")
+                        .track("DI", "Guitar Clean DI DBL L")
                     .end()
-                    .folder_with_items("C", Some("Guitar Clean DBL C")) // Base track on folder
-                        .track("Amp", "Guitar Clean Amp DBL C") // Track, not folder
-                        .track("DI", "Guitar Clean DI DBL C") // Track, not folder
+                    .folder_with_items("C", Some("Guitar Clean DBL C"))
+                        .track("Amp", "Guitar Clean Amp DBL C")
+                        .track("DI", "Guitar Clean DI DBL C")
                     .end()
-                    .folder_with_items("R", Some("Guitar Clean DBL R")) // Base track on folder
-                        .track("Amp", "Guitar Clean Amp DBL R") // Track, not folder
-                        .track("DI", "Guitar Clean DI DBL R") // Track, not folder
+                    .folder_with_items("R", Some("Guitar Clean DBL R"))
+                        .track("Amp", "Guitar Clean Amp DBL R")
+                        .track("DI", "Guitar Clean DI DBL R")
                     .end()
                 .end()
             .end()
@@ -355,16 +347,16 @@ mod tests {
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
         
-        // Note: "Electric Guitar" is collapsed, so arrangements appear directly under "Guitars"
-        // Items without explicit layer get default "Main" layer
+        // Guitars (with patterns) is preserved, Electric is collapsed into it
+        // Arrangements (Clean, Drive) are under Guitars
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
                 .folder("Clean")
-                    .track("Main", "Guitar Clean") // Default layer
+                    .track("Main", "Guitar Clean")
                     .track("DBL", "Guitar Clean DBL")
                 .end()
                 .folder("Drive")
-                    .track("Main", "Guitar Drive") // Default layer
+                    .track("Main", "Guitar Drive")
                     .track("DBL", "Guitar Drive DBL")
                 .end()
             .end()
@@ -393,9 +385,8 @@ mod tests {
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
         
-        // Note: "Electric Guitar" is collapsed, so arrangements appear directly under "Guitars"
-        // Items without explicit layer get default "Main" layer, but since there are channels, Main is collapsed
-        // Channels are ordered L, C, R
+        // Guitars (with patterns) is preserved, Electric is collapsed into it
+        // Arrangements (Clean, Drive) are under Guitars, each with channels L, C, R
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
                 .folder("Clean")
@@ -430,11 +421,11 @@ mod tests {
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
         
-        // Note: "Clean" and "Electric Guitar" are collapsed when they're intermediate levels
-        // Items without explicit layer get default "Main" layer
+        // Guitars (with patterns) is preserved, Electric and Clean are collapsed into it
+        // Layers (Main, DBL) are directly under Guitars
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
-                .track("Main", "Guitar Clean") // Default layer
+                .track("Main", "Guitar Clean")
                 .track("DBL", "Guitar Clean DBL")
             .end()
             .build();
@@ -459,8 +450,8 @@ mod tests {
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
         
-        // Note: "Clean", "Main", and "Electric Guitar" are collapsed when they're intermediate levels
-        // Channels are directly under "Guitars" in order: L, C, R
+        // Guitars (with patterns) is preserved, Electric, Clean, Main are collapsed into it
+        // Channels (L, C, R) are directly under Guitars
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
                 .track("L", "Guitar Clean L")

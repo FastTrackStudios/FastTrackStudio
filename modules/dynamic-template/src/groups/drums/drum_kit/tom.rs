@@ -36,7 +36,7 @@ impl From<Tom> for ItemMetadataGroup {
 
         // Use field_value_descriptors for MultiMic to get "T1", "T2", "T3" as display names
         ItemMetadataGroup::builder("Toms")
-            .patterns(["tom", "t1", "t2", "t3", "t4", "t5", "ft", "floor"])
+            .patterns(["tom", "rack", "t1", "t2", "t3", "t4", "t5", "ft", "floor"])
             .field_value_descriptors(ItemMetadataField::MultiMic, tom_number_descriptors)
             .build()
     }

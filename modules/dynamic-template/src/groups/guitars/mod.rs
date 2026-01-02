@@ -19,8 +19,6 @@ impl From<Guitars> for Group<ItemMetadata> {
             .patterns(vec!["guitar", "gtr"])
             // Negative patterns to avoid matching bass guitars
             .exclude(vec!["bass_guitar", "bassguitar", "bg"])
-            // Make transparent so Electric GTR and Acoustic GTR appear at top level
-            .transparent()
             .group(ElectricGuitar)
             .group(AcousticGuitar)
             .build()

@@ -8,9 +8,9 @@ pub struct AcousticGuitar;
 
 impl From<AcousticGuitar> for Group<ItemMetadata> {
     fn from(_val: AcousticGuitar) -> Self {
-        Group::builder("Acoustic Guitar")
+        Group::builder("Acoustic")
             .prefix("AG")
-            .patterns(vec!["acoustic"])
+            .patterns(vec!["acoustic", "acc", "nylon", "classical", "fingerpick"])
             .build()
     }
 }
