@@ -124,22 +124,15 @@ impl<M: Metadata> Structure<M> {
         self.collapse_hierarchy_internal(is_top_level, 0, &find_group);
     }
 
-    /// Internal implementation with depth tracking for debugging
+    /// Internal implementation with depth tracking
     fn collapse_hierarchy_internal<'a, F>(&mut self, is_top_level: bool, depth: usize, find_group: &F)
     where
         F: Fn(&str) -> Option<&'a crate::Group<M>>,
     {
-        let indent = "  ".repeat(depth);
-        eprintln!("{}[COLLAPSE] Processing: '{}' (top_level: {}, children: {}, items: {})", 
-                 indent, self.name, is_top_level, self.children.len(), self.items.len());
-
         // First, recursively process all children from top to bottom
         for child in &mut self.children {
             child.collapse_hierarchy_internal(false, depth + 1, find_group);
         }
-
-        eprintln!("{}[COLLAPSE] After recursive processing: '{}' (children: {})", 
-                 indent, self.name, self.children.len());
 
         // Now check each child - if it has only one direct child and no items, remove it
         // BUT keep it if it has siblings (other groups at the same level) - this preserves organizational structure
@@ -162,18 +155,8 @@ impl<M: Metadata> Structure<M> {
                 let org_subgroups: Vec<_> = group.groups.iter()
                     .filter(|g| !g.metadata_only && !metadata_group_names.contains(&g.name.as_str()))
                     .collect();
-                let has_no_org_subgroups = org_subgroups.is_empty();
-                
-                if !has_no_org_subgroups {
-                    eprintln!("{}[COLLAPSE] Group '{}' has {} organizational subgroups: {:?}", 
-                             indent, child.name, org_subgroups.len(), 
-                             org_subgroups.iter().map(|g| &g.name).collect::<Vec<_>>());
-                }
-                eprintln!("{}[COLLAPSE] Found group '{}' in config, has {} total subgroups, {} org subgroups (is_deepest: {})", 
-                         indent, child.name, group.groups.len(), org_subgroups.len(), has_no_org_subgroups);
-                has_no_org_subgroups
+                org_subgroups.is_empty()
             } else {
-                eprintln!("{}[COLLAPSE] Group '{}' NOT found in config", indent, child.name);
                 false  // If we can't find it in config, assume it's not deepest
             };
             
@@ -190,13 +173,9 @@ impl<M: Metadata> Structure<M> {
                     !c.items.is_empty() ||  // Has items directly
                     (c.children.iter().all(|gc| !gc.items.is_empty() && gc.children.is_empty()))  // All children are leaf nodes
                 }) && !organizes_items;  // Don't remove if this group organizes items
-            
-            eprintln!("{}[COLLAPSE] Checking child: '{}' (single_child: {}, no_items: {}, is_deepest: {}, is_last_group: {}, organizes_items: {}, all_children_last: {})", 
-                     indent, child.name, has_single_child, has_no_items, is_deepest_group, is_last_group, organizes_items, all_children_are_last_groups);
 
             // Never remove deepest groups (like "Kick", "Snare") - they are the actual instrument groups
             if is_deepest_group {
-                eprintln!("{}[COLLAPSE] KEEPING deepest group: '{}'", indent, child.name);
                 new_children.push(child);
                 continue;
             }
@@ -246,25 +225,15 @@ impl<M: Metadata> Structure<M> {
                (has_no_items && !has_siblings) ||
                (has_items_but_no_children && !has_siblings) ||
                (has_items_and_only_leaf_children && !has_siblings)) {
-                eprintln!("{}[COLLAPSE] REMOVING intermediate: '{}' (promoting {} children, {} items, no siblings)", 
-                         indent, child.name, child.children.len(), child.items.len());
                 // Promote items to parent
                 self.items.extend(std::mem::take(&mut child.items));
                 // Promote all children, not just the first one
                 new_children.extend(std::mem::take(&mut child.children));
             } else {
-                if has_siblings {
-                    eprintln!("{}[COLLAPSE] KEEPING: '{}' (has {} siblings)", indent, child.name, total_siblings - 1);
-                } else {
-                    eprintln!("{}[COLLAPSE] KEEPING: '{}'", indent, child.name);
-                }
                 new_children.push(child);
             }
         }
         self.children = new_children;
-
-        eprintln!("{}[COLLAPSE] After removing intermediates: '{}' (children: {})", 
-                 indent, self.name, self.children.len());
 
         // Special handling for top-level:
         // If top-level has only 1 child and no items, remove the top-level (promote the child)
@@ -282,14 +251,9 @@ impl<M: Metadata> Structure<M> {
                 false
             };
             
-            eprintln!("{}[COLLAPSE] Top-level '{}' has 1 child '{}' (is_deepest: {})", 
-                     indent, self.name, only_child.name, is_deepest_group);
-            
             // Only remove top-level if child is a deepest group (leaf group with no organizational subgroups)
             // This keeps organizational levels like "Drums" -> "Drum Kit" -> "Kick"
             if is_deepest_group {
-                eprintln!("{}[COLLAPSE] REMOVING top-level: '{}' (promoting deepest group '{}')", 
-                         indent, self.name, only_child.name);
                 let only_child = self.children.remove(0);
                 self.name = only_child.name;
                 self.display_name = only_child.display_name;
@@ -297,9 +261,6 @@ impl<M: Metadata> Structure<M> {
                 self.children = only_child.children;
                 // The promoted child is now at top level, recursively process it
                 self.collapse_hierarchy_internal(true, depth, find_group);
-            } else {
-                eprintln!("{}[COLLAPSE] KEEPING top-level: '{}' (child is last group)", 
-                         indent, self.name);
             }
         }
     }

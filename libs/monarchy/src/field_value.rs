@@ -59,10 +59,15 @@ impl IntoPatterns for &[&str] {
 /// 
 /// # Example
 /// 
-/// ```rust
-/// FieldValueDescriptor::new("Out")
-///     .patterns(["out", "ouut"])
-///     .exclude(["outside", "outdoor"])
+/// ```
+/// use monarchy::FieldValueDescriptor;
+/// 
+/// let descriptor = FieldValueDescriptor::new("Out")
+///     .patterns(vec!["out".to_string(), "ouut".to_string()])
+///     .exclude(vec!["outside".to_string(), "outdoor".to_string()]);
+/// 
+/// assert!(descriptor.matches("kick out"));
+/// assert!(!descriptor.matches("outside"));
 /// ```
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FieldValueDescriptor {
@@ -106,70 +111,25 @@ impl FieldValueDescriptor {
     
     /// Check if a string matches this value descriptor
     pub fn matches(&self, text: &str) -> bool {
-        let text_lower = text.to_lowercase();
-        
         // Check negative patterns first
         for pattern in &self.negative_patterns {
-            let pattern_lower = pattern.to_lowercase();
-            if Self::contains_word(&text_lower, &pattern_lower) {
+            if crate::utils::contains_word(text, pattern) {
                 return false;
             }
         }
         
         // If no patterns specified, match the value name directly as a word
         if self.patterns.is_empty() {
-            return Self::contains_word(&text_lower, &self.value.to_lowercase());
+            return crate::utils::contains_word(text, &self.value);
         }
         
         // Check positive patterns
         for pattern in &self.patterns {
-            let pattern_lower = pattern.to_lowercase();
-            if Self::contains_word(&text_lower, &pattern_lower) {
+            if crate::utils::contains_word(text, pattern) {
                 return true;
             }
         }
         
-        false
-    }
-    
-    /// Check if text contains pattern as a whole word (not just as a substring)
-    /// A word is defined as a sequence of alphanumeric characters
-    /// The pattern must be surrounded by non-alphanumeric characters or at the start/end of the string
-    fn contains_word(text: &str, pattern: &str) -> bool {
-        if pattern.is_empty() {
-            return false;
-        }
-
-        // Find all occurrences of the pattern
-        let mut start = 0;
-        while let Some(pos) = text[start..].find(pattern) {
-            let actual_pos = start + pos;
-            let before_pos = if actual_pos > 0 { actual_pos - 1 } else { 0 };
-            let after_pos = actual_pos + pattern.len();
-
-            // Check if character before pattern is non-alphanumeric (or at start)
-            let before_is_word_char = if actual_pos > 0 {
-                text.chars().nth(before_pos).map_or(false, |c| c.is_alphanumeric())
-            } else {
-                false // At start, so no character before
-            };
-
-            // Check if character after pattern is non-alphanumeric (or at end)
-            let after_is_word_char = if after_pos < text.len() {
-                text.chars().nth(after_pos).map_or(false, |c| c.is_alphanumeric())
-            } else {
-                false // At end, so no character after
-            };
-
-            // Pattern is a whole word if it's not surrounded by word characters
-            if !before_is_word_char && !after_is_word_char {
-                return true;
-            }
-
-            // Continue searching from after this occurrence
-            start = actual_pos + 1;
-        }
-
         false
     }
 }

@@ -54,33 +54,6 @@ impl<M: Metadata> Parser<M> {
                         .collect();
                     let match_count = match_details.iter().filter(|(_, matches)| *matches).count();
                     
-                    // Check if any parent group in the path has only_match_nested_when_parent_matches set
-                    // and doesn't match - if so, this path is invalid
-                    let mut invalid_path = false;
-                    for (i, group_in_path) in path.iter().enumerate() {
-                        if group_in_path.only_match_nested_when_parent_matches {
-                            // Check if this group matches
-                            let group_matches = group_in_path.matches(&input);
-                            if !group_matches {
-                                // This group doesn't match, so nested groups shouldn't be searched
-                                // But we're here, which means a nested group matched
-                                // This is only valid if this is the last group in the path (the matched group itself)
-                                if i < path.len() - 1 {
-                                    // This is not the last group, so there are nested groups
-                                    // Since this group doesn't match and has only_match_nested_when_parent_matches,
-                                    // the nested groups shouldn't have been searched
-                                    invalid_path = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    
-                    if invalid_path {
-                        // Skip this path - it violates the only_match_nested_when_parent_matches rule
-                        continue;
-                    }
-                    
                     // Keep the deepest match, or if depth is equal, prefer one with more matching groups
                     let is_better = depth > deepest_depth || 
                                    (depth == deepest_depth && match_count > best_match_count);
@@ -88,9 +61,9 @@ impl<M: Metadata> Parser<M> {
                     if is_better {
                         deepest_depth = depth;
                         best_match_count = match_count;
-                        matched_group = Some(deepest_group);
-                        // Clone the groups to store them
-                        matched_groups = path.into_iter().map(|g| g.clone()).collect();
+                    matched_group = Some(deepest_group);
+                    // Clone the groups to store them
+                    matched_groups = path.into_iter().map(|g| g.clone()).collect();
                     }
                 }
             }
@@ -157,7 +130,9 @@ impl<M: Metadata> Parser<M> {
         let this_matches = group.matches(input);
         
         // If this group requires parent match, check that the parent in the path matches
-        if group.requires_parent_match && !current_path.is_empty() {
+        // Note: current_path already includes this group (pushed above), so we need len >= 2
+        // to have a parent (index len - 2 is the parent, len - 1 is this group)
+        if group.requires_parent_match && current_path.len() >= 2 {
             // Get the parent (the group before this one in the path)
             let parent_index = current_path.len() - 2;
             if let Some(parent) = current_path.get(parent_index) {
@@ -172,13 +147,6 @@ impl<M: Metadata> Parser<M> {
         // Collect all matches at the deepest depth, then we'll pick the best one based on match count
         let mut deepest_matches: Vec<(&'a crate::Group<M>, Vec<&'a crate::Group<M>>)> = Vec::new();
         let mut deepest_depth = 0;
-        
-        // Check if we should only search nested groups when parent matches
-        // This prevents items from matching nested groups when the parent doesn't match
-        // (e.g., "FX Reverb" shouldn't match "Drums" -> "FX" -> "Reverb" if "Drums" doesn't match)
-        // However, if the parent has no patterns (container group), we allow nested groups to be searched
-        let should_only_match_nested_when_parent_matches = group.only_match_nested_when_parent_matches;
-        let parent_has_patterns = !group.patterns.is_empty();
         
         for nested_group in &group.groups {
             // Skip nested groups that are metadata field groups (used only for metadata extraction)
@@ -195,15 +163,6 @@ impl<M: Metadata> Parser<M> {
                 // If this nested group requires parent match, check that parent matches first
                 if nested_group.requires_parent_match && !this_matches {
                     // Skip this nested group if parent doesn't match
-                    continue;
-                }
-                
-                // If parent group has only_match_nested_when_parent_matches set, only search nested groups if parent matches
-                // This prevents items from matching nested groups when the parent doesn't match
-                // (e.g., "FX Reverb" shouldn't match "Drums" -> "FX" -> "Reverb" if "Drums" doesn't match)
-                // For container groups with no patterns, we still enforce this rule
-                if should_only_match_nested_when_parent_matches && !this_matches {
-                    // Skip searching nested groups if parent doesn't match
                     continue;
                 }
                 
@@ -415,23 +374,23 @@ impl<M: Metadata> Parser<M> {
             let field_name_lower = field_name.to_lowercase().replace("_", "").replace(" ", "");
             group_name_lower == field_name_lower || g.name.eq_ignore_ascii_case(&field_name)
         }) {
-            // Extract matching patterns from nested group
+        // Extract matching patterns from nested group
             let matches = self.extract_patterns_from_group(input, nested_group, field);
-            
-            if matches.is_empty() {
-                return None;
-            }
+        
+        if matches.is_empty() {
+            return None;
+        }
 
-            // Convert matches to Value based on field type
-            // Try Vec<String> first (for fields like multi_mic), then String
-            if let Some(value) = M::create_vec_string_value(field, matches.clone()) {
+        // Convert matches to Value based on field type
+        // Try Vec<String> first (for fields like multi_mic), then String
+        if let Some(value) = M::create_vec_string_value(field, matches.clone()) {
+            return Some(value);
+        }
+        
+        // For String fields, take the first match
+        if let Some(first_match) = matches.first() {
+            if let Some(value) = M::create_string_value(field, first_match.clone()) {
                 return Some(value);
-            }
-            
-            // For String fields, take the first match
-            if let Some(first_match) = matches.first() {
-                if let Some(value) = M::create_string_value(field, first_match.clone()) {
-                    return Some(value);
                 }
             }
         }
@@ -457,15 +416,12 @@ impl<M: Metadata> Parser<M> {
         }
         
         // Fall back to simple pattern matching (backward compatibility)
-        let input_lower = input.to_lowercase();
         let mut matches = Vec::new();
 
         // Check each pattern in the group
         for pattern in &group.patterns {
-            let pattern_lower = pattern.to_lowercase();
-            
-            // Use word boundary matching (same as Group::matches)
-            if crate::group::Group::<M>::contains_word(&input_lower, &pattern_lower) {
+            // Use word boundary matching
+            if crate::utils::contains_word(input, pattern) {
                 matches.push(pattern.clone());
             }
         }

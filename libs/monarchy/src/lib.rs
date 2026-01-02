@@ -12,13 +12,14 @@ pub mod organizer;
 pub mod parser;
 pub mod structure;
 pub mod test_utils;
+pub mod utils;
 
 // Core exports
 pub use config::{Config, ConfigBuilder, FallbackStrategy, ParserRules};
 pub use error::{MonarchyError, Result};
 pub use field::{IntoField, MetadataField};
 pub use field_value::FieldValueDescriptor;
-pub use group::{FieldGroupingStrategy, Group, GroupBuilder};
+pub use group::{FieldGroupingStrategy, Group, GroupBuilder, IntoVec};
 pub use metadata::Metadata;
 pub use organizer::Organizer;
 pub use parser::Parser;

@@ -139,17 +139,6 @@ pub struct Group<M: Metadata> {
     /// Default is false, allowing groups to match independently.
     pub requires_parent_match: bool,
     
-    /// If true, nested groups under this group can only be matched if this parent group also matches.
-    /// This prevents items from matching nested groups when the parent doesn't match.
-    /// 
-    /// Example: With `only_match_nested_when_parent_matches: true` on "Drums",
-    /// "FX Reverb" will match top-level "FX" -> "Reverb", not "Drums" -> "FX" -> "Reverb",
-    /// because "Drums" doesn't match "FX Reverb".
-    /// 
-    /// Default is false, allowing nested groups to be matched even when parent doesn't match
-    /// (for backward compatibility with existing groups).
-    pub only_match_nested_when_parent_matches: bool,
-    
     /// Field value descriptors for metadata fields
     /// 
     /// This allows each metadata field value (e.g., "Out", "In", "Hi Hat", "Ride")
@@ -158,13 +147,12 @@ pub struct Group<M: Metadata> {
     /// The key is the field name (e.g., "MultiMic"), and the value is a list of descriptors
     /// for each possible value of that field.
     /// 
-    /// Example:
-    /// ```rust
+    /// Example (conceptual structure):
+    /// ```text
     /// field_value_descriptors: {
     ///     "MultiMic": [
     ///         FieldValueDescriptor { value: "Out", patterns: ["out"], negative_patterns: [] },
     ///         FieldValueDescriptor { value: "In", patterns: ["in"], negative_patterns: [] },
-    ///         FieldValueDescriptor { value: "Hi Hat", patterns: ["hat", "hihat", "Hi-hat"], negative_patterns: [] },
     ///     ]
     /// }
     /// ```
@@ -177,8 +165,8 @@ pub struct Group<M: Metadata> {
     /// 
     /// If no strategy is specified for a field, `FieldGroupingStrategy::Default` is used.
     /// 
-    /// Example:
-    /// ```rust
+    /// Example (conceptual structure):
+    /// ```text
     /// field_grouping_strategies: {
     ///     "MultiMic": FieldGroupingStrategy::MainOnContainer,
     /// }
@@ -207,12 +195,9 @@ impl<M: Metadata> Group<M> {
 
     /// Check if a string matches this group's patterns
     pub fn matches(&self, text: &str) -> bool {
-        let text_lower = text.to_lowercase();
-
         // Check negative patterns first
         for pattern in &self.negative_patterns {
-            let pattern_lower = pattern.to_lowercase();
-            if Self::contains_word(&text_lower, &pattern_lower) {
+            if crate::utils::contains_word(text, pattern) {
                 return false;
             }
         }
@@ -224,8 +209,7 @@ impl<M: Metadata> Group<M> {
         }
 
         for pattern in &self.patterns {
-            let pattern_lower = pattern.to_lowercase();
-            if Self::contains_word(&text_lower, &pattern_lower) {
+            if crate::utils::contains_word(text, pattern) {
                 return true;
             }
         }
@@ -234,47 +218,11 @@ impl<M: Metadata> Group<M> {
     }
 
     /// Check if text contains pattern as a whole word (not just as a substring)
-    /// A word is defined as a sequence of alphanumeric characters
-    /// The pattern must be surrounded by non-alphanumeric characters or at the start/end of the string
-    /// Check if text contains pattern as a whole word (not just as a substring)
-    /// A word is defined as a sequence of alphanumeric characters
-    /// The pattern must be surrounded by non-alphanumeric characters or at the start/end of the string
+    /// 
+    /// Delegates to [`crate::utils::contains_word`].
+    #[deprecated(since = "0.2.0", note = "Use crate::utils::contains_word instead")]
     pub fn contains_word(text: &str, pattern: &str) -> bool {
-        if pattern.is_empty() {
-            return false;
-        }
-
-        // Find all occurrences of the pattern
-        let mut start = 0;
-        while let Some(pos) = text[start..].find(pattern) {
-            let actual_pos = start + pos;
-            let before_pos = if actual_pos > 0 { actual_pos - 1 } else { 0 };
-            let after_pos = actual_pos + pattern.len();
-
-            // Check if character before pattern is non-alphanumeric (or at start)
-            let before_is_word_char = if actual_pos > 0 {
-                text.chars().nth(before_pos).map_or(false, |c| c.is_alphanumeric())
-            } else {
-                false // At start, so no character before
-            };
-
-            // Check if character after pattern is non-alphanumeric (or at end)
-            let after_is_word_char = if after_pos < text.len() {
-                text.chars().nth(after_pos).map_or(false, |c| c.is_alphanumeric())
-            } else {
-                false // At end, so no character after
-            };
-
-            // Pattern is a whole word if it's not surrounded by word characters
-            if !before_is_word_char && !after_is_word_char {
-                return true;
-            }
-
-            // Continue searching from after this occurrence
-            start = actual_pos + 1;
-        }
-
-        false
+        crate::utils::contains_word(text, pattern)
     }
 }
 
@@ -297,7 +245,6 @@ impl<M: Metadata> GroupBuilder<M> {
                 transparent: false,
                 metadata_only: false,
                 requires_parent_match: false,
-                only_match_nested_when_parent_matches: false,
                 field_value_descriptors: std::collections::HashMap::new(),
                 field_grouping_strategies: std::collections::HashMap::new(),
                 field_default_values: std::collections::HashMap::new(),
@@ -499,27 +446,6 @@ impl<M: Metadata> GroupBuilder<M> {
     /// if it also matches the "Electronic Kit" patterns (e.g., "electronic", "808", etc.).
     pub fn requires_parent_match(mut self) -> Self {
         self.group.requires_parent_match = true;
-        self
-    }
-    
-    /// Set `only_match_nested_when_parent_matches` to true.
-    /// 
-    /// This prevents nested groups from being matched when the parent doesn't match.
-    /// Useful for groups like "Drums" where nested "FX" should only match if "Drums" also matches.
-    /// 
-    /// # Example
-    /// 
-    /// ```ignore
-    /// Group::builder("Drums")
-    ///     .only_match_nested_when_parent_matches()
-    ///     .group(fx_group())
-    ///     .build()
-    /// ```
-    /// 
-    /// With this configuration, "FX Reverb" will match top-level "FX" -> "Reverb",
-    /// not "Drums" -> "FX" -> "Reverb", because "Drums" doesn't match "FX Reverb".
-    pub fn only_match_nested_when_parent_matches(mut self) -> Self {
-        self.group.only_match_nested_when_parent_matches = true;
         self
     }
     
