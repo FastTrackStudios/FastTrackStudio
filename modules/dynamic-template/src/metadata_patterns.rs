@@ -14,7 +14,7 @@ use crate::item_metadata::prelude::*;
 pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
     // Define each field's patterns separately for clarity
     let section = Group::builder("Section")
-        .patterns(["Intro", "Verse", "Chorus", "Bridge", "Instrumental", "Outro"])
+        .patterns(["Intro", "Verse", "Chorus", "Bridge", "Middle", "Instrumental", "Outro", "Pre", "Post"])
         .build();
 
     let arrangement = Group::builder("Arrangement")
@@ -38,7 +38,36 @@ pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
         .build();
 
     let performer = Group::builder("Performer")
-        .patterns(["Cody", "John", "JT", "Bri"])
+        .patterns([
+            // Common first names - add more as needed
+            "Aaron", "Adam", "Alex", "Amanda", "Amy", "Andrew", "Angela", "Anna",
+            "Ben", "Beth", "Bill", "Bob", "Brad", "Brandon", "Bri", "Brian", "Brittany",
+            "Caleb", "Carlos", "Chad", "Chris", "Cody", "Connor", "Corey",
+            "Dakota", "Dan", "Daniel", "Dave", "David", "Derek", "Diana", "Dylan",
+            "Ed", "Elena", "Emily", "Emma", "Eric", "Ethan", "Evan",
+            "Frank", "Fred",
+            "Gary", "George", "Grace", "Greg",
+            "Hannah", "Harry", "Heather", "Henry",
+            "Ian", "Isaac",
+            "Jack", "Jacob", "Jake", "James", "Jamie", "Jason", "Jeff", "Jen", "Jennifer", 
+            "Jeremy", "Jesse", "Jessica", "Jim", "Joe", "Joey", "John", "Johnny", "Johny", "Jon", 
+            "Jordan", "Jose", "Josh", "Joshua", "JT", "Juan", "Julia", "Justin",
+            "Karen", "Kate", "Katie", "Keith", "Kelly", "Ken", "Kevin", "Kim", "Kyle",
+            "Larry", "Laura", "Lauren", "Leo", "Lisa", "Logan", "Luke",
+            "Madison", "Marc", "Marcus", "Maria", "Mark", "Matt", "Matthew", "Megan", 
+            "Melissa", "Michael", "Michelle", "Mike", "Mitch", "Morgan",
+            "Nancy", "Nate", "Nathan", "Nick", "Nicole", "Noah",
+            "Oliver", "Olivia",
+            "Pat", "Patrick", "Paul", "Pete", "Peter", "Phil",
+            "Rachel", "Randy", "Ray", "Rebecca", "Richard", "Rick", "Rob", "Robert", 
+            "Roger", "Ron", "Ryan",
+            "Sam", "Samantha", "Sandra", "Sara", "Sarah", "Scott", "Sean", "Seth", 
+            "Shane", "Shannon", "Sharon", "Shawn", "Sophia", "Stacy", "Steve", "Steven",
+            "Taylor", "Thomas", "Tim", "Timothy", "Todd", "Tom", "Tony", "Travis", "Tyler",
+            "Victor", "Victoria",
+            "Will", "William",
+            "Zach", "Zachary", "Zoe",
+        ])
         .build();
 
     let rec_tag = Group::builder("RecTag")

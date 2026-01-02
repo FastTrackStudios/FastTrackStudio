@@ -7,7 +7,7 @@ mod groups;
 mod item_metadata;
 mod metadata_patterns;
 
-pub use groups::{Bass, Choir, Drums, Guitars, Keys, Orchestra, Percussion, Synths, Vocals};
+pub use groups::{Bass, Choir, Drums, Guitars, Keys, Orchestra, Percussion, Synths, Vocals, SFX};
 pub use item_metadata::ItemMetadata;
 
 /// Type alias for our standard Config with ItemMetadata
@@ -38,6 +38,7 @@ pub fn default_config() -> DynamicTemplateConfig {
         .group(Vocals)
         .group(Choir)
         .group(Orchestra)
+        .group(SFX)
         .build()
 }
 
@@ -272,6 +273,25 @@ fn structure_to_tracks<M: Metadata>(structure: &Structure<M>, skip_root: bool) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_acc_guitar_structure() {
+        // Test that Acoustic Guitar stays under Guitars (Guitars is not transparent)
+        // Guitars -> Acoustic -> [item] collapses to Guitars: [item]
+        let inputs = vec!["Acc Guitar"];
+        let config = default_config();
+        let result = monarchy_sort(inputs, config).unwrap();
+        
+        println!("\nAcc Guitar result:");
+        result.print_tree();
+        
+        // Guitars is not transparent, so it keeps its name even with a single item
+        // The structure should be: Guitars: [item]
+        let guitars = result.find_child("Guitars")
+            .expect("Should have Guitars folder");
+        assert_eq!(guitars.items.len(), 1, "Guitars should have 1 item");
+        assert_eq!(guitars.items[0].original, "Acc Guitar");
+    }
 
     #[test]
     fn test_kick_and_drumkit() {
