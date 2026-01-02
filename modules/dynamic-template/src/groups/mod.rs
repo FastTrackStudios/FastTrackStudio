@@ -7,6 +7,7 @@ pub mod guitars;
 pub mod keys;
 pub mod orchestra;
 pub mod percussion;
+pub mod sfx;
 pub mod synths;
 pub mod vocals;
 
@@ -20,5 +21,6 @@ pub use guitars::Guitars;
 pub use keys::Keys;
 pub use orchestra::Orchestra;
 pub use percussion::Percussion;
+pub use sfx::SFX;
 pub use synths::Synths;
 pub use vocals::Vocals;
