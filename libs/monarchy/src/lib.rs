@@ -26,11 +26,15 @@ pub use organizer::Organizer;
 pub use parser::Parser;
 pub use structure::Structure;
 pub use test_utils::StructureAssertions;
+// Display name generation
+// ToDisplayName: trait implemented by metadata types to generate canonical display names
 pub use visitor::{
-    collect_unsorted_to_root, collect_unsorted_to_root_with_name, expand_items_to_children,
-    ApplyTaggedCollections, CollectUnsorted, CollapseHierarchy, ExpandItemsToChildren,
-    PromoteSingleChild, RemoveEmptyNodes, StructureVisitor, Visitable
+    cleanup_display_names, cleanup_display_names_with_fallback, collect_unsorted_to_root,
+    collect_unsorted_to_root_with_name, expand_items_to_children, ApplyTaggedCollections,
+    CleanupDisplayNames, CollectUnsorted, CollapseHierarchy, ExpandItemsToChildren,
+    PromoteSingleChild, RemoveEmptyNodes, StructureVisitor, Visitable,
 };
+// Note: ToDisplayName is defined in this file, not in visitor module
 
 // Re-export the derive macros
 // Note: Metadata derive macro shares the same name as the Metadata trait - this is the standard Rust pattern
@@ -61,6 +65,78 @@ pub struct Item<M: Metadata> {
     /// 
     /// Note: For serialization, this is serialized as group names (Vec<String>)
     pub matched_groups: Vec<Group<M>>,
+}
+
+impl<M: Metadata> Item<M> {
+    /// Derive display name from matched groups and metadata
+    /// 
+    /// This method extracts prefixes and group names from matched_groups,
+    /// then delegates to the metadata's `to_display_name()` implementation.
+    /// 
+    /// Returns the original name if metadata doesn't implement ToDisplayName
+    /// or if to_display_name returns an empty string.
+    pub fn derive_display_name(&self) -> String 
+    where 
+        M: ToDisplayName 
+    {
+        let prefixes: Vec<String> = self.matched_groups
+            .iter()
+            .filter_map(|g| g.prefix.clone())
+            .collect();
+        
+        let group_names: Vec<String> = self.matched_groups
+            .iter()
+            .map(|g| g.name.clone())
+            .collect();
+        
+        let display_name = self.metadata.to_display_name(&prefixes, &group_names);
+        
+        // Fall back to original if empty
+        if display_name.is_empty() {
+            self.original.clone()
+        } else {
+            display_name
+        }
+    }
+}
+
+/// Trait for types that can generate a display name from their data
+/// 
+/// This trait is implemented by metadata types to generate canonical display names
+/// that include all relevant information from the parsed metadata.
+/// 
+/// # Example
+/// ```ignore
+/// impl ToDisplayName for MyMetadata {
+///     fn to_display_name(&self, prefixes: &[String], group_names: &[String]) -> String {
+///         let mut parts = Vec::new();
+///         
+///         // Add prefixes
+///         if !prefixes.is_empty() {
+///             parts.push(prefixes.join(" "));
+///         }
+///         
+///         // Add last group name
+///         if let Some(group) = group_names.last() {
+///             parts.push(group.clone());
+///         }
+///         
+///         // Add other metadata fields...
+///         
+///         parts.join(" ")
+///     }
+/// }
+/// ```
+pub trait ToDisplayName {
+    /// Generate a full canonical display name
+    /// 
+    /// # Arguments
+    /// * `prefixes` - Accumulated prefixes from matched groups (e.g., ["D", "GTR"])
+    /// * `group_names` - Names of matched groups in hierarchy order (e.g., ["Drums", "Kick"])
+    /// 
+    /// # Returns
+    /// Full display name like "D Kick In" or "GTR E Cody Crunch 2"
+    fn to_display_name(&self, prefixes: &[String], group_names: &[String]) -> String;
 }
 
 /// Trait for converting various input types into sortable strings

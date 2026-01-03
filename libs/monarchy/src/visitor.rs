@@ -16,7 +16,7 @@
 //! structure.accept(&mut CollapseHierarchy::new(&config));
 //! ```
 
-use crate::{Config, Group, Metadata, Structure};
+use crate::{Config, Group, Metadata, Structure, ToDisplayName};
 
 /// Trait for visiting and transforming Structure nodes
 ///
@@ -749,8 +749,9 @@ impl<M: Metadata> StructureVisitor<M> for PromoteSingleChild {
 /// Visitor that expands multiple items on a node into individual child nodes
 ///
 /// This ensures each item becomes its own track. When a node has multiple items,
-/// each item is converted to its own child node with the item's original name
-/// as the node name.
+/// each item is converted to its own child node. The node name is derived from
+/// the item's metadata using `derive_display_name()` if the metadata implements
+/// `ToDisplayName`, otherwise falls back to the original name.
 ///
 /// Single items stay on the parent node (the folder will have the item on it).
 ///
@@ -758,7 +759,7 @@ impl<M: Metadata> StructureVisitor<M> for PromoteSingleChild {
 /// (handled by checking the Playlist metadata field if it exists)
 pub struct ExpandItemsToChildren;
 
-impl<M: Metadata> StructureVisitor<M> for ExpandItemsToChildren {
+impl<M: Metadata + ToDisplayName> StructureVisitor<M> for ExpandItemsToChildren {
     fn leave(&mut self, node: &mut Structure<M>, _depth: usize) {
         // Only expand if we have multiple items
         // Single item stays on the parent node (will become a track/folder with item on it)
@@ -769,9 +770,8 @@ impl<M: Metadata> StructureVisitor<M> for ExpandItemsToChildren {
         // Expand each item into its own child node
         let items = std::mem::take(&mut node.items);
         for item in items {
-            // Use the item's original name as the child node name
-            // TODO: Could extract a cleaner display name from metadata
-            let child_name = item.original.clone();
+            // Use derive_display_name() to get a clean display name from metadata
+            let child_name = item.derive_display_name();
             let mut child = Structure::new(&child_name);
             child.items.push(item);
             node.children.push(child);
@@ -780,9 +780,247 @@ impl<M: Metadata> StructureVisitor<M> for ExpandItemsToChildren {
 }
 
 /// Helper function to expand items to children throughout a structure
-pub fn expand_items_to_children<M: Metadata>(root: &mut Structure<M>) {
+pub fn expand_items_to_children<M: Metadata + ToDisplayName>(root: &mut Structure<M>) {
     let mut expander = ExpandItemsToChildren;
     root.accept(&mut expander);
+}
+
+/// Visitor that cleans up display names by stripping redundant context
+///
+/// After `ExpandItemsToChildren` creates child nodes with full display names,
+/// this visitor removes redundant parts based on the parent hierarchy.
+///
+/// For example:
+/// - "Kick In" under "Kick" folder → "In"
+/// - "Ed Crunch" under "Ed" folder → "Crunch"
+/// - "D Kick" under "Drums" folder → "Kick"
+///
+/// Also handles duplicate detection and numbering:
+/// - Two children named "Crunch" → "Crunch 1", "Crunch 2"
+///
+/// If stripping results in an empty string, falls back to the configured
+/// fallback name (default: group name or "Main").
+pub struct CleanupDisplayNames {
+    /// Stack of ancestor names as we traverse
+    context_stack: Vec<String>,
+    /// Fallback name when stripping results in empty string
+    fallback_name: String,
+}
+
+impl Default for CleanupDisplayNames {
+    fn default() -> Self {
+        Self {
+            context_stack: Vec::new(),
+            fallback_name: "Main".to_string(),
+        }
+    }
+}
+
+impl CleanupDisplayNames {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    /// Set a custom fallback name for when stripping results in empty string
+    pub fn with_fallback(mut self, fallback: impl Into<String>) -> Self {
+        self.fallback_name = fallback.into();
+        self
+    }
+    
+    /// Clean up a filename to be suitable for display
+    /// 
+    /// Performs the following cleanup:
+    /// 1. Remove file extension (.wav, .aiff, .flac, etc.)
+    /// 2. Remove leading track numbers (e.g., "49 " from "49 Organ Chords")
+    /// 3. Remove trailing version/playlist suffixes (e.g., ".2_03", "_03", ".dup1")
+    /// 4. Strip context words from ancestors
+    fn cleanup_name(&self, name: &str) -> String {
+        let mut cleaned = name.to_string();
+        
+        // Step 1: Remove file extension
+        let extensions = [".wav", ".aiff", ".aif", ".flac", ".mp3", ".ogg", ".m4a"];
+        for ext in extensions {
+            if cleaned.to_lowercase().ends_with(ext) {
+                cleaned = cleaned[..cleaned.len() - ext.len()].to_string();
+                break;
+            }
+        }
+        
+        // Step 2: Remove trailing version/playlist suffixes
+        // Patterns like "_03", ".2_03", ".dup1_03", ".01.R.05_03"
+        // These are typically Pro Tools or DAW-specific suffixes
+        let suffix_patterns = [
+            // Full patterns with underscores
+            r"[._]\d+[._]\d+$",        // .05_03, _05_03
+            r"[._]dup\d*[._]?\d*$",    // .dup1_03, .dup1
+            r"[._]\d+$",               // _03, .2
+            r"[._][RL][._]?\d*[._]?\d*$", // .R.05_03, .L
+        ];
+        
+        // Simple suffix removal (not using regex for performance)
+        // Remove patterns like "_03" at the end
+        if let Some(idx) = cleaned.rfind('_') {
+            let suffix = &cleaned[idx + 1..];
+            if suffix.chars().all(|c| c.is_ascii_digit()) {
+                cleaned = cleaned[..idx].to_string();
+            }
+        }
+        
+        // Remove patterns like ".2" at the end (but not things like "DX7")
+        if let Some(idx) = cleaned.rfind('.') {
+            let suffix = &cleaned[idx + 1..];
+            // Only remove if it's a simple number or dup pattern
+            if suffix.chars().all(|c| c.is_ascii_digit()) 
+                || suffix.starts_with("dup") 
+            {
+                cleaned = cleaned[..idx].to_string();
+            }
+        }
+        
+        // Recursively clean more suffixes
+        // Handle cases like "Snare.dup1.05_03" -> "Snare"
+        loop {
+            let before = cleaned.clone();
+            
+            // Remove trailing _NN
+            if let Some(idx) = cleaned.rfind('_') {
+                let suffix = &cleaned[idx + 1..];
+                if suffix.chars().all(|c| c.is_ascii_digit()) {
+                    cleaned = cleaned[..idx].to_string();
+                    continue;
+                }
+            }
+            
+            // Remove trailing .NN or .dupN
+            if let Some(idx) = cleaned.rfind('.') {
+                let suffix = &cleaned[idx + 1..];
+                if suffix.chars().all(|c| c.is_ascii_digit()) 
+                    || suffix.starts_with("dup")
+                    || suffix == "R"
+                    || suffix == "L"
+                {
+                    cleaned = cleaned[..idx].to_string();
+                    continue;
+                }
+            }
+            
+            if before == cleaned {
+                break;
+            }
+        }
+        
+        // Step 3: Remove leading track numbers (e.g., "49 " from "49 Organ Chords")
+        let parts: Vec<&str> = cleaned.split_whitespace().collect();
+        if parts.len() > 1 {
+            if let Some(first) = parts.first() {
+                // Check if first word is just a number (track number)
+                if first.chars().all(|c| c.is_ascii_digit()) {
+                    cleaned = parts[1..].join(" ");
+                }
+            }
+        }
+        
+        // Step 4: Strip context words from ancestors
+        self.strip_context(&cleaned)
+    }
+    
+    /// Strip context words from a name based on ancestor names
+    /// 
+    /// Removes words from the name that appear in any ancestor's name.
+    /// Case-insensitive comparison.
+    fn strip_context(&self, name: &str) -> String {
+        let mut words: Vec<&str> = name.split_whitespace().collect();
+        
+        // Build a set of all context words from ancestors (lowercase for comparison)
+        let context_words: std::collections::HashSet<String> = self.context_stack
+            .iter()
+            .flat_map(|ancestor| ancestor.split_whitespace())
+            .map(|w| w.to_lowercase())
+            .collect();
+        
+        // Remove words that appear in context
+        words.retain(|word| !context_words.contains(&word.to_lowercase()));
+        
+        words.join(" ")
+    }
+    
+    /// Number duplicate names in a list of children
+    /// 
+    /// If multiple children have the same name after stripping,
+    /// append " 1", " 2", etc.
+    fn number_duplicates(children: &mut [Structure<impl Metadata>]) {
+        use std::collections::HashMap;
+        
+        // Count occurrences of each name
+        let mut name_counts: HashMap<String, usize> = HashMap::new();
+        for child in children.iter() {
+            *name_counts.entry(child.name.clone()).or_insert(0) += 1;
+        }
+        
+        // Track which names need numbering (count > 1)
+        let duplicates: std::collections::HashSet<String> = name_counts
+            .into_iter()
+            .filter(|(_, count)| *count > 1)
+            .map(|(name, _)| name)
+            .collect();
+        
+        // Apply numbering to duplicates
+        let mut name_counters: HashMap<String, usize> = HashMap::new();
+        for child in children.iter_mut() {
+            if duplicates.contains(&child.name) {
+                let counter = name_counters.entry(child.name.clone()).or_insert(0);
+                *counter += 1;
+                child.name = format!("{} {}", child.name, counter);
+            }
+        }
+    }
+}
+
+impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
+    fn enter(&mut self, node: &mut Structure<M>, _depth: usize) -> bool {
+        // Push this node's name onto the context stack before visiting children
+        self.context_stack.push(node.name.clone());
+        true
+    }
+    
+    fn leave(&mut self, node: &mut Structure<M>, _depth: usize) {
+        // Process children's names before popping context
+        for child in &mut node.children {
+            let cleaned = self.cleanup_name(&child.name);
+            if cleaned.is_empty() {
+                // Fallback: use the last group name from context, or default fallback
+                child.name = self.context_stack.last()
+                    .cloned()
+                    .unwrap_or_else(|| self.fallback_name.clone());
+            } else {
+                child.name = cleaned;
+            }
+        }
+        
+        // Number any duplicate names among children
+        Self::number_duplicates(&mut node.children);
+        
+        // Pop this node from context stack
+        self.context_stack.pop();
+    }
+}
+
+/// Helper function to clean up display names throughout a structure
+/// 
+/// This should be called after `expand_items_to_children()` to strip
+/// redundant context from the generated display names.
+pub fn cleanup_display_names<M: Metadata>(root: &mut Structure<M>) {
+    let mut cleaner = CleanupDisplayNames::new();
+    root.accept(&mut cleaner);
+}
+
+/// Helper function to clean up display names with a custom fallback
+pub fn cleanup_display_names_with_fallback<M: Metadata>(
+    root: &mut Structure<M>,
+    fallback: &str,
+) {
+    let mut cleaner = CleanupDisplayNames::new().with_fallback(fallback);
+    root.accept(&mut cleaner);
 }
 
 #[cfg(test)]

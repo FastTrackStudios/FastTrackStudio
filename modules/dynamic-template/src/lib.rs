@@ -263,9 +263,11 @@ fn structure_to_tracks<M: Metadata>(structure: &Structure<M>, skip_root: bool) -
     }
 
     // If this structure has items but no children, it's a leaf track
-    // Note: The items from monarchy are just strings, not DAW Items
-    // You may want to convert them to DAW Items separately if needed
-    // For now, we just create the track with the name
+    // Convert monarchy items to DAW items using the original name
+    for monarchy_item in &structure.items {
+        let item = Item::with_name(monarchy_item.original.clone());
+        track.items.push(item);
+    }
 
     vec![track]
 }
