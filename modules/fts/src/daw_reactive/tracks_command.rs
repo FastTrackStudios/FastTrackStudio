@@ -1,20 +1,44 @@
 //! REAPER implementation of TrackCommandHandler
+//!
+//! This module provides the REAPER-specific implementation for executing track commands
+//! like mute, solo, etc. It handles main-thread dispatching for REAPER API calls.
+//!
+//! This module is only available when the `reaper` feature is enabled.
 
 use async_trait::async_trait;
-use daw::tracks::reactive::irpc::TrackCommandHandler;
-use daw::tracks::api::solo::SoloMode;
+use std::sync::{Arc, OnceLock};
+
+use fragile::Fragile;
 use reaper_high::{Reaper, Project as ReaperProject, TaskSupport};
 use reaper_medium::{ProjectRef, SoloMode as ReaperSoloMode};
-use std::sync::{Arc, OnceLock};
-use fragile::Fragile;
 use tracing::{info, warn};
+
+use daw::tracks::reactive::irpc::TrackCommandHandler;
+use daw::tracks::api::solo::SoloMode;
+
+use super::tracks::ReaperTrackReactiveService;
+use super::SetlistProvider;
+
+/// Type alias for the static track reactive service
+type StaticTrackService = Fragile<Arc<dyn TrackServiceAccessor>>;
+
+/// Trait for accessing the track reactive service
+/// This allows us to store a type-erased reference to the track service
+/// 
+/// Note: This trait is NOT Send + Sync because ReaperTrackReactiveService contains
+/// non-thread-safe types (RefCell/Rc). Access is controlled via Fragile wrapper
+/// which ensures main-thread-only access.
+pub trait TrackServiceAccessor {
+    /// Update a single track from REAPER (called after command execution)
+    fn update_track_from_reaper(&self, project: ReaperProject, track_index: usize);
+}
 
 /// Static storage for track reactive service (main thread only)
 /// Wrapped in Fragile to ensure main-thread-only access
-static TRACK_REACTIVE_SERVICE: OnceLock<Fragile<Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>>> = OnceLock::new();
+static TRACK_REACTIVE_SERVICE: OnceLock<StaticTrackService> = OnceLock::new();
 
 /// Initialize track reactive service (called from main thread during setup)
-pub fn init_track_reactive_service(service: Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>) {
+pub fn init_track_reactive_service(service: Arc<dyn TrackServiceAccessor>) {
     if TRACK_REACTIVE_SERVICE.set(Fragile::new(service)).is_err() {
         panic!("Track reactive service already initialized");
     }
@@ -22,28 +46,35 @@ pub fn init_track_reactive_service(service: Arc<crate::infrastructure::reaper_tr
 
 /// Get track reactive service (main thread only)
 /// Panics if called from wrong thread
-fn get_track_reactive_service() -> Option<Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>> {
+fn get_track_reactive_service() -> Option<Arc<dyn TrackServiceAccessor>> {
     TRACK_REACTIVE_SERVICE.get().map(|f| f.get().clone())
 }
 
+/// Trait for providing project lookup from project name
+pub trait ProjectProvider: Send + Sync {
+    /// Get the REAPER project from a project name
+    fn get_project_from_name(&self, project_name: &str) -> Option<ReaperProject>;
+}
+
 /// REAPER implementation of TrackCommandHandler
-pub struct ReaperTrackCommandHandler {
-    setlist_service: Arc<crate::services::setlist_service::SetlistService>,
+pub struct ReaperTrackCommandHandler<P: ProjectProvider> {
+    project_provider: Arc<P>,
     task_support: Arc<TaskSupport>,
 }
 
-impl ReaperTrackCommandHandler {
-    pub fn new(
-        setlist_service: Arc<crate::services::setlist_service::SetlistService>,
-        task_support: Arc<TaskSupport>,
-    ) -> Self {
+impl<P: ProjectProvider> ReaperTrackCommandHandler<P> {
+    pub fn new(project_provider: Arc<P>, task_support: Arc<TaskSupport>) -> Self {
         Self {
-            setlist_service,
+            project_provider,
             task_support,
         }
     }
+}
 
-    /// Get the REAPER project from project name
+/// Default project provider that looks up projects by name
+pub struct DefaultProjectProvider;
+
+impl ProjectProvider for DefaultProjectProvider {
     fn get_project_from_name(&self, project_name: &str) -> Option<ReaperProject> {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
@@ -68,25 +99,18 @@ impl ReaperTrackCommandHandler {
 }
 
 #[async_trait]
-impl TrackCommandHandler for ReaperTrackCommandHandler {
+impl<P: ProjectProvider + 'static> TrackCommandHandler for ReaperTrackCommandHandler<P> {
     async fn set_track_mute(&self, project_id: String, track_index: usize, muted: bool) -> Result<(), String> {
         info!("[Track Command] Setting track {} mute to {} in project {}", track_index, muted, project_id);
         
         let project_name = project_id.clone();
-        let setlist_service_for_closure = self.setlist_service.clone();
-        let task_support_for_closure = self.task_support.clone();
-        let task_support_ref = &*self.task_support;
+        let project_provider = self.project_provider.clone();
         
         // Dispatch to main thread using task_support
-        let result = task_support_ref
+        let result = (&*self.task_support)
             .main_thread_future(move || {
                 // This closure runs on the main thread
-                let handler = ReaperTrackCommandHandler {
-                    setlist_service: setlist_service_for_closure,
-                    task_support: task_support_for_closure,
-                };
-                
-                let project = handler.get_project_from_name(&project_name)
+                let project = project_provider.get_project_from_name(&project_name)
                     .ok_or_else(|| format!("Project not found: {}", project_name))?;
                 
                 let track = project.track_by_index(track_index as u32)
@@ -110,11 +134,11 @@ impl TrackCommandHandler for ReaperTrackCommandHandler {
         
         match result {
             Ok(()) => {
-                info!("[Track Command] ✅ Successfully set track {} mute to {} in project {}", track_index, muted, project_id);
+                info!("[Track Command] Successfully set track {} mute to {} in project {}", track_index, muted, project_id);
                 Ok(())
             }
             Err(e) => {
-                warn!("[Track Command] ❌ Failed to set track mute: {}", e);
+                warn!("[Track Command] Failed to set track mute: {}", e);
                 Err(e)
             }
         }
@@ -124,8 +148,7 @@ impl TrackCommandHandler for ReaperTrackCommandHandler {
         info!("[Track Command] Setting track {} solo to {:?} in project {}", track_index, solo_mode, project_id);
         
         let project_name = project_id.clone();
-        let setlist_service_for_closure = self.setlist_service.clone();
-        let task_support_for_closure = self.task_support.clone();
+        let project_provider = self.project_provider.clone();
         
         // Convert SoloMode to REAPER solo mode (can be done outside main thread)
         let reaper_solo_mode = match solo_mode {
@@ -143,16 +166,10 @@ impl TrackCommandHandler for ReaperTrackCommandHandler {
         };
         
         // Dispatch to main thread using task_support
-        // Use a reference to avoid borrowing issues
         let result = (&*self.task_support)
             .main_thread_future(move || {
                 // This closure runs on the main thread
-                let handler = ReaperTrackCommandHandler {
-                    setlist_service: setlist_service_for_closure,
-                    task_support: task_support_for_closure,
-                };
-                
-                let project = handler.get_project_from_name(&project_name)
+                let project = project_provider.get_project_from_name(&project_name)
                     .ok_or_else(|| format!("Project not found: {}", project_name))?;
                 
                 let track = project.track_by_index(track_index as u32)
@@ -173,14 +190,31 @@ impl TrackCommandHandler for ReaperTrackCommandHandler {
         
         match result {
             Ok(()) => {
-                info!("[Track Command] ✅ Successfully set track {} solo to {:?} in project {}", track_index, solo_mode, project_id);
+                info!("[Track Command] Successfully set track {} solo to {:?} in project {}", track_index, solo_mode, project_id);
                 Ok(())
             }
             Err(e) => {
-                warn!("[Track Command] ❌ Failed to set track solo: {}", e);
+                warn!("[Track Command] Failed to set track solo: {}", e);
                 Err(e)
             }
         }
     }
 }
 
+/// Wrapper type to implement TrackServiceAccessor for ReaperTrackReactiveService
+/// This allows us to store it in the static without the generic
+pub struct TrackServiceWrapper<S: SetlistProvider> {
+    inner: Arc<ReaperTrackReactiveService<S>>,
+}
+
+impl<S: SetlistProvider> TrackServiceWrapper<S> {
+    pub fn new(service: Arc<ReaperTrackReactiveService<S>>) -> Self {
+        Self { inner: service }
+    }
+}
+
+impl<S: SetlistProvider + 'static> TrackServiceAccessor for TrackServiceWrapper<S> {
+    fn update_track_from_reaper(&self, project: ReaperProject, track_index: usize) {
+        self.inner.update_track_from_reaper(project, track_index);
+    }
+}

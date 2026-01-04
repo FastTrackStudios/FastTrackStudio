@@ -1,6 +1,127 @@
-//! Monarchy: A metadata-based hierarchical sorter
+//! # Monarchy: A Hierarchical Sorting and Organization Library
 //!
-//! Type-safe, config-compatible organization system.
+//! Monarchy is a powerful, type-safe library for organizing string inputs into hierarchical
+//! tree structures based on pattern matching and metadata extraction. Originally designed
+//! for organizing audio track names in DAW (Digital Audio Workstation) projects, it can be
+//! used for any domain that requires flexible categorization of named items.
+//!
+//! ## Key Features
+//!
+//! - **Pattern-based matching**: Define groups with patterns that match input strings
+//! - **Hierarchical organization**: Automatically organize items into nested tree structures
+//! - **Metadata extraction**: Extract structured data from input strings (performer, arrangement, etc.)
+//! - **Configurable fallback**: Control how unmatched items are handled
+//! - **Visitor pattern**: Transform trees with composable visitors (collapse, cleanup, etc.)
+//! - **Scoped sorting**: Re-sort items within specific group contexts
+//! - **Derive macros**: Automatically implement `Metadata` trait for your types
+//!
+//! ## Core Concepts
+//!
+//! - **[`Config`]**: Configuration defining groups, parser rules, and fallback strategy
+//! - **[`Group`]**: Pattern-based category with optional nesting, prefixes, and metadata fields
+//! - **[`Item`]**: A parsed input with extracted metadata and matched group hierarchy
+//! - **[`Structure`]**: The resulting hierarchical tree of organized items
+//! - **[`Metadata`]**: Trait for types that hold extracted metadata from inputs
+//!
+//! ## Quick Start
+//!
+//! ```ignore
+//! use monarchy::{monarchy_sort, Config, Group, Metadata};
+//!
+//! // Define your metadata struct with the Metadata derive macro
+//! #[derive(Metadata, Default, Clone, Debug)]
+//! struct TrackMetadata {
+//!     performer: Option<String>,
+//!     multi_mic: Option<Vec<String>>,
+//! }
+//!
+//! // Create a configuration with groups and patterns
+//! let config = Config::builder()
+//!     .group(Group::builder("Drums")
+//!         .patterns(["kick", "snare", "hi-hat"])
+//!         .prefix("D")
+//!         .group(Group::builder("Kick").patterns(["kick"]).build())
+//!         .group(Group::builder("Snare").patterns(["snare"]).build())
+//!         .build())
+//!     .group(Group::builder("Guitars")
+//!         .patterns(["guitar", "gtr"])
+//!         .prefix("GTR")
+//!         .build())
+//!     .build();
+//!
+//! // Sort input strings into a hierarchical structure
+//! let inputs = vec!["Kick In.wav", "Kick Out.wav", "Snare Top.wav", "Guitar DI.wav"];
+//! let structure = monarchy_sort(inputs, config)?;
+//!
+//! // The structure now contains:
+//! // root
+//! // ├── Drums
+//! // │   ├── Kick: [Kick In.wav, Kick Out.wav]
+//! // │   └── Snare: [Snare Top.wav]
+//! // └── Guitars: [Guitar DI.wav]
+//! ```
+//!
+//! ## Advanced Usage
+//!
+//! ### Metadata Extraction
+//!
+//! Groups can define metadata fields that are extracted from matched inputs:
+//!
+//! ```ignore
+//! Group::builder("Electric Guitar")
+//!     .patterns(["electric", "elec"])
+//!     .field(TrackMetadataField::Performer)
+//!     .field_value_descriptors(
+//!         TrackMetadataField::MultiMic,
+//!         vec![
+//!             FieldValueDescriptor::builder("In").patterns(["in"]).build(),
+//!             FieldValueDescriptor::builder("Out").patterns(["out"]).build(),
+//!         ]
+//!     )
+//!     .build()
+//! ```
+//!
+//! ### Visitors for Tree Transformation
+//!
+//! Apply visitors to transform the structure after sorting:
+//!
+//! ```ignore
+//! use monarchy::{Visitable, CollapseHierarchy, cleanup_display_names};
+//!
+//! let mut structure = monarchy_sort(inputs, config.clone())?;
+//!
+//! // Collapse unnecessary intermediate levels
+//! structure.accept(&mut CollapseHierarchy::new(&config));
+//!
+//! // Clean up display names
+//! cleanup_display_names(&mut structure);
+//! ```
+//!
+//! ### Scoped Re-sorting
+//!
+//! Re-sort items within a specific group context for iterative workflows:
+//!
+//! ```ignore
+//! use monarchy::monarchy_sort_scoped;
+//!
+//! // Re-sort unsorted items within the "Electric Guitar" group
+//! let result = monarchy_sort_scoped(unsorted_items, config, "Electric Guitar")?;
+//! ```
+//!
+//! ## Module Overview
+//!
+//! | Module | Description |
+//! |--------|-------------|
+//! | [`config`] | Configuration types: `Config`, `ParserRules`, `FallbackStrategy` |
+//! | [`group`] | Group definition and builder: `Group`, `GroupBuilder` |
+//! | [`structure`] | Hierarchical tree structure: `Structure` |
+//! | [`metadata`] | Metadata trait and field name trait |
+//! | [`parser`] | Input string parser: `Parser` |
+//! | [`organizer`] | Structure builder from parsed items: `Organizer` |
+//! | [`visitor`] | Tree transformation visitors |
+//! | [`field`] | Metadata field infrastructure |
+//! | [`field_value`] | Field value descriptors for pattern matching |
+//! | [`error`] | Error types and result alias |
 
 pub mod config;
 pub mod error;
@@ -21,7 +142,7 @@ pub use error::{MonarchyError, Result};
 pub use field::{IntoField, MetadataField};
 pub use field_value::FieldValueDescriptor;
 pub use group::{FieldGroupingStrategy, Group, GroupBuilder, IntoVec};
-pub use metadata::Metadata;
+pub use metadata::{FieldName, Metadata};
 pub use organizer::Organizer;
 pub use parser::Parser;
 pub use structure::Structure;
@@ -58,12 +179,13 @@ pub struct Item<M: Metadata> {
     /// Parsed metadata
     pub metadata: M,
 
-    /// Full hierarchy of groups that matched, from top-level to most specific
+    /// Full hierarchy of groups that matched, from top-level to most specific.
+    ///
     /// Stored as actual Group instances so we can access fields like prefix, transparent, etc.
-    /// Example: [Drums Group, Drum_Kit Group, Kick Group]
-    /// The last element is the most specific group that matched
-    /// 
-    /// Note: For serialization, this is serialized as group names (Vec<String>)
+    /// Example: `[Drums Group, Drum_Kit Group, Kick Group]`
+    /// The last element is the most specific group that matched.
+    ///
+    /// Note: For serialization, this is serialized as group names (`Vec<String>`).
     pub matched_groups: Vec<Group<M>>,
 }
 

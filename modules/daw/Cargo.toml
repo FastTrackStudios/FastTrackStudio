@@ -60,6 +60,24 @@ iroh = { version = "0.95", features = ["discovery-local-network"] }
 # RPP file parsing (optional)
 rpp-parser = { version = "0.1", optional = true }
 
+[dependencies.reaper-medium]
+workspace = true
+optional = true
+
+[dependencies.reaper-low]
+workspace = true
+optional = true
+
+[dependencies.enumflags2]
+version = "0.7"
+optional = true
+
+[dependencies.fragile]
+version = "2.0.1"
+optional = true
+
+
+
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = "3.0"

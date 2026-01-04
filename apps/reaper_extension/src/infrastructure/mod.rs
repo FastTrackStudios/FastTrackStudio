@@ -13,13 +13,28 @@ pub mod color_utils;
 pub mod reactive_logger;
 pub mod reactive_polling;
 pub mod reactive_app_state;
-pub mod reaper_transport_reactive;
-pub mod reaper_track_reactive;
-pub mod reaper_track_command;
+
+// Re-export REAPER reactive services from fts::daw_reactive
+// These are the canonical implementations that live in the fts module
+pub use fts::daw_reactive::transport::ReaperTransportReactiveService;
+pub use fts::daw_reactive::tracks::ReaperTrackReactiveService;
+pub use fts::daw_reactive::SetlistProvider;
+pub use fts::daw_reactive::logging as formatted_logging;
+pub use fts::daw_reactive::tracks_command::{
+    ReaperTrackCommandHandler,
+    ProjectProvider,
+    DefaultProjectProvider,
+    init_track_reactive_service,
+    TrackServiceAccessor,
+    TrackServiceWrapper,
+};
+
+// Re-export REAPER lyrics reactive service (if lyrics feature is enabled)
 #[cfg(feature = "lyrics")]
-pub mod reaper_lyrics_reactive;
+pub use fts::lyrics::reactive::reaper::ReaperLyricsReactiveService;
+
+// Re-export REAPER chords reactive service (if keyflow feature is enabled)
 #[cfg(feature = "keyflow")]
-pub mod reaper_chords_reactive;
-pub mod formatted_logging;
+pub use fts::chords::reactive::reaper::ReaperChordsReactiveService;
 
 

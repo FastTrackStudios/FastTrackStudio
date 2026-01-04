@@ -1,4 +1,5 @@
 use dynamic_template::*;
+use monarchy::monarchy_sort;
 
 #[test]
 fn stevie_wonder_superstition() {
@@ -30,14 +31,16 @@ fn stevie_wonder_superstition() {
         "024 Elec Gui 3 Amp Sim B_01.wav",
         "Superstition Mix 1_01.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+    let tracks = items.clone().organize_into_tracks(&config, None).unwrap();
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
-    // TODO: Add expected structure once provided
+
+    // Snapshot test: capture the hierarchical structure
+    let structure = monarchy_sort(items, config).unwrap();
+    insta::assert_snapshot!(structure.to_tree_string());
 }

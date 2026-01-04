@@ -1,5 +1,5 @@
-use crate::{IntoField, Metadata};
 use crate::field_value::FieldValueDescriptor;
+use crate::{IntoField, Metadata};
 use serde::{Deserialize, Serialize};
 
 /// Strategy for how items should be grouped when a metadata field is present
@@ -8,10 +8,10 @@ pub enum FieldGroupingStrategy {
     /// Default behavior: items with the field value become children grouped by value
     /// Items without the field stay at the current level
     Default,
-    
+
     /// MainOnContainer: items WITHOUT the field go on the folder track (container),
     /// items WITH the field become children grouped by field value
-    /// 
+    ///
     /// Example: For MultiMic field with MainOnContainer:
     /// - "Guitar Clean" (no MultiMic) → goes on "Clean" folder track
     /// - "Guitar Clean Amp" (MultiMic: "Amp") → becomes child under "Clean"
@@ -20,7 +20,7 @@ pub enum FieldGroupingStrategy {
 }
 
 /// Helper trait to convert single items or collections into a Vec
-/// 
+///
 /// This allows builder methods to accept both single items and collections:
 /// - Single item: `"pattern"` or `field` or `group`
 /// - Collection: `vec!["pattern1", "pattern2"]` or `[field1, field2]` or `[group1, group2]`
@@ -138,15 +138,15 @@ pub struct Group<M: Metadata> {
     /// when both "Electronic Kit" and "Snare" patterns are present.
     /// Default is false, allowing groups to match independently.
     pub requires_parent_match: bool,
-    
+
     /// Field value descriptors for metadata fields
-    /// 
+    ///
     /// This allows each metadata field value (e.g., "Out", "In", "Hi Hat", "Ride")
     /// to have its own patterns and negative patterns, making them act more like separate groups.
-    /// 
+    ///
     /// The key is the field name (e.g., "MultiMic"), and the value is a list of descriptors
     /// for each possible value of that field.
-    /// 
+    ///
     /// Example (conceptual structure):
     /// ```text
     /// field_value_descriptors: {
@@ -157,14 +157,14 @@ pub struct Group<M: Metadata> {
     /// }
     /// ```
     pub field_value_descriptors: std::collections::HashMap<String, Vec<FieldValueDescriptor>>,
-    
+
     /// Field grouping strategies for metadata fields
-    /// 
+    ///
     /// This allows different metadata fields to use different grouping behaviors.
     /// The key is the field name (e.g., "MultiMic"), and the value is the strategy to use.
-    /// 
+    ///
     /// If no strategy is specified for a field, `FieldGroupingStrategy::Default` is used.
-    /// 
+    ///
     /// Example (conceptual structure):
     /// ```text
     /// field_grouping_strategies: {
@@ -172,17 +172,17 @@ pub struct Group<M: Metadata> {
     /// }
     /// ```
     pub field_grouping_strategies: std::collections::HashMap<String, FieldGroupingStrategy>,
-    
+
     /// Default values for metadata fields when items don't have the field
-    /// 
+    ///
     /// When grouping by a metadata field, items without that field will be treated
     /// as if they have the field with the default value. This allows items without
     /// a field to be grouped alongside items that do have the field.
-    /// 
+    ///
     /// Example: For Layers field with default "Main":
     /// - "Guitar Clean" (no layer) → treated as "Guitar Clean" with layer "Main"
     /// - "Guitar Clean DBL" (layer: "DBL") → grouped alongside "Main" items
-    /// 
+    ///
     /// The key is the field name (e.g., "Layers"), and the value is the default value (e.g., "Main").
     pub field_default_values: std::collections::HashMap<String, String>,
 }
@@ -194,7 +194,7 @@ impl<M: Metadata> Group<M> {
     }
 
     /// Check if a string matches this group's patterns
-    /// 
+    ///
     /// If no patterns are specified, this returns `true` (matches everything).
     /// This allows container groups to match when any child matches.
     pub fn matches(&self, text: &str) -> bool {
@@ -219,14 +219,14 @@ impl<M: Metadata> Group<M> {
 
         false
     }
-    
+
     /// Check if this group has any patterns defined
     pub fn has_patterns(&self) -> bool {
         !self.patterns.is_empty()
     }
 
     /// Check if text contains pattern as a whole word (not just as a substring)
-    /// 
+    ///
     /// Delegates to [`crate::utils::contains_word`].
     #[deprecated(since = "0.2.0", note = "Use crate::utils::contains_word instead")]
     pub fn contains_word(text: &str, pattern: &str) -> bool {
@@ -296,12 +296,12 @@ impl<M: Metadata> GroupBuilder<M> {
     }
 
     /// Add configuration for a specific metadata field
-    /// 
+    ///
     /// This is a generic method that works with any metadata field.
     /// The derive macro generates convenience methods (like `.multi_mic()`) that call this.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```ignore
     /// Group::builder("Kick")
     ///     .metadata_field(ItemMetadataField::MultiMic, multi_mic_group)
@@ -318,14 +318,14 @@ impl<M: Metadata> GroupBuilder<M> {
         self.group.groups.push(field_group);
         self
     }
-    
+
     /// Add field value descriptors for a metadata field
-    /// 
+    ///
     /// This allows each metadata field value (e.g., "Out", "In", "Hi Hat", "Ride")
     /// to have its own patterns and negative patterns.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```ignore
     /// Group::builder("Kick")
     ///     .field_value_descriptors(
@@ -337,10 +337,16 @@ impl<M: Metadata> GroupBuilder<M> {
     ///     )
     ///     .build()
     /// ```
-    pub fn field_value_descriptors(mut self, field: M::Field, descriptors: Vec<FieldValueDescriptor>) -> Self {
+    pub fn field_value_descriptors(
+        mut self,
+        field: M::Field,
+        descriptors: Vec<FieldValueDescriptor>,
+    ) -> Self {
         let field_name = format!("{:?}", field);
         self.group.metadata_fields.push(field);
-        self.group.field_value_descriptors.insert(field_name, descriptors);
+        self.group
+            .field_value_descriptors
+            .insert(field_name, descriptors);
         self
     }
 
@@ -365,9 +371,9 @@ impl<M: Metadata> GroupBuilder<M> {
         self
     }
 
-    /// Add nested groups (accepts single group or collection)
-    /// 
-    /// Accepts anything that can be converted to Group<M>:
+    /// Add nested groups (accepts single group or collection).
+    ///
+    /// Accepts anything that can be converted to `Group<M>`:
     /// - Single group: `Group<M>` or anything implementing `Into<Group<M>>`
     /// - Collections: `Vec<G>` or `[G; N]` where `G: Into<Group<M>>`
     pub fn group<G, I>(mut self, groups: G) -> Self
@@ -375,7 +381,9 @@ impl<M: Metadata> GroupBuilder<M> {
         G: IntoVec<I>,
         I: Into<Group<M>>,
     {
-        self.group.groups.extend(groups.into_vec().into_iter().map(Into::into));
+        self.group
+            .groups
+            .extend(groups.into_vec().into_iter().map(Into::into));
         self
     }
 
@@ -434,12 +442,12 @@ impl<M: Metadata> GroupBuilder<M> {
     }
 
     /// Require that the parent group also matches for this group to match.
-    /// 
+    ///
     /// This is useful for groups like "Electronic Snare" that should only match
     /// when both the parent "Electronic Kit" and this "Snare" group match.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```ignore
     /// Group::builder("Electronic Kit")
     ///     .group(
@@ -449,28 +457,28 @@ impl<M: Metadata> GroupBuilder<M> {
     ///     )
     ///     .build()
     /// ```
-    /// 
+    ///
     /// With this configuration, "Snare Top" will only match the "Snare" group
     /// if it also matches the "Electronic Kit" patterns (e.g., "electronic", "808", etc.).
     pub fn requires_parent_match(mut self) -> Self {
         self.group.requires_parent_match = true;
         self
     }
-    
+
     /// Set the grouping strategy for a specific metadata field
-    /// 
+    ///
     /// This allows different metadata fields to use different grouping behaviors.
     /// The order of fields in `metadata_fields` determines their priority for grouping.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```ignore
     /// Group::builder("Guitar")
     ///     .field([ItemMetadataField::Arrangement, ItemMetadataField::MultiMic])
     ///     .field_strategy(ItemMetadataField::MultiMic, FieldGroupingStrategy::MainOnContainer)
     ///     .build()
     /// ```
-    /// 
+    ///
     /// With this configuration:
     /// - Items are first grouped by Arrangement (priority 1)
     /// - Then by MultiMic (priority 2) using MainOnContainer strategy
@@ -478,30 +486,38 @@ impl<M: Metadata> GroupBuilder<M> {
     /// - Items with MultiMic become children grouped by value
     pub fn field_strategy(mut self, field: M::Field, strategy: FieldGroupingStrategy) -> Self {
         let field_name = format!("{:?}", field);
-        self.group.field_grouping_strategies.insert(field_name, strategy);
+        self.group
+            .field_grouping_strategies
+            .insert(field_name, strategy);
         self
     }
 
     /// Set the default value for a metadata field when items don't have that field
-    /// 
+    ///
     /// When grouping by a metadata field, items without that field will be treated
     /// as if they have the field with the default value. This allows items without
     /// a field to be grouped alongside items that do have the field.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```ignore
     /// Group::builder("Electric Guitar")
     ///     .field_default_value(ItemMetadataField::Layers, "Main")
     ///     .build()
     /// ```
-    /// 
+    ///
     /// This means:
     /// - "Guitar Clean" (no layer) → treated as "Guitar Clean" with layer "Main"
     /// - "Guitar Clean DBL" (layer: "DBL") → grouped alongside "Main" items
-    pub fn field_default_value(mut self, field: M::Field, default_value: impl Into<String>) -> Self {
+    pub fn field_default_value(
+        mut self,
+        field: M::Field,
+        default_value: impl Into<String>,
+    ) -> Self {
         let field_name = format!("{:?}", field);
-        self.group.field_default_values.insert(field_name, default_value.into());
+        self.group
+            .field_default_values
+            .insert(field_name, default_value.into());
         self
     }
 

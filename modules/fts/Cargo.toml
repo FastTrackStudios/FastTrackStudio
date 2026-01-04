@@ -42,13 +42,18 @@ default-features = true
 # RPP file parsing (optional)
 [features]
 default = []
-reaper = ["dep:reaper-high", "dep:reaper-medium", "dep:reaper-low", "dep:enumflags2"]
+reaper = ["dep:reaper-high", "dep:reaper-medium", "dep:reaper-low", "dep:enumflags2", "dep:fragile"]
 rpp = ["dep:rpp-parser"]
 dioxus = ["dep:dioxus"]
 full = ["reaper", "rpp"]
 
 [dependencies.rpp-parser]
 version = "0.1"
+optional = true
+
+# Thread-safety wrapper for main-thread-only types (reaper feature)
+[dependencies.fragile]
+version = "2.0"
 optional = true
 
 # REAPER dependencies (optional, enabled by reaper feature)

@@ -7,8 +7,8 @@ pub struct Room;
 
 impl From<Room> for ItemMetadataGroup {
     fn from(_val: Room) -> Self {
-        use monarchy::FieldValueDescriptor;
         use crate::item_metadata::ItemMetadataField;
+        use monarchy::FieldValueDescriptor;
 
         // Define room positions using field_value_descriptors to ensure L comes before R
         // Order matters - items will be sorted by the order of descriptors
@@ -30,11 +30,38 @@ impl From<Room> for ItemMetadataGroup {
         // Use the convenience method - extension trait is in scope via prelude
         ItemMetadataGroup::builder("Rooms")
             .patterns([
-                "room", "rooms", "amb", "ambient", "ambience", "mono", "stereo", "wide", "crush",
-                "crushed", "verb", "reverb", "knee", "floor mic", "corner",
+                "room",
+                "rooms",
+                "amb",
+                "ambient",
+                "ambience",
+                "mono",
+                "stereo",
+                "wide",
+                "crush",
+                "crushed",
+                "verb",
+                "reverb",
+                "knee",
+                "floor mic",
+                "corner",
             ])
             // Exclude cymbal-related patterns so they go to Cymbals group instead
-            .exclude(["oh", "overhead", "overheads", "ovh", "hihat", "hi-hat", "hi hat", "hh", "hat"])
+            // Also exclude snare patterns so "SNR VERB" goes to Snare, not Rooms
+            .exclude([
+                "oh",
+                "overhead",
+                "overheads",
+                "ovh",
+                "hihat",
+                "hi-hat",
+                "hi hat",
+                "hh",
+                "hat",
+                "snr",
+                "snare",
+                "sn",
+            ])
             .field_value_descriptors(ItemMetadataField::MultiMic, room_position_descriptors)
             .build()
     }

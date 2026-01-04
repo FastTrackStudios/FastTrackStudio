@@ -6,6 +6,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod irpc;
 
+#[cfg(feature = "reaper")]
+pub mod reaper;
+
 use super::core::Lyrics;
 use crate::lyrics::source::LyricsAnnotations;
 use rxrust::prelude::*;

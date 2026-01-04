@@ -1,27 +1,33 @@
-use serde::{Deserialize, Serialize};
-use derive_builder::Builder;
-use std::collections::HashMap;
-use colored::Colorize;
-use crate::tracks::api::folder::{TcpFolderState, McpFolderState, FolderDepthChange};
 use crate::tracks::api::automation::AutomationMode;
+use crate::tracks::api::collapse::{
+    ArrangeCollapseState, BusCompactSettings, MixerCollapseState, WiringCollapseState,
+};
+use crate::tracks::api::fixed_lanes::{
+    FixedLanesSettings, LaneNameSettings, LaneRecordSettings, LaneSoloSettings,
+};
+use crate::tracks::api::folder::{FolderDepthChange, McpFolderState, TcpFolderState};
 use crate::tracks::api::free_mode::FreeMode;
-use crate::tracks::api::fixed_lanes::{FixedLanesSettings, LaneSoloSettings, LaneRecordSettings, LaneNameSettings};
-use crate::tracks::api::record::{RecordSettings, RecordMode, MonitorMode};
-use crate::tracks::api::receive::{TrackReceive, ReceiveMode};
-use crate::tracks::api::hardware::{HardwareOutputSettings, MidiOutputSettings, MasterSendSettings};
-use crate::tracks::api::solo::SoloMode;
-use crate::tracks::api::collapse::{ArrangeCollapseState, MixerCollapseState, WiringCollapseState, BusCompactSettings};
-use crate::tracks::api::quantize::InputQuantize;
-use crate::tracks::api::timebase::TrackTimebase;
+use crate::tracks::api::hardware::{
+    HardwareOutputSettings, MasterSendSettings, MidiOutputSettings,
+};
 use crate::tracks::api::midi_note_name::MidiNoteName;
-use crate::tracks::envelope::ExtensionData;
-use crate::tracks::item::Item;
+use crate::tracks::api::quantize::InputQuantize;
+use crate::tracks::api::receive::{ReceiveMode, TrackReceive};
+use crate::tracks::api::record::{MonitorMode, RecordMode, RecordSettings};
+use crate::tracks::api::solo::SoloMode;
+use crate::tracks::api::timebase::TrackTimebase;
 use crate::tracks::envelope::Envelope;
+use crate::tracks::envelope::ExtensionData;
 use crate::tracks::fx_chain::FxChain;
-use crate::tracks::types::{TrackName, TrackGuid, MetadataKey};
+use crate::tracks::item::Item;
+use crate::tracks::types::{MetadataKey, TrackGuid, TrackName};
+use colored::Colorize;
+use derive_builder::Builder;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Represents a track in a project
-/// 
+///
 /// This struct contains all fields from the REAPER track state chunk,
 /// including basic properties, volume/pan, mute/solo, folder settings,
 /// fixed lanes, record settings, receives, hardware outputs, and more.
@@ -43,7 +49,7 @@ pub struct Track {
     pub peak_color: Option<i32>,
     /// Track timebase (BEAT) - -1 = project default
     pub beat: Option<TrackTimebase>,
-    
+
     // === Volume and Pan ===
     /// Volume (0.0 to 1.0, or in REAPER units) - from VOLPAN field 1
     pub volume: f64,
@@ -53,7 +59,7 @@ pub struct Track {
     pub pan_law: Option<f64>,
     /// Width (stereo width, typically 0.0 to 1.0)
     pub width: f64,
-    
+
     // === Mute and Solo ===
     /// Whether the track is muted - from MUTESOLO field 1
     pub muted: bool,
@@ -61,11 +67,11 @@ pub struct Track {
     pub solo_state: SoloMode,
     /// Solo defeat - from MUTESOLO field 3
     pub solo_defeat: bool,
-    
+
     // === Automation ===
     /// Automation mode (AUTOMODE)
     pub automation_mode: AutomationMode,
-    
+
     // === Phase and Folder ===
     /// Invert phase (IPHASE)
     pub invert_phase: bool,
@@ -83,13 +89,13 @@ pub struct Track {
     pub is_folder: bool,
     /// Bus compact settings (BUSCOMP) - collapse folder settings
     pub bus_compact: Option<BusCompactSettings>,
-    
+
     // === Show in Mixer ===
     /// Show in mixer (SHOWINMIX field 1)
     pub show_in_mixer: bool,
     /// Show in track list (SHOWINMIX field 4)
     pub show_in_track_list: bool,
-    
+
     // === Free Item Positioning / Fixed Item Lanes ===
     /// Free item positioning mode (FREEMODE) - 0=disabled, 1=FIP, 2=FIL
     pub free_mode: Option<FreeMode>,
@@ -101,7 +107,7 @@ pub struct Track {
     pub lane_record: Option<LaneRecordSettings>,
     /// Lane name settings (LANENAME) - REAPER 7+
     pub lane_names: Option<LaneNameSettings>,
-    
+
     // === Record Settings ===
     /// Record settings (REC)
     pub record_settings: Option<RecordSettings>,
@@ -111,25 +117,25 @@ pub struct Track {
     pub input_monitoring_mode: Option<String>,
     /// Recording mode (legacy field, also in record_settings)
     pub recording_mode: Option<String>,
-    
+
     // === Track Height ===
     /// Track height in TCP (TRACKHEIGHT field 1) - height in pixels
     pub track_height: Option<i32>,
     /// Folder override (TRACKHEIGHT field 2) - collapsed
     pub track_height_folder_override: Option<bool>,
-    
+
     // === Input Quantize ===
     /// Input quantize settings (INQ)
     pub input_quantize: Option<InputQuantize>,
-    
+
     // === Channel Count ===
     /// Number of track channels (NCHAN)
     pub channel_count: u32,
-    
+
     // === Recording Format ===
     /// Recording format data (RECCFG) - binary data
     pub rec_cfg: Option<String>,
-    
+
     // === MIDI ===
     /// MIDI color map file path (MIDICOLORMAPFN)
     pub midi_color_map_fn: Option<String>,
@@ -139,7 +145,7 @@ pub struct Track {
     pub custom_note_order: Option<Vec<i32>>,
     /// MIDI note names (MIDINOTENAMES)
     pub midi_note_names: Vec<MidiNoteName>,
-    
+
     // === FX ===
     /// Whether the track has FX enabled (FX) - 0=bypassed, 1=active
     pub has_fx: bool,
@@ -147,48 +153,48 @@ pub struct Track {
     pub fx_chain: Option<FxChain>,
     /// Input FX chain (FXCHAIN_REC)
     pub input_fx_chain: Option<FxChain>,
-    
+
     // === Performance ===
     /// Performance options (PERF) - bitwise flags
     pub perf: Option<i32>,
-    
+
     // === Layouts ===
     /// Active TCP and MCP layouts (LAYOUTS)
     pub layouts_tcp: Option<String>,
     pub layouts_mcp: Option<String>,
-    
+
     // === Extension Data ===
     /// Extension-specific persistent data (EXT)
     pub extension_data: Vec<ExtensionData>,
-    
+
     // === Receives ===
     /// Track receives (AUXRECV)
     pub receives: Vec<TrackReceive>,
-    
+
     // === Master Send ===
     /// Master/parent send (MAINSEND)
     pub master_send: Option<MasterSendSettings>,
-    
+
     // === Hardware Outputs ===
     /// Hardware output sends (HWOUT)
     pub hardware_outputs: Vec<HardwareOutputSettings>,
-    
+
     // === Track State ===
     /// Whether the track is selected
     pub selected: bool,
     /// Track color (RGB value)
     pub color: Option<u32>,
-    
+
     // === Nested Content ===
     /// Items on this track (audio and MIDI items)
     pub items: Vec<Item>,
     /// Automation envelopes on this track (volume, pan, etc.)
     pub envelopes: Vec<Envelope>,
-    
+
     // === Metadata ===
     /// Optional metadata
     pub metadata: HashMap<MetadataKey, String>,
-    
+
     // === Extension State ===
     /// Extension-specific state data (ExtState)
     /// This is a flexible metadata field that can store arbitrary data.
@@ -204,21 +210,21 @@ impl Default for Track {
 
 impl Track {
     /// Calculate the track depth by summing folder_depth_change values from previous tracks
-    /// 
+    ///
     /// This calculates the absolute cumulative nesting level by iterating through
     /// all tracks from the beginning up to (but not including) the current track,
     /// and summing their folder_depth_change values.
-    /// 
+    ///
     /// The depth represents how many folder levels deep this track is:
     /// - 0 = top-level track (not in any folder)
     /// - 1 = inside one folder
     /// - 2 = inside two nested folders
     /// - etc.
-    /// 
+    ///
     /// # Arguments
     /// * `tracks` - The full list of tracks (must include this track)
     /// * `index` - The index of this track in the list
-    /// 
+    ///
     /// # Returns
     /// The calculated depth (0 = top-level, 1 = inside one folder, etc.)
     pub fn calculate_depth(tracks: &[Track], index: usize) -> u32 {
@@ -229,25 +235,26 @@ impl Track {
         }
         depth.max(0) as u32
     }
-    
+
     /// Calculate the track depth for this track within a track list
-    /// 
+    ///
     /// This is a convenience method that finds this track in the list and calculates its depth.
-    /// 
+    ///
     /// # Arguments
     /// * `tracks` - The full list of tracks (must include this track)
-    /// 
+    ///
     /// # Returns
     /// The calculated depth, or 0 if the track is not found
     pub fn depth_in_list(&self, tracks: &[Track]) -> u32 {
-        tracks.iter()
+        tracks
+            .iter()
             .position(|t| std::ptr::eq(t, self))
             .map(|idx| Self::calculate_depth(tracks, idx))
             .unwrap_or(0)
     }
-    
+
     /// Create a new track builder
-    /// 
+    ///
     /// This provides a fluent interface for building tracks:
     /// ```rust
     /// let track = Track::builder()
@@ -260,7 +267,7 @@ impl Track {
     pub fn builder() -> TrackBuilder {
         TrackBuilder::default()
     }
-    
+
     /// Create a new track
     pub fn new(name: impl Into<TrackName>) -> Self {
         Self {
@@ -272,21 +279,21 @@ impl Track {
             locked: false,
             peak_color: None,
             beat: None,
-            
+
             // Volume and pan
             volume: 1.0,
             pan: 0.0,
             pan_law: None,
             width: 1.0,
-            
+
             // Mute and solo
             muted: false,
             solo_state: SoloMode::Off,
             solo_defeat: false,
-            
+
             // Automation
             automation_mode: AutomationMode::TrimRead,
-            
+
             // Phase and folder
             invert_phase: false,
             folder_state_tcp: None,
@@ -294,78 +301,78 @@ impl Track {
             folder_depth_change: FolderDepthChange::Normal,
             is_folder: false,
             bus_compact: None,
-            
+
             // Show in mixer
             show_in_mixer: true,
             show_in_track_list: true,
-            
+
             // Free item positioning / Fixed lanes
             free_mode: None,
             fixed_lanes: None,
             lane_solo: None,
             lane_record: None,
             lane_names: None,
-            
+
             // Record settings
             record_settings: None,
             record_armed: false,
             input_monitoring_mode: None,
             recording_mode: None,
-            
+
             // Track height
             track_height: None,
             track_height_folder_override: None,
-            
+
             // Input quantize
             input_quantize: None,
-            
+
             // Channel count
             channel_count: 2,
-            
+
             // Recording format
             rec_cfg: None,
-            
+
             // MIDI
             midi_color_map_fn: None,
             midi_output: None,
             custom_note_order: None,
             midi_note_names: Vec::new(),
-            
+
             // FX
             has_fx: false,
             fx_chain: None,
             input_fx_chain: None,
-            
+
             // Performance
             perf: None,
-            
+
             // Layouts
             layouts_tcp: None,
             layouts_mcp: None,
-            
+
             // Extension data
             extension_data: Vec::new(),
-            
+
             // Receives
             receives: Vec::new(),
-            
+
             // Master send
             master_send: None,
-            
+
             // Hardware outputs
             hardware_outputs: Vec::new(),
-            
+
             // Track state
             selected: false,
             color: None,
-            
+
             // Nested content
             items: Vec::new(),
             envelopes: Vec::new(),
-            
+
             // Metadata
             metadata: HashMap::new(),
-            
+
             // Extension state
             ext_state: None,
         }
@@ -394,7 +401,7 @@ impl Track {
     }
 
     /// Get FTS-Item-Properties from ext_state
-    /// 
+    ///
     /// This retrieves the FTS-Item-Properties data stored in the ext_state field.
     /// The data is stored as a string (typically JSON) and can be parsed as needed.
     pub fn get_fts_item_properties(&self) -> Option<&str> {
@@ -402,7 +409,7 @@ impl Track {
     }
 
     /// Set FTS-Item-Properties in ext_state
-    /// 
+    ///
     /// This stores FTS-Item-Properties data in the ext_state field.
     /// The data should be serialized (e.g., as JSON) before being stored.
     pub fn set_fts_item_properties<S: Into<String>>(&mut self, properties: S) {
@@ -416,19 +423,19 @@ impl Track {
 }
 
 /// Display a track list in hierarchical format
-/// 
+///
 /// Prints and returns a String representation of tracks with their items in a tree structure:
 /// ```
 /// Trackname: [Item1, Item2]
 /// -Trackname: [Item3]
 /// --Trackname: [Item4, Item5]
 /// ```
-/// 
+///
 /// This function both prints the output and returns the string, so you can use it directly
 /// in tests or capture the output for further processing.
-/// 
+///
 /// This function is designed to be extended with colors and other formatting features.
-/// 
+///
 /// # Example
 /// ```rust
 /// let tracks = vec![
@@ -443,7 +450,7 @@ impl Track {
 pub fn display_tracklist(tracks: &[Track]) -> String {
     let mut output = String::new();
     let mut depth = 0i32;
-    
+
     for track in tracks {
         // Calculate indentation prefix (depth represents how many levels deep we are)
         // Depth is calculated BEFORE applying this track's folder_depth_change
@@ -452,11 +459,11 @@ pub fn display_tracklist(tracks: &[Track]) -> String {
         } else {
             String::new()
         };
-        
+
         // Color track name (cyan for tracks, can be customized later based on track type)
         let track_name = track.name.0.color("cyan").bold();
         output.push_str(&format!("{}{}", prefix, track_name));
-        
+
         // Add items if any
         if !track.items.is_empty() {
             output.push_str(&": [".to_string());
@@ -474,23 +481,23 @@ pub fn display_tracklist(tracks: &[Track]) -> String {
             }
             output.push_str(&"]".to_string());
         }
-        
+
         output.push('\n');
-        
+
         // Update depth AFTER printing (for next track)
         depth += track.folder_depth_change.to_reaper_value();
     }
-    
+
     // Print the output
     print!("{}", output);
-    
+
     output
 }
 
 /// Helper trait to convert single items or collections into an iterator of Items
-/// 
+///
 /// This allows the builder to accept both single items and collections:
-/// - Single item: `"Kick In"` 
+/// - Single item: `"Kick In"`
 /// - Collection: `vec!["Kick In", "Kick Out"]`
 pub trait IntoItems {
     type Iter: Iterator<Item = Item>;
@@ -544,18 +551,18 @@ where
 }
 
 /// Builder for constructing expected track structures in tests
-/// 
+///
 /// # Example
 /// ```rust
 /// let expected = TrackStructureBuilder::new()
 ///     .track("Kick", "Kick In")  // Single item
 ///     .build();
-/// 
+///
 /// // Or with multiple items:
 /// let expected = TrackStructureBuilder::new()
 ///     .track("Kick", vec!["Kick In", "Kick Out"])
 ///     .build();
-/// 
+///
 /// // Or with folders:
 /// let expected = TrackStructureBuilder::new()
 ///     .folder("Kick")
@@ -576,11 +583,11 @@ impl TrackStructureBuilder {
             folder_stack: Vec::new(),
         }
     }
-    
+
     /// Add a track with items
-    /// 
+    ///
     /// Items can be a single item or a collection of items, both implementing Into<Item>
-    /// 
+    ///
     /// # Example
     /// ```rust
     /// .track("Kick", "Kick In")  // Single item (string)
@@ -595,12 +602,12 @@ impl TrackStructureBuilder {
         self.tracks.push(track);
         self
     }
-    
+
     /// Start a folder (creates a folder track)
     pub fn folder(mut self, name: impl Into<TrackName>) -> Self {
         self.folder_with_items(name, None::<Vec<&str>>)
     }
-    
+
     /// Start a folder with items on the folder track itself
     pub fn folder_with_items<I>(mut self, name: impl Into<TrackName>, items: Option<I>) -> Self
     where
@@ -617,7 +624,7 @@ impl TrackStructureBuilder {
         self.folder_stack.push(index);
         self
     }
-    
+
     /// End the current folder (closes the most recent folder)
     pub fn end(mut self) -> Self {
         if let Some(_folder_index) = self.folder_stack.pop() {
@@ -641,10 +648,181 @@ impl TrackStructureBuilder {
         }
         self
     }
-    
+
     /// Build the final Vec<Track>
     pub fn build(self) -> Vec<Track> {
         self.tracks
+    }
+}
+
+/// A composable group of tracks that can be stored in variables and composed together.
+///
+/// This enables readable, modular test structure definitions:
+///
+/// ```rust
+/// use daw::tracks::prelude::*;
+///
+/// // Define individual groups
+/// let kick = TrackGroup::folder("Kick")
+///     .track("In", "Kick In")
+///     .track("Out", "Kick Out")
+///     .end();
+///
+/// let snare = TrackGroup::folder("Snare")
+///     .track("Top", "Snare Top")
+///     .track("Bottom", "Snare Bottom")
+///     .end();
+///
+/// // Compose into larger groups
+/// let drums = TrackGroup::folder("Drums")
+///     .group(kick)
+///     .group(snare)
+///     .end();
+///
+/// // Add to builder for final structure
+/// let expected = TrackStructureBuilder::new()
+///     .group(drums)
+///     .build();
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct TrackGroup {
+    name: Option<TrackName>,
+    tracks: Vec<Track>,
+    folder_stack: Vec<usize>,
+}
+
+impl TrackGroup {
+    /// Create a new empty group
+    pub fn new() -> Self {
+        Self {
+            name: None,
+            tracks: Vec::new(),
+            folder_stack: Vec::new(),
+        }
+    }
+
+    /// Create a new group starting with a folder
+    ///
+    /// This is a convenience constructor that creates a new empty group
+    /// and immediately starts a folder with the given name.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let drums = TrackGroup::folder("Drums")
+    ///     .track("Kick", "kick.wav")
+    ///     .track("Snare", "snare.wav")
+    ///     .end();
+    /// ```
+    pub fn folder(name: impl Into<TrackName>) -> Self {
+        Self::new().start_folder(name)
+    }
+
+    /// Start a folder with the given name (chainable method)
+    pub fn start_folder(mut self, name: impl Into<TrackName>) -> Self {
+        self.start_folder_with_items(name, None::<Vec<&str>>)
+    }
+
+    /// Start a folder with items on the folder track itself (chainable method)
+    pub fn start_folder_with_items<I>(
+        mut self,
+        name: impl Into<TrackName>,
+        items: Option<I>,
+    ) -> Self
+    where
+        I: IntoItems,
+    {
+        let mut track = Track::new(name);
+        track.is_folder = true;
+        track.folder_depth_change = FolderDepthChange::FolderStart;
+        if let Some(items) = items {
+            track.items = items.into_items().collect();
+        }
+        let index = self.tracks.len();
+        self.tracks.push(track);
+        self.folder_stack.push(index);
+        self
+    }
+
+    /// Create a new group starting with a folder that has items
+    ///
+    /// This is a convenience constructor that creates a new empty group
+    /// and immediately starts a folder with the given name and items.
+    pub fn folder_with_items<I>(name: impl Into<TrackName>, items: Option<I>) -> Self
+    where
+        I: IntoItems,
+    {
+        Self::new().start_folder_with_items(name, items)
+    }
+
+    /// Add a track to this group
+    pub fn track<I>(mut self, name: impl Into<TrackName>, items: I) -> Self
+    where
+        I: IntoItems,
+    {
+        let mut track = Track::new(name);
+        track.items = items.into_items().collect();
+        self.tracks.push(track);
+        self
+    }
+
+    /// Add another group to this group (flattens the group's tracks into this group)
+    pub fn group(mut self, group: TrackGroup) -> Self {
+        self.tracks.extend(group.tracks);
+        self
+    }
+
+    /// Add multiple groups to this group
+    pub fn groups(mut self, groups: impl IntoIterator<Item = TrackGroup>) -> Self {
+        for group in groups {
+            self.tracks.extend(group.tracks);
+        }
+        self
+    }
+
+    /// End the current folder (closes the most recent folder)
+    pub fn end(mut self) -> Self {
+        if let Some(_folder_index) = self.folder_stack.pop() {
+            if let Some(last_track) = self.tracks.last_mut() {
+                match last_track.folder_depth_change {
+                    FolderDepthChange::Normal => {
+                        last_track.folder_depth_change = FolderDepthChange::ClosesLevels(-1);
+                    }
+                    FolderDepthChange::ClosesLevels(n) => {
+                        last_track.folder_depth_change = FolderDepthChange::ClosesLevels(n - 1);
+                    }
+                    _ => {
+                        last_track.folder_depth_change = FolderDepthChange::ClosesLevels(-1);
+                    }
+                }
+            }
+        }
+        self
+    }
+
+    /// Get the tracks in this group
+    pub fn tracks(self) -> Vec<Track> {
+        self.tracks
+    }
+
+    /// Consume and return the tracks
+    pub fn into_tracks(self) -> Vec<Track> {
+        self.tracks
+    }
+}
+
+impl TrackStructureBuilder {
+    /// Add a group of tracks to this builder
+    pub fn group(mut self, group: TrackGroup) -> Self {
+        self.tracks.extend(group.tracks);
+        self
+    }
+
+    /// Add multiple groups to this builder
+    pub fn groups(mut self, groups: impl IntoIterator<Item = TrackGroup>) -> Self {
+        for group in groups {
+            self.tracks.extend(group.tracks);
+        }
+        self
     }
 }
 
@@ -655,24 +833,24 @@ impl Default for TrackStructureBuilder {
 }
 
 /// Compare two track lists, focusing only on structural aspects that matter for organization
-/// 
+///
 /// This function compares:
 /// - Track names
 /// - Items (by name only, ignoring IDs and other metadata)
 /// - Folder structure (is_folder, folder_depth_change)
 /// - Overall hierarchy structure
-/// 
+///
 /// It ignores:
 /// - IDs, GUIDs, and other metadata
 /// - Volume, pan, mute, solo, and other audio settings
 /// - Item positions, lengths, and other item metadata
-/// 
+///
 /// Returns `Ok(())` if tracks match, or `Err(String)` with a detailed description of differences.
-/// 
+///
 /// # Example
 /// ```rust
 /// use daw::tracks::assert_tracks_equal;
-/// 
+///
 /// let actual = vec![Track::new("Kick")];
 /// let expected = vec![Track::new("Kick")];
 /// assert_tracks_equal(&actual, &expected).unwrap();
@@ -756,30 +934,30 @@ fn compare_track(actual: &Track, expected: &Track, path: &str) -> Result<(), Str
 fn format_track_list(tracks: &[Track]) -> String {
     let mut output = String::new();
     let mut depth = 0i32;
-    
+
     for track in tracks {
         let prefix = if depth > 0 {
             "-".repeat(depth as usize)
         } else {
             String::new()
         };
-        
+
         output.push_str(&format!("{}{}", prefix, track.name.0));
-        
+
         if !track.items.is_empty() {
             let item_names: Vec<&str> = track.items.iter().map(|i| i.name.as_str()).collect();
             output.push_str(&format!(": [{:?}]", item_names));
         }
-        
+
         if track.is_folder {
             output.push_str(" (folder)");
         }
-        
+
         output.push('\n');
-        
+
         depth += track.folder_depth_change.to_reaper_value();
     }
-    
+
     output
 }
 
@@ -788,13 +966,13 @@ mod tests {
     use super::*;
     use crate::tracks::item::Item;
     use crate::tracks::AddChild;
-    
+
     /// Strip ANSI color codes from a string for testing
     fn strip_ansi_codes(s: &str) -> String {
         // Remove ANSI escape sequences manually (simpler than regex dependency)
         let mut result = String::new();
         let mut chars = s.chars().peekable();
-        
+
         while let Some(ch) = chars.next() {
             if ch == '\x1b' || ch == '\u{1b}' {
                 // Skip until we find 'm' (end of ANSI sequence)
@@ -817,9 +995,9 @@ mod tests {
         let tracks = TrackStructureBuilder::new()
             .track("Kick In", vec!["Kick In.wav", "Kick In Alt.wav"])
             .build();
-        
+
         let output = display_tracklist(&tracks);
-        
+
         // Strip ANSI codes for comparison
         let stripped = strip_ansi_codes(&output);
         assert_eq!(stripped, "Kick In: [Kick In.wav, Kick In Alt.wav]\n");
@@ -830,14 +1008,14 @@ mod tests {
         // Create a hierarchy: Drums -> Kick -> Kick In
         let tracks = TrackStructureBuilder::new()
             .folder("Drums")
-                .folder("Kick")
-                    .track("Kick In", "Kick In.wav")
-                .end()
+            .folder("Kick")
+            .track("Kick In", "Kick In.wav")
+            .end()
             .end()
             .build();
-        
+
         let output = display_tracklist(&tracks);
-        
+
         // Expected output:
         // Drums
         // -Kick
@@ -853,13 +1031,16 @@ mod tests {
         // Create tracks with multiple items
         let tracks = TrackStructureBuilder::new()
             .folder("Drums")
-                .track("Kick", "Kick In.wav")
-                .track("Snare", vec!["Snare Top.wav", "Snare Bottom.wav", "Snare Room.wav"])
+            .track("Kick", "Kick In.wav")
+            .track(
+                "Snare",
+                vec!["Snare Top.wav", "Snare Bottom.wav", "Snare Room.wav"],
+            )
             .end()
             .build();
-        
+
         let output = display_tracklist(&tracks);
-        
+
         // Expected output:
         // Drums
         // -Snare: [Snare Top.wav, Snare Bottom.wav, Snare Room.wav]
@@ -876,9 +1057,9 @@ mod tests {
         let tracks = TrackStructureBuilder::new()
             .track("Empty Track", Vec::<&str>::new())
             .build();
-        
+
         let output = display_tracklist(&tracks);
-        
+
         // Strip ANSI codes for comparison
         let stripped = strip_ansi_codes(&output);
         assert_eq!(stripped, "Empty Track\n");
@@ -889,16 +1070,16 @@ mod tests {
         // Create a deeply nested structure: Drums -> Percussion -> Shakers -> Shaker 1
         let tracks = TrackStructureBuilder::new()
             .folder("Drums")
-                .folder("Percussion")
-                    .folder("Shakers")
-                        .track("Shaker 1", "Shaker 1.wav")
-                    .end()
-                .end()
+            .folder("Percussion")
+            .folder("Shakers")
+            .track("Shaker 1", "Shaker 1.wav")
+            .end()
+            .end()
             .end()
             .build();
-        
+
         let output = display_tracklist(&tracks);
-        
+
         // Expected output:
         // Drums
         // -Percussion
@@ -913,26 +1094,28 @@ mod tests {
 
 impl TrackBuilder {
     /// Build a Track with sensible defaults
-    /// 
+    ///
     /// This custom build method uses `Track::default()` to set all defaults,
     /// then applies any values provided via the builder.
-    /// 
+    ///
     /// Panics if required fields (like `name`) are not set. This makes the API
     /// infallible when all required fields are provided.
     pub fn build(self) -> Track {
-        let name = self.name.expect("Track name is required - use .name() to set it");
-        
+        let name = self
+            .name
+            .expect("Track name is required - use .name() to set it");
+
         // Start with defaults
         let mut track = Track::default();
         track.name = name;
-        
+
         // Override with any builder-provided values
         // Builder fields for Option<T> are Option<Option<T>> (outer Option = was it set, inner = the value)
         // We need to flatten them
         if let Some(id) = self.id {
             track.id = id;
         }
-        
+
         if let Some(guid) = self.guid {
             track.guid = guid;
         }
@@ -943,10 +1126,10 @@ impl TrackBuilder {
                 track.metadata.insert(k, v);
             }
         }
-        
+
         track
     }
-    
+
     /// Add child tracks using folder properties
     ///
     /// This method automatically builds the parent track, then adds children with proper
@@ -956,7 +1139,7 @@ impl TrackBuilder {
     /// # Example
     /// ```rust
     /// use daw::tracks::AddChild;
-    /// 
+    ///
     /// let kick_in = Track::builder().name("Kick In").add_child(vec![]); // Empty vec for leaf
     /// let kick_bus = Track::builder().name("Kick").add_child(kick_in);
     /// let drum_bus = Track::builder().name("Drums").add_child(kick_bus);
@@ -970,4 +1153,3 @@ impl TrackBuilder {
         parent.add_child(children)
     }
 }
-

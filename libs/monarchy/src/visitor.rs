@@ -77,12 +77,21 @@ struct CollapseHelper<'a, M: Metadata> {
 
 impl<'a, M: Metadata> CollapseHelper<'a, M> {
     fn new(config: &'a Config<M>) -> Self {
-        Self { 
+        Self {
             config,
-            metadata_group_names: vec!["MultiMic", "SUM", "Section", "Layers", "Effect", "Arrangement", "Performer", "Channel"],
+            metadata_group_names: vec![
+                "MultiMic",
+                "SUM",
+                "Section",
+                "Layers",
+                "Effect",
+                "Arrangement",
+                "Performer",
+                "Channel",
+            ],
         }
     }
-    
+
     /// Find a group by name in the config (recursive search)
     fn find_group(&self, name: &str) -> Option<&'a Group<M>> {
         fn search<'a, M: Metadata>(group: &'a Group<M>, name: &str) -> Option<&'a Group<M>> {
@@ -104,7 +113,7 @@ impl<'a, M: Metadata> CollapseHelper<'a, M> {
         }
         None
     }
-    
+
     /// Check if a group is a "deepest group" (has no organizational subgroups in config)
     /// Deepest groups like Kick, Snare should never be collapsed
     fn is_deepest_group(&self, name: &str) -> bool {
@@ -124,32 +133,37 @@ impl<'a, M: Metadata> CollapseHelper<'a, M> {
             true
         }
     }
-    
+
     /// Check if a name corresponds to a config-defined group
     fn is_config_group(&self, name: &str) -> bool {
         self.find_group(name).is_some()
     }
-    
+
     /// Check if a name is a top-level category (direct child of config.groups)
     fn is_top_level_category(&self, name: &str) -> bool {
-        self.config.groups.iter().any(|g| g.name.eq_ignore_ascii_case(name))
+        self.config
+            .groups
+            .iter()
+            .any(|g| g.name.eq_ignore_ascii_case(name))
     }
-    
+
     /// Check if a top-level category has patterns (can match items directly)
     /// Groups with patterns should keep their name when collapsing (Guitars, Vocals)
     /// Groups without patterns are just containers and should collapse to their children (Drums)
     fn top_level_has_patterns(&self, name: &str) -> bool {
-        self.config.groups.iter()
+        self.config
+            .groups
+            .iter()
             .find(|g| g.name.eq_ignore_ascii_case(name))
             .map(|g| !g.patterns.is_empty())
             .unwrap_or(false)
     }
-    
+
     /// Find the parent group of a given group name
     fn find_parent_group(&self, child_name: &str) -> Option<&'a Group<M>> {
         fn search_parent<'a, M: Metadata>(
-            parent: &'a Group<M>, 
-            child_name: &str
+            parent: &'a Group<M>,
+            child_name: &str,
         ) -> Option<&'a Group<M>> {
             for child in &parent.groups {
                 if child.name.eq_ignore_ascii_case(child_name) {
@@ -176,16 +190,18 @@ impl<'a, M: Metadata> CollapseHelper<'a, M> {
         }
         None
     }
-    
+
     /// Check if a top-level category is transparent
     /// Transparent groups have their children promoted to top level
     fn is_top_level_transparent(&self, name: &str) -> bool {
-        self.config.groups.iter()
+        self.config
+            .groups
+            .iter()
             .find(|g| g.name.eq_ignore_ascii_case(name))
             .map(|g| g.transparent)
             .unwrap_or(false)
     }
-    
+
     /// Check if a child group shares any patterns with its parent
     /// If true, the child should collapse INTO the parent's name (e.g., Lead Vocals -> Vocals)
     /// If false, the child should keep its own name (e.g., BGVs stays BGVs)
@@ -194,12 +210,12 @@ impl<'a, M: Metadata> CollapseHelper<'a, M> {
             Some(g) => g,
             None => return false,
         };
-        
+
         let parent_group = match self.find_parent_group(child_name) {
             Some(g) => g,
             None => return false,
         };
-        
+
         // Check if any pattern in child matches any pattern in parent
         for child_pattern in &child_group.patterns {
             let child_pattern_lower = child_pattern.to_lowercase();
@@ -209,19 +225,19 @@ impl<'a, M: Metadata> CollapseHelper<'a, M> {
                 }
             }
         }
-        
+
         false
     }
 }
 
 /// Pass 1: Collapse intermediate groups
-/// 
+///
 /// Removes intermediate groups between top-level categories and deepest groups.
 /// For example: Drums -> Drum Kit -> [Kick, Snare] becomes Drums -> [Kick, Snare]
-/// 
+///
 /// Rules:
 /// - Never collapse top-level categories (Drums, Guitars, Vocals, etc.)
-/// - Never collapse deepest groups (Kick, Snare, etc.) 
+/// - Never collapse deepest groups (Kick, Snare, etc.)
 /// - Never collapse metadata-derived groups (In, Out, L, R, etc.)
 /// - Collapse intermediate config groups that have a single child
 pub struct CollapseIntermediateGroups<'a, M: Metadata> {
@@ -230,9 +246,11 @@ pub struct CollapseIntermediateGroups<'a, M: Metadata> {
 
 impl<'a, M: Metadata> CollapseIntermediateGroups<'a, M> {
     pub fn new(config: &'a Config<M>) -> Self {
-        Self { helper: CollapseHelper::new(config) }
+        Self {
+            helper: CollapseHelper::new(config),
+        }
     }
-    
+
     /// Collapse single-child chains of metadata-derived groups
     /// This takes Electric -> Clean -> DBL -> L: [item] and collapses to Electric: [item]
     fn collapse_metadata_children(&self, node: &mut Structure<M>) {
@@ -240,12 +258,12 @@ impl<'a, M: Metadata> CollapseIntermediateGroups<'a, M> {
         // collapse it by promoting its items and children
         while node.children.len() == 1 && node.items.is_empty() {
             let only_child = &node.children[0];
-            
+
             // If the child is a config group, stop - we don't collapse config groups here
             if self.helper.is_config_group(&only_child.name) {
                 break;
             }
-            
+
             // Child is metadata-derived, collapse it
             let only_child = node.children.remove(0);
             node.items.extend(only_child.items);
@@ -268,28 +286,28 @@ impl<'a, M: Metadata> StructureVisitor<M> for CollapseIntermediateGroups<'a, M> 
             // This handles: Electric -> Clean -> DBL -> L: [item] => Electric: [item]
             self.collapse_metadata_children(node);
         }
-        
+
         // Don't process nodes that are top-level categories - they're handled in pass 2
         if self.helper.is_top_level_category(&node.name) {
             // But DO collapse intermediate children within top-level categories
             while node.children.len() == 1 && node.items.is_empty() {
                 let only_child = &node.children[0];
-                
+
                 // Stop if child is a deepest group
                 if self.helper.is_deepest_group(&only_child.name) {
                     break;
                 }
-                
+
                 // Stop if child is not in config (metadata-derived)
                 if !self.helper.is_config_group(&only_child.name) {
                     break;
                 }
-                
+
                 // Stop if child is also a top-level category (shouldn't happen but be safe)
                 if self.helper.is_top_level_category(&only_child.name) {
                     break;
                 }
-                
+
                 // Collapse: promote child's children and items to this node
                 let only_child = node.children.remove(0);
                 node.items.extend(only_child.items);
@@ -297,27 +315,27 @@ impl<'a, M: Metadata> StructureVisitor<M> for CollapseIntermediateGroups<'a, M> 
             }
             return;
         }
-        
+
         // For non-top-level config nodes (intermediate groups), collapse single-child chains
         // but stop at deepest groups and metadata-derived groups
         while node.children.len() == 1 && node.items.is_empty() {
             let only_child = &node.children[0];
-            
+
             // Stop if child is a deepest group
             if self.helper.is_deepest_group(&only_child.name) {
                 break;
             }
-            
+
             // Stop if child is not in config (metadata-derived)
             if !self.helper.is_config_group(&only_child.name) {
                 break;
             }
-            
+
             // Stop if child is a top-level category
             if self.helper.is_top_level_category(&only_child.name) {
                 break;
             }
-            
+
             // Collapse: promote child's children and items to this node
             let only_child = node.children.remove(0);
             node.items.extend(only_child.items);
@@ -330,8 +348,8 @@ impl<'a, M: Metadata> StructureVisitor<M> for CollapseIntermediateGroups<'a, M> 
 ///
 /// After intermediate groups are collapsed, this pass removes top-level categories
 /// that have only a single child remaining.
-/// 
-/// For example: 
+///
+/// For example:
 /// - Drums -> Kick (single deepest group) becomes just Kick
 /// - Drums -> [Kick, Snare] stays as Drums -> [Kick, Snare]
 pub struct CollapseTopLevelGroups<'a, M: Metadata> {
@@ -340,16 +358,18 @@ pub struct CollapseTopLevelGroups<'a, M: Metadata> {
 
 impl<'a, M: Metadata> CollapseTopLevelGroups<'a, M> {
     pub fn new(config: &'a Config<M>) -> Self {
-        Self { helper: CollapseHelper::new(config) }
+        Self {
+            helper: CollapseHelper::new(config),
+        }
     }
-    
+
     /// For top-level groups WITH patterns (Guitars, Vocals):
     /// Collapse intermediate config groups based on transparency:
-    /// 
+    ///
     /// Rules:
     /// - If parent is NOT transparent → always keep parent name (Guitars, Keys)
     /// - If parent IS transparent → always use child name (Lead Vocals, BGVs)
-    /// 
+    ///
     /// Examples:
     /// - Guitars -> Electric -> [items] becomes Guitars: [items] (Guitars not transparent)
     /// - Guitars -> Acoustic -> [items] becomes Guitars: [items] (Guitars not transparent)
@@ -358,22 +378,22 @@ impl<'a, M: Metadata> CollapseTopLevelGroups<'a, M> {
     fn collapse_intermediates_into_top_level(&self, node: &mut Structure<M>) {
         // Check if this top-level group is transparent
         let is_transparent = self.helper.is_top_level_transparent(&node.name);
-        
+
         // While we have a single child that's a config group (not metadata-derived),
         // decide whether to keep parent name or child name
         while node.children.len() == 1 && node.items.is_empty() {
             let only_child = &node.children[0];
-            
+
             // If child is not a config group (metadata-derived), stop
             if !self.helper.is_config_group(&only_child.name) {
                 break;
             }
-            
+
             // Decide whether to keep parent name or use child name
             let keep_parent_name = !is_transparent;
             // Non-transparent parent: always keep parent name (Guitars, Keys, etc.)
             // Transparent parent: always use child name (Lead Vocals, BGVs)
-            
+
             if keep_parent_name {
                 // Keep THIS node's name, promote child's content
                 let only_child = node.children.remove(0);
@@ -389,19 +409,19 @@ impl<'a, M: Metadata> CollapseTopLevelGroups<'a, M> {
             }
         }
     }
-    
+
     /// For top-level groups WITHOUT patterns (Drums):
     /// Collapse all the way to the deepest config group
     /// Drums -> Drum Kit -> Kick -> [items] becomes Kick: [items]
     fn collapse_to_deepest(&self, node: &mut Structure<M>) {
         while node.children.len() == 1 && node.items.is_empty() {
             let only_child = &node.children[0];
-            
+
             // If child is not a config group, stop
             if !self.helper.is_config_group(&only_child.name) {
                 break;
             }
-            
+
             // Replace this node with the child
             let only_child = node.children.remove(0);
             node.name = only_child.name;
@@ -418,17 +438,17 @@ impl<'a, M: Metadata> StructureVisitor<M> for CollapseTopLevelGroups<'a, M> {
         if depth != 0 {
             return;
         }
-        
+
         // At root level, process each top-level child
         // For each child that's a top-level category:
         // - If it has patterns (Guitars, Vocals): keep the name, promote children's content
         // - If it has no patterns (Drums): collapse to the deepest matching group
-        
+
         for child in &mut node.children {
             if !self.helper.is_top_level_category(&child.name) {
                 continue;
             }
-            
+
             // Check if this top-level category has patterns
             if self.helper.top_level_has_patterns(&child.name) {
                 // Has patterns (Guitars, Vocals) - keep the top-level name
@@ -439,22 +459,23 @@ impl<'a, M: Metadata> StructureVisitor<M> for CollapseTopLevelGroups<'a, M> {
                 self.collapse_to_deepest(child);
             }
         }
-        
+
         // Now handle the case where root has a single child that should become root
         while node.children.len() == 1 && node.items.is_empty() {
             let only_child = &node.children[0];
-            
+
             // If the single child has multiple grandchildren, keep it
             if only_child.children.len() > 1 {
                 break;
             }
-            
+
             // If the single child is a top-level with patterns, keep it
-            if self.helper.is_top_level_category(&only_child.name) 
-                && self.helper.top_level_has_patterns(&only_child.name) {
+            if self.helper.is_top_level_category(&only_child.name)
+                && self.helper.top_level_has_patterns(&only_child.name)
+            {
                 break;
             }
-            
+
             // If the single child has items directly, it can become root
             if !only_child.items.is_empty() && only_child.children.is_empty() {
                 let only_child = node.children.remove(0);
@@ -464,7 +485,7 @@ impl<'a, M: Metadata> StructureVisitor<M> for CollapseTopLevelGroups<'a, M> {
                 node.children = only_child.children;
                 break;
             }
-            
+
             // If single child has a single grandchild, collapse one level
             if only_child.children.len() == 1 {
                 let only_child = node.children.remove(0);
@@ -475,14 +496,14 @@ impl<'a, M: Metadata> StructureVisitor<M> for CollapseTopLevelGroups<'a, M> {
                 node.children = grandchild.children;
                 continue;
             }
-            
+
             break;
         }
     }
 }
 
 /// Combined collapse visitor that runs both passes
-/// 
+///
 /// This is a convenience wrapper that applies:
 /// 1. CollapseIntermediateGroups - removes unnecessary intermediate levels
 /// 2. CollapseTopLevelGroups - removes top-level groups when they have single children
@@ -494,14 +515,14 @@ impl<'a, M: Metadata> CollapseHierarchy<'a, M> {
     pub fn new(config: &'a Config<M>) -> Self {
         Self { config }
     }
-    
+
     /// Apply all collapse passes to a structure
     pub fn apply(&self, root: &mut Structure<M>) {
         // Pass 1: Collapse intermediate groups
         let mut pass1 = CollapseIntermediateGroups::new(self.config);
         root.accept(&mut pass1);
-        
-        // Pass 2: Collapse top-level groups  
+
+        // Pass 2: Collapse top-level groups
         let mut pass2 = CollapseTopLevelGroups::new(self.config);
         root.accept(&mut pass2);
     }
@@ -562,15 +583,12 @@ impl<'a, M: Metadata> ApplyTaggedCollections<'a, M> {
 
 impl<'a, M: Metadata> StructureVisitor<M> for ApplyTaggedCollections<'a, M> {
     fn leave(&mut self, node: &mut Structure<M>, _depth: usize) {
-        // Find if this node's group has a tagged collection
-        let tagged_collection = match self.find_group(&node.name) {
-            Some(group) => group.tagged_collection.as_ref(),
-            None => return,
+        // Find if this node's group has a tagged collection (using let-else)
+        let Some(group) = self.find_group(&node.name) else {
+            return;
         };
-
-        let tagged_collection = match tagged_collection {
-            Some(tc) => tc,
-            None => return,
+        let Some(tagged_collection) = &group.tagged_collection else {
+            return;
         };
 
         // No items to process
@@ -596,10 +614,10 @@ impl<'a, M: Metadata> StructureVisitor<M> for ApplyTaggedCollections<'a, M> {
             // Create subfolder for tagged collection items
             let mut collection_node = Structure::new(&tagged_collection.name);
             collection_node.items = matching_items;
-            
+
             // Add collection as first child (before other children)
             node.children.insert(0, collection_node);
-            
+
             // Keep non-matching items at current level
             node.items = non_matching_items;
         } else {
@@ -627,7 +645,7 @@ impl<'a, M: Metadata> StructureVisitor<M> for ApplyTaggedCollections<'a, M> {
 /// let mut collector = CollectUnsorted::new();
 /// structure.accept(&mut collector);
 /// let unsorted_items = collector.finalize();
-/// 
+///
 /// // Add unsorted folder to root if there are items
 /// if !unsorted_items.is_empty() {
 ///     let mut unsorted_folder = Structure::new("Unsorted");
@@ -645,7 +663,7 @@ pub struct CollectUnsorted<M: Metadata> {
 impl<M: Metadata> Default for CollectUnsorted<M> {
     fn default() -> Self {
         Self {
-            folder_name: "Unsorted".to_string(),
+            folder_name: String::from("Unsorted"),
             collected: Vec::new(),
         }
     }
@@ -667,7 +685,7 @@ impl<M: Metadata> CollectUnsorted<M> {
     pub fn finalize(&mut self) -> Vec<crate::Item<M>> {
         std::mem::take(&mut self.collected)
     }
-    
+
     /// Check if any unsorted items were collected
     pub fn has_unsorted(&self) -> bool {
         !self.collected.is_empty()
@@ -679,7 +697,7 @@ impl<M: Metadata> StructureVisitor<M> for CollectUnsorted<M> {
         // Only collect unsorted if:
         // 1. Node has items at this level
         // 2. Node also has children (subgroups that items could potentially belong to)
-        // 
+        //
         // If there are no children, items belong here and aren't "unsorted"
         if node.items.is_empty() || node.children.is_empty() {
             return;
@@ -691,7 +709,7 @@ impl<M: Metadata> StructureVisitor<M> for CollectUnsorted<M> {
 }
 
 /// Helper function to apply CollectUnsorted and add the Unsorted folder to root
-/// 
+///
 /// This is a convenience function that:
 /// 1. Runs the CollectUnsorted visitor
 /// 2. If any items were collected, adds an "Unsorted" folder to the root
@@ -707,16 +725,16 @@ pub fn collect_unsorted_to_root_with_name<M: Metadata>(
 ) -> usize {
     let mut collector = CollectUnsorted::with_folder_name(folder_name);
     root.accept(&mut collector);
-    
+
     let unsorted_items = collector.finalize();
     let count = unsorted_items.len();
-    
+
     if !unsorted_items.is_empty() {
         let mut unsorted_folder = Structure::new(folder_name);
         unsorted_folder.items = unsorted_items;
         root.children.push(unsorted_folder);
     }
-    
+
     count
 }
 
@@ -725,7 +743,8 @@ pub struct RemoveEmptyNodes;
 
 impl<M: Metadata> StructureVisitor<M> for RemoveEmptyNodes {
     fn leave(&mut self, node: &mut Structure<M>, _depth: usize) {
-        node.children.retain(|child| !child.items.is_empty() || !child.children.is_empty());
+        node.children
+            .retain(|child| !child.items.is_empty() || !child.children.is_empty());
     }
 }
 
@@ -761,12 +780,19 @@ pub struct ExpandItemsToChildren;
 
 impl<M: Metadata + ToDisplayName> StructureVisitor<M> for ExpandItemsToChildren {
     fn leave(&mut self, node: &mut Structure<M>, _depth: usize) {
-        // Only expand if we have multiple items
-        // Single item stays on the parent node (will become a track/folder with item on it)
-        if node.items.len() <= 1 {
+        // Expand items to children if:
+        // 1. We have multiple items, OR
+        // 2. We have items AND children (items need to become siblings of children)
+        //
+        // A single item with no children stays on the parent node
+        // (will become a track/folder with item on it)
+        let has_multiple_items = node.items.len() > 1;
+        let has_items_and_children = !node.items.is_empty() && !node.children.is_empty();
+
+        if !has_multiple_items && !has_items_and_children {
             return;
         }
-        
+
         // Expand each item into its own child node
         let items = std::mem::take(&mut node.items);
         for item in items {
@@ -811,7 +837,7 @@ impl Default for CleanupDisplayNames {
     fn default() -> Self {
         Self {
             context_stack: Vec::new(),
-            fallback_name: "Main".to_string(),
+            fallback_name: String::from("Main"),
         }
     }
 }
@@ -820,15 +846,15 @@ impl CleanupDisplayNames {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Set a custom fallback name for when stripping results in empty string
     pub fn with_fallback(mut self, fallback: impl Into<String>) -> Self {
         self.fallback_name = fallback.into();
         self
     }
-    
+
     /// Clean up a filename to be suitable for display
-    /// 
+    ///
     /// Performs the following cleanup:
     /// 1. Remove file extension (.wav, .aiff, .flac, etc.)
     /// 2. Remove leading track numbers (e.g., "49 " from "49 Organ Chords")
@@ -836,7 +862,7 @@ impl CleanupDisplayNames {
     /// 4. Strip context words from ancestors
     fn cleanup_name(&self, name: &str) -> String {
         let mut cleaned = name.to_string();
-        
+
         // Step 1: Remove file extension
         let extensions = [".wav", ".aiff", ".aif", ".flac", ".mp3", ".ogg", ".m4a"];
         for ext in extensions {
@@ -845,18 +871,18 @@ impl CleanupDisplayNames {
                 break;
             }
         }
-        
+
         // Step 2: Remove trailing version/playlist suffixes
         // Patterns like "_03", ".2_03", ".dup1_03", ".01.R.05_03"
         // These are typically Pro Tools or DAW-specific suffixes
         let suffix_patterns = [
             // Full patterns with underscores
-            r"[._]\d+[._]\d+$",        // .05_03, _05_03
-            r"[._]dup\d*[._]?\d*$",    // .dup1_03, .dup1
-            r"[._]\d+$",               // _03, .2
+            r"[._]\d+[._]\d+$",           // .05_03, _05_03
+            r"[._]dup\d*[._]?\d*$",       // .dup1_03, .dup1
+            r"[._]\d+$",                  // _03, .2
             r"[._][RL][._]?\d*[._]?\d*$", // .R.05_03, .L
         ];
-        
+
         // Simple suffix removal (not using regex for performance)
         // Remove patterns like "_03" at the end
         if let Some(idx) = cleaned.rfind('_') {
@@ -865,23 +891,21 @@ impl CleanupDisplayNames {
                 cleaned = cleaned[..idx].to_string();
             }
         }
-        
+
         // Remove patterns like ".2" at the end (but not things like "DX7")
         if let Some(idx) = cleaned.rfind('.') {
             let suffix = &cleaned[idx + 1..];
             // Only remove if it's a simple number or dup pattern
-            if suffix.chars().all(|c| c.is_ascii_digit()) 
-                || suffix.starts_with("dup") 
-            {
+            if suffix.chars().all(|c| c.is_ascii_digit()) || suffix.starts_with("dup") {
                 cleaned = cleaned[..idx].to_string();
             }
         }
-        
+
         // Recursively clean more suffixes
         // Handle cases like "Snare.dup1.05_03" -> "Snare"
         loop {
             let before = cleaned.clone();
-            
+
             // Remove trailing _NN
             if let Some(idx) = cleaned.rfind('_') {
                 let suffix = &cleaned[idx + 1..];
@@ -890,11 +914,11 @@ impl CleanupDisplayNames {
                     continue;
                 }
             }
-            
+
             // Remove trailing .NN or .dupN
             if let Some(idx) = cleaned.rfind('.') {
                 let suffix = &cleaned[idx + 1..];
-                if suffix.chars().all(|c| c.is_ascii_digit()) 
+                if suffix.chars().all(|c| c.is_ascii_digit())
                     || suffix.starts_with("dup")
                     || suffix == "R"
                     || suffix == "L"
@@ -903,12 +927,12 @@ impl CleanupDisplayNames {
                     continue;
                 }
             }
-            
+
             if before == cleaned {
                 break;
             }
         }
-        
+
         // Step 3: Remove leading track numbers (e.g., "49 " from "49 Organ Chords")
         let parts: Vec<&str> = cleaned.split_whitespace().collect();
         if parts.len() > 1 {
@@ -919,51 +943,52 @@ impl CleanupDisplayNames {
                 }
             }
         }
-        
+
         // Step 4: Strip context words from ancestors
         self.strip_context(&cleaned)
     }
-    
+
     /// Strip context words from a name based on ancestor names
-    /// 
+    ///
     /// Removes words from the name that appear in any ancestor's name.
     /// Case-insensitive comparison.
     fn strip_context(&self, name: &str) -> String {
         let mut words: Vec<&str> = name.split_whitespace().collect();
-        
+
         // Build a set of all context words from ancestors (lowercase for comparison)
-        let context_words: std::collections::HashSet<String> = self.context_stack
+        let context_words: std::collections::HashSet<String> = self
+            .context_stack
             .iter()
             .flat_map(|ancestor| ancestor.split_whitespace())
             .map(|w| w.to_lowercase())
             .collect();
-        
+
         // Remove words that appear in context
         words.retain(|word| !context_words.contains(&word.to_lowercase()));
-        
+
         words.join(" ")
     }
-    
+
     /// Number duplicate names in a list of children
-    /// 
+    ///
     /// If multiple children have the same name after stripping,
     /// append " 1", " 2", etc.
     fn number_duplicates(children: &mut [Structure<impl Metadata>]) {
         use std::collections::HashMap;
-        
+
         // Count occurrences of each name
         let mut name_counts: HashMap<String, usize> = HashMap::new();
         for child in children.iter() {
             *name_counts.entry(child.name.clone()).or_insert(0) += 1;
         }
-        
+
         // Track which names need numbering (count > 1)
         let duplicates: std::collections::HashSet<String> = name_counts
             .into_iter()
             .filter(|(_, count)| *count > 1)
             .map(|(name, _)| name)
             .collect();
-        
+
         // Apply numbering to duplicates
         let mut name_counters: HashMap<String, usize> = HashMap::new();
         for child in children.iter_mut() {
@@ -982,31 +1007,33 @@ impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
         self.context_stack.push(node.name.clone());
         true
     }
-    
+
     fn leave(&mut self, node: &mut Structure<M>, _depth: usize) {
         // Process children's names before popping context
         for child in &mut node.children {
             let cleaned = self.cleanup_name(&child.name);
             if cleaned.is_empty() {
                 // Fallback: use the last group name from context, or default fallback
-                child.name = self.context_stack.last()
+                child.name = self
+                    .context_stack
+                    .last()
                     .cloned()
                     .unwrap_or_else(|| self.fallback_name.clone());
             } else {
                 child.name = cleaned;
             }
         }
-        
+
         // Number any duplicate names among children
         Self::number_duplicates(&mut node.children);
-        
+
         // Pop this node from context stack
         self.context_stack.pop();
     }
 }
 
 /// Helper function to clean up display names throughout a structure
-/// 
+///
 /// This should be called after `expand_items_to_children()` to strip
 /// redundant context from the generated display names.
 pub fn cleanup_display_names<M: Metadata>(root: &mut Structure<M>) {
@@ -1015,10 +1042,7 @@ pub fn cleanup_display_names<M: Metadata>(root: &mut Structure<M>) {
 }
 
 /// Helper function to clean up display names with a custom fallback
-pub fn cleanup_display_names_with_fallback<M: Metadata>(
-    root: &mut Structure<M>,
-    fallback: &str,
-) {
+pub fn cleanup_display_names_with_fallback<M: Metadata>(root: &mut Structure<M>, fallback: &str) {
     let mut cleaner = CleanupDisplayNames::new().with_fallback(fallback);
     root.accept(&mut cleaner);
 }
@@ -1026,6 +1050,331 @@ pub fn cleanup_display_names_with_fallback<M: Metadata>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metadata::FieldName;
+    use serde::{Deserialize, Serialize};
 
-    // We'll add tests once we have a simple Metadata implementation for testing
+    // region:    --- Test Fixtures
+
+    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
+    #[derive(Clone, Debug, Default)]
+    struct TestMetadata {
+        group: Option<String>,
+        multi_mic: Option<String>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    enum TestMetadataField {
+        Group,
+        MultiMic,
+    }
+
+    impl FieldName for TestMetadataField {
+        fn name(&self) -> &'static str {
+            match self {
+                TestMetadataField::Group => "Group",
+                TestMetadataField::MultiMic => "MultiMic",
+            }
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    enum TestMetadataValue {
+        Group(String),
+        MultiMic(String),
+    }
+
+    impl crate::Metadata for TestMetadata {
+        type Field = TestMetadataField;
+        type Value = TestMetadataValue;
+
+        fn get(&self, field: &Self::Field) -> Option<Self::Value> {
+            match field {
+                TestMetadataField::Group => self.group.clone().map(TestMetadataValue::Group),
+                TestMetadataField::MultiMic => {
+                    self.multi_mic.clone().map(TestMetadataValue::MultiMic)
+                }
+            }
+        }
+
+        fn set(&mut self, field: Self::Field, value: Self::Value) {
+            match (field, value) {
+                (TestMetadataField::Group, TestMetadataValue::Group(v)) => self.group = Some(v),
+                (TestMetadataField::MultiMic, TestMetadataValue::MultiMic(v)) => {
+                    self.multi_mic = Some(v)
+                }
+                _ => {}
+            }
+        }
+
+        fn fields() -> Vec<Self::Field> {
+            vec![TestMetadataField::Group, TestMetadataField::MultiMic]
+        }
+    }
+
+    fn create_test_item(name: &str) -> crate::Item<TestMetadata> {
+        crate::Item {
+            id: name.to_string(),
+            original: name.to_string(),
+            metadata: TestMetadata::default(),
+            matched_groups: vec![],
+        }
+    }
+
+    // endregion: --- Test Fixtures
+
+    // region:    --- RemoveEmptyNodes Tests
+
+    mod remove_empty_nodes {
+        use super::*;
+
+        #[test]
+        fn removes_empty_children() -> Result<()> {
+            // -- Setup & Fixtures
+            let mut root: Structure<TestMetadata> = Structure::new("Root");
+            root.children.push(Structure::new("Empty"));
+            let mut with_item = Structure::new("WithItem");
+            with_item.items.push(create_test_item("item1"));
+            root.children.push(with_item);
+
+            // -- Exec
+            root.accept(&mut RemoveEmptyNodes);
+
+            // -- Check
+            assert_eq!(root.children.len(), 1);
+            assert_eq!(root.children[0].name, "WithItem");
+
+            Ok(())
+        }
+
+        #[test]
+        fn keeps_nodes_with_children() -> Result<()> {
+            // -- Setup & Fixtures
+            let mut root: Structure<TestMetadata> = Structure::new("Root");
+            let mut parent = Structure::new("Parent");
+            let mut child = Structure::new("Child");
+            child.items.push(create_test_item("item1"));
+            parent.children.push(child);
+            root.children.push(parent);
+
+            // -- Exec
+            root.accept(&mut RemoveEmptyNodes);
+
+            // -- Check
+            assert_eq!(root.children.len(), 1);
+            assert_eq!(root.children[0].name, "Parent");
+
+            Ok(())
+        }
+    }
+
+    // endregion: --- RemoveEmptyNodes Tests
+
+    // region:    --- PromoteSingleChild Tests
+
+    mod promote_single_child {
+        use super::*;
+
+        #[test]
+        fn promotes_single_child_content() -> Result<()> {
+            // -- Setup & Fixtures
+            // Structure: Root -> Parent -> Child (with item1)
+            // Both Root and Parent have single children with no items, so both should be promoted
+            let mut root: Structure<TestMetadata> = Structure::new("Root");
+            let mut parent: Structure<TestMetadata> = Structure::new("Parent");
+            let mut child: Structure<TestMetadata> = Structure::new("Child");
+            child.items.push(create_test_item("item1"));
+            parent.children.push(child);
+            root.children.push(parent);
+
+            // -- Exec
+            root.accept(&mut PromoteSingleChild);
+
+            // -- Check
+            // The visitor works bottom-up:
+            // 1. leave(Child) - has item, no promotion
+            // 2. leave(Parent) - has 1 child (Child) + 0 items -> promotes Child's content into Parent
+            //    Parent now has: items=[item1], children=[]
+            // 3. leave(Root) - has 1 child (Parent) + 0 items -> promotes Parent's content into Root
+            //    Root now has: items=[item1], children=[]
+            assert_eq!(root.children.len(), 0);
+            assert_eq!(root.items.len(), 1);
+
+            Ok(())
+        }
+
+        #[test]
+        fn does_not_promote_when_parent_has_items() -> Result<()> {
+            // -- Setup & Fixtures
+            // If the parent has its own items, don't promote the child into parent
+            // But root can still promote the parent into root
+            let mut root: Structure<TestMetadata> = Structure::new("Root");
+            let mut parent: Structure<TestMetadata> = Structure::new("Parent");
+            parent.items.push(create_test_item("parent_item"));
+            parent.children.push(Structure::new("Child"));
+            root.children.push(parent);
+
+            // -- Exec
+            root.accept(&mut PromoteSingleChild);
+
+            // -- Check
+            // 1. leave(Child) - no items, no children -> no change
+            // 2. leave(Parent) - has items, so its child (Child) is NOT promoted
+            // 3. leave(Root) - has 1 child (Parent) + 0 items -> promotes Parent into Root
+            //    Root now has: items=[parent_item], children=[Child]
+            assert_eq!(root.items.len(), 1);
+            assert_eq!(root.children.len(), 1);
+            assert_eq!(root.children[0].name, "Child");
+
+            Ok(())
+        }
+
+        #[test]
+        fn does_not_promote_when_multiple_children() -> Result<()> {
+            // -- Setup & Fixtures
+            let mut root: Structure<TestMetadata> = Structure::new("Root");
+            let mut parent: Structure<TestMetadata> = Structure::new("Parent");
+            parent.children.push(Structure::new("Child1"));
+            parent.children.push(Structure::new("Child2"));
+            root.children.push(parent);
+
+            // -- Exec
+            root.accept(&mut PromoteSingleChild);
+
+            // -- Check
+            // Parent has 2 children, so it won't promote into Root (wait, Parent doesn't have items)
+            // Actually Root has 1 child (Parent) + 0 items -> promotes Parent into Root
+            // Root gets Parent's children: [Child1, Child2]
+            assert_eq!(root.children.len(), 2);
+            assert_eq!(root.children[0].name, "Child1");
+            assert_eq!(root.children[1].name, "Child2");
+
+            Ok(())
+        }
+    }
+
+    // endregion: --- PromoteSingleChild Tests
+
+    // region:    --- CollectUnsorted Tests
+
+    mod collect_unsorted {
+        use super::*;
+
+        #[test]
+        fn collects_items_when_node_has_children() -> Result<()> {
+            // -- Setup & Fixtures
+            let mut root: Structure<TestMetadata> = Structure::new("Root");
+            root.items.push(create_test_item("unsorted1"));
+            root.children.push(Structure::new("Child"));
+
+            // -- Exec
+            // Use the helper function that adds the Unsorted folder
+            let count = collect_unsorted_to_root(&mut root);
+
+            // -- Check
+            assert!(root.items.is_empty());
+            assert_eq!(count, 1);
+            assert_eq!(root.children.len(), 2); // Child + Unsorted folder
+            assert_eq!(root.children[1].name, "Unsorted");
+            assert_eq!(root.children[1].items.len(), 1);
+
+            Ok(())
+        }
+
+        #[test]
+        fn does_not_collect_when_no_children() -> Result<()> {
+            // -- Setup & Fixtures
+            let mut root: Structure<TestMetadata> = Structure::new("Root");
+            root.items.push(create_test_item("item1"));
+
+            // -- Exec
+            let mut collector = CollectUnsorted::new();
+            root.accept(&mut collector);
+
+            // -- Check
+            // No children, so items stay on root
+            assert_eq!(root.items.len(), 1);
+            assert_eq!(root.children.len(), 0);
+
+            Ok(())
+        }
+    }
+
+    // endregion: --- CollectUnsorted Tests
+
+    // region:    --- CleanupDisplayNames Tests
+
+    mod cleanup_display_names {
+        use super::*;
+
+        #[test]
+        fn removes_file_extension() -> Result<()> {
+            // -- Setup & Fixtures
+            let mut root: Structure<TestMetadata> = Structure::new("Root");
+            root.children.push(Structure::new("Snare.wav"));
+
+            // -- Exec
+            let mut cleaner = CleanupDisplayNames::new();
+            root.accept(&mut cleaner);
+
+            // -- Check
+            assert_eq!(root.children[0].name, "Snare");
+
+            Ok(())
+        }
+
+        #[test]
+        fn removes_track_number_prefix() -> Result<()> {
+            // -- Setup & Fixtures
+            let mut root: Structure<TestMetadata> = Structure::new("Root");
+            root.children.push(Structure::new("49 Organ Chords"));
+
+            // -- Exec
+            let mut cleaner = CleanupDisplayNames::new();
+            root.accept(&mut cleaner);
+
+            // -- Check
+            assert_eq!(root.children[0].name, "Organ Chords");
+
+            Ok(())
+        }
+
+        #[test]
+        fn strips_context_from_parent() -> Result<()> {
+            // -- Setup & Fixtures
+            let mut root: Structure<TestMetadata> = Structure::new("Drums");
+            root.children.push(Structure::new("Drums Snare"));
+
+            // -- Exec
+            let mut cleaner = CleanupDisplayNames::new();
+            root.accept(&mut cleaner);
+
+            // -- Check
+            assert_eq!(root.children[0].name, "Snare");
+
+            Ok(())
+        }
+
+        #[test]
+        fn numbers_duplicate_names() -> Result<()> {
+            // -- Setup & Fixtures
+            let mut root: Structure<TestMetadata> = Structure::new("Root");
+            root.children.push(Structure::new("Snare"));
+            root.children.push(Structure::new("Snare"));
+            root.children.push(Structure::new("Snare"));
+
+            // -- Exec
+            let mut cleaner = CleanupDisplayNames::new();
+            root.accept(&mut cleaner);
+
+            // -- Check
+            assert_eq!(root.children[0].name, "Snare 1");
+            assert_eq!(root.children[1].name, "Snare 2");
+            assert_eq!(root.children[2].name, "Snare 3");
+
+            Ok(())
+        }
+    }
+
+    // endregion: --- CleanupDisplayNames Tests
 }

@@ -6,6 +6,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod irpc;
 
+#[cfg(feature = "reaper")]
+pub mod reaper;
+
 use crate::chords::types::ChordsData;
 use rxrust::prelude::*;
 use std::cell::RefCell;

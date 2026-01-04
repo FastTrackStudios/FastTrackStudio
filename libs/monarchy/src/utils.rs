@@ -1,16 +1,45 @@
-//! Utility functions shared across the monarchy crate
+//! Utility functions shared across the monarchy crate.
+//!
+//! This module contains helper functions used internally by monarchy,
+//! primarily for pattern matching operations.
+//!
+//! # Word Boundary Matching
+//!
+//! The [`contains_word`] function is the core pattern matching utility.
+//! It matches patterns as whole words, respecting:
+//!
+//! - Traditional word boundaries (spaces, underscores, hyphens)
+//! - CamelCase boundaries (lowercase followed by uppercase)
+//! - Number boundaries (letter followed by digit or vice versa)
+//!
+//! ```ignore
+//! use monarchy::utils::contains_word;
+//!
+//! // Traditional word boundaries
+//! assert!(contains_word("Kick In", "kick"));
+//! assert!(contains_word("kick_in", "kick"));
+//! assert!(!contains_word("kickstart", "kick"));
+//!
+//! // CamelCase boundaries
+//! assert!(contains_word("EdCrunch", "Ed"));
+//! assert!(contains_word("EdCrunch", "Crunch"));
+//!
+//! // Number boundaries
+//! assert!(contains_word("Crunch1", "Crunch"));
+//! assert!(contains_word("DX7", "DX"));
+//! ```
 
-/// Check if text contains pattern as a whole word (not just as a substring)
-/// 
+/// Check if text contains pattern as a whole word (not just as a substring).
+///
 /// A word is defined as a sequence of alphanumeric characters.
 /// The pattern must be surrounded by non-alphanumeric characters, be at the start/end of the string,
 /// or be at a camelCase boundary (lowercase followed by uppercase).
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```
 /// use monarchy::utils::contains_word;
-/// 
+///
 /// assert!(contains_word("kick_in", "kick"));
 /// assert!(contains_word("Kick In", "kick"));
 /// assert!(contains_word("kick", "kick"));
@@ -29,7 +58,7 @@ pub fn contains_word(text: &str, pattern: &str) -> bool {
 
     let text_lower = text.to_lowercase();
     let pattern_lower = pattern.to_lowercase();
-    
+
     // Find all occurrences of the pattern
     let mut start = 0;
     while let Some(pos) = text_lower[start..].find(&pattern_lower) {
@@ -47,7 +76,7 @@ pub fn contains_word(text: &str, pattern: &str) -> bool {
                     // 2. CamelCase: before is lowercase and current is uppercase
                     !b.is_alphanumeric() || (b.is_lowercase() && c.is_uppercase())
                 }
-                _ => true
+                _ => true,
             }
         } else {
             true // At start, so it's a boundary
@@ -64,12 +93,12 @@ pub fn contains_word(text: &str, pattern: &str) -> bool {
                     // 2. CamelCase: last is lowercase/digit and after is uppercase, OR
                     // 3. Number boundary: last is alphabetic and after is digit, OR
                     // 4. Number boundary: last is digit and after is alphabetic
-                    !a.is_alphanumeric() || 
-                    (l.is_lowercase() && a.is_uppercase()) ||
-                    (l.is_alphabetic() && a.is_ascii_digit()) ||
-                    (l.is_ascii_digit() && a.is_alphabetic())
+                    !a.is_alphanumeric()
+                        || (l.is_lowercase() && a.is_uppercase())
+                        || (l.is_alphabetic() && a.is_ascii_digit())
+                        || (l.is_ascii_digit() && a.is_alphabetic())
                 }
-                _ => true
+                _ => true,
             }
         } else {
             true // At end, so it's a boundary

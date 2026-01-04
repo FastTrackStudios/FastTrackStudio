@@ -185,9 +185,12 @@ fn broadcast_track_update_for_song(track: &reaper_high::Track) {
 /// Also updates the track reactive service when tracks change
 /// 
 /// Note: This must be called from the main thread after the middleware is created
+/// Type alias for the concrete REAPER track service
+pub type ConcreteReaperTrackService = fts::daw_reactive::tracks::ReaperTrackReactiveService<crate::services::SetlistService>;
+
 pub fn init_reactive_stream_subscriptions(
     rx: &ControlSurfaceRx,
-    track_service: Option<std::sync::Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>>,
+    track_service: Option<std::sync::Arc<ConcreteReaperTrackService>>,
 ) {
     use fts::setlist::infra::reaper::{invalidate_track_cache, invalidate_all_track_caches};
     use fts::setlist::infra::stream::{get_broadcast_sender, get_state_provider, SetlistUpdateMessage};
@@ -588,7 +591,7 @@ pub fn init_deferred_reactive_logger(middleware: &ComprehensiveChangeDetectionMi
 /// RefCell borrow panics during initial setup.
 pub fn init_middleware_reactive_streams(
     middleware: &ComprehensiveChangeDetectionMiddleware,
-    track_service: Option<std::sync::Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>>,
+    track_service: Option<std::sync::Arc<ConcreteReaperTrackService>>,
 ) {
     // Initialize reactive stream subscriptions (these are needed for broadcasting updates)
     init_reactive_stream_subscriptions(middleware.rx(), track_service);
@@ -601,7 +604,7 @@ pub fn init_middleware_reactive_streams(
 pub struct ChangeDetection {
     middleware: ComprehensiveChangeDetectionMiddleware,
     logger_initialized: std::cell::Cell<bool>,
-    track_service: std::cell::Cell<Option<std::sync::Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>>>,
+    track_service: std::cell::Cell<Option<std::sync::Arc<ConcreteReaperTrackService>>>,
 }
 
 impl std::fmt::Debug for ChangeDetection {
@@ -624,7 +627,7 @@ impl ChangeDetection {
     }
     
     /// Set the track reactive service (called from App initialization)
-    pub fn set_track_service(&self, track_service: std::sync::Arc<crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService>) {
+    pub fn set_track_service(&self, track_service: std::sync::Arc<ConcreteReaperTrackService>) {
         self.track_service.set(Some(track_service));
     }
     

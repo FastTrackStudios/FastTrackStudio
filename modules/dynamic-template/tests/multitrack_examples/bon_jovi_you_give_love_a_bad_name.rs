@@ -1,4 +1,5 @@
 use dynamic_template::*;
+use monarchy::monarchy_sort;
 
 #[test]
 fn bon_jovi_you_give_love_a_bad_name() {
@@ -25,14 +26,16 @@ fn bon_jovi_you_give_love_a_bad_name() {
         "You Give Love A Bad Name.PRINT.L.wav",
         "You Give Love A Bad Name.PRINT.R.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+    let tracks = items.clone().organize_into_tracks(&config, None).unwrap();
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
-    // TODO: Add expected structure once provided
+
+    // Snapshot test: capture the hierarchical structure
+    let structure = monarchy_sort(items, config).unwrap();
+    insta::assert_snapshot!(structure.to_tree_string());
 }

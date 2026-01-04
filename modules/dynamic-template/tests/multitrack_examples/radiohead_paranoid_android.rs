@@ -1,6 +1,9 @@
+use daw::tracks::{assert_tracks_equal, Track, TrackGroup, TrackStructureBuilder};
 use dynamic_template::*;
-use daw::tracks::{TrackStructureBuilder, assert_tracks_equal, Track};
-use monarchy::{monarchy_sort, move_unsorted_to_group, reapply_collapse, expand_items_to_children, cleanup_display_names};
+use monarchy::{
+    cleanup_display_names, expand_items_to_children, monarchy_sort, move_unsorted_to_group,
+    reapply_collapse,
+};
 
 /// Count all items in a flat track list
 fn count_items(tracks: &[Track]) -> usize {
@@ -72,14 +75,14 @@ fn radiohead_paranoid_android() {
         "9 SNR VERB.05_03.wav",
         "Paranoid_Android_Cover_PLP_JH_MIX_1_Master.wav",
     ];
-    
+
     // Step 1: Initial sort using monarchy
     let config = default_config();
     let mut structure = monarchy_sort(items, config.clone()).unwrap();
-    
+
     println!("\n=== STEP 1: Initial monarchy_sort ===");
     println!("{}", structure);
-    
+
     // Step 2: Move Ed/Johny guitar tracks from Unsorted to Electric Guitar
     // In a real app, this would be triggered by user input: "These are electric guitar tracks"
     println!("\n=== STEP 2: Moving guitar tracks from Unsorted to Electric Guitar ===");
@@ -89,157 +92,212 @@ fn radiohead_paranoid_android() {
         &["Unsorted"],
         "Electric",
         &["Guitars"],
-    ).unwrap();
+    )
+    .unwrap();
     println!("Sorted {} guitar items", guitar_sorted);
-    
+
     // Note: FX1/FX2 now automatically go to SFX group (no manual step needed)
-    
+
     // Step 3: Re-apply collapse to clean up hierarchy
     reapply_collapse(&mut structure, &config);
-    
+
     // Step 4: Expand items to individual child tracks
     // This ensures each item becomes its own track (one item per track rule)
     expand_items_to_children(&mut structure);
-    
+
     // Step 5: Cleanup display names by stripping redundant context
     // This removes parent folder names from child track names and numbers duplicates
     cleanup_display_names(&mut structure);
-    
+
     println!("\n=== STEP 5: Final structure after cleanup_display_names ===");
     println!("{}", structure);
-    
+
     // Convert to tracks for display
     let tracks = structure.clone().to_tracks();
-    
+
     println!("\n=== Final Track list ===");
     daw::tracks::display_tracklist(&tracks);
-    
-    // Expected structure - matches actual output from monarchy sorting + display name cleanup
-    // NOTE: This reflects the ACTUAL behavior of the sorting algorithm, not an idealized structure
+
+    // ============================================================================
+    // Define individual track groups (composable, readable structure)
+    // ============================================================================
+
+    // --- Drums ---
+    let kick = TrackGroup::folder("Kick")
+        .track("In", "1 Kick In.05_04.wav")
+        .track("Out", "3 Kick Out.05_04.wav")
+        .end();
+
+    let snare = TrackGroup::folder("Snare")
+        .track("Bottom", "8 Snare Btm.05_03.wav")
+        .track("Snare 1", "5 Snare.05_03.wav")
+        .track("Snare 2", "6 Snare.dup1.05_03.wav")
+        .end();
+
+    let toms = TrackGroup::folder("Toms")
+        .track("FT", "12 Floor.01.R.05_03.wav")
+        .track("Rack 10-St", "10 Rack 10-St.01.R.05_03.wav")
+        .track("Rack 12", "11  Rack 12.01.R.05_03.wav")
+        .end();
+
+    let cymbals = TrackGroup::folder("Cymbals")
+        .track("OH", "14 Mono Ovh.01.R.05_03.wav")
+        .end();
+
+    let rooms = TrackGroup::folder("Rooms")
+        .track("R", "13 Knee Mic.01.R.05_03.wav")
+        .end();
+
+    let drums = TrackGroup::folder("Drums")
+        .group(kick)
+        .group(snare)
+        .group(toms)
+        .group(cymbals)
+        .group(rooms)
+        .end();
+
+    // --- Percussion ---
+    let guiro = TrackGroup::folder("Guiro")
+        .track("Shaker", "21 Guiro Shaker_03.wav")
+        .track("Guiro", "22 Guiro_03.wav")
+        .end();
+
+    let percussion = TrackGroup::folder("Percussion")
+        .track("Shaker", "24 SHAKER_03.wav")
+        .track("Cabasa", "19 Cabasa_03.wav")
+        .group(guiro)
+        .track("Clave", "20 Clave_03.wav")
+        .track("Vibraslap", "23 Vibraslap_03.wav")
+        .end();
+
+    // --- Guitars ---
+    let ed_crunch = TrackGroup::folder("Crunch")
+        .track("Crunch 1", "28 EdCrunch_03.wav")
+        .track("Crunch 2", "30 EdCrunch2_03.wav")
+        .end();
+
+    let ed = TrackGroup::folder("Ed")
+        .group(ed_crunch)
+        .track("Pitch", "33 EdPitch_03.wav")
+        .end();
+
+    let johny_crunch = TrackGroup::folder("Crunch")
+        .track("Crunch 1", "29 JohnyCrunch1_03.wav")
+        .track("Crunch 2", "31 JohnyCrunch2_03.wav")
+        .end();
+
+    let johny_phaser = TrackGroup::folder("Phaser")
+        .track("Phaser 1", "35 JohnyPhaser1_03.wav")
+        .track("Phaser 2", "36 JohnyPhaser1.dup1_03.wav")
+        .track("Phaser 3", "39 JohnyPhaser2_03.wav")
+        .end();
+
+    let johny = TrackGroup::folder("Johny")
+        .group(johny_crunch)
+        .track("Lead", "34 JohnyLead_03.wav")
+        .group(johny_phaser)
+        .end();
+
+    let electric = TrackGroup::folder("Electric").group(ed).group(johny).end();
+
+    let guitars = TrackGroup::folder("Guitars").group(electric).end();
+
+    // --- Keys ---
+    let electric_keys = TrackGroup::folder("Electric")
+        .track("Rhodes", "53 rhodes_david bennett_03.wav")
+        .track("DX7", "45 DX7 .2_03.wav")
+        .track("Mellotron", "48 Mellotron.2_03.wav")
+        .end();
+
+    let organ = TrackGroup::folder("Organ")
+        .track("Chords", "49 Organ Chords.2_03.wav")
+        .track("Notes", "50 Organ Notes.2_03.wav")
+        .track("Slide", "51 Organ Slide.2_03.wav")
+        .end();
+
+    let keys = TrackGroup::folder("Keys")
+        .track("Piano", "52 Piano_03.wav")
+        .group(electric_keys)
+        .group(organ)
+        .end();
+
+    // --- Synths ---
+    let synths = TrackGroup::folder("Synths")
+        .track("Prophet", "54 prophet synth_david bennett_03.wav")
+        .end();
+
+    // --- Vocals ---
+    let vocal_outro = TrackGroup::folder("Outro")
+        .track("1", "62 Outro vocal 1_03.wav")
+        .track("2", "63 Outro vocal 2_03.wav")
+        .track("3", "64 Outro vocal 3_03.wav")
+        .end();
+
+    let vocal_main = TrackGroup::folder("Main")
+        .track("Voc", "56 Lead Voc_03.wav")
+        .track("vox quad", "60 lead vox quad_03.wav")
+        .track("extra vocal2", "65 extra vocal2_03.wav")
+        .track("extra vocal3", "66 extra vocal3_03.wav")
+        .end();
+
+    let vocal_dbl = TrackGroup::folder("DBL")
+        .track("Voc 1", "57 Lead Voc Dbl_03.wav")
+        .track("Voc 2", "58 Lead Voc Dbl.dup1_03.wav")
+        .end();
+
+    let lead = TrackGroup::folder("Lead")
+        .track("Bridge", "61 Bridge vocal extra_03.wav")
+        .group(vocal_outro)
+        .group(vocal_main)
+        .track("3", "59 Vocal 3_03.wav")
+        .group(vocal_dbl)
+        .end();
+
+    let vocals = TrackGroup::folder("Vocals")
+        .group(lead)
+        .track("Bridge 1", "67 Voca Middle Bridge1_03.wav")
+        .track("Bridge 2", "68 Voca Middle Bridge2_03.wav")
+        .track("Bridge 3", "69 Voca Middle Bridge3_03.wav")
+        .track("Bridge 4", "70 Voca Middle Bridge4_03.wav")
+        .track("Bridge 5", "71 Voca Middle Bridge5_03.wav")
+        .end();
+
+    // --- SFX ---
+    let sfx = TrackGroup::folder("SFX")
+        .track("Intro 1", "42 intro count.1_03.wav")
+        .track("Robot Voice", "43 Robot Voice_03.wav")
+        .track("FX1", "46 FX1.2_03.wav")
+        .track("FX2", "47 FX2.2_03.wav")
+        .end();
+
+    // --- Unsorted ---
+    let unsorted = TrackGroup::folder("Unsorted")
+        .track("CK MAP]", "40 CK MAP]_03.wav")
+        .track(
+            "Paranoid_Android_Cover_PLP_JH_MIX_1_Master",
+            "Paranoid_Android_Cover_PLP_JH_MIX_1_Master.wav",
+        )
+        .end();
+
+    // ============================================================================
+    // Compose final structure
+    // ============================================================================
+
     let expected = TrackStructureBuilder::new()
-        // Drums
-        .folder("Drums")
-            .folder("Kick")
-                .track("In", "1 Kick In.05_04.wav")
-                .track("Out", "3 Kick Out.05_04.wav")
-            .end()
-            .folder("Snare")
-                .track("Bottom", "8 Snare Btm.05_03.wav")
-                .track("Snare 1", "5 Snare.05_03.wav")
-                .track("Snare 2", "6 Snare.dup1.05_03.wav")
-            .end()
-            .folder("Toms")
-                .track("FT", "12 Floor.01.R.05_03.wav")
-                .track("Rack 10-St", "10 Rack 10-St.01.R.05_03.wav")
-                .track("Rack 12", "11  Rack 12.01.R.05_03.wav")
-            .end()
-            .folder("Cymbals")
-                .track("OH", "14 Mono Ovh.01.R.05_03.wav")
-            .end()
-            .folder("Rooms")
-                .track("R", "13 Knee Mic.01.R.05_03.wav")
-            .end()
-        .end()
-        // Percussion
-        .folder("Percussion")
-            .track("Shaker", "24 SHAKER_03.wav")
-            .track("Cabasa", "19 Cabasa_03.wav")
-            .folder("Guiro")
-                .track("Shaker", "21 Guiro Shaker_03.wav")
-                .track("Guiro", "22 Guiro_03.wav")
-            .end()
-            .track("Clave", "20 Clave_03.wav")
-            .track("Vibraslap", "23 Vibraslap_03.wav")
-        .end()
-        // Bass (single item, no subfolder)
+        .group(drums)
+        .group(percussion)
         .track("Bass", "25 _Bass.01_03.wav")
-        // Guitars - note: Acoustic guitar went to unsorted since it wasn't manually moved
-        .folder("Guitars")
-            .folder("Electric")
-                .folder("Ed")
-                    .folder("Crunch")
-                        .track("Crunch 1", "28 EdCrunch_03.wav")
-                        .track("Crunch 2", "30 EdCrunch2_03.wav")
-                    .end()
-                    .track("Pitch", "33 EdPitch_03.wav")
-                .end()
-                .folder("Johny")
-                    .folder("Crunch")
-                        .track("Crunch 1", "29 JohnyCrunch1_03.wav")
-                        .track("Crunch 2", "31 JohnyCrunch2_03.wav")
-                    .end()
-                    .track("Lead", "34 JohnyLead_03.wav")
-                    .folder("Phaser")
-                        .track("Phaser 1", "35 JohnyPhaser1_03.wav")
-                        .track("Phaser 2", "36 JohnyPhaser1.dup1_03.wav")
-                        .track("Phaser 3", "39 JohnyPhaser2_03.wav")
-                    .end()
-                .end()
-            .end()
-        .end()
-        // Keys
-        .folder("Keys")
-            .track("Piano", "52 Piano_03.wav")
-            .folder("Electric")
-                .track("DX7", "45 DX7 .2_03.wav")
-                .track("Mellotron", "48 Mellotron.2_03.wav")
-                .track("David", "53 rhodes_david bennett_03.wav") // TODO: should be "Rhodes" - "david bennett" extracted as performer
-            .end()
-            .folder("Organ")
-                .track("Chords", "49 Organ Chords.2_03.wav")
-                .track("Notes", "50 Organ Notes.2_03.wav")
-                .track("Slide", "51 Organ Slide.2_03.wav")
-            .end()
-        .end()
-        // Synths
-        .folder("Synths")
-            .track("Bells", "44 Bells.2_03.wav")
-            .track("David", "54 prophet synth_david bennett_03.wav") // TODO: should be "Prophet" - "david bennett" extracted as performer
-        .end()
-        // Vocals - hierarchy differs from ideal due to how sections are organized
-        .folder("Vocals")
-            .folder("Lead")
-                .track("Bridge", "61 Bridge vocal extra_03.wav")
-                .folder("Outro")
-                    .track("1", "62 Outro vocal 1_03.wav")
-                    .track("2", "63 Outro vocal 2_03.wav")
-                    .track("3", "64 Outro vocal 3_03.wav")
-                .end()
-                .folder("Main")
-                    .track("Voc", "56 Lead Voc_03.wav")
-                    .track("vox quad", "60 lead vox quad_03.wav")
-                    .track("extra vocal2", "65 extra vocal2_03.wav")
-                    .track("extra vocal3", "66 extra vocal3_03.wav")
-                .end()
-                .track("3", "59 Vocal 3_03.wav")
-                .folder("DBL")
-                    .track("Voc 1", "57 Lead Voc Dbl_03.wav")
-                    .track("Voc 2", "58 Lead Voc Dbl.dup1_03.wav")
-                .end()
-            .end()
-            .track("Bridge 1", "67 Voca Middle Bridge1_03.wav")
-            .track("Bridge 2", "68 Voca Middle Bridge2_03.wav")
-            .track("Bridge 3", "69 Voca Middle Bridge3_03.wav")
-            .track("Bridge 4", "70 Voca Middle Bridge4_03.wav")
-            .track("Bridge 5", "71 Voca Middle Bridge5_03.wav")
-        .end()
-        // SFX
-        .folder("SFX")
-            .track("Intro 1", "42 intro count.1_03.wav")
-            .track("Robot Voice", "43 Robot Voice_03.wav")
-            .track("FX1", "46 FX1.2_03.wav")
-            .track("FX2", "47 FX2.2_03.wav")
-        .end()
-        // Unsorted (items that couldn't be classified)
-        .folder("Unsorted")
-            .track("CK MAP]", "40 CK MAP]_03.wav")
-            .track("Paranoid_Android_Cover_PLP_JH_MIX_1_Master", "Paranoid_Android_Cover_PLP_JH_MIX_1_Master.wav")
-        .end()
+        .group(guitars)
+        .group(keys)
+        .group(synths)
+        .group(vocals)
+        .group(sfx)
+        .group(unsorted)
         .build();
-    
+
     // Full structure assertion
     assert_tracks_equal(&tracks, &expected).unwrap();
-    
+
     // ============================================================================
     // EXPECTED TRACK HIERARCHY (documented version)
     // ============================================================================
@@ -275,8 +333,6 @@ fn radiohead_paranoid_android() {
     // Bass                     ← 25 _Bass.01_03.wav (single item, no subfolder needed)
     //
     // Guitars/
-    //   ├─ Acoustic/
-    //   │   └─ Main           ← 26 Acc Guitar_03.wav
     //   └─ Electric/
     //       ├─ Ed/
     //       │   ├─ Crunch     ← 28 EdCrunch_03.wav
@@ -302,30 +358,28 @@ fn radiohead_paranoid_android() {
     //       └─ Slide          ← 51 Organ Slide.2_03.wav
     //
     // Synths/
-    //   ├─ Prophet            ← 54 prophet synth_david bennett_03.wav
-    //   └─ Bells              ← 44 Bells.2_03.wav
+    //   └─ Prophet            ← 54 prophet synth_david bennett_03.wav
     //
     // Vocals/
-    //   ├─ Main/                              (SECTION - main/verse parts)
-    //   │   ├─ Lead/                          (arrangement - "Lead Voc" tracks)
-    //   │   │   ├─ Main       ← 56 Lead Voc_03.wav
+    //   ├─ Lead/
+    //   │   ├─ Bridge         ← 61 Bridge vocal extra_03.wav
+    //   │   ├─ Outro/
+    //   │   │   ├─ 1          ← 62 Outro vocal 1_03.wav
+    //   │   │   ├─ 2          ← 63 Outro vocal 2_03.wav
+    //   │   │   └─ 3          ← 64 Outro vocal 3_03.wav
+    //   │   ├─ Main/
+    //   │   │   ├─ Voc        ← 56 Lead Voc_03.wav
     //   │   │   ├─ Dbl        ← 57 Lead Voc Dbl_03.wav
     //   │   │   └─ Dbl 2      ← 58 Lead Voc Dbl.dup1_03.wav
-    //   │   ├─ Vocal 3        ← 59 Vocal 3_03.wav
-    //   │   ├─ Vocal Quad     ← 60 lead vox quad_03.wav
-    //   │   ├─ Extra 2        ← 65 extra vocal2_03.wav
-    //   │   └─ Extra 3        ← 66 extra vocal3_03.wav
-    //   ├─ Bridge/                            (SECTION)
-    //   │   ├─ Main           ← 61 Bridge vocal extra_03.wav
-    //   │   ├─ 1              ← 67 Voca Middle Bridge1_03.wav
-    //   │   ├─ 2              ← 68 Voca Middle Bridge2_03.wav
-    //   │   ├─ 3              ← 69 Voca Middle Bridge3_03.wav
-    //   │   ├─ 4              ← 70 Voca Middle Bridge4_03.wav
-    //   │   └─ 5              ← 71 Voca Middle Bridge5_03.wav
-    //   └─ Outro/                             (SECTION)
-    //       ├─ 1              ← 62 Outro vocal 1_03.wav
-    //       ├─ 2              ← 63 Outro vocal 2_03.wav
-    //       └─ 3              ← 64 Outro vocal 3_03.wav
+    //   │   ├─ 3              ← 59 Vocal 3_03.wav
+    //   │   └─ DBL/
+    //   │       ├─ Voc 1      ← 57 Lead Voc Dbl_03.wav
+    //   │       └─ Voc 2      ← 58 Lead Voc Dbl.dup1_03.wav
+    //   ├─ Bridge 1           ← 67 Voca Middle Bridge1_03.wav
+    //   ├─ Bridge 2           ← 68 Voca Middle Bridge2_03.wav
+    //   ├─ Bridge 3           ← 69 Voca Middle Bridge3_03.wav
+    //   ├─ Bridge 4           ← 70 Voca Middle Bridge4_03.wav
+    //   └─ Bridge 5           ← 71 Voca Middle Bridge5_03.wav
     //
     // SFX/
     //   ├─ FX1                ← 46 FX1.2_03.wav
@@ -333,7 +387,7 @@ fn radiohead_paranoid_android() {
     //   ├─ Robot Voice        ← 43 Robot Voice_03.wav
     //   └─ Intro Count        ← 42 intro count.1_03.wav
     //
-    // Unmatched/
+    // Unsorted/
     //   ├─ CK MAP             ← 40 CK MAP]_03.wav (likely click/map track)
     //   └─ Mix Master         ← Paranoid_Android_Cover_PLP_JH_MIX_1_Master.wav
     //

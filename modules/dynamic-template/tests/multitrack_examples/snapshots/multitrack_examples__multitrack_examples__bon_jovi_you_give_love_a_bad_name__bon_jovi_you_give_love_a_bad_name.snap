@@ -1,0 +1,16 @@
+---
+source: modules/dynamic-template/tests/multitrack_examples/bon_jovi_you_give_love_a_bad_name.rs
+expression: structure.to_tree_string()
+---
+-Drums: [Drums.PNT.L.wav, Drums.PNT.R.wav]
+-Percussion: [095 Pop Tamb.L.wav, 095 Pop Tamb.R.wav]
+-Bass: [Bass.wav]
+-Guitars
+--Electric
+---Solo: [Guitar Solo.wav]
+---Main: [Guitar Slide.wav]
+--Acoustic: [Acoustic.Right.wav, Acoustic.wav]
+-Vocals
+--Lead Vocals: [Vocal.Tune.Lead.wav]
+--BGVs: [Vocal.Harmony.One.wav, Vocal.Harmony.Two.wav]
+-Unsorted: [banjo.One.wav, banjo.Solo.wav, ... and 6 more]

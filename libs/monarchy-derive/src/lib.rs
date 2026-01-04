@@ -37,7 +37,7 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields, Ident, Type};
 /// Supports attributes:
 /// - `#[metadata(skip)]` - Exclude field from metadata
 /// - `#[monarchy(variant)]` - Mark field as a variant (for grouping items that are identical except for this field)
-/// 
+///
 /// Note: Tagged collections are now defined at the group level using `.tagged_collection(group)`
 /// and work at the pattern matching level, not the metadata field level.
 #[proc_macro_derive(Metadata, attributes(metadata, monarchy))]
@@ -178,12 +178,12 @@ pub fn derive_metadata(input: TokenStream) -> TokenStream {
     let create_string_arms = field_info.iter().filter_map(|info| {
         let variant = &info.variant_name;
         let ty = &info.field_type;
-        
+
         // Check if this is Vec<String> - if so, skip (use create_vec_string_value instead)
         if is_vec_string_type(ty) {
             return None;
         }
-        
+
         Some(quote! {
             #field_enum_name::#variant => {
                 Some(#value_enum_name::#variant(value))
@@ -196,12 +196,12 @@ pub fn derive_metadata(input: TokenStream) -> TokenStream {
     let create_vec_string_arms = field_info.iter().filter_map(|info| {
         let variant = &info.variant_name;
         let ty = &info.field_type;
-        
+
         // Only include if this is Vec<String>
         if !is_vec_string_type(ty) {
             return None;
         }
-        
+
         Some(quote! {
             #field_enum_name::#variant => {
                 Some(#value_enum_name::#variant(values))
@@ -213,14 +213,14 @@ pub fn derive_metadata(input: TokenStream) -> TokenStream {
     // We use an extension trait because we can't implement methods on GroupBuilder<M>
     // from outside the monarchy crate (orphan rule)
     let trait_name = Ident::new(&format!("{}GroupExt", struct_name), Span::call_site());
-    
+
     let field_methods: Vec<_> = field_info
         .iter()
         .map(|info| {
             let field_name = &info.field_name;
             quote! {
                 /// Add configuration for the #field_name metadata field
-                /// 
+                ///
                 /// This is a convenience method that calls `metadata_field()`.
                 /// Accepts a Group that defines patterns, negative patterns,
                 /// prefixes, nested groups, etc. for this specific metadata field.
@@ -248,6 +248,15 @@ pub fn derive_metadata(input: TokenStream) -> TokenStream {
         })
         .collect();
 
+    // Generate FieldName match arms
+    let field_name_arms = field_info.iter().map(|info| {
+        let variant = &info.variant_name;
+        let variant_str = variant.to_string();
+        quote! {
+            #field_enum_name::#variant => #variant_str
+        }
+    });
+
     // Generate the output tokens
     let output = quote! {
         // Field enum
@@ -255,6 +264,15 @@ pub fn derive_metadata(input: TokenStream) -> TokenStream {
         #[serde(rename_all = "snake_case")]
         pub enum #field_enum_name {
             #(#field_variants),*
+        }
+
+        // FieldName trait implementation
+        impl monarchy::FieldName for #field_enum_name {
+            fn name(&self) -> &'static str {
+                match self {
+                    #(#field_name_arms),*
+                }
+            }
         }
 
         // Value enum
@@ -387,7 +405,7 @@ pub fn derive_metadata_builder(input: TokenStream) -> TokenStream {
         .filter_map(|field| {
             let field_name = field.ident.as_ref()?;
             let field_enum_name = Ident::new(&format!("{}Field", struct_name), Span::call_site());
-            
+
             // Get the field enum variant name (PascalCase)
             let variant_name = Ident::new(
                 &field_name.to_string().to_case(Case::Pascal),
@@ -411,7 +429,7 @@ pub fn derive_metadata_builder(input: TokenStream) -> TokenStream {
 
             Some(quote! {
                 /// Add configuration for the #field_name metadata field
-                /// 
+                ///
                 /// This accepts a Group that defines patterns, negative patterns,
                 /// prefixes, nested groups, etc. for this specific metadata field.
                 fn #field_name<F>(self, field: F) -> monarchy::GroupBuilder<#struct_name>

@@ -1,17 +1,81 @@
-use crate::{Config, Group, Item, Metadata, Structure, CollapseHierarchy};
+//! Organizer for building hierarchical structures from parsed items.
+//!
+//! The organizer takes a collection of parsed [`Item`]s and builds a
+//! hierarchical [`Structure`] based on the configuration's group definitions.
+//!
+//! # Responsibilities
+//!
+//! - Building the tree structure from matched groups
+//! - Grouping items by metadata field values
+//! - Handling unmatched items according to the fallback strategy
+//! - Applying tagged collections
+//! - Applying hierarchy collapse transformations
+//!
+//! # Usage
+//!
+//! The organizer is typically used internally by [`monarchy_sort`](crate::monarchy_sort),
+//! but can be used directly for custom workflows:
+//!
+//! ```ignore
+//! use monarchy::{Parser, Organizer, Config};
+//!
+//! let config = Config::builder()
+//!     .group(drums_group)
+//!     .build();
+//!
+//! let parser = Parser::new(config.clone());
+//! let items: Vec<_> = inputs.iter()
+//!     .map(|i| parser.parse(i.clone()).unwrap())
+//!     .collect();
+//!
+//! let organizer = Organizer::new(config);
+//! let structure = organizer.organize(items);
+//! ```
 
-/// Organizes items into hierarchical structures based on groups
+use crate::{CollapseHierarchy, Config, Group, Item, Metadata, Structure};
+
+/// Organizes parsed [`Item`]s into a hierarchical [`Structure`].
+///
+/// The organizer builds a tree structure by:
+/// 1. Creating nodes for each matched group
+/// 2. Grouping items by metadata field values within groups
+/// 3. Applying the fallback strategy for unmatched items
+/// 4. Collapsing unnecessary intermediate hierarchy levels
+///
+/// # Example
+///
+/// ```ignore
+/// let organizer = Organizer::new(config);
+/// let structure = organizer.organize(items);
+///
+/// // The structure now contains a tree of groups and items
+/// structure.print_tree();
+/// ```
 pub struct Organizer<M: Metadata> {
     config: Config<M>,
 }
 
 impl<M: Metadata> Organizer<M> {
-    /// Create a new organizer with the given configuration
+    /// Create a new organizer with the given configuration.
     pub fn new(config: Config<M>) -> Self {
         Self { config }
     }
 
-    /// Organize items into a hierarchical structure
+    /// Organize items into a hierarchical structure.
+    ///
+    /// This method:
+    /// 1. Builds the tree structure from the config's groups
+    /// 2. Places items in their matched group locations
+    /// 3. Groups items by metadata field values
+    /// 4. Handles unmatched items according to the fallback strategy
+    /// 5. Applies collapse transformations to simplify the hierarchy
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let structure = organizer.organize(items);
+    /// assert!(!structure.is_empty());
+    /// ```
     pub fn organize(&self, items: Vec<Item<M>>) -> Structure<M> {
         let mut root = Structure::new("root");
 
@@ -112,7 +176,6 @@ impl<M: Metadata> Organizer<M> {
             })
             .cloned()
             .collect();
-        
 
         // Handle tagged collections if specified (pattern-based grouping)
         if let Some(ref tagged_collection_group) = group.tagged_collection {
@@ -133,7 +196,11 @@ impl<M: Metadata> Organizer<M> {
                 // Create sub-structure for tagged collection
                 let mut collection_structure = Structure::new(&tagged_collection_group.name);
                 // Group matching items by metadata fields if needed
-                let grouped_matching = self.group_by_metadata_fields_recursive(matching_items, group, &group.metadata_fields);
+                let grouped_matching = self.group_by_metadata_fields_recursive(
+                    matching_items,
+                    group,
+                    &group.metadata_fields,
+                );
                 if grouped_matching.children.is_empty() && grouped_matching.items.is_empty() {
                     // If grouping didn't create structure, use the items from the grouped result
                     collection_structure.items = grouped_matching.items;
@@ -144,17 +211,29 @@ impl<M: Metadata> Organizer<M> {
                 structure.children.push(collection_structure);
 
                 // Group non-matching items by metadata fields if needed
-                let grouped_non_matching = self.group_by_metadata_fields_recursive(non_matching_items, group, &group.metadata_fields);
+                let grouped_non_matching = self.group_by_metadata_fields_recursive(
+                    non_matching_items,
+                    group,
+                    &group.metadata_fields,
+                );
                 structure.children.extend(grouped_non_matching.children);
                 structure.items = grouped_non_matching.items;
             } else if !matching_items.is_empty() {
                 // All items match - group them by metadata fields if needed
-                let grouped = self.group_by_metadata_fields_recursive(matching_items, group, &group.metadata_fields);
+                let grouped = self.group_by_metadata_fields_recursive(
+                    matching_items,
+                    group,
+                    &group.metadata_fields,
+                );
                 structure.children = grouped.children;
                 structure.items = grouped.items;
             } else {
                 // No items match - group non-matching items by metadata fields if needed
-                let grouped = self.group_by_metadata_fields_recursive(non_matching_items, group, &group.metadata_fields);
+                let grouped = self.group_by_metadata_fields_recursive(
+                    non_matching_items,
+                    group,
+                    &group.metadata_fields,
+                );
                 structure.children = grouped.children;
                 structure.items = grouped.items;
             }
@@ -171,7 +250,7 @@ impl<M: Metadata> Organizer<M> {
                     // Convert the value to a string for grouping
                     format!("{:?}", value)
                 } else {
-                    "default".to_string()
+                    String::from("default")
                 };
 
                 variant_groups
@@ -185,20 +264,24 @@ impl<M: Metadata> Organizer<M> {
             let mut sorted_items = Vec::new();
             let mut variant_keys: Vec<String> = variant_groups.keys().cloned().collect();
             variant_keys.sort();
-            
+
             for variant_key in variant_keys {
                 if let Some(variant_items) = variant_groups.remove(&variant_key) {
                     sorted_items.extend(variant_items);
                 }
             }
-            
+
             structure.items = sorted_items;
         } else {
             // Check if we should group items by metadata field values
             // If multiple items have different values for metadata fields, create sub-structures
             if !group_items.is_empty() && !group.metadata_fields.is_empty() {
                 // Use recursive grouping that respects field priority order and strategies
-                let grouped = self.group_by_metadata_fields_recursive(group_items, group, &group.metadata_fields);
+                let grouped = self.group_by_metadata_fields_recursive(
+                    group_items,
+                    group,
+                    &group.metadata_fields,
+                );
                 structure.items = grouped.items;
                 structure.children = grouped.children;
             } else {
@@ -213,7 +296,7 @@ impl<M: Metadata> Organizer<M> {
             if nested_group.metadata_only {
                 continue;
             }
-            
+
             // Filter items to only include those whose matched_groups path includes this parent group
             // This ensures items matched via "Drum Kit" -> "Kick" don't also get placed in "Electronic Kit" -> "Kick"
             let filtered_items: Vec<Item<M>> = all_items
@@ -221,9 +304,15 @@ impl<M: Metadata> Organizer<M> {
                 .filter(|item| {
                     // Check if the item's matched_groups path includes this parent group
                     // before the nested group. This ensures correct hierarchy matching.
-                    let matched_names: Vec<&str> = item.matched_groups.iter().map(|g| g.name.as_str()).collect();
+                    let matched_names: Vec<&str> = item
+                        .matched_groups
+                        .iter()
+                        .map(|g| g.name.as_str())
+                        .collect();
                     // Check if the nested group name appears in the path
-                    if let Some(nested_pos) = matched_names.iter().position(|&n| n == nested_group.name) {
+                    if let Some(nested_pos) =
+                        matched_names.iter().position(|&n| n == nested_group.name)
+                    {
                         // Found the nested group, check if this parent group appears before it
                         matched_names[..nested_pos].contains(&group.name.as_str())
                     } else {
@@ -233,7 +322,7 @@ impl<M: Metadata> Organizer<M> {
                 })
                 .cloned()
                 .collect();
-            
+
             let child =
                 self.build_group_structure(nested_group, &filtered_items, current_prefixes.clone());
             if !child.is_empty() {
@@ -245,7 +334,7 @@ impl<M: Metadata> Organizer<M> {
     }
 
     /// Recursively group items by metadata fields in priority order
-    /// 
+    ///
     /// Processes fields in the order they appear in `remaining_fields`, applying
     /// the appropriate grouping strategy for each field.
     fn group_by_metadata_fields_recursive(
@@ -255,7 +344,7 @@ impl<M: Metadata> Organizer<M> {
         remaining_fields: &[M::Field],
     ) -> Structure<M> {
         let mut result = Structure::new("temp");
-        
+
         if items.is_empty() || remaining_fields.is_empty() {
             result.items = items;
             return result;
@@ -264,12 +353,13 @@ impl<M: Metadata> Organizer<M> {
         // Get the first field (highest priority)
         let current_field = &remaining_fields[0];
         let remaining_fields = &remaining_fields[1..];
-        
+
         let field_name = format!("{:?}", current_field);
-        let strategy = group.field_grouping_strategies
+        let strategy = group
+            .field_grouping_strategies
             .get(&field_name)
             .cloned()
-            .unwrap_or(crate::FieldGroupingStrategy::Default);
+            .unwrap_or_else(|| crate::FieldGroupingStrategy::Default);
 
         // Group items by this field's value
         let mut field_groups: Vec<(String, Vec<Item<M>>)> = Vec::new();
@@ -302,18 +392,27 @@ impl<M: Metadata> Organizer<M> {
         // Sort field_groups by descriptor order if available, otherwise by nested group pattern order
         // Default value should always come first if present
         if let Some(descriptors) = group.field_value_descriptors.get(&field_name) {
-            let descriptor_order: Vec<String> = descriptors.iter().map(|d| d.value.clone()).collect();
+            let descriptor_order: Vec<String> =
+                descriptors.iter().map(|d| d.value.clone()).collect();
             field_groups.sort_by(|a, b| {
                 // Check if either is the default value - default comes first
-                let a_is_default = default_value.as_ref().map_or(false, |d| a.0 == *d || a.0.to_lowercase() == d.to_lowercase());
-                let b_is_default = default_value.as_ref().map_or(false, |d| b.0 == *d || b.0.to_lowercase() == d.to_lowercase());
+                let a_is_default = default_value.as_ref().map_or(false, |d| {
+                    a.0 == *d || a.0.to_lowercase() == d.to_lowercase()
+                });
+                let b_is_default = default_value.as_ref().map_or(false, |d| {
+                    b.0 == *d || b.0.to_lowercase() == d.to_lowercase()
+                });
                 match (a_is_default, b_is_default) {
                     (true, false) => std::cmp::Ordering::Less,
                     (false, true) => std::cmp::Ordering::Greater,
                     _ => {
                         // Neither or both are default - use descriptor order
-                        let a_idx = descriptor_order.iter().position(|v| a.0 == *v || a.0.to_lowercase() == v.to_lowercase());
-                        let b_idx = descriptor_order.iter().position(|v| b.0 == *v || b.0.to_lowercase() == v.to_lowercase());
+                        let a_idx = descriptor_order
+                            .iter()
+                            .position(|v| a.0 == *v || a.0.to_lowercase() == v.to_lowercase());
+                        let b_idx = descriptor_order
+                            .iter()
+                            .position(|v| b.0 == *v || b.0.to_lowercase() == v.to_lowercase());
                         match (a_idx, b_idx) {
                             (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
                             (Some(_), _) => std::cmp::Ordering::Less,
@@ -335,20 +434,24 @@ impl<M: Metadata> Organizer<M> {
                 let pattern_order: Vec<String> = nested_group.patterns.clone();
                 field_groups.sort_by(|a, b| {
                     // Check if either is the default value - default comes first
-                    let a_is_default = default_value.as_ref().map_or(false, |d| a.0 == *d || a.0.to_lowercase() == d.to_lowercase());
-                    let b_is_default = default_value.as_ref().map_or(false, |d| b.0 == *d || b.0.to_lowercase() == d.to_lowercase());
+                    let a_is_default = default_value.as_ref().map_or(false, |d| {
+                        a.0 == *d || a.0.to_lowercase() == d.to_lowercase()
+                    });
+                    let b_is_default = default_value.as_ref().map_or(false, |d| {
+                        b.0 == *d || b.0.to_lowercase() == d.to_lowercase()
+                    });
                     match (a_is_default, b_is_default) {
                         (true, false) => std::cmp::Ordering::Less,
                         (false, true) => std::cmp::Ordering::Greater,
                         _ => {
                             // Neither or both are default - use pattern order
                             let a_idx = pattern_order.iter().position(|v| {
-                                a.0.eq_ignore_ascii_case(v) || 
-                                a.0.to_lowercase() == v.to_lowercase()
+                                a.0.eq_ignore_ascii_case(v)
+                                    || a.0.to_lowercase() == v.to_lowercase()
                             });
                             let b_idx = pattern_order.iter().position(|v| {
-                                b.0.eq_ignore_ascii_case(v) || 
-                                b.0.to_lowercase() == v.to_lowercase()
+                                b.0.eq_ignore_ascii_case(v)
+                                    || b.0.to_lowercase() == v.to_lowercase()
                             });
                             match (a_idx, b_idx) {
                                 (Some(a_pos), Some(b_pos)) => a_pos.cmp(&b_pos),
@@ -366,17 +469,22 @@ impl<M: Metadata> Organizer<M> {
         match strategy {
             crate::FieldGroupingStrategy::Default => {
                 // Default: items with field values become children, items without stay at current level
-        if field_groups.len() > 1 {
+                if field_groups.len() > 1 {
                     // Multiple values - create sub-structures
                     for (field_key, items) in field_groups {
-                        let mut sub_structure = self.group_by_metadata_fields_recursive(items, group, remaining_fields);
+                        let mut sub_structure =
+                            self.group_by_metadata_fields_recursive(items, group, remaining_fields);
                         sub_structure.name = field_key;
                         sub_structure.display_name = sub_structure.name.clone();
                         result.children.push(sub_structure);
                     }
                     // Items without this field stay at current level, but process remaining fields
                     if !items_without_field.is_empty() {
-                        let without_field_structure = self.group_by_metadata_fields_recursive(items_without_field, group, remaining_fields);
+                        let without_field_structure = self.group_by_metadata_fields_recursive(
+                            items_without_field,
+                            group,
+                            remaining_fields,
+                        );
                         result.items = without_field_structure.items;
                         result.children.extend(without_field_structure.children);
                     }
@@ -385,30 +493,42 @@ impl<M: Metadata> Organizer<M> {
                     // If there are remaining fields or items without field, create sub-structure
                     // Otherwise, keep at current level
                     let (field_key, items) = field_groups.remove(0);
-                    let processed = self.group_by_metadata_fields_recursive(items, group, remaining_fields);
-                    
+                    let processed =
+                        self.group_by_metadata_fields_recursive(items, group, remaining_fields);
+
                     // If there are remaining fields to process or children were created, we need a sub-structure
                     // Also create sub-structure if there are items without this field (they'll be at current level)
-                    if !remaining_fields.is_empty() || !processed.children.is_empty() || !items_without_field.is_empty() {
+                    if !remaining_fields.is_empty()
+                        || !processed.children.is_empty()
+                        || !items_without_field.is_empty()
+                    {
                         let mut sub_structure = processed;
                         sub_structure.name = field_key;
                         sub_structure.display_name = sub_structure.name.clone();
-                    result.children.push(sub_structure);
+                        result.children.push(sub_structure);
                     } else {
                         // No remaining fields and no children - keep at current level
                         result.items = processed.items;
                         result.children = processed.children;
-            }
+                    }
 
                     // Also process items without field
                     if !items_without_field.is_empty() {
-                        let without_field_structure = self.group_by_metadata_fields_recursive(items_without_field, group, remaining_fields);
+                        let without_field_structure = self.group_by_metadata_fields_recursive(
+                            items_without_field,
+                            group,
+                            remaining_fields,
+                        );
                         result.items.extend(without_field_structure.items);
                         result.children.extend(without_field_structure.children);
                     }
                 } else {
                     // No field values - process remaining fields
-                    let processed = self.group_by_metadata_fields_recursive(items_without_field, group, remaining_fields);
+                    let processed = self.group_by_metadata_fields_recursive(
+                        items_without_field,
+                        group,
+                        remaining_fields,
+                    );
                     result.items = processed.items;
                     result.children = processed.children;
                 }
@@ -420,7 +540,8 @@ impl<M: Metadata> Organizer<M> {
                 if !field_groups.is_empty() {
                     // Items with field values become children (tracks when remaining_fields is empty)
                     for (field_key, items) in field_groups {
-                        let sub_structure = self.group_by_metadata_fields_recursive(items, group, remaining_fields);
+                        let sub_structure =
+                            self.group_by_metadata_fields_recursive(items, group, remaining_fields);
                         // If remaining_fields is empty, this should be a structure with only items (will become a track)
                         // If remaining_fields is not empty, it might have children (will become a folder)
                         let mut sub_structure = sub_structure;
@@ -431,24 +552,32 @@ impl<M: Metadata> Organizer<M> {
                     }
                     // Items without field go on the folder track (current level)
                     if !items_without_field.is_empty() {
-                        let without_field_structure = self.group_by_metadata_fields_recursive(items_without_field, group, remaining_fields);
+                        let without_field_structure = self.group_by_metadata_fields_recursive(
+                            items_without_field,
+                            group,
+                            remaining_fields,
+                        );
                         result.items = without_field_structure.items;
                         result.children.extend(without_field_structure.children);
                     }
-        } else {
+                } else {
                     // No items with field - all items go on folder track
-                    let processed = self.group_by_metadata_fields_recursive(items_without_field, group, remaining_fields);
+                    let processed = self.group_by_metadata_fields_recursive(
+                        items_without_field,
+                        group,
+                        remaining_fields,
+                    );
                     result.items = processed.items;
                     result.children = processed.children;
                 }
             }
         }
-        
+
         result
     }
 
     /// Format a metadata value for grouping purposes
-    /// 
+    ///
     /// This converts the metadata value to a string that can be used as a group key.
     /// Uses the format_metadata_value helper from lib.rs which handles Vec<String> properly.
     fn format_metadata_value_for_grouping(&self, value: &M::Value) -> String {
@@ -469,7 +598,7 @@ impl<M: Metadata> Organizer<M> {
             }
             None
         }
-        
+
         for group in &config.groups {
             if let Some(found) = search_group(group, name) {
                 return Some(found);

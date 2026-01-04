@@ -1,8 +1,71 @@
-//! Test utilities for easier structure verification
+//! Test utilities for easier structure verification.
+//!
+//! This module provides assertion helpers for testing monarchy structures.
+//! It uses a fluent builder pattern for readable, chainable assertions.
+//!
+//! # Basic Usage
+//!
+//! ```ignore
+//! use monarchy::StructureAssertions;
+//!
+//! let structure = monarchy_sort(inputs, config)?;
+//!
+//! structure.assert()
+//!     .has_total_items(5)
+//!     .has_groups(2)
+//!     .group("Drums")
+//!         .has_items(3)
+//!         .contains("Kick In.wav")
+//!         .done()
+//!     .group("Guitars")
+//!         .has_items(2)
+//!         .done();
+//! ```
+//!
+//! # Nested Groups
+//!
+//! ```ignore
+//! structure.assert()
+//!     .group("Drums")
+//!         .group("Kick")
+//!             .contains_exactly(&["Kick In.wav", "Kick Out.wav"])
+//!             .done()
+//!         .group("Snare")
+//!             .has_items(1)
+//!             .done()
+//!         .done();
+//! ```
+//!
+//! # Macros
+//!
+//! For more complex assertions, use the `assert_structure!` macro:
+//!
+//! ```ignore
+//! assert_structure!(structure, {
+//!     total_items: 5,
+//!     groups: [
+//!         { name: "Drums", items: ["Kick.wav", "Snare.wav"] },
+//!         { name: "Guitars", items: ["Guitar.wav"] }
+//!     ]
+//! });
+//! ```
 
 use crate::{Metadata, Structure};
 
-/// A builder for creating expected structures for testing
+/// Assertion helper for verifying [`Structure`] contents in tests.
+///
+/// Use [`StructureAssertions::assert`] to create an assertion helper,
+/// then chain assertion methods to verify the structure.
+///
+/// # Example
+///
+/// ```ignore
+/// structure.assert()
+///     .has_total_items(5)
+///     .group("Drums")
+///         .has_items(3)
+///         .done();
+/// ```
 pub struct StructureAssertion<'a, M: Metadata> {
     structure: &'a Structure<M>,
     path: Vec<String>,

@@ -1,4 +1,5 @@
 use dynamic_template::*;
+use monarchy::monarchy_sort;
 
 #[test]
 fn neil_young_heart_of_gold() {
@@ -26,14 +27,16 @@ fn neil_young_heart_of_gold() {
         "20.Vocal.HARMONY Dbl OptoComp_01.wav",
         "21.Heart Of Gold Mix_01.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+    let tracks = items.clone().organize_into_tracks(&config, None).unwrap();
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
-    // TODO: Add expected structure once provided
+
+    // Snapshot test: capture the hierarchical structure
+    let structure = monarchy_sort(items, config).unwrap();
+    insta::assert_snapshot!(structure.to_tree_string());
 }

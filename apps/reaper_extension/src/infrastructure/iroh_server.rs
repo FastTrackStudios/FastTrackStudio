@@ -50,7 +50,7 @@ pub fn start_iroh_server(
     
     // Create transport API using REAPER implementation
     let transport_service_box: Box<dyn daw::transport::reactive::TransportReactiveService> = 
-        Box::new(crate::infrastructure::reaper_transport_reactive::ReaperTransportReactiveService::new(
+        Box::new(fts::daw_reactive::transport::ReaperTransportReactiveService::new(
             transport_streams,
             setlist_service.clone(),
         ));
@@ -58,7 +58,7 @@ pub fn start_iroh_server(
     
     // Create tracks API using REAPER implementation
     let track_service_box: Box<dyn daw::tracks::reactive::TrackReactiveService> = 
-        Box::new(crate::infrastructure::reaper_track_reactive::ReaperTrackReactiveService::new(
+        Box::new(fts::daw_reactive::tracks::ReaperTrackReactiveService::new(
             track_streams,
             setlist_service.clone(),
         ));
@@ -74,12 +74,14 @@ pub fn start_iroh_server(
     // Initialize track reactive service static for command handler
     // Use the same instance that's in reactive_state
     if let Some(reaper_track_service) = &reactive_state.reaper_track_service {
-        crate::infrastructure::reaper_track_command::init_track_reactive_service(reaper_track_service.clone());
+        // Wrap in TrackServiceWrapper to erase the generic type
+        let wrapper = fts::daw_reactive::tracks_command::TrackServiceWrapper::new(reaper_track_service.clone());
+        fts::daw_reactive::tracks_command::init_track_reactive_service(Arc::new(wrapper));
     }
     
     let track_command_handler: Arc<dyn daw::tracks::reactive::irpc::TrackCommandHandler> = 
-        Arc::new(crate::infrastructure::reaper_track_command::ReaperTrackCommandHandler::new(
-            setlist_service.clone(),
+        Arc::new(fts::daw_reactive::tracks_command::ReaperTrackCommandHandler::new(
+            Arc::new(fts::daw_reactive::tracks_command::DefaultProjectProvider),
             task_support,
         ));
     
@@ -92,7 +94,7 @@ pub fn start_iroh_server(
     #[cfg(feature = "lyrics")]
     let mut lyrics_api = {
         let lyrics_service_box: Box<dyn fts::lyrics::reactive::LyricsReactiveService> = 
-            Box::new(crate::infrastructure::reaper_lyrics_reactive::ReaperLyricsReactiveService::new(
+            Box::new(fts::lyrics::reactive::reaper::ReaperLyricsReactiveService::new(
                 lyrics_streams,
             ));
         fts::lyrics::reactive::irpc::LyricsApi::spawn(lyrics_service_box)
@@ -103,7 +105,7 @@ pub fn start_iroh_server(
     let mut chart_api = {
         let chords_streams = fts::chords::reactive::ChordsStreams::new();
         let chords_service_box: Box<dyn fts::chords::reactive::ChordsReactiveService> = 
-            Box::new(crate::infrastructure::reaper_chords_reactive::ReaperChordsReactiveService::new(
+            Box::new(fts::chords::reactive::reaper::ReaperChordsReactiveService::new(
                 chords_streams,
             ));
         fts::chords::reactive::irpc::ChartApi::spawn(chords_service_box)
