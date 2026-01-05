@@ -163,9 +163,11 @@ fn radiohead_paranoid_android() {
         .end();
 
     // --- Percussion ---
-    // "Guiro Shaker" extracts arrangement="Shaker", "Guiro" defaults to arrangement="Main"
+    // "Guiro Shaker" extracts arrangement="Shaker"
+    // "Guiro" defaults to arrangement="Main", but since there are no layer siblings,
+    // "Main" is replaced with parent name "Guiro" for clarity
     let guiro = TrackGroup::folder("Guiro")
-        .track("Main", "22 Guiro_03.wav")
+        .track("Guiro", "22 Guiro_03.wav")
         .track("Shaker", "21 Guiro Shaker_03.wav")
         .end();
 

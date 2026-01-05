@@ -1142,6 +1142,18 @@ impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
                 .all(|word| word.chars().all(|c| c.is_ascii_digit()))
         };
 
+        // Check if "Main" is used as a meaningful layer distinction
+        // (i.e., there are sibling layers like DBL, Quad, etc.)
+        const LAYER_NAMES: &[&str] = &[
+            "DBL", "Double", "TPL", "Triple", "Quad", "Oct", "Octave", "Harmony", "Unison",
+        ];
+        let has_layer_siblings = node.children.iter().any(|c| {
+            let name = self.cleanup_name(&c.name);
+            LAYER_NAMES
+                .iter()
+                .any(|layer| name.eq_ignore_ascii_case(layer))
+        });
+
         // Process children's names before popping context
         for child in &mut node.children {
             let cleaned = self.cleanup_name(&child.name);
@@ -1150,6 +1162,11 @@ impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
                 // Skip generic collection names like "SUM" - look for the last group name
                 // that represents an actual instrument/category
                 child.name = self.find_fallback_name(&node.name);
+            } else if cleaned.eq_ignore_ascii_case("Main") && !has_layer_siblings {
+                // "Main" is a generic placeholder with no layer siblings
+                // Replace with parent name for context
+                // E.g., under "Guiro" folder, "Main" becomes "Guiro"
+                child.name = Self::title_case(&node.name);
             } else if is_only_numbers(&cleaned) {
                 // Cleaned name is ONLY numbers (e.g., "1", "2 3")
                 // Prefix with the parent's name for context
