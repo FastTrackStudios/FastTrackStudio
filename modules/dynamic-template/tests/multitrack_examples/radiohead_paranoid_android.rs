@@ -240,9 +240,9 @@ fn radiohead_paranoid_android() {
 
     // --- Vocals ---
     let vocal_outro = TrackGroup::folder("Outro")
-        .track("1", "62 Outro vocal 1_03.wav")
-        .track("2", "63 Outro vocal 2_03.wav")
-        .track("3", "64 Outro vocal 3_03.wav")
+        .track("Outro 1", "62 Outro vocal 1_03.wav")
+        .track("Outro 2", "63 Outro vocal 2_03.wav")
+        .track("Outro 3", "64 Outro vocal 3_03.wav")
         .end();
 
     // Main layer tracks (no explicit layer = Main default)
@@ -268,17 +268,17 @@ fn radiohead_paranoid_android() {
         .group(vocal_outro)
         .group(vocal_main)
         .group(vocal_quad)
-        .track("3", "59 Vocal 3_03.wav")
+        .track("Lead 3", "59 Vocal 3_03.wav")
         .group(vocal_dbl)
         .end();
 
     let vocals = TrackGroup::folder("Vocals")
         .group(lead)
-        .track("Bridge 1", "67 Voca Middle Bridge1_03.wav")
-        .track("Bridge 2", "68 Voca Middle Bridge2_03.wav")
-        .track("Bridge 3", "69 Voca Middle Bridge3_03.wav")
-        .track("Bridge 4", "70 Voca Middle Bridge4_03.wav")
-        .track("Bridge 5", "71 Voca Middle Bridge5_03.wav")
+        .track("Middle Bridge 1", "67 Voca Middle Bridge1_03.wav")
+        .track("Middle Bridge 2", "68 Voca Middle Bridge2_03.wav")
+        .track("Middle Bridge 3", "69 Voca Middle Bridge3_03.wav")
+        .track("Middle Bridge 4", "70 Voca Middle Bridge4_03.wav")
+        .track("Middle Bridge 5", "71 Voca Middle Bridge5_03.wav")
         .end();
 
     // --- SFX ---

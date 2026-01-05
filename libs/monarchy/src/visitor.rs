@@ -952,8 +952,12 @@ impl CleanupDisplayNames {
     ///
     /// Removes words from the name that appear in any ancestor's name.
     /// Case-insensitive comparison.
+    ///
+    /// If stripping would leave only numbers or short prefixes (e.g., "1", "V 2"),
+    /// the last meaningful word from the original name is preserved to maintain
+    /// meaningful context.
     fn strip_context(&self, name: &str) -> String {
-        let mut words: Vec<&str> = name.split_whitespace().collect();
+        let words: Vec<&str> = name.split_whitespace().collect();
 
         // Build a set of all context words from ancestors (lowercase for comparison)
         let context_words: std::collections::HashSet<String> = self
@@ -964,9 +968,45 @@ impl CleanupDisplayNames {
             .collect();
 
         // Remove words that appear in context
-        words.retain(|word| !context_words.contains(&word.to_lowercase()));
+        let mut filtered: Vec<&str> = words
+            .iter()
+            .filter(|word| !context_words.contains(&word.to_lowercase()))
+            .copied()
+            .collect();
 
-        words.join(" ")
+        // Helper to check if a word is "meaningful" (not just a number or short prefix)
+        // Short prefixes are typically 1-4 uppercase letters like "V", "D", "GTR", "BGV"
+        let is_meaningful = |w: &str| {
+            // Not all digits
+            if w.chars().all(|c| c.is_ascii_digit()) {
+                return false;
+            }
+            // Not a short all-caps prefix (1-4 chars)
+            if w.len() <= 4 && w.chars().all(|c| c.is_uppercase() || c.is_ascii_digit()) {
+                return false;
+            }
+            true
+        };
+
+        // Check if a word looks like a prefix (short all-caps)
+        let is_prefix =
+            |w: &str| w.len() <= 4 && w.chars().all(|c| c.is_uppercase() || c.is_ascii_digit());
+
+        // Check if we're left with only non-meaningful words (numbers/prefixes)
+        let has_meaningful_word = filtered.iter().any(|w| is_meaningful(w));
+
+        if !has_meaningful_word && !filtered.is_empty() {
+            // We only have numbers/prefixes - find the last meaningful word from original
+            // to preserve some meaningful context
+            if let Some(last_meaningful) = words.iter().rev().find(|w| is_meaningful(w)) {
+                // Remove prefixes from filtered, keep only numbers
+                filtered.retain(|w| !is_prefix(w));
+                // Insert the meaningful word before the numbers
+                filtered.insert(0, last_meaningful);
+            }
+        }
+
+        filtered.join(" ")
     }
 
     /// Find a meaningful fallback name from the context stack
@@ -1093,6 +1133,15 @@ impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
     }
 
     fn leave(&mut self, node: &mut Structure<M>, _depth: usize) {
+        // Helper to check if a name is ONLY numbers (no meaningful text at all)
+        // This is more conservative - we only add parent context when there's
+        // truly nothing meaningful, like "1", "2", "3"
+        let is_only_numbers = |name: &str| {
+            // All words must be purely numeric
+            name.split_whitespace()
+                .all(|word| word.chars().all(|c| c.is_ascii_digit()))
+        };
+
         // Process children's names before popping context
         for child in &mut node.children {
             let cleaned = self.cleanup_name(&child.name);
@@ -1101,6 +1150,22 @@ impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
                 // Skip generic collection names like "SUM" - look for the last group name
                 // that represents an actual instrument/category
                 child.name = self.find_fallback_name(&node.name);
+            } else if is_only_numbers(&cleaned) {
+                // Cleaned name is ONLY numbers (e.g., "1", "2 3")
+                // Prefix with the parent's name for context
+                // E.g., under "Outro" folder, "1" becomes "Outro 1"
+                let parent_name = &node.name;
+                // Don't use generic parent names
+                const GENERIC_NAMES: &[&str] = &["SUM", "Main", "Sub", "Aux", "Bus", "Group"];
+                if !GENERIC_NAMES
+                    .iter()
+                    .any(|g| g.eq_ignore_ascii_case(parent_name))
+                {
+                    child.name = format!("{} {}", Self::title_case(parent_name), cleaned);
+                } else {
+                    // Generic parent, try to find a better name from context
+                    child.name = format!("{} {}", self.find_fallback_name(parent_name), cleaned);
+                }
             } else {
                 // Apply title case to cleaned name (e.g., "chords" -> "Chords")
                 child.name = Self::title_case(&cleaned);
@@ -1457,6 +1522,58 @@ mod tests {
             assert_eq!(root.children[0].name, "Snare 1");
             assert_eq!(root.children[1].name, "Snare 2");
             assert_eq!(root.children[2].name, "Snare 3");
+
+            Ok(())
+        }
+
+        #[test]
+        fn preserves_meaningful_word_when_only_numbers_remain() -> Result<()> {
+            // -- Setup & Fixtures
+            // Simulates: Outro folder containing "V Outro 1", "V Outro 2"
+            // After stripping "V" and "Outro" from context, should keep "Outro 1" not just "1"
+            let mut root: Structure<TestMetadata> = Structure::new("Root");
+            let mut outro = Structure::new("Outro");
+            outro.children.push(Structure::new("V Outro 1"));
+            outro.children.push(Structure::new("V Outro 2"));
+            outro.children.push(Structure::new("V Outro 3"));
+            root.children.push(outro);
+
+            // -- Exec
+            let mut cleaner = CleanupDisplayNames::new();
+            root.accept(&mut cleaner);
+
+            // -- Check
+            // Should preserve "Outro" as meaningful context, not just "1", "2", "3"
+            let outro_folder = &root.children[0];
+            assert_eq!(outro_folder.children[0].name, "Outro 1");
+            assert_eq!(outro_folder.children[1].name, "Outro 2");
+            assert_eq!(outro_folder.children[2].name, "Outro 3");
+
+            Ok(())
+        }
+
+        #[test]
+        fn prefixes_numbers_with_parent_name() -> Result<()> {
+            // -- Setup & Fixtures
+            // Simulates: Outro folder containing just "1", "2", "3"
+            // (when display names don't include section because it's used for hierarchy)
+            let mut root: Structure<TestMetadata> = Structure::new("Root");
+            let mut outro = Structure::new("Outro");
+            outro.children.push(Structure::new("1"));
+            outro.children.push(Structure::new("2"));
+            outro.children.push(Structure::new("3"));
+            root.children.push(outro);
+
+            // -- Exec
+            let mut cleaner = CleanupDisplayNames::new();
+            root.accept(&mut cleaner);
+
+            // -- Check
+            // Children that are just numbers should get prefixed with parent name
+            let outro_folder = &root.children[0];
+            assert_eq!(outro_folder.children[0].name, "Outro 1");
+            assert_eq!(outro_folder.children[1].name, "Outro 2");
+            assert_eq!(outro_folder.children[2].name, "Outro 3");
 
             Ok(())
         }

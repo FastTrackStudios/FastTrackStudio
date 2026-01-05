@@ -46,6 +46,7 @@ pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
             "C2",
             "C3",
             // Compound sections
+            "Middle Bridge",
             "Middle 8",
             "Middle8",
             // Main sections
