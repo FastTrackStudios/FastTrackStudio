@@ -136,13 +136,13 @@ fn radiohead_paranoid_android() {
 
     let snare = TrackGroup::folder("Snare")
         .group(snare_sum)
-        .track("SNR VERB", "9 SNR VERB.05_03.wav")
+        .track("Verb", "9 SNR VERB.05_03.wav")
         .end();
 
     let toms = TrackGroup::folder("Toms")
-        .track("FT", "12 Floor.01.R.05_03.wav")
-        .track("Rack 10-St", "10 Rack 10-St.01.R.05_03.wav")
-        .track("Rack 12", "11  Rack 12.01.R.05_03.wav")
+        .track("Floor", "12 Floor.01.R.05_03.wav")
+        .track(r#"Rack 10""#, "10 Rack 10-St.01.R.05_03.wav")
+        .track(r#"Rack 12""#, "11  Rack 12.01.R.05_03.wav")
         .end();
 
     let cymbals = TrackGroup::folder("Cymbals")
@@ -205,7 +205,7 @@ fn radiohead_paranoid_android() {
 
     let electric = TrackGroup::folder("Electric").group(ed).group(johny).end();
 
-    let acc_guitar = TrackGroup::single_track("Acc Guitar", "26 Acc Guitar_03.wav");
+    let acc_guitar = TrackGroup::single_track("Acoustic", "26 Acc Guitar_03.wav");
 
     let guitars = TrackGroup::folder("Guitars")
         .group(electric)
@@ -246,16 +246,18 @@ fn radiohead_paranoid_android() {
         .end();
 
     // Main layer tracks (no explicit layer = Main default)
+    // Items get "Lead 1", "Lead 2", "Lead 3" as they match Lead group
     let vocal_main = TrackGroup::folder("Main")
-        .track("Voc", "56 Lead Voc_03.wav")
-        .track("Extra Vocal2", "65 extra vocal2_03.wav")
-        .track("Extra Vocal3", "66 extra vocal3_03.wav")
+        .track("Lead 1", "56 Lead Voc_03.wav")
+        .track("Lead 2", "65 extra vocal2_03.wav")
+        .track("Lead 3", "66 extra vocal3_03.wav")
         .end();
 
     // DBL (double) layer tracks
+    // Items get "DBL 1", "DBL 2" as they match DBL layer
     let vocal_dbl = TrackGroup::folder("DBL")
-        .track("Voc 1", "57 Lead Voc Dbl_03.wav")
-        .track("Voc 2", "58 Lead Voc Dbl.dup1_03.wav")
+        .track("DBL 1", "57 Lead Voc Dbl_03.wav")
+        .track("DBL 2", "58 Lead Voc Dbl.dup1_03.wav")
         .end();
 
     // "Quad" is a layer (like Main, DBL), extracted from "lead vox quad"

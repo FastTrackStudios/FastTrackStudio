@@ -15,7 +15,7 @@ pub struct Vocals;
 impl From<Vocals> for ItemMetadataGroup {
     fn from(_val: Vocals) -> Self {
         ItemMetadataGroup::builder("Vocals")
-            .prefix("Vox")
+            .prefix("V")
             .patterns(["vocal", "vocals", "vox", "voc", "voca", "voice"])
             // Exclude non-vocal voice effects (these should go to SFX)
             .exclude(["robot", "vocoder", "talkbox"])

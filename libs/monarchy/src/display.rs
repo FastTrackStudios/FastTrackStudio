@@ -57,15 +57,28 @@ pub fn format_metadata_value<M: Metadata>(value: &M::Value) -> String {
         if inner.starts_with('[') && inner.ends_with(']') {
             let content = &inner[1..inner.len() - 1];
             // Split by comma and clean up quotes
+            // Note: We use strip_prefix/strip_suffix to only remove the outer
+            // Debug formatting quotes, not quotes that are part of the actual value
+            // (e.g., "Rack 10\"" should become "Rack 10\"", not "Rack 10")
             let values: Vec<String> = content
                 .split(',')
-                .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                .map(|s| {
+                    let trimmed = s.trim();
+                    // Only strip one quote from each end (the Debug formatting quotes)
+                    let without_leading = trimmed.strip_prefix('"').unwrap_or(trimmed);
+                    let without_trailing = without_leading.strip_suffix('"').unwrap_or(without_leading);
+                    // Unescape any escaped quotes in the value
+                    without_trailing.replace("\\\"", "\"")
+                })
                 .filter(|s| !s.is_empty())
                 .collect();
             return values.join(" ");
         }
         // Otherwise, just return the inner content without quotes
-        return inner.trim_matches('"').trim_matches('\'').to_string();
+        // Strip one quote from each end, not all quotes
+        let without_leading = inner.strip_prefix('"').unwrap_or(inner);
+        let without_trailing = without_leading.strip_suffix('"').unwrap_or(without_leading);
+        return without_trailing.replace("\\\"", "\"");
     }
     value_str
 }

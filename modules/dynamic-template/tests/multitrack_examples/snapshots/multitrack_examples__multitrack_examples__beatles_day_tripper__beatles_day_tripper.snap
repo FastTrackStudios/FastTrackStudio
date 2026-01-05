@@ -10,7 +10,7 @@ expression: structure.to_tree_string()
 -Percussion: [tambourine_01.wav]
 -Bass: [bass hofner_01.wav, bass hofner.Duplicate _01.wav]
 -Vocals
---Lead Vocals
+--Lead
 ---1: [Steve Lead VOX Take 1.06_01.wav]
 ---2: [Steve Lead VOX Take 2.06_01.wav]
 --BGVs: [Steve BGV1_SUM.06_01.wav, Steve BGV1A.06_01.wav, ... and 8 more]

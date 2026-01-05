@@ -15,7 +15,7 @@ expression: structure.to_tree_string()
 --Acoustic: [08.Acoustic OptoComp_01.wav, 09.Acoustic Dbl OptoComp_01.wav, ... and 2 more]
 -Keys: [14.Piano 260VU_01.wav, 15.Piano Lead 260VU_01.wav]
 -Vocals
---Lead Vocals
+--Lead
 ---Main: [16.Vocal OptoComp_01.wav]
 ---Triple: [18.Vocal.Triple OptoComp_01.wav]
 ---DBL: [17.Vocal.DBL OptoComp_01.wav]

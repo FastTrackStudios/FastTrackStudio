@@ -13,8 +13,8 @@ impl From<LeadVocals> for ItemMetadataGroup {
         // Configure lead vocals with field priority: Performer → Section → Layers → Channels
         // The order of these calls determines the priority order
         // Layers uses "Main" as default value so items without a layer are grouped alongside items with layers
-        ItemMetadataGroup::builder("Lead Vocals")
-            .prefix("LV")
+        // Note: No prefix for Lead Vocals - parent Vocals has "V" prefix which is sufficient
+        ItemMetadataGroup::builder("Lead")
             .patterns(["lead", "main", "solo", "vocal"])
             // Only match if parent (Vocals) also matches - prevents "JohnyLead" from matching
             // just because it contains "Lead" without any vocal-related patterns
@@ -58,9 +58,9 @@ mod tests {
         daw::tracks::display_tracklist(&tracks);
 
         // Single track - all intermediate levels are collapsed
-        // Vocals is transparent so Lead Vocals is kept as the name
+        // Vocals is transparent so Lead is kept as the name
         let expected = TrackStructureBuilder::new()
-            .track("Lead Vocals", "Vocal Chorus Cody DBL L")
+            .track("Lead", "Vocal Chorus Cody DBL L")
             .build();
 
         assert_tracks_equal(&tracks, &expected).unwrap();
@@ -80,9 +80,9 @@ mod tests {
         daw::tracks::display_tracklist(&tracks);
 
         // Performer (Cody) is collapsed when it's the only one
-        // Lead Vocals shares "vocal" pattern with Vocals, so collapses into Vocals
+        // Lead shares "vocal" pattern with Vocals, so collapses into Vocals
         let expected = TrackStructureBuilder::new()
-            .folder("Lead Vocals")
+            .folder("Lead")
             .track("Chorus", "Vocal Chorus Cody")
             .track("Verse", "Vocal Verse Cody")
             .end()
@@ -105,9 +105,9 @@ mod tests {
         daw::tracks::display_tracklist(&tracks);
 
         // Performers are grouped, Chorus and Main are collapsed
-        // Lead Vocals shares "vocal" pattern with Vocals, so collapses into Vocals
+        // Lead shares "vocal" pattern with Vocals, so collapses into Vocals
         let expected = TrackStructureBuilder::new()
-            .folder("Lead Vocals")
+            .folder("Lead")
             .track("Cody", "Vocal Chorus Cody")
             .track("John", "Vocal Chorus John")
             .end()
@@ -130,9 +130,9 @@ mod tests {
         daw::tracks::display_tracklist(&tracks);
 
         // Cody and Chorus are collapsed
-        // Lead Vocals shares "vocal" pattern with Vocals, so collapses into Vocals
+        // Lead shares "vocal" pattern with Vocals, so collapses into Vocals
         let expected = TrackStructureBuilder::new()
-            .folder("Lead Vocals")
+            .folder("Lead")
             .track("Main", "Vocal Chorus Cody")
             .track("DBL", "Vocal Chorus Cody DBL")
             .end()
@@ -159,9 +159,9 @@ mod tests {
         daw::tracks::display_tracklist(&tracks);
 
         // Cody, Chorus, and Main are collapsed
-        // Lead Vocals shares "vocal" pattern with Vocals, so collapses into Vocals
+        // Lead shares "vocal" pattern with Vocals, so collapses into Vocals
         let expected = TrackStructureBuilder::new()
-            .folder("Lead Vocals")
+            .folder("Lead")
             .track("L", "Vocal Chorus Cody L")
             .track("C", "Vocal Chorus Cody C")
             .track("R", "Vocal Chorus Cody R")
@@ -193,9 +193,9 @@ mod tests {
         daw::tracks::display_tracklist(&tracks);
 
         // Cody and Chorus are collapsed
-        // Lead Vocals shares "vocal" pattern with Vocals, so collapses into Vocals
+        // Lead shares "vocal" pattern with Vocals, so collapses into Vocals
         let expected = TrackStructureBuilder::new()
-            .folder("Lead Vocals")
+            .folder("Lead")
             .folder("Main")
             .track("L", "Vocal Chorus Cody Main L")
             .track("C", "Vocal Chorus Cody Main C")

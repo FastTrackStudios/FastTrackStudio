@@ -11,6 +11,6 @@ expression: structure.to_tree_string()
 ---Main: [Guitar Slide.wav]
 --Acoustic: [Acoustic.Right.wav, Acoustic.wav]
 -Vocals
---Lead Vocals: [Vocal.Tune.Lead.wav]
+--Lead: [Vocal.Tune.Lead.wav]
 --BGVs: [Vocal.Harmony.One.wav, Vocal.Harmony.Two.wav]
 -Unsorted: [banjo.One.wav, banjo.Solo.wav, ... and 6 more]
