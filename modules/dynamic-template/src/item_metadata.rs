@@ -291,6 +291,7 @@ impl ToDisplayName for ItemMetadata {
     /// - Kick with multi_mic=["In"] → "D Kick In" (with D prefix from Drums)
     /// - Electric Guitar with performer="Ed", arrangement="Crunch" → "GTR Ed Crunch"
     /// - Snare with increment="1" → "D Snare 1" (but only if has mic info too)
+    /// - Acoustic Guitar → "GTR Acoustic" (not "GTR AG Acoustic" - skip redundant prefix)
     /// - DX7 .2_03.wav → "" (triggers fallback to original)
     fn to_display_name(&self, prefixes: &[String], group_names: &[String]) -> String {
         // Helper to capitalize first letter of a string
@@ -304,10 +305,8 @@ impl ToDisplayName for ItemMetadata {
 
         let mut parts = Vec::new();
 
-        // Add prefixes first (e.g., "D" for Drums, "GTR" for Guitars)
-        if !prefixes.is_empty() {
-            parts.push(prefixes.join(" "));
-        }
+        // We'll add prefixes later, after we know if we're including the group name
+        // This lets us skip the last prefix if it would be redundant with the group name
 
         // Track if we have any PRIMARY metadata (identifies what the item is)
         // vs SECONDARY metadata (version/layer info that only makes sense with primary)
@@ -356,6 +355,15 @@ impl ToDisplayName for ItemMetadata {
             has_primary_metadata = true;
         }
 
+        // Add effect (e.g., "Verb", "Comp", "Delay") - title case
+        // This is primary because it identifies the track's processing
+        if let Some(ref effect) = self.effect {
+            for fx in effect {
+                parts.push(title_case(fx));
+                has_primary_metadata = true;
+            }
+        }
+
         // SECONDARY metadata fields - only include if we have primary metadata
         // These provide additional context but don't identify the item alone
 
@@ -378,13 +386,19 @@ impl ToDisplayName for ItemMetadata {
 
         // Include group name in display if:
         // 1. We have primary metadata (the group provides context), OR
-        // 2. The original_name exactly matches or contains the group name
-        //    (e.g., input "Kick" matching Kick group should display as "D Kick")
+        // 2. The original_name contains the group name (case-insensitive), OR
+        // 3. We matched a specific subgroup (more than one group in the trail)
+        //    This handles "Acc Guitar" → Guitars > Acoustic where we want "GTR Acoustic"
         //
-        // If we only matched by pattern without the group name in original,
+        // If we only matched a top-level group by pattern without the group name in original,
         // return empty to use the original name (e.g., "Robot Voice" stays as "Robot Voice")
         let should_include_group = if let Some(last_group) = group_names.last() {
             if has_primary_metadata {
+                true
+            } else if group_names.len() > 1 && !has_primary_metadata {
+                // Matched a subgroup without primary metadata
+                // e.g., "Acc Guitar" matched Guitars > Acoustic
+                // We want to show the subgroup name
                 true
             } else if let Some(ref original) = self.original_name {
                 // Check if original contains the group name (case-insensitive)
@@ -398,17 +412,49 @@ impl ToDisplayName for ItemMetadata {
 
         if should_include_group {
             if let Some(last_group) = group_names.last() {
-                // Calculate where to insert group name:
-                // - After prefixes (if present, they're at index 0)
-                // - After variant (if present, it's right after prefixes)
-                let prefix_offset = if !prefixes.is_empty() { 1 } else { 0 };
-                let variant_offset = if self.variant.is_some() { 1 } else { 0 };
-                let insert_pos = prefix_offset + variant_offset;
-                // Insert group name after prefixes and variant but before other parts
-                parts.insert(insert_pos, last_group.clone());
-            }
+                // Build prefixes, but skip the last one if we're including the group name
+                // This avoids redundancy like "GTR AG Acoustic" → "GTR Acoustic"
+                // The last prefix corresponds to the last group, so skip it
+                let prefixes_to_use: Vec<&String> = if prefixes.len() == group_names.len() {
+                    // Each group has a prefix, skip the last one
+                    prefixes
+                        .iter()
+                        .take(prefixes.len().saturating_sub(1))
+                        .collect()
+                } else {
+                    // Not a 1:1 mapping, use all prefixes
+                    prefixes.iter().collect()
+                };
 
-            return parts.join(" ");
+                // Build final parts with adjusted prefixes
+                let mut final_parts = Vec::new();
+                if !prefixes_to_use.is_empty() {
+                    final_parts.push(
+                        prefixes_to_use
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                    );
+                }
+
+                // Add variant if present
+                if let Some(ref variant) = self.variant {
+                    final_parts.push(variant.clone());
+                }
+
+                // Add group name
+                final_parts.push(last_group.clone());
+
+                // Add remaining parts (everything after variant, which is first in parts if present)
+                // Parts order: variant?, performer?, section?, arrangement?, multi_mic?, track_type?, effect?
+                let skip_count = if self.variant.is_some() { 1 } else { 0 };
+                for part in parts.iter().skip(skip_count) {
+                    final_parts.push(part.clone());
+                }
+
+                return final_parts.join(" ");
+            }
         }
 
         // No meaningful metadata and original doesn't contain group name

@@ -128,6 +128,60 @@ pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
         ])
         .build();
 
+    // Effect patterns - audio processing effects applied to tracks
+    // These can appear on any instrument track (e.g., "Snare Verb", "Vocal Comp")
+    let effect = Group::builder("Effect")
+        .patterns([
+            // Reverb variations
+            "Verb",
+            "Reverb",
+            "Rev",
+            // Note: "Room" excluded - conflicts with room mics in drums
+            "Hall",
+            "Plate",
+            "Chamber",
+            "Spring",
+            // Delay variations
+            "Delay",
+            "Dly",
+            "Echo",
+            "Slap",
+            "Slapback",
+            // Compression/dynamics
+            "Comp",
+            "Compressor",
+            "Limiter",
+            "Lim",
+            // Distortion/saturation
+            "Dist",
+            "Distortion",
+            "Fuzz",
+            "Overdrive",
+            "OD",
+            "Saturation",
+            "Sat",
+            // Modulation effects
+            "Chorus",
+            "Flanger",
+            "Phaser",
+            "Tremolo",
+            "Vibrato",
+            // EQ/filtering
+            "EQ",
+            "Filter",
+            "HPF",
+            "LPF",
+            // Other common effects
+            "Parallel",
+            "Crush",
+            "Bitcrush",
+            "Send",
+            "Return",
+            "Aux",
+            // Note: "FX" intentionally excluded - too generic, matches SFX filenames
+        ])
+        .build();
+
     // Combine all field patterns into a single metadata-only group
     Group::builder("MetadataFields")
         .metadata_only()
@@ -139,5 +193,6 @@ pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
         .multi_mic(multi_mic)
         .performer(performer)
         .rec_tag(rec_tag)
+        .effect(effect)
         .build()
 }

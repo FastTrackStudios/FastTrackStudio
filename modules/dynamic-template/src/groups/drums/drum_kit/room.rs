@@ -28,6 +28,8 @@ impl From<Room> for ItemMetadataGroup {
         ];
 
         // Use the convenience method - extension trait is in scope via prelude
+        // Note: "verb" and "reverb" are now global effect patterns, not room-specific
+        // Room mics are physical mics in the room, not reverb sends
         ItemMetadataGroup::builder("Rooms")
             .patterns([
                 "room",
@@ -35,13 +37,6 @@ impl From<Room> for ItemMetadataGroup {
                 "amb",
                 "ambient",
                 "ambience",
-                "mono",
-                "stereo",
-                "wide",
-                "crush",
-                "crushed",
-                "verb",
-                "reverb",
                 "knee",
                 "floor mic",
                 "corner",
