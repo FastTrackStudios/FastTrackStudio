@@ -1128,7 +1128,11 @@ impl CleanupDisplayNames {
     /// Only groups if:
     /// 1. There are at least 2 items with the same prefix
     /// 2. There are OTHER different siblings (otherwise grouping is unnecessary)
-    fn group_numbered_siblings(children: &mut Vec<Structure<impl Metadata + Clone>>) {
+    /// 3. The prefix is NOT redundant with ancestor names (avoids Snare/SUM/Snare nesting)
+    fn group_numbered_siblings(
+        children: &mut Vec<Structure<impl Metadata + Clone>>,
+        context_stack: &[String],
+    ) {
         use std::collections::HashMap;
 
         if children.len() < 2 {
@@ -1150,11 +1154,22 @@ impl CleanupDisplayNames {
             None
         };
 
+        // Check if a prefix would create redundant nesting
+        // e.g., don't create "Snare/" folder when we're inside "Snare/SUM/"
+        let is_redundant_with_ancestors = |prefix: &str| -> bool {
+            context_stack
+                .iter()
+                .any(|ancestor| ancestor.eq_ignore_ascii_case(prefix))
+        };
+
         // Count occurrences of each prefix
         let mut prefix_counts: HashMap<String, Vec<usize>> = HashMap::new();
         for (idx, child) in children.iter().enumerate() {
             if let Some((prefix, _)) = extract_prefix(&child.name) {
-                prefix_counts.entry(prefix).or_default().push(idx);
+                // Skip prefixes that would create redundant nesting
+                if !is_redundant_with_ancestors(&prefix) {
+                    prefix_counts.entry(prefix).or_default().push(idx);
+                }
             }
         }
 
@@ -1267,7 +1282,8 @@ impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
         // Group siblings that share the same prefix + number pattern
         // E.g., "Middle Bridge 1", "Middle Bridge 2" become folder "Middle Bridge" with children "1", "2"
         // But only if there are OTHER different children (otherwise no need to group)
-        Self::group_numbered_siblings(&mut node.children);
+        // Pass context stack to avoid redundant nesting (e.g., Snare/SUM/Snare)
+        Self::group_numbered_siblings(&mut node.children, &self.context_stack);
 
         // Pop this node from context stack (pop display_name first if it was pushed)
         if node.display_name != node.name {

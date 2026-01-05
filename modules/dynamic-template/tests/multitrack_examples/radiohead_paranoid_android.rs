@@ -128,15 +128,12 @@ fn radiohead_paranoid_android() {
         .track("Out", "3 Kick Out.05_04.wav")
         .end();
 
-    // Snare 1, Snare 2 are grouped into a "Snare" subfolder within SUM
-    let snare_inner = TrackGroup::folder("Snare")
+    // Snare 1, Snare 2 stay flat within SUM (no redundant Snare subfolder
+    // since "Snare" is already an ancestor in the context stack)
+    let snare_sum = TrackGroup::folder("SUM")
+        .track("Bottom", "8 Snare Btm.05_03.wav")
         .track("Snare 1", "5 Snare.05_03.wav")
         .track("Snare 2", "6 Snare.dup1.05_03.wav")
-        .end();
-
-    let snare_sum = TrackGroup::folder("SUM")
-        .group(snare_inner)
-        .track("Bottom", "8 Snare Btm.05_03.wav")
         .end();
 
     let snare = TrackGroup::folder("Snare")
