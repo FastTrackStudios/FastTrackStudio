@@ -765,6 +765,46 @@ impl<M: Metadata> StructureVisitor<M> for PromoteSingleChild {
     }
 }
 
+/// Visitor that collapses single-child intermediate folders
+///
+/// When a folder has exactly one child folder (no items), the intermediate
+/// folder is removed and the child is promoted to take its place.
+/// Unlike PromoteSingleChild, this uses the CHILD's name (more descriptive).
+///
+/// Example: Cymbals/OH -> OH (when OH is the only cymbal)
+///
+/// This is applied recursively from the bottom up.
+pub struct CollapseSingleChildFolders;
+
+impl<M: Metadata> StructureVisitor<M> for CollapseSingleChildFolders {
+    fn leave(&mut self, node: &mut Structure<M>, _depth: usize) {
+        // Process each child - if a child has exactly one grandchild and no items,
+        // replace the child with the grandchild
+        let mut i = 0;
+        while i < node.children.len() {
+            let child = &node.children[i];
+            // Check if this child should be collapsed:
+            // - Has exactly one child (grandchild)
+            // - Has no items on itself
+            if child.children.len() == 1 && child.items.is_empty() {
+                // Remove the intermediate child and replace with grandchild
+                let mut intermediate = node.children.remove(i);
+                let grandchild = intermediate.children.remove(0);
+                node.children.insert(i, grandchild);
+                // Don't increment i - we need to check the newly inserted grandchild
+            } else {
+                i += 1;
+            }
+        }
+    }
+}
+
+/// Helper function to collapse single-child intermediate folders throughout a structure
+pub fn collapse_single_child_folders<M: Metadata>(root: &mut Structure<M>) {
+    let mut collapser = CollapseSingleChildFolders;
+    root.accept(&mut collapser);
+}
+
 /// Visitor that expands multiple items on a node into individual child nodes
 ///
 /// This ensures each item becomes its own track. When a node has multiple items,
@@ -959,12 +999,62 @@ impl CleanupDisplayNames {
     fn strip_context(&self, name: &str) -> String {
         let words: Vec<&str> = name.split_whitespace().collect();
 
+        // Words that are modifiers/layers and should NOT be treated as identifying context
+        // These describe HOW something is recorded, not WHAT it is
+        // If these appear in an ancestor name, they shouldn't strip the same word from children
+        const NON_CONTEXT_WORDS: &[&str] = &[
+            // Layer/duplicate modifiers
+            "duplicate",
+            "dup",
+            "dbl",
+            "double",
+            "tpl",
+            "triple",
+            "quad",
+            "oct",
+            "octave",
+            "main",
+            "harmony",
+            "unison",
+            // Channel modifiers
+            "l",
+            "r",
+            "c",
+            "left",
+            "right",
+            "center",
+            "mid",
+            "side",
+            // Mic position modifiers
+            "in",
+            "out",
+            "top",
+            "bottom",
+            "close",
+            "room",
+            "far",
+            "near",
+            // Numbers (handled separately but listed for clarity)
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+        ];
+
         // Build a set of all context words from ancestors (lowercase for comparison)
+        // Exclude non-context words - they shouldn't be used to strip from children
         let context_words: std::collections::HashSet<String> = self
             .context_stack
             .iter()
             .flat_map(|ancestor| ancestor.split_whitespace())
             .map(|w| w.to_lowercase())
+            .filter(|w| !NON_CONTEXT_WORDS.contains(&w.as_str()))
             .collect();
 
         // Remove words that appear in context

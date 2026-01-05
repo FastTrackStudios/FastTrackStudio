@@ -10,8 +10,7 @@ impl From<ElectricGuitar> for ItemMetadataGroup {
     fn from(_val: ElectricGuitar) -> Self {
         use crate::item_metadata::ItemMetadataField;
 
-        // Define guitar-specific arrangement patterns
-        // These are guitar-specific and not in the global metadata patterns
+        // Define guitar-specific arrangement patterns (playing styles / tones)
         let guitar_arrangement = ItemMetadataGroup::builder("Arrangement")
             .patterns([
                 "Clean",
@@ -29,6 +28,38 @@ impl From<ElectricGuitar> for ItemMetadataGroup {
                 "Overdrive",
             ])
             .build();
+
+        // Define guitar model/variant descriptors
+        let variant_descriptors = vec![
+            FieldValueDescriptor::builder("Strat")
+                .patterns(["strat", "stratocaster"])
+                .build(),
+            FieldValueDescriptor::builder("Tele")
+                .patterns(["tele", "telecaster"])
+                .build(),
+            FieldValueDescriptor::builder("Les Paul")
+                .patterns(["les paul", "lespaul", "lp"])
+                .build(),
+            FieldValueDescriptor::builder("SG").patterns(["sg"]).build(),
+            FieldValueDescriptor::builder("Gretsch")
+                .patterns(["gretsch"])
+                .build(),
+            FieldValueDescriptor::builder("Jazzmaster")
+                .patterns(["jazzmaster", "jm"])
+                .build(),
+            FieldValueDescriptor::builder("Jaguar")
+                .patterns(["jaguar", "jag"])
+                .build(),
+            FieldValueDescriptor::builder("335")
+                .patterns(["335", "es-335", "es335"])
+                .build(),
+            FieldValueDescriptor::builder("Rickenbacker")
+                .patterns(["rickenbacker", "ric", "ricky"])
+                .build(),
+            FieldValueDescriptor::builder("PRS")
+                .patterns(["prs", "paul reed smith"])
+                .build(),
+        ];
 
         // Define multi-mic descriptors for guitar (Amp, DI, Amplitube)
         let multi_mic_descriptors = vec![
@@ -50,16 +81,31 @@ impl From<ElectricGuitar> for ItemMetadataGroup {
                 "lead guitar",
                 "lead_guitar",
                 "leadguitar",
+                // Common electric guitar models (also matched as variants)
+                "strat",
+                "stratocaster",
+                "tele",
+                "telecaster",
+                "les paul",
+                "lespaul",
+                "sg",
+                "gretsch",
+                "jazzmaster",
+                "jaguar",
+                "firebird",
+                "explorer",
+                "flying v",
             ])
             .performer(ItemMetadataGroup::builder("Performer").build()) // Priority 1: Performer (uses global patterns)
-            .arrangement(guitar_arrangement) // Priority 2: Arrangement
-            .layers(ItemMetadataGroup::builder("Layers").build()) // Priority 3: Layers (uses global patterns)
+            .field_value_descriptors(ItemMetadataField::Variant, variant_descriptors) // Priority 2: Variant/model
+            .arrangement(guitar_arrangement) // Priority 3: Arrangement
+            .layers(ItemMetadataGroup::builder("Layers").build()) // Priority 4: Layers (uses global patterns)
             .field_default_value(ItemMetadataField::Layers, "Main") // Default layer name for items without a layer
             .channel(
                 ItemMetadataGroup::builder("Channel")
                     .patterns(["L", "C", "R", "Left", "Center", "Right"])
                     .build(),
-            ) // Priority 4: Channel (order: L, C, R)
+            ) // Priority 5: Channel (order: L, C, R)
             // Note: We use field_value_descriptors for MultiMic, so we don't need the nested .multi_mic() group
             // The field_value_descriptors handle the MultiMic value extraction and matching
             .field_value_descriptors(ItemMetadataField::MultiMic, multi_mic_descriptors)
@@ -141,11 +187,12 @@ mod tests {
         daw::tracks::display_tracklist(&tracks);
 
         // Guitars (with patterns) is preserved, Electric and Clean are collapsed
-        // Base track (Guitar Clean) goes on folder, Amp and DI are child tracks
+        // All items expand to children (Amp, DI, Electric Clean)
         let expected = TrackStructureBuilder::new()
-            .folder_with_items("Guitars", Some("Guitar Clean"))
+            .folder("Guitars")
             .track("Amp", "Guitar Clean Amp")
             .track("DI", "Guitar Clean DI")
+            .track("Electric Clean", "Guitar Clean")
             .end()
             .build();
 
@@ -156,7 +203,7 @@ mod tests {
     fn multiple_arrangements_with_multi_mics() {
         // Example 3 extended: Multiple arrangements with multi-mics
         // Input: Guitar Clean, Guitar Clean Amp, Guitar Clean DI, Guitar Drive, Guitar Drive Amp, Guitar Drive DI
-        // Output: Electric -> Clean: [base] -> Amp, DI and Drive: [base] -> Amp, DI
+        // Output: Electric -> Clean -> Amp, DI, Electric Clean and Drive -> Amp, DI, Electric Drive
         let items = vec![
             "Guitar Clean",
             "Guitar Clean Amp",
@@ -173,16 +220,19 @@ mod tests {
         daw::tracks::display_tracklist(&tracks);
 
         // Guitars (with patterns) is preserved, Electric is collapsed
-        // Each arrangement has base item on folder, multi-mics as children
+        // Each arrangement has items expanded to children
+        // "Clean" and "Drive" are stripped since they're parent folder names
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
-            .folder_with_items("Clean", Some("Guitar Clean"))
+            .folder("Clean")
             .track("Amp", "Guitar Clean Amp")
             .track("DI", "Guitar Clean DI")
+            .track("Electric", "Guitar Clean")
             .end()
-            .folder_with_items("Drive", Some("Guitar Drive"))
+            .folder("Drive")
             .track("Amp", "Guitar Drive Amp")
             .track("DI", "Guitar Drive DI")
+            .track("Electric", "Guitar Drive")
             .end()
             .end()
             .build();
@@ -212,16 +262,18 @@ mod tests {
         daw::tracks::display_tracklist(&tracks);
 
         // Guitars (with patterns) is preserved, Electric and Clean are collapsed
-        // Main and DBL are layers directly under Guitars
+        // Main and DBL are layers - items expand to individual children
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
-            .folder_with_items("Main", Some("Guitar Clean"))
+            .folder("Main")
             .track("Amp", "Guitar Clean Amp")
             .track("DI", "Guitar Clean DI")
+            .track("Electric Clean", "Guitar Clean")
             .end()
-            .folder_with_items("DBL", Some("Guitar Clean DBL"))
+            .folder("DBL")
             .track("Amp", "Guitar Clean Amp DBL")
             .track("DI", "Guitar Clean DI DBL")
+            .track("Electric Clean DBL", "Guitar Clean DBL")
             .end()
             .end()
             .build();
@@ -254,20 +306,23 @@ mod tests {
         daw::tracks::display_tracklist(&tracks);
 
         // Guitars (with patterns) is preserved, Electric, Clean, Main are collapsed
-        // Channels (L, C, R) are directly under Guitars
+        // Channels (L, C, R) are directly under Guitars, items expand to children
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
-            .folder_with_items("L", Some("Guitar Clean L"))
+            .folder("L")
             .track("Amp", "Guitar Clean Amp L")
             .track("DI", "Guitar Clean DI L")
+            .track("Electric Clean L", "Guitar Clean L")
             .end()
-            .folder_with_items("C", Some("Guitar Clean C"))
+            .folder("C")
             .track("Amp", "Guitar Clean Amp C")
             .track("DI", "Guitar Clean DI C")
+            .track("Electric Clean C", "Guitar Clean C")
             .end()
-            .folder_with_items("R", Some("Guitar Clean R"))
+            .folder("R")
             .track("Amp", "Guitar Clean Amp R")
             .track("DI", "Guitar Clean DI R")
+            .track("Electric Clean R", "Guitar Clean R")
             .end()
             .end()
             .build();
@@ -310,35 +365,41 @@ mod tests {
         daw::tracks::display_tracklist(&tracks);
 
         // Guitars (with patterns) is preserved, Electric and Clean are collapsed
-        // Main and DBL are layers, each with channels L, C, R
+        // Main and DBL are layers, each with channels L, C, R, items expand to children
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
             .folder("Main")
-            .folder_with_items("L", Some("Guitar Clean Main L"))
+            .folder("L")
             .track("Amp", "Guitar Clean Amp Main L")
             .track("DI", "Guitar Clean DI Main L")
+            .track("Electric Clean Main L", "Guitar Clean Main L")
             .end()
-            .folder_with_items("C", Some("Guitar Clean Main C"))
+            .folder("C")
             .track("Amp", "Guitar Clean Amp Main C")
             .track("DI", "Guitar Clean DI Main C")
+            .track("Electric Clean Main C", "Guitar Clean Main C")
             .end()
-            .folder_with_items("R", Some("Guitar Clean Main R"))
+            .folder("R")
             .track("Amp", "Guitar Clean Amp Main R")
             .track("DI", "Guitar Clean DI Main R")
+            .track("Electric Clean Main R", "Guitar Clean Main R")
             .end()
             .end()
             .folder("DBL")
-            .folder_with_items("L", Some("Guitar Clean DBL L"))
+            .folder("L")
             .track("Amp", "Guitar Clean Amp DBL L")
             .track("DI", "Guitar Clean DI DBL L")
+            .track("Electric Clean DBL L", "Guitar Clean DBL L")
             .end()
-            .folder_with_items("C", Some("Guitar Clean DBL C"))
+            .folder("C")
             .track("Amp", "Guitar Clean Amp DBL C")
             .track("DI", "Guitar Clean DI DBL C")
+            .track("Electric Clean DBL C", "Guitar Clean DBL C")
             .end()
-            .folder_with_items("R", Some("Guitar Clean DBL R"))
+            .folder("R")
             .track("Amp", "Guitar Clean Amp DBL R")
             .track("DI", "Guitar Clean DI DBL R")
+            .track("Electric Clean DBL R", "Guitar Clean DBL R")
             .end()
             .end()
             .end()

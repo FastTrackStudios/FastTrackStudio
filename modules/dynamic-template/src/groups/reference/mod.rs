@@ -32,6 +32,10 @@ impl From<Reference> for Group<ItemMetadata> {
                 "ref",
                 "ref mix",
                 "reference mix",
+                // Mixdown abbreviations
+                "MDN",
+                "mixdown",
+                "mix down",
                 // 2-track patterns
                 "2 track",
                 "2-track",

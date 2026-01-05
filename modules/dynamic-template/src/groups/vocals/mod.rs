@@ -9,7 +9,9 @@ pub use background_vocals::BackgroundVocals;
 pub use lead_vocals::LeadVocals;
 
 /// Top-level vocals group containing lead and background vocals
-/// This is transparent so Lead Vocals and BGVs appear at top level
+///
+/// Not transparent - creates a Vocals folder when there are multiple vocal types
+/// (e.g., Lead and BGVs). This provides clearer organization in the track list.
 pub struct Vocals;
 
 impl From<Vocals> for ItemMetadataGroup {
@@ -19,8 +21,6 @@ impl From<Vocals> for ItemMetadataGroup {
             .patterns(["vocal", "vocals", "vox", "voc", "voca", "voice"])
             // Exclude non-vocal voice effects (these should go to SFX)
             .exclude(["robot", "vocoder", "talkbox"])
-            // Make transparent so Lead Vocals and BGVs appear at top level
-            .transparent()
             .group(LeadVocals)
             .group(BackgroundVocals)
             .build()

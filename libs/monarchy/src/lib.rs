@@ -150,10 +150,11 @@ pub use test_utils::StructureAssertions;
 // Display name generation
 // ToDisplayName: trait implemented by metadata types to generate canonical display names
 pub use visitor::{
-    cleanup_display_names, cleanup_display_names_with_fallback, collect_unsorted_to_root,
-    collect_unsorted_to_root_with_name, expand_items_to_children, ApplyTaggedCollections,
-    CleanupDisplayNames, CollectUnsorted, CollapseHierarchy, ExpandItemsToChildren,
-    PromoteSingleChild, RemoveEmptyNodes, StructureVisitor, Visitable,
+    cleanup_display_names, cleanup_display_names_with_fallback, collapse_single_child_folders,
+    collect_unsorted_to_root, collect_unsorted_to_root_with_name, expand_items_to_children,
+    ApplyTaggedCollections, CleanupDisplayNames, CollapseSingleChildFolders, CollectUnsorted,
+    CollapseHierarchy, ExpandItemsToChildren, PromoteSingleChild, RemoveEmptyNodes,
+    StructureVisitor, Visitable,
 };
 // Note: ToDisplayName is defined in this file, not in visitor module
 
@@ -660,6 +661,357 @@ pub fn move_unsorted_to_group<M: Metadata>(
     Ok(sorted_count)
 }
 
+/// Move a specific child node to a target group
+///
+/// Unlike `move_unsorted_to_group` which moves ALL items from a path, this function
+/// moves a specific named child (and all its contents) from a source path to a target group.
+///
+/// This is useful for manual sorting where you want to move specific performer groups
+/// (e.g., "Chad", "Lou") from Unsorted to BGVs, rather than moving everything at once.
+///
+/// # Arguments
+/// * `root` - The root structure (modified in place)
+/// * `config` - The full config for re-parsing
+/// * `child_name` - Name of the child to move (e.g., "Chad")
+/// * `source_path` - Path where the child currently lives (e.g., &["Unsorted"])
+/// * `target_group` - Name of the group to sort items into (e.g., "BGVs")
+/// * `target_path` - Path where the sorted result should be merged (e.g., &["Vocals"])
+///
+/// # Returns
+/// * `Ok(usize)` - Number of items sorted into the target group
+///
+/// # Example
+///
+/// ```ignore
+/// // Move "Chad" from Unsorted to BGVs under Vocals
+/// move_child_to_group(
+///     &mut structure,
+///     &config,
+///     "Chad",           // Child to move
+///     &["Unsorted"],    // Source path
+///     "BGVs",           // Target group
+///     &["Vocals"],      // Target path
+/// )?;
+/// ```
+pub fn move_child_to_group<M: Metadata>(
+    root: &mut Structure<M>,
+    config: &Config<M>,
+    child_name: &str,
+    source_path: &[&str],
+    target_group: &str,
+    target_path: &[&str],
+) -> Result<usize> {
+    // Find the source parent and extract the specific child
+    let items = if source_path.is_empty() {
+        // Source is root - extract child directly
+        if let Some(mut child) = root.remove_child(child_name) {
+            child.extract_all_items()
+        } else {
+            return Ok(0); // Child not found
+        }
+    } else {
+        // Navigate to source path and extract child
+        if let Some(parent) = root.find_at_path_mut(source_path) {
+            if let Some(mut child) = parent.remove_child(child_name) {
+                child.extract_all_items()
+            } else {
+                return Ok(0); // Child not found
+            }
+        } else {
+            return Ok(0); // Source path not found
+        }
+    };
+
+    if items.is_empty() {
+        return Ok(0);
+    }
+
+    // Assign items to target group and organize by metadata fields
+    let scoped_result = assign_to_group(items, config, target_group)?;
+    let sorted_count = scoped_result.sorted.total_items();
+
+    // Merge sorted result into target path
+    if !scoped_result.sorted.is_empty() {
+        root.merge_at_path(target_path, scoped_result.sorted);
+    }
+
+    // Put unsorted items back in Unsorted folder
+    if !scoped_result.unsorted.is_empty() {
+        let unsorted_folder = if let Some(folder) = root.find_child_mut("Unsorted") {
+            folder
+        } else {
+            root.children.push(Structure::new("Unsorted"));
+            root.children.last_mut().unwrap()
+        };
+        unsorted_folder.items.extend(scoped_result.unsorted);
+    }
+
+    // Clean up empty source path if needed
+    if !source_path.is_empty() {
+        // Check if source parent is now empty and remove it
+        if source_path.len() > 1 {
+            if let Some(parent) = root.find_at_path_mut(&source_path[..source_path.len() - 1]) {
+                let source_name = source_path[source_path.len() - 1];
+                if let Some(source) = parent.find_child(source_name) {
+                    if source.is_empty() {
+                        parent.remove_child(source_name);
+                    }
+                }
+            }
+        } else {
+            // Source is direct child of root
+            if let Some(source) = root.find_child(source_path[0]) {
+                if source.is_empty() {
+                    root.remove_child(source_path[0]);
+                }
+            }
+        }
+    }
+
+    Ok(sorted_count)
+}
+
+/// Move items matching a pattern from a source path to a target group
+///
+/// This function finds all items (recursively) in the source path where the original
+/// text contains the pattern, extracts them, and re-sorts them into the target group.
+///
+/// This is useful for moving items by performer name, instrument type, etc.
+/// without needing pre-organized folder structure.
+///
+/// # Arguments
+/// * `root` - The root structure (modified in place)
+/// * `config` - The full config for re-parsing
+/// * `pattern` - Pattern to match in item's original text (case-insensitive word match)
+/// * `source_path` - Path where items currently live (e.g., &["Unsorted"])
+/// * `target_group` - Name of the group to sort items into (e.g., "BGVs")
+/// * `target_path` - Path where the sorted result should be merged (e.g., &["Vocals"])
+///
+/// # Returns
+/// * `Ok(usize)` - Number of items moved to the target group
+///
+/// # Example
+///
+/// ```ignore
+/// // Move all items containing "Chad" from Unsorted to BGVs under Vocals
+/// move_items_matching_to_group(
+///     &mut structure,
+///     &config,
+///     "Chad",           // Pattern to match
+///     &["Unsorted"],    // Source path
+///     "BGVs",           // Target group
+///     &["Vocals"],      // Target path
+/// )?;
+/// ```
+pub fn move_items_matching_to_group<M: Metadata>(
+    root: &mut Structure<M>,
+    config: &Config<M>,
+    pattern: &str,
+    source_path: &[&str],
+    target_group: &str,
+    target_path: &[&str],
+) -> Result<usize> {
+    // Extract items matching the pattern from the source path
+    let matching_items = {
+        let source = if source_path.is_empty() {
+            Some(root as &mut Structure<M>)
+        } else {
+            root.find_at_path_mut(source_path)
+        };
+
+        match source {
+            Some(node) => {
+                let mut items = Vec::new();
+                extract_items_matching(node, pattern, &mut items);
+                items
+            }
+            None => return Ok(0), // Source path not found
+        }
+    };
+
+    if matching_items.is_empty() {
+        return Ok(0);
+    }
+
+    // Assign items to target group and organize by metadata fields
+    let scoped_result = assign_to_group(matching_items, config, target_group)?;
+    let sorted_count = scoped_result.sorted.total_items();
+
+    // Merge sorted result into target path
+    if !scoped_result.sorted.is_empty() {
+        root.merge_at_path(target_path, scoped_result.sorted);
+    }
+
+    // Put unsorted items back in Unsorted folder
+    if !scoped_result.unsorted.is_empty() {
+        let unsorted_folder = if let Some(folder) = root.find_child_mut("Unsorted") {
+            folder
+        } else {
+            root.children.push(Structure::new("Unsorted"));
+            root.children.last_mut().unwrap()
+        };
+        unsorted_folder.items.extend(scoped_result.unsorted);
+    }
+
+    // Clean up empty nodes in source path
+    cleanup_empty_nodes(root, source_path);
+
+    Ok(sorted_count)
+}
+
+/// Move items matching ANY of multiple patterns from a source path to a target group
+///
+/// This is like `move_items_matching_to_group` but takes multiple patterns.
+/// All items matching any pattern are moved together, which allows the organizer
+/// to create proper subfolders when multiple performers/values exist.
+///
+/// # Example
+///
+/// ```ignore
+/// // Move all BGV performers (Chad, Lou, Tit) from Unsorted to BGVs
+/// move_items_matching_any_to_group(
+///     &mut structure,
+///     &config,
+///     &["Chad", "Lou", "Tit"],  // Multiple patterns
+///     &["Unsorted"],
+///     "BGVs",
+///     &["Vocals"],
+/// )?;
+/// ```
+pub fn move_items_matching_any_to_group<M: Metadata>(
+    root: &mut Structure<M>,
+    config: &Config<M>,
+    patterns: &[&str],
+    source_path: &[&str],
+    target_group: &str,
+    target_path: &[&str],
+) -> Result<usize> {
+    // Extract items matching ANY of the patterns from the source path
+    let matching_items = {
+        let source = if source_path.is_empty() {
+            Some(root as &mut Structure<M>)
+        } else {
+            root.find_at_path_mut(source_path)
+        };
+
+        match source {
+            Some(node) => {
+                let mut items = Vec::new();
+                extract_items_matching_any(node, patterns, &mut items);
+                items
+            }
+            None => return Ok(0), // Source path not found
+        }
+    };
+
+    if matching_items.is_empty() {
+        return Ok(0);
+    }
+
+    // Assign items to target group and organize by metadata fields
+    let scoped_result = assign_to_group(matching_items, config, target_group)?;
+    let sorted_count = scoped_result.sorted.total_items();
+
+    // Merge sorted result into target path
+    if !scoped_result.sorted.is_empty() {
+        root.merge_at_path(target_path, scoped_result.sorted);
+    }
+
+    // Put unsorted items back in Unsorted folder
+    if !scoped_result.unsorted.is_empty() {
+        let unsorted_folder = if let Some(folder) = root.find_child_mut("Unsorted") {
+            folder
+        } else {
+            root.children.push(Structure::new("Unsorted"));
+            root.children.last_mut().unwrap()
+        };
+        unsorted_folder.items.extend(scoped_result.unsorted);
+    }
+
+    // Clean up empty nodes in source path
+    cleanup_empty_nodes(root, source_path);
+
+    Ok(sorted_count)
+}
+
+/// Helper: Extract items matching a pattern from a structure (recursively)
+fn extract_items_matching<M: Metadata>(
+    node: &mut Structure<M>,
+    pattern: &str,
+    out: &mut Vec<Item<M>>,
+) {
+    // Extract matching items from this node
+    let mut remaining = Vec::new();
+    for item in std::mem::take(&mut node.items) {
+        if crate::utils::contains_word(&item.original, pattern) {
+            out.push(item);
+        } else {
+            remaining.push(item);
+        }
+    }
+    node.items = remaining;
+
+    // Recursively process children
+    for child in &mut node.children {
+        extract_items_matching(child, pattern, out);
+    }
+
+    // Remove empty children
+    node.children.retain(|c| !c.is_empty());
+}
+
+/// Helper: Extract items matching ANY of multiple patterns from a structure (recursively)
+fn extract_items_matching_any<M: Metadata>(
+    node: &mut Structure<M>,
+    patterns: &[&str],
+    out: &mut Vec<Item<M>>,
+) {
+    // Extract items matching any pattern from this node
+    let mut remaining = Vec::new();
+    for item in std::mem::take(&mut node.items) {
+        if patterns.iter().any(|p| crate::utils::contains_word(&item.original, p)) {
+            out.push(item);
+        } else {
+            remaining.push(item);
+        }
+    }
+    node.items = remaining;
+
+    // Recursively process children
+    for child in &mut node.children {
+        extract_items_matching_any(child, patterns, out);
+    }
+
+    // Remove empty children
+    node.children.retain(|c| !c.is_empty());
+}
+
+/// Helper: Clean up empty nodes along a path
+fn cleanup_empty_nodes<M: Metadata>(root: &mut Structure<M>, path: &[&str]) {
+    if path.is_empty() {
+        return;
+    }
+
+    // Check if the source is empty and remove it
+    if path.len() == 1 {
+        if let Some(source) = root.find_child(path[0]) {
+            if source.is_empty() {
+                root.remove_child(path[0]);
+            }
+        }
+    } else {
+        // Navigate to parent and check child
+        if let Some(parent) = root.find_at_path_mut(&path[..path.len() - 1]) {
+            let child_name = path[path.len() - 1];
+            if let Some(child) = parent.find_child(child_name) {
+                if child.is_empty() {
+                    parent.remove_child(child_name);
+                }
+            }
+        }
+    }
+}
+
 /// Re-sort items and merge them into an existing structure
 /// 
 /// This is a simpler version of `move_unsorted_to_group` that takes items directly
@@ -697,10 +1049,8 @@ pub fn sort_and_merge<M: Metadata>(
 /// After merging new items into a structure, the hierarchy may need to be
 /// re-collapsed to remove unnecessary intermediate levels.
 pub fn reapply_collapse<M: Metadata>(root: &mut Structure<M>, config: &Config<M>) {
-    let mut collapse_visitor = CollapseHierarchy::new(config);
-    for child in &mut root.children {
-        child.accept(&mut collapse_visitor);
-    }
+    let collapse = CollapseHierarchy::new(config);
+    collapse.apply(root);
 }
 
 /// Trait for containers that can hold sorted items

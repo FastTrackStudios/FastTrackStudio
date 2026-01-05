@@ -1,5 +1,5 @@
-use dynamic_template::{default_config, IntoTracks, ItemMetadata};
-use monarchy::{monarchy_sort, Parser};
+use dynamic_template::{default_config, ItemMetadata, OrganizeIntoTracks};
+use monarchy::Parser;
 use std::env;
 
 fn main() {
@@ -122,13 +122,12 @@ fn analyze_single(
     println!("────────────────────────────────────────────────────────────────");
     println!("  \"{}\"", display_name);
 
-    // Show final structure
-    println!("\nFINAL STRUCTURE (single item tree):");
+    // Show final tracks
+    println!("\nTRACKS:");
     println!("────────────────────────────────────────────────────────────────");
-    let result = monarchy_sort(vec![input.to_string()], config.clone());
-    match result {
-        Ok(structure) => {
-            structure.print_tree();
+    match vec![input.to_string()].organize_into_tracks(config, None) {
+        Ok(tracks) => {
+            print_tracks(&tracks);
         }
         Err(e) => {
             eprintln!("  Error: {}", e);
@@ -185,18 +184,11 @@ fn analyze_multiple(
         println!();
     }
 
-    // Show structure tree
-    println!("STRUCTURE TREE:");
+    // Convert to tracks using organize_into_tracks (default options include expansion)
+    println!("TRACKS:");
     println!("────────────────────────────────────────────────────────────────");
-    let result = monarchy_sort(input_strings.clone(), config.clone());
-    match result {
-        Ok(structure) => {
-            structure.print_tree();
-
-            // Convert to tracks and show
-            println!("\nTRACKS (as they would appear in DAW):");
-            println!("────────────────────────────────────────────────────────────────");
-            let tracks = structure.to_tracks();
+    match input_strings.organize_into_tracks(config, None) {
+        Ok(tracks) => {
             print_tracks(&tracks);
         }
         Err(e) => {

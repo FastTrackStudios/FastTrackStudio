@@ -1,15 +1,14 @@
 //! Upright bass group definition
 
-use crate::item_metadata::ItemMetadata;
-use monarchy::Group;
+use crate::item_metadata::prelude::*;
 
 /// Upright bass group
 pub struct UprightBass;
 
-impl From<UprightBass> for Group<ItemMetadata> {
+impl From<UprightBass> for ItemMetadataGroup {
     fn from(_val: UprightBass) -> Self {
-        Group::builder("Upright Bass")
-            .patterns(vec!["upright", "double_bass", "acoustic_bass"])
+        ItemMetadataGroup::builder("Upright Bass")
+            .patterns(["upright", "double_bass", "acoustic_bass"])
             .build()
     }
 }

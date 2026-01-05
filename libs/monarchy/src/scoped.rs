@@ -359,6 +359,114 @@ pub fn move_unsorted_to_group<M: Metadata>(
     Ok(sorted_count)
 }
 
+/// Move a specific child node to a target group
+///
+/// Unlike `move_unsorted_to_group` which moves ALL items from a path, this function
+/// moves a specific named child (and all its contents) from a source path to a target group.
+///
+/// This is useful for manual sorting where you want to move specific performer groups
+/// (e.g., "Chad", "Lou") from Unsorted to BGVs, rather than moving everything at once.
+///
+/// # Arguments
+/// * `root` - The root structure (modified in place)
+/// * `config` - The full config for re-parsing
+/// * `child_name` - Name of the child to move (e.g., "Chad")
+/// * `source_path` - Path where the child currently lives (e.g., &["Unsorted"])
+/// * `target_group` - Name of the group to sort items into (e.g., "BGVs")
+/// * `target_path` - Path where the sorted result should be merged (e.g., &["Vocals"])
+///
+/// # Returns
+/// * `Ok(usize)` - Number of items sorted into the target group
+///
+/// # Example
+///
+/// ```ignore
+/// // Move "Chad" from Unsorted to BGVs under Vocals
+/// move_child_to_group(
+///     &mut structure,
+///     &config,
+///     "Chad",           // Child to move
+///     &["Unsorted"],    // Source path
+///     "BGVs",           // Target group
+///     &["Vocals"],      // Target path
+/// )?;
+/// ```
+pub fn move_child_to_group<M: Metadata>(
+    root: &mut Structure<M>,
+    config: &Config<M>,
+    child_name: &str,
+    source_path: &[&str],
+    target_group: &str,
+    target_path: &[&str],
+) -> Result<usize> {
+    // Find the source parent and extract the specific child
+    let items = if source_path.is_empty() {
+        // Source is root - extract child directly
+        if let Some(mut child) = root.remove_child(child_name) {
+            child.extract_all_items()
+        } else {
+            return Ok(0); // Child not found
+        }
+    } else {
+        // Navigate to source path and extract child
+        if let Some(parent) = root.find_at_path_mut(source_path) {
+            if let Some(mut child) = parent.remove_child(child_name) {
+                child.extract_all_items()
+            } else {
+                return Ok(0); // Child not found
+            }
+        } else {
+            return Ok(0); // Source path not found
+        }
+    };
+
+    if items.is_empty() {
+        return Ok(0);
+    }
+
+    // Assign items to target group and organize by metadata fields
+    let scoped_result = assign_to_group(items, config, target_group)?;
+    let sorted_count = scoped_result.sorted.total_items();
+
+    // Merge sorted result into target path
+    if !scoped_result.sorted.is_empty() {
+        root.merge_at_path(target_path, scoped_result.sorted);
+    }
+
+    // Put unsorted items back in Unsorted folder
+    if !scoped_result.unsorted.is_empty() {
+        let unsorted_folder = if let Some(folder) = root.find_child_mut("Unsorted") {
+            folder
+        } else {
+            root.children.push(Structure::new("Unsorted"));
+            root.children.last_mut().unwrap()
+        };
+        unsorted_folder.items.extend(scoped_result.unsorted);
+    }
+
+    // Clean up empty source path if needed
+    if !source_path.is_empty() {
+        // Check if source parent is now empty and remove it
+        if let Some(parent) = root.find_at_path_mut(&source_path[..source_path.len() - 1]) {
+            let source_name = source_path[source_path.len() - 1];
+            if let Some(source) = parent.find_child(source_name) {
+                if source.is_empty() {
+                    parent.remove_child(source_name);
+                }
+            }
+        } else if source_path.len() == 1 {
+            // Source is direct child of root
+            if let Some(source) = root.find_child(source_path[0]) {
+                if source.is_empty() {
+                    root.remove_child(source_path[0]);
+                }
+            }
+        }
+    }
+
+    Ok(sorted_count)
+}
+
 /// Re-sort items and merge them into an existing structure
 ///
 /// This is a simpler version of `move_unsorted_to_group` that takes items directly

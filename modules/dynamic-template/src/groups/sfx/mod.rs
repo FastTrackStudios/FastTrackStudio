@@ -29,6 +29,7 @@ impl From<SFX> for Group<ItemMetadata> {
                 "impact",
                 "riser",
                 "sweep",
+                "swell",
                 "hit",
                 "boom",
                 "explosion",

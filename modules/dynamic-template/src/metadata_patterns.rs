@@ -83,7 +83,18 @@ pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
 
     let layers = Group::builder("Layers")
         .patterns([
-            "DBL", "TPL", "Double", "Triple", "Main", "OCT", "1", "2", "3", "4", "5",
+            "DBL",
+            "TPL",
+            "Double",
+            "Triple",
+            "Main",
+            "OCT",
+            "Duplicate",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
         ])
         .build();
 
@@ -106,20 +117,20 @@ pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
             "Bill", "Bob", "Brad", "Brandon", "Bri", "Brian", "Brittany", "Caleb", "Carlos",
             "Chad", "Chris", "Cody", "Connor", "Corey", "Dakota", "Dan", "Daniel", "Dave", "David",
             "Derek", "Diana", "Dylan", "Ed", "Elena", "Emily", "Emma", "Eric", "Ethan", "Evan",
-            "Frank", "Fred", "Gary", "George", "Grace", "Greg", "Hannah", "Harry", "Heather",
-            "Henry", "Ian", "Isaac", "Jack", "Jacob", "Jake", "James", "Jamie", "Jason", "Jeff",
-            "Jen", "Jennifer", "Jeremy", "Jesse", "Jessica", "Jim", "Joe", "Joey", "John",
+            "Fernando", "Frank", "Fred", "Gary", "George", "Grace", "Greg", "Hannah", "Harry",
+            "Heather", "Henry", "Ian", "Isaac", "Jack", "Jacob", "Jake", "James", "Jamie", "Jason",
+            "Jeff", "Jen", "Jennifer", "Jeremy", "Jesse", "Jessica", "Jim", "Joe", "Joey", "John",
             "Johnny", "Johny", "Jon", "Jordan", "Jose", "Josh", "Joshua", "JT", "Juan", "Julia",
             "Justin", "Karen", "Kate", "Katie", "Keith", "Kelly", "Ken", "Kevin", "Kim", "Kyle",
-            "Larry", "Laura", "Lauren", "Leo", "Lisa", "Logan", "Luke", "Madison", "Marc",
+            "Larry", "Laura", "Lauren", "Leo", "Lisa", "Logan", "Lou", "Luke", "Madison", "Marc",
             "Marcus", "Maria", "Mark", "Matt", "Matthew", "Megan", "Melissa", "Michael",
             "Michelle", "Mike", "Mitch", "Morgan", "Nancy", "Nate", "Nathan", "Nick", "Nicole",
-            "Noah", "Oliver", "Olivia", "Pat", "Patrick", "Paul", "Pete", "Peter", "Phil",
+            "Noah", "Oliver", "Olivia", "Pat", "Patrick", "Paul", "Perry", "Pete", "Peter", "Phil",
             "Rachel", "Randy", "Ray", "Rebecca", "Richard", "Rick", "Rob", "Robert", "Roger",
             "Ron", "Ryan", "Sam", "Samantha", "Sandra", "Sara", "Sarah", "Scott", "Sean", "Seth",
             "Shane", "Shannon", "Sharon", "Shawn", "Sophia", "Stacy", "Steve", "Steven", "Taylor",
-            "Thomas", "Tim", "Timothy", "Todd", "Tom", "Tony", "Travis", "Tyler", "Victor",
-            "Victoria", "Will", "William", "Zach", "Zachary", "Zoe",
+            "Thomas", "Tit", "Tim", "Timothy", "Todd", "Tom", "Tony", "Travis", "Tyler", "Victor",
+            "Victoria", "Warren", "Will", "William", "Zach", "Zachary", "Zoe",
         ])
         .build();
 

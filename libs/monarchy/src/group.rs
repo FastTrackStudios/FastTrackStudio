@@ -84,8 +84,13 @@ impl IntoVec<String> for &[&str] {
 /// Defines a group pattern for organizing items
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Group<M: Metadata> {
-    /// Name of this group
+    /// Name of this group (used for display)
     pub name: String,
+
+    /// Optional unique identifier for this group (used for targeting in operations)
+    /// Examples: "kick_drum_kit", "snare_electronic", "bgvs", "lead_vocals"
+    /// If not set, the group can still be found by name, but id provides unambiguous targeting
+    pub id: Option<String>,
 
     /// Optional prefix to apply to this group and its children
     pub prefix: Option<String>,
@@ -240,6 +245,7 @@ impl<M: Metadata> GroupBuilder<M> {
         GroupBuilder {
             group: Group {
                 name: name.into(),
+                id: None,
                 prefix: None,
                 inherit_prefix: true,
                 blocked_prefixes: Vec::new(),
@@ -347,6 +353,24 @@ impl<M: Metadata> GroupBuilder<M> {
         self.group
             .field_value_descriptors
             .insert(field_name, descriptors);
+        self
+    }
+
+    /// Set a unique identifier for this group
+    ///
+    /// The ID is used for unambiguous targeting in operations like `move_child_to_group`.
+    /// Convention: use snake_case with parent context, e.g., "kick_drum_kit", "snare_electronic"
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// Group::builder("Kick")
+    ///     .id("kick_drum_kit")
+    ///     .patterns(["kick", "kik", "bd"])
+    ///     .build()
+    /// ```
+    pub fn id(mut self, id: impl Into<String>) -> Self {
+        self.group.id = Some(id.into());
         self
     }
 

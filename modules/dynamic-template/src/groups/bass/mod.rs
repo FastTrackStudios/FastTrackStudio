@@ -1,7 +1,6 @@
 //! Bass-related group definitions
 
-use crate::item_metadata::ItemMetadata;
-use monarchy::Group;
+use crate::item_metadata::prelude::*;
 
 pub mod bass_guitar;
 pub mod synth_bass;
@@ -14,13 +13,13 @@ pub use upright_bass::UprightBass;
 /// Top-level bass group containing all bass types
 pub struct Bass;
 
-impl From<Bass> for Group<ItemMetadata> {
+impl From<Bass> for ItemMetadataGroup {
     fn from(_val: Bass) -> Self {
-        Group::builder("Bass")
+        ItemMetadataGroup::builder("Bass")
             .prefix("Bass")
-            .patterns(vec!["bass"])
+            .patterns(["bass"])
             // Negative patterns to avoid matching bass drums
-            .exclude(vec!["bassdrum", "bass_drum", "bd", "kick"])
+            .exclude(["bassdrum", "bass_drum", "bd", "kick"])
             .group(BassGuitar)
             .group(SynthBass)
             .group(UprightBass)
@@ -32,7 +31,6 @@ impl From<Bass> for Group<ItemMetadata> {
 mod tests {
     use super::*;
     use crate::{default_config, OrganizeIntoTracks};
-    use daw::tracks::item::Item;
     use daw::tracks::{assert_tracks_equal, TrackStructureBuilder};
 
     #[test]
@@ -52,12 +50,12 @@ mod tests {
         // Bass
         // -Guitar [Bass Guitar]
         // -Synth [Bass Synth]
-        // -Upright Bass [Upright Bass]
+        // -Upright [Upright Bass]  <- "Bass" stripped from context
         let expected = TrackStructureBuilder::new()
             .folder("Bass")
             .track("Guitar", "Bass Guitar")
             .track("Synth", "Bass Synth")
-            .track("Upright Bass", "Upright Bass")
+            .track("Upright", "Upright Bass")
             .end()
             .build();
 

@@ -62,6 +62,39 @@ impl ItemToString for Item {
     }
 }
 
+/// Options for organizing items into tracks
+#[derive(Clone)]
+pub struct OrganizeOptions {
+    /// Expand multiple items on a node into individual child tracks
+    pub expand_items: bool,
+    /// Clean up display names by stripping redundant context
+    pub cleanup_names: bool,
+    /// Collapse single-child intermediate folders (e.g., Cymbals/OH -> OH)
+    pub collapse_single_child: bool,
+}
+
+impl Default for OrganizeOptions {
+    /// Default options enable expansion, cleanup, and collapse
+    fn default() -> Self {
+        Self {
+            expand_items: true,
+            cleanup_names: true,
+            collapse_single_child: true,
+        }
+    }
+}
+
+impl OrganizeOptions {
+    /// Create options with no transformations (raw monarchy sort output)
+    pub fn none() -> Self {
+        Self {
+            expand_items: false,
+            cleanup_names: false,
+            collapse_single_child: false,
+        }
+    }
+}
+
 /// Trait for organizing DAW Items into Tracks using monarchy sort
 ///
 /// This trait accepts anything that can be converted into DAW Items,
@@ -76,6 +109,16 @@ pub trait OrganizeIntoTracks {
         config: &DynamicTemplateConfig,
         existing_tracks: Option<&[Track]>,
     ) -> monarchy::Result<Vec<Track>>;
+
+    /// Organize items into tracks with additional options
+    ///
+    /// Use `OrganizeOptions::with_expansion()` to enable item expansion and name cleanup.
+    fn organize_into_tracks_with_options(
+        self,
+        config: &DynamicTemplateConfig,
+        existing_tracks: Option<&[Track]>,
+        options: OrganizeOptions,
+    ) -> monarchy::Result<Vec<Track>>;
 }
 
 impl<T> OrganizeIntoTracks for Vec<T>
@@ -87,8 +130,30 @@ where
         config: &DynamicTemplateConfig,
         existing_tracks: Option<&[Track]>,
     ) -> monarchy::Result<Vec<Track>> {
+        // Default: no expansion or cleanup (backwards compatible)
+        self.organize_into_tracks_with_options(config, existing_tracks, OrganizeOptions::default())
+    }
+
+    fn organize_into_tracks_with_options(
+        self,
+        config: &DynamicTemplateConfig,
+        existing_tracks: Option<&[Track]>,
+        options: OrganizeOptions,
+    ) -> monarchy::Result<Vec<Track>> {
         // Convert input to DAW Items
         let items: Vec<Item> = self.into_iter().map(|t| t.into()).collect();
+
+        // Collect input strings in order first (preserving original order)
+        let input_strings: Vec<String> = items
+            .iter()
+            .map(|item| {
+                if item.name.is_empty() {
+                    item.id.to_string()
+                } else {
+                    item.name.clone()
+                }
+            })
+            .collect();
 
         // Create a mapping from item string to original DAW Item
         let item_map: std::collections::HashMap<String, Vec<Item>> =
@@ -104,12 +169,20 @@ where
                     map
                 });
 
-        // Convert DAW Items to strings for monarchy sort
-        let input_strings: Vec<String> = item_map.keys().cloned().collect();
-
         // Perform monarchy sort (clone config since monarchy_sort takes ownership)
         // If existing tracks are provided, monarchy can use them via Target trait
-        let structure = monarchy_sort(input_strings, config.clone())?;
+        let mut structure = monarchy_sort(input_strings, config.clone())?;
+
+        // Apply optional transformations
+        if options.collapse_single_child {
+            collapse_single_child_folders(&mut structure);
+        }
+        if options.expand_items {
+            expand_items_to_children(&mut structure);
+        }
+        if options.cleanup_names {
+            cleanup_display_names(&mut structure);
+        }
 
         // Convert Structure to Tracks, preserving original DAW Items
         let mut new_tracks = structure_to_tracks_with_items(&structure, &item_map, false);
