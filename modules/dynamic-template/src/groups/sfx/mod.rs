@@ -4,8 +4,9 @@
 //! - Sound effects (whoosh, impact, etc.)
 //! - Voice effects (robot, processed, etc.)
 //! - Foley and ambient sounds
-//! - Count-ins, clicks, and cue tracks
 //! - Generic "FX" tracks that aren't tied to a specific instrument
+//!
+//! Note: Click, count-in, and cue tracks are now in the Click group
 
 use crate::item_metadata::ItemMetadata;
 use monarchy::Group;
@@ -43,10 +44,7 @@ impl From<SFX> for Group<ItemMetadata> {
                 "atmosphere",
                 "room tone",
                 "noise",
-                // Cue tracks
-                "count",
-                "click",
-                "cue",
+                // Misc audio markers
                 "slate",
                 "beep",
                 "tone",

@@ -13,4 +13,5 @@ expression: structure.to_tree_string()
 -Vocals
 --Lead: [Vocal.Tune.Lead.wav]
 --BGVs: [Vocal.Harmony.One.wav, Vocal.Harmony.Two.wav]
--Unsorted: [banjo.One.wav, banjo.Solo.wav, ... and 6 more]
+-Reference: [You Give Love A Bad Name.PRINT.L.wav, You Give Love A Bad Name.PRINT.R.wav]
+-Unsorted: [banjo.One.wav, banjo.Solo.wav, ... and 4 more]

@@ -283,20 +283,24 @@ fn radiohead_paranoid_android() {
 
     // --- SFX ---
     let sfx = TrackGroup::folder("SFX")
-        .track("Intro 1", "42 intro count.1_03.wav")
         .track("Robot Voice", "43 Robot Voice_03.wav")
         .track("FX1", "46 FX1.2_03.wav")
         .track("FX2", "47 FX2.2_03.wav")
         .end();
 
+    // --- Guide ---
+    // "intro count" matches Count subgroup
+    let guide = TrackGroup::single_track("Guide", "42 intro count.1_03.wav");
+
+    // --- Reference ---
+    // "Master" in filename matches Reference group
+    let reference = TrackGroup::single_track(
+        "Reference",
+        "Paranoid_Android_Cover_PLP_JH_MIX_1_Master.wav",
+    );
+
     // --- Unsorted ---
-    let unsorted = TrackGroup::folder("Unsorted")
-        .track("CK MAP]", "40 CK MAP]_03.wav")
-        .track(
-            "Paranoid_Android_Cover_PLP_JH_MIX_1_Master",
-            "Paranoid_Android_Cover_PLP_JH_MIX_1_Master.wav",
-        )
-        .end();
+    let unsorted = TrackGroup::single_track("Unsorted", "40 CK MAP]_03.wav");
 
     // ============================================================================
     // Compose final structure
@@ -311,6 +315,8 @@ fn radiohead_paranoid_android() {
         .group(synths)
         .group(vocals)
         .group(sfx)
+        .group(guide)
+        .group(reference)
         .group(unsorted)
         .build();
 

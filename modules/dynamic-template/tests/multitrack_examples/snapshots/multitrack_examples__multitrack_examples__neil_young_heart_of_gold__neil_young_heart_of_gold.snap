@@ -22,4 +22,5 @@ expression: structure.to_tree_string()
 --BGVs
 ---Main: [19.Vocal.HARMONY OptoComp_01.wav]
 ---DBL: [20.Vocal.HARMONY Dbl OptoComp_01.wav]
--Unsorted: [12.Mando OptoComp_01.wav, 21.Heart Of Gold Mix_01.wav]
+-Reference: [21.Heart Of Gold Mix_01.wav]
+-Unsorted: [12.Mando OptoComp_01.wav]

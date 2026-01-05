@@ -14,5 +14,5 @@ expression: structure.to_tree_string()
 ---1: [Steve Lead VOX Take 1.06_01.wav]
 ---2: [Steve Lead VOX Take 2.06_01.wav]
 --BGVs: [Steve BGV1_SUM.06_01.wav, Steve BGV1A.06_01.wav, ... and 8 more]
--SFX: [click.Edit_01.wav]
+-Guide: [click.Edit_01.wav]
 -Unsorted: [fernando strat_02.wav, gretsch fernando_02.wav, ... and 2 more]

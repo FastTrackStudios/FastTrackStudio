@@ -7,7 +7,9 @@ mod groups;
 mod item_metadata;
 mod metadata_patterns;
 
-pub use groups::{Bass, Choir, Drums, Guitars, Keys, Orchestra, Percussion, Synths, Vocals, SFX};
+pub use groups::{
+    Bass, Choir, Drums, Guide, Guitars, Keys, Orchestra, Percussion, Reference, Synths, Vocals, SFX,
+};
 pub use item_metadata::ItemMetadata;
 
 /// Type alias for our standard Config with ItemMetadata
@@ -39,6 +41,9 @@ pub fn default_config() -> DynamicTemplateConfig {
         .group(Choir)
         .group(Orchestra)
         .group(SFX)
+        // Utility tracks at the bottom
+        .group(Guide)
+        .group(Reference)
         .build()
 }
 
