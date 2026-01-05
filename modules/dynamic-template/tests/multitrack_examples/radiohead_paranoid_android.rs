@@ -163,9 +163,9 @@ fn radiohead_paranoid_android() {
         .end();
 
     // --- Percussion ---
-    // "Guiro Shaker" extracts arrangement="Shaker", "Main" becomes "Guiro" (parent name)
+    // "Guiro Shaker" extracts arrangement="Shaker", "Guiro" defaults to arrangement="Main"
     let guiro = TrackGroup::folder("Guiro")
-        .track("Guiro", "22 Guiro_03.wav")
+        .track("Main", "22 Guiro_03.wav")
         .track("Shaker", "21 Guiro Shaker_03.wav")
         .end();
 
@@ -249,8 +249,7 @@ fn radiohead_paranoid_android() {
 
     // Main layer tracks (no explicit layer = Main default)
     // Items get "Lead 1", "Lead 2", "Lead 3" as they match Lead group
-    // These are now grouped into a "Lead" subfolder since they share the prefix
-    let vocal_lead_inner = TrackGroup::folder("Lead")
+    let vocal_main = TrackGroup::folder("Main")
         .track("Lead 1", "56 Lead Voc_03.wav")
         .track("Lead 2", "65 extra vocal2_03.wav")
         .track("Lead 3", "66 extra vocal3_03.wav")
@@ -269,24 +268,19 @@ fn radiohead_paranoid_android() {
     let lead = TrackGroup::folder("Lead")
         .track("Bridge", "61 Bridge vocal extra_03.wav")
         .group(vocal_outro)
-        .group(vocal_lead_inner)
+        .group(vocal_main)
         .group(vocal_quad)
         .track("Lead 3", "59 Vocal 3_03.wav")
         .group(vocal_dbl)
         .end();
 
-    // Middle Bridge tracks are now grouped into a folder since they share a prefix
-    let middle_bridge = TrackGroup::folder("Middle Bridge")
+    let vocals = TrackGroup::folder("Vocals")
+        .group(lead)
         .track("Middle Bridge 1", "67 Voca Middle Bridge1_03.wav")
         .track("Middle Bridge 2", "68 Voca Middle Bridge2_03.wav")
         .track("Middle Bridge 3", "69 Voca Middle Bridge3_03.wav")
         .track("Middle Bridge 4", "70 Voca Middle Bridge4_03.wav")
         .track("Middle Bridge 5", "71 Voca Middle Bridge5_03.wav")
-        .end();
-
-    let vocals = TrackGroup::folder("Vocals")
-        .group(middle_bridge)
-        .group(lead)
         .end();
 
     // --- SFX ---
