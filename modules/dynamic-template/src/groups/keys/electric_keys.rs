@@ -8,35 +8,87 @@ pub struct ElectricKeys;
 
 impl From<ElectricKeys> for Group<ItemMetadata> {
     fn from(_val: ElectricKeys) -> Self {
-        // Subgroup for Rhodes/Wurlitzer to preserve the instrument name in display names
-        let rhodes = Group::builder("Rhodes")
-            .patterns(vec!["rhodes", "wurlitzer", "fender_rhodes"])
-            .build();
-
-        Group::builder("Electric Keys")
-            .group(rhodes)
+        Group::builder("Electric")
             .patterns(vec![
-                // Electric pianos
-                "rhodes",
-                "wurlitzer",
                 "electric_piano",
+                "electric piano",
                 "ep",
-                "fender_rhodes",
-                // FM synthesizers (keyboard-based)
-                "dx7",
-                "dx-7",
-                "fm piano",
-                "fm_piano",
-                // Clavinet
-                "clav",
-                "clavinet",
-                // Hohner
-                "hohner",
-                "pianet",
-                // Tape-based keyboards
-                "mellotron",
-                "chamberlin",
+                "e_piano",
+                "e piano",
             ])
+            // Add specific instrument subgroups
+            .group(Rhodes)
+            .group(Wurlitzer)
+            .group(DX7)
+            .group(Mellotron)
+            .group(Clavinet)
+            .group(Pianet)
+            .build()
+    }
+}
+
+/// Rhodes electric piano
+pub struct Rhodes;
+
+impl From<Rhodes> for Group<ItemMetadata> {
+    fn from(_val: Rhodes) -> Self {
+        Group::builder("Rhodes")
+            .patterns(vec!["rhodes", "fender_rhodes", "fender rhodes"])
+            .build()
+    }
+}
+
+/// Wurlitzer electric piano
+pub struct Wurlitzer;
+
+impl From<Wurlitzer> for Group<ItemMetadata> {
+    fn from(_val: Wurlitzer) -> Self {
+        Group::builder("Wurlitzer")
+            .patterns(vec!["wurlitzer", "wurli", "wurly"])
+            .build()
+    }
+}
+
+/// DX7 FM synthesizer
+pub struct DX7;
+
+impl From<DX7> for Group<ItemMetadata> {
+    fn from(_val: DX7) -> Self {
+        Group::builder("DX7")
+            .patterns(vec!["dx7", "dx-7", "dx 7", "fm piano", "fm_piano"])
+            .build()
+    }
+}
+
+/// Mellotron tape-based keyboard
+pub struct Mellotron;
+
+impl From<Mellotron> for Group<ItemMetadata> {
+    fn from(_val: Mellotron) -> Self {
+        Group::builder("Mellotron")
+            .patterns(vec!["mellotron", "chamberlin"])
+            .build()
+    }
+}
+
+/// Clavinet
+pub struct Clavinet;
+
+impl From<Clavinet> for Group<ItemMetadata> {
+    fn from(_val: Clavinet) -> Self {
+        Group::builder("Clavinet")
+            .patterns(vec!["clav", "clavinet"])
+            .build()
+    }
+}
+
+/// Hohner Pianet
+pub struct Pianet;
+
+impl From<Pianet> for Group<ItemMetadata> {
+    fn from(_val: Pianet) -> Self {
+        Group::builder("Pianet")
+            .patterns(vec!["pianet", "hohner"])
             .build()
     }
 }

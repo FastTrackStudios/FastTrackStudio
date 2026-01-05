@@ -969,6 +969,85 @@ impl CleanupDisplayNames {
         words.join(" ")
     }
 
+    /// Find a meaningful fallback name from the context stack
+    ///
+    /// When a cleaned name is empty, we need a fallback. Instead of using
+    /// the immediate parent's name (which might be a collection like "SUM"),
+    /// we look through the context stack to find the most appropriate name.
+    ///
+    /// Generic collection names are skipped in favor of actual group names.
+    fn find_fallback_name(&self, parent_name: &str) -> String {
+        // Names that are generic collections, not meaningful fallbacks
+        const COLLECTION_NAMES: &[&str] = &["sum", "main", "sub", "aux", "bus", "group"];
+
+        let parent_lower = parent_name.to_lowercase();
+
+        // If parent name is not a generic collection, use it
+        if !COLLECTION_NAMES.contains(&parent_lower.as_str()) {
+            return parent_name.to_string();
+        }
+
+        // Search context stack from end to beginning for a meaningful name
+        // Skip entries that are prefixed display names (contain spaces with prefix-like patterns)
+        for name in self.context_stack.iter().rev() {
+            let name_lower = name.to_lowercase();
+
+            // Skip generic collection names
+            if COLLECTION_NAMES.contains(&name_lower.as_str()) {
+                continue;
+            }
+
+            // Skip prefixed display names (like "D Snare", "GTR E Electric")
+            // These contain the prefix + group name, we want just the group name
+            if name.contains(' ') {
+                // Check if first word looks like a prefix (all caps or short)
+                let first_word = name.split_whitespace().next().unwrap_or("");
+                if first_word.len() <= 4
+                    && first_word
+                        .chars()
+                        .all(|c| c.is_uppercase() || c.is_ascii_digit())
+                {
+                    continue;
+                }
+            }
+
+            return name.clone();
+        }
+
+        // Last resort: use the fallback_name or parent_name
+        if !self.fallback_name.is_empty() {
+            self.fallback_name.clone()
+        } else {
+            parent_name.to_string()
+        }
+    }
+
+    /// Convert a string to title case (capitalize first letter of each word)
+    ///
+    /// Examples:
+    /// - "chords" -> "Chords"
+    /// - "quad" -> "Quad"
+    /// - "lead vox" -> "Lead Vox"
+    /// - "DBL" -> "DBL" (preserves all-caps)
+    fn title_case(s: &str) -> String {
+        s.split_whitespace()
+            .map(|word| {
+                // If word is all uppercase (like "DBL", "OH"), preserve it
+                if word.chars().all(|c| c.is_uppercase() || c.is_ascii_digit()) {
+                    word.to_string()
+                } else {
+                    // Otherwise, capitalize first letter and lowercase the rest
+                    let mut chars = word.chars();
+                    match chars.next() {
+                        None => String::new(),
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    }
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// Number duplicate names in a list of children
     ///
     /// If multiple children have the same name after stripping,
@@ -1018,10 +1097,13 @@ impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
         for child in &mut node.children {
             let cleaned = self.cleanup_name(&child.name);
             if cleaned.is_empty() {
-                // Fallback: use the parent's name (not display_name which includes prefixes)
-                child.name = node.name.clone();
+                // Fallback: find a meaningful name from context stack
+                // Skip generic collection names like "SUM" - look for the last group name
+                // that represents an actual instrument/category
+                child.name = self.find_fallback_name(&node.name);
             } else {
-                child.name = cleaned;
+                // Apply title case to cleaned name (e.g., "chords" -> "Chords")
+                child.name = Self::title_case(&cleaned);
             }
         }
 

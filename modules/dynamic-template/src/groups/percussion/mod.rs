@@ -67,13 +67,17 @@ impl From<Guiro> for Group<ItemMetadata> {
     fn from(_val: Guiro) -> Self {
         // Guiro can be played with different techniques/implements
         // "Guiro Shaker" = guiro played with shaker-like technique
+        // "Guiro" alone defaults to "Main" arrangement
         let technique = ItemMetadataGroup::builder("Arrangement")
             .patterns(vec!["shaker", "stick", "mallet", "brush"])
             .build();
 
+        use crate::item_metadata::ItemMetadataField;
+
         ItemMetadataGroup::builder("Guiro")
             .patterns(vec!["guiro"])
             .arrangement(technique)
+            .field_default_value(ItemMetadataField::Arrangement, "Main")
             .build()
     }
 }

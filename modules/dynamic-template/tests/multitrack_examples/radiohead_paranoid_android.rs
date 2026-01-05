@@ -130,8 +130,8 @@ fn radiohead_paranoid_android() {
 
     let snare_sum = TrackGroup::folder("SUM")
         .track("Bottom", "8 Snare Btm.05_03.wav")
-        .track("SUM 1", "5 Snare.05_03.wav")
-        .track("SUM 2", "6 Snare.dup1.05_03.wav")
+        .track("Snare 1", "5 Snare.05_03.wav")
+        .track("Snare 2", "6 Snare.dup1.05_03.wav")
         .end();
 
     let snare = TrackGroup::folder("Snare")
@@ -161,10 +161,10 @@ fn radiohead_paranoid_android() {
         .end();
 
     // --- Percussion ---
-    // "Guiro Shaker" extracts arrangement="shaker", "Guiro" stays as group fallback
+    // "Guiro Shaker" extracts arrangement="Shaker", "Guiro" defaults to arrangement="Main"
     let guiro = TrackGroup::folder("Guiro")
-        .track("shaker", "21 Guiro Shaker_03.wav")
-        .track("Guiro", "22 Guiro_03.wav")
+        .track("Main", "22 Guiro_03.wav")
+        .track("Shaker", "21 Guiro Shaker_03.wav")
         .end();
 
     let percussion = TrackGroup::folder("Percussion")
@@ -219,11 +219,11 @@ fn radiohead_paranoid_android() {
         .track("Mellotron", "48 Mellotron.2_03.wav")
         .end();
 
-    // "Organ X" extracts arrangement values: chords, notes, slide
+    // "Organ X" extracts arrangement values: Chords, Notes, Slide (title case)
     let organ = TrackGroup::folder("Organ")
-        .track("chords", "49 Organ Chords.2_03.wav")
-        .track("notes", "50 Organ Notes.2_03.wav")
-        .track("slide", "51 Organ Slide.2_03.wav")
+        .track("Chords", "49 Organ Chords.2_03.wav")
+        .track("Notes", "50 Organ Notes.2_03.wav")
+        .track("Slide", "51 Organ Slide.2_03.wav")
         .end();
 
     let keys = TrackGroup::folder("Keys")
@@ -248,8 +248,8 @@ fn radiohead_paranoid_android() {
     // Main layer tracks (no explicit layer = Main default)
     let vocal_main = TrackGroup::folder("Main")
         .track("Voc", "56 Lead Voc_03.wav")
-        .track("extra vocal2", "65 extra vocal2_03.wav")
-        .track("extra vocal3", "66 extra vocal3_03.wav")
+        .track("Extra Vocal2", "65 extra vocal2_03.wav")
+        .track("Extra Vocal3", "66 extra vocal3_03.wav")
         .end();
 
     // DBL (double) layer tracks
@@ -258,8 +258,8 @@ fn radiohead_paranoid_android() {
         .track("Voc 2", "58 Lead Voc Dbl.dup1_03.wav")
         .end();
 
-    // "quad" is a layer (like Main, DBL), extracted from "lead vox quad"
-    let vocal_quad = TrackGroup::single_track("quad", "60 lead vox quad_03.wav");
+    // "Quad" is a layer (like Main, DBL), extracted from "lead vox quad"
+    let vocal_quad = TrackGroup::single_track("Quad", "60 lead vox quad_03.wav");
 
     let lead = TrackGroup::folder("Lead")
         .track("Bridge", "61 Bridge vocal extra_03.wav")

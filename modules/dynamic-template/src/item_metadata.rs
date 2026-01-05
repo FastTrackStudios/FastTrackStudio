@@ -293,6 +293,15 @@ impl ToDisplayName for ItemMetadata {
     /// - Snare with increment="1" → "D Snare 1" (but only if has mic info too)
     /// - DX7 .2_03.wav → "" (triggers fallback to original)
     fn to_display_name(&self, prefixes: &[String], group_names: &[String]) -> String {
+        // Helper to capitalize first letter of a string
+        fn title_case(s: &str) -> String {
+            let mut chars = s.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            }
+        }
+
         let mut parts = Vec::new();
 
         // Add prefixes first (e.g., "D" for Drums, "GTR" for Guitars)
@@ -319,31 +328,31 @@ impl ToDisplayName for ItemMetadata {
             has_primary_metadata = true;
         }
 
-        // Add section (e.g., "Verse", "Chorus")
+        // Add section (e.g., "Verse", "Chorus") - title case
         if let Some(ref section) = self.section {
-            parts.push(section.clone());
+            parts.push(title_case(section));
             has_primary_metadata = true;
         }
 
-        // Add arrangement (e.g., "Crunch", "Clean", "Lead")
+        // Add arrangement (e.g., "Crunch", "Clean", "Lead") - title case
         if let Some(ref arrangement) = self.arrangement {
-            parts.push(arrangement.clone());
+            parts.push(title_case(arrangement));
             has_primary_metadata = true;
         }
 
-        // Add multi-mic positions (e.g., "In", "Out", "Top", "Bottom")
+        // Add multi-mic positions (e.g., "In", "Out", "Top", "Bottom") - title case
         // This is primary because it identifies mic placement
         if let Some(ref multi_mic) = self.multi_mic {
             for mic in multi_mic {
-                parts.push(mic.clone());
+                parts.push(title_case(mic));
                 has_primary_metadata = true;
             }
         }
 
-        // Add track type (e.g., "BUS", "SUM", "MIDI", "DI")
+        // Add track type (e.g., "BUS", "SUM", "MIDI", "DI") - uppercase for acronyms
         // This is primary because it identifies the track's role
         if let Some(ref track_type) = self.track_type {
-            parts.push(track_type.clone());
+            parts.push(track_type.to_uppercase());
             has_primary_metadata = true;
         }
 
@@ -351,9 +360,9 @@ impl ToDisplayName for ItemMetadata {
         // These provide additional context but don't identify the item alone
 
         if has_primary_metadata {
-            // Add layers (e.g., "DBL", "OCT", "L", "R")
+            // Add layers (e.g., "DBL", "OCT", "L", "R") - title case (preserves uppercase)
             if let Some(ref layers) = self.layers {
-                parts.push(layers.clone());
+                parts.push(title_case(layers));
             }
 
             // Add increment (e.g., "1", "2" for Tom 1, Tom 2)
@@ -361,9 +370,9 @@ impl ToDisplayName for ItemMetadata {
                 parts.push(increment.clone());
             }
 
-            // Add channel (e.g., "L", "R", "C")
+            // Add channel (e.g., "L", "R", "C") - uppercase
             if let Some(ref channel) = self.channel {
-                parts.push(channel.clone());
+                parts.push(channel.to_uppercase());
             }
         }
 

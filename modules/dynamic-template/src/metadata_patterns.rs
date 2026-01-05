@@ -13,17 +13,66 @@ use crate::item_metadata::prelude::*;
 /// hierarchy but provides metadata extraction across all groups.
 pub fn default_metadata_field_patterns() -> Group<ItemMetadata> {
     // Define each field's patterns separately for clarity
+    // Section patterns for song structure elements
+    // NOTE: Longer/compound patterns must come BEFORE shorter patterns
+    // so "Pre-Chorus" matches before "Chorus" does
     let section = Group::builder("Section")
         .patterns([
+            // Pre/Post modifiers (MUST come before Verse/Chorus/etc.)
+            "Pre-Chorus",
+            "Pre Chorus",
+            "PreChorus",
+            "Post-Chorus",
+            "Post Chorus",
+            "PostChorus",
+            "Pre-Verse",
+            "Pre Verse",
+            "PreVerse",
+            // Numbered sections (MUST come before base sections)
+            "Verse 1",
+            "Verse 2",
+            "Verse 3",
+            "Verse 4",
+            "Chorus 1",
+            "Chorus 2",
+            "Chorus 3",
+            "Bridge 1",
+            "Bridge 2",
+            "V1",
+            "V2",
+            "V3",
+            "V4",
+            "C1",
+            "C2",
+            "C3",
+            // Compound sections
+            "Middle 8",
+            "Middle8",
+            // Main sections
             "Intro",
             "Verse",
             "Chorus",
             "Bridge",
-            "Middle",
-            "Instrumental",
             "Outro",
-            "Pre",
-            "Post",
+            "Vamp",
+            "Coda",
+            "Tag",
+            // Instrumental sections
+            "Instrumental",
+            "Solo",
+            "Break",
+            "Breakdown",
+            "Buildup",
+            "Build",
+            "Drop",
+            "Interlude",
+            "Turnaround",
+            // Other common sections
+            "Middle",
+            "Hook",
+            "Refrain",
+            "Transition",
+            "Ending",
         ])
         .build();
 
