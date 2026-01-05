@@ -7,8 +7,8 @@ pub struct Snare;
 
 impl From<Snare> for ItemMetadataGroup {
     fn from(_val: Snare) -> Self {
-        use monarchy::FieldValueDescriptor;
         use crate::item_metadata::ItemMetadataField;
+        use monarchy::FieldValueDescriptor;
 
         // Define multi-mic positions using field_value_descriptors to ensure Top comes before Bottom
         // Order matters - items will be sorted by the order of descriptors
@@ -27,10 +27,18 @@ impl From<Snare> for ItemMetadataGroup {
                 .build(),
         ];
 
+        // Define SUM tagged collection - all items go into SUM EXCEPT effect prints
+        // Effect prints (VERB, DLY, etc.) will NOT match and stay as siblings to SUM
+        // Empty patterns = matches everything, exclude() adds negative patterns for effects
+        let sum_collection = ItemMetadataGroup::builder("SUM")
+            .exclude(["verb", "vrb", "rev", "dly", "delay", "crush", "dist", "fx"])
+            .build();
+
         // Use the convenience method - extension trait is in scope via prelude
         ItemMetadataGroup::builder("Snare")
             .patterns(["snare", "snr", "sn"])
             .field_value_descriptors(ItemMetadataField::MultiMic, multi_mic_descriptors)
+            .tagged_collection(sum_collection)
             .build()
     }
 }

@@ -1,6 +1,6 @@
 //! Percussion group definitions
 
-use crate::item_metadata::ItemMetadata;
+use crate::item_metadata::{ItemMetadata, ItemMetadataGroup, ItemMetadataGroupExt};
 use monarchy::Group;
 
 /// Top-level percussion group for non-drum kit percussion instruments
@@ -10,10 +10,7 @@ impl From<Percussion> for Group<ItemMetadata> {
     fn from(_val: Percussion) -> Self {
         Group::builder("Percussion")
             .prefix("Perc")
-            .patterns(vec![
-                "percussion",
-                "perc",
-            ])
+            .patterns(vec!["percussion", "perc"])
             // Exclude drum kit items
             .exclude(vec!["drum", "kick", "snare", "hihat", "cymbal", "tom"])
             // Add subgroups for specific percussion instruments
@@ -52,7 +49,9 @@ impl From<Shaker> for Group<ItemMetadata> {
 pub struct Tambourine;
 impl From<Tambourine> for Group<ItemMetadata> {
     fn from(_val: Tambourine) -> Self {
-        Group::builder("Tambourine").patterns(vec!["tambourine", "tamb"]).build()
+        Group::builder("Tambourine")
+            .patterns(vec!["tambourine", "tamb"])
+            .build()
     }
 }
 
@@ -66,7 +65,16 @@ impl From<Cabasa> for Group<ItemMetadata> {
 pub struct Guiro;
 impl From<Guiro> for Group<ItemMetadata> {
     fn from(_val: Guiro) -> Self {
-        Group::builder("Guiro").patterns(vec!["guiro"]).build()
+        // Guiro can be played with different techniques/implements
+        // "Guiro Shaker" = guiro played with shaker-like technique
+        let technique = ItemMetadataGroup::builder("Arrangement")
+            .patterns(vec!["shaker", "stick", "mallet", "brush"])
+            .build();
+
+        ItemMetadataGroup::builder("Guiro")
+            .patterns(vec!["guiro"])
+            .arrangement(technique)
+            .build()
     }
 }
 
@@ -80,7 +88,9 @@ impl From<Clave> for Group<ItemMetadata> {
 pub struct Vibraslap;
 impl From<Vibraslap> for Group<ItemMetadata> {
     fn from(_val: Vibraslap) -> Self {
-        Group::builder("Vibraslap").patterns(vec!["vibraslap"]).build()
+        Group::builder("Vibraslap")
+            .patterns(vec!["vibraslap"])
+            .build()
     }
 }
 
@@ -108,28 +118,36 @@ impl From<Cowbell> for Group<ItemMetadata> {
 pub struct Woodblock;
 impl From<Woodblock> for Group<ItemMetadata> {
     fn from(_val: Woodblock) -> Self {
-        Group::builder("Woodblock").patterns(vec!["woodblock", "wood block"]).build()
+        Group::builder("Woodblock")
+            .patterns(vec!["woodblock", "wood block"])
+            .build()
     }
 }
 
 pub struct Clap;
 impl From<Clap> for Group<ItemMetadata> {
     fn from(_val: Clap) -> Self {
-        Group::builder("Clap").patterns(vec!["clap", "handclap"]).build()
+        Group::builder("Clap")
+            .patterns(vec!["clap", "handclap"])
+            .build()
     }
 }
 
 pub struct Triangle;
 impl From<Triangle> for Group<ItemMetadata> {
     fn from(_val: Triangle) -> Self {
-        Group::builder("Triangle").patterns(vec!["triangle"]).build()
+        Group::builder("Triangle")
+            .patterns(vec!["triangle"])
+            .build()
     }
 }
 
 pub struct Maracas;
 impl From<Maracas> for Group<ItemMetadata> {
     fn from(_val: Maracas) -> Self {
-        Group::builder("Maracas").patterns(vec!["maracas", "maraca"]).build()
+        Group::builder("Maracas")
+            .patterns(vec!["maracas", "maraca"])
+            .build()
     }
 }
 
@@ -150,14 +168,18 @@ impl From<Djembe> for Group<ItemMetadata> {
 pub struct Timbales;
 impl From<Timbales> for Group<ItemMetadata> {
     fn from(_val: Timbales) -> Self {
-        Group::builder("Timbales").patterns(vec!["timbales", "timbale"]).build()
+        Group::builder("Timbales")
+            .patterns(vec!["timbales", "timbale"])
+            .build()
     }
 }
 
 pub struct Chimes;
 impl From<Chimes> for Group<ItemMetadata> {
     fn from(_val: Chimes) -> Self {
-        Group::builder("Chimes").patterns(vec!["chimes", "chime"]).build()
+        Group::builder("Chimes")
+            .patterns(vec!["chimes", "chime"])
+            .build()
     }
 }
 
@@ -171,6 +193,8 @@ impl From<Agogo> for Group<ItemMetadata> {
 pub struct Castanets;
 impl From<Castanets> for Group<ItemMetadata> {
     fn from(_val: Castanets) -> Self {
-        Group::builder("Castanets").patterns(vec!["castanets", "castanet"]).build()
+        Group::builder("Castanets")
+            .patterns(vec!["castanets", "castanet"])
+            .build()
     }
 }

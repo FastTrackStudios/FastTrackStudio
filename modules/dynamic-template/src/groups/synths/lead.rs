@@ -15,7 +15,7 @@ impl From<Lead> for Group<ItemMetadata> {
             .patterns(vec![
                 "synth lead",
                 "lead synth",
-                "lead line",  // Common synth term
+                "lead line", // Common synth term
             ])
             // This is a child of Synths, so requires_parent_match ensures
             // items only match if they already matched Synths

@@ -174,21 +174,21 @@ pub trait IntoTracks<M: Metadata> {
     /// ```ignore
     /// use dynamic_template::{default_config, IntoTracks};
     /// use monarchy::monarchy_sort;
-    /// 
+    ///
     /// let structure = monarchy_sort(vec!["Kick In"], default_config())?;
     /// let tracks = structure.to_tracks();
     /// ```
     fn to_tracks(self) -> Vec<Track>;
 }
 
-impl<M: Metadata> IntoTracks<M> for Structure<M> {
+impl<M: Metadata + ToDisplayName> IntoTracks<M> for Structure<M> {
     fn to_tracks(self) -> Vec<Track> {
         structure_to_tracks(&self, false)
     }
 }
 
 /// Helper function to recursively convert Structure to Tracks with original DAW Items
-fn structure_to_tracks_with_items<M: Metadata>(
+fn structure_to_tracks_with_items<M: Metadata + ToDisplayName>(
     structure: &Structure<M>,
     item_map: &std::collections::HashMap<String, Vec<Item>>,
     skip_root: bool,
@@ -206,17 +206,18 @@ fn structure_to_tracks_with_items<M: Metadata>(
     // Create a track for this structure node
     let mut track = Track::new(structure.name.clone());
 
-    // Add items from monarchy structure to the track
-    for monarchy_item in &structure.items {
-        if let Some(daw_items) = item_map.get(&monarchy_item.original) {
-            track.items.extend(daw_items.clone());
-        }
-    }
-
     // If this structure has children, it's a folder
     if !structure.children.is_empty() {
         track.is_folder = true;
         track.folder_depth_change = FolderDepthChange::FolderStart;
+
+        // Add items directly to the folder track (not as children)
+        // This handles the MainOnContainer strategy where base items stay on the folder
+        for monarchy_item in &structure.items {
+            if let Some(daw_items) = item_map.get(&monarchy_item.original) {
+                track.items.extend(daw_items.clone());
+            }
+        }
 
         // Recursively convert children
         let mut child_tracks = Vec::new();
@@ -229,11 +230,21 @@ fn structure_to_tracks_with_items<M: Metadata>(
     }
 
     // If this structure has items but no children, it's a leaf track
+    // Add items from monarchy structure to the track
+    for monarchy_item in &structure.items {
+        if let Some(daw_items) = item_map.get(&monarchy_item.original) {
+            track.items.extend(daw_items.clone());
+        }
+    }
+
     vec![track]
 }
 
 /// Helper function to recursively convert Structure to Tracks (without preserving items)
-fn structure_to_tracks<M: Metadata>(structure: &Structure<M>, skip_root: bool) -> Vec<Track> {
+fn structure_to_tracks<M: Metadata + ToDisplayName>(
+    structure: &Structure<M>,
+    skip_root: bool,
+) -> Vec<Track> {
     // Skip root if it's just a container (name is "root" or empty)
     if skip_root || structure.name == "root" || structure.name.is_empty() {
         // Process all children and flatten
@@ -251,6 +262,13 @@ fn structure_to_tracks<M: Metadata>(structure: &Structure<M>, skip_root: bool) -
     if !structure.children.is_empty() {
         track.is_folder = true;
         track.folder_depth_change = FolderDepthChange::FolderStart;
+
+        // Add items directly to the folder track (not as children)
+        // This handles the MainOnContainer strategy where base items stay on the folder
+        for monarchy_item in &structure.items {
+            let item = Item::with_name(monarchy_item.original.clone());
+            track.items.push(item);
+        }
 
         // Recursively convert children
         let mut child_tracks = Vec::new();
@@ -283,13 +301,14 @@ mod tests {
         let inputs = vec!["Acc Guitar"];
         let config = default_config();
         let result = monarchy_sort(inputs, config).unwrap();
-        
+
         println!("\nAcc Guitar result:");
         result.print_tree();
-        
+
         // Guitars is not transparent, so it keeps its name even with a single item
         // The structure should be: Guitars: [item]
-        let guitars = result.find_child("Guitars")
+        let guitars = result
+            .find_child("Guitars")
             .expect("Should have Guitars folder");
         assert_eq!(guitars.items.len(), 1, "Guitars should have 1 item");
         assert_eq!(guitars.items[0].original, "Acc Guitar");
@@ -317,9 +336,9 @@ mod tests {
             .has_total_items(3)
             .has_groups(1)
             .group("Drums")
-            .has_groups(2)  // Kick folder and Snare track
+            .has_groups(2) // Kick folder and Snare track
             .group("Kick")
-            .has_groups(2)  // In and Out sub-groups
+            .has_groups(2) // In and Out sub-groups
             .done()
             .group("Drums")
             .group("Snare")
@@ -337,7 +356,7 @@ mod tests {
             "synth_bass_sub.wav",
             "upright_pizz.wav",
             "electric_bass_amp.wav",
-            "sub_bass.wav",  // Changed from "808_bass.wav" to avoid matching Electronic Kit
+            "sub_bass.wav", // Changed from "808_bass.wav" to avoid matching Electronic Kit
             "acoustic_bass.wav",
         ];
 
@@ -360,11 +379,11 @@ mod tests {
             .has_groups(1)
             .group("Bass")
             .has_groups(3)
-            .group("Guitar")  // The group name is "Guitar", display name is "Bass Guitar"
+            .group("Guitar") // The group name is "Guitar", display name is "Bass Guitar"
             .contains_exactly(&["bass_guitar_di.wav", "electric_bass_amp.wav"])
             .done()
             .group("Bass")
-            .group("Synth")  // The group name is "Synth", display name is "Bass Synth"
+            .group("Synth") // The group name is "Synth", display name is "Bass Synth"
             .contains_exactly(&["synth_bass_sub.wav", "sub_bass.wav"])
             .done()
             .group("Bass")

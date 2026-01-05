@@ -52,7 +52,7 @@ mod tests {
     use super::*;
     use crate::{default_config, OrganizeIntoTracks};
     use daw::tracks::item::Item;
-    use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
+    use daw::tracks::{assert_tracks_equal, TrackStructureBuilder};
 
     #[test]
     fn full_drum_kit_integration_test() {
@@ -72,15 +72,15 @@ mod tests {
             "Rooms L",
             "Rooms R",
         ];
-        
+
         // Organize into tracks using monarchy sort
         let config = default_config();
         let tracks = items.organize_into_tracks(&config, None).unwrap();
-        
+
         // Display the track list
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
-        
+
         // Verify we got the expected structure:
         // Drums
         // -Kick
@@ -104,34 +104,34 @@ mod tests {
         //   --R [Rooms R]
         let expected = TrackStructureBuilder::new()
             .folder("Drums")
-                .folder("Kick")
-                    .track("In", "Kick In")
-                    .track("Out", "Kick Out")
-                .end()
-                .folder("Snare")
-                    .track("Top", "Snare Top")
-                    .track("Bottom", "Snare Bottom")
-                .end()
-                .folder("Toms")
-                    .track("T1", "Tom 1")
-                    .track("T2", "Tom 2")
-                    .track("T3", "Tom 3")
-                .end()
-                .folder("Cymbals")
-                    .track("Hi Hat", "Hi Hat")
-                    .track("Ride", "Ride")
-                    .folder("OH")
-                        .track("L", "OH L")
-                        .track("R", "OH R")
-                    .end()
-                .end()
-                .folder("Rooms")
-                    .track("L", "Rooms L")
-                    .track("R", "Rooms R")
-                .end()
+            .folder("Kick")
+            .track("In", "Kick In")
+            .track("Out", "Kick Out")
+            .end()
+            .folder("Snare")
+            .track("Top", "Snare Top")
+            .track("Bottom", "Snare Bottom")
+            .end()
+            .folder("Toms")
+            .track("T1", "Tom 1")
+            .track("T2", "Tom 2")
+            .track("T3", "Tom 3")
+            .end()
+            .folder("Cymbals")
+            .track("Hi Hat", "Hi Hat")
+            .track("Ride", "Ride")
+            .folder("OH")
+            .track("L", "OH L")
+            .track("R", "OH R")
+            .end()
+            .end()
+            .folder("Rooms")
+            .track("L", "Rooms L")
+            .track("R", "Rooms R")
+            .end()
             .end()
             .build();
-        
+
         assert_tracks_equal(&tracks, &expected).unwrap();
     }
 }

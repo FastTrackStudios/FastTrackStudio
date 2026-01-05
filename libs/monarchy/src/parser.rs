@@ -129,15 +129,37 @@ impl<M: Metadata> Parser<M> {
             let group_names: Vec<String> = matched_groups.iter().map(|g| g.name.clone()).collect();
             self.set_group_field(&mut metadata, &group_names);
 
-            // Extract metadata based on the group's fields
-            for field in &group.metadata_fields {
-                if let Some(value) = self.extract_field_value(&input, field, group) {
-                    metadata.set(field.clone(), value);
+            // Extract metadata from ALL groups in the matched path, not just the deepest one
+            // This ensures fields like Variant defined on parent groups (Electronic Kit)
+            // are also extracted when matching child groups (808 Snare -> Electronic Kit -> Snare)
+            for path_group in &matched_groups {
+                for field in &path_group.metadata_fields {
+                    // Only set if not already set (deepest group takes precedence for conflicts)
+                    if metadata.get(field).is_none() {
+                        if let Some(value) = self.extract_field_value(&input, field, path_group) {
+                            metadata.set(field.clone(), value);
+                        }
+                    }
+                }
+
+                // Check if item matches any tagged collections in this group
+                if let Some(ref tagged_collection_group) = path_group.tagged_collection
+                    && tagged_collection_group.matches(&input)
+                {
+                    self.add_tagged_collection_field(&mut metadata, &tagged_collection_group.name);
                 }
             }
 
-            // Check if item matches any tagged collections in this group
-            // An item can match multiple tagged collections, so we append to a vector
+            // Also extract from the deepest group (in case it wasn't in the path for some reason)
+            for field in &group.metadata_fields {
+                if metadata.get(field).is_none() {
+                    if let Some(value) = self.extract_field_value(&input, field, group) {
+                        metadata.set(field.clone(), value);
+                    }
+                }
+            }
+
+            // Check tagged collection on deepest group too
             if let Some(ref tagged_collection_group) = group.tagged_collection
                 && tagged_collection_group.matches(&input)
             {

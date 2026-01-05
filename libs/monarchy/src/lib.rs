@@ -708,76 +708,22 @@ pub trait Target<M: Metadata> {
     fn existing_items(&self) -> Vec<Item<M>>;
 }
 
-/// Format metadata as a display name using group prefixes and field ordering from config
+/// Format metadata as a display name using the item's metadata ToDisplayName implementation
 /// 
-/// Format: "{prefixes} {group_name} {field_values}"
+/// This delegates to `item.derive_display_name()` which:
+/// 1. Extracts prefixes and group names from matched_groups
+/// 2. Calls `metadata.to_display_name()` to generate the display string
+/// 3. Falls back to original input if no meaningful display name is generated
 /// 
-/// Example: "D Kick In" where:
-/// - "D" is the prefix from "Drums" group
-/// - "Kick" is the most specific group name
-/// - "In" is the multi_mic value
-/// 
-/// Field values are included in the order they appear in the group's metadata_fields configuration.
-pub fn to_display_name<M: Metadata>(item: &Item<M>, _config: &Config<M>) -> String {
-    let mut parts = Vec::new();
-    
-    // Use matched_groups directly - now they're actual Group instances!
-    let group_trail = &item.matched_groups;
-    
-    if group_trail.is_empty() {
-        return item.original.clone();
-    }
-    
-    // Collect prefixes from groups in trail (all except the last)
-    let mut accumulated_prefixes: Vec<String> = Vec::new();
-    
-    for (i, group) in group_trail.iter().enumerate() {
-        // For the last group, we use its name, not its prefix
-        if i < group_trail.len() - 1 {
-            // Apply inheritance rules
-            if let Some(ref prefix) = group.prefix {
-                // This group has its own prefix
-                if group.inherit_prefix {
-                    // Filter out blocked prefixes (only when adding our own prefix)
-                    accumulated_prefixes.retain(|p: &String| !group.blocked_prefixes.contains(p));
-                } else {
-                    // Don't inherit, clear accumulated
-                    accumulated_prefixes.clear();
-                }
-                accumulated_prefixes.push(prefix.clone());
-            } else if !group.inherit_prefix {
-                // No prefix but don't inherit, clear accumulated
-                accumulated_prefixes.clear();
-            }
-            // If group has no prefix and inherit_prefix is true, we just continue
-            // (blocked_prefixes only applies when the group adds its own prefix)
-        }
-    }
-    
-    // Add accumulated prefixes to display name
-    if !accumulated_prefixes.is_empty() {
-        parts.push(accumulated_prefixes.join(" "));
-    }
-    
-    // Add the most specific group name (last in trail)
-    if let Some(last_group) = group_trail.last() {
-        parts.push(last_group.name.clone());
-    }
-    
-    // Get field ordering from the most specific group
-    if let Some(last_group) = group_trail.last() {
-        // Add field values in the order they appear in metadata_fields
-        for field in &last_group.metadata_fields {
-            if let Some(value) = item.metadata.get(field) {
-                let value_str = format_metadata_value::<M>(&value);
-                if !value_str.is_empty() {
-                    parts.push(value_str);
-                }
-            }
-        }
-    }
-    
-    parts.join(" ")
+/// Example: "808 Snare Top" where:
+/// - "808" is the variant
+/// - "Snare" is the most specific group name  
+/// - "Top" is the multi_mic value
+///
+/// Note: The `_config` parameter is kept for API compatibility but not used.
+/// The display name logic is controlled by the Metadata type's ToDisplayName implementation.
+pub fn to_display_name<M: Metadata + ToDisplayName>(item: &Item<M>, _config: &Config<M>) -> String {
+    item.derive_display_name()
 }
 
 impl<M: Metadata> Serialize for Item<M>
@@ -911,7 +857,7 @@ fn find_group_in_config<'a, M: Metadata>(config: &'a Config<M>, name: &str) -> O
 }
 
 /// Format a metadata value as a string for display
-fn format_metadata_value<M: Metadata>(value: &M::Value) -> String {
+pub fn format_metadata_value<M: Metadata>(value: &M::Value) -> String {
     let value_str = format!("{:?}", value);
     // Remove enum variant wrapper if present (e.g., "MultiMic([\"In\"])" -> "In")
     // This is a simple heuristic - we might need a better way

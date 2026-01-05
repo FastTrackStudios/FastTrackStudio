@@ -128,10 +128,15 @@ fn radiohead_paranoid_android() {
         .track("Out", "3 Kick Out.05_04.wav")
         .end();
 
-    let snare = TrackGroup::folder("Snare")
+    let snare_sum = TrackGroup::folder("SUM")
         .track("Bottom", "8 Snare Btm.05_03.wav")
-        .track("Snare 1", "5 Snare.05_03.wav")
-        .track("Snare 2", "6 Snare.dup1.05_03.wav")
+        .track("SUM 1", "5 Snare.05_03.wav")
+        .track("SUM 2", "6 Snare.dup1.05_03.wav")
+        .end();
+
+    let snare = TrackGroup::folder("Snare")
+        .group(snare_sum)
+        .track("SNR VERB", "9 SNR VERB.05_03.wav")
         .end();
 
     let toms = TrackGroup::folder("Toms")
@@ -142,11 +147,10 @@ fn radiohead_paranoid_android() {
 
     let cymbals = TrackGroup::folder("Cymbals")
         .track("OH", "14 Mono Ovh.01.R.05_03.wav")
+        .track("Hi Hat", "15 Room HH.05_03.wav")
         .end();
 
-    let rooms = TrackGroup::folder("Rooms")
-        .track("R", "13 Knee Mic.01.R.05_03.wav")
-        .end();
+    let rooms = TrackGroup::single_track("Rooms", "13 Knee Mic.01.R.05_03.wav");
 
     let drums = TrackGroup::folder("Drums")
         .group(kick)
@@ -157,8 +161,9 @@ fn radiohead_paranoid_android() {
         .end();
 
     // --- Percussion ---
+    // "Guiro Shaker" extracts arrangement="shaker", "Guiro" stays as group fallback
     let guiro = TrackGroup::folder("Guiro")
-        .track("Shaker", "21 Guiro Shaker_03.wav")
+        .track("shaker", "21 Guiro Shaker_03.wav")
         .track("Guiro", "22 Guiro_03.wav")
         .end();
 
@@ -200,7 +205,12 @@ fn radiohead_paranoid_android() {
 
     let electric = TrackGroup::folder("Electric").group(ed).group(johny).end();
 
-    let guitars = TrackGroup::folder("Guitars").group(electric).end();
+    let acc_guitar = TrackGroup::single_track("Acc Guitar", "26 Acc Guitar_03.wav");
+
+    let guitars = TrackGroup::folder("Guitars")
+        .group(electric)
+        .group(acc_guitar)
+        .end();
 
     // --- Keys ---
     let electric_keys = TrackGroup::folder("Electric")
@@ -209,10 +219,11 @@ fn radiohead_paranoid_android() {
         .track("Mellotron", "48 Mellotron.2_03.wav")
         .end();
 
+    // "Organ X" extracts arrangement values: chords, notes, slide
     let organ = TrackGroup::folder("Organ")
-        .track("Chords", "49 Organ Chords.2_03.wav")
-        .track("Notes", "50 Organ Notes.2_03.wav")
-        .track("Slide", "51 Organ Slide.2_03.wav")
+        .track("chords", "49 Organ Chords.2_03.wav")
+        .track("notes", "50 Organ Notes.2_03.wav")
+        .track("slide", "51 Organ Slide.2_03.wav")
         .end();
 
     let keys = TrackGroup::folder("Keys")
@@ -224,6 +235,7 @@ fn radiohead_paranoid_android() {
     // --- Synths ---
     let synths = TrackGroup::folder("Synths")
         .track("Prophet", "54 prophet synth_david bennett_03.wav")
+        .track("Bells", "44 Bells.2_03.wav")
         .end();
 
     // --- Vocals ---
@@ -233,22 +245,27 @@ fn radiohead_paranoid_android() {
         .track("3", "64 Outro vocal 3_03.wav")
         .end();
 
+    // Main layer tracks (no explicit layer = Main default)
     let vocal_main = TrackGroup::folder("Main")
         .track("Voc", "56 Lead Voc_03.wav")
-        .track("vox quad", "60 lead vox quad_03.wav")
         .track("extra vocal2", "65 extra vocal2_03.wav")
         .track("extra vocal3", "66 extra vocal3_03.wav")
         .end();
 
+    // DBL (double) layer tracks
     let vocal_dbl = TrackGroup::folder("DBL")
         .track("Voc 1", "57 Lead Voc Dbl_03.wav")
         .track("Voc 2", "58 Lead Voc Dbl.dup1_03.wav")
         .end();
 
+    // "quad" is a layer (like Main, DBL), extracted from "lead vox quad"
+    let vocal_quad = TrackGroup::single_track("quad", "60 lead vox quad_03.wav");
+
     let lead = TrackGroup::folder("Lead")
         .track("Bridge", "61 Bridge vocal extra_03.wav")
         .group(vocal_outro)
         .group(vocal_main)
+        .group(vocal_quad)
         .track("3", "59 Vocal 3_03.wav")
         .group(vocal_dbl)
         .end();

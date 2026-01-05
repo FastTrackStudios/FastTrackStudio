@@ -10,11 +10,7 @@ impl From<ElectricKeys> for Group<ItemMetadata> {
     fn from(_val: ElectricKeys) -> Self {
         // Subgroup for Rhodes/Wurlitzer to preserve the instrument name in display names
         let rhodes = Group::builder("Rhodes")
-            .patterns(vec![
-                "rhodes",
-                "wurlitzer",
-                "fender_rhodes",
-            ])
+            .patterns(vec!["rhodes", "wurlitzer", "fender_rhodes"])
             .build();
 
         Group::builder("Electric Keys")

@@ -9,9 +9,8 @@ impl From<Kick> for ItemMetadataGroup {
     fn from(_val: Kick) -> Self {
         // Define multi-mic positions as a Group
         let multi_mic = ItemMetadataGroup::builder("MultiMic")
-            .patterns(["808", "808-Kick" ])
+            .patterns(["808", "808-Kick"])
             .build();
-
 
         // Use the convenience method - extension trait is in scope via prelude
         // Require parent match so this only matches when "Electronic Kit" also matches

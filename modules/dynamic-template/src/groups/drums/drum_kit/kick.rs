@@ -7,15 +7,13 @@ pub struct Kick;
 
 impl From<Kick> for ItemMetadataGroup {
     fn from(_val: Kick) -> Self {
-        use monarchy::FieldValueDescriptor;
         use crate::item_metadata::ItemMetadataField;
-        
+        use monarchy::FieldValueDescriptor;
+
         // Define multi-mic positions using field value descriptors
         // Each value can have its own patterns and negative patterns
         let multi_mic_descriptors = vec![
-            FieldValueDescriptor::builder("In")
-                .patterns(["in"])
-                .build(),
+            FieldValueDescriptor::builder("In").patterns(["in"]).build(),
             FieldValueDescriptor::builder("Out")
                 .patterns(["out"])
                 .build(),
@@ -93,9 +91,7 @@ mod tests {
 
         /// Create a config with only the Kick group
         fn isolated_config() -> DynamicTemplateConfig {
-            Config::builder()
-                .group(Kick)
-                .build()
+            Config::builder().group(Kick).build()
         }
 
         #[test]
@@ -105,7 +101,10 @@ mod tests {
             let parser = Parser::new(config);
             let item = parser.parse(input.to_string()).unwrap();
 
-            assert_eq!(item.metadata, expected, "Isolated config: 'Kick' should match Kick group and have original_name");
+            assert_eq!(
+                item.metadata, expected,
+                "Isolated config: 'Kick' should match Kick group and have original_name"
+            );
         }
 
         #[test]
@@ -117,8 +116,11 @@ mod tests {
 
             // Update expected to match actual group trail from parser
             expected.group = item.metadata.group.clone();
-            assert_eq!(item.metadata, expected, "Isolated config: 'Kick In' should parse multi_mic field as ['In']");
-            
+            assert_eq!(
+                item.metadata, expected,
+                "Isolated config: 'Kick In' should parse multi_mic field as ['In']"
+            );
+
             // Test display name
             let display_name = monarchy::to_display_name(&item, &config);
             assert_eq!(display_name, "Kick In", "Display name should be 'Kick In'");
@@ -147,7 +149,10 @@ mod tests {
 
             // Update expected to match actual group trail from parser
             expected.group = item.metadata.group.clone();
-            assert_eq!(item.metadata, expected, "Isolated config: 'Kick Out' should parse multi_mic field as ['Out']");
+            assert_eq!(
+                item.metadata, expected,
+                "Isolated config: 'Kick Out' should parse multi_mic field as ['Out']"
+            );
         }
 
         #[test]
@@ -178,11 +183,17 @@ mod tests {
 
             // Update expected to match actual group trail from parser
             expected.group = item.metadata.group.clone();
-            assert_eq!(item.metadata, expected, "Integration config: 'Kick' should match Kick group and have original_name");
-            
+            assert_eq!(
+                item.metadata, expected,
+                "Integration config: 'Kick' should match Kick group and have original_name"
+            );
+
             // Test display name - integration config has "D" prefix from "Drums" group
             let display_name = monarchy::to_display_name(&item, &config);
-            assert_eq!(display_name, "D Kick", "Integration config: display name should be 'D Kick' (with prefix)");
+            assert_eq!(
+                display_name, "D Kick",
+                "Integration config: display name should be 'D Kick' (with prefix)"
+            );
         }
 
         #[test]
@@ -194,11 +205,17 @@ mod tests {
 
             // Update expected to match actual group trail from parser
             expected.group = item.metadata.group.clone();
-            assert_eq!(item.metadata, expected, "Integration config: 'Kick In' should parse multi_mic field as ['In']");
-            
+            assert_eq!(
+                item.metadata, expected,
+                "Integration config: 'Kick In' should parse multi_mic field as ['In']"
+            );
+
             // Test display name - integration config has "D" prefix from "Drums" group
             let display_name = monarchy::to_display_name(&item, &config);
-            assert_eq!(display_name, "D Kick In", "Integration config: display name should be 'D Kick In' (with prefix)");
+            assert_eq!(
+                display_name, "D Kick In",
+                "Integration config: display name should be 'D Kick In' (with prefix)"
+            );
         }
 
         #[test]
@@ -224,11 +241,17 @@ mod tests {
 
             // Update expected to match actual group trail from parser
             expected.group = item.metadata.group.clone();
-            assert_eq!(item.metadata, expected, "Integration config: 'Kick Out' should parse multi_mic field as ['Out']");
-            
+            assert_eq!(
+                item.metadata, expected,
+                "Integration config: 'Kick Out' should parse multi_mic field as ['Out']"
+            );
+
             // Test display name - integration config has "D" prefix from "Drums" group
             let display_name = monarchy::to_display_name(&item, &config);
-            assert_eq!(display_name, "D Kick Out", "Integration config: display name should be 'D Kick Out' (with prefix)");
+            assert_eq!(
+                display_name, "D Kick Out",
+                "Integration config: display name should be 'D Kick Out' (with prefix)"
+            );
         }
 
         #[test]

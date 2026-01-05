@@ -7,7 +7,8 @@ expression: structure.to_tree_string()
 ---Kick: [006 Kick_01.wav]
 ---Snare: [007 Snare_01.wav]
 ---Cymbals
-----OH: [008 Overhead Hats_01.wav, 009 Overhead Ride_01.wav]
+----OH: [008 Overhead Hats_01.wav]
+-----Ride: [009 Overhead Ride_01.wav]
 --Electronic Kit: [017 Elec Gui 1 DI_01.wav, 018 Elec Gui 1 Amp Sim_01.wav, ... and 6 more]
 -Bass: [015 Bass DI_01.wav, 016 Bass Amp Sim_01.wav]
 -Lead Vocals: [010 Lead Vocal_01.wav]

@@ -22,9 +22,7 @@ pub struct Prophet;
 
 impl From<Prophet> for Group<ItemMetadata> {
     fn from(_val: Prophet) -> Self {
-        Group::builder("Prophet")
-            .patterns(vec!["prophet"])
-            .build()
+        Group::builder("Prophet").patterns(vec!["prophet"]).build()
     }
 }
 

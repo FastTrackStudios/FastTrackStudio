@@ -17,8 +17,8 @@ expression: structure.to_tree_string()
 -Vocals
 --Lead Vocals
 ---Main: [16.Vocal OptoComp_01.wav]
----DBL: [17.Vocal.DBL OptoComp_01.wav]
 ---Triple: [18.Vocal.Triple OptoComp_01.wav]
+---DBL: [17.Vocal.DBL OptoComp_01.wav]
 --BGVs
 ---Main: [19.Vocal.HARMONY OptoComp_01.wav]
 ---DBL: [20.Vocal.HARMONY Dbl OptoComp_01.wav]

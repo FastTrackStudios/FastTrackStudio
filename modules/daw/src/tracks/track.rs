@@ -717,6 +717,31 @@ impl TrackGroup {
         Self::new().start_folder(name)
     }
 
+    /// Create a group containing a single track (not a folder)
+    ///
+    /// This is useful when you want to include a single track in a hierarchy
+    /// using `.group()` instead of `.track()`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let rooms = TrackGroup::single_track("Rooms", "room_mic.wav");
+    /// let drums = TrackGroup::folder("Drums")
+    ///     .group(kick)
+    ///     .group(snare)
+    ///     .group(rooms)  // Single track, not a folder
+    ///     .end();
+    /// ```
+    pub fn single_track<I>(name: impl Into<TrackName>, items: I) -> Self
+    where
+        I: IntoItems,
+    {
+        let mut group = Self::new();
+        let mut track = Track::new(name);
+        track.items = items.into_items().collect();
+        group.tracks.push(track);
+        group
+    }
+
     /// Start a folder with the given name (chainable method)
     pub fn start_folder(mut self, name: impl Into<TrackName>) -> Self {
         self.start_folder_with_items(name, None::<Vec<&str>>)

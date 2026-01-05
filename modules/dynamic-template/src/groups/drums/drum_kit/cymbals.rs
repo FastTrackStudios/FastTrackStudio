@@ -1,8 +1,8 @@
 //! Cymbals group definition
 
 use crate::item_metadata::prelude::*;
-use monarchy::FieldValueDescriptor;
 use crate::item_metadata::ItemMetadataField;
+use monarchy::FieldValueDescriptor;
 
 /// Cymbals group
 pub struct Cymbals;

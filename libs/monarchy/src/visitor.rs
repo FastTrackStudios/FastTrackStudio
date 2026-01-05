@@ -1003,8 +1003,13 @@ impl CleanupDisplayNames {
 
 impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
     fn enter(&mut self, node: &mut Structure<M>, _depth: usize) -> bool {
-        // Push this node's name onto the context stack before visiting children
+        // Push both name and display_name onto the context stack before visiting children
+        // The display_name includes prefixes (e.g., "D Kick", "GTR EG Electric")
+        // which should also be stripped from child names
         self.context_stack.push(node.name.clone());
+        if node.display_name != node.name {
+            self.context_stack.push(node.display_name.clone());
+        }
         true
     }
 
@@ -1013,12 +1018,8 @@ impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
         for child in &mut node.children {
             let cleaned = self.cleanup_name(&child.name);
             if cleaned.is_empty() {
-                // Fallback: use the last group name from context, or default fallback
-                child.name = self
-                    .context_stack
-                    .last()
-                    .cloned()
-                    .unwrap_or_else(|| self.fallback_name.clone());
+                // Fallback: use the parent's name (not display_name which includes prefixes)
+                child.name = node.name.clone();
             } else {
                 child.name = cleaned;
             }
@@ -1027,7 +1028,10 @@ impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
         // Number any duplicate names among children
         Self::number_duplicates(&mut node.children);
 
-        // Pop this node from context stack
+        // Pop this node from context stack (pop display_name first if it was pushed)
+        if node.display_name != node.name {
+            self.context_stack.pop();
+        }
         self.context_stack.pop();
     }
 }

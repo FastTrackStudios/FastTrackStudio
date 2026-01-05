@@ -7,9 +7,9 @@ pub struct Tom;
 
 impl From<Tom> for ItemMetadataGroup {
     fn from(_val: Tom) -> Self {
-        use monarchy::FieldValueDescriptor;
         use crate::item_metadata::ItemMetadataField;
-        
+        use monarchy::FieldValueDescriptor;
+
         // Define tom number/position as field value descriptors
         // Each value can have its own patterns, and the value name becomes the display name
         // So "T1", "T2", "T3" will be the track names
