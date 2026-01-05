@@ -1118,6 +1118,91 @@ impl CleanupDisplayNames {
             }
         }
     }
+
+    /// Group sibling children that share a common prefix with numbers
+    ///
+    /// For example, if children are ["Lead", "Middle Bridge 1", "Middle Bridge 2", "Middle Bridge 3"],
+    /// groups the numbered ones into a folder:
+    /// ["Lead", "Middle Bridge" -> ["Middle Bridge 1", "Middle Bridge 2", "Middle Bridge 3"]]
+    ///
+    /// Only groups if:
+    /// 1. There are at least 2 items with the same prefix
+    /// 2. There are OTHER different siblings (otherwise grouping is unnecessary)
+    fn group_numbered_siblings(children: &mut Vec<Structure<impl Metadata + Clone>>) {
+        use std::collections::HashMap;
+
+        if children.len() < 2 {
+            return;
+        }
+
+        // Extract prefix from names like "Middle Bridge 1" -> "Middle Bridge"
+        let extract_prefix = |name: &str| -> Option<(String, String)> {
+            let name = name.trim();
+            // Find the last word - if it's a number, the rest is the prefix
+            let words: Vec<&str> = name.split_whitespace().collect();
+            if words.len() >= 2 {
+                let last = words.last().unwrap();
+                if last.chars().all(|c| c.is_ascii_digit()) {
+                    let prefix = words[..words.len() - 1].join(" ");
+                    return Some((prefix, last.to_string()));
+                }
+            }
+            None
+        };
+
+        // Count occurrences of each prefix
+        let mut prefix_counts: HashMap<String, Vec<usize>> = HashMap::new();
+        for (idx, child) in children.iter().enumerate() {
+            if let Some((prefix, _)) = extract_prefix(&child.name) {
+                prefix_counts.entry(prefix).or_default().push(idx);
+            }
+        }
+
+        // Find prefixes that appear 2+ times
+        let groupable_prefixes: Vec<(String, Vec<usize>)> = prefix_counts
+            .into_iter()
+            .filter(|(_, indices)| indices.len() >= 2)
+            .collect();
+
+        // Only group if there are OTHER children that won't be grouped
+        // (i.e., the grouping provides organizational benefit)
+        let total_groupable: usize = groupable_prefixes.iter().map(|(_, v)| v.len()).sum();
+        if total_groupable == children.len() {
+            // All children would be grouped - no benefit, skip
+            return;
+        }
+
+        if groupable_prefixes.is_empty() {
+            return;
+        }
+
+        // Create new children list with grouped items
+        let mut new_children: Vec<Structure<_>> = Vec::new();
+        let mut grouped_indices: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+
+        // First, create folder structures for each prefix group
+        for (prefix, indices) in &groupable_prefixes {
+            let mut folder: Structure<_> = Structure::new(prefix);
+            for &idx in indices {
+                grouped_indices.insert(idx);
+                let child = &children[idx];
+                // Child keeps its full name (e.g., "Middle Bridge 1")
+                // since it provides context within the folder
+                folder.children.push(child.clone());
+            }
+            new_children.push(folder);
+        }
+
+        // Then add non-grouped children
+        for (idx, child) in children.iter().enumerate() {
+            if !grouped_indices.contains(&idx) {
+                new_children.push(child.clone());
+            }
+        }
+
+        *children = new_children;
+    }
 }
 
 impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
@@ -1150,6 +1235,10 @@ impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
                 // Skip generic collection names like "SUM" - look for the last group name
                 // that represents an actual instrument/category
                 child.name = self.find_fallback_name(&node.name);
+            } else if cleaned.eq_ignore_ascii_case("Main") {
+                // "Main" is a generic default - use parent name instead
+                // E.g., under "Guiro" folder, "Main" becomes "Guiro"
+                child.name = Self::title_case(&node.name);
             } else if is_only_numbers(&cleaned) {
                 // Cleaned name is ONLY numbers (e.g., "1", "2 3")
                 // Prefix with the parent's name for context
@@ -1174,6 +1263,11 @@ impl<M: Metadata> StructureVisitor<M> for CleanupDisplayNames {
 
         // Number any duplicate names among children
         Self::number_duplicates(&mut node.children);
+
+        // Group siblings that share the same prefix + number pattern
+        // E.g., "Middle Bridge 1", "Middle Bridge 2" become folder "Middle Bridge" with children "1", "2"
+        // But only if there are OTHER different children (otherwise no need to group)
+        Self::group_numbered_siblings(&mut node.children);
 
         // Pop this node from context stack (pop display_name first if it was pushed)
         if node.display_name != node.name {
