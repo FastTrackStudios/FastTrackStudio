@@ -241,6 +241,16 @@ fn radiohead_paranoid_android() {
         .end();
 
     // --- Vocals ---
+    // Middle Bridge is a section - tracks match Lead via "voca" pattern
+    // Creates a folder since there are multiple numbered tracks
+    let middle_bridge = TrackGroup::folder("Middle Bridge")
+        .track("Middle Bridge 1", "67 Voca Middle Bridge1_03.wav")
+        .track("Middle Bridge 2", "68 Voca Middle Bridge2_03.wav")
+        .track("Middle Bridge 3", "69 Voca Middle Bridge3_03.wav")
+        .track("Middle Bridge 4", "70 Voca Middle Bridge4_03.wav")
+        .track("Middle Bridge 5", "71 Voca Middle Bridge5_03.wav")
+        .end();
+
     let vocal_outro = TrackGroup::folder("Outro")
         .track("Outro 1", "62 Outro vocal 1_03.wav")
         .track("Outro 2", "63 Outro vocal 2_03.wav")
@@ -265,22 +275,16 @@ fn radiohead_paranoid_android() {
     // "Quad" is a layer (like Main, DBL), extracted from "lead vox quad"
     let vocal_quad = TrackGroup::single_track("Quad", "60 lead vox quad_03.wav");
 
+    // Lead vocals - Vocals is transparent so this appears at top level
+    // Bridge is a single track (section), Middle Bridge is a sibling folder
     let lead = TrackGroup::folder("Lead")
         .track("Bridge", "61 Bridge vocal extra_03.wav")
+        .group(middle_bridge)
         .group(vocal_outro)
         .group(vocal_main)
         .group(vocal_quad)
         .track("Lead 3", "59 Vocal 3_03.wav")
         .group(vocal_dbl)
-        .end();
-
-    let vocals = TrackGroup::folder("Vocals")
-        .group(lead)
-        .track("Middle Bridge 1", "67 Voca Middle Bridge1_03.wav")
-        .track("Middle Bridge 2", "68 Voca Middle Bridge2_03.wav")
-        .track("Middle Bridge 3", "69 Voca Middle Bridge3_03.wav")
-        .track("Middle Bridge 4", "70 Voca Middle Bridge4_03.wav")
-        .track("Middle Bridge 5", "71 Voca Middle Bridge5_03.wav")
         .end();
 
     // --- SFX ---
@@ -315,7 +319,7 @@ fn radiohead_paranoid_android() {
         .group(guitars)
         .group(keys)
         .group(synths)
-        .group(vocals)
+        .group(lead) // Vocals is transparent, so Lead appears directly
         .group(sfx)
         .group(guide)
         .group(reference)

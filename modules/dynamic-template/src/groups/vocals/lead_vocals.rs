@@ -15,7 +15,7 @@ impl From<LeadVocals> for ItemMetadataGroup {
         // Layers uses "Main" as default value so items without a layer are grouped alongside items with layers
         // Note: No prefix for Lead Vocals - parent Vocals has "V" prefix which is sufficient
         ItemMetadataGroup::builder("Lead")
-            .patterns(["lead", "main", "solo", "vocal"])
+            .patterns(["lead", "main", "solo", "vocal", "voca"])
             // Only match if parent (Vocals) also matches - prevents "JohnyLead" from matching
             // just because it contains "Lead" without any vocal-related patterns
             .requires_parent_match()
