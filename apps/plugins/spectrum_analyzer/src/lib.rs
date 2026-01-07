@@ -1,0 +1,310 @@
+mod audio;
+mod editor;
+mod embedded_editor;
+mod embedded_editor_gpu;
+mod ui;
+
+use atomic_float::AtomicF32;
+use audio::meter::{create_meter_channels, MeterConsumer, MeterProducer};
+use audio::spectrum::{SpectrumConsumer, SpectrumProducer, SpectrumSpeed};
+use editor::EditorInitFlags;
+use editor::PluginEditor;
+use embedded_editor_gpu::SpectrumEmbeddedEditorGpu;
+use nih_plug::editor::embedded::EmbeddedEditor;
+use nih_plug::prelude::*;
+use nih_plug_iced::{create_iced_editor, IcedState};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
+#[derive(Enum, PartialEq, Clone)]
+enum AmplitudeRange {
+    #[id = "60db"]
+    #[name = "60 dB"]
+    Range60dB,
+    #[id = "90db"]
+    #[name = "90 dB"]
+    Range90dB,
+    #[id = "120db"]
+    #[name = "120 dB"]
+    Range120dB,
+}
+
+impl AmplitudeRange {
+    fn to_db_range(&self) -> (f32, f32) {
+        match self {
+            AmplitudeRange::Range60dB => (-60.0, 0.0),
+            AmplitudeRange::Range90dB => (-90.0, 0.0),
+            AmplitudeRange::Range120dB => (-120.0, 0.0),
+        }
+    }
+}
+
+#[derive(Enum, PartialEq, Clone, Copy)]
+enum ResolutionLevel {
+    #[id = "low"]
+    #[name = "Low (1024)"]
+    Low,
+    #[id = "medium"]
+    #[name = "Medium (2048)"]
+    Medium,
+    #[id = "high"]
+    #[name = "High (4096)"]
+    High,
+    #[id = "maximum"]
+    #[name = "Maximum (8192)"]
+    Maximum,
+}
+
+impl ResolutionLevel {
+    pub fn to_bin_count(&self) -> usize {
+        match self {
+            ResolutionLevel::Low => 128,      // Smoothest - fewer bins
+            ResolutionLevel::Medium => 256,   // Medium detail
+            ResolutionLevel::High => 512,     // High detail
+            ResolutionLevel::Maximum => 2049, // All bins (4096 FFT / 2 + 1)
+        }
+    }
+}
+
+#[derive(Enum, PartialEq)]
+enum TiltLevel {
+    #[id = "none"]
+    #[name = "None (0 dB/oct)"]
+    None,
+    #[id = "subtle"]
+    #[name = "Subtle (3 dB/oct)"]
+    Subtle,
+    #[id = "natural"]
+    #[name = "Natural (4.5 dB/oct)"]
+    Natural,
+    #[id = "standard"]
+    #[name = "Standard (6 dB/oct)"]
+    Standard,
+    #[id = "strong"]
+    #[name = "Strong (9 dB/oct)"]
+    Strong,
+}
+
+impl TiltLevel {
+    fn to_db_per_octave(&self) -> f32 {
+        match self {
+            TiltLevel::None => 0.0,
+            TiltLevel::Subtle => 3.0,
+            TiltLevel::Natural => 4.5,
+            TiltLevel::Standard => 6.0,
+            TiltLevel::Strong => 9.0,
+        }
+    }
+}
+
+struct SAPlugin {
+    // Plugin parameters
+    params: Arc<SAPluginParams>,
+
+    // SHARED STATE (thread-safe, read by both audio and UI)
+    sample_rate: Arc<AtomicF32>,
+
+    // AUDIO THREAD WRITERS (produce data)
+    audio_spectrum_producer: SpectrumProducer, // Writes spectrum data from audio thread
+    audio_meter_producer: MeterProducer,       // Writes meter levels from audio thread
+
+    // UI THREAD READERS (consume data)
+    ui_spectrum_consumer: SpectrumConsumer, // Reads spectrum data in UI thread
+    ui_meter_consumer: MeterConsumer,       // Reads meter levels in UI thread
+
+    // UI STATE
+    iced_state: Arc<IcedState>,
+
+    // PROCESSING STATE
+    process_stopped: Arc<AtomicBool>,
+}
+
+#[derive(Params)]
+struct SAPluginParams {
+    #[id = "range"]
+    pub range: EnumParam<AmplitudeRange>,
+
+    #[id = "resolution"]
+    pub resolution: EnumParam<ResolutionLevel>,
+
+    #[id = "speed"]
+    pub speed: EnumParam<SpectrumSpeed>,
+
+    #[id = "tilt"]
+    pub tilt: EnumParam<TiltLevel>,
+}
+
+impl Default for SAPlugin {
+    fn default() -> Self {
+        let sample_rate = Arc::new(AtomicF32::new(44100.0));
+
+        // Configure the spectrum analyser
+        let (audio_spectrum_producer, ui_spectrum_consumer) = SpectrumProducer::new();
+
+        let (audio_meter_producer, ui_meter_consumer) = create_meter_channels();
+
+        Self {
+            // CORE COMPONENTS
+            params: Arc::new(SAPluginParams::default()),
+
+            // SHARED STATE
+            sample_rate,
+
+            // AUDIO/UI COMMUNICATION
+            audio_spectrum_producer,
+            audio_meter_producer,
+            ui_spectrum_consumer,
+            ui_meter_consumer,
+
+            // UI STATE
+            iced_state: IcedState::from_size(800, 600),
+
+            // PROCESSING STATE
+            process_stopped: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+impl Default for SAPluginParams {
+    fn default() -> Self {
+        Self {
+            range: EnumParam::new("Range", AmplitudeRange::Range90dB),
+            resolution: EnumParam::new("Resolution", ResolutionLevel::Medium),
+            speed: EnumParam::new("Speed", SpectrumSpeed::Medium),
+            tilt: EnumParam::new("Tilt", TiltLevel::Natural),
+        }
+    }
+}
+
+impl Plugin for SAPlugin {
+    const NAME: &'static str = "spectrum_analyser";
+    const VENDOR: &'static str = "Cmdv";
+    const URL: &'static str = env!("CARGO_PKG_HOMEPAGE");
+    const EMAIL: &'static str = "info@cmdv.me";
+
+    const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
+    // The first audio IO layout is used as the default. The other layouts may be selected either
+    // explicitly or automatically by the host or the user depending on the plugin API/backend.
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_input_channels: NonZeroU32::new(2),
+        main_output_channels: NonZeroU32::new(2),
+
+        aux_input_ports: &[],
+        aux_output_ports: &[],
+
+        // Individual ports and the layout as a whole can be named here. By default these names
+        // are generated as needed. This layout will be called 'Stereo', while a layout with
+        // only one input and output channel would be called 'Mono'.
+        names: PortNames::const_default(),
+    }];
+
+    const MIDI_INPUT: MidiConfig = MidiConfig::None;
+    const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
+
+    const SAMPLE_ACCURATE_AUTOMATION: bool = true;
+
+    // If the plugin can send or receive SysEx messages, it can define a type to wrap around those
+    // messages here. The type implements the `SysExMessage` trait, which allows conversion to and
+    // from plain byte buffers.
+    type SysExMessage = ();
+    // More advanced plugins can use this to run expensive background tasks. See the field's
+    // documentation for more information. `()` means that the plugin does not have any background
+    // tasks.
+    type BackgroundTask = ();
+
+    fn params(&self) -> Arc<dyn Params> {
+        self.params.clone()
+    }
+
+    fn initialize(
+        &mut self,
+        _audio_io_layout: &AudioIOLayout,
+        buffer_config: &BufferConfig,
+        _context: &mut impl InitContext<Self>,
+    ) -> bool {
+        // Store sample rate for communication with UI
+        self.sample_rate
+            .store(buffer_config.sample_rate, Ordering::Relaxed);
+        true
+    }
+
+    fn reset(&mut self) {
+        // Called when processing starts/resumes
+        self.process_stopped.store(false, Ordering::Relaxed);
+    }
+
+    fn process_stopped(&mut self) {
+        self.audio_spectrum_producer.write_silence();
+        self.audio_meter_producer.write_silence();
+        self.process_stopped.store(true, Ordering::Relaxed);
+    }
+
+    fn process(
+        &mut self,
+        buffer: &mut Buffer,
+        _aux: &mut AuxiliaryBuffers,
+        _context: &mut impl ProcessContext<Self>,
+    ) -> ProcessStatus {
+        let sample_rate = self.sample_rate.load(Ordering::Relaxed);
+
+        // Read current parameter values
+        let tilt = self.params.tilt.value();
+        let speed = self.params.speed.value();
+        let resolution = self.params.resolution.value();
+
+        self.audio_spectrum_producer
+            .process(buffer, sample_rate, tilt, speed, resolution);
+        self.audio_meter_producer.update_peaks(buffer);
+
+        ProcessStatus::Normal
+    }
+
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        let init_flags = EditorInitFlags {
+            plugin_params: self.params.clone(),
+            sample_rate: self.sample_rate.clone(),
+            process_stopped: self.process_stopped.clone(),
+            spectrum_output: self.ui_spectrum_consumer.clone(),
+            meter_output: self.ui_meter_consumer.clone(),
+            iced_state: self.iced_state.clone(),
+        };
+
+        create_iced_editor::<PluginEditor>(
+            self.iced_state.clone(),
+            init_flags,
+            Vec::new(), // fonts
+        )
+    }
+
+    fn embedded_editor(&mut self) -> Option<Arc<dyn EmbeddedEditor>> {
+        Some(Arc::new(SpectrumEmbeddedEditorGpu::new(
+            self.params.clone(),
+            self.ui_spectrum_consumer.clone(),
+            self.ui_meter_consumer.clone(),
+            self.sample_rate.clone(),
+        )))
+    }
+}
+
+impl ClapPlugin for SAPlugin {
+    const CLAP_ID: &'static str = "com.your-domain.spectrum-analyser";
+    const CLAP_DESCRIPTION: Option<&'static str> = Some("A real-time spectrum analyser");
+    const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
+    const CLAP_SUPPORT_URL: Option<&'static str> = None;
+
+    // Don't forget to change these features
+    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::Analyzer, ClapFeature::Stereo];
+}
+
+impl Vst3Plugin for SAPlugin {
+    const VST3_CLASS_ID: [u8; 16] = *b"Exactly16Chars!!";
+
+    // And also don't forget to change these categories
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Analyzer, Vst3SubCategory::Tools];
+}
+
+nih_export_clap!(SAPlugin);

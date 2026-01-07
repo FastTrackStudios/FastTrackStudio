@@ -732,113 +732,11 @@ pub fn move_child_to_group<M: Metadata>(
 
     // Merge sorted result into target path
     if !scoped_result.sorted.is_empty() {
-        root.merge_at_path(target_path, scoped_result.sorted);
-    }
-
-    // Put unsorted items back in Unsorted folder
-    if !scoped_result.unsorted.is_empty() {
-        let unsorted_folder = if let Some(folder) = root.find_child_mut("Unsorted") {
-            folder
-        } else {
-            root.children.push(Structure::new("Unsorted"));
-            root.children.last_mut().unwrap()
-        };
-        unsorted_folder.items.extend(scoped_result.unsorted);
-    }
-
-    // Clean up empty source path if needed
-    if !source_path.is_empty() {
-        // Check if source parent is now empty and remove it
-        if source_path.len() > 1 {
-            if let Some(parent) = root.find_at_path_mut(&source_path[..source_path.len() - 1]) {
-                let source_name = source_path[source_path.len() - 1];
-                if let Some(source) = parent.find_child(source_name) {
-                    if source.is_empty() {
-                        parent.remove_child(source_name);
-                    }
-                }
-            }
-        } else {
-            // Source is direct child of root
-            if let Some(source) = root.find_child(source_path[0]) {
-                if source.is_empty() {
-                    root.remove_child(source_path[0]);
-                }
-            }
-        }
-    }
-
-    Ok(sorted_count)
-}
-
-/// Move items matching a pattern from a source path to a target group
-///
-/// This function finds all items (recursively) in the source path where the original
-/// text contains the pattern, extracts them, and re-sorts them into the target group.
-///
-/// This is useful for moving items by performer name, instrument type, etc.
-/// without needing pre-organized folder structure.
-///
-/// # Arguments
-/// * `root` - The root structure (modified in place)
-/// * `config` - The full config for re-parsing
-/// * `pattern` - Pattern to match in item's original text (case-insensitive word match)
-/// * `source_path` - Path where items currently live (e.g., &["Unsorted"])
-/// * `target_group` - Name of the group to sort items into (e.g., "BGVs")
-/// * `target_path` - Path where the sorted result should be merged (e.g., &["Vocals"])
-///
-/// # Returns
-/// * `Ok(usize)` - Number of items moved to the target group
-///
-/// # Example
-///
-/// ```ignore
-/// // Move all items containing "Chad" from Unsorted to BGVs under Vocals
-/// move_items_matching_to_group(
-///     &mut structure,
-///     &config,
-///     "Chad",           // Pattern to match
-///     &["Unsorted"],    // Source path
-///     "BGVs",           // Target group
-///     &["Vocals"],      // Target path
-/// )?;
-/// ```
-pub fn move_items_matching_to_group<M: Metadata>(
-    root: &mut Structure<M>,
-    config: &Config<M>,
-    pattern: &str,
-    source_path: &[&str],
-    target_group: &str,
-    target_path: &[&str],
-) -> Result<usize> {
-    // Extract items matching the pattern from the source path
-    let matching_items = {
-        let source = if source_path.is_empty() {
-            Some(root as &mut Structure<M>)
-        } else {
-            root.find_at_path_mut(source_path)
-        };
-
-        match source {
-            Some(node) => {
-                let mut items = Vec::new();
-                extract_items_matching(node, pattern, &mut items);
-                items
-            }
-            None => return Ok(0), // Source path not found
-        }
-    };
-
-    if matching_items.is_empty() {
-        return Ok(0);
-    }
-
-    // Assign items to target group and organize by metadata fields
-    let scoped_result = assign_to_group(matching_items, config, target_group)?;
-    let sorted_count = scoped_result.sorted.total_items();
-
-    // Merge sorted result into target path
-    if !scoped_result.sorted.is_empty() {
+        // Before merging, check if we need to "uncollapse" the target
+        // This handles the case where Vocals had Lead collapsed into it,
+        // but now we're adding BGVs as a sibling - Lead needs to be restored
+        uncollapse_for_sibling(root, target_path, target_group, config);
+        
         root.merge_at_path(target_path, scoped_result.sorted);
     }
 
@@ -859,20 +757,26 @@ pub fn move_items_matching_to_group<M: Metadata>(
     Ok(sorted_count)
 }
 
-/// Move items matching ANY of multiple patterns from a source path to a target group
-///
-/// This is like `move_items_matching_to_group` but takes multiple patterns.
-/// All items matching any pattern are moved together, which allows the organizer
-/// to create proper subfolders when multiple performers/values exist.
-///
+/// Move items matching ANY of multiple patterns from source to target group
+/// 
+/// This is useful for moving multiple related items at once, allowing the organizer
+/// to see all items together and create proper grouping (e.g., performer subfolders).
+/// 
+/// # Arguments
+/// * `root` - The root structure (modified in place)
+/// * `config` - The full config for re-parsing
+/// * `patterns` - Patterns to match (items matching ANY pattern are moved)
+/// * `source_path` - Path to extract items from
+/// * `target_group` - Name of the group to sort items into
+/// * `target_path` - Path where the sorted result should be merged
+/// 
 /// # Example
-///
 /// ```ignore
-/// // Move all BGV performers (Chad, Lou, Tit) from Unsorted to BGVs
+/// // Move all BGV performers from Unsorted to BGVs
 /// move_items_matching_any_to_group(
 ///     &mut structure,
 ///     &config,
-///     &["Chad", "Lou", "Tit"],  // Multiple patterns
+///     &["Chad", "Lou", "Tit"],  // All BGV performers
 ///     &["Unsorted"],
 ///     "BGVs",
 ///     &["Vocals"],
@@ -914,6 +818,11 @@ pub fn move_items_matching_any_to_group<M: Metadata>(
 
     // Merge sorted result into target path
     if !scoped_result.sorted.is_empty() {
+        // Before merging, check if we need to "uncollapse" the target
+        // This handles the case where Vocals had Lead collapsed into it,
+        // but now we're adding BGVs as a sibling - Lead needs to be restored
+        uncollapse_for_sibling(root, target_path, target_group, config);
+        
         root.merge_at_path(target_path, scoped_result.sorted);
     }
 
@@ -984,6 +893,129 @@ fn extract_items_matching_any<M: Metadata>(
 
     // Remove empty children
     node.children.retain(|c| !c.is_empty());
+}
+
+/// Helper: Uncollapse a parent node before adding a sibling child
+/// 
+/// When a parent (like Vocals) had a single child (Lead) that was collapsed,
+/// and we're now adding a sibling (BGVs), we need to "uncollapse" by wrapping
+/// the existing items/children in a folder for the original child.
+/// 
+/// Example:
+/// - Before: Vocals has items directly (Lead was collapsed) 
+///   OR Vocals has metadata children like Main, 2 (Lead's metadata children were promoted)
+/// - After adding BGVs: Vocals -> [Lead (with original items/children), BGVs (new)]
+fn uncollapse_for_sibling<M: Metadata>(
+    root: &mut Structure<M>,
+    target_path: &[&str],
+    new_child_group: &str,
+    config: &Config<M>,
+) {
+    // Find the target node
+    let target = if target_path.is_empty() {
+        return; // Can't uncollapse root
+    } else {
+        match root.find_at_path_mut(target_path) {
+            Some(t) => t,
+            None => return, // Target doesn't exist, will be created by merge
+        }
+    };
+    
+    // Only uncollapse if the target has content that should be in a sibling folder
+    // This could be:
+    // 1. Items directly on target (collapsed from a child)
+    // 2. Metadata-derived children (like Main, 2) that were promoted from a collapsed child
+    let has_items = !target.items.is_empty();
+    let has_metadata_children = target.children.iter().any(|c| {
+        // Check if child name looks like a metadata-derived group (not a config group)
+        !is_config_group_name(&c.name, config)
+    });
+    
+    if !has_items && !has_metadata_children {
+        return; // Nothing to uncollapse
+    }
+    
+    // Find the sibling group name for the new child
+    // E.g., if new_child_group is "BGVs", the sibling is "Lead"
+    let sibling_name = find_sibling_group_name(target_path, new_child_group, config);
+    
+    if let Some(sibling_name) = sibling_name {
+        // Check if this sibling folder already exists
+        if target.find_child(&sibling_name).is_some() {
+            return; // Sibling already exists, no need to uncollapse
+        }
+        
+        // Create a folder for the sibling and move items/metadata-children into it
+        let mut sibling_folder = Structure::new(&sibling_name);
+        sibling_folder.items = std::mem::take(&mut target.items);
+        
+        // Move metadata-derived children to the sibling, keep config-group children
+        let mut remaining_children = Vec::new();
+        for child in std::mem::take(&mut target.children) {
+            if is_config_group_name(&child.name, config) {
+                // Keep config-group children at current level
+                remaining_children.push(child);
+            } else {
+                // Move metadata-derived children to sibling
+                sibling_folder.children.push(child);
+            }
+        }
+        target.children = remaining_children;
+        
+        // Add the sibling folder as the first child
+        target.children.insert(0, sibling_folder);
+    }
+}
+
+/// Check if a name corresponds to a config-defined group
+fn is_config_group_name<M: Metadata>(name: &str, config: &Config<M>) -> bool {
+    fn search<M: Metadata>(groups: &[Group<M>], name: &str) -> bool {
+        for group in groups {
+            if group.name.eq_ignore_ascii_case(name) {
+                return true;
+            }
+            if search(&group.groups, name) {
+                return true;
+            }
+        }
+        false
+    }
+    search(&config.groups, name)
+}
+
+/// Find the sibling group name when adding a new child to a parent
+/// 
+/// E.g., when adding "BGVs" to "Vocals", the sibling is "Lead"
+fn find_sibling_group_name<M: Metadata>(
+    parent_path: &[&str],
+    new_child: &str,
+    config: &Config<M>,
+) -> Option<String> {
+    // Find the parent group in config
+    let parent_name = parent_path.last()?;
+    
+    fn find_group<'a, M: Metadata>(groups: &'a [Group<M>], name: &str) -> Option<&'a Group<M>> {
+        for group in groups {
+            if group.name.eq_ignore_ascii_case(name) {
+                return Some(group);
+            }
+            if let Some(found) = find_group(&group.groups, name) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    
+    let parent_group = find_group(&config.groups, parent_name)?;
+    
+    // Find child groups that are NOT the new child and NOT metadata-only
+    for child_group in &parent_group.groups {
+        if !child_group.metadata_only && !child_group.name.eq_ignore_ascii_case(new_child) {
+            return Some(child_group.name.clone());
+        }
+    }
+    
+    None
 }
 
 /// Helper: Clean up empty nodes along a path

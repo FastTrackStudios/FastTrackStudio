@@ -1,0 +1,36 @@
+[package]
+name = "spectrum_analyser"
+version = "0.1.0"
+edition = "2021"
+authors = ["Cmdv <info@cmdv.me>"]
+license = "GPL-3.0-or-later"
+homepage = "www.cmdv.me"
+description = "A Spectrum analyser with potential"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Local modified nih_plug with REAPER embed UI support (submodule)
+nih_plug = { path = "../../../libs/nih-plug", features = ["assert_process_allocs"] }
+# This fork of nih_plug_iced is updated to use iced 0.14 with wgpu
+nih_plug_iced = { git = "https://github.com/Cmdv/nih_plug_iced.git", branch = "screen-cursor-location", features = ["canvas", "svg", "wgpu"] }
+
+# Thread-safe audio buffering
+triple_buffer = "8.0"
+# For atomic operations
+atomic_float = "0.1"
+realfft = "3.3"
+apodize = "1.0"
+dasp = "0.11.0"
+libm = "0.2.15"
+# For custom error types
+thiserror = "1.0"
+# For uniform buffer serialization
+bytemuck = { version = "1.14", features = ["derive"] }
+# For blocking on async GPU operations
+pollster = "0.4"
+
+# Override nih_plug for the nih_plug_iced dependency to use our local submodule
+[patch."https://github.com/Cmdv/nih-plug.git"]
+nih_plug = { path = "../../../libs/nih-plug" }

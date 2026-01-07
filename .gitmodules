@@ -1,0 +1,4 @@
+[submodule "libs/nih-plug"]
+	path = libs/nih-plug
+	url = https://github.com/Codys-Wright/nih-plug.git
+	branch = reaper-embed-ui

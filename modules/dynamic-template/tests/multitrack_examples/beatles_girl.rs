@@ -68,6 +68,11 @@ fn beatles_girl() {
     // Convert to tracks
     let tracks = structure.clone().to_tracks();
 
+    // Always display final structure for easy debugging
+    println!("\n=== BEATLES GIRL - Final Track Structure ===");
+    daw::tracks::display_tracklist(&tracks);
+    println!();
+
     // ============================================================================
     // Define expected structure
     // ============================================================================
@@ -131,14 +136,15 @@ fn beatles_girl() {
         .group(tit)
         .end();
 
-    // Lead folder collapsed during initial sort (only Marc tracks, no BGVs yet)
-    // After adding BGVs, we have: Vocals > (Main, 2, BGVs)
-    // Main and 2 are cleaned to "Vocals" and "Vocals 2" using parent folder name
-    let vocals = TrackGroup::folder("Vocals")
-        .track("Vocals", "Marc VOX.wav")
-        .track("Vocals 2", "Marc VOX 2.wav")
-        .group(bgvs)
+    // Lead folder is PRESERVED because Lead is a config group that might get siblings (BGVs)
+    // Marc items become "Lead", "Lead 2" under the Lead folder
+    // (first item gets parent name when stripped, subsequent items get numbered)
+    let lead = TrackGroup::folder("Lead")
+        .track("Lead", "Marc VOX.wav")
+        .track("Lead 2", "Marc VOX 2.wav")
         .end();
+
+    let vocals = TrackGroup::folder("Vocals").group(lead).group(bgvs).end();
 
     // --- SFX ---
     // boomK__BottleOver matches "boom" pattern in SFX group
