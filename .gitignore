@@ -1,5 +1,6 @@
-# Rust build artifacts
-/target/
+# Rust build artifacts (all target directories)
+target/
+**/target/
 
 # IDE files
 .vscode/
@@ -51,6 +52,7 @@ node_modules/
 # Rust-specific
 **/*.rs.bk
 *.pdb
+Cargo.lock
 
 # Backup files
 *.bak
