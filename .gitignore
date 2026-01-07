@@ -78,3 +78,20 @@ perf.data*
 /lib/*.dylib
 /lib/*.so
 /lib/*.dll
+
+# Large font files (should be downloaded separately or use Git LFS)
+*.ttf
+*.otf
+*.woff
+*.woff2
+*.sfd
+packages/charts/resources/fonts/
+
+# Large binary assets
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.svg
+*.pdf
