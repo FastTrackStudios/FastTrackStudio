@@ -10,7 +10,7 @@ description = "Core abstraction layer for FTS audio plugins (nih_plug + dioxus +
 [features]
 default = ["gui"]
 # Enable GUI support (dioxus + wgpu)
-gui = ["nih_plug_dioxus"]
+gui = ["nih_plug_dioxus", "lumen-blocks", "lucide-dioxus"]
 # Enable hub client for cross-plugin communication
 hub = ["plugin-hub/client"]
 
@@ -20,6 +20,10 @@ nih_plug = { workspace = true }
 
 # GUI support (optional)
 nih_plug_dioxus = { workspace = true, optional = true }
+
+# Lumen Blocks components (optional - GUI only)
+lumen-blocks = { workspace = true, optional = true }
+lucide-dioxus = { workspace = true, optional = true }
 
 # Plugin hub client (optional)
 plugin-hub = { path = "../plugin-hub", optional = true }

@@ -50,6 +50,11 @@ pub use nih_plug_dioxus;
 #[cfg(feature = "gui")]
 pub use nih_plug_dioxus::prelude::*;
 
+#[cfg(feature = "gui")]
+pub use lumen_blocks;
+#[cfg(feature = "gui")]
+pub use lucide_dioxus;
+
 #[cfg(feature = "hub")]
 pub use plugin_hub;
 

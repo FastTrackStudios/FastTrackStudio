@@ -2,3 +2,6 @@
 	path = libs/nih-plug
 	url = https://github.com/Codys-Wright/nih-plug.git
 	branch = reaper-embed-ui
+[submodule "libs/lumen-blocks"]
+	path = libs/lumen-blocks
+	url = git@github.com:Codys-Wright/lumen-blocks.git

@@ -1,0 +1,3 @@
+[submodule "libs/lumen-blocks"]
+	path = libs/lumen-blocks
+	url = https://github.com/Leaf-Computer/lumen-blocks.git

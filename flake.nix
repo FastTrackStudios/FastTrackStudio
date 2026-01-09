@@ -38,6 +38,9 @@
           clang
           llvmPackages.bintools
 
+          # CSS tooling
+          tailwindcss_4
+
           # Font/text rendering (for yeslogic-fontconfig-sys)
           fontconfig
           freetype

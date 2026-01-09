@@ -1,6 +1,7 @@
 //! Plugin shell/wrapper component with top bar and size controls.
 
 use crate::sizing::{AspectRatio, SizeTier, MAX_WINDOW_SIZE};
+use lumen_blocks::components::button::{Button, ButtonSize, ButtonVariant};
 use nih_plug::nih_log;
 use nih_plug_dioxus::TAILWIND_CSS;
 use nih_plug_dioxus::dioxus_native::prelude::*;
@@ -34,7 +35,7 @@ pub const SIZE_PRESETS: &[(u32, u32)] = &[
 #[deprecated(since = "0.2.0", note = "Use sizing::SizeTier::Medium instead")]
 pub const DEFAULT_SIZE_INDEX: usize = 2;
 
-// CSS for the shell
+// Shell-specific CSS that can't be done with Tailwind alone
 const SHELL_CSS: &str = r#"
 * {
     box-sizing: border-box;
@@ -46,209 +47,6 @@ html, body {
     width: 100%;
     height: 100%;
     overflow: hidden;
-}
-
-.shell-root {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    background-color: #09090b;
-    font-family: system-ui, sans-serif;
-    position: relative;
-}
-
-.top-bar {
-    height: 36px;
-    min-height: 36px;
-    background-color: #18181b;
-    border-bottom: 1px solid #27272a;
-    display: flex;
-    align-items: center;
-    padding: 0 12px;
-    justify-content: space-between;
-    user-select: none;
-    position: relative;
-    z-index: 100;
-}
-
-.top-bar-left {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.plugin-name {
-    color: white;
-    font-weight: 600;
-    font-size: 14px;
-}
-
-.plugin-version {
-    color: #71717a;
-    font-size: 12px;
-}
-
-.top-bar-right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.size-buttons {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    background-color: #27272a;
-    border-radius: 4px;
-    padding: 2px;
-}
-
-.size-btn {
-    padding: 4px 8px;
-    font-size: 12px;
-    font-weight: 500;
-    border-radius: 3px;
-    cursor: pointer;
-    color: #a1a1aa;
-    background: transparent;
-}
-
-.size-btn:hover {
-    color: #e4e4e7;
-    background-color: #3f3f46;
-}
-
-.size-btn.selected {
-    background-color: #2563eb;
-    color: white;
-}
-
-.dropdown-container {
-    position: relative;
-}
-
-.dropdown-trigger {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    background-color: #27272a;
-    border: 1px solid #3f3f46;
-    border-radius: 4px;
-    color: #d4d4d8;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-}
-
-.dropdown-trigger:hover {
-    background-color: #3f3f46;
-}
-
-.dropdown-arrow {
-    color: #71717a;
-}
-
-.dropdown-menu {
-    position: absolute;
-    top: 100%;
-    right: 0;
-    margin-top: 4px;
-    background-color: #27272a;
-    border: 1px solid #3f3f46;
-    border-radius: 6px;
-    min-width: 150px;
-    padding: 4px;
-    z-index: 1000;
-    width: 180px;
-    max-height: 400px;
-    overflow-y: auto;
-}
-
-.dropdown-item {
-    padding: 8px 12px;
-    cursor: pointer;
-    border-radius: 4px;
-    color: #d4d4d8;
-}
-
-.dropdown-item:hover {
-    background-color: #3f3f46;
-}
-
-.dropdown-item.selected {
-    background-color: #2563eb;
-    color: white;
-}
-
-.dropdown-item-name {
-    font-size: 14px;
-    font-weight: 500;
-}
-
-.dropdown-item-size {
-    font-size: 11px;
-    color: #71717a;
-    margin-top: 2px;
-}
-
-.dropdown-item.selected .dropdown-item-size {
-    color: #93c5fd;
-}
-
-.content-area {
-    flex: 1;
-    overflow: hidden;
-}
-
-.dropdown-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 999;
-    background: transparent;
-}
-
-.dropdown-menu-root {
-    position: absolute;
-    top: 40px;
-    right: 12px;
-    background-color: #27272a;
-    border: 1px solid #3f3f46;
-    border-radius: 6px;
-    min-width: 150px;
-    padding: 4px;
-    z-index: 1000;
-    width: 180px;
-    max-height: 400px;
-    overflow-y: auto;
-}
-
-.aspect-dropdown-root {
-    position: absolute;
-    top: 40px;
-    right: 100px;
-    background-color: #27272a;
-    border: 1px solid #3f3f46;
-    border-radius: 6px;
-    min-width: 150px;
-    padding: 4px;
-    z-index: 1000;
-    width: 160px;
-    max-height: 400px;
-    overflow-y: auto;
-}
-
-.dropdown-section-header {
-    padding: 4px 12px;
-    font-size: 10px;
-    font-weight: 600;
-    color: #71717a;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
 }
 "#;
 
@@ -302,35 +100,35 @@ pub fn PluginShell(
         style { {SHELL_CSS} }
 
         div {
-            class: "shell-root",
+            class: "dark w-full h-full flex flex-col bg-background font-sans relative",
 
             // Top bar
             div {
-                class: "top-bar",
+                class: "h-9 min-h-9 bg-card border-b border-border flex items-center px-3 justify-between select-none relative z-50",
 
                 // Left side
                 div {
-                    class: "top-bar-left",
-                    span { class: "plugin-name", "{plugin_name}" }
+                    class: "flex items-center gap-2",
+                    span { class: "text-foreground font-semibold text-sm", "{plugin_name}" }
                     if !version_display.is_empty() {
-                        span { class: "plugin-version", "{version_display}" }
+                        span { class: "text-muted-foreground text-xs", "{version_display}" }
                     }
                 }
 
                 // Right side
                 div {
-                    class: "top-bar-right",
+                    class: "flex items-center gap-2",
 
                     // Aspect ratio selector (optional)
                     if show_aspect_selector {
                         div {
-                            class: "dropdown-trigger",
+                            class: "flex items-center gap-1.5 px-2.5 py-1 bg-secondary border border-border rounded text-secondary-foreground text-xs font-medium cursor-pointer hover:bg-muted",
                             onclick: move |_| {
                                 aspect_dropdown_open.set(!is_aspect_open);
                                 size_dropdown_open.set(false);
                             },
                             span { "{aspect.short_name()}" }
-                            span { class: "dropdown-arrow", if is_aspect_open { "^" } else { "v" } }
+                            span { class: "text-muted-foreground", if is_aspect_open { "^" } else { "v" } }
                         }
                     }
 
@@ -344,39 +142,39 @@ pub fn PluginShell(
 
                     // Size dropdown trigger
                     div {
-                        class: "dropdown-trigger",
+                        class: "flex items-center gap-1.5 px-2.5 py-1 bg-secondary border border-border rounded text-secondary-foreground text-xs font-medium cursor-pointer hover:bg-muted",
                         onclick: move |_| {
                             size_dropdown_open.set(!is_size_open);
                             aspect_dropdown_open.set(false);
                         },
                         span { "{cur_w}x{cur_h}" }
-                        span { class: "dropdown-arrow", if is_size_open { "^" } else { "v" } }
+                        span { class: "text-muted-foreground", if is_size_open { "^" } else { "v" } }
                     }
                 }
             }
 
             // Content area
             div {
-                class: "content-area",
+                class: "flex-1 overflow-hidden",
                 {children}
             }
 
             // Aspect ratio dropdown menu
             if is_aspect_open {
                 div {
-                    class: "dropdown-overlay",
+                    class: "absolute inset-0 z-40 bg-transparent",
                     onclick: move |_| {
                         aspect_dropdown_open.set(false);
                     },
 
                     div {
-                        class: "aspect-dropdown-root",
+                        class: "absolute top-10 right-24 bg-popover border border-border rounded-lg min-w-40 p-1 z-50 w-40 max-h-96 overflow-y-auto",
                         onclick: move |e| {
                             e.stop_propagation();
                         },
 
                         // Standard section
-                        div { class: "dropdown-section-header", "Standard" }
+                        div { class: "px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide", "Standard" }
                         AspectDropdownItem {
                             aspect_option: AspectRatio::Widescreen,
                             current_aspect: current_aspect,
@@ -391,7 +189,7 @@ pub fn PluginShell(
                         }
 
                         // Rack section
-                        div { class: "dropdown-section-header", "Rack" }
+                        div { class: "px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide", "Rack" }
                         AspectDropdownItem {
                             aspect_option: AspectRatio::Rack1U,
                             current_aspect: current_aspect,
@@ -418,7 +216,7 @@ pub fn PluginShell(
                         }
 
                         // Half Rack section
-                        div { class: "dropdown-section-header", "Half Rack" }
+                        div { class: "px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide", "Half Rack" }
                         AspectDropdownItem {
                             aspect_option: AspectRatio::HalfRack1U,
                             current_aspect: current_aspect,
@@ -445,7 +243,7 @@ pub fn PluginShell(
                         }
 
                         // 500 Series section
-                        div { class: "dropdown-section-header", "500 Series" }
+                        div { class: "px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide", "500 Series" }
                         AspectDropdownItem {
                             aspect_option: AspectRatio::Series500Single,
                             current_aspect: current_aspect,
@@ -465,13 +263,13 @@ pub fn PluginShell(
             // Size tier dropdown menu
             if is_size_open {
                 div {
-                    class: "dropdown-overlay",
+                    class: "absolute inset-0 z-40 bg-transparent",
                     onclick: move |_| {
                         size_dropdown_open.set(false);
                     },
 
                     div {
-                        class: "dropdown-menu-root",
+                        class: "absolute top-10 right-3 bg-popover border border-border rounded-lg min-w-40 p-1 z-50 w-44 max-h-96 overflow-y-auto",
                         onclick: move |e| {
                             e.stop_propagation();
                         },
@@ -503,7 +301,7 @@ fn SizeTierButtons(
 ) -> Element {
     rsx! {
         div {
-            class: "size-buttons",
+            class: "flex items-center gap-0.5 bg-secondary rounded p-0.5",
             for tier in SizeTier::all().iter().copied() {
                 SizeTierButton {
                     aspect: aspect,
@@ -526,20 +324,23 @@ fn SizeTierButton(
     mut current_aspect: Signal<AspectRatio>,
     mut current_tier: Signal<SizeTier>,
 ) -> Element {
-    let class = if is_selected {
-        "size-btn selected"
+    let variant = if is_selected {
+        ButtonVariant::Primary
     } else {
-        "size-btn"
+        ButtonVariant::Ghost
     };
 
+    let label = tier.label();
+
     rsx! {
-        div {
-            class: class,
-            onclick: move |_| {
+        Button {
+            variant: variant,
+            size: ButtonSize::Small,
+            on_click: move |_| {
                 current_tier.set(tier);
                 do_resize(aspect, tier);
             },
-            "{tier.label()}"
+            "{label}"
         }
     }
 }
@@ -557,9 +358,9 @@ fn AspectDropdownItem(
     let is_selected = std::mem::discriminant(&aspect_option) == std::mem::discriminant(&current);
 
     let class = if is_selected {
-        "dropdown-item selected"
+        "px-3 py-2 cursor-pointer rounded bg-primary text-primary-foreground text-sm"
     } else {
-        "dropdown-item"
+        "px-3 py-2 cursor-pointer rounded text-popover-foreground hover:bg-muted text-sm"
     };
 
     let (ratio_w, ratio_h) = aspect_option.ratio();
@@ -592,9 +393,9 @@ fn SizeDropdownItem(
     let (width, height) = aspect.dimensions_with_max(tier_option, MAX_WINDOW_SIZE);
 
     let class = if is_selected {
-        "dropdown-item selected"
+        "px-3 py-2 cursor-pointer rounded bg-primary text-primary-foreground text-sm"
     } else {
-        "dropdown-item"
+        "px-3 py-2 cursor-pointer rounded text-popover-foreground hover:bg-muted text-sm"
     };
 
     let label = format!("{} - {}x{}", tier_option.name(), width, height);

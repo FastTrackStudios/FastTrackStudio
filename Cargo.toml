@@ -1,10 +1,10 @@
 [workspace]
 members = [
     "apps/reaper_extension",
-    "apps/plugins/spectrum_analyzer",
     "apps/plugins/wgpu_reaper_demo",
     "apps/plugins/gain",
-    # "apps/native-test",  # Excluded - standalone app using latest blitz from git
+    "apps/native-testing",
+    # "apps/native-test",  # Excluded - old test app
     # "apps/fts-control",  # Temporarily excluded - uses dioxus "native" which conflicts with git blitz
     "libs/macros",
     "libs/monarchy",
@@ -28,6 +28,7 @@ members = [
     "modules/ui",
     "modules/api",
     "modules/rppxml",
+    "modules/fx",
 ]
 # Exclude submodules that have their own workspaces
 exclude = ["libs/nih-plug", "apps/fts-control"]
@@ -49,7 +50,7 @@ dioxus = { version = "0.7.1", features = ["router"], default-features = false }
 fragile = "2.0.1"
 futures = "0.3"
 libloading = "0.9"
-lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
+lumen-blocks = { path = "libs/lumen-blocks/blocks" }
 nih_plug = { path = "libs/nih-plug" }
 nih_plug_dioxus = { path = "libs/nih-plug/nih_plug_dioxus" }
 nom = "8.0.0"
@@ -67,6 +68,8 @@ tauri-plugin-shell = "2"
 taurpc = "0.5.2"
 thiserror = "1.0"
 tracing = "0.1"
+dioxus-sdk-time = "0.7"
+lucide-dioxus = "2"
 ui = { path = "modules/ui" }
 
 [workspace.dependencies.chrono]
@@ -160,19 +163,36 @@ nonstandard_style = "warn"
 [patch."https://github.com/Cmdv/nih-plug.git"]
 nih_plug = { path = "libs/nih-plug" }
 
-# Override blitz crates to use git version for latest CSS support
-# NOTE: DO NOT patch stylo from git - the crates.io version works fine,
-# but the git version has E0275 trait recursion overflow
+# Override blitz crates from git to use local fork with post-processing support
+[patch."https://github.com/DioxusLabs/blitz.git"]
+dioxus-native = { path = "../reference/dioxus/blitz/packages/dioxus-native" }
+dioxus-native-dom = { path = "../reference/dioxus/blitz/packages/dioxus-native-dom" }
+blitz-dom = { path = "../reference/dioxus/blitz/packages/blitz-dom" }
+blitz-html = { path = "../reference/dioxus/blitz/packages/blitz-html" }
+blitz-net = { path = "../reference/dioxus/blitz/packages/blitz-net" }
+blitz-paint = { path = "../reference/dioxus/blitz/packages/blitz-paint" }
+blitz-traits = { path = "../reference/dioxus/blitz/packages/blitz-traits" }
+blitz-shell = { path = "../reference/dioxus/blitz/packages/blitz-shell" }
+stylo_taffy = { path = "../reference/dioxus/blitz/packages/stylo_taffy" }
+
+# Also patch crates-io versions for other crates that use these
 [patch.crates-io]
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git" }
-dioxus-native-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-html = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-net = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-shell = { git = "https://github.com/DioxusLabs/blitz.git" }
-stylo_taffy = { git = "https://github.com/DioxusLabs/blitz.git" }
+dioxus-native = { path = "../reference/dioxus/blitz/packages/dioxus-native" }
+dioxus-native-dom = { path = "../reference/dioxus/blitz/packages/dioxus-native-dom" }
+blitz-dom = { path = "../reference/dioxus/blitz/packages/blitz-dom" }
+blitz-html = { path = "../reference/dioxus/blitz/packages/blitz-html" }
+blitz-net = { path = "../reference/dioxus/blitz/packages/blitz-net" }
+blitz-paint = { path = "../reference/dioxus/blitz/packages/blitz-paint" }
+blitz-traits = { path = "../reference/dioxus/blitz/packages/blitz-traits" }
+blitz-shell = { path = "../reference/dioxus/blitz/packages/blitz-shell" }
+stylo_taffy = { path = "../reference/dioxus/blitz/packages/stylo_taffy" }
+# Anyrender with post-processing support
+anyrender = { path = "../reference/dioxus/anyrender/crates/anyrender" }
+anyrender_vello = { path = "../reference/dioxus/anyrender/crates/anyrender_vello" }
+anyrender_vello_cpu = { path = "../reference/dioxus/anyrender/crates/anyrender_vello_cpu" }
+anyrender_vello_hybrid = { path = "../reference/dioxus/anyrender/crates/anyrender_vello_hybrid" }
+anyrender_svg = { path = "../reference/dioxus/anyrender/crates/anyrender_svg" }
+wgpu_context = { path = "../reference/dioxus/anyrender/crates/wgpu_context" }
 
 [workspace.lints.clippy]
 # Core lints - treat as errors

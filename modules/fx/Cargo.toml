@@ -1,0 +1,28 @@
+[package]
+name = "fts-fx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "DSP effect blocks for FastTrackStudio"
+
+[features]
+default = ["ui"]
+ui = []  # UI components, can be disabled for headless/plugin use
+# no_std = []  # Future: DSP-only, no allocations
+
+[dependencies]
+# Core dasp crates for DSP primitives
+dasp_sample = "0.11"
+dasp_frame = "0.11"
+dasp_ring_buffer = "0.11"
+dasp_interpolate = { version = "0.11", features = ["floor", "linear", "sinc"] }
+dasp_peak = "0.11"
+dasp_rms = "0.11"
+dasp_envelope = { version = "0.11", features = ["peak", "rms"] }
+# High-quality resampling with SIMD acceleration
+rubato = "1.0"
+audioadapter-buffers = "2.0"
+
+[lints]
+workspace = true
