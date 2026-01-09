@@ -22,10 +22,10 @@
 //! - `shared.rs` - Shared macro and wrapper enum
 
 pub mod shared {
-    pub mod traits;
     pub mod behavior;
     pub mod conversion;
     pub mod macros;
+    pub mod traits;
 }
 pub mod arrange_view;
 pub mod automation_item;
@@ -43,7 +43,7 @@ pub mod track;
 // Re-export the main types
 pub use shared::behavior::MouseModifierBehavior;
 pub use shared::conversion::{get_behavior, get_mouse_modifier_name};
-pub use shared::traits::{BehaviorId, BehaviorDisplay, MouseBehavior};
+pub use shared::traits::{BehaviorDisplay, BehaviorId, MouseBehavior};
 
 // Re-export all behavior enums for convenience
 pub use arrange_view::*;

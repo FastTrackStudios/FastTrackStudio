@@ -41,13 +41,13 @@ pub struct AppState {
 pub trait SetlistDataSource {
     /// Get the setlist (if available)
     fn get_setlist(&self) -> Option<Setlist>;
-    
+
     /// Get the active song index (if known)
     fn get_active_song_index(&self) -> Option<usize>;
-    
+
     /// Get transport state
     fn get_transport_state(&self) -> TransportState;
-    
+
     /// Get app state
     fn get_app_state(&self) -> AppState;
 }

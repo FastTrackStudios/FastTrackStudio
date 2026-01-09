@@ -4,18 +4,18 @@
 //! Provides functions to get HWNDs of various REAPER windows using control IDs
 //! that are consistent across all platforms.
 
-use reaper_low::raw::{HWND, POINT};
 use reaper_low::Swell;
+use reaper_low::raw::{HWND, POINT};
 use reaper_medium::Reaper as MediumReaper;
-use swell_ui::Window;
 use std::ffi::CString;
+use swell_ui::Window;
 
 /// Window Control IDs
 /// IDs of child windows are the same on all platforms
 /// https://forum.cockos.com/showpost.php?p=2388026&postcount=5
 mod wnd_control_ids {
     pub const MAIN_ARRANGE: i32 = 0x000003E8; // trackview
-    pub const MAIN_RULER: i32 = 0x000003ED;   // timeline
+    pub const MAIN_RULER: i32 = 0x000003ED; // timeline
     pub const MIDI_NOTES_VIEW: i32 = 0x000003E9; // midiview
     pub const MIDI_PIANO_VIEW: i32 = 0x000003EB; // midipianoview
 }
@@ -25,12 +25,11 @@ mod wnd_control_ids {
 /// Uses GetDlgItem with control ID that's consistent across platforms
 pub fn get_arrange_wnd(medium_reaper: &MediumReaper) -> Option<HWND> {
     let main_hwnd = medium_reaper.get_main_hwnd();
-    
+
     // Use GetDlgItem to get child window by control ID
-    let arrange_hwnd = unsafe {
-        Swell::get().GetDlgItem(main_hwnd.as_ptr(), wnd_control_ids::MAIN_ARRANGE)
-    };
-    
+    let arrange_hwnd =
+        unsafe { Swell::get().GetDlgItem(main_hwnd.as_ptr(), wnd_control_ids::MAIN_ARRANGE) };
+
     if arrange_hwnd.is_null() {
         None
     } else {
@@ -43,12 +42,11 @@ pub fn get_arrange_wnd(medium_reaper: &MediumReaper) -> Option<HWND> {
 /// Uses GetDlgItem with control ID that's consistent across platforms
 pub fn get_ruler_wnd(medium_reaper: &MediumReaper) -> Option<HWND> {
     let main_hwnd = medium_reaper.get_main_hwnd();
-    
+
     // Use GetDlgItem to get child window by control ID
-    let ruler_hwnd = unsafe {
-        Swell::get().GetDlgItem(main_hwnd.as_ptr(), wnd_control_ids::MAIN_RULER)
-    };
-    
+    let ruler_hwnd =
+        unsafe { Swell::get().GetDlgItem(main_hwnd.as_ptr(), wnd_control_ids::MAIN_RULER) };
+
     if ruler_hwnd.is_null() {
         None
     } else {
@@ -58,7 +56,7 @@ pub fn get_ruler_wnd(medium_reaper: &MediumReaper) -> Option<HWND> {
 
 /// Search for a window by name in children of a parent window
 /// Port of SearchChildren from SWS
-/// 
+///
 /// On Windows with localization, uses GetWindowText and manual search.
 /// Otherwise, uses FindWindowEx with name as title parameter (more efficient).
 fn search_children(
@@ -69,11 +67,11 @@ fn search_children(
 ) -> Option<HWND> {
     let swell = Swell::get();
     let name_cstr = CString::new(name).ok()?;
-    
+
     // Try FindWindowEx approach first (works on non-localized Windows and all platforms)
     // This is more efficient than manual enumeration
     let mut return_hwnd = start_after;
-    
+
     loop {
         let found = unsafe {
             swell.FindWindowEx(
@@ -83,36 +81,38 @@ fn search_children(
                 name_cstr.as_ptr(),
             )
         };
-        
+
         if found.is_null() {
             break;
         }
-        
+
         // If windowHasNoChildren is true, check that the window has no children
         if !window_has_no_children {
             return Some(found);
         }
-        
+
         // Check if window has no children
         let has_children = unsafe {
-            !swell.GetWindow(found, reaper_low::raw::GW_CHILD as i32).is_null()
+            !swell
+                .GetWindow(found, reaper_low::raw::GW_CHILD as i32)
+                .is_null()
         };
-        
+
         if !has_children {
             return Some(found);
         }
-        
+
         // Continue searching from this point
         return_hwnd = Some(found);
     }
-    
+
     // Fallback: Manual enumeration (for localized Windows or if FindWindowEx fails)
     // This matches the Windows localized code path
     // If parent is null, we can't enumerate children, so return None
     if parent.is_null() {
         return None;
     }
-    
+
     let mut current = if let Some(start) = start_after {
         // Start from next sibling after start_after
         unsafe { swell.GetWindow(start, reaper_low::raw::GW_HWNDNEXT as i32) }
@@ -120,7 +120,7 @@ fn search_children(
         // Start from first child
         unsafe { swell.GetWindow(parent, reaper_low::raw::GW_CHILD as i32) }
     };
-    
+
     while !current.is_null() {
         // Get window text and compare
         if let Some(window) = Window::new(current) {
@@ -129,7 +129,9 @@ fn search_children(
                     // If windowHasNoChildren is true, check that the window has no children
                     if window_has_no_children {
                         let has_children = unsafe {
-                            !swell.GetWindow(current, reaper_low::raw::GW_CHILD as i32).is_null()
+                            !swell
+                                .GetWindow(current, reaper_low::raw::GW_CHILD as i32)
+                                .is_null()
                         };
                         if has_children {
                             // Continue searching
@@ -143,13 +145,11 @@ fn search_children(
                 }
             }
         }
-        
+
         // Move to next sibling
-        current = unsafe {
-            swell.GetWindow(current, reaper_low::raw::GW_HWNDNEXT as i32)
-        };
+        current = unsafe { swell.GetWindow(current, reaper_low::raw::GW_HWNDNEXT as i32) };
     }
-    
+
     None
 }
 
@@ -165,7 +165,7 @@ fn find_in_reaper(name: &str, medium_reaper: &MediumReaper) -> Option<HWND> {
 fn find_in_reaper_dockers(name: &str, medium_reaper: &MediumReaper) -> Option<HWND> {
     let main_hwnd = medium_reaper.get_main_hwnd();
     let swell = Swell::get();
-    
+
     // Find docker windows by class name "REAPER_dock"
     let docker_class = CString::new("REAPER_dock").ok()?;
     let mut docker = unsafe {
@@ -176,12 +176,12 @@ fn find_in_reaper_dockers(name: &str, medium_reaper: &MediumReaper) -> Option<HW
             std::ptr::null(),
         )
     };
-    
+
     while !docker.is_null() {
         if let Some(hwnd) = search_children(name, docker, None, false) {
             return Some(hwnd);
         }
-        
+
         // Find next docker
         docker = unsafe {
             swell.FindWindowEx(
@@ -192,23 +192,26 @@ fn find_in_reaper_dockers(name: &str, medium_reaper: &MediumReaper) -> Option<HW
             )
         };
     }
-    
+
     None
 }
 
 /// Find floating window
 /// Port of FindFloating from SWS
-fn find_floating(name: &str, medium_reaper: &MediumReaper, check_for_no_caption: bool, window_has_no_children: bool) -> Option<HWND> {
+fn find_floating(
+    name: &str,
+    medium_reaper: &MediumReaper,
+    check_for_no_caption: bool,
+    window_has_no_children: bool,
+) -> Option<HWND> {
     let main_hwnd = medium_reaper.get_main_hwnd();
     let swell = Swell::get();
     let mut hwnd = search_children(name, std::ptr::null_mut(), None, window_has_no_children);
-    
+
     while let Some(current_hwnd) = hwnd {
         // Check if parent is main window
-        let parent = unsafe {
-            swell.GetParent(current_hwnd)
-        };
-        
+        let parent = unsafe { swell.GetParent(current_hwnd) };
+
         if parent == main_hwnd.as_ptr() {
             // Check for no caption if requested
             if check_for_no_caption {
@@ -218,14 +221,19 @@ fn find_floating(name: &str, medium_reaper: &MediumReaper, check_for_no_caption:
                 // WS_CAPTION check - if style doesn't have caption, continue
                 // For now, we'll skip this check as it's complex
             }
-            
+
             return Some(current_hwnd);
         }
-        
+
         // Continue searching
-        hwnd = search_children(name, std::ptr::null_mut(), Some(current_hwnd), window_has_no_children);
+        hwnd = search_children(
+            name,
+            std::ptr::null_mut(),
+            Some(current_hwnd),
+            window_has_no_children,
+        );
     }
-    
+
     None
 }
 
@@ -245,26 +253,26 @@ pub fn get_transport_wnd(medium_reaper: &MediumReaper) -> Option<HWND> {
     // Note: SWS uses __localizeFunc("Transport", "DLG_188", 0) for localization
     // For now, we'll try the English name and hope it works
     // In the future, we could add localization support
-    
+
     let transport_name = "Transport";
-    
+
     // Search in order: dockers, floating, floating dockers, main window
     if let Some(hwnd) = find_in_reaper_dockers(transport_name, medium_reaper) {
         return Some(hwnd);
     }
-    
+
     if let Some(hwnd) = find_floating(transport_name, medium_reaper, false, false) {
         return Some(hwnd);
     }
-    
+
     if let Some(hwnd) = find_in_floating_dockers(transport_name, medium_reaper) {
         return Some(hwnd);
     }
-    
+
     if let Some(hwnd) = find_in_reaper(transport_name, medium_reaper) {
         return Some(hwnd);
     }
-    
+
     None
 }
 
@@ -273,19 +281,16 @@ pub fn get_transport_wnd(medium_reaper: &MediumReaper) -> Option<HWND> {
 /// Uses GetDlgItem with control ID that's consistent across platforms
 pub fn get_notes_view(midi_editor_hwnd: HWND, medium_reaper: &MediumReaper) -> Option<HWND> {
     // Check if it's a valid MIDI editor
-    let mode = unsafe {
-        medium_reaper.low().MIDIEditor_GetMode(midi_editor_hwnd)
-    };
-    
+    let mode = unsafe { medium_reaper.low().MIDIEditor_GetMode(midi_editor_hwnd) };
+
     if mode == -1 {
         return None;
     }
-    
+
     // Use GetDlgItem to get child window by control ID
-    let notes_view_hwnd = unsafe {
-        Swell::get().GetDlgItem(midi_editor_hwnd, wnd_control_ids::MIDI_NOTES_VIEW)
-    };
-    
+    let notes_view_hwnd =
+        unsafe { Swell::get().GetDlgItem(midi_editor_hwnd, wnd_control_ids::MIDI_NOTES_VIEW) };
+
     if notes_view_hwnd.is_null() {
         None
     } else {
@@ -298,19 +303,16 @@ pub fn get_notes_view(midi_editor_hwnd: HWND, medium_reaper: &MediumReaper) -> O
 /// Uses GetDlgItem with control ID that's consistent across platforms
 pub fn get_piano_view(midi_editor_hwnd: HWND, medium_reaper: &MediumReaper) -> Option<HWND> {
     // Check if it's a valid MIDI editor
-    let mode = unsafe {
-        medium_reaper.low().MIDIEditor_GetMode(midi_editor_hwnd)
-    };
-    
+    let mode = unsafe { medium_reaper.low().MIDIEditor_GetMode(midi_editor_hwnd) };
+
     if mode == -1 {
         return None;
     }
-    
+
     // Use GetDlgItem to get child window by control ID
-    let piano_view_hwnd = unsafe {
-        Swell::get().GetDlgItem(midi_editor_hwnd, wnd_control_ids::MIDI_PIANO_VIEW)
-    };
-    
+    let piano_view_hwnd =
+        unsafe { Swell::get().GetDlgItem(midi_editor_hwnd, wnd_control_ids::MIDI_PIANO_VIEW) };
+
     if piano_view_hwnd.is_null() {
         None
     } else {
@@ -324,215 +326,195 @@ pub fn get_piano_view(midi_editor_hwnd: HWND, medium_reaper: &MediumReaper) -> O
 /// Note: We don't cache the result like SWS does because HWND is not Send/Sync
 /// This means we'll search each time, but it's safer for multi-threaded contexts
 pub fn get_tcp_wnd(medium_reaper: &MediumReaper) -> (Option<HWND>, bool) {
-        let main_hwnd = medium_reaper.get_main_hwnd();
-        let swell = Swell::get();
-        
-        // Try to find by class name "REAPERTCPDisplay"
-        let tcp_class = CString::new("REAPERTCPDisplay").ok();
-        let mut tcp_hwnd = if let Some(class) = &tcp_class {
-            unsafe {
-                swell.FindWindowEx(
-                    main_hwnd.as_ptr(),
-                    std::ptr::null_mut(),
-                    class.as_ptr(),
-                    std::ptr::null(),
-                )
-            }
-        } else {
-            std::ptr::null_mut()
-        };
-        
-        // macOS workaround: verify class name (old macOS swell FindWindowEx is broken)
-        #[cfg(target_os = "macos")]
-        {
-            if !tcp_hwnd.is_null() {
-                let mut buf = vec![0u8; 1024];
-                let got_class = unsafe {
-                    swell.GetClassName(
-                        tcp_hwnd,
-                        buf.as_mut_ptr() as *mut i8,
-                        buf.len() as i32,
-                    )
-                };
-                
-                if got_class == 0 {
+    let main_hwnd = medium_reaper.get_main_hwnd();
+    let swell = Swell::get();
+
+    // Try to find by class name "REAPERTCPDisplay"
+    let tcp_class = CString::new("REAPERTCPDisplay").ok();
+    let mut tcp_hwnd = if let Some(class) = &tcp_class {
+        unsafe {
+            swell.FindWindowEx(
+                main_hwnd.as_ptr(),
+                std::ptr::null_mut(),
+                class.as_ptr(),
+                std::ptr::null(),
+            )
+        }
+    } else {
+        std::ptr::null_mut()
+    };
+
+    // macOS workaround: verify class name (old macOS swell FindWindowEx is broken)
+    #[cfg(target_os = "macos")]
+    {
+        if !tcp_hwnd.is_null() {
+            let mut buf = vec![0u8; 1024];
+            let got_class = unsafe {
+                swell.GetClassName(tcp_hwnd, buf.as_mut_ptr() as *mut i8, buf.len() as i32)
+            };
+
+            if got_class == 0 {
+                tcp_hwnd = std::ptr::null_mut();
+            } else {
+                let class_name =
+                    unsafe { CString::from_vec_unchecked(buf[..got_class as usize].to_vec()) };
+                if class_name.to_string_lossy() != "REAPERTCPDisplay" {
                     tcp_hwnd = std::ptr::null_mut();
-                } else {
-                    let class_name = unsafe {
-                        CString::from_vec_unchecked(buf[..got_class as usize].to_vec())
-                    };
-                    if class_name.to_string_lossy() != "REAPERTCPDisplay" {
-                        tcp_hwnd = std::ptr::null_mut();
-                    }
                 }
             }
         }
-        
-        let mut is_container = false;
-        if !tcp_hwnd.is_null() {
-            is_container = true;
-            return (Some(tcp_hwnd), is_container);
+    }
+
+    let mut is_container = false;
+    if !tcp_hwnd.is_null() {
+        is_container = true;
+        return (Some(tcp_hwnd), is_container);
+    }
+
+    // Legacy path - 5.x releases
+    // Find first visible track in TCP
+    let low_reaper = medium_reaper.low();
+    let track_count = unsafe { low_reaper.CountTracks(std::ptr::null_mut()) };
+
+    let mut track: *mut reaper_low::raw::MediaTrack = std::ptr::null_mut();
+    for i in 0..track_count {
+        let current_track = unsafe { low_reaper.GetTrack(std::ptr::null_mut(), i) };
+
+        if current_track.is_null() {
+            continue;
         }
-        
-        // Legacy path - 5.x releases
-        // Find first visible track in TCP
-        let low_reaper = medium_reaper.low();
-        let track_count = unsafe {
-            low_reaper.CountTracks(std::ptr::null_mut())
+
+        // Check B_SHOWINTCP using GetMediaTrackInfo_Value
+        let show_in_tcp = unsafe {
+            low_reaper
+                .GetMediaTrackInfo_Value(current_track, b"B_SHOWINTCP\0".as_ptr() as *const i8)
+                != 0.0
         };
-        
-        let mut track: *mut reaper_low::raw::MediaTrack = std::ptr::null_mut();
-        for i in 0..track_count {
-            let current_track = unsafe {
-                low_reaper.GetTrack(std::ptr::null_mut(), i)
-            };
-            
-            if current_track.is_null() {
-                continue;
-            }
-            
-            // Check B_SHOWINTCP using GetMediaTrackInfo_Value
-            let show_in_tcp = unsafe {
-                low_reaper.GetMediaTrackInfo_Value(current_track, b"B_SHOWINTCP\0".as_ptr() as *const i8) != 0.0
-            };
-            
-            // Check I_WNDH (window height)
-            let wnd_h = unsafe {
-                low_reaper.GetMediaTrackInfo_Value(current_track, b"I_WNDH\0".as_ptr() as *const i8)
-            };
-            
-            if show_in_tcp && wnd_h != 0.0 {
-                track = current_track;
-                break;
-            }
+
+        // Check I_WNDH (window height)
+        let wnd_h = unsafe {
+            low_reaper.GetMediaTrackInfo_Value(current_track, b"I_WNDH\0".as_ptr() as *const i8)
+        };
+
+        if show_in_tcp && wnd_h != 0.0 {
+            track = current_track;
+            break;
         }
-        
-        // Get master track
-        let master = unsafe {
-            low_reaper.GetMasterTrack(std::ptr::null_mut())
-        };
-        
-        // Check if master is visible in TCP
-        // TODO: TcpVis() function - for now, check B_SHOWINTCP
-        let master_show_in_tcp = if !master.is_null() {
-            unsafe {
-                low_reaper.GetMediaTrackInfo_Value(master, b"B_SHOWINTCP\0".as_ptr() as *const i8) != 0.0
-            }
-        } else {
-            false
-        };
-        
-        // Determine first track to search for
-        let first_track = if master_show_in_tcp {
-            master
-        } else if !track.is_null() {
-            track
-        } else {
-            master
-        };
-        
-        // If no tracks visible, temporarily show master to find TCP
-        let mut master_vis_restore: Option<i32> = None;
-        if track.is_null() && !master_show_in_tcp {
-            let current_vis = unsafe {
-                low_reaper.GetMasterTrackVisibility()
-            };
-            unsafe {
-                low_reaper.SetMasterTrackVisibility(current_vis | 1); // Show in TCP
-            }
-            master_vis_restore = Some(current_vis);
+    }
+
+    // Get master track
+    let master = unsafe { low_reaper.GetMasterTrack(std::ptr::null_mut()) };
+
+    // Check if master is visible in TCP
+    // TODO: TcpVis() function - for now, check B_SHOWINTCP
+    let master_show_in_tcp = if !master.is_null() {
+        unsafe {
+            low_reaper.GetMediaTrackInfo_Value(master, b"B_SHOWINTCP\0".as_ptr() as *const i8)
+                != 0.0
         }
-        
-        // TCP hierarchy: TCP owner -> TCP hwnd -> tracks
-        // Enumerate windows to find the one containing first_track
-        let mut found_hwnd: Option<HWND> = None;
-        let mut tcp_owner = unsafe {
+    } else {
+        false
+    };
+
+    // Determine first track to search for
+    let first_track = if master_show_in_tcp {
+        master
+    } else if !track.is_null() {
+        track
+    } else {
+        master
+    };
+
+    // If no tracks visible, temporarily show master to find TCP
+    let mut master_vis_restore: Option<i32> = None;
+    if track.is_null() && !master_show_in_tcp {
+        let current_vis = unsafe { low_reaper.GetMasterTrackVisibility() };
+        unsafe {
+            low_reaper.SetMasterTrackVisibility(current_vis | 1); // Show in TCP
+        }
+        master_vis_restore = Some(current_vis);
+    }
+
+    // TCP hierarchy: TCP owner -> TCP hwnd -> tracks
+    // Enumerate windows to find the one containing first_track
+    let mut found_hwnd: Option<HWND> = None;
+    let mut tcp_owner = unsafe {
+        swell.FindWindowEx(
+            main_hwnd.as_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+
+    while !tcp_owner.is_null() && found_hwnd.is_none() {
+        let mut tcp_hwnd = unsafe {
             swell.FindWindowEx(
-                main_hwnd.as_ptr(),
+                tcp_owner,
                 std::ptr::null_mut(),
                 std::ptr::null(),
                 std::ptr::null(),
             )
         };
-        
-        while !tcp_owner.is_null() && found_hwnd.is_none() {
-            let mut tcp_hwnd = unsafe {
+
+        while !tcp_hwnd.is_null() && found_hwnd.is_none() {
+            let mut track_hwnd = unsafe {
                 swell.FindWindowEx(
-                    tcp_owner,
+                    tcp_hwnd,
                     std::ptr::null_mut(),
                     std::ptr::null(),
                     std::ptr::null(),
                 )
             };
-            
-            while !tcp_hwnd.is_null() && found_hwnd.is_none() {
-                let mut track_hwnd = unsafe {
-                    swell.FindWindowEx(
-                        tcp_hwnd,
-                        std::ptr::null_mut(),
-                        std::ptr::null(),
-                        std::ptr::null(),
-                    )
+
+            while !track_hwnd.is_null() && found_hwnd.is_none() {
+                // Get track pointer from window user data
+                // GWL_USERDATA = -21
+                let track_ptr = unsafe {
+                    swell.GetWindowLong(track_hwnd, -21) as *mut reaper_low::raw::MediaTrack
                 };
-                
-                while !track_hwnd.is_null() && found_hwnd.is_none() {
-                    // Get track pointer from window user data
-                    // GWL_USERDATA = -21
-                    let track_ptr = unsafe {
-                        swell.GetWindowLong(track_hwnd, -21) as *mut reaper_low::raw::MediaTrack
-                    };
-                    
-                    if track_ptr == first_track {
-                        found_hwnd = Some(tcp_hwnd);
-                        break;
-                    }
-                    
-                    track_hwnd = unsafe {
-                        swell.FindWindowEx(
-                            tcp_hwnd,
-                            track_hwnd,
-                            std::ptr::null(),
-                            std::ptr::null(),
-                        )
-                    };
-                }
-                
-                if found_hwnd.is_some() {
+
+                if track_ptr == first_track {
+                    found_hwnd = Some(tcp_hwnd);
                     break;
                 }
-                
-                tcp_hwnd = unsafe {
-                    swell.FindWindowEx(
-                        tcp_owner,
-                        tcp_hwnd,
-                        std::ptr::null(),
-                        std::ptr::null(),
-                    )
+
+                track_hwnd = unsafe {
+                    swell.FindWindowEx(tcp_hwnd, track_hwnd, std::ptr::null(), std::ptr::null())
                 };
             }
-            
+
             if found_hwnd.is_some() {
                 break;
             }
-            
-            tcp_owner = unsafe {
-                swell.FindWindowEx(
-                    main_hwnd.as_ptr(),
-                    tcp_owner,
-                    std::ptr::null(),
-                    std::ptr::null(),
-                )
+
+            tcp_hwnd = unsafe {
+                swell.FindWindowEx(tcp_owner, tcp_hwnd, std::ptr::null(), std::ptr::null())
             };
         }
-        
-        // Restore master track visibility if we changed it
-        if let Some(vis) = master_vis_restore {
-            unsafe {
-                low_reaper.SetMasterTrackVisibility(vis);
-            }
+
+        if found_hwnd.is_some() {
+            break;
         }
-        
-        (found_hwnd, is_container)
+
+        tcp_owner = unsafe {
+            swell.FindWindowEx(
+                main_hwnd.as_ptr(),
+                tcp_owner,
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+    }
+
+    // Restore master track visibility if we changed it
+    if let Some(vis) = master_vis_restore {
+        unsafe {
+            low_reaper.SetMasterTrackVisibility(vis);
+        }
+    }
+
+    (found_hwnd, is_container)
 }
 
 /// Get TCP track window HWND for a specific track
@@ -542,36 +524,31 @@ pub fn get_tcp_track_wnd(
     medium_reaper: &MediumReaper,
 ) -> Option<HWND> {
     let (tcp_hwnd, is_container) = get_tcp_wnd(medium_reaper);
-    
+
     let tcp_hwnd = tcp_hwnd?;
-    
+
     // If container, return the container itself
     if is_container {
         return Some(tcp_hwnd);
     }
-    
+
     // Otherwise, enumerate children to find the track
     let swell = Swell::get();
-    let mut child = unsafe {
-        swell.GetWindow(tcp_hwnd, reaper_low::raw::GW_CHILD as i32)
-    };
-    
+    let mut child = unsafe { swell.GetWindow(tcp_hwnd, reaper_low::raw::GW_CHILD as i32) };
+
     while !child.is_null() {
         // Get track pointer from window user data
         // GWL_USERDATA = -21
-        let track_ptr = unsafe {
-            swell.GetWindowLong(child, -21) as *mut reaper_low::raw::MediaTrack
-        };
-        
+        let track_ptr =
+            unsafe { swell.GetWindowLong(child, -21) as *mut reaper_low::raw::MediaTrack };
+
         if track_ptr == track {
             return Some(child);
         }
-        
-        child = unsafe {
-            swell.GetWindow(child, reaper_low::raw::GW_HWNDNEXT as i32)
-        };
+
+        child = unsafe { swell.GetWindow(child, reaper_low::raw::GW_HWNDNEXT as i32) };
     }
-    
+
     None
 }
 
@@ -582,25 +559,25 @@ pub fn get_mixer_wnd(medium_reaper: &MediumReaper) -> Option<HWND> {
     // Try "Mixer" as the window name
     // Note: SWS uses __localizeFunc("Mixer", "DLG_151", 0) for localization
     let mixer_name = "Mixer";
-    
+
     // Use FindReaperWndByPreparedString logic
     // Search in order: dockers, floating, floating dockers, main window
     if let Some(hwnd) = find_in_reaper_dockers(mixer_name, medium_reaper) {
         return Some(hwnd);
     }
-    
+
     if let Some(hwnd) = find_floating(mixer_name, medium_reaper, false, false) {
         return Some(hwnd);
     }
-    
+
     if let Some(hwnd) = find_in_floating_dockers(mixer_name, medium_reaper) {
         return Some(hwnd);
     }
-    
+
     if let Some(hwnd) = find_in_reaper(mixer_name, medium_reaper) {
         return Some(hwnd);
     }
-    
+
     None
 }
 
@@ -609,16 +586,16 @@ pub fn get_mixer_wnd(medium_reaper: &MediumReaper) -> Option<HWND> {
 pub fn get_mixer_master_wnd(mixer_hwnd: HWND, medium_reaper: &MediumReaper) -> Option<HWND> {
     // Try "Mixer Master" as the window name
     let mixer_master_name = "Mixer Master";
-    
+
     // First try by prepared string (searches dockers, floating, etc.)
     if let Some(hwnd) = find_in_reaper_dockers(mixer_master_name, medium_reaper) {
         return Some(hwnd);
     }
-    
+
     if let Some(hwnd) = find_floating(mixer_master_name, medium_reaper, false, false) {
         return Some(hwnd);
     }
-    
+
     // v6+ in mixer: try to find by class name "master"
     let swell = Swell::get();
     let master_class = CString::new("master").ok();
@@ -635,7 +612,7 @@ pub fn get_mixer_master_wnd(mixer_hwnd: HWND, medium_reaper: &MediumReaper) -> O
             return Some(hwnd);
         }
     }
-    
+
     None
 }
 
@@ -647,10 +624,10 @@ pub fn get_mcp_wnd(medium_reaper: &MediumReaper) -> (Option<HWND>, bool) {
         Some(h) => h,
         None => return (None, false),
     };
-    
+
     let swell = Swell::get();
     let mut is_container = false;
-    
+
     // Try to find by class name "REAPERMCPDisplay"
     let mcp_class = CString::new("REAPERMCPDisplay").ok();
     let mut mcp_hwnd = if let Some(class) = &mcp_class {
@@ -665,45 +642,38 @@ pub fn get_mcp_wnd(medium_reaper: &MediumReaper) -> (Option<HWND>, bool) {
     } else {
         std::ptr::null_mut()
     };
-    
+
     // macOS workaround: verify class name (old macOS swell FindWindowEx is broken)
     #[cfg(target_os = "macos")]
     {
         if !mcp_hwnd.is_null() {
             let mut buf = vec![0u8; 1024];
             let got_class = unsafe {
-                swell.GetClassName(
-                    mcp_hwnd,
-                    buf.as_mut_ptr() as *mut i8,
-                    buf.len() as i32,
-                )
+                swell.GetClassName(mcp_hwnd, buf.as_mut_ptr() as *mut i8, buf.len() as i32)
             };
-            
+
             if got_class == 0 {
                 mcp_hwnd = std::ptr::null_mut();
             } else {
-                let class_name = unsafe {
-                    CString::from_vec_unchecked(buf[..got_class as usize].to_vec())
-                };
+                let class_name =
+                    unsafe { CString::from_vec_unchecked(buf[..got_class as usize].to_vec()) };
                 if class_name.to_string_lossy() != "REAPERMCPDisplay" {
                     mcp_hwnd = std::ptr::null_mut();
                 }
             }
         }
     }
-    
+
     if !mcp_hwnd.is_null() {
         is_container = true;
         return (Some(mcp_hwnd), is_container);
     }
-    
+
     // Legacy path - 5.x releases
     // Find first child window that's not the master track
     let low_reaper = medium_reaper.low();
-    let master = unsafe {
-        low_reaper.GetMasterTrack(std::ptr::null_mut())
-    };
-    
+    let master = unsafe { low_reaper.GetMasterTrack(std::ptr::null_mut()) };
+
     let mut hwnd = unsafe {
         swell.FindWindowEx(
             mixer_hwnd,
@@ -712,29 +682,21 @@ pub fn get_mcp_wnd(medium_reaper: &MediumReaper) -> (Option<HWND>, bool) {
             std::ptr::null(),
         )
     };
-    
+
     while !hwnd.is_null() {
         // Get track pointer from window user data
-        let track_ptr = unsafe {
-            swell.GetWindowLong(hwnd, -21) as *mut reaper_low::raw::MediaTrack
-        };
-        
+        let track_ptr =
+            unsafe { swell.GetWindowLong(hwnd, -21) as *mut reaper_low::raw::MediaTrack };
+
         // Skip master track
         if track_ptr != master {
             return (Some(hwnd), is_container);
         }
-        
+
         // Find next child
-        hwnd = unsafe {
-            swell.FindWindowEx(
-                mixer_hwnd,
-                hwnd,
-                std::ptr::null(),
-                std::ptr::null(),
-            )
-        };
+        hwnd = unsafe { swell.FindWindowEx(mixer_hwnd, hwnd, std::ptr::null(), std::ptr::null()) };
     }
-    
+
     (None, is_container)
 }
 
@@ -784,7 +746,7 @@ pub fn hwnd_to_envelope(
     let tcp_hwnd = tcp_hwnd?;
     let swell = Swell::get();
     let low_reaper = medium_reaper.low();
-    
+
     if is_container {
         if hwnd == tcp_hwnd {
             // Convert screen point to client coordinates
@@ -792,11 +754,9 @@ pub fn hwnd_to_envelope(
             unsafe {
                 swell.ScreenToClient(hwnd, &mut pt_client);
             }
-            
-                    let track_count = unsafe {
-                        low_reaper.GetNumTracks()
-                    };
-            
+
+            let track_count = unsafe { low_reaper.GetNumTracks() };
+
             // Search through tracks (including master at i=-1)
             for i in -1..track_count {
                 let chk_track = if i < 0 {
@@ -804,11 +764,11 @@ pub fn hwnd_to_envelope(
                 } else {
                     unsafe { low_reaper.GetTrack(std::ptr::null_mut(), i) }
                 };
-                
+
                 if chk_track.is_null() {
                     continue;
                 }
-                
+
                 // Check B_SHOWINTCP using GetSetMediaTrackInfo (returns pointer)
                 let show_in_tcp_ptr = unsafe {
                     low_reaper.GetSetMediaTrackInfo(
@@ -817,19 +777,17 @@ pub fn hwnd_to_envelope(
                         std::ptr::null_mut(),
                     )
                 };
-                
+
                 if show_in_tcp_ptr.is_null() {
                     continue;
                 }
-                
-                let show_in_tcp = unsafe {
-                    *(show_in_tcp_ptr as *const bool)
-                };
-                
+
+                let show_in_tcp = unsafe { *(show_in_tcp_ptr as *const bool) };
+
                 if !show_in_tcp {
                     continue;
                 }
-                
+
                 // Get I_TCPY
                 let ypos_ptr = unsafe {
                     low_reaper.GetSetMediaTrackInfo(
@@ -843,7 +801,7 @@ pub fn hwnd_to_envelope(
                 } else {
                     unsafe { *(ypos_ptr as *const i32) }
                 };
-                
+
                 // Get I_WNDH (includes env lanes)
                 let h_ptr = unsafe {
                     low_reaper.GetSetMediaTrackInfo(
@@ -857,55 +815,50 @@ pub fn hwnd_to_envelope(
                 } else {
                     unsafe { *(h_ptr as *const i32) }
                 };
-                
+
                 // Check if point is within track bounds
                 if pt_client.y < ypos || pt_client.y >= ypos + h {
                     continue;
                 }
-                
+
                 // Enumerate track envelopes
-                let env_count = unsafe {
-                    low_reaper.CountTrackEnvelopes(chk_track)
-                };
-                
+                let env_count = unsafe { low_reaper.CountTrackEnvelopes(chk_track) };
+
                 for e in 0..env_count {
-                    let env = unsafe {
-                        low_reaper.GetTrackEnvelope(chk_track, e)
-                    };
-                    
+                    let env = unsafe { low_reaper.GetTrackEnvelope(chk_track, e) };
+
                     if env.is_null() {
                         continue;
                     }
-                    
+
                     // Get envelope Y and height using GetEnvelopeInfo_Value
                     let env_y = unsafe {
-                        low_reaper.GetEnvelopeInfo_Value(env, b"I_TCPY\0".as_ptr() as *const i8) as i32
+                        low_reaper.GetEnvelopeInfo_Value(env, b"I_TCPY\0".as_ptr() as *const i8)
+                            as i32
                     };
                     let env_h = unsafe {
-                        low_reaper.GetEnvelopeInfo_Value(env, b"I_TCPH\0".as_ptr() as *const i8) as i32
+                        low_reaper.GetEnvelopeInfo_Value(env, b"I_TCPH\0".as_ptr() as *const i8)
+                            as i32
                     };
-                    
+
                     // Check if point is within envelope bounds
                     if pt_client.y >= ypos + env_y && pt_client.y < ypos + env_y + env_h {
                         return Some(env);
                     }
                 }
-                
+
                 break; // Only check first matching track
             }
         }
     } else {
         // Not a container - check if hwnd is a direct child of TCP
-        let parent = unsafe {
-            swell.GetParent(hwnd)
-        };
-        
+        let parent = unsafe { swell.GetParent(hwnd) };
+
         if parent == tcp_hwnd {
             // Get envelope pointer from window user data
-            let env_ptr = unsafe {
-                swell.GetWindowLong(hwnd, -21) as *mut reaper_low::raw::TrackEnvelope
-            };
-            
+            let env_ptr =
+                unsafe { swell.GetWindowLong(hwnd, -21) as *mut reaper_low::raw::TrackEnvelope };
+
             // Validate pointer using ValidatePtr if available
             if !env_ptr.is_null() {
                 let is_valid = unsafe {
@@ -922,7 +875,7 @@ pub fn hwnd_to_envelope(
             }
         }
     }
-    
+
     None
 }
 
@@ -939,15 +892,13 @@ pub fn hwnd_to_track(
     let mut track: *mut reaper_low::raw::MediaTrack = std::ptr::null_mut();
     let mut context = HwndToTrackContext::new();
     let mut in_spacer = false;
-    
-    let hwnd_parent = unsafe {
-        swell.GetParent(hwnd)
-    };
-    
+
+    let hwnd_parent = unsafe { swell.GetParent(hwnd) };
+
     // Check TCP first
     {
         let (tcp_hwnd, is_container) = get_tcp_wnd(medium_reaper);
-        
+
         if let Some(tcp) = tcp_hwnd {
             if is_container {
                 if hwnd == tcp {
@@ -956,16 +907,14 @@ pub fn hwnd_to_track(
                     unsafe {
                         swell.ScreenToClient(hwnd, &mut pt_client);
                     }
-                    
+
                     // Get showmaintrack config (default to true if not available)
                     // TODO: Get from ConfigVar<int>("showmaintrack")
                     let show_main_track = true;
                     let start_i = if show_main_track { 0 } else { 1 };
-                    
-                    let track_count = unsafe {
-                        low_reaper.GetNumTracks()
-                    };
-                    
+
+                    let track_count = unsafe { low_reaper.GetNumTracks() };
+
                     // Search through tracks using CSurf_TrackFromID
                     for i in start_i..=track_count {
                         let chk_track = unsafe {
@@ -981,33 +930,42 @@ pub fn hwnd_to_track(
                                 }
                             }
                         };
-                        
+
                         if chk_track.is_null() {
                             continue;
                         }
-                        
+
                         // Check B_SHOWINTCP
                         let show_in_tcp = unsafe {
-                            low_reaper.GetMediaTrackInfo_Value(chk_track, b"B_SHOWINTCP\0".as_ptr() as *const i8) != 0.0
+                            low_reaper.GetMediaTrackInfo_Value(
+                                chk_track,
+                                b"B_SHOWINTCP\0".as_ptr() as *const i8,
+                            ) != 0.0
                         };
-                        
+
                         if !show_in_tcp {
                             continue;
                         }
-                        
+
                         // Get spacer size
                         let spacer_size = get_track_spacer_size(chk_track, false, medium_reaper);
-                        
+
                         // Get I_TCPY and I_TCPH
                         let ypos_val = unsafe {
-                            low_reaper.GetMediaTrackInfo_Value(chk_track, b"I_TCPY\0".as_ptr() as *const i8) as f64
+                            low_reaper.GetMediaTrackInfo_Value(
+                                chk_track,
+                                b"I_TCPY\0".as_ptr() as *const i8,
+                            ) as f64
                         };
                         let h_val = unsafe {
-                            low_reaper.GetMediaTrackInfo_Value(chk_track, b"I_TCPH\0".as_ptr() as *const i8) as f64
+                            low_reaper.GetMediaTrackInfo_Value(
+                                chk_track,
+                                b"I_TCPH\0".as_ptr() as *const i8,
+                            ) as f64
                         };
                         let ypos = ypos_val - spacer_size as f64;
                         let h = h_val + spacer_size as f64;
-                        
+
                         // Check if point is within track bounds
                         let pt_y = pt_client.y as f64;
                         if pt_y >= ypos && pt_y < ypos + h {
@@ -1021,21 +979,18 @@ pub fn hwnd_to_track(
                 }
             } else if hwnd_parent == tcp {
                 // hwnd is a track (direct child of TCP)
-                track = unsafe {
-                    swell.GetWindowLong(hwnd, -21) as *mut reaper_low::raw::MediaTrack
-                };
+                track =
+                    unsafe { swell.GetWindowLong(hwnd, -21) as *mut reaper_low::raw::MediaTrack };
             } else {
                 // Check if parent's parent is TCP (hwnd is VU meter inside track)
-                let hwnd_pparent = unsafe {
-                    swell.GetParent(hwnd_parent)
-                };
+                let hwnd_pparent = unsafe { swell.GetParent(hwnd_parent) };
                 if hwnd_pparent == tcp {
                     track = unsafe {
                         swell.GetWindowLong(hwnd_parent, -21) as *mut reaper_low::raw::MediaTrack
                     };
                 }
             }
-            
+
             if !track.is_null() {
                 context.is_tcp = true;
             } else if hwnd == tcp {
@@ -1043,18 +998,17 @@ pub fn hwnd_to_track(
             }
         }
     }
-    
+
     // Check MCP if no track found in TCP
     if track.is_null() {
         let (mcp_hwnd, is_container) = get_mcp_wnd(medium_reaper);
-        
+
         if let Some(mcp) = mcp_hwnd {
             let mixer_hwnd = get_mixer_wnd(medium_reaper);
-            let mixer_master_hwnd = mixer_hwnd.and_then(|mixer| get_mixer_master_wnd(mixer, medium_reaper));
-            let hwnd_pparent = unsafe {
-                swell.GetParent(hwnd_parent)
-            };
-            
+            let mixer_master_hwnd =
+                mixer_hwnd.and_then(|mixer| get_mixer_master_wnd(mixer, medium_reaper));
+            let hwnd_pparent = unsafe { swell.GetParent(hwnd_parent) };
+
             if is_container {
                 if hwnd == mcp {
                     // Convert screen point to client coordinates
@@ -1062,21 +1016,17 @@ pub fn hwnd_to_track(
                     unsafe {
                         swell.ScreenToClient(hwnd, &mut pt_client);
                     }
-                    
-                    let track_count = unsafe {
-                        low_reaper.GetNumTracks()
-                    };
-                    
+
+                    let track_count = unsafe { low_reaper.GetNumTracks() };
+
                     // Search through tracks
                     for i in 0..track_count {
-                        let chk_track = unsafe {
-                            low_reaper.GetTrack(std::ptr::null_mut(), i)
-                        };
-                        
+                        let chk_track = unsafe { low_reaper.GetTrack(std::ptr::null_mut(), i) };
+
                         if chk_track.is_null() {
                             continue;
                         }
-                        
+
                         // Check B_SHOWINMIXER using GetSetMediaTrackInfo
                         let show_in_mixer_ptr = unsafe {
                             low_reaper.GetSetMediaTrackInfo(
@@ -1085,22 +1035,20 @@ pub fn hwnd_to_track(
                                 std::ptr::null_mut(),
                             )
                         };
-                        
+
                         if show_in_mixer_ptr.is_null() {
                             continue;
                         }
-                        
-                        let show_in_mixer = unsafe {
-                            *(show_in_mixer_ptr as *const bool)
-                        };
-                        
+
+                        let show_in_mixer = unsafe { *(show_in_mixer_ptr as *const bool) };
+
                         if !show_in_mixer {
                             continue;
                         }
-                        
+
                         // Get spacer size for MCP
                         let spacer_size = get_track_spacer_size(chk_track, true, medium_reaper);
-                        
+
                         // Get I_MCPX, I_MCPW, I_MCPY, I_MCPH using GetSetMediaTrackInfo
                         let xpos_ptr = unsafe {
                             low_reaper.GetSetMediaTrackInfo(
@@ -1115,7 +1063,7 @@ pub fn hwnd_to_track(
                             unsafe { *(xpos_ptr as *const i32) }
                         };
                         let xpos = xpos_val - spacer_size;
-                        
+
                         let w_ptr = unsafe {
                             low_reaper.GetSetMediaTrackInfo(
                                 chk_track,
@@ -1129,11 +1077,11 @@ pub fn hwnd_to_track(
                             unsafe { *(w_ptr as *const i32) }
                         };
                         let w = w_val + spacer_size;
-                        
+
                         if pt_client.x < xpos || pt_client.x >= xpos + w {
                             continue;
                         }
-                        
+
                         let ypos_ptr = unsafe {
                             low_reaper.GetSetMediaTrackInfo(
                                 chk_track,
@@ -1146,7 +1094,7 @@ pub fn hwnd_to_track(
                         } else {
                             unsafe { *(ypos_ptr as *const i32) }
                         };
-                        
+
                         let h_ptr = unsafe {
                             low_reaper.GetSetMediaTrackInfo(
                                 chk_track,
@@ -1159,7 +1107,7 @@ pub fn hwnd_to_track(
                         } else {
                             unsafe { *(h_ptr as *const i32) }
                         };
-                        
+
                         // Check if point is within track bounds
                         if pt_client.y >= ypos && pt_client.y < ypos + h {
                             track = chk_track;
@@ -1171,34 +1119,33 @@ pub fn hwnd_to_track(
                     }
                 } else if let Some(mixer_master) = mixer_master_hwnd {
                     if hwnd == mixer_master || hwnd_parent == mixer_master {
-                        track = unsafe {
-                            low_reaper.GetMasterTrack(std::ptr::null_mut())
-                        };
+                        track = unsafe { low_reaper.GetMasterTrack(std::ptr::null_mut()) };
                     }
                 }
-            } else if hwnd_parent == mcp 
+            } else if hwnd_parent == mcp
                 || mixer_hwnd.map(|m| hwnd_parent == m).unwrap_or(false)
-                || mixer_master_hwnd.map(|m| hwnd_parent == m).unwrap_or(false) {
+                || mixer_master_hwnd.map(|m| hwnd_parent == m).unwrap_or(false)
+            {
                 // hwnd is a track (direct child of MCP/mixer/master)
-                track = unsafe {
-                    swell.GetWindowLong(hwnd, -21) as *mut reaper_low::raw::MediaTrack
-                };
-                
+                track =
+                    unsafe { swell.GetWindowLong(hwnd, -21) as *mut reaper_low::raw::MediaTrack };
+
                 // Special case: if parent is mixer master and no track found, use master track
                 if track.is_null() && mixer_master_hwnd.map(|m| hwnd_parent == m).unwrap_or(false) {
-                    track = unsafe {
-                        low_reaper.GetMasterTrack(std::ptr::null_mut())
-                    };
+                    track = unsafe { low_reaper.GetMasterTrack(std::ptr::null_mut()) };
                 }
             } else if hwnd_pparent == mcp
                 || mixer_hwnd.map(|m| hwnd_pparent == m).unwrap_or(false)
-                || mixer_master_hwnd.map(|m| hwnd_pparent == m).unwrap_or(false) {
+                || mixer_master_hwnd
+                    .map(|m| hwnd_pparent == m)
+                    .unwrap_or(false)
+            {
                 // hwnd is VU meter inside track (parent's parent is MCP/mixer/master)
                 track = unsafe {
                     swell.GetWindowLong(hwnd_parent, -21) as *mut reaper_low::raw::MediaTrack
                 };
             }
-            
+
             if !track.is_null() {
                 context.is_mcp = true;
             } else if hwnd == mcp || mixer_master_hwnd.map(|m| hwnd == m).unwrap_or(false) {
@@ -1206,7 +1153,7 @@ pub fn hwnd_to_track(
             }
         }
     }
-    
+
     // Validate track pointer using ValidatePtr if available
     if !track.is_null() {
         let is_valid = unsafe {
@@ -1218,12 +1165,12 @@ pub fn hwnd_to_track(
                 true
             }
         };
-        
+
         if !is_valid {
             track = std::ptr::null_mut();
         }
     }
-    
+
     if !track.is_null() {
         if in_spacer {
             context.is_spacer = true;

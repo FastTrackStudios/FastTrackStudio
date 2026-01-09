@@ -1,5 +1,5 @@
 //! Infrastructure layer for setlist
-//! 
+//!
 //! This module contains infrastructure concerns like API state, Dioxus integration,
 //! and other external integrations.
 
@@ -14,4 +14,3 @@ pub mod traits;
 
 #[cfg(feature = "reaper")]
 pub mod reaper;
-

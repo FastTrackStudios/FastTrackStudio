@@ -1,5 +1,5 @@
 //! Block parsing for RPP format
-//! 
+//!
 //! Handles the block structure of RPP files:
 //! - Block starts: <TRACK NAME "Track 1" VOL 1.0>
 //! - Block ends: >
@@ -7,14 +7,14 @@
 
 use nom::{
     bytes::complete::tag,
-    character::complete::{space0, multispace0},
+    character::complete::{multispace0, space0},
     combinator::map,
     IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use super::token::{Token, parse_token_line};
+use super::token::{parse_token_line, Token};
 
 /// Types of RPP blocks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -95,19 +95,19 @@ impl fmt::Display for RppBlock {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Format block start
         write!(f, "<{}", self.name)?;
-        
+
         // Add parameters if any
         if !self.params.is_empty() {
             let param_strs: Vec<String> = self.params.iter().map(|t| t.to_string()).collect();
             write!(f, " {}", param_strs.join(" "))?;
         }
         writeln!(f)?;
-        
+
         // Add children with indentation
         for child in &self.children {
             writeln!(f, "  {}", child)?;
         }
-        
+
         // Close block
         write!(f, ">")
     }
@@ -115,22 +115,16 @@ impl fmt::Display for RppBlock {
 
 /// Parse a block start: <TRACK
 fn block_start(input: &str) -> IResult<&str, (String, Vec<Token>)> {
-    map(
-        (
-            tag("<"),
-            space0,
-            parse_token_line,
-        ),
-        |(_, _, tokens)| {
-            if tokens.is_empty() {
-                ("".to_string(), vec![])
-            } else {
-                let name = tokens[0].as_string().unwrap_or("").to_string();
-                let params = tokens[1..].to_vec();
-                (name, params)
-            }
+    map((tag("<"), space0, parse_token_line), |(_, _, tokens)| {
+        if tokens.is_empty() {
+            ("".to_string(), vec![])
+        } else {
+            let name = tokens[0].as_string().unwrap_or("").to_string();
+            let params = tokens[1..].to_vec();
+            (name, params)
         }
-    ).parse(input)
+    })
+    .parse(input)
 }
 
 /// Parse a block end: >
@@ -138,35 +132,34 @@ fn block_end(input: &str) -> IResult<&str, ()> {
     map(tag(">"), |_| ()).parse(input)
 }
 
-
 /// Parse a complete RPP block with its content
 pub fn parse_block(input: &str) -> IResult<&str, RppBlock> {
     // Skip leading whitespace/newlines before the block start
     let (input, _) = multispace0(input)?;
     let (input, (name, params)) = block_start(input)?;
     let block_type = BlockType::parse(&name);
-    
+
     // Skip leading whitespace/newlines
     let (input, _) = multispace0(input)?;
-    
+
     // Parse content lines until we hit the block end
     let mut children = Vec::new();
     let mut remaining_input = input;
-    
+
     loop {
         // Skip leading whitespace/newlines
         let (input_after_ws, _) = multispace0(remaining_input)?;
-        
+
         // Check if this is a block end
         if let Ok((input_after_end, _)) = block_end(input_after_ws) {
             remaining_input = input_after_end;
             break;
         }
-        
+
         // Try to parse as a content line
         if let Ok((input_after_content, content_tokens)) = parse_token_line(input_after_ws) {
             children.push(RppBlockContent::Content(content_tokens));
-            
+
             // Skip the newline after the content line
             let (input_after_newline, _) = multispace0(input_after_content)?;
             remaining_input = input_after_newline;
@@ -181,13 +174,16 @@ pub fn parse_block(input: &str) -> IResult<&str, RppBlock> {
             }
         }
     }
-    
-    Ok((remaining_input, RppBlock {
-        block_type,
-        name,
-        params,
-        children,
-    }))
+
+    Ok((
+        remaining_input,
+        RppBlock {
+            block_type,
+            name,
+            params,
+            children,
+        },
+    ))
 }
 
 /// Parse multiple blocks from input
@@ -198,19 +194,22 @@ pub fn parse_blocks(input: &str) -> IResult<&str, Vec<RppBlock>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::primitives::token::{Token, QuoteType};
+    use crate::primitives::token::{QuoteType, Token};
 
     #[test]
     fn test_block_start() {
         let result = block_start("<TRACK NAME \"Track 1\" VOL 1.0>");
         assert!(result.is_ok());
-        
+
         let (remaining, (name, params)) = result.unwrap();
-        assert_eq!(remaining, ">");  // The '>' is not consumed by block_start
+        assert_eq!(remaining, ">"); // The '>' is not consumed by block_start
         assert_eq!(name, "TRACK");
         assert_eq!(params.len(), 4);
         assert_eq!(params[0], Token::Identifier("NAME".to_string()));
-        assert_eq!(params[1], Token::String("Track 1".to_string(), QuoteType::Double));
+        assert_eq!(
+            params[1],
+            Token::String("Track 1".to_string(), QuoteType::Double)
+        );
         assert_eq!(params[2], Token::Identifier("VOL".to_string()));
         assert_eq!(params[3], Token::Identifier("1.0".to_string()));
     }
@@ -220,17 +219,16 @@ mod tests {
         assert_eq!(block_end(">"), Ok(("", ())));
     }
 
-
     #[test]
     fn test_parse_block() {
         let input = r#"<TRACK
 NAME "Track 1"
 VOL 1.0 0.0
 >"#;
-        
+
         let result = parse_block(input);
         assert!(result.is_ok());
-        
+
         let (remaining, block) = result.unwrap();
         assert_eq!(remaining, "");
         assert_eq!(block.name, "TRACK");
@@ -245,6 +243,9 @@ VOL 1.0 0.0
         assert_eq!(BlockType::parse("ITEM"), BlockType::Item);
         assert_eq!(BlockType::parse("VOLENV2"), BlockType::Envelope);
         assert_eq!(BlockType::parse("FXCHAIN"), BlockType::FxChain);
-        assert_eq!(BlockType::parse("CUSTOM"), BlockType::Other("CUSTOM".to_string()));
+        assert_eq!(
+            BlockType::parse("CUSTOM"),
+            BlockType::Other("CUSTOM".to_string())
+        );
     }
 }

@@ -19,14 +19,16 @@ pub enum McpFolderState {
 }
 
 /// Folder depth change - relative change in folder depth from the previous track
-/// 
+///
 /// This represents the `folder_depth_change()` value from REAPER:
 /// - `0` = normal track (no change)
 /// - `1` = track is a folder parent (starts a new folder)
 /// - `-1` = track is the last in the innermost folder (closes one level)
 /// - `-2` = track is the last in the innermost and next-innermost folders (closes two levels)
 /// - etc.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum FolderDepthChange {
     /// Closes multiple folder levels (e.g., -2, -3, -4, etc.)
     ClosesLevels(i32),
@@ -88,15 +90,17 @@ impl From<FolderDepthChange> for i32 {
 }
 
 /// Track depth - absolute cumulative folder nesting level
-/// 
+///
 /// This represents how many folder levels deep a track is:
 /// - `0` = top-level track (not in any folder)
 /// - `1` = inside one folder
 /// - `2` = inside two nested folders
 /// - etc.
-/// 
+///
 /// This is calculated by summing all `FolderDepthChange` values from track 0 to the current track.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct TrackDepth(i32);
 
 impl TrackDepth {
@@ -155,4 +159,3 @@ impl std::fmt::Display for TrackDepth {
         write!(f, "{}", self.0)
     }
 }
-

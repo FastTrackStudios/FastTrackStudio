@@ -30,8 +30,8 @@ impl From<Bass> for ItemMetadataGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{default_config, OrganizeIntoTracks};
-    use daw::tracks::{assert_tracks_equal, TrackStructureBuilder};
+    use crate::{OrganizeIntoTracks, default_config};
+    use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 
     #[test]
     fn full_bass_integration_test() {

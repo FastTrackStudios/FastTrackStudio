@@ -1,0 +1,38 @@
+[package]
+name = "plugin-hub"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "Cross-plugin state sharing hub using rapace for FTS audio plugins"
+
+[features]
+default = ["host"]
+# Host-side hub (runs in REAPER extension or standalone)
+host = []
+# Plugin-side client (embedded in each FTS plugin)
+client = []
+
+[dependencies]
+# Serialization
+serde = { workspace = true }
+postcard = { version = "1.0", features = ["alloc"] }
+
+# Async runtime
+tokio = { workspace = true, features = ["sync", "rt", "time", "macros"] }
+futures = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+
+# Atomic types for real-time safe state
+atomic_float = { workspace = true }
+parking_lot = "0.12"
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

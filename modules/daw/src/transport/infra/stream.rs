@@ -35,19 +35,19 @@ pub trait TransportStreamReceiver: Send + Sync {
 pub enum TransportStreamError {
     #[error("Connection error: {0}")]
     Connection(String),
-    
+
     #[error("Stream ended")]
     StreamEnded,
-    
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     #[error("Other error: {0}")]
     Other(String),
 }
 
 /// Trait for transport stream backends
-/// 
+///
 /// Different backends (REAPER, other DAWs, etc.) implement this trait
 /// to provide transport stream connections. The transport crate uses
 /// dynamic dispatch to call the registered backend without knowing
@@ -55,18 +55,21 @@ pub enum TransportStreamError {
 #[async_trait]
 pub trait TransportStreamBackend: Send + Sync {
     /// Create a transport stream by connecting to the given socket address
-    async fn create_stream(&self, socket_addr: String) -> Result<Box<dyn TransportStream>, TransportStreamError>;
-    
+    async fn create_stream(
+        &self,
+        socket_addr: String,
+    ) -> Result<Box<dyn TransportStream>, TransportStreamError>;
+
     /// Get the name of this backend (for logging/debugging)
     fn name(&self) -> &'static str;
 }
 
 /// Create a transport stream by connecting to a socket address using a backend
-/// 
+///
 /// This is a generic function that connects to any transport stream service
 /// listening on the given socket address. It uses the provided backend
 /// to create the connection.
-/// 
+///
 /// The backend implementation (REAPER, other DAWs, etc.) is passed in,
 /// allowing the caller to choose which backend to use.
 #[cfg(not(target_arch = "wasm32"))]

@@ -39,26 +39,24 @@
 //! }
 //! ```
 
-pub mod track;
-pub mod item;
 pub mod envelope;
 pub mod fx_chain;
-pub mod project;
+pub mod item;
 pub mod marker_region;
-pub mod time_tempo;
+pub mod project;
 pub mod time_pos_utils;
+pub mod time_tempo;
+pub mod track;
 
 // Re-export the main types for convenience
-pub use track::Track;
-pub use item::Item;
 pub use envelope::Envelope;
 pub use fx_chain::FxChain;
-pub use project::ReaperProject;
+pub use item::Item;
 pub use marker_region::{MarkerRegion, MarkerRegionCollection};
-pub use time_tempo::{TempoTimePoint, TempoTimeEnvelope};
+pub use project::ReaperProject;
 pub use time_pos_utils::{
-    time_to_beat_position,
-    time_to_beat_position_structured,
-    time_to_beat_position_with_envelope,
-    time_to_beat_position_structured_with_envelope,
+    time_to_beat_position, time_to_beat_position_structured,
+    time_to_beat_position_structured_with_envelope, time_to_beat_position_with_envelope,
 };
+pub use time_tempo::{TempoTimeEnvelope, TempoTimePoint};
+pub use track::Track;

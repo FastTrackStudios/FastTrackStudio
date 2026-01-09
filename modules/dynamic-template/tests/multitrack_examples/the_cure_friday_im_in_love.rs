@@ -33,14 +33,14 @@ fn the_cure_friday_im_in_love() {
         "28.Harm Overlap_01.wav",
         "29.Friday I'm In Love Mix_01.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
 }

@@ -19,7 +19,7 @@ pub type Section = KeyflowSection;
 pub trait SectionTypeExt {
     /// Check if this section type should be numbered (alias for should_number for compatibility)
     fn should_be_numbered(&self) -> bool;
-    
+
     /// Get default display preference (full name vs abbreviation)
     fn prefers_full_name(&self) -> bool;
 }
@@ -70,7 +70,8 @@ pub fn section_from_seconds_with_tempo(
         number,
         bpm,
         time_signature,
-    ).map_err(|e| SetlistError::invalid_section(&e))
+    )
+    .map_err(|e| SetlistError::invalid_section(&e))
 }
 
 /// Create a new section with DAW positions (for DAW integration)
@@ -101,7 +102,11 @@ pub fn section_with_id(
 // Extension trait to add methods to Section instances
 pub trait SectionExt {
     fn validate(&self) -> Result<(), SetlistError>;
-    fn with_time_range(&self, start_seconds: f64, end_seconds: f64) -> Result<Section, SetlistError>;
+    fn with_time_range(
+        &self,
+        start_seconds: f64,
+        end_seconds: f64,
+    ) -> Result<Section, SetlistError>;
 }
 
 /// Validate a section (module-level function for convenience)
@@ -114,7 +119,11 @@ impl SectionExt for Section {
         KeyflowSection::validate(self).map_err(|e| SetlistError::invalid_section(&e))
     }
 
-    fn with_time_range(&self, start_seconds: f64, end_seconds: f64) -> Result<Section, SetlistError> {
+    fn with_time_range(
+        &self,
+        start_seconds: f64,
+        end_seconds: f64,
+    ) -> Result<Section, SetlistError> {
         KeyflowSection::with_time_range(self, start_seconds, end_seconds)
             .map_err(|e| SetlistError::invalid_section(&e))
     }
@@ -149,10 +158,7 @@ mod tests {
 
         // Test fuzzy matching
         assert_eq!(SectionType::parse("vrse").unwrap(), SectionType::Verse);
-        assert_eq!(
-            SectionType::parse("chorous").unwrap(),
-            SectionType::Chorus
-        );
+        assert_eq!(SectionType::parse("chorous").unwrap(), SectionType::Chorus);
 
         // Test error case
         assert!(SectionType::parse("invalid").is_err());
@@ -180,24 +186,14 @@ mod tests {
     #[test]
     fn test_section_validation() {
         // Valid section
-        let section = section_from_seconds(
-            SectionType::Chorus,
-            10.0,
-            20.0,
-            "Chorus".to_string(),
-            None,
-        )
-        .unwrap();
+        let section =
+            section_from_seconds(SectionType::Chorus, 10.0, 20.0, "Chorus".to_string(), None)
+                .unwrap();
         assert!(section.validate().is_ok());
 
         // Invalid time range
-        let invalid_section = section_from_seconds(
-            SectionType::Verse,
-            20.0,
-            10.0,
-            "Invalid".to_string(),
-            None,
-        );
+        let invalid_section =
+            section_from_seconds(SectionType::Verse, 20.0, 10.0, "Invalid".to_string(), None);
         assert!(invalid_section.is_err());
     }
 
@@ -213,14 +209,8 @@ mod tests {
         .unwrap();
         assert_eq!(verse.display_name(), "Verse 1");
 
-        let intro = section_from_seconds(
-            SectionType::Intro,
-            0.0,
-            10.0,
-            "Intro".to_string(),
-            None,
-        )
-        .unwrap();
+        let intro =
+            section_from_seconds(SectionType::Intro, 0.0, 10.0, "Intro".to_string(), None).unwrap();
         assert_eq!(intro.display_name(), "Intro");
 
         let mut chorus_split = section_from_seconds(
@@ -237,30 +227,15 @@ mod tests {
 
     #[test]
     fn test_section_overlaps() {
-        let section1 = section_from_seconds(
-            SectionType::Verse,
-            10.0,
-            30.0,
-            "Verse".to_string(),
-            None,
-        )
-        .unwrap();
-        let section2 = section_from_seconds(
-            SectionType::Chorus,
-            25.0,
-            45.0,
-            "Chorus".to_string(),
-            None,
-        )
-        .unwrap();
-        let section3 = section_from_seconds(
-            SectionType::Bridge,
-            50.0,
-            70.0,
-            "Bridge".to_string(),
-            None,
-        )
-        .unwrap();
+        let section1 =
+            section_from_seconds(SectionType::Verse, 10.0, 30.0, "Verse".to_string(), None)
+                .unwrap();
+        let section2 =
+            section_from_seconds(SectionType::Chorus, 25.0, 45.0, "Chorus".to_string(), None)
+                .unwrap();
+        let section3 =
+            section_from_seconds(SectionType::Bridge, 50.0, 70.0, "Bridge".to_string(), None)
+                .unwrap();
 
         assert!(section1.overlaps_with_section(&section2));
         assert!(section2.overlaps_with_section(&section1));
@@ -269,14 +244,8 @@ mod tests {
 
     #[test]
     fn test_metadata() {
-        let mut section = section_from_seconds(
-            SectionType::Verse,
-            0.0,
-            30.0,
-            "Verse".to_string(),
-            None,
-        )
-        .unwrap();
+        let mut section =
+            section_from_seconds(SectionType::Verse, 0.0, 30.0, "Verse".to_string(), None).unwrap();
 
         section.set_metadata("key", "C major");
         section.set_metadata("tempo", "120");

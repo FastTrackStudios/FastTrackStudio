@@ -2,17 +2,13 @@
 //!
 //! Exposes all transport reactive streams over IRPC so they can be reactive over the network.
 
-use crate::transport::{Transport, PlayState, Tempo};
-use irpc::{
-    channel::mpsc,
-    rpc::RemoteService,
-    rpc_requests, Client, WithChannels,
-};
-use serde::{Deserialize, Serialize};
-use iroh::{protocol::ProtocolHandler, Endpoint, EndpointAddr};
+use crate::transport::{PlayState, Tempo, Transport};
+use iroh::{Endpoint, EndpointAddr, protocol::ProtocolHandler};
+use irpc::{Client, WithChannels, channel::mpsc, rpc::RemoteService, rpc_requests};
 use irpc_iroh::{IrohLazyRemoteConnection, IrohProtocol};
 use rxrust::prelude::*;
-use tokio::sync::{mpsc as tokio_mpsc, broadcast};
+use serde::{Deserialize, Serialize};
+use tokio::sync::{broadcast, mpsc as tokio_mpsc};
 
 /// Transport changed message
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,7 +63,13 @@ pub enum TransportProtocol {
 /// Transport API client
 pub struct TransportApi {
     inner: Client<TransportProtocol>,
-    pub(crate) handler_data: Option<(mpsc::Receiver<TransportMessage>, broadcast::Sender<TransportUpdateMessage>, broadcast::Sender<TransportUpdateMessage>, broadcast::Sender<TransportUpdateMessage>, broadcast::Sender<TransportUpdateMessage>)>,
+    pub(crate) handler_data: Option<(
+        mpsc::Receiver<TransportMessage>,
+        broadcast::Sender<TransportUpdateMessage>,
+        broadcast::Sender<TransportUpdateMessage>,
+        broadcast::Sender<TransportUpdateMessage>,
+        broadcast::Sender<TransportUpdateMessage>,
+    )>,
 }
 
 impl TransportApi {
@@ -90,10 +92,12 @@ impl TransportApi {
             let transport_subject = streams.transport_changed.borrow().clone();
             let tx = transport_broadcast.clone();
             transport_subject.subscribe(move |(project_id, transport)| {
-                let _ = tx.send(TransportUpdateMessage::TransportChanged(TransportChangedMessage {
-                    project_id,
-                    transport,
-                }));
+                let _ = tx.send(TransportUpdateMessage::TransportChanged(
+                    TransportChangedMessage {
+                        project_id,
+                        transport,
+                    },
+                ));
             });
         }
 
@@ -101,10 +105,12 @@ impl TransportApi {
             let play_state_subject = streams.play_state_changed.borrow().clone();
             let tx = play_state_broadcast.clone();
             play_state_subject.subscribe(move |(project_id, play_state)| {
-                let _ = tx.send(TransportUpdateMessage::PlayStateChanged(PlayStateChangedMessage {
-                    project_id,
-                    play_state,
-                }));
+                let _ = tx.send(TransportUpdateMessage::PlayStateChanged(
+                    PlayStateChangedMessage {
+                        project_id,
+                        play_state,
+                    },
+                ));
             });
         }
 
@@ -123,16 +129,24 @@ impl TransportApi {
             let position_subject = streams.position_changed.borrow().clone();
             let tx = position_broadcast.clone();
             position_subject.subscribe(move |(project_id, position)| {
-                let _ = tx.send(TransportUpdateMessage::PositionChanged(PositionChangedMessage {
-                    project_id,
-                    position,
-                }));
+                let _ = tx.send(TransportUpdateMessage::PositionChanged(
+                    PositionChangedMessage {
+                        project_id,
+                        position,
+                    },
+                ));
             });
         }
 
         // Store channels for later spawning in tokio runtime
         // The handler will be spawned when start_handler() is called from the IROH server
-        let handler_data = (rx, transport_broadcast, play_state_broadcast, tempo_broadcast, position_broadcast);
+        let handler_data = (
+            rx,
+            transport_broadcast,
+            play_state_broadcast,
+            tempo_broadcast,
+            position_broadcast,
+        );
 
         TransportApi {
             inner: Client::local(tx),
@@ -141,18 +155,33 @@ impl TransportApi {
     }
 
     /// Extract handler data for spawning in tokio runtime
-    pub fn take_handler_data(&mut self) -> Option<(mpsc::Receiver<TransportMessage>, broadcast::Sender<TransportUpdateMessage>, broadcast::Sender<TransportUpdateMessage>, broadcast::Sender<TransportUpdateMessage>, broadcast::Sender<TransportUpdateMessage>)> {
+    pub fn take_handler_data(
+        &mut self,
+    ) -> Option<(
+        mpsc::Receiver<TransportMessage>,
+        broadcast::Sender<TransportUpdateMessage>,
+        broadcast::Sender<TransportUpdateMessage>,
+        broadcast::Sender<TransportUpdateMessage>,
+        broadcast::Sender<TransportUpdateMessage>,
+    )> {
         self.handler_data.take()
     }
 
     /// Start the message handler (must be called from within a tokio runtime)
     pub fn start_handler(&mut self) {
-        if let Some((rx, transport_broadcast, play_state_broadcast, tempo_broadcast, position_broadcast)) = self.handler_data.take() {
+        if let Some((
+            rx,
+            transport_broadcast,
+            play_state_broadcast,
+            tempo_broadcast,
+            position_broadcast,
+        )) = self.handler_data.take()
+        {
             let transport_broadcast_clone = transport_broadcast.clone();
             let play_state_broadcast_clone = play_state_broadcast.clone();
             let tempo_broadcast_clone = tempo_broadcast.clone();
             let position_broadcast_clone = position_broadcast.clone();
-            
+
             tokio::spawn(async move {
                 let mut rx = rx;
                 while let Ok(Some(msg)) = rx.recv().await {
@@ -226,4 +255,3 @@ impl TransportApi {
         self.inner.server_streaming(SubscribeTransport, 32).await
     }
 }
-

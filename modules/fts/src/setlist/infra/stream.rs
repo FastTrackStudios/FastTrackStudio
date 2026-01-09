@@ -7,19 +7,20 @@ use crate::{Setlist, SetlistApi, Song};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use daw::transport::Transport;
-use iroh::{protocol::ProtocolHandler, Endpoint, EndpointAddr};
+use iroh::{Endpoint, EndpointAddr, protocol::ProtocolHandler};
 use irpc::{
+    Client, Request, WithChannels,
     channel::{mpsc, oneshot},
     rpc::RemoteService,
-    rpc_requests, Client, Request, WithChannels,
+    rpc_requests,
 };
 use irpc_iroh::{IrohLazyRemoteConnection, IrohProtocol};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, OnceLock,
+        atomic::{AtomicU64, Ordering},
     },
     time::Instant,
 };
@@ -27,12 +28,11 @@ use tokio::sync::broadcast;
 use tokio::time;
 use tracing::{debug, error, info, warn};
 
-
 /// Granular setlist update message sent over the irpc stream
-/// 
+///
 /// Instead of sending the entire setlist on every update, we send only what changed.
 /// This reduces payload size and prevents unnecessary rerenders in the desktop app.
-/// 
+///
 /// Note: Uses externally tagged enum (default) for PostCard compatibility.
 /// PostCard does not support internally tagged enums.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,26 +40,26 @@ pub enum SetlistUpdateMessage {
     /// Full setlist update (sent on initial connection or major changes)
     /// Contains the complete setlist structure (songs, sections, metadata) but NOT tracks/transport
     FullSetlist {
-                        setlist: crate::Setlist,
+        setlist: crate::Setlist,
         active_song_index: Option<usize>,
         active_section_index: Option<usize>,
         active_slide_index: Option<usize>,
     },
-    
+
     /// Update tracks for a specific song
     /// Only sent when tracks change for that song
     SongTracks {
         song_index: usize,
         tracks: Vec<daw::tracks::Track>,
     },
-    
+
     /// Update transport info for a specific song
     /// Only sent when transport state changes for that song
     SongTransport {
         song_index: usize,
         transport: Transport,
     },
-    
+
     /// Update active indices (which song/section/slide is currently active)
     /// Sent frequently as playback progresses
     /// Also includes progress values (0.0 to 1.0) for the active song and section
@@ -70,29 +70,25 @@ pub enum SetlistUpdateMessage {
         song_progress: Option<f64>, // 0.0 to 1.0, linear time-based progress through active song
         section_progress: Option<f64>, // 0.0 to 1.0, linear time-based progress through active section
     },
-    
+
     /// Update song metadata (name, sections, lyrics structure, etc.)
     /// Only sent when song structure changes (sections added/removed, name changed, etc.)
     SongMetadata {
         song_index: usize,
-                        song: crate::Song,
+        song: crate::Song,
     },
-    
+
     /// Add a new song to the setlist
     SongAdded {
         song_index: usize,
-                        song: crate::Song,
+        song: crate::Song,
     },
-    
+
     /// Remove a song from the setlist
-    SongRemoved {
-        song_index: usize,
-    },
-    
+    SongRemoved { song_index: usize },
+
     /// Songs reordered in the setlist
-    SongsReordered {
-                        setlist: crate::Setlist,
-    },
+    SongsReordered { setlist: crate::Setlist },
 }
 
 /// Request to subscribe to setlist structure updates (songs, sections, metadata)
@@ -248,7 +244,7 @@ pub enum SetlistStreamProtocol {
 }
 
 /// Trait for backends that can provide setlist state
-/// 
+///
 /// This allows the setlist stream actor to get setlist state
 /// from different sources (REAPER, other DAWs, etc.)
 #[async_trait]
@@ -258,43 +254,51 @@ pub trait SetlistStateProvider: Send + Sync {
 }
 
 /// Trait for backends that can handle setlist commands
-/// 
+///
 /// This allows the setlist stream actor to execute commands
 /// on different backends (REAPER, other DAWs, etc.)
 #[async_trait]
 pub trait SetlistCommandHandler: Send + Sync {
     /// Execute a transport command
     async fn execute_transport_command(&self, command: TransportCommand) -> Result<(), String>;
-    
+
     /// Execute a navigation command
     async fn execute_navigation_command(&self, command: NavigationCommand) -> Result<(), String>;
-    
+
     /// Seek to a specific section
     async fn seek_to_section(&self, song_index: usize, section_index: usize) -> Result<(), String>;
-    
+
     /// Seek to a specific song (switches to that song's tab and moves cursor to beginning)
     async fn seek_to_song(&self, song_index: usize) -> Result<(), String>;
-    
+
     /// Seek to a specific time position within a song
     async fn seek_to_time(&self, song_index: usize, time_seconds: f64) -> Result<(), String>;
-    
+
     /// Seek to a specific musical position within a song
-    async fn seek_to_musical_position(&self, song_index: usize, musical_position: daw::primitives::MusicalPosition) -> Result<(), String>;
-    
+    async fn seek_to_musical_position(
+        &self,
+        song_index: usize,
+        musical_position: daw::primitives::MusicalPosition,
+    ) -> Result<(), String>;
+
     /// Toggle loop for current song
     async fn toggle_loop(&self) -> Result<(), String>;
-    
+
     /// Advance to the next syllable and assign it to the next MIDI note at edit cursor
     async fn advance_syllable(&self) -> Result<LyricsState, String>;
-    
+
     /// Get current lyrics state
     async fn get_lyrics_state(&self) -> Result<LyricsState, String>;
-    
+
     /// Assign a specific syllable to the MIDI note at edit cursor position
     async fn assign_syllable_to_note(&self, syllable_text: String) -> Result<(), String>;
-    
+
     /// Update lyrics for a song
-    async fn update_lyrics(&self, song_index: usize, lyrics: crate::lyrics::core::Lyrics) -> Result<(), String>;
+    async fn update_lyrics(
+        &self,
+        song_index: usize,
+        lyrics: crate::lyrics::core::Lyrics,
+    ) -> Result<(), String>;
 }
 
 /// Register the broadcast sender for reactive change detection
@@ -305,10 +309,10 @@ fn register_broadcast_sender(
 ) {
     static BROADCAST_SENDER: OnceLock<broadcast::Sender<SetlistUpdateMessage>> = OnceLock::new();
     static STATE_PROVIDER: OnceLock<Arc<dyn SetlistStateProvider>> = OnceLock::new();
-    
+
     BROADCAST_SENDER.set(broadcast_tx).ok();
     STATE_PROVIDER.set(state_provider).ok();
-    
+
     info!("[Setlist Stream] Registered broadcast sender for reactive change detection");
 }
 
@@ -340,7 +344,7 @@ impl SetlistStreamActor {
     pub fn spawn(state_provider: Arc<dyn SetlistStateProvider>) -> SetlistStreamApi {
         Self::spawn_with_handler(state_provider, None)
     }
-    
+
     pub fn spawn_with_handler(
         state_provider: Arc<dyn SetlistStateProvider>,
         command_handler: Option<Arc<dyn SetlistCommandHandler>>,
@@ -361,12 +365,20 @@ impl SetlistStreamActor {
 
         // Spawn the actor to handle messages
         // Try to spawn if runtime exists, otherwise store for later
-        let (actor_opt, broadcast_tx_opt, state_provider_opt) = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let (actor_opt, broadcast_tx_opt, state_provider_opt) = if let Ok(handle) =
+            tokio::runtime::Handle::try_current()
+        {
             handle.spawn(actor.run());
             (None, None, None)
         } else {
-            tracing::warn!("No tokio runtime available when creating SetlistStreamApi - actor will be spawned in tokio runtime thread");
-            (Some(actor), Some(broadcast_tx.clone()), Some(state_provider.clone()))
+            tracing::warn!(
+                "No tokio runtime available when creating SetlistStreamApi - actor will be spawned in tokio runtime thread"
+            );
+            (
+                Some(actor),
+                Some(broadcast_tx.clone()),
+                Some(state_provider.clone()),
+            )
         };
 
         // Spawn the polling task that reads setlist state and broadcasts to all subscribers
@@ -376,7 +388,9 @@ impl SetlistStreamActor {
                 Self::poll_and_broadcast(broadcast_tx, state_provider_for_polling).await;
             });
         } else {
-            tracing::warn!("No tokio runtime available when creating SetlistStreamApi - polling task will be spawned in tokio runtime thread");
+            tracing::warn!(
+                "No tokio runtime available when creating SetlistStreamApi - polling task will be spawned in tokio runtime thread"
+            );
         }
 
         SetlistStreamApi {
@@ -386,7 +400,7 @@ impl SetlistStreamActor {
             state_provider: state_provider_opt,
         }
     }
-    
+
     /// Spawn the actor in the current tokio runtime
     /// This should be called from within a tokio runtime context
     pub fn spawn_actor_in_runtime(actor: Self) {
@@ -405,13 +419,16 @@ impl SetlistStreamActor {
         sub: WithChannels<SubscribeSetlistStructure, SetlistStreamProtocol>,
     ) {
         let WithChannels { tx, .. } = sub;
-        
+
         // CRITICAL: Send initial message synchronously before spawning task
         // This ensures the connection is established before the handler returns
         let state_provider_for_initial = self.state_provider.clone();
         let initial_update = match state_provider_for_initial.get_setlist_api().await {
             Ok(setlist_api) => {
-                debug!("[Setlist Stream] Got setlist API for SetlistStructure, sending initial update with {} songs", setlist_api.get_setlist().songs.len());
+                debug!(
+                    "[Setlist Stream] Got setlist API for SetlistStructure, sending initial update with {} songs",
+                    setlist_api.get_setlist().songs.len()
+                );
                 let mut setlist_without_tracks = setlist_api.get_setlist().clone();
                 // Clear tracks from each song's project
                 for song in &mut setlist_without_tracks.songs {
@@ -425,11 +442,14 @@ impl SetlistStreamActor {
                     active_section_index: setlist_api.active_section_index(),
                     active_slide_index: setlist_api.active_slide_index(),
                 }
-            },
+            }
             Err(e) => {
-                warn!("[Setlist Stream] Setlist state not available yet for SetlistStructure: {}, sending empty message", e);
-                let empty_setlist = Setlist::new("Loading...".to_string())
-                    .unwrap_or_else(|_| Setlist {
+                warn!(
+                    "[Setlist Stream] Setlist state not available yet for SetlistStructure: {}, sending empty message",
+                    e
+                );
+                let empty_setlist =
+                    Setlist::new("Loading...".to_string()).unwrap_or_else(|_| Setlist {
                         id: None,
                         name: "Loading...".to_string(),
                         songs: Vec::new(),
@@ -443,7 +463,7 @@ impl SetlistStreamActor {
                 }
             }
         };
-        
+
         // Send initial update synchronously to establish connection
         match tx.send(initial_update).await {
             Ok(_) => {
@@ -458,23 +478,26 @@ impl SetlistStreamActor {
                 return; // Client disconnected, don't spawn forwarding task
             }
         }
-        
+
         // Now spawn task to forward subsequent updates
         let mut broadcast_rx = self.broadcast_tx.subscribe();
         tokio::task::spawn(async move {
             info!("[Setlist Stream] 🚀 Started forwarding task for SetlistStructure subscriber");
-            
+
             // Forward all subsequent updates from the broadcast channel that are structure-related
             // Keep the original tx alive - when tx is dropped, the connection closes
             loop {
                 match broadcast_rx.recv().await {
                     Ok(update) => {
                         // Only forward structure-related messages
-                        if matches!(update, SetlistUpdateMessage::FullSetlist { .. } | 
-                                          SetlistUpdateMessage::SongMetadata { .. } |
-                                          SetlistUpdateMessage::SongAdded { .. } |
-                                          SetlistUpdateMessage::SongRemoved { .. } |
-                                          SetlistUpdateMessage::SongsReordered { .. }) {
+                        if matches!(
+                            update,
+                            SetlistUpdateMessage::FullSetlist { .. }
+                                | SetlistUpdateMessage::SongMetadata { .. }
+                                | SetlistUpdateMessage::SongAdded { .. }
+                                | SetlistUpdateMessage::SongRemoved { .. }
+                                | SetlistUpdateMessage::SongsReordered { .. }
+                        ) {
                             // Forward to client - this will block if the client isn't consuming
                             // but that's okay, we want backpressure
                             if let Err(e) = tx.send(update).await {
@@ -488,19 +511,26 @@ impl SetlistStreamActor {
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        info!("[Setlist Stream] Broadcast channel closed for SetlistStructure, stopping forwarder");
+                        info!(
+                            "[Setlist Stream] Broadcast channel closed for SetlistStructure, stopping forwarder"
+                        );
                         break;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        warn!("[Setlist Stream] SetlistStructure subscriber lagged, skipped {} messages", skipped);
+                        warn!(
+                            "[Setlist Stream] SetlistStructure subscriber lagged, skipped {} messages",
+                            skipped
+                        );
                         // Continue - we'll send the next available message
                     }
                 }
             }
-            
+
             // Keep the original tx alive until the task ends
             // When tx is dropped, the connection closes
-            info!("[Setlist Stream] Forwarding task ended for SetlistStructure, connection will close");
+            info!(
+                "[Setlist Stream] Forwarding task ended for SetlistStructure, connection will close"
+            );
         });
     }
 
@@ -510,12 +540,14 @@ impl SetlistStreamActor {
         sub: WithChannels<SubscribeActiveIndices, SetlistStreamProtocol>,
     ) {
         let WithChannels { tx, .. } = sub;
-        
+
         // CRITICAL: Send initial message synchronously before spawning task
         let state_provider_for_initial = self.state_provider.clone();
         let initial_update = match state_provider_for_initial.get_setlist_api().await {
             Ok(setlist_api) => {
-                debug!("[Setlist Stream] Got setlist API for ActiveIndices, sending initial update");
+                debug!(
+                    "[Setlist Stream] Got setlist API for ActiveIndices, sending initial update"
+                );
                 SetlistUpdateMessage::ActiveIndices {
                     active_song_index: setlist_api.active_song_index(),
                     active_section_index: setlist_api.active_section_index(),
@@ -523,9 +555,12 @@ impl SetlistStreamActor {
                     song_progress: setlist_api.song_progress,
                     section_progress: setlist_api.section_progress,
                 }
-            },
+            }
             Err(e) => {
-                warn!("[Setlist Stream] Setlist state not available yet for ActiveIndices: {}, sending empty message", e);
+                warn!(
+                    "[Setlist Stream] Setlist state not available yet for ActiveIndices: {}, sending empty message",
+                    e
+                );
                 SetlistUpdateMessage::ActiveIndices {
                     active_song_index: None,
                     active_section_index: None,
@@ -535,7 +570,7 @@ impl SetlistStreamActor {
                 }
             }
         };
-        
+
         // Send initial update synchronously to establish connection
         match tx.send(initial_update).await {
             Ok(_) => {
@@ -550,12 +585,12 @@ impl SetlistStreamActor {
                 return; // Client disconnected, don't spawn forwarding task
             }
         }
-        
+
         // Now spawn task to forward subsequent updates
         let mut broadcast_rx = self.broadcast_tx.subscribe();
         tokio::task::spawn(async move {
             info!("[Setlist Stream] 🚀 Started forwarding task for ActiveIndices subscriber");
-            
+
             // Forward all subsequent ActiveIndices updates
             loop {
                 match broadcast_rx.recv().await {
@@ -572,16 +607,23 @@ impl SetlistStreamActor {
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        info!("[Setlist Stream] Broadcast channel closed for ActiveIndices, stopping forwarder");
+                        info!(
+                            "[Setlist Stream] Broadcast channel closed for ActiveIndices, stopping forwarder"
+                        );
                         break;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        warn!("[Setlist Stream] ActiveIndices subscriber lagged, skipped {} messages", skipped);
+                        warn!(
+                            "[Setlist Stream] ActiveIndices subscriber lagged, skipped {} messages",
+                            skipped
+                        );
                     }
                 }
             }
-            
-            info!("[Setlist Stream] Forwarding task ended for ActiveIndices, connection will close");
+
+            info!(
+                "[Setlist Stream] Forwarding task ended for ActiveIndices, connection will close"
+            );
         });
     }
 
@@ -591,7 +633,7 @@ impl SetlistStreamActor {
         sub: WithChannels<SubscribeSongTracks, SetlistStreamProtocol>,
     ) {
         let WithChannels { tx, .. } = sub;
-        
+
         // CRITICAL: Send initial message synchronously before spawning task
         let state_provider_for_initial = self.state_provider.clone();
         let initial_update = match state_provider_for_initial.get_setlist_api().await {
@@ -599,22 +641,33 @@ impl SetlistStreamActor {
                 debug!("[Setlist Stream] Got setlist API for SongTracks, sending initial update");
                 // Send tracks for active song as initial update
                 if let Some(active_song_index) = setlist_api.active_song_index() {
-                    if let Some(active_song) = setlist_api.get_setlist().songs.get(active_song_index) {
+                    if let Some(active_song) =
+                        setlist_api.get_setlist().songs.get(active_song_index)
+                    {
                         if let Some(project) = &active_song.project {
-                            debug!("[Setlist Stream] Sending initial tracks for active song {}", active_song_index);
+                            debug!(
+                                "[Setlist Stream] Sending initial tracks for active song {}",
+                                active_song_index
+                            );
                             SetlistUpdateMessage::SongTracks {
                                 song_index: active_song_index,
                                 tracks: project.tracks().to_vec(),
                             }
                         } else {
-                            debug!("[Setlist Stream] Active song {} has no project, sending empty tracks", active_song_index);
+                            debug!(
+                                "[Setlist Stream] Active song {} has no project, sending empty tracks",
+                                active_song_index
+                            );
                             SetlistUpdateMessage::SongTracks {
                                 song_index: active_song_index,
                                 tracks: Vec::new(),
                             }
                         }
                     } else {
-                        warn!("[Setlist Stream] Active song index {} out of bounds, sending empty tracks", active_song_index);
+                        warn!(
+                            "[Setlist Stream] Active song index {} out of bounds, sending empty tracks",
+                            active_song_index
+                        );
                         SetlistUpdateMessage::SongTracks {
                             song_index: active_song_index,
                             tracks: Vec::new(),
@@ -628,16 +681,19 @@ impl SetlistStreamActor {
                         tracks: Vec::new(),
                     }
                 }
-            },
+            }
             Err(e) => {
-                warn!("[Setlist Stream] Setlist state not available yet for SongTracks: {}, sending empty message", e);
+                warn!(
+                    "[Setlist Stream] Setlist state not available yet for SongTracks: {}, sending empty message",
+                    e
+                );
                 SetlistUpdateMessage::SongTracks {
                     song_index: 0,
                     tracks: Vec::new(),
                 }
             }
         };
-        
+
         // Send initial update synchronously to establish connection
         match tx.send(initial_update).await {
             Ok(_) => {
@@ -652,12 +708,12 @@ impl SetlistStreamActor {
                 return; // Client disconnected, don't spawn forwarding task
             }
         }
-        
+
         // Now spawn task to forward subsequent updates
         let mut broadcast_rx = self.broadcast_tx.subscribe();
         tokio::task::spawn(async move {
             info!("[Setlist Stream] 🚀 Started forwarding task for SongTracks subscriber");
-            
+
             // Forward all subsequent SongTracks updates
             loop {
                 match broadcast_rx.recv().await {
@@ -674,15 +730,20 @@ impl SetlistStreamActor {
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        info!("[Setlist Stream] Broadcast channel closed for SongTracks, stopping forwarder");
+                        info!(
+                            "[Setlist Stream] Broadcast channel closed for SongTracks, stopping forwarder"
+                        );
                         break;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        warn!("[Setlist Stream] SongTracks subscriber lagged, skipped {} messages", skipped);
+                        warn!(
+                            "[Setlist Stream] SongTracks subscriber lagged, skipped {} messages",
+                            skipped
+                        );
                     }
                 }
             }
-            
+
             info!("[Setlist Stream] Forwarding task ended for SongTracks, connection will close");
         });
     }
@@ -693,30 +754,43 @@ impl SetlistStreamActor {
         sub: WithChannels<SubscribeSongTransport, SetlistStreamProtocol>,
     ) {
         let WithChannels { tx, .. } = sub;
-        
+
         // CRITICAL: Send initial message synchronously before spawning task
         let state_provider_for_initial = self.state_provider.clone();
         let initial_update = match state_provider_for_initial.get_setlist_api().await {
             Ok(setlist_api) => {
-                debug!("[Setlist Stream] Got setlist API for SongTransport, sending initial update");
+                debug!(
+                    "[Setlist Stream] Got setlist API for SongTransport, sending initial update"
+                );
                 // Send transport for active song as initial update
                 if let Some(active_song_index) = setlist_api.active_song_index() {
-                    if let Some(active_song) = setlist_api.get_setlist().songs.get(active_song_index) {
+                    if let Some(active_song) =
+                        setlist_api.get_setlist().songs.get(active_song_index)
+                    {
                         if let Some(project) = &active_song.project {
-                            debug!("[Setlist Stream] Sending initial transport for active song {}", active_song_index);
+                            debug!(
+                                "[Setlist Stream] Sending initial transport for active song {}",
+                                active_song_index
+                            );
                             SetlistUpdateMessage::SongTransport {
                                 song_index: active_song_index,
                                 transport: project.transport().clone(),
                             }
                         } else {
-                            debug!("[Setlist Stream] Active song {} has no project, sending default transport", active_song_index);
+                            debug!(
+                                "[Setlist Stream] Active song {} has no project, sending default transport",
+                                active_song_index
+                            );
                             SetlistUpdateMessage::SongTransport {
                                 song_index: active_song_index,
                                 transport: Transport::default(),
                             }
                         }
                     } else {
-                        warn!("[Setlist Stream] Active song index {} out of bounds, sending default transport", active_song_index);
+                        warn!(
+                            "[Setlist Stream] Active song index {} out of bounds, sending default transport",
+                            active_song_index
+                        );
                         SetlistUpdateMessage::SongTransport {
                             song_index: active_song_index,
                             transport: Transport::default(),
@@ -730,16 +804,19 @@ impl SetlistStreamActor {
                         transport: Transport::default(),
                     }
                 }
-            },
+            }
             Err(e) => {
-                warn!("[Setlist Stream] Setlist state not available yet for SongTransport: {}, sending empty message", e);
+                warn!(
+                    "[Setlist Stream] Setlist state not available yet for SongTransport: {}, sending empty message",
+                    e
+                );
                 SetlistUpdateMessage::SongTransport {
                     song_index: 0,
                     transport: Transport::default(),
                 }
             }
         };
-        
+
         // Send initial update synchronously to establish connection
         match tx.send(initial_update).await {
             Ok(_) => {
@@ -754,12 +831,12 @@ impl SetlistStreamActor {
                 return; // Client disconnected, don't spawn forwarding task
             }
         }
-        
+
         // Now spawn task to forward subsequent updates
         let mut broadcast_rx = self.broadcast_tx.subscribe();
         tokio::task::spawn(async move {
             info!("[Setlist Stream] 🚀 Started forwarding task for SongTransport subscriber");
-            
+
             // Forward all subsequent SongTransport updates
             loop {
                 match broadcast_rx.recv().await {
@@ -776,16 +853,23 @@ impl SetlistStreamActor {
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        info!("[Setlist Stream] Broadcast channel closed for SongTransport, stopping forwarder");
+                        info!(
+                            "[Setlist Stream] Broadcast channel closed for SongTransport, stopping forwarder"
+                        );
                         break;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        warn!("[Setlist Stream] SongTransport subscriber lagged, skipped {} messages", skipped);
+                        warn!(
+                            "[Setlist Stream] SongTransport subscriber lagged, skipped {} messages",
+                            skipped
+                        );
                     }
                 }
             }
-            
-            info!("[Setlist Stream] Forwarding task ended for SongTransport, connection will close");
+
+            info!(
+                "[Setlist Stream] Forwarding task ended for SongTransport, connection will close"
+            );
         });
     }
 
@@ -805,25 +889,31 @@ impl SetlistStreamActor {
             }
             SetlistStreamMessage::SubscribeSetlist(sub) => {
                 let WithChannels { tx, .. } = sub;
-                
+
                 // CRITICAL: Send initial message synchronously before spawning task
                 // This ensures the connection is established before the handler returns
                 // The connection stays alive as long as tx is alive in the spawned task
                 let state_provider_for_initial = self.state_provider.clone();
                 let initial_update = match state_provider_for_initial.get_setlist_api().await {
                     Ok(setlist_api) => {
-                        debug!("[Setlist Stream] Got setlist API, sending initial update with {} songs", setlist_api.get_setlist().songs.len());
+                        debug!(
+                            "[Setlist Stream] Got setlist API, sending initial update with {} songs",
+                            setlist_api.get_setlist().songs.len()
+                        );
                         SetlistUpdateMessage::FullSetlist {
                             setlist: setlist_api.get_setlist().clone(),
                             active_song_index: setlist_api.active_song_index(),
                             active_section_index: setlist_api.active_section_index(),
                             active_slide_index: setlist_api.active_slide_index(),
                         }
-                    },
+                    }
                     Err(e) => {
-                        warn!("[Setlist Stream] Setlist state not available yet: {}, sending empty setlist", e);
-                        let empty_setlist = Setlist::new("Loading...".to_string())
-                            .unwrap_or_else(|_| Setlist {
+                        warn!(
+                            "[Setlist Stream] Setlist state not available yet: {}, sending empty setlist",
+                            e
+                        );
+                        let empty_setlist =
+                            Setlist::new("Loading...".to_string()).unwrap_or_else(|_| Setlist {
                                 id: None,
                                 name: "Loading...".to_string(),
                                 songs: Vec::new(),
@@ -837,28 +927,28 @@ impl SetlistStreamActor {
                         }
                     }
                 };
-                
-        // Send initial update synchronously to establish connection
-        match tx.send(initial_update).await {
-            Ok(_) => {
-                info!("[Setlist Stream] ✅ Sent initial setlist update to new subscriber");
-            }
-            Err(e) => {
-                error!(
-                    error = %e,
-                    error_debug = ?e,
-                    "[Setlist Stream] ❌ Failed to send initial setlist update, client disconnected"
-                );
-                return; // Client disconnected, don't spawn forwarding task
-            }
-        }
-                
+
+                // Send initial update synchronously to establish connection
+                match tx.send(initial_update).await {
+                    Ok(_) => {
+                        info!("[Setlist Stream] ✅ Sent initial setlist update to new subscriber");
+                    }
+                    Err(e) => {
+                        error!(
+                            error = %e,
+                            error_debug = ?e,
+                            "[Setlist Stream] ❌ Failed to send initial setlist update, client disconnected"
+                        );
+                        return; // Client disconnected, don't spawn forwarding task
+                    }
+                }
+
                 // Now spawn task to forward subsequent updates
                 // The tx is moved into the task to keep the connection alive
                 let mut broadcast_rx = self.broadcast_tx.subscribe();
                 tokio::task::spawn(async move {
                     info!("[Setlist Stream] 🚀 Started forwarding task for subscriber");
-                    
+
                     // Forward all subsequent updates from the broadcast channel
                     // Keep the original tx alive - when tx is dropped, the connection closes
                     loop {
@@ -876,23 +966,30 @@ impl SetlistStreamActor {
                                 }
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                                info!("[Setlist Stream] Broadcast channel closed, stopping forwarder");
+                                info!(
+                                    "[Setlist Stream] Broadcast channel closed, stopping forwarder"
+                                );
                                 break;
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                                warn!("[Setlist Stream] Subscriber lagged, skipped {} messages", skipped);
+                                warn!(
+                                    "[Setlist Stream] Subscriber lagged, skipped {} messages",
+                                    skipped
+                                );
                                 // Continue - we'll send the next available message
                             }
                         }
                     }
-                    
+
                     // Keep the original tx alive until the task ends
                     // When tx is dropped, the connection closes
                     info!("[Setlist Stream] Forwarding task ended, connection will close");
                 });
             }
             SetlistStreamMessage::TransportCommand(cmd) => {
-                let WithChannels { tx, inner, span, .. } = cmd;
+                let WithChannels {
+                    tx, inner, span, ..
+                } = cmd;
                 let handler = self.command_handler.clone();
                 tokio::task::spawn(async move {
                     let _entered = span.enter();
@@ -907,7 +1004,9 @@ impl SetlistStreamActor {
                 });
             }
             SetlistStreamMessage::NavigationCommand(cmd) => {
-                let WithChannels { tx, inner, span, .. } = cmd;
+                let WithChannels {
+                    tx, inner, span, ..
+                } = cmd;
                 let handler = self.command_handler.clone();
                 tokio::task::spawn(async move {
                     let _entered = span.enter();
@@ -922,12 +1021,16 @@ impl SetlistStreamActor {
                 });
             }
             SetlistStreamMessage::SeekToSection(cmd) => {
-                let WithChannels { tx, inner, span, .. } = cmd;
+                let WithChannels {
+                    tx, inner, span, ..
+                } = cmd;
                 let handler = self.command_handler.clone();
                 tokio::task::spawn(async move {
                     let _entered = span.enter();
                     let result = if let Some(handler) = handler {
-                        handler.seek_to_section(inner.song_index, inner.section_index).await
+                        handler
+                            .seek_to_section(inner.song_index, inner.section_index)
+                            .await
                     } else {
                         Err("Command handler not available".to_string())
                     };
@@ -937,7 +1040,9 @@ impl SetlistStreamActor {
                 });
             }
             SetlistStreamMessage::SeekToSong(cmd) => {
-                let WithChannels { tx, inner, span, .. } = cmd;
+                let WithChannels {
+                    tx, inner, span, ..
+                } = cmd;
                 let handler = self.command_handler.clone();
                 tokio::task::spawn(async move {
                     let _entered = span.enter();
@@ -952,12 +1057,16 @@ impl SetlistStreamActor {
                 });
             }
             SetlistStreamMessage::SeekToMusicalPosition(cmd) => {
-                let WithChannels { tx, inner, span, .. } = cmd;
+                let WithChannels {
+                    tx, inner, span, ..
+                } = cmd;
                 let handler = self.command_handler.clone();
                 tokio::task::spawn(async move {
                     let _entered = span.enter();
                     let result = if let Some(handler) = handler {
-                        handler.seek_to_musical_position(inner.song_index, inner.musical_position).await
+                        handler
+                            .seek_to_musical_position(inner.song_index, inner.musical_position)
+                            .await
                     } else {
                         Err("Command handler not available".to_string())
                     };
@@ -967,12 +1076,16 @@ impl SetlistStreamActor {
                 });
             }
             SetlistStreamMessage::SeekToTime(cmd) => {
-                let WithChannels { tx, inner, span, .. } = cmd;
+                let WithChannels {
+                    tx, inner, span, ..
+                } = cmd;
                 let handler = self.command_handler.clone();
                 tokio::task::spawn(async move {
                     let _entered = span.enter();
                     let result = if let Some(handler) = handler {
-                        handler.seek_to_time(inner.song_index, inner.time_seconds).await
+                        handler
+                            .seek_to_time(inner.song_index, inner.time_seconds)
+                            .await
                     } else {
                         Err("Command handler not available".to_string())
                     };
@@ -997,7 +1110,12 @@ impl SetlistStreamActor {
                 });
             }
             SetlistStreamMessage::AdvanceSyllable(cmd) => {
-                let WithChannels { tx, inner: _inner, span, .. } = cmd;
+                let WithChannels {
+                    tx,
+                    inner: _inner,
+                    span,
+                    ..
+                } = cmd;
                 let handler = self.command_handler.clone();
                 tokio::task::spawn(async move {
                     let _entered = span.enter();
@@ -1012,7 +1130,12 @@ impl SetlistStreamActor {
                 });
             }
             SetlistStreamMessage::GetLyricsState(cmd) => {
-                let WithChannels { tx, inner: _inner, span, .. } = cmd;
+                let WithChannels {
+                    tx,
+                    inner: _inner,
+                    span,
+                    ..
+                } = cmd;
                 let handler = self.command_handler.clone();
                 tokio::task::spawn(async move {
                     let _entered = span.enter();
@@ -1027,7 +1150,9 @@ impl SetlistStreamActor {
                 });
             }
             SetlistStreamMessage::AssignSyllableToNote(cmd) => {
-                let WithChannels { tx, inner, span, .. } = cmd;
+                let WithChannels {
+                    tx, inner, span, ..
+                } = cmd;
                 let handler = self.command_handler.clone();
                 tokio::task::spawn(async move {
                     let _entered = span.enter();
@@ -1042,7 +1167,9 @@ impl SetlistStreamActor {
                 });
             }
             SetlistStreamMessage::UpdateLyrics(cmd) => {
-                let WithChannels { tx, inner, span, .. } = cmd;
+                let WithChannels {
+                    tx, inner, span, ..
+                } = cmd;
                 let handler = self.command_handler.clone();
                 tokio::task::spawn(async move {
                     let _entered = span.enter();
@@ -1060,7 +1187,7 @@ impl SetlistStreamActor {
     }
 
     /// Poll setlist state and broadcast granular updates to all subscribers
-    /// 
+    ///
     /// Tracks previous state and only sends updates for what changed:
     /// - ActiveIndices: Sent frequently as playback progresses
     /// - SongTransport: Sent when transport changes for a specific song
@@ -1070,25 +1197,25 @@ impl SetlistStreamActor {
         broadcast_tx: tokio::sync::broadcast::Sender<SetlistUpdateMessage>,
         state_provider: Arc<dyn SetlistStateProvider>,
     ) {
-        
         static SEND_COUNT: AtomicU64 = AtomicU64::new(0);
         static LAST_LOG: OnceLock<std::sync::Mutex<Instant>> = OnceLock::new();
         static FIRST_UPDATE: OnceLock<std::sync::Mutex<bool>> = OnceLock::new();
-        
+
         // Track previous state to detect changes
         let mut prev_setlist_structure: Option<crate::Setlist> = None;
         let mut prev_tracks: HashMap<usize, Vec<daw::tracks::Track>> = HashMap::new();
         let mut prev_transport: HashMap<usize, Transport> = HashMap::new();
-        let mut prev_active_indices: (Option<usize>, Option<usize>, Option<usize>) = (None, None, None);
+        let mut prev_active_indices: (Option<usize>, Option<usize>, Option<usize>) =
+            (None, None, None);
         let mut prev_song_progress: Option<f64> = None;
         let mut prev_section_progress: Option<f64> = None;
-        
+
         // Poll as fast as possible - update whenever state changes
         let mut interval = time::interval(time::Duration::from_millis(8)); // ~120Hz polling
 
         loop {
             interval.tick().await;
-            
+
             // Get current setlist API state from the provider
             match state_provider.get_setlist_api().await {
                 Ok(setlist_api) => {
@@ -1098,14 +1225,14 @@ impl SetlistStreamActor {
                         setlist_api.active_section_index(),
                         setlist_api.active_slide_index(),
                     );
-                    
+
                     // Check if this is the first update - send FullSetlist
                     let is_first = FIRST_UPDATE.get_or_init(|| std::sync::Mutex::new(true));
                     let mut first_guard = is_first.lock().unwrap();
                     if *first_guard {
                         *first_guard = false;
                         drop(first_guard);
-                        
+
                         // Send full setlist structure (without tracks/transport)
                         let mut setlist_without_tracks = setlist.clone();
                         // Clear tracks from each song's project
@@ -1114,7 +1241,7 @@ impl SetlistStreamActor {
                                 project.set_tracks(Vec::new());
                             }
                         }
-                        
+
                         let update = SetlistUpdateMessage::FullSetlist {
                             setlist: setlist_without_tracks,
                             active_song_index: current_active_indices.0,
@@ -1124,7 +1251,7 @@ impl SetlistStreamActor {
                         if broadcast_tx.send(update).is_ok() {
                             SEND_COUNT.fetch_add(1, Ordering::Relaxed);
                         }
-                        
+
                         // Send tracks and transport for each song
                         for (song_index, song) in setlist.songs.iter().enumerate() {
                             if let Some(project) = &song.project {
@@ -1140,7 +1267,7 @@ impl SetlistStreamActor {
                                     }
                                     prev_tracks.insert(song_index, tracks);
                                 }
-                                
+
                                 // Send transport if available
                                 let transport = project.transport().clone();
                                 let update = SetlistUpdateMessage::SongTransport {
@@ -1153,32 +1280,39 @@ impl SetlistStreamActor {
                                 prev_transport.insert(song_index, transport);
                             }
                         }
-                        
+
                         // Store initial state
                         prev_setlist_structure = Some(setlist.clone());
                         prev_active_indices = current_active_indices;
                         prev_song_progress = setlist_api.song_progress;
                         prev_section_progress = setlist_api.section_progress;
-                        
-                        tracing::info!("[Setlist Stream] Sent initial full setlist update with {} songs", setlist.songs.len());
+
+                        tracing::info!(
+                            "[Setlist Stream] Sent initial full setlist update with {} songs",
+                            setlist.songs.len()
+                        );
                         continue;
                     }
-                    
+
                     // Check for structure changes (songs added/removed/reordered)
-                    let structure_changed = prev_setlist_structure.as_ref()
+                    let structure_changed = prev_setlist_structure
+                        .as_ref()
                         .map(|prev| {
-                            prev.songs.len() != setlist.songs.len() ||
-                            prev.songs.iter().enumerate().any(|(i, prev_song)| {
-                                setlist.songs.get(i)
-                                    .map(|curr_song| {
-                                        prev_song.name != curr_song.name ||
-                                        prev_song.sections.len() != curr_song.sections.len()
-                                    })
-                                    .unwrap_or(true)
-                            })
+                            prev.songs.len() != setlist.songs.len()
+                                || prev.songs.iter().enumerate().any(|(i, prev_song)| {
+                                    setlist
+                                        .songs
+                                        .get(i)
+                                        .map(|curr_song| {
+                                            prev_song.name != curr_song.name
+                                                || prev_song.sections.len()
+                                                    != curr_song.sections.len()
+                                        })
+                                        .unwrap_or(true)
+                                })
                         })
                         .unwrap_or(true);
-                    
+
                     if structure_changed {
                         // Major structure change - send FullSetlist
                         let mut setlist_without_tracks = setlist.clone();
@@ -1187,7 +1321,7 @@ impl SetlistStreamActor {
                                 project.set_tracks(Vec::new());
                             }
                         }
-                        
+
                         let update = SetlistUpdateMessage::FullSetlist {
                             setlist: setlist_without_tracks,
                             active_song_index: current_active_indices.0,
@@ -1199,12 +1333,13 @@ impl SetlistStreamActor {
                         }
                         prev_setlist_structure = Some(setlist.clone());
                     }
-                    
+
                     // Check for active indices OR progress changes (frequent updates during playback)
                     let indices_changed = prev_active_indices != current_active_indices;
                     let song_progress_changed = prev_song_progress != setlist_api.song_progress;
-                    let section_progress_changed = prev_section_progress != setlist_api.section_progress;
-                    
+                    let section_progress_changed =
+                        prev_section_progress != setlist_api.section_progress;
+
                     if indices_changed || song_progress_changed || section_progress_changed {
                         // Get progress from current setlist API (we already have it from the match above)
                         let update = SetlistUpdateMessage::ActiveIndices {
@@ -1221,23 +1356,24 @@ impl SetlistStreamActor {
                         prev_song_progress = setlist_api.song_progress;
                         prev_section_progress = setlist_api.section_progress;
                     }
-                    
+
                     // Check for track changes per song
                     for (song_index, song) in setlist.songs.iter().enumerate() {
                         if let Some(project) = &song.project {
                             let current_tracks = project.tracks().to_vec();
                             let prev_tracks_for_song = prev_tracks.get(&song_index);
-                            
+
                             // Check if tracks changed (compare by length and names for efficiency)
                             let tracks_changed = prev_tracks_for_song
                                 .map(|prev| {
-                                    prev.len() != current_tracks.len() ||
-                                    prev.iter().zip(current_tracks.iter()).any(|(p, c)| {
-                                        p.name != c.name || p.index != c.index
-                                    })
+                                    prev.len() != current_tracks.len()
+                                        || prev
+                                            .iter()
+                                            .zip(current_tracks.iter())
+                                            .any(|(p, c)| p.name != c.name || p.index != c.index)
                                 })
                                 .unwrap_or(true);
-                            
+
                             if tracks_changed && !current_tracks.is_empty() {
                                 let update = SetlistUpdateMessage::SongTracks {
                                     song_index,
@@ -1248,19 +1384,23 @@ impl SetlistStreamActor {
                                 }
                                 prev_tracks.insert(song_index, current_tracks);
                             }
-                            
+
                             // Check for transport changes (compare key fields)
                             let current_transport = project.transport();
                             let prev_transport_for_song = prev_transport.get(&song_index);
-                            
+
                             let transport_changed = prev_transport_for_song
                                 .map(|prev| {
-                                    prev.play_state != current_transport.play_state ||
-                                    (prev.playhead_position.time.to_seconds() - current_transport.playhead_position.time.to_seconds()).abs() > 0.01 ||
-                                    (prev.tempo.bpm - current_transport.tempo.bpm).abs() > 0.1
+                                    prev.play_state != current_transport.play_state
+                                        || (prev.playhead_position.time.to_seconds()
+                                            - current_transport.playhead_position.time.to_seconds())
+                                        .abs()
+                                            > 0.01
+                                        || (prev.tempo.bpm - current_transport.tempo.bpm).abs()
+                                            > 0.1
                                 })
                                 .unwrap_or(true);
-                            
+
                             if transport_changed {
                                 let update = SetlistUpdateMessage::SongTransport {
                                     song_index,
@@ -1273,12 +1413,12 @@ impl SetlistStreamActor {
                             }
                         }
                     }
-                    
+
                     // Clean up tracks/transport for removed songs
                     let current_song_count = setlist.songs.len();
                     prev_tracks.retain(|&idx, _| idx < current_song_count);
                     prev_transport.retain(|&idx, _| idx < current_song_count);
-                    
+
                     // Log periodically to verify updates are being sent
                     let count = SEND_COUNT.load(Ordering::Relaxed);
                     if count % 1000 == 0 && count > 0 {
@@ -1323,16 +1463,16 @@ impl SetlistStreamApi {
     pub const ALPN: &[u8] = b"fasttrackstudio/reaper/1";
 
     /// Create a new setlist stream API with a state provider
-    /// 
+    ///
     /// This is called by the server (e.g., REAPER extension) to create
     /// a setlist stream service. The state provider implementation
     /// (e.g., ReaperSetlistStateProvider) is specific to the backend.
     pub fn spawn(state_provider: Arc<dyn SetlistStateProvider>) -> Self {
         SetlistStreamActor::spawn(state_provider)
     }
-    
+
     /// Create a new setlist stream API with a state provider and command handler
-    /// 
+    ///
     /// This is called by the server (e.g., REAPER extension) to create
     /// a setlist stream service with command execution capabilities.
     pub fn spawn_with_handler(
@@ -1343,7 +1483,7 @@ impl SetlistStreamApi {
     }
 
     /// Connect to a remote setlist stream service using endpoint ID
-    /// 
+    ///
     /// This is called by clients (e.g., playground app) to connect to
     /// a setlist stream service. Clients don't need to know about
     /// the backend implementation - they just connect via irpc.
@@ -1366,9 +1506,11 @@ impl SetlistStreamApi {
             .inner
             .as_local()
             .context("cannot listen on remote service")?;
-        Ok(IrohProtocol::new(SetlistStreamProtocol::remote_handler(local)))
+        Ok(IrohProtocol::new(SetlistStreamProtocol::remote_handler(
+            local,
+        )))
     }
-    
+
     /// Spawn deferred tasks in the current tokio runtime
     /// This should be called from within a tokio runtime context
     /// Returns true if any tasks were spawned
@@ -1380,7 +1522,9 @@ impl SetlistStreamApi {
             });
             spawned = true;
         }
-        if let (Some(broadcast_tx), Some(state_provider)) = (self.broadcast_tx.take(), self.state_provider.take()) {
+        if let (Some(broadcast_tx), Some(state_provider)) =
+            (self.broadcast_tx.take(), self.state_provider.take())
+        {
             tokio::spawn(async move {
                 SetlistStreamActor::poll_and_broadcast(broadcast_tx, state_provider).await;
             });
@@ -1394,33 +1538,44 @@ impl SetlistStreamApi {
     pub async fn subscribe(&self) -> irpc::Result<mpsc::Receiver<SetlistUpdateMessage>> {
         self.inner.server_streaming(SubscribeSetlist, 32).await
     }
-    
+
     /// Subscribe to setlist structure updates (songs, sections, metadata)
     /// Returns a receiver that will receive SetlistUpdateMessage messages
     pub async fn subscribe_structure(&self) -> irpc::Result<mpsc::Receiver<SetlistUpdateMessage>> {
-        self.inner.server_streaming(SubscribeSetlistStructure, 32).await
+        self.inner
+            .server_streaming(SubscribeSetlistStructure, 32)
+            .await
     }
-    
+
     /// Subscribe to active indices updates (which song/section/slide is active)
     /// Returns a receiver that will receive SetlistUpdateMessage messages
-    pub async fn subscribe_active_indices(&self) -> irpc::Result<mpsc::Receiver<SetlistUpdateMessage>> {
-        self.inner.server_streaming(SubscribeActiveIndices, 32).await
+    pub async fn subscribe_active_indices(
+        &self,
+    ) -> irpc::Result<mpsc::Receiver<SetlistUpdateMessage>> {
+        self.inner
+            .server_streaming(SubscribeActiveIndices, 32)
+            .await
     }
-    
+
     /// Subscribe to song tracks updates
     /// Returns a receiver that will receive SetlistUpdateMessage messages
     pub async fn subscribe_tracks(&self) -> irpc::Result<mpsc::Receiver<SetlistUpdateMessage>> {
         self.inner.server_streaming(SubscribeSongTracks, 32).await
     }
-    
+
     /// Subscribe to song transport updates
     /// Returns a receiver that will receive SetlistUpdateMessage messages
     pub async fn subscribe_transport(&self) -> irpc::Result<mpsc::Receiver<SetlistUpdateMessage>> {
-        self.inner.server_streaming(SubscribeSongTransport, 32).await
+        self.inner
+            .server_streaming(SubscribeSongTransport, 32)
+            .await
     }
-    
+
     /// Execute a transport command
-    pub async fn transport_command(&self, command: TransportCommand) -> irpc::Result<Result<(), String>> {
+    pub async fn transport_command(
+        &self,
+        command: TransportCommand,
+    ) -> irpc::Result<Result<(), String>> {
         let msg = command;
         let rx = match self.inner.request().await? {
             Request::Local(request) => {
@@ -1438,9 +1593,12 @@ impl SetlistStreamApi {
             Err(e) => Ok(Err(format!("Request failed: {}", e))),
         }
     }
-    
+
     /// Execute a navigation command
-    pub async fn navigation_command(&self, command: NavigationCommand) -> irpc::Result<Result<(), String>> {
+    pub async fn navigation_command(
+        &self,
+        command: NavigationCommand,
+    ) -> irpc::Result<Result<(), String>> {
         let msg = command;
         let rx = match self.inner.request().await? {
             Request::Local(request) => {
@@ -1458,10 +1616,17 @@ impl SetlistStreamApi {
             Err(e) => Ok(Err(format!("Request failed: {}", e))),
         }
     }
-    
+
     /// Seek to a specific section
-    pub async fn seek_to_section(&self, song_index: usize, section_index: usize) -> irpc::Result<Result<(), String>> {
-        let msg = SeekToSection { song_index, section_index };
+    pub async fn seek_to_section(
+        &self,
+        song_index: usize,
+        section_index: usize,
+    ) -> irpc::Result<Result<(), String>> {
+        let msg = SeekToSection {
+            song_index,
+            section_index,
+        };
         let rx = match self.inner.request().await? {
             Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();
@@ -1478,7 +1643,7 @@ impl SetlistStreamApi {
             Err(e) => Ok(Err(format!("Request failed: {}", e))),
         }
     }
-    
+
     /// Seek to a specific song (switches to that song's tab and moves cursor to beginning)
     pub async fn seek_to_song(&self, song_index: usize) -> irpc::Result<Result<(), String>> {
         let msg = SeekToSong { song_index };
@@ -1498,10 +1663,17 @@ impl SetlistStreamApi {
             Err(e) => Ok(Err(format!("Request failed: {}", e))),
         }
     }
-    
+
     /// Seek to a specific musical position within a song
-    pub async fn seek_to_musical_position(&self, song_index: usize, musical_position: daw::primitives::MusicalPosition) -> irpc::Result<Result<(), String>> {
-        let msg = SeekToMusicalPosition { song_index, musical_position };
+    pub async fn seek_to_musical_position(
+        &self,
+        song_index: usize,
+        musical_position: daw::primitives::MusicalPosition,
+    ) -> irpc::Result<Result<(), String>> {
+        let msg = SeekToMusicalPosition {
+            song_index,
+            musical_position,
+        };
         let rx = match self.inner.request().await? {
             Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();
@@ -1520,8 +1692,15 @@ impl SetlistStreamApi {
     }
 
     /// Seek to a specific time position within a song
-    pub async fn seek_to_time(&self, song_index: usize, time_seconds: f64) -> irpc::Result<Result<(), String>> {
-        let msg = SeekToTime { song_index, time_seconds };
+    pub async fn seek_to_time(
+        &self,
+        song_index: usize,
+        time_seconds: f64,
+    ) -> irpc::Result<Result<(), String>> {
+        let msg = SeekToTime {
+            song_index,
+            time_seconds,
+        };
         let rx = match self.inner.request().await? {
             Request::Local(request) => {
                 let (tx, rx) = oneshot::channel();
@@ -1538,7 +1717,7 @@ impl SetlistStreamApi {
             Err(e) => Ok(Err(format!("Request failed: {}", e))),
         }
     }
-    
+
     /// Toggle loop for current song
     pub async fn toggle_loop(&self) -> irpc::Result<Result<(), String>> {
         let msg = ToggleLoop;
@@ -1558,7 +1737,7 @@ impl SetlistStreamApi {
             Err(e) => Ok(Err(format!("Request failed: {}", e))),
         }
     }
-    
+
     /// Advance to next syllable and assign to next MIDI note
     pub async fn advance_syllable(&self) -> irpc::Result<Result<LyricsState, String>> {
         let msg = AdvanceSyllable;
@@ -1578,7 +1757,7 @@ impl SetlistStreamApi {
             Err(e) => Ok(Err(format!("Request failed: {}", e))),
         }
     }
-    
+
     /// Get current lyrics state
     pub async fn get_lyrics_state(&self) -> irpc::Result<Result<LyricsState, String>> {
         let msg = GetLyricsState;
@@ -1598,9 +1777,12 @@ impl SetlistStreamApi {
             Err(e) => Ok(Err(format!("Request failed: {}", e))),
         }
     }
-    
+
     /// Assign syllable to MIDI note at edit cursor
-    pub async fn assign_syllable_to_note(&self, syllable_text: String) -> irpc::Result<Result<(), String>> {
+    pub async fn assign_syllable_to_note(
+        &self,
+        syllable_text: String,
+    ) -> irpc::Result<Result<(), String>> {
         let msg = AssignSyllableToNote { syllable_text };
         let rx = match self.inner.request().await? {
             Request::Local(request) => {
@@ -1618,9 +1800,13 @@ impl SetlistStreamApi {
             Err(e) => Ok(Err(format!("Request failed: {}", e))),
         }
     }
-    
+
     /// Update lyrics for a song
-    pub async fn update_lyrics(&self, song_index: usize, lyrics: crate::lyrics::core::Lyrics) -> irpc::Result<Result<(), String>> {
+    pub async fn update_lyrics(
+        &self,
+        song_index: usize,
+        lyrics: crate::lyrics::core::Lyrics,
+    ) -> irpc::Result<Result<(), String>> {
         let msg = UpdateLyrics { song_index, lyrics };
         let rx = match self.inner.request().await? {
             Request::Local(request) => {
@@ -1639,4 +1825,3 @@ impl SetlistStreamApi {
         }
     }
 }
-

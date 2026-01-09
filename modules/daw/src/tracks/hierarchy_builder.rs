@@ -17,28 +17,28 @@ use crate::tracks::types::TrackName;
 pub fn build_track_hierarchy(specs: Vec<(&str, bool)>) -> Vec<Track> {
     let mut tracks = Vec::new();
     let mut open_folders = 0;
-    
+
     for (name, is_folder) in specs {
         let mut track = Track::new(name);
         track.is_folder = is_folder;
-        
+
         if is_folder {
             track.folder_depth_change = FolderDepthChange::FolderStart;
             open_folders += 1;
         } else {
             track.folder_depth_change = FolderDepthChange::Normal;
         }
-        
+
         tracks.push(track);
     }
-    
+
     // Close any open folders at the end
     if open_folders > 0 && !tracks.is_empty() {
         if let Some(last_track) = tracks.last_mut() {
             last_track.folder_depth_change = FolderDepthChange::ClosesLevels(-open_folders);
         }
     }
-    
+
     tracks
 }
 
@@ -46,13 +46,13 @@ pub fn build_track_hierarchy(specs: Vec<(&str, bool)>) -> Vec<Track> {
 pub fn build_hierarchy(mut parent: Track, children: Vec<Track>) -> Vec<Track> {
     let mut tracks = Vec::new();
     let children_len = children.len();
-    
+
     parent.is_folder = true;
     parent.folder_depth_change = FolderDepthChange::FolderStart;
     tracks.push(parent);
-    
+
     let mut all_children = Vec::new();
-    
+
     for (i, mut child) in children.into_iter().enumerate() {
         if i == children_len - 1 {
             // Last child should close the parent folder
@@ -80,19 +80,23 @@ pub fn build_hierarchy(mut parent: Track, children: Vec<Track>) -> Vec<Track> {
                 }
             }
         }
-        
+
         all_children.push(child);
     }
-    
+
     // If the last child was a folder start, we need to find the last track within that folder
     // and modify its closing level to also close the parent
     if children_len > 0 {
         if let Some(last_child) = all_children.last() {
-            if last_child.is_folder && last_child.folder_depth_change == FolderDepthChange::FolderStart {
+            if last_child.is_folder
+                && last_child.folder_depth_change == FolderDepthChange::FolderStart
+            {
                 // Find the last track that closes a level (the actual last track in the folder hierarchy)
                 // Search backwards to find the last non-folder-start track
                 for track in all_children.iter_mut().rev() {
-                    if track.is_folder && track.folder_depth_change == FolderDepthChange::FolderStart {
+                    if track.is_folder
+                        && track.folder_depth_change == FolderDepthChange::FolderStart
+                    {
                         continue; // Skip folder starts
                     }
                     // This is the last actual track - modify it to also close the parent
@@ -109,13 +113,13 @@ pub fn build_hierarchy(mut parent: Track, children: Vec<Track>) -> Vec<Track> {
             }
         }
     }
-    
+
     tracks.extend(all_children);
     tracks
 }
 
 /// A fluent, recursive builder for creating track hierarchies.
-/// 
+///
 /// This builder automatically calculates REAPER's `folder_depth_change` values
 /// by tracking an internal stack of open folders.
 pub struct TrackHierarchyBuilder {
@@ -133,7 +137,7 @@ impl TrackHierarchyBuilder {
     }
 
     /// Add a folder track and start a new nesting level.
-    /// 
+    ///
     /// Subsequent calls to `track()` or `folder()` will be children of this folder
     /// until `end()` is called.
     pub fn folder(mut self, name: impl Into<TrackName>) -> Self {
@@ -141,10 +145,10 @@ impl TrackHierarchyBuilder {
         let mut track = Track::new(name.clone());
         track.is_folder = true;
         track.folder_depth_change = FolderDepthChange::FolderStart;
-        
+
         // If this is the last track and it was closing levels, we need to adjust it
         // but here we are starting a NEW folder, so the previous track's depth change remains.
-        
+
         self.tracks.push(track);
         self.folder_stack.push(name);
         self
@@ -172,7 +176,7 @@ impl TrackHierarchyBuilder {
     }
 
     /// Build the final list of tracks.
-    /// 
+    ///
     /// Automatically closes any remaining open folders.
     pub fn build(mut self) -> Vec<Track> {
         while !self.folder_stack.is_empty() {
@@ -197,14 +201,14 @@ mod tests {
     fn test_fluent_hierarchy_builder() {
         let tracks = TrackHierarchyBuilder::new()
             .folder("Drums")
-                .folder("Kick")
-                    .track("Kick In")
-                    .track("Kick Out")
-                .end()
-                .folder("Snare")
-                    .track("Snare Top")
-                    .track("Snare Bottom")
-                .end()
+            .folder("Kick")
+            .track("Kick In")
+            .track("Kick Out")
+            .end()
+            .folder("Snare")
+            .track("Snare Top")
+            .track("Snare Bottom")
+            .end()
             .end()
             .build();
 
@@ -213,11 +217,17 @@ mod tests {
 
         // Drums (FolderStart)
         assert_eq!(tracks[0].name.0, "Drums");
-        assert_eq!(tracks[0].folder_depth_change, FolderDepthChange::FolderStart);
+        assert_eq!(
+            tracks[0].folder_depth_change,
+            FolderDepthChange::FolderStart
+        );
 
         // Kick (FolderStart)
         assert_eq!(tracks[1].name.0, "Kick");
-        assert_eq!(tracks[1].folder_depth_change, FolderDepthChange::FolderStart);
+        assert_eq!(
+            tracks[1].folder_depth_change,
+            FolderDepthChange::FolderStart
+        );
 
         // Kick In (Normal)
         assert_eq!(tracks[2].name.0, "Kick In");
@@ -225,11 +235,17 @@ mod tests {
 
         // Kick Out (ClosesLevels(-1)) - closes Kick
         assert_eq!(tracks[3].name.0, "Kick Out");
-        assert_eq!(tracks[3].folder_depth_change, FolderDepthChange::ClosesLevels(-1));
+        assert_eq!(
+            tracks[3].folder_depth_change,
+            FolderDepthChange::ClosesLevels(-1)
+        );
 
         // Snare (FolderStart)
         assert_eq!(tracks[4].name.0, "Snare");
-        assert_eq!(tracks[4].folder_depth_change, FolderDepthChange::FolderStart);
+        assert_eq!(
+            tracks[4].folder_depth_change,
+            FolderDepthChange::FolderStart
+        );
 
         // Snare Top (Normal)
         assert_eq!(tracks[5].name.0, "Snare Top");
@@ -237,6 +253,9 @@ mod tests {
 
         // Snare Bottom (ClosesLevels(-2)) - closes Snare AND Drums
         assert_eq!(tracks[6].name.0, "Snare Bottom");
-        assert_eq!(tracks[6].folder_depth_change, FolderDepthChange::ClosesLevels(-2));
+        assert_eq!(
+            tracks[6].folder_depth_change,
+            FolderDepthChange::ClosesLevels(-2)
+        );
     }
 }

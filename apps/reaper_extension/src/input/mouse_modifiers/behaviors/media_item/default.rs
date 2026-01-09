@@ -1,6 +1,6 @@
 //! Media Item default behaviors (left drag, click, double click)
 
-use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorId, BehaviorDisplay};
+use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorDisplay, BehaviorId};
 
 /// Media Item left drag behaviors
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -142,7 +142,7 @@ impl BehaviorId for MediaItemLeftDragBehavior {
             id => MediaItemLeftDragBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemLeftDragBehavior::NoAction => 0,
@@ -332,7 +332,7 @@ impl BehaviorId for MediaItemClickBehavior {
             id => MediaItemClickBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemClickBehavior::NoAction => 0,
@@ -412,7 +412,7 @@ impl BehaviorId for MediaItemDoubleClickBehavior {
             id => MediaItemDoubleClickBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemDoubleClickBehavior::NoAction => 0,
@@ -445,4 +445,3 @@ impl BehaviorDisplay for MediaItemDoubleClickBehavior {
         }
     }
 }
-

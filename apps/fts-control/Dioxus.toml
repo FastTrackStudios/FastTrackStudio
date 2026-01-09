@@ -1,0 +1,23 @@
+[application]
+name = "fts-control"
+default_platform = "native"
+
+[native]
+# Enable native renderer (Blitz - Vello/WGPU)
+renderer = "blitz"
+
+[native.window]
+title = "FTS Control"
+width = 1200
+height = 800
+resizable = true
+decorations = true
+
+[native.bundle]
+# macOS bundle identifier
+identifier = "com.fasttrackstudio.fts-control"
+icon = ["assets/icon.png"]
+
+[web]
+# Not the primary target but can be enabled for testing
+app_name = "fts-control"

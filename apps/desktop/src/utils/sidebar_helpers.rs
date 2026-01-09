@@ -1,6 +1,6 @@
+use crate::utils::{calculate_section_progress, calculate_song_progress, get_project_name};
 use fts::setlist::{Setlist, Song};
 use std::collections::HashMap;
-use crate::utils::{get_project_name, calculate_song_progress, calculate_section_progress};
 
 /// Calculate song progress for sidebar display
 pub fn get_song_progress_for_sidebar(
@@ -11,7 +11,10 @@ pub fn get_song_progress_for_sidebar(
 ) -> f64 {
     if current_song_idx == Some(song_idx) {
         let project_name = get_project_name(song).unwrap_or_else(|| "default".to_string());
-        let position = transport_positions.get(&project_name).copied().unwrap_or(0.0);
+        let position = transport_positions
+            .get(&project_name)
+            .copied()
+            .unwrap_or(0.0);
         calculate_song_progress(song, position)
     } else {
         0.0 // No progress for inactive songs
@@ -28,7 +31,10 @@ pub fn get_section_progress_for_sidebar(
 ) -> f64 {
     if current_song_idx == Some(song_idx) {
         let project_name = get_project_name(song).unwrap_or_else(|| "default".to_string());
-        let position = transport_positions.get(&project_name).copied().unwrap_or(0.0);
+        let position = transport_positions
+            .get(&project_name)
+            .copied()
+            .unwrap_or(0.0);
         calculate_section_progress(section, position)
     } else {
         0.0 // No progress for inactive songs
@@ -47,7 +53,9 @@ pub fn reset_previous_song_position(
             let reset_position = if prev_song.effective_start() > 0.0 {
                 prev_song.effective_start()
             } else {
-                prev_song.sections.first()
+                prev_song
+                    .sections
+                    .first()
                     .and_then(|s| s.start_seconds())
                     .unwrap_or(0.0)
             };
@@ -74,4 +82,3 @@ pub fn update_position_on_section_click(
     }
     None
 }
-

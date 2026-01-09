@@ -1,8 +1,8 @@
 //! Track receive settings
 
-use serde::{Deserialize, Serialize};
-use crate::tracks::envelope::Envelope;
 use crate::tracks::api::automation::AutomationMode;
+use crate::tracks::envelope::Envelope;
+use serde::{Deserialize, Serialize};
 
 /// Wrapper for unknown enum values to preserve them during serialization
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -52,19 +52,18 @@ impl From<i32> for ReceiveMode {
 /// Track receive settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrackReceive {
-    pub source_track_index: i32,   // field 1 - source track index (zero based)
-    pub mode: ReceiveMode,          // field 2 - mode
-    pub volume: f64,                // field 3 - volume
-    pub pan: f64,                   // field 4 - pan
-    pub mute: bool,                 // field 5 - mute
-    pub mono_sum: bool,             // field 6 - mono sum
-    pub invert_polarity: bool,      // field 7 - invert polarity
+    pub source_track_index: i32, // field 1 - source track index (zero based)
+    pub mode: ReceiveMode,       // field 2 - mode
+    pub volume: f64,             // field 3 - volume
+    pub pan: f64,                // field 4 - pan
+    pub mute: bool,              // field 5 - mute
+    pub mono_sum: bool,          // field 6 - mono sum
+    pub invert_polarity: bool,   // field 7 - invert polarity
     pub source_audio_channels: i32, // field 8 - source audio channels
-    pub dest_audio_channels: i32,   // field 9 - dest audio channels
-    pub pan_law: f64,               // field 10 - panlaw
-    pub midi_channels: i32,         // field 11 - midi channels
+    pub dest_audio_channels: i32, // field 9 - dest audio channels
+    pub pan_law: f64,            // field 10 - panlaw
+    pub midi_channels: i32,      // field 11 - midi channels
     pub automation_mode: Option<AutomationMode>, // field 12 - automation mode (None = use track mode, -1)
     /// Envelopes for this receive (pan, mute, etc.)
     pub envelopes: Vec<Envelope>,
 }
-

@@ -8,8 +8,7 @@ use std::fmt;
 pub struct Hidden<T>(pub T);
 
 /// Track solo mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum SoloMode {
     /// No solo
     #[default]
@@ -66,5 +65,3 @@ impl fmt::Display for SoloMode {
         }
     }
 }
-
-

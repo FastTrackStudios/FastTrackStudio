@@ -1,8 +1,7 @@
 use crate::primitives::{Position, TimeSelection, TimeSignature};
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum PlayState {
     #[default]
     Stopped,
@@ -10,7 +9,6 @@ pub enum PlayState {
     Paused,
     Recording,
 }
-
 
 impl fmt::Display for PlayState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -23,15 +21,13 @@ impl fmt::Display for PlayState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum RecordMode {
     #[default]
     Normal,
     TimeSelection,
     Item,
 }
-
 
 impl fmt::Display for RecordMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

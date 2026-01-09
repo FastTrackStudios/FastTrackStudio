@@ -3,40 +3,40 @@
 //! Provides functionality to get, set, save, and restore REAPER mouse modifier assignments.
 //! Organized by context categories for easy maintenance.
 
-pub mod core;
-pub mod preset;
-pub mod contexts;
-pub mod types;
 pub mod actions;
 pub mod behaviors;
+pub mod contexts;
+pub mod core;
+pub mod preset;
+pub mod types;
 
-pub use core::{get_mouse_modifier, set_mouse_modifier, MouseModifierFlag};
-pub use preset::{save_all_modifiers, load_preset, list_presets, delete_preset};
 pub use contexts::ALL_CONTEXTS;
+pub use core::{MouseModifierFlag, get_mouse_modifier, set_mouse_modifier};
+pub use preset::{delete_preset, list_presets, load_preset, save_all_modifiers};
 pub use types::{
-    MouseModifierAction,
-    MouseModifierContext,
-    ModifierFlag,
-    ContextModifierMap,
-    MouseModifierMap,
-    load_all_modifiers,
-    apply_modifier_map,
-    // Base mouse button input enum
-    MouseButtonInput,
     // Context interaction enums
     ArrangeViewInteraction,
     AutomationItemInteraction,
+    ContextModifierMap,
+    EdgeInteraction,
     EnvelopeInteraction,
     FixedLaneInteraction,
-    MidiInteraction,
     MediaItemInteraction,
+    MidiInteraction,
     MixerInteraction,
+    ModifierFlag,
+    // Base mouse button input enum
+    MouseButtonInput,
+    MouseModifierAction,
+    MouseModifierContext,
+    MouseModifierMap,
+    // Special interaction enums (Edge, Rate, etc.)
+    NoteInteraction,
     ProjectInteraction,
     RazorEditInteraction,
     RulerInteraction,
-    TrackInteraction,
-    // Special interaction enums (Edge, Rate, etc.)
-    NoteInteraction,
-    EdgeInteraction,
     StretchMarkerInteraction,
+    TrackInteraction,
+    apply_modifier_map,
+    load_all_modifiers,
 };

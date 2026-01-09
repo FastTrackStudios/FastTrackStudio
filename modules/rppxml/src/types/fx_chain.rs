@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::primitives::{RppBlock, BlockType};
+use crate::primitives::{BlockType, RppBlock};
 
 /// A REAPER FX chain
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -25,7 +25,10 @@ impl FxChain {
     /// Create an FxChain from a parsed RPP block
     pub fn from_block(block: &RppBlock) -> Result<Self, String> {
         if block.block_type != BlockType::FxChain {
-            return Err(format!("Expected FxChain block, got {:?}", block.block_type));
+            return Err(format!(
+                "Expected FxChain block, got {:?}",
+                block.block_type
+            ));
         }
 
         let mut fx_chain = FxChain {

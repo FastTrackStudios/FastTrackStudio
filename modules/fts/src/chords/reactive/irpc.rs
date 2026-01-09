@@ -3,16 +3,12 @@
 //! Exposes chart reactive streams over IRPC so they can be reactive over the network.
 //! The Chart includes chords, sections, tempo, time signatures, and all other chart data.
 
-use keyflow::Chart;
 use crate::chords::reactive::ChordsReactiveService;
-use irpc::{
-    channel::mpsc,
-    rpc::RemoteService,
-    rpc_requests, Client ,
-};
-use serde::{Deserialize, Serialize};
-use iroh::{protocol::ProtocolHandler, Endpoint, EndpointAddr};
+use iroh::{Endpoint, EndpointAddr, protocol::ProtocolHandler};
+use irpc::{Client, channel::mpsc, rpc::RemoteService, rpc_requests};
 use irpc_iroh::{IrohLazyRemoteConnection, IrohProtocol};
+use keyflow::Chart;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 /// Chart changed message
@@ -44,14 +40,17 @@ pub enum ChartProtocol {
 /// Chart API client
 pub struct ChartApi {
     inner: Client<ChartProtocol>,
-    pub(crate) handler_data: Option<(mpsc::Receiver<ChartMessage>, broadcast::Sender<ChartUpdateMessage>)>,
+    pub(crate) handler_data: Option<(
+        mpsc::Receiver<ChartMessage>,
+        broadcast::Sender<ChartUpdateMessage>,
+    )>,
 }
 
 impl ChartApi {
     pub const ALPN: &[u8] = b"irpc-iroh/chart/1";
 
     /// Create a new chart reactive API (server-side)
-    /// 
+    ///
     /// Note: This currently uses ChordsReactiveService, but in the future
     /// we should create a ChartReactiveService that directly streams Chart updates.
     /// For now, we'll need to convert ChordsData to Chart or extend the service.
@@ -82,7 +81,12 @@ impl ChartApi {
     }
 
     /// Extract handler data for spawning in tokio runtime
-    pub fn take_handler_data(&mut self) -> Option<(mpsc::Receiver<ChartMessage>, broadcast::Sender<ChartUpdateMessage>)> {
+    pub fn take_handler_data(
+        &mut self,
+    ) -> Option<(
+        mpsc::Receiver<ChartMessage>,
+        broadcast::Sender<ChartUpdateMessage>,
+    )> {
         self.handler_data.take()
     }
 

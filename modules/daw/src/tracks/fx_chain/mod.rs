@@ -35,4 +35,3 @@ impl fmt::Display for Plugin {
         Ok(())
     }
 }
-

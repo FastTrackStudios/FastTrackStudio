@@ -989,8 +989,8 @@ fn format_track_list(tracks: &[Track]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tracks::item::Item;
     use crate::tracks::AddChild;
+    use crate::tracks::item::Item;
 
     /// Strip ANSI color codes from a string for testing
     fn strip_ansi_codes(s: &str) -> String {

@@ -17,7 +17,7 @@ impl RotationAngle {
             RotationAngle::Rotate270 => RotationAngle::None,
         }
     }
-    
+
     pub fn to_degrees(self) -> f32 {
         match self {
             RotationAngle::None => 0.0,
@@ -34,7 +34,7 @@ pub struct PdfPageData {
     pub text_elements: Vec<TextElement>,
     pub page_width: f32,
     pub page_height: f32,
-    pub page_index: usize, // For contamination checking
+    pub page_index: usize,       // For contamination checking
     pub rotation: RotationAngle, // Page rotation state
 }
 
@@ -52,4 +52,3 @@ pub struct TextBounds {
     pub width: f32,
     pub height: f32,
 }
-

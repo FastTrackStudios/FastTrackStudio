@@ -41,7 +41,7 @@ pub enum Context {
 pub struct KeyPress {
     /// The key character (e.g., 't', 'L', '<ESC>')
     pub key: String,
-    
+
     /// Current context
     pub context: Context,
 }
@@ -51,22 +51,22 @@ pub struct KeyPress {
 pub struct CommandState {
     /// Current key sequence being built (e.g., "tL")
     pub key_sequence: String,
-    
+
     /// Current mode
     pub mode: Mode,
-    
+
     /// Current context
     pub context: Context,
-    
+
     /// Whether we're recording a macro
     pub macro_recording: bool,
-    
+
     /// The register for macro recording/playback
     pub macro_register: Option<char>,
-    
+
     /// Last executed command (for repeat)
     pub last_command: Option<Command>,
-    
+
     /// Timeline selection side (left or right)
     pub timeline_selection_side: String,
 }
@@ -76,13 +76,13 @@ pub struct CommandState {
 pub struct Command {
     /// The action sequence (e.g., ["timeline_operator", "timeline_motion"])
     pub action_sequence: Vec<ActionType>,
-    
+
     /// The action keys/identifiers for each action type
     pub action_keys: Vec<ActionKey>,
-    
+
     /// The mode this command was executed in
     pub mode: Mode,
-    
+
     /// The context this command was executed in
     pub context: Context,
 }
@@ -106,10 +106,10 @@ pub enum ActionType {
 pub struct ActionKey {
     /// The action identifier (command ID or name)
     pub identifier: String,
-    
+
     /// Optional repetition count (for numeric prefixes like "5p")
     pub repetition_count: Option<u32>,
-    
+
     /// Optional register (for macro operations)
     pub register: Option<char>,
 }
@@ -126,7 +126,7 @@ impl CommandState {
             .unwrap()
             .clone()
     }
-    
+
     /// Set the command state
     pub fn set(state: CommandState) {
         if let Ok(mut guard) = INPUT_STATE
@@ -135,15 +135,15 @@ impl CommandState {
         {
             *guard = state;
         }
-        
+
         // TODO: Persist to REAPER's external state for persistence across sessions
     }
-    
+
     /// Reset to default state
     pub fn reset() {
         Self::set(CommandState::default());
     }
-    
+
     /// Append a keypress to the current sequence
     pub fn append_key(&mut self, keypress: KeyPress) {
         // If ESC, reset sequence
@@ -151,16 +151,16 @@ impl CommandState {
             self.key_sequence = String::new();
             return;
         }
-        
+
         // Update context if sequence is empty
         if self.key_sequence.is_empty() {
             self.context = keypress.context;
         }
-        
+
         // Append key to sequence
         self.key_sequence.push_str(&keypress.key);
     }
-    
+
     /// Clear the key sequence
     pub fn clear_sequence(&mut self) {
         self.key_sequence.clear();

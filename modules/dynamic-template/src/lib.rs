@@ -8,7 +8,7 @@ mod item_metadata;
 mod metadata_patterns;
 
 pub use groups::{
-    Bass, Choir, Drums, Guide, Guitars, Keys, Orchestra, Percussion, Reference, Synths, Vocals, SFX,
+    Bass, Choir, Drums, Guide, Guitars, Keys, Orchestra, Percussion, Reference, SFX, Synths, Vocals,
 };
 pub use item_metadata::ItemMetadata;
 

@@ -52,4 +52,3 @@ impl fmt::Display for SendMode {
         }
     }
 }
-

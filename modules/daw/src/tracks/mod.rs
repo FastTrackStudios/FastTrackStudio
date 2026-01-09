@@ -24,14 +24,16 @@ pub use api::record::{MonitorMode, RecordMode, RecordSettings};
 pub use api::solo::SoloMode;
 pub use envelope::{AutomationItem, Envelope, EnvelopePoint, EnvelopePointShape, ExtensionData};
 pub use fx_chain::{FxChain, Plugin};
-pub use hierarchy_builder::{build_hierarchy, build_track_hierarchy, TrackHierarchyBuilder};
+pub use hierarchy_builder::{TrackHierarchyBuilder, build_hierarchy, build_track_hierarchy};
 pub use item::Item;
 pub use reactive::irpc::{TrackApi, TrackProtocol, TrackUpdateMessage};
 pub use reactive::{
     DefaultTrackReactiveService, EventStreamSubject as TrackEventStreamSubject,
     TrackReactiveService, TrackReactiveState, TrackStreams,
 };
-pub use track::{Track, display_tracklist, TrackStructureBuilder, TrackGroup, IntoItems, assert_tracks_equal};
-pub use track_chunk::{parse_track_chunk, ParsedTrackChunk};
+pub use track::{
+    IntoItems, Track, TrackGroup, TrackStructureBuilder, assert_tracks_equal, display_tracklist,
+};
+pub use track_chunk::{ParsedTrackChunk, parse_track_chunk};
 pub use track_list::{AddChild, IntoTrackVec, PrintTrackTree};
 pub use types::{MetadataKey, TrackGuid, TrackName};

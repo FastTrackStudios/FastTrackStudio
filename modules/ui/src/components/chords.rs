@@ -3,10 +3,10 @@
 //! Displays detected chords from Chart data in various notation formats
 
 use dioxus::prelude::*;
-use fts::setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES};
-use keyflow::{Chart, ChartSection, ChordInstance};
+use fts::setlist::{ACTIVE_INDICES, SETLIST_STRUCTURE};
 use keyflow::chord::Chord;
 use keyflow::primitives::RootNotation;
+use keyflow::{Chart, ChartSection, ChordInstance};
 
 /// Display format for chords
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,12 +42,10 @@ pub struct ChordsViewProps {
 #[component]
 pub fn ChordsView(props: ChordsViewProps) -> Element {
     let mut format = use_signal(|| props.format);
-    
+
     // Get current song index
-    let current_song_index = use_memo(move || {
-        ACTIVE_INDICES.read().0
-    });
-    
+    let current_song_index = use_memo(move || ACTIVE_INDICES.read().0);
+
     // Get song name and project name for chart lookup
     let song_name = use_memo(move || {
         if let Some(song_idx) = current_song_index() {
@@ -59,12 +57,13 @@ pub fn ChordsView(props: ChordsViewProps) -> Element {
         }
         None
     });
-    
+
     let project_name = use_memo(move || {
         if let Some(song_idx) = current_song_index() {
             if let Some(setlist) = SETLIST_STRUCTURE.read().as_ref() {
                 if let Some(song) = setlist.songs.get(song_idx) {
-                    return song.metadata
+                    return song
+                        .metadata
                         .get("project_name")
                         .or_else(|| song.metadata.get("Project"))
                         .or_else(|| song.metadata.get("project"))
@@ -74,18 +73,18 @@ pub fn ChordsView(props: ChordsViewProps) -> Element {
         }
         None
     });
-    
+
     // Get chart state from global signal
     let chart_state = use_memo(move || {
         use fts::chords::CHART_STATE_SIGNAL;
         CHART_STATE_SIGNAL.read().clone()
     });
-    
+
     // Extract chords from chart
     let chords = use_memo(move || {
         let project = project_name();
         let charts = chart_state();
-        
+
         if let Some(proj_name) = project.as_ref() {
             if let Some(chart) = charts.get(proj_name) {
                 extract_chords_from_chart(chart, proj_name)
@@ -96,11 +95,11 @@ pub fn ChordsView(props: ChordsViewProps) -> Element {
             Vec::new()
         }
     });
-    
+
     rsx! {
         div {
             class: "chords-view h-full flex flex-col p-6",
-            
+
             // Header with song name
             div {
                 class: "mb-6",
@@ -117,7 +116,7 @@ pub fn ChordsView(props: ChordsViewProps) -> Element {
                     "Chords from chart data"
                 }
             }
-            
+
             // Format selector
             div {
                 class: "format-selector mb-6 flex gap-2 border-b border-border pb-4",
@@ -149,7 +148,7 @@ pub fn ChordsView(props: ChordsViewProps) -> Element {
                     "Roman Numerals"
                 }
             }
-            
+
             // Chords display
             if chords().is_empty() {
                 div {
@@ -224,7 +223,7 @@ pub fn ChordsView(props: ChordsViewProps) -> Element {
 fn extract_chords_from_chart(chart: &Chart, _project_name: &str) -> Vec<ChordDisplay> {
     let mut chords = Vec::new();
     let key = chart.initial_key.as_ref().or(chart.current_key.as_ref());
-    
+
     // Iterate through all sections and measures to collect chords
     for section in &chart.sections {
         for measure in &section.measures {
@@ -234,15 +233,18 @@ fn extract_chords_from_chart(chart: &Chart, _project_name: &str) -> Vec<ChordDis
             }
         }
     }
-    
+
     chords
 }
 
 /// Convert a ChordInstance to ChordDisplay format
-fn convert_chord_instance_to_display(chord_instance: &ChordInstance, key: Option<&keyflow::Key>) -> ChordDisplay {
+fn convert_chord_instance_to_display(
+    chord_instance: &ChordInstance,
+    key: Option<&keyflow::Key>,
+) -> ChordDisplay {
     // Get the chord name (standard format)
     let name = chord_instance.full_symbol.clone();
-    
+
     // Format position
     let position = format!(
         "{}.{}.{:03}",
@@ -250,22 +252,18 @@ fn convert_chord_instance_to_display(chord_instance: &ChordInstance, key: Option
         chord_instance.position.total_duration.beat + 1,
         chord_instance.position.total_duration.subdivision
     );
-    
+
     // Convert to Nashville Number System (requires key context)
-    let nashville = key.and_then(|k| {
-        convert_to_nashville(&chord_instance.parsed, k)
-    });
-    
+    let nashville = key.and_then(|k| convert_to_nashville(&chord_instance.parsed, k));
+
     // Convert to Roman Numeral (requires key context)
-    let roman = key.and_then(|k| {
-        convert_to_roman(&chord_instance.parsed, k)
-    });
-    
+    let roman = key.and_then(|k| convert_to_roman(&chord_instance.parsed, k));
+
     // For now, we don't have time positions in ChordInstance
     // We'll use 0.0 as placeholder - in the future, we can calculate from musical position
     let start_time = 0.0;
     let end_time = 0.0;
-    
+
     ChordDisplay {
         name,
         nashville,
@@ -282,13 +280,13 @@ fn convert_to_nashville(chord: &Chord, key: &keyflow::Key) -> Option<String> {
     if let Some(degree) = chord.root.scale_degree() {
         return Some(format!("{}{}", degree, format_chord_quality(chord)));
     }
-    
+
     // Get the resolved note
     let root_note = chord.root.resolve(Some(key))?;
-    
+
     // Find the scale degree of the root note in the key
     let scale_degree = key.degree_of_note(&root_note)?;
-    
+
     Some(format!("{}{}", scale_degree, format_chord_quality(chord)))
 }
 
@@ -317,7 +315,7 @@ fn convert_to_roman(chord: &Chord, key: &keyflow::Key) -> Option<String> {
             return Some(format!("{}{}", roman, format_chord_quality(chord)));
         }
     }
-    
+
     // Check if it's a scale degree
     if let Some(degree) = chord.root.scale_degree() {
         // Determine case based on chord quality
@@ -327,7 +325,7 @@ fn convert_to_roman(chord: &Chord, key: &keyflow::Key) -> Option<String> {
         } else {
             keyflow::primitives::RomanCase::Upper
         };
-        
+
         let roman = match (degree, case) {
             (1, keyflow::primitives::RomanCase::Upper) => "I",
             (2, keyflow::primitives::RomanCase::Upper) => "II",
@@ -347,13 +345,13 @@ fn convert_to_roman(chord: &Chord, key: &keyflow::Key) -> Option<String> {
         };
         return Some(format!("{}{}", roman, format_chord_quality(chord)));
     }
-    
+
     // Get the resolved note
     let root_note = chord.root.resolve(Some(key))?;
-    
+
     // Find the scale degree of the root note in the key
     let scale_degree = key.degree_of_note(&root_note)?;
-    
+
     // Determine case based on chord quality
     let is_minor = matches!(chord.quality, keyflow::chord::ChordQuality::Minor);
     let case = if is_minor {
@@ -361,7 +359,7 @@ fn convert_to_roman(chord: &Chord, key: &keyflow::Key) -> Option<String> {
     } else {
         keyflow::primitives::RomanCase::Upper
     };
-    
+
     let roman = match (scale_degree, case) {
         (1, keyflow::primitives::RomanCase::Upper) => "I",
         (2, keyflow::primitives::RomanCase::Upper) => "II",
@@ -379,14 +377,14 @@ fn convert_to_roman(chord: &Chord, key: &keyflow::Key) -> Option<String> {
         (7, keyflow::primitives::RomanCase::Lower) => "vii",
         _ => return None, // Invalid degree
     };
-    
+
     Some(format!("{}{}", roman, format_chord_quality(chord)))
 }
 
 /// Format chord quality/extensions for display
 fn format_chord_quality(chord: &Chord) -> String {
     let mut parts = Vec::new();
-    
+
     // Quality
     match chord.quality {
         keyflow::chord::ChordQuality::Minor => parts.push("m".to_string()),
@@ -396,12 +394,12 @@ fn format_chord_quality(chord: &Chord) -> String {
         keyflow::chord::ChordQuality::Power => parts.push("5".to_string()),
         _ => {} // Major is default, no suffix
     }
-    
+
     // Family (7th)
     if let Some(family) = &chord.family {
         parts.push(family.symbol().to_string());
     }
-    
+
     // Extensions
     if chord.extensions.has_any() {
         // Format extensions manually
@@ -427,16 +425,16 @@ fn format_chord_quality(chord: &Chord) -> String {
             });
         }
     }
-    
+
     // Alterations
     for alt in &chord.alterations {
         parts.push(alt.to_string());
     }
-    
+
     // Bass note (slash chord)
     if let Some(bass) = &chord.bass {
         parts.push(format!("/{}", bass.to_string()));
     }
-    
+
     parts.join("")
 }

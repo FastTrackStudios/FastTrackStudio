@@ -8,18 +8,17 @@
 //! Architecture:
 //!   Reaper Extension (local) → irpc → Desktop App → iroh-gossip → Network Peers
 
+use anyhow::Result;
 use iroh::{
-    Endpoint,
-    protocol::Router,
+    Endpoint, EndpointId,
     discovery::mdns::{DiscoveryEvent, MdnsDiscovery},
     endpoint_info::UserData,
-    EndpointId,
+    protocol::Router,
 };
-use anyhow::Result;
-use n0_future::StreamExt;
-use irpc::{channel::oneshot, rpc_requests, Client, WithChannels};
+use iroh_gossip::{api::Event, net::Gossip, proto::TopicId};
+use irpc::{Client, WithChannels, channel::oneshot, rpc_requests};
 use irpc_iroh::IrohProtocol;
-use iroh_gossip::{net::Gossip, api::Event, proto::TopicId};
+use n0_future::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
@@ -65,11 +64,11 @@ enum CommandProtocol {
     /// Set transport state
     #[rpc(tx=oneshot::Sender<()>)]
     SetTransport(SetTransport),
-    
+
     /// Set current setlist
     #[rpc(tx=oneshot::Sender<()>)]
     SetSetlist(SetSetlist),
-    
+
     /// Get current state
     #[rpc(tx=oneshot::Sender<AppState>)]
     GetState(GetState),
@@ -89,18 +88,18 @@ async fn main() -> Result<()> {
 
     // Create an endpoint
     let endpoint = Endpoint::bind().await?;
-    
+
     let endpoint_id = endpoint.id();
     println!("Created endpoint {}", endpoint_id.fmt_short());
-    
+
     // Set user data for discovery filtering
     let user_data = UserData::try_from(String::from("iroh-example"))?;
     endpoint.set_user_data_for_discovery(Some(user_data.clone()));
-    
+
     // Add mDNS discovery
     let mdns = MdnsDiscovery::builder().build(endpoint_id)?;
     endpoint.discovery().add(mdns.clone());
-    
+
     // Wait for endpoint to be online
     endpoint.online().await;
     println!("Endpoint is online");
@@ -109,20 +108,20 @@ async fn main() -> Result<()> {
 
     // Shared state (simulating desktop app state)
     let state = Arc::new(Mutex::new(AppState::default()));
-    
+
     // Create gossip protocol for broadcasting state changes
     let gossip = Gossip::builder().spawn(endpoint.clone());
-    
+
     // Create a topic for state synchronization
     let topic_id = TopicId::from_bytes([42u8; 32]); // Fixed topic for this example
     println!("State sync topic: {}", hex::encode(topic_id.as_bytes()));
-    
+
     // Subscribe to gossip topic (will receive updates from other peers)
     let (gossip_sender, mut gossip_receiver) = gossip
         .subscribe(topic_id, vec![]) // Start with no bootstrap peers
         .await?
         .split();
-    
+
     // Spawn task to handle gossip messages (state updates from peers)
     let state_clone = state.clone();
     tokio::spawn(async move {
@@ -133,7 +132,10 @@ async fn main() -> Result<()> {
                         let mut state = state_clone.lock().unwrap();
                         match update {
                             StateUpdate::TransportChanged { playing, position } => {
-                                println!("📡 Received transport update: playing={}, position={}", playing, position);
+                                println!(
+                                    "📡 Received transport update: playing={}, position={}",
+                                    playing, position
+                                );
                                 state.transport_playing = playing;
                                 state.transport_position = position;
                             }
@@ -163,15 +165,19 @@ async fn main() -> Result<()> {
     // Create irpc handler for commands (simulating Reaper extension → Desktop app)
     let (tx, rx) = tokio::sync::mpsc::channel(16);
     let command_client = Client::<CommandProtocol>::local(tx);
-    
+
     // Spawn actor to handle irpc commands
     let state_for_commands = state.clone();
     let gossip_sender_for_commands = gossip_sender.clone();
-    tokio::spawn(command_actor(rx, state_for_commands, gossip_sender_for_commands));
-    
+    tokio::spawn(command_actor(
+        rx,
+        state_for_commands,
+        gossip_sender_for_commands,
+    ));
+
     // Create irpc protocol handler for Router
     let irpc_protocol = IrohProtocol::with_sender(command_client.as_local().unwrap());
-    
+
     // Build router with both irpc and gossip protocols
     let router = Router::builder(endpoint.clone())
         .accept(IRPC_ALPN, irpc_protocol)
@@ -181,29 +187,29 @@ async fn main() -> Result<()> {
     // Spawn discovery task
     let ud = user_data.clone();
     let endpoint_clone = endpoint.clone();
-    
+
     tokio::spawn(async move {
         let mut discovery_stream = mdns.subscribe().await;
         let mut discovered_endpoints: Vec<EndpointId> = vec![];
-        
+
         while let Some(event) = discovery_stream.next().await {
             match event {
                 DiscoveryEvent::Discovered { endpoint_info, .. } => {
                     match endpoint_info.data.user_data() {
                         Some(user_data) if user_data == &ud => {
                             let peer_id = endpoint_info.endpoint_id;
-                            
+
                             if peer_id == endpoint_clone.id() {
                                 continue;
                             }
-                            
+
                             if discovered_endpoints.contains(&peer_id) {
                                 continue;
                             }
-                            
+
                             discovered_endpoints.push(peer_id);
                             println!("🔍 Found peer {}!", peer_id.fmt_short());
-                            
+
                             // Try to join their gossip swarm
                             // In a real app, you'd exchange topic info via irpc first
                             // For this example, we use a fixed topic
@@ -219,13 +225,13 @@ async fn main() -> Result<()> {
     // Simulate Reaper extension sending commands via irpc
     // In real app, this would be a separate process connecting via irpc
     println!("\nSimulating Reaper extension commands...\n");
-    
+
     // Create a local irpc client (simulating Reaper extension)
     let reaper_client = command_client.clone();
-    
+
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        
+
         // Send transport command
         println!("🎹 Reaper: Setting transport to playing=true, position=10.5");
         let cmd = SetTransport {
@@ -235,9 +241,9 @@ async fn main() -> Result<()> {
         if let Err(e) = reaper_client.rpc(cmd).await {
             eprintln!("Failed to send command: {}", e);
         }
-        
+
         tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-        
+
         // Send setlist command
         println!("🎹 Reaper: Setting setlist to id=42");
         let cmd = SetSetlist { setlist_id: 42 };
@@ -251,9 +257,9 @@ async fn main() -> Result<()> {
     println!("- gossip: Broadcasting state changes to network peers");
     println!("- mDNS: Discovering peers on local network");
     println!("Press Ctrl+C to exit.\n");
-    
+
     tokio::signal::ctrl_c().await?;
-    
+
     println!("Shutting down.");
     router.shutdown().await?;
 
@@ -271,16 +277,19 @@ async fn command_actor(
             CommandMessage::SetTransport(msg) => {
                 let WithChannels { inner, tx, .. } = msg;
                 let SetTransport { playing, position } = inner;
-                
-                println!("📥 Received SetTransport command: playing={}, position={}", playing, position);
-                
+
+                println!(
+                    "📥 Received SetTransport command: playing={}, position={}",
+                    playing, position
+                );
+
                 // Update local state
                 {
                     let mut s = state.lock().unwrap();
                     s.transport_playing = playing;
                     s.transport_position = position;
                 }
-                
+
                 // Broadcast state change via gossip
                 let update = StateUpdate::TransportChanged { playing, position };
                 let bytes = postcard::to_stdvec(&update).unwrap();
@@ -289,21 +298,21 @@ async fn command_actor(
                 } else {
                     println!("📢 Broadcasted transport update to network");
                 }
-                
+
                 tx.send(()).await.ok();
             }
             CommandMessage::SetSetlist(msg) => {
                 let WithChannels { inner, tx, .. } = msg;
                 let SetSetlist { setlist_id } = inner;
-                
+
                 println!("📥 Received SetSetlist command: id={}", setlist_id);
-                
+
                 // Update local state
                 {
                     let mut s = state.lock().unwrap();
                     s.current_setlist_id = Some(setlist_id);
                 }
-                
+
                 // Broadcast state change via gossip
                 let update = StateUpdate::SetlistChanged { setlist_id };
                 let bytes = postcard::to_stdvec(&update).unwrap();
@@ -312,15 +321,15 @@ async fn command_actor(
                 } else {
                     println!("📢 Broadcasted setlist update to network");
                 }
-                
+
                 tx.send(()).await.ok();
             }
             CommandMessage::GetState(msg) => {
                 let WithChannels { tx, .. } = msg;
-                
+
                 let state_copy = state.lock().unwrap().clone();
                 println!("📥 Received GetState command");
-                
+
                 tx.send(state_copy).await.ok();
             }
         }

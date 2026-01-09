@@ -120,9 +120,9 @@ impl From<ElectricGuitar> for ItemMetadataGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{default_config, OrganizeIntoTracks};
+    use crate::{OrganizeIntoTracks, default_config};
     use daw::tracks::item::Item;
-    use daw::tracks::{assert_tracks_equal, TrackStructureBuilder};
+    use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 
     #[test]
     fn single_track_no_grouping_needed() {

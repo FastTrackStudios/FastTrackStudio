@@ -32,7 +32,7 @@ impl fmt::Display for EnvelopePointShape {
 }
 
 /// Automation Item (AI) properties within an envelope
-/// 
+///
 /// Automation items are reusable automation patterns that can be pooled and shared
 /// across multiple envelope instances. They contain their own envelope points and
 /// can be looped, have different play rates, and baseline/amplitude adjustments.
@@ -41,51 +41,51 @@ pub struct AutomationItem {
     /// Pool index - pooled instances have the same index
     /// (greater by 1 than the one displayed by default in the Name field of AI Properties window)
     pub pool_index: i32,
-    
+
     /// Position in seconds
     pub position: f64,
-    
+
     /// Length in seconds
     pub length: f64,
-    
+
     /// Start offset in seconds
     pub start_offset: f64,
-    
+
     /// Play rate (1.0 = normal speed)
     pub play_rate: f64,
-    
+
     /// Selected state (bool)
     pub selected: bool,
-    
+
     /// Baseline value (0 = -100%, 0.5 = 0%, 1 = 100%)
     pub baseline: f64,
-    
+
     /// Amplitude (-2 = -200%, 1 = 100%, 2 = 200%)
     /// Baseline/amplitude affects pooled copies
     pub amplitude: f64,
-    
+
     /// Loop enabled (bool)
     pub loop_enabled: bool,
-    
+
     /// Position in quarter notes (only used in certain contexts)
     pub position_qn: f64,
-    
+
     /// Length in quarter notes (only used in certain contexts)
     pub length_qn: f64,
-    
+
     /// 1-based index of AI since starting the project, incremented even if
     /// older AIs were deleted and regardless of the AI being pooled
     pub instance_index: i32,
-    
+
     /// Muted state (bool)
     pub muted: bool,
-    
+
     /// Start offset in quarter notes (only used in certain contexts)
     pub start_offset_qn: f64,
-    
+
     /// Transition time in seconds
     pub transition_time: f64,
-    
+
     /// Volume envelope maximum when this instance was created
     /// (matches the 1|4 bits of the "volenvrange" config variable:
     /// 0=+6dB, 1=+0dB, 4=+12dB, 5=+24dB)
@@ -93,7 +93,7 @@ pub struct AutomationItem {
 }
 
 /// Extension-specific persistent data block within an envelope
-/// 
+///
 /// These blocks contain arbitrary data that can be added by extensions
 /// using the GetSetEnvelopeInfo_String() function with 'P_EXT' parameter.
 /// The structure is unknown and can vary, so we preserve the raw content.
@@ -101,10 +101,10 @@ pub struct AutomationItem {
 pub struct ExtensionData {
     /// The parameter name (field 1)
     pub parmname: String,
-    
+
     /// The string data (field 2)
     pub string_data: String,
-    
+
     /// Raw content of the entire EXT block for preservation
     pub raw_content: String,
 }
@@ -114,33 +114,45 @@ impl ExtensionData {
     /// Expected format: "<EXT\n  parmname string_data\n>"
     pub fn from_rpp_block(block_content: &str) -> Result<Self, String> {
         let lines: Vec<&str> = block_content.lines().collect();
-        
+
         if lines.len() < 3 {
-            return Err(format!("EXT block must have at least 3 lines (start, content, end), got {}", lines.len()));
+            return Err(format!(
+                "EXT block must have at least 3 lines (start, content, end), got {}",
+                lines.len()
+            ));
         }
-        
+
         // First line should be "<EXT"
         if !lines[0].trim().starts_with("<EXT") {
-            return Err(format!("Expected EXT block to start with '<EXT', got: '{}'", lines[0]));
+            return Err(format!(
+                "Expected EXT block to start with '<EXT', got: '{}'",
+                lines[0]
+            ));
         }
-        
+
         // Last line should be ">"
         if lines.last().unwrap().trim() != ">" {
-            return Err(format!("Expected EXT block to end with '>', got: '{}'", lines.last().unwrap()));
+            return Err(format!(
+                "Expected EXT block to end with '>', got: '{}'",
+                lines.last().unwrap()
+            ));
         }
-        
+
         // Parse the content line (should be the middle line)
         if lines.len() == 3 {
             let content_line = lines[1].trim();
             let tokens: Vec<&str> = content_line.split_whitespace().collect();
-            
+
             if tokens.len() < 2 {
-                return Err(format!("EXT block content line must have at least 2 tokens, got: '{}'", content_line));
+                return Err(format!(
+                    "EXT block content line must have at least 2 tokens, got: '{}'",
+                    content_line
+                ));
             }
-            
+
             let parmname = tokens[0].to_string();
             let string_data = tokens[1..].join(" ");
-            
+
             Ok(ExtensionData {
                 parmname,
                 string_data,
@@ -148,20 +160,23 @@ impl ExtensionData {
             })
         } else {
             // Handle multi-line content
-            let content_lines = &lines[1..lines.len()-1];
+            let content_lines = &lines[1..lines.len() - 1];
             let _content = content_lines.join("\n");
-            
+
             // Try to parse the first line for parmname and string_data
             let first_content_line = content_lines[0].trim();
             let tokens: Vec<&str> = first_content_line.split_whitespace().collect();
-            
+
             if tokens.len() < 2 {
-                return Err(format!("EXT block first content line must have at least 2 tokens, got: '{}'", first_content_line));
+                return Err(format!(
+                    "EXT block first content line must have at least 2 tokens, got: '{}'",
+                    first_content_line
+                ));
             }
-            
+
             let parmname = tokens[0].to_string();
             let string_data = tokens[1..].join(" ");
-            
+
             Ok(ExtensionData {
                 parmname,
                 string_data,
@@ -182,7 +197,10 @@ impl AutomationItem {
     /// Expected format: POOLEDENVINST pool_index position length start_offset play_rate selected baseline amplitude loop_enabled position_qn length_qn instance_index muted start_offset_qn transition_time volume_envelope_max
     pub fn from_tokens(tokens: &[Token]) -> Result<Self, String> {
         if tokens.len() < 17 {
-            return Err(format!("AutomationItem expects 17 tokens, got {}", tokens.len()));
+            return Err(format!(
+                "AutomationItem expects 17 tokens, got {}",
+                tokens.len()
+            ));
         }
 
         // Parse pool_index (field 1)
@@ -315,11 +333,11 @@ impl AutomationItem {
     /// Expected format: "POOLEDENVINST 1 5 1.5 0 1 1 0.5 1 1 0 0 1 0 0 0.012 0"
     pub fn from_rpp_line(line: &str) -> Result<Self, String> {
         use crate::primitives::token::parse_token_line;
-        
+
         let tokens = parse_token_line(line)
             .map_err(|e| format!("Failed to parse line '{}': {:?}", line, e))?
             .1;
-        
+
         Self::from_tokens(&tokens)
     }
 }
@@ -369,34 +387,35 @@ impl From<i64> for EnvelopePointShape {
 }
 
 /// An envelope point - the lowest level component in RPP files
-/// 
+///
 /// PT 3.000000 -0.2 5 0 0 0 -0.7
 /// field 1, float, position (seconds)
 /// field 2, float, value
 /// field 3, int, shape (-1 = envelope default?)
-/// field 4, int, optional, ?? (TEMPOENVEX time sig = 65536 * 
+/// field 4, int, optional, ?? (TEMPOENVEX time sig = 65536 *
 /// time signature denominator + time signature numerator)
 /// field 5, int (bool), selected (optional)
 /// field 6, int, ?? (optional)
 /// field 7, float, bezier tension (optional)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnvelopePoint {
-    pub position: f64,           // field 1: position in seconds
-    pub value: f64,              // field 2: envelope value
-    pub shape: EnvelopePointShape, // field 3: point shape
-    pub time_sig: Option<i32>,   // field 4: time signature (TEMPOENVEX only)
-    pub selected: Option<bool>,  // field 5: selected state
+    pub position: f64,                // field 1: position in seconds
+    pub value: f64,                   // field 2: envelope value
+    pub shape: EnvelopePointShape,    // field 3: point shape
+    pub time_sig: Option<i32>,        // field 4: time signature (TEMPOENVEX only)
+    pub selected: Option<bool>,       // field 5: selected state
     pub unknown_field_6: Option<i32>, // field 6: unknown field
-    pub bezier_tension: Option<f64>, // field 7: bezier tension
+    pub bezier_tension: Option<f64>,  // field 7: bezier tension
 }
 
 impl fmt::Display for EnvelopePoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PT {:.6} {:.6} {} ", 
-               self.position, 
-               self.value, 
-               self.shape as i32)?;
-        
+        write!(
+            f,
+            "PT {:.6} {:.6} {} ",
+            self.position, self.value, self.shape as i32
+        )?;
+
         if let Some(ts) = self.time_sig {
             write!(f, "{} ", ts)?;
         }
@@ -409,7 +428,7 @@ impl fmt::Display for EnvelopePoint {
         if let Some(tension) = self.bezier_tension {
             write!(f, "{:.6}", tension)?;
         }
-        
+
         Ok(())
     }
 }
@@ -419,11 +438,11 @@ impl EnvelopePoint {
     /// Expected format: "PT 3.000000 -0.2 5 0 0 0 -0.7"
     pub fn from_rpp_line(line: &str) -> Result<Self, String> {
         use crate::primitives::token::parse_token_line;
-        
+
         let tokens = parse_token_line(line)
             .map_err(|e| format!("Failed to parse line '{}': {:?}", line, e))?
             .1;
-        
+
         Self::from_tokens(&tokens)
     }
 
@@ -431,7 +450,10 @@ impl EnvelopePoint {
     /// Expected format: PT position value shape [time_sig] [selected] [unknown] [bezier_tension]
     pub fn from_tokens(tokens: &[Token]) -> Result<Self, String> {
         if tokens.len() < 4 {
-            return Err(format!("Envelope point needs at least 4 tokens, got {}", tokens.len()));
+            return Err(format!(
+                "Envelope point needs at least 4 tokens, got {}",
+                tokens.len()
+            ));
         }
 
         // Parse position (field 1)
@@ -519,8 +541,14 @@ pub struct Envelope {
 
 impl fmt::Display for Envelope {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Envelope({}) - {} points, {} automation items, {} extension blocks", 
-               self.envelope_type, self.points.len(), self.automation_items.len(), self.extension_data.len())
+        write!(
+            f,
+            "Envelope({}) - {} points, {} automation items, {} extension blocks",
+            self.envelope_type,
+            self.points.len(),
+            self.automation_items.len(),
+            self.extension_data.len()
+        )
     }
 }
 
@@ -544,11 +572,11 @@ impl Envelope {
     }
 
     /// Parse envelope points, automation items, and extension data from a raw RPP envelope block string
-    /// 
+    ///
     /// # Example
     /// ```
     /// use rpp_parser::Envelope;
-    /// 
+    ///
     /// let rpp_content = r#"<VOLENV2
     ///   EGUID {E1A0A26B-6BF4-C6BD-873D-DB57E2C20775}
     ///   ACT 1 -1
@@ -567,32 +595,34 @@ impl Envelope {
     ///   PT 4 0.22266414 0
     ///   PT 4.02 0.25703958 0
     /// >"#;
-    /// 
+    ///
     /// let (points, automation_items, extension_data) = Envelope::parse_envelope_content(rpp_content).unwrap();
     /// ```
-    pub fn parse_envelope_content(rpp_content: &str) -> Result<(Vec<EnvelopePoint>, Vec<AutomationItem>, Vec<ExtensionData>), String> {
+    pub fn parse_envelope_content(
+        rpp_content: &str,
+    ) -> Result<(Vec<EnvelopePoint>, Vec<AutomationItem>, Vec<ExtensionData>), String> {
         let mut points = Vec::new();
         let mut automation_items = Vec::new();
         let mut extension_data = Vec::new();
-        
+
         let lines: Vec<&str> = rpp_content.lines().collect();
         let mut i = 0;
-        
+
         while i < lines.len() {
             let line = lines[i].trim();
-            
+
             // Skip empty lines and comments
             if line.is_empty() || line.starts_with("//") {
                 i += 1;
                 continue;
             }
-            
+
             // Skip block start/end markers (but not EXT blocks)
             if (line.starts_with('<') && !line.starts_with("<EXT")) || line == ">" {
                 i += 1;
                 continue;
             }
-            
+
             // Look for envelope point lines (PT)
             if line.starts_with("PT ") {
                 let point = EnvelopePoint::from_rpp_line(line)?;
@@ -611,41 +641,40 @@ impl Envelope {
                 let mut ext_lines = Vec::new();
                 ext_lines.push(line);
                 i += 1;
-                
+
                 while i < lines.len() {
                     let current_line = lines[i].trim();
                     ext_lines.push(current_line);
-                    
+
                     if current_line == ">" {
                         break;
                     }
                     i += 1;
                 }
-                
+
                 if i >= lines.len() {
                     return Err("EXT block not properly closed with '>'".to_string());
                 }
-                
+
                 let ext_block_content = ext_lines.join("\n");
                 let extension_block = ExtensionData::from_rpp_block(&ext_block_content)?;
                 extension_data.push(extension_block);
                 i += 1;
-            }
-            else {
+            } else {
                 // Skip unknown lines
                 i += 1;
             }
         }
-        
+
         Ok((points, automation_items, extension_data))
     }
 
     /// Parse envelope points from a raw RPP envelope block string (legacy method)
-    /// 
+    ///
     /// # Example
     /// ```
     /// use rpp_parser::Envelope;
-    /// 
+    ///
     /// let rpp_content = r#"<VOLENV2
     ///   EGUID {E1A0A26B-6BF4-C6BD-873D-DB57E2C20775}
     ///   ACT 1 -1
@@ -660,7 +689,7 @@ impl Envelope {
     ///   PT 4 0.22266414 0
     ///   PT 4.02 0.25703958 0
     /// >"#;
-    /// 
+    ///
     /// let points = Envelope::parse_envelope_points(rpp_content).unwrap();
     /// ```
     pub fn parse_envelope_points(rpp_content: &str) -> Result<Vec<EnvelopePoint>, String> {
@@ -672,7 +701,6 @@ impl Envelope {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn test_parse_envelope_content_with_automation_items() {
@@ -692,11 +720,12 @@ mod tests {
   PT 4.02 0.25703958 0
 >"#;
 
-        let (points, automation_items, extension_data) = Envelope::parse_envelope_content(rpp_content).unwrap();
-        
+        let (points, automation_items, extension_data) =
+            Envelope::parse_envelope_content(rpp_content).unwrap();
+
         println!("\n🎵 Parsed Envelope Content from Raw RPP:");
         println!("{}", "=".repeat(60));
-        
+
         // Display extension data
         for (i, ext_data) in extension_data.iter().enumerate() {
             println!("Extension Data {}: {}", i + 1, ext_data);
@@ -705,26 +734,44 @@ mod tests {
             println!("  Raw Content: {}", ext_data.raw_content);
             println!();
         }
-        
+
         // Display automation items
         for (i, automation_item) in automation_items.iter().enumerate() {
             println!("Automation Item {}: {}", i + 1, automation_item);
             println!("  Pool Index: {}", automation_item.pool_index);
-            println!("  Position: {:.6}s, Length: {:.6}s", automation_item.position, automation_item.length);
-            println!("  Start Offset: {:.6}s, Play Rate: {:.6}", automation_item.start_offset, automation_item.play_rate);
-            println!("  Selected: {}, Muted: {}", automation_item.selected, automation_item.muted);
-            println!("  Baseline: {:.6}, Amplitude: {:.6}", automation_item.baseline, automation_item.amplitude);
+            println!(
+                "  Position: {:.6}s, Length: {:.6}s",
+                automation_item.position, automation_item.length
+            );
+            println!(
+                "  Start Offset: {:.6}s, Play Rate: {:.6}",
+                automation_item.start_offset, automation_item.play_rate
+            );
+            println!(
+                "  Selected: {}, Muted: {}",
+                automation_item.selected, automation_item.muted
+            );
+            println!(
+                "  Baseline: {:.6}, Amplitude: {:.6}",
+                automation_item.baseline, automation_item.amplitude
+            );
             println!("  Loop Enabled: {}", automation_item.loop_enabled);
             println!("  Transition Time: {:.6}s", automation_item.transition_time);
-            println!("  Volume Envelope Max: {}", automation_item.volume_envelope_max);
+            println!(
+                "  Volume Envelope Max: {}",
+                automation_item.volume_envelope_max
+            );
             println!();
         }
-        
+
         // Display envelope points
         for (i, point) in points.iter().enumerate() {
             println!("Point {}: {}", i + 1, point);
             println!("  Shape: {}", point.shape);
-            println!("  Position: {:.6}s, Value: {:.6}", point.position, point.value);
+            println!(
+                "  Position: {:.6}s, Value: {:.6}",
+                point.position, point.value
+            );
             if let Some(ts) = point.time_sig {
                 println!("  Time Signature: {}", ts);
             }
@@ -739,13 +786,13 @@ mod tests {
             }
             println!();
         }
-        
+
         // Verify we got the expected number of extension data blocks
         assert_eq!(extension_data.len(), 0);
-        
+
         // Verify we got the expected number of automation items
         assert_eq!(automation_items.len(), 1);
-        
+
         // Verify the automation item
         let ai = &automation_items[0];
         assert_eq!(ai.pool_index, 1);
@@ -764,15 +811,15 @@ mod tests {
         assert_eq!(ai.start_offset_qn, 0.0);
         assert_eq!(ai.transition_time, 0.012);
         assert_eq!(ai.volume_envelope_max, 0);
-        
+
         // Verify we got the expected number of points
         assert_eq!(points.len(), 5);
-        
+
         // Verify the first point
         assert_eq!(points[0].position, 0.0);
         assert_eq!(points[0].value, 1.0);
         assert_eq!(points[0].shape, EnvelopePointShape::Linear);
-        
+
         // Verify the second point (with all fields)
         assert_eq!(points[1].position, 2.0);
         assert_eq!(points[1].value, 0.02073425);
@@ -781,7 +828,7 @@ mod tests {
         assert_eq!(points[1].selected, Some(true));
         assert_eq!(points[1].unknown_field_6, Some(0));
         assert_eq!(points[1].bezier_tension, Some(0.3030303));
-        
+
         println!("✅ Successfully parsed {} extension blocks, {} automation items, and {} envelope points from raw RPP!", 
                  extension_data.len(), automation_items.len(), points.len());
     }
@@ -790,22 +837,37 @@ mod tests {
     fn test_automation_item_parsing() {
         // Test parsing a single automation item line
         let line = "POOLEDENVINST 1 5 1.5 0 1 1 0.5 1 1 0 0 1 0 0 0.012 0";
-        
+
         let automation_item = AutomationItem::from_rpp_line(line).unwrap();
-        
+
         println!("\n🤖 Parsed Automation Item:");
         println!("{}", "=".repeat(40));
         println!("Raw line: {}", line);
         println!("Parsed: {}", automation_item);
         println!("Pool Index: {}", automation_item.pool_index);
-        println!("Position: {:.6}s, Length: {:.6}s", automation_item.position, automation_item.length);
-        println!("Start Offset: {:.6}s, Play Rate: {:.6}", automation_item.start_offset, automation_item.play_rate);
-        println!("Selected: {}, Muted: {}", automation_item.selected, automation_item.muted);
-        println!("Baseline: {:.6}, Amplitude: {:.6}", automation_item.baseline, automation_item.amplitude);
+        println!(
+            "Position: {:.6}s, Length: {:.6}s",
+            automation_item.position, automation_item.length
+        );
+        println!(
+            "Start Offset: {:.6}s, Play Rate: {:.6}",
+            automation_item.start_offset, automation_item.play_rate
+        );
+        println!(
+            "Selected: {}, Muted: {}",
+            automation_item.selected, automation_item.muted
+        );
+        println!(
+            "Baseline: {:.6}, Amplitude: {:.6}",
+            automation_item.baseline, automation_item.amplitude
+        );
         println!("Loop Enabled: {}", automation_item.loop_enabled);
         println!("Transition Time: {:.6}s", automation_item.transition_time);
-        println!("Volume Envelope Max: {}", automation_item.volume_envelope_max);
-        
+        println!(
+            "Volume Envelope Max: {}",
+            automation_item.volume_envelope_max
+        );
+
         // Verify all fields
         assert_eq!(automation_item.pool_index, 1);
         assert_eq!(automation_item.position, 5.0);
@@ -823,7 +885,7 @@ mod tests {
         assert_eq!(automation_item.start_offset_qn, 0.0);
         assert_eq!(automation_item.transition_time, 0.012);
         assert_eq!(automation_item.volume_envelope_max, 0);
-        
+
         println!("✅ Automation item parsing successful!");
     }
 
@@ -833,9 +895,9 @@ mod tests {
         let ext_block_content = r#"<EXT
 my_extension "some data with spaces"
 >"#;
-        
+
         let extension_data = ExtensionData::from_rpp_block(ext_block_content).unwrap();
-        
+
         println!("\n🔧 Parsed Extension Data:");
         println!("{}", "=".repeat(40));
         println!("Raw block:\n{}", ext_block_content);
@@ -843,12 +905,12 @@ my_extension "some data with spaces"
         println!("Parameter Name: {}", extension_data.parmname);
         println!("String Data: {}", extension_data.string_data);
         println!("Raw Content: {}", extension_data.raw_content);
-        
+
         // Verify the extension data
         assert_eq!(extension_data.parmname, "my_extension");
         assert_eq!(extension_data.string_data, "\"some data with spaces\"");
         assert_eq!(extension_data.raw_content, ext_block_content);
-        
+
         println!("✅ Extension data parsing successful!");
     }
 
@@ -873,11 +935,12 @@ my_extension "some data with spaces"
   PT 4.02 0.25703958 0
 >"#;
 
-        let (points, automation_items, extension_data) = Envelope::parse_envelope_content(rpp_content).unwrap();
-        
+        let (points, automation_items, extension_data) =
+            Envelope::parse_envelope_content(rpp_content).unwrap();
+
         println!("\n🎵 Parsed Envelope Content with EXT Blocks:");
         println!("{}", "=".repeat(60));
-        
+
         // Display extension data
         for (i, ext_data) in extension_data.iter().enumerate() {
             println!("Extension Data {}: {}", i + 1, ext_data);
@@ -885,30 +948,30 @@ my_extension "some data with spaces"
             println!("  String Data: {}", ext_data.string_data);
             println!();
         }
-        
+
         // Display automation items
         for (i, automation_item) in automation_items.iter().enumerate() {
             println!("Automation Item {}: {}", i + 1, automation_item);
             println!("  Pool Index: {}", automation_item.pool_index);
             println!();
         }
-        
+
         // Display envelope points
         for (i, point) in points.iter().enumerate() {
             println!("Point {}: {}", i + 1, point);
             println!();
         }
-        
+
         // Verify we got the expected counts
         assert_eq!(extension_data.len(), 1);
         assert_eq!(automation_items.len(), 1);
         assert_eq!(points.len(), 5);
-        
+
         // Verify the extension data
         let ext = &extension_data[0];
         assert_eq!(ext.parmname, "my_extension");
         assert_eq!(ext.string_data, "\"some extension data\"");
-        
+
         println!("✅ Successfully parsed {} extension blocks, {} automation items, and {} envelope points!", 
                  extension_data.len(), automation_items.len(), points.len());
     }

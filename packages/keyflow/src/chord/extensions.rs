@@ -223,9 +223,7 @@ impl Extensions {
         while consumed < tokens.len() {
             trace!(
                 "Loop iteration: consumed={}, tokens[{}]={:?}",
-                consumed,
-                consumed,
-                tokens[consumed].token_type
+                consumed, consumed, tokens[consumed].token_type
             );
 
             // Check for accidental (b or #)
@@ -251,8 +249,7 @@ impl Extensions {
             if consumed < tokens.len() {
                 trace!(
                     "Checking for number at position {}: {:?}",
-                    consumed,
-                    tokens[consumed].token_type
+                    consumed, tokens[consumed].token_type
                 );
                 if let TokenType::Number(n) = &tokens[consumed].token_type {
                     let quality = quality_mod.unwrap();

@@ -8,7 +8,10 @@ use crate::lyrics::core::Lyrics;
 /// Trait for reading lyrics from a DAW project
 pub trait LyricsReader {
     /// Read lyrics from a project
-    fn read_lyrics_from_project(&self, project: &dyn std::any::Any) -> Result<LyricsData, LyricsReadError>;
+    fn read_lyrics_from_project(
+        &self,
+        project: &dyn std::any::Any,
+    ) -> Result<LyricsData, LyricsReadError>;
 }
 
 /// Trait for writing lyrics to a DAW project
@@ -19,7 +22,7 @@ pub trait LyricsWriter {
         project: &dyn std::any::Any,
         lyrics: &Lyrics,
     ) -> Result<(), LyricsWriteError>;
-    
+
     /// Update lyrics in a project for a specific song
     fn update_lyrics_in_project(
         &self,

@@ -1,9 +1,9 @@
 use crate::marker_region::core::Marker;
 use crate::primitives::TimeSignature;
+use crate::tracks::Track;
+use crate::transport::{RecordMode, Tempo, Transport, TransportActions, TransportError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::transport::{RecordMode, Tempo, Transport, TransportActions, TransportError};
-use crate::tracks::Track;
 
 /// Embeddable project state that carries its own transport.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,7 +17,6 @@ pub struct Project<T> {
     /// List of tracks in this project
     pub tracks: Vec<Track>,
 }
-
 
 impl<T> Project<T> {
     /// Create a new project with a specific transport implementation.
@@ -247,7 +246,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-        use crate::transport::TransportActions as _;
+    use crate::transport::TransportActions as _;
 
     #[test]
     fn project_embeds_transport() {

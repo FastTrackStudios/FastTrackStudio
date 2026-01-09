@@ -7,13 +7,13 @@ use std::ffi::CString;
 
 /// Mouse modifier flag bits
 /// Each context has 16 possible modifier combinations (0-15)
-/// 
+///
 /// Flag bits:
 /// - Bit 0 (1): Shift
 /// - Bit 1 (2): Control (Cmd on macOS)
 /// - Bit 2 (4): Alt (Opt on macOS)
 /// - Bit 3 (8): Win (Ctrl on macOS)
-/// 
+///
 /// Combinations:
 /// - 0: Default action (no modifiers)
 /// - 1: Shift
@@ -34,9 +34,9 @@ use std::ffi::CString;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MouseModifierFlag {
     pub shift: bool,
-    pub control: bool,  // Cmd on macOS
-    pub alt: bool,      // Opt on macOS
-    pub win: bool,      // Ctrl on macOS
+    pub control: bool, // Cmd on macOS
+    pub alt: bool,     // Opt on macOS
+    pub win: bool,     // Ctrl on macOS
 }
 
 impl MouseModifierFlag {
@@ -48,7 +48,7 @@ impl MouseModifierFlag {
             win,
         }
     }
-    
+
     pub fn none() -> Self {
         Self {
             shift: false,
@@ -57,17 +57,25 @@ impl MouseModifierFlag {
             win: false,
         }
     }
-    
+
     /// Convert to REAPER modifier flag (0-15)
     pub fn to_flag(self) -> i32 {
         let mut flag = 0;
-        if self.shift { flag |= 1; }
-        if self.control { flag |= 2; }
-        if self.alt { flag |= 4; }
-        if self.win { flag |= 8; }
+        if self.shift {
+            flag |= 1;
+        }
+        if self.control {
+            flag |= 2;
+        }
+        if self.alt {
+            flag |= 4;
+        }
+        if self.win {
+            flag |= 8;
+        }
         flag
     }
-    
+
     /// Create from REAPER modifier flag (0-15)
     pub fn from_flag(flag: i32) -> Self {
         Self {
@@ -77,26 +85,38 @@ impl MouseModifierFlag {
             win: (flag & 8) != 0,
         }
     }
-    
+
     /// Add 1024 bit for no-move/no-select flags
     pub fn with_options(&self, no_move: bool, no_select: bool) -> i32 {
         let mut flag = (*self).to_flag();
         flag |= 1024; // Enable options bit
-        if no_move { flag |= 1 << 10; } // Bit 10 = no-move
-        if no_select { flag |= 2 << 10; } // Bit 11 = no-select
+        if no_move {
+            flag |= 1 << 10;
+        } // Bit 10 = no-move
+        if no_select {
+            flag |= 2 << 10;
+        } // Bit 11 = no-select
         flag
     }
-    
+
     /// Get human-readable description of modifier combination
     pub fn to_string(self) -> String {
         if !self.shift && !self.control && !self.alt && !self.win {
             "Default action".to_string()
         } else {
             let mut parts = Vec::new();
-            if self.shift { parts.push("Shift"); }
-            if self.control { parts.push("Cmd"); } // Cmd on macOS, Ctrl on Windows
-            if self.alt { parts.push("Opt"); } // Opt on macOS, Alt on Windows
-            if self.win { parts.push("Ctrl"); } // Ctrl on macOS, Win on Windows
+            if self.shift {
+                parts.push("Shift");
+            }
+            if self.control {
+                parts.push("Cmd");
+            } // Cmd on macOS, Ctrl on Windows
+            if self.alt {
+                parts.push("Opt");
+            } // Opt on macOS, Alt on Windows
+            if self.win {
+                parts.push("Ctrl");
+            } // Ctrl on macOS, Win on Windows
             parts.join("+")
         }
     }
@@ -115,7 +135,7 @@ impl AllModifierFlags {
 
 impl Iterator for AllModifierFlags {
     type Item = (i32, MouseModifierFlag);
-    
+
     fn next(&mut self) -> Option<Self::Item> {
         if self.current < 16 {
             let flag = MouseModifierFlag::from_flag(self.current);
@@ -142,22 +162,22 @@ pub fn get_mouse_modifier(
     medium_reaper: &MediumReaper,
 ) -> Option<String> {
     let low_reaper = medium_reaper.low();
-    
+
     // Check if GetMouseModifier is available
     if low_reaper.pointers().GetMouseModifier.is_none() {
         return None;
     }
-    
+
     let context_cstr = match CString::new(context) {
         Ok(cstr) => cstr,
         Err(_) => return None,
     };
     let flag = modifier_flag.to_flag();
-    
+
     // Allocate buffer for action string (REAPER typically uses 512 bytes)
     // Use i8 buffer since REAPER expects *mut c_char
     let mut action_buf = vec![0i8; 512];
-    
+
     unsafe {
         low_reaper.GetMouseModifier(
             context_cstr.as_ptr(),
@@ -166,22 +186,22 @@ pub fn get_mouse_modifier(
             action_buf.len() as i32,
         );
     }
-    
+
     // Convert C string to Rust String
     // Find null terminator
-    let null_pos = action_buf.iter().position(|&b| b == 0).unwrap_or(action_buf.len());
-    
-    // Convert to bytes (i8 to u8)
-    let action_bytes: Vec<u8> = action_buf[..null_pos]
+    let null_pos = action_buf
         .iter()
-        .map(|&b| b as u8)
-        .collect();
-    
+        .position(|&b| b == 0)
+        .unwrap_or(action_buf.len());
+
+    // Convert to bytes (i8 to u8)
+    let action_bytes: Vec<u8> = action_buf[..null_pos].iter().map(|&b| b as u8).collect();
+
     let action_str = match String::from_utf8(action_bytes) {
         Ok(s) => s,
         Err(_) => return None,
     };
-    
+
     // Return None if empty (no assignment)
     // Note: REAPER may return empty string for unassigned modifiers
     let trimmed = action_str.trim();
@@ -207,18 +227,18 @@ pub fn set_mouse_modifier(
     medium_reaper: &MediumReaper,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let low_reaper = medium_reaper.low();
-    
+
     // Check if SetMouseModifier is available
     if low_reaper.pointers().SetMouseModifier.is_none() {
         return Err("SetMouseModifier not available".into());
     }
-    
+
     let context_cstr = match CString::new(context) {
         Ok(cstr) => cstr,
         Err(_) => return Err("Invalid context string".into()),
     };
     let flag = modifier_flag.to_flag();
-    
+
     let action_cstr = if action == "-1" {
         std::ptr::null()
     } else {
@@ -227,15 +247,11 @@ pub fn set_mouse_modifier(
             Err(_) => return Err("Invalid action string".into()),
         }
     };
-    
+
     unsafe {
-        low_reaper.SetMouseModifier(
-            context_cstr.as_ptr(),
-            flag,
-            action_cstr,
-        );
+        low_reaper.SetMouseModifier(context_cstr.as_ptr(), flag, action_cstr);
     }
-    
+
     Ok(())
 }
 
@@ -250,18 +266,14 @@ pub fn reset_context(
 /// Reset all mouse modifiers (all contexts)
 pub fn reset_all(medium_reaper: &MediumReaper) -> Result<(), Box<dyn std::error::Error>> {
     let low_reaper = medium_reaper.low();
-    
+
     // Check if SetMouseModifier is available
     if low_reaper.pointers().SetMouseModifier.is_none() {
         return Err("SetMouseModifier not available".into());
     }
-    
+
     unsafe {
-        low_reaper.SetMouseModifier(
-            std::ptr::null(),
-            -1,
-            std::ptr::null(),
-        );
+        low_reaper.SetMouseModifier(std::ptr::null(), -1, std::ptr::null());
     }
     Ok(())
 }

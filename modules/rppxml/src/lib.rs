@@ -1,26 +1,26 @@
 //! # RPP Parser
-//! 
+//!
 //! A high-performance RPP (REAPER Project) file format parser using nom parser combinators.
 //! This parser focuses on the generic RPP file format parsing without REAPER-specific data structures.
-//! 
+//!
 //! ## Features
-//! 
+//!
 //! - **High Performance**: Uses nom parser combinators for zero-copy parsing
 //! - **WDL Compatible**: Matches the parsing behavior of REAPER's WDL library
 //! - **Generic Format**: Parses RPP file structure without REAPER-specific assumptions
 //! - **Modular Design**: Separate token, block, and project parsing modules
 //! - **Type Safe**: Strongly typed Rust structures for RPP format elements
-//! 
+//!
 //! ## Architecture
-//! 
+//!
 //! This parser provides the core RPP file format parsing:
 //! - **Token Parsing**: Handles all token types (strings, numbers, MIDI events, etc.)
 //! - **Block Parsing**: Parses RPP block structures (`<BLOCK>` and `>`)
 //! - **Project Parsing**: Top-level RPP file parsing
-//! 
+//!
 //! REAPER-specific data structures (tracks, items, envelopes, FX chains) should be handled
 //! by separate adapter modules that consume this parser's output.
-//! 
+//!
 //! ## Example
 //!
 //! ```rust
@@ -56,7 +56,7 @@ pub mod types;
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_track_hierarchy_parsing() {
         // Test that we can parse track hierarchy information
@@ -74,17 +74,17 @@ mod tests {
             ISBUS 2 -1
           >
         >"#;
-        
+
         let project = parse_rpp_file(rpp_content).unwrap();
         assert_eq!(project.blocks.len(), 3);
-        
+
         // Verify we can extract folder information
         for block in &project.blocks {
             if block.block_type == BlockType::Track {
                 // Track folder hierarchy display logic
                 let mut folder_state = 0;
                 let mut indentation = 0;
-                
+
                 for child in &block.children {
                     if let RppBlockContent::Content(tokens) = child {
                         if let Some(first_token) = tokens.first() {
@@ -96,7 +96,7 @@ mod tests {
                         }
                     }
                 }
-                
+
                 // Verify the folder information is parsed correctly
                 match block.children.iter().find_map(|child| {
                     if let RppBlockContent::Content(tokens) = child {
@@ -110,11 +110,11 @@ mod tests {
                 }) {
                     Some(name) if name == "DRUMS" => {
                         assert_eq!(folder_state, 1); // folder parent
-                        assert_eq!(indentation, 1);  // increase indentation
+                        assert_eq!(indentation, 1); // increase indentation
                     }
                     Some(name) if name == "Kick" => {
                         assert_eq!(folder_state, 0); // regular track
-                        assert_eq!(indentation, 0);  // no change
+                        assert_eq!(indentation, 0); // no change
                     }
                     Some(name) if name == "Out" => {
                         assert_eq!(folder_state, 2); // last track in folder
@@ -128,24 +128,29 @@ mod tests {
 }
 
 // Re-export the main types for convenience
-pub use primitives::{RppProject, parse_rpp, Token, QuoteType, RppBlock, BlockType, RppBlockContent};
-pub use types::{Track, Item, Envelope, FxChain, ReaperProject, MarkerRegion, MarkerRegionCollection, TempoTimePoint, TempoTimeEnvelope};
+pub use primitives::{
+    parse_rpp, BlockType, QuoteType, RppBlock, RppBlockContent, RppProject, Token,
+};
+pub use types::{
+    Envelope, FxChain, Item, MarkerRegion, MarkerRegionCollection, ReaperProject,
+    TempoTimeEnvelope, TempoTimePoint, Track,
+};
 
 /// Main error type for RPP parsing
 #[derive(Error, Debug)]
 pub enum RppParseError {
     #[error("Parse error: {0}")]
     ParseError(String),
-    
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-    
+
     #[error("Invalid token: {0}")]
     InvalidToken(String),
-    
+
     #[error("Unexpected end of input")]
     UnexpectedEof,
-    
+
     #[error("Invalid block structure")]
     InvalidBlockStructure,
 }
@@ -158,10 +163,13 @@ pub fn parse_rpp_file(content: &str) -> RppResult<RppProject> {
     match primitives::project::parse_rpp(content) {
         Ok((remaining, project)) => {
             if !remaining.trim().is_empty() {
-                return Err(RppParseError::ParseError(format!("Unexpected remaining input: {}", remaining)));
+                return Err(RppParseError::ParseError(format!(
+                    "Unexpected remaining input: {}",
+                    remaining
+                )));
             }
             Ok(project)
         }
-        Err(e) => Err(RppParseError::ParseError(format!("{:?}", e)))
+        Err(e) => Err(RppParseError::ParseError(format!("{:?}", e))),
     }
 }

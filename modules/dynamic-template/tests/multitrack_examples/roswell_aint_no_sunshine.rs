@@ -27,14 +27,14 @@ fn roswell_aint_no_sunshine() {
         "Tom  3.wav",
         "Tom  4.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
 }

@@ -1,7 +1,7 @@
 //! Electronic snare drum group definition
 
-use crate::item_metadata::prelude::*;
 use crate::item_metadata::ItemMetadataField;
+use crate::item_metadata::prelude::*;
 use monarchy::FieldValueDescriptor;
 
 /// Electronic snare drum group
@@ -43,7 +43,7 @@ impl From<Snare> for ItemMetadataGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{default_config, DynamicTemplateConfig};
+    use crate::{DynamicTemplateConfig, default_config};
     use monarchy::{Config, Parser};
 
     /// Shared test cases - define input strings and expected metadata once

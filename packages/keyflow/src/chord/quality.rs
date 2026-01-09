@@ -6,8 +6,7 @@ use crate::primitives::Interval;
 use serde::{Deserialize, Serialize};
 
 /// Basic chord quality - the fundamental triad structure
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ChordQuality {
     /// Major triad (1, 3, 5) - C, E, G
     #[default]
@@ -25,8 +24,7 @@ pub enum ChordQuality {
 }
 
 /// Type of suspended chord
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum SuspendedType {
     /// Sus2 - suspended 2nd (1, 2, 5) - C, D, G
     Second,
@@ -34,7 +32,6 @@ pub enum SuspendedType {
     #[default]
     Fourth,
 }
-
 
 impl ChordQuality {
     /// Get the intervals that define this quality
@@ -97,7 +94,6 @@ impl ChordQuality {
         ChordQuality::Suspended(SuspendedType::Fourth)
     }
 }
-
 
 impl std::fmt::Display for ChordQuality {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

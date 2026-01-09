@@ -66,8 +66,7 @@ impl Default for DurationType {
 }
 
 /// A representation of the dot(s) on a note.
-#[derive(PartialEq, Debug)]
-#[derive(Default)]
+#[derive(PartialEq, Debug, Default)]
 pub struct Dots {
     dots: u8,
 }
@@ -83,7 +82,6 @@ impl Dots {
         self.dots
     }
 }
-
 
 impl Display for Dots {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

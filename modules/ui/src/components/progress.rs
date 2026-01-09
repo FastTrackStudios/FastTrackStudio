@@ -8,22 +8,23 @@ pub fn TimeSignatureCard(
     label: String,
     top_offset: String,
     card_key: String,
-    #[props(default = true)]
-    vertical: bool,
-    #[props(default = "sm".to_string())]
-    size: String,
+    #[props(default = true)] vertical: bool,
+    #[props(default = "sm".to_string())] size: String,
 ) -> Element {
     // Parse time signature for fraction display
     let (numerator, denominator) = if label.contains('/') {
         if let Some(slash_pos) = label.find('/') {
-            (label[..slash_pos].trim().to_string(), label[slash_pos + 1..].trim().to_string())
+            (
+                label[..slash_pos].trim().to_string(),
+                label[slash_pos + 1..].trim().to_string(),
+            )
         } else {
             (label.clone(), String::new())
         }
     } else {
         (String::new(), String::new())
     };
-    
+
     // Size presets: text size, padding, and spacing
     let (text_size, padding, spacing) = match size.as_str() {
         "xs" => ("text-xs", "px-0.5 py-0.5", "my-0.5"),
@@ -32,10 +33,13 @@ pub fn TimeSignatureCard(
         "lg" => ("text-base", "px-2 py-1", "my-1"),
         _ => ("text-xs", "px-1 py-0.5", "my-0.5"), // Default to sm
     };
-    
-    let card_class = format!("{} font-medium text-center whitespace-nowrap {} rounded bg-accent text-accent-foreground border border-border", text_size, padding);
+
+    let card_class = format!(
+        "{} font-medium text-center whitespace-nowrap {} rounded bg-accent text-accent-foreground border border-border",
+        text_size, padding
+    );
     let divider_class = format!("border-t border-current w-full {}", spacing);
-    
+
     rsx! {
         div {
             key: "{card_key}",
@@ -72,29 +76,36 @@ pub fn TempoCard(
     label: String,
     bottom_offset: String,
     card_key: String,
-    #[props(default = "text-xs".to_string())]
-    text_size: String,
+    #[props(default = "text-xs".to_string())] text_size: String,
     #[props(default = "px-2 py-0.5 rounded text-xs font-medium text-white bg-black/70 whitespace-nowrap".to_string())]
     card_class: String,
-    #[props(default = false)]
-    position_above: bool,
-    #[props(default = false)]
-    left_align: bool,
+    #[props(default = false)] position_above: bool,
+    #[props(default = false)] left_align: bool,
 ) -> Element {
-    let transform = if left_align { "" } else { "transform: translateX(-50%);" };
-    let style = if position_above {
-        format!("left: {}%; {} top: {};", position_percent, transform, bottom_offset)
+    let transform = if left_align {
+        ""
     } else {
-        format!("left: {}%; {} top: calc(100% + {});", position_percent, transform, bottom_offset)
+        "transform: translateX(-50%);"
     };
-    
+    let style = if position_above {
+        format!(
+            "left: {}%; {} top: {};",
+            position_percent, transform, bottom_offset
+        )
+    } else {
+        format!(
+            "left: {}%; {} top: calc(100% + {});",
+            position_percent, transform, bottom_offset
+        )
+    };
+
     // Adjust card class for left alignment - replace text-center with text-left
     let adjusted_card_class = if left_align && card_class.contains("text-center") {
         card_class.replace("text-center", "text-left")
     } else {
         card_class
     };
-    
+
     rsx! {
         div {
             key: "{card_key}",
@@ -116,28 +127,28 @@ pub fn TempoCard(
 /// Progress bar section definition
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProgressSection {
-    pub start_percent: f64,  // 0-100, where this section starts
-    pub end_percent: f64,    // 0-100, where this section ends
-    pub color: String,       // Tailwind color class or CSS color
-    pub name: String,        // Name to display inside the section
+    pub start_percent: f64, // 0-100, where this section starts
+    pub end_percent: f64,   // 0-100, where this section ends
+    pub color: String,      // Tailwind color class or CSS color
+    pub name: String,       // Name to display inside the section
 }
 
 /// Tempo/Time signature marker definition
 #[derive(Clone, Debug, PartialEq)]
 pub struct TempoMarker {
-    pub position_percent: f64,  // 0-100, where this marker is positioned
-    pub label: String,          // Label text (e.g., "4/4", "120 bpm", "4/4 120 bpm")
-    pub is_tempo: bool,         // true if this is a tempo marker, false if time signature
-    pub is_time_sig: bool,       // true if this is a time signature marker
+    pub position_percent: f64, // 0-100, where this marker is positioned
+    pub label: String,         // Label text (e.g., "4/4", "120 bpm", "4/4 120 bpm")
+    pub is_tempo: bool,        // true if this is a tempo marker, false if time signature
+    pub is_time_sig: bool,     // true if this is a time signature marker
     #[allow(dead_code)]
-    pub show_line_only: bool,   // true if this marker should only show a line (no card) - for filtered markers
+    pub show_line_only: bool, // true if this marker should only show a line (no card) - for filtered markers
 }
 
 /// Measure indicator definition for section progress bar
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeasureIndicator {
-    pub position_percent: f64,  // 0-100, where this measure indicator is positioned (within section)
-    pub measure_number: i32,    // Measure number (1-based for display)
+    pub position_percent: f64, // 0-100, where this measure indicator is positioned (within section)
+    pub measure_number: i32,   // Measure number (1-based for display)
     pub time_signature: Option<(u8, u8)>, // Time signature for this measure (numerator, denominator)
     pub musical_position: daw::primitives::MusicalPosition, // Musical position for seeking
 }
@@ -147,42 +158,39 @@ pub struct MeasureIndicator {
 pub fn SegmentedProgressBar(
     progress: Signal<f64>,
     sections: Vec<ProgressSection>,
-    #[props(default)]
-    tempo_markers: Vec<TempoMarker>,
-    #[props(default)]
-    song_key: Option<String>,
-    #[props(default)]
-    on_section_click: Option<Callback<usize>>,
+    #[props(default)] tempo_markers: Vec<TempoMarker>,
+    #[props(default)] song_key: Option<String>,
+    #[props(default)] on_section_click: Option<Callback<usize>>,
 ) -> Element {
     let current_progress = progress();
-    
+
     // Track progress changes to detect jumps and disable animations
     // Store previous values in signals
     let mut prev_progress = use_signal(|| None::<f64>);
     let mut prev_song_key = use_signal(|| None::<String>);
-    
+
     // Compute animation state using use_memo - reads signals but doesn't modify them
     // Clone song_key to avoid move issues
     let song_key_for_memo = song_key.clone();
     let should_animate = use_memo(move || {
         let prev = prev_progress();
         let prev_key = prev_song_key();
-    
-    // Check if song changed
+
+        // Check if song changed
         let song_changed = prev_key != song_key_for_memo;
-        
+
         // Check if there's a large position jump (more than 5% change)
         let large_jump = if let Some(prev_val) = prev {
             (current_progress - prev_val).abs() > 5.0
         } else {
             false
         };
-        
+
         // Disable animations for song changes or large jumps (instant updates)
         // Enable animations for small incremental changes (smooth updates)
         !song_changed && !large_jump && prev.is_some()
     });
-    
+
     // Update tracking state in effect - clone values to avoid move issues
     let current_progress_for_effect = current_progress;
     let song_key_for_effect = song_key.clone();
@@ -190,115 +198,130 @@ pub fn SegmentedProgressBar(
         prev_progress.set(Some(current_progress_for_effect));
         if prev_song_key() != song_key_for_effect {
             prev_song_key.set(song_key_for_effect.clone());
-    }
+        }
     });
-    
+
     // Pre-calculate section data
-    let section_data: Vec<_> = sections.iter().enumerate().map(|(index, section)| {
-        let section_start = section.start_percent;
-        let section_end = section.end_percent;
-        let section_width = section.end_percent - section.start_percent;
-        
-        // Calculate how much of this section is filled
-        let filled_percent = if current_progress <= section_start {
-            0.0
-        } else if current_progress >= section_end {
-            100.0
-        } else {
-            // Progress is within this section
-            let progress_in_section = current_progress - section_start;
-            (progress_in_section / section_width) * 100.0
-        };
-        
-        (index, section_start, section_end, section_width, section.color.clone(), filled_percent, section.name.clone())
-    }).collect();
-    
+    let section_data: Vec<_> = sections
+        .iter()
+        .enumerate()
+        .map(|(index, section)| {
+            let section_start = section.start_percent;
+            let section_end = section.end_percent;
+            let section_width = section.end_percent - section.start_percent;
+
+            // Calculate how much of this section is filled
+            let filled_percent = if current_progress <= section_start {
+                0.0
+            } else if current_progress >= section_end {
+                100.0
+            } else {
+                // Progress is within this section
+                let progress_in_section = current_progress - section_start;
+                (progress_in_section / section_width) * 100.0
+            };
+
+            (
+                index,
+                section_start,
+                section_end,
+                section_width,
+                section.color.clone(),
+                filled_percent,
+                section.name.clone(),
+            )
+        })
+        .collect();
+
     // Find the active section (the one we're currently in)
-    let active_section = section_data.iter().find(|(_, start, end, _, _, _, _)| {
-        current_progress >= *start && current_progress < *end
-    }).or_else(|| {
-        // If we're past all sections, check if we're at the very end of the last section
-        if let Some((_, start, end, _, _, _, _)) = section_data.last() {
-            if current_progress >= *start && current_progress <= *end {
-        section_data.last()
+    let active_section = section_data
+        .iter()
+        .find(|(_, start, end, _, _, _, _)| current_progress >= *start && current_progress < *end)
+        .or_else(|| {
+            // If we're past all sections, check if we're at the very end of the last section
+            if let Some((_, start, end, _, _, _, _)) = section_data.last() {
+                if current_progress >= *start && current_progress <= *end {
+                    section_data.last()
+                } else {
+                    None
+                }
             } else {
                 None
             }
-        } else {
-            None
-        }
-    });
-    
+        });
+
     // Calculate section progress (0-100% within the active section)
-    let section_progress = if let Some((_, section_start, section_end, section_width, _, _, _)) = active_section {
-        if current_progress <= *section_start {
-            0.0
-        } else if current_progress >= *section_end {
-            100.0
+    let section_progress =
+        if let Some((_, section_start, section_end, section_width, _, _, _)) = active_section {
+            if current_progress <= *section_start {
+                0.0
+            } else if current_progress >= *section_end {
+                100.0
+            } else {
+                let progress_in_section = current_progress - section_start;
+                (progress_in_section / section_width) * 100.0
+            }
         } else {
-            let progress_in_section = current_progress - section_start;
-            (progress_in_section / section_width) * 100.0
-        }
-    } else {
-        0.0
-    };
-    
-    let active_color = active_section.map(|(_, _, _, _, color, _, _)| color.clone()).unwrap_or_else(|| "rgb(100, 100, 100)".to_string());
-    
+            0.0
+        };
+
+    let active_color = active_section
+        .map(|(_, _, _, _, color, _, _)| color.clone())
+        .unwrap_or_else(|| "rgb(100, 100, 100)".to_string());
+
     // Helper function to check if two markers overlap (assuming ~4rem label width with larger text)
     // Labels are centered, so they overlap if distance < ~2rem (4rem / 2)
     // At 100% width, 2rem ≈ 2% of typical container width
-    let check_overlap = |pos1: f64, pos2: f64| -> bool {
-        (pos1 - pos2).abs() < 2.0
-    };
-    
+    let check_overlap = |pos1: f64, pos2: f64| -> bool { (pos1 - pos2).abs() < 2.0 };
+
     // Calculate line and card positions - lines end at a fixed position, cards positioned to start there
     // Lines should go FROM bottom of container UP TO a fixed end point
     // Then cards are positioned so their bottom aligns with that end point
     let card_size = "sm"; // Song progress bar uses small cards
     let card_height_rem = match card_size {
-        "xs" => 2.5,  // vertical fraction, smaller
-        "sm" => 3.5,  // vertical fraction with text-xs + spacing + padding
-        "md" => 4.0,  // vertical fraction, larger
-        "lg" => 5.0,  // vertical fraction, largest
+        "xs" => 2.5, // vertical fraction, smaller
+        "sm" => 3.5, // vertical fraction with text-xs + spacing + padding
+        "md" => 4.0, // vertical fraction, larger
+        "lg" => 5.0, // vertical fraction, largest
         _ => 3.5,
     };
-    
+
     // Fixed line end position (where cards should start) - adjust this to control line length
     // Making it slightly lower (-0.75rem) so cards sit better on the lines
     let line_end_rem = -0.75; // Line ends at -0.75rem from container top
     // Container is h-20 (5rem), so line height = 5rem - (-0.75rem) = 5.75rem
     let line_height = format!("calc(5rem + {}rem)", -line_end_rem); // 5rem + 0.75rem = 5.75rem
-    
+
     // Card top position = line_end - card_height (so card bottom aligns with line end)
     // line_end is -0.75rem, card_height is 3.5rem, so card top = -0.75 - 3.5 = -4.25rem
     let card_top_offset_rem = line_end_rem - card_height_rem; // -0.75 - 3.5 = -4.25
     let card_top_offset_str = format!("{}rem", card_top_offset_rem); // "-4.25rem"
-    
+
     // Pre-calculate positions for time signature markers (all in same row, no staggering)
     // Only include markers that should show cards (filter out show_line_only markers)
     let time_sig_with_positions: Vec<_> = {
-        tempo_markers.iter()
+        tempo_markers
+            .iter()
             .enumerate()
             .filter(|(_, m)| m.is_time_sig && !m.show_line_only)
-            .map(|(orig_idx, marker)| {
-                (orig_idx, marker, card_top_offset_str.clone())
-            })
+            .map(|(orig_idx, marker)| (orig_idx, marker, card_top_offset_str.clone()))
             .collect()
     };
-    
+
     // Collect filtered time signature markers (show_line_only: true) for small lines at top of progress bar
-    let filtered_time_sig_markers: Vec<_> = tempo_markers.iter()
+    let filtered_time_sig_markers: Vec<_> = tempo_markers
+        .iter()
         .enumerate()
         .filter(|(_, m)| m.is_time_sig && m.show_line_only)
         .collect();
-    
+
     let tempo_with_positions: Vec<_> = {
-        let tempo_markers_list: Vec<_> = tempo_markers.iter()
+        let tempo_markers_list: Vec<_> = tempo_markers
+            .iter()
             .enumerate()
             .filter(|(_, m)| m.is_tempo)
             .collect();
-        
+
         let mut result = Vec::new();
         for (idx, (orig_idx, marker)) in tempo_markers_list.iter().enumerate() {
             // Check if this marker overlaps with previous ones
@@ -309,17 +332,17 @@ pub fn SegmentedProgressBar(
             } else {
                 false
             };
-            
+
             let bottom_offset = if needs_stagger && idx % 2 == 1 {
-                "0.75rem"   // Lower lane for odd indices when overlapping
+                "0.75rem" // Lower lane for odd indices when overlapping
             } else {
-                "0.5rem"    // Default higher lane (closer to progress bar)
+                "0.5rem" // Default higher lane (closer to progress bar)
             };
             result.push((*orig_idx, *marker, bottom_offset));
         }
         result
     };
-    
+
     rsx! {
         div {
             class: "relative flex flex-col items-center justify-center h-20 w-full",
@@ -407,10 +430,10 @@ pub fn SegmentedProgressBar(
                 for (index, section_start, _section_end, section_width, section_color, _filled_percent, _section_name) in section_data.iter() {
                     div {
                         key: "{index}",
-                        class: if on_section_click.is_some() { 
-                            "absolute h-full z-0 cursor-pointer transition-all duration-200 hover:brightness-110 hover:ring-2 hover:ring-white hover:ring-opacity-50" 
-                        } else { 
-                            "absolute h-full z-0" 
+                        class: if on_section_click.is_some() {
+                            "absolute h-full z-0 cursor-pointer transition-all duration-200 hover:brightness-110 hover:ring-2 hover:ring-white hover:ring-opacity-50"
+                        } else {
+                            "absolute h-full z-0"
                         },
                         style: format!(
                             "left: {}%; width: {}%;",
@@ -503,12 +526,9 @@ pub fn CompactProgressBar(
     bright_color: String,
     muted_color: String,
     is_selected: bool,
-    #[props(default = false)]
-    is_inactive: bool,
-    #[props(default = false)]
-    always_black_bg: bool,
-    #[props(default)]
-    on_click: Option<Callback<MouseEvent>>,
+    #[props(default = false)] is_inactive: bool,
+    #[props(default = false)] always_black_bg: bool,
+    #[props(default)] on_click: Option<Callback<MouseEvent>>,
 ) -> Element {
     rsx! {
         div {
@@ -564,7 +584,7 @@ pub fn CompactProgressBar(
 }
 
 /// Song progress bar component using segmented progress bar
-/// 
+///
 /// This is a wrapper around SegmentedProgressBar that handles song-specific logic.
 /// It accepts sections as props to keep it domain-agnostic.
 #[component]
@@ -572,10 +592,8 @@ pub fn SongProgressBar(
     progress: Signal<f64>,
     sections: Vec<ProgressSection>,
     on_section_click: Option<Callback<usize>>,
-    #[props(default)]
-    tempo_markers: Vec<TempoMarker>,
-    #[props(default)]
-    song_key: Option<String>,
+    #[props(default)] tempo_markers: Vec<TempoMarker>,
+    #[props(default)] song_key: Option<String>,
 ) -> Element {
     rsx! {
         div {

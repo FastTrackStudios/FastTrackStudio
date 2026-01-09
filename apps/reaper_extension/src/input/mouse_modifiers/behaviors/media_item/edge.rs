@@ -1,6 +1,6 @@
 //! Media Item edge behaviors
 
-use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorId, BehaviorDisplay};
+use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorDisplay, BehaviorId};
 
 /// Media Item edge left drag behaviors
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -64,7 +64,7 @@ impl BehaviorId for MediaItemEdgeLeftDragBehavior {
             id => MediaItemEdgeLeftDragBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemEdgeLeftDragBehavior::NoAction => 0,
@@ -146,7 +146,7 @@ impl BehaviorId for MediaItemEdgeDoubleClickBehavior {
             id => MediaItemEdgeDoubleClickBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemEdgeDoubleClickBehavior::NoAction => 0,
@@ -165,4 +165,3 @@ impl BehaviorDisplay for MediaItemEdgeDoubleClickBehavior {
         }
     }
 }
-

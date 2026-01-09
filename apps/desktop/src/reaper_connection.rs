@@ -5,10 +5,10 @@
 
 use anyhow::Result;
 use iroh::{Endpoint, EndpointId};
-use irpc::{channel::mpsc, Client, Request};
+use irpc::{Client, Request, channel::mpsc};
 use irpc_iroh::client;
 use peer_2_peer::{
-    iroh_connection::{create_reaper_client, discover_reaper_endpoint, REAPER_ALPN},
+    iroh_connection::{REAPER_ALPN, create_reaper_client, discover_reaper_endpoint},
     reaper_api::{ClientRequest, Connect, ReaperProtocol, ReaperStateUpdate, TransportCommand},
 };
 use std::sync::Arc;
@@ -206,13 +206,13 @@ impl ReaperConnection {
                 match tokio::time::timeout(connection_timeout, request.write(msg)).await {
                     Ok(Ok((tx, rx))) => (tx.into(), rx.into()),
                     Ok(Err(e)) => {
-                        return Err(anyhow::anyhow!("Failed to write connection message: {}", e))
+                        return Err(anyhow::anyhow!("Failed to write connection message: {}", e));
                     }
                     Err(_) => {
                         return Err(anyhow::anyhow!(
                             "Timeout writing connection message after {:?}",
                             connection_timeout
-                        ))
+                        ));
                     }
                 }
             }
@@ -223,7 +223,10 @@ impl ReaperConnection {
                 return Err(anyhow::anyhow!("Connection request failed: {}", e));
             }
             Err(_) => {
-                return Err(anyhow::anyhow!("Connection timeout after {:?} - REAPER extension may not be running or network issue", connection_timeout));
+                return Err(anyhow::anyhow!(
+                    "Connection timeout after {:?} - REAPER extension may not be running or network issue",
+                    connection_timeout
+                ));
             }
         };
 
@@ -244,7 +247,7 @@ impl ReaperConnection {
             info!("[DESKTOP] Starting state update receive loop");
             let mut update_count = 0u64;
             let health_check_interval = tokio::time::Duration::from_millis(33); // ~30Hz for checking
-                                                                                // Connection timeout: 1 second - should receive data at 30Hz so this is reasonable
+            // Connection timeout: 1 second - should receive data at 30Hz so this is reasonable
             let connection_timeout = tokio::time::Duration::from_secs(1);
 
             // Shared last received time for health checking

@@ -21,7 +21,9 @@ pub use duration::{ChordRhythm, LilySyntax, PushPullAmount};
 pub use error::{ChordParseError, ChordParseErrors};
 pub use extensions::{ExtensionQuality, Extensions};
 pub use family::ChordFamily;
-pub use midi::{detect_chords_from_midi_notes, midi_pitch_to_note_name, DetectedChord, MidiNote, MidiNoteName};
+pub use midi::{
+    DetectedChord, MidiNote, MidiNoteName, detect_chords_from_midi_notes, midi_pitch_to_note_name,
+};
 pub use quality::{ChordQuality, SuspendedType};
-pub use root::{parse_root, RootParseResult};
-pub use semitone_sequence::{from_semitones, quality_from_semitones, SemitoneSequenceError};
+pub use root::{RootParseResult, parse_root};
+pub use semitone_sequence::{SemitoneSequenceError, from_semitones, quality_from_semitones};

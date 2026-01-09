@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::primitives::{RppBlock, BlockType, Token};
-use crate::types::item::Item;
+use crate::primitives::{BlockType, RppBlock, Token};
 use crate::types::envelope::Envelope;
+use crate::types::item::Item;
 
 /// Automation mode for tracks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,7 +162,9 @@ impl fmt::Display for RecordMode {
             RecordMode::MidiReplace => write!(f, "MIDI Replace"),
             RecordMode::MidiTouchReplace => write!(f, "MIDI Touch Replace"),
             RecordMode::OutputMultichannel => write!(f, "Output (Multichannel)"),
-            RecordMode::OutputMultichannelLatencyComp => write!(f, "Output (Multichannel, Latency Comp)"),
+            RecordMode::OutputMultichannelLatencyComp => {
+                write!(f, "Output (Multichannel, Latency Comp)")
+            }
             RecordMode::Unknown(val) => write!(f, "Unknown({})", val),
         }
     }
@@ -235,17 +237,17 @@ impl fmt::Display for FreeMode {
 /// Volume and pan settings for tracks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VolPanSettings {
-    pub volume: f64,        // field 1 - track volume
-    pub pan: f64,           // field 2 - track pan
-    pub pan_law: f64,       // field 3 - track pan law
+    pub volume: f64,  // field 1 - track volume
+    pub pan: f64,     // field 2 - track pan
+    pub pan_law: f64, // field 3 - track pan law
 }
 
 /// Mute and solo settings for tracks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MuteSoloSettings {
-    pub mute: bool,         // field 1 - mute
+    pub mute: bool,           // field 1 - mute
     pub solo: TrackSoloState, // field 2 - solo state
-    pub solo_defeat: bool,  // field 3 - solo defeat
+    pub solo_defeat: bool,    // field 3 - solo defeat
 }
 
 /// Folder settings for tracks
@@ -258,56 +260,56 @@ pub struct FolderSettings {
 /// Bus compact settings for tracks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BusCompactSettings {
-    pub arrange_collapse: i32,     // field 1 - collapse state in Arrange
-    pub mixer_collapse: i32,       // field 2 - collapse state in Mixer
-    pub wiring_collapse: i32,      // field 3 - collapse state in track wiring
-    pub wiring_x: i32,             // field 4 - track wiring routing window x position
-    pub wiring_y: i32,             // field 5 - track wiring routing window y position
+    pub arrange_collapse: i32, // field 1 - collapse state in Arrange
+    pub mixer_collapse: i32,   // field 2 - collapse state in Mixer
+    pub wiring_collapse: i32,  // field 3 - collapse state in track wiring
+    pub wiring_x: i32,         // field 4 - track wiring routing window x position
+    pub wiring_y: i32,         // field 5 - track wiring routing window y position
 }
 
 /// Show in mixer settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShowInMixerSettings {
-    pub show_in_mixer: bool,       // field 1 - show in mixer
-    pub unknown_field_2: f64,      // field 2 - unknown
-    pub unknown_field_3: f64,      // field 3 - unknown
-    pub show_in_track_list: bool,  // field 4 - show in track list
-    pub unknown_field_5: f64,      // field 5 - unknown
-    pub unknown_field_6: i32,      // field 6 - unknown
-    pub unknown_field_7: i32,      // field 7 - unknown
-    pub unknown_field_8: i32,      // field 8 - unknown
+    pub show_in_mixer: bool,      // field 1 - show in mixer
+    pub unknown_field_2: f64,     // field 2 - unknown
+    pub unknown_field_3: f64,     // field 3 - unknown
+    pub show_in_track_list: bool, // field 4 - show in track list
+    pub unknown_field_5: f64,     // field 5 - unknown
+    pub unknown_field_6: i32,     // field 6 - unknown
+    pub unknown_field_7: i32,     // field 7 - unknown
+    pub unknown_field_8: i32,     // field 8 - unknown
 }
 
 /// Input quantize settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InputQuantizeSettings {
-    pub quantize_midi: bool,       // field 1 - quantize midi
-    pub quantize_to_pos: i32,      // field 2 - quantize to pos (-1=prev, 0=nearest, 1=next)
-    pub quantize_note_offs: bool,  // field 3 - quantize note-offs
-    pub quantize_to: f64,          // field 4 - quantize to (fraction of beat)
-    pub quantize_strength: i32,    // field 5 - quantize strength (%)
-    pub swing_strength: i32,       // field 6 - swing strength (%)
-    pub quantize_range_min: i32,   // field 7 - quantize range min (%)
-    pub quantize_range_max: i32,   // field 8 - quantize range max (%)
+    pub quantize_midi: bool,      // field 1 - quantize midi
+    pub quantize_to_pos: i32,     // field 2 - quantize to pos (-1=prev, 0=nearest, 1=next)
+    pub quantize_note_offs: bool, // field 3 - quantize note-offs
+    pub quantize_to: f64,         // field 4 - quantize to (fraction of beat)
+    pub quantize_strength: i32,   // field 5 - quantize strength (%)
+    pub swing_strength: i32,      // field 6 - swing strength (%)
+    pub quantize_range_min: i32,  // field 7 - quantize range min (%)
+    pub quantize_range_max: i32,  // field 8 - quantize range max (%)
 }
 
 /// Record settings for tracks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordSettings {
-    pub armed: bool,               // field 1 - armed
-    pub input: i32,                // field 2 - input (device + channel coded)
-    pub monitor: MonitorMode,      // field 3 - monitor mode
-    pub record_mode: RecordMode,   // field 4 - record mode
-    pub monitor_track_media: bool, // field 5 - monitor track media while recording
+    pub armed: bool,                // field 1 - armed
+    pub input: i32,                 // field 2 - input (device + channel coded)
+    pub monitor: MonitorMode,       // field 3 - monitor mode
+    pub record_mode: RecordMode,    // field 4 - record mode
+    pub monitor_track_media: bool,  // field 5 - monitor track media while recording
     pub preserve_pdc_delayed: bool, // field 6 - preserve PDC delayed monitoring
-    pub record_path: i32,          // field 7 - record path (0=primary, 1=secondary, 2=both)
+    pub record_path: i32,           // field 7 - record path (0=primary, 1=secondary, 2=both)
 }
 
 /// Track height settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrackHeightSettings {
-    pub height: i32,               // field 1 - height in pixels
-    pub folder_override: bool,     // field 2 - folder override (collapsed)
+    pub height: i32,           // field 1 - height in pixels
+    pub folder_override: bool, // field 2 - folder override (collapsed)
 }
 
 /// Fixed lanes settings (REAPER 7+)
@@ -323,150 +325,150 @@ pub struct FixedLanesSettings {
 /// Lane solo settings (REAPER 7+)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LaneSoloSettings {
-    pub playing_lanes: i32,        // field 1 - bitfield of playing lanes
-    pub unknown_field_2: i32,      // field 2 - unknown
-    pub unknown_field_3: i32,      // field 3 - unknown
-    pub unknown_field_4: i32,      // field 4 - unknown
-    pub unknown_field_5: i32,      // field 5 - unknown
-    pub unknown_field_6: i32,      // field 6 - unknown
-    pub unknown_field_7: i32,      // field 7 - unknown
-    pub unknown_field_8: i32,      // field 8 - unknown
+    pub playing_lanes: i32,   // field 1 - bitfield of playing lanes
+    pub unknown_field_2: i32, // field 2 - unknown
+    pub unknown_field_3: i32, // field 3 - unknown
+    pub unknown_field_4: i32, // field 4 - unknown
+    pub unknown_field_5: i32, // field 5 - unknown
+    pub unknown_field_6: i32, // field 6 - unknown
+    pub unknown_field_7: i32, // field 7 - unknown
+    pub unknown_field_8: i32, // field 8 - unknown
 }
 
 /// Lane record settings (REAPER 7+)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LaneRecordSettings {
-    pub record_enabled_lane: i32,  // field 1 - 0-based index of record enabled lane
+    pub record_enabled_lane: i32, // field 1 - 0-based index of record enabled lane
     pub comping_enabled_lane: i32, // field 2 - 0-based index of comping enabled lane
-    pub last_comping_lane: i32,    // field 3 - 0-based index of last comping enabled lane
+    pub last_comping_lane: i32,   // field 3 - 0-based index of last comping enabled lane
 }
 
 /// Lane name settings (REAPER 7+)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LaneNameSettings {
-    pub lane_count: i32,           // field 1 - number of lanes
-    pub lane_names: Vec<String>,   // field 2+ - lane names
+    pub lane_count: i32,         // field 1 - number of lanes
+    pub lane_names: Vec<String>, // field 2+ - lane names
 }
 
 /// MIDI hardware output settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MidiOutputSettings {
-    pub device: i32,               // device index (floor(val / 32))
-    pub channel: i32,              // channel number (val & 0x1F)
+    pub device: i32,  // device index (floor(val / 32))
+    pub channel: i32, // channel number (val & 0x1F)
 }
 
 /// Master/parent send settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MasterSendSettings {
-    pub enabled: bool,             // field 1 - enabled
-    pub unknown_field_2: i32,      // field 2 - unknown
+    pub enabled: bool,        // field 1 - enabled
+    pub unknown_field_2: i32, // field 2 - unknown
 }
 
 /// Hardware output settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HardwareOutputSettings {
-    pub output_index: i32,         // field 1 - output index
-    pub send_mode: i32,            // field 2 - send mode
-    pub volume: f64,               // field 3 - volume
-    pub pan: f64,                  // field 4 - pan
-    pub mute: bool,                // field 5 - mute
-    pub invert_polarity: bool,     // field 6 - invert polarity
-    pub send_source_channel: i32,  // field 7 - send source channel
-    pub unknown_field_8: i32,      // field 8 - unknown
-    pub automation_mode: i32,      // field 9 - automation mode
+    pub output_index: i32,        // field 1 - output index
+    pub send_mode: i32,           // field 2 - send mode
+    pub volume: f64,              // field 3 - volume
+    pub pan: f64,                 // field 4 - pan
+    pub mute: bool,               // field 5 - mute
+    pub invert_polarity: bool,    // field 6 - invert polarity
+    pub send_source_channel: i32, // field 7 - send source channel
+    pub unknown_field_8: i32,     // field 8 - unknown
+    pub automation_mode: i32,     // field 9 - automation mode
 }
 
 /// A REAPER track
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Track {
     // Basic track properties
-    pub name: String,                           // NAME - Track name
-    pub locked: bool,                           // LOCK - Track controls are locked
-    pub peak_color: Option<i32>,                // PEAKCOL - Peak colour
-    pub beat: Option<i32>,                      // BEAT - Track timebase (-1 = project default)
-    pub automation_mode: AutomationMode,        // AUTOMODE - Automation mode
-    
+    pub name: String,                    // NAME - Track name
+    pub locked: bool,                    // LOCK - Track controls are locked
+    pub peak_color: Option<i32>,         // PEAKCOL - Peak colour
+    pub beat: Option<i32>,               // BEAT - Track timebase (-1 = project default)
+    pub automation_mode: AutomationMode, // AUTOMODE - Automation mode
+
     // Volume and pan
-    pub volpan: Option<VolPanSettings>,         // VOLPAN - Volume/Pan settings
-    
+    pub volpan: Option<VolPanSettings>, // VOLPAN - Volume/Pan settings
+
     // Mute and solo
-    pub mutesolo: Option<MuteSoloSettings>,     // MUTESOLO - Mute/solo settings
-    
+    pub mutesolo: Option<MuteSoloSettings>, // MUTESOLO - Mute/solo settings
+
     // Phase and folder settings
-    pub invert_phase: bool,                     // IPHASE - Invert phase
-    pub folder: Option<FolderSettings>,         // ISBUS - Folder settings
+    pub invert_phase: bool,                      // IPHASE - Invert phase
+    pub folder: Option<FolderSettings>,          // ISBUS - Folder settings
     pub bus_compact: Option<BusCompactSettings>, // BUSCOMP - Collapse folder settings
-    
+
     // Show in mixer
     pub show_in_mixer: Option<ShowInMixerSettings>, // SHOWINMIX - Show in mixer settings
-    
+
     // Free item positioning
-    pub free_mode: Option<FreeMode>,            // FREEMODE - Free item positioning mode
-    
+    pub free_mode: Option<FreeMode>, // FREEMODE - Free item positioning mode
+
     // Fixed lanes (REAPER 7+)
     pub fixed_lanes: Option<FixedLanesSettings>, // FIXEDLANES - Fixed lanes settings
-    pub lane_solo: Option<LaneSoloSettings>,    // LANESOLO - Lane solo settings
+    pub lane_solo: Option<LaneSoloSettings>,     // LANESOLO - Lane solo settings
     pub lane_record: Option<LaneRecordSettings>, // LANEREC - Lane record settings
-    pub lane_names: Option<LaneNameSettings>,   // LANENAME - Lane names
-    
+    pub lane_names: Option<LaneNameSettings>,    // LANENAME - Lane names
+
     // Record settings
-    pub record: Option<RecordSettings>,         // REC - Record settings
-    
+    pub record: Option<RecordSettings>, // REC - Record settings
+
     // Track height
     pub track_height: Option<TrackHeightSettings>, // TRACKHEIGHT - Height in TCP
-    
+
     // Input quantize
     pub input_quantize: Option<InputQuantizeSettings>, // INQ - Input quantize settings
-    
+
     // Channel count
-    pub channel_count: u32,                     // NCHAN - Number of track channels
-    
+    pub channel_count: u32, // NCHAN - Number of track channels
+
     // Recording format
-    pub rec_cfg: Option<String>,                // RECCFG - Recording format data
-    
+    pub rec_cfg: Option<String>, // RECCFG - Recording format data
+
     // MIDI color map
-    pub midi_color_map_fn: Option<String>,      // MIDICOLORMAPFN - Path to note color map file
-    
+    pub midi_color_map_fn: Option<String>, // MIDICOLORMAPFN - Path to note color map file
+
     // FX state
-    pub fx_enabled: bool,                       // FX - FX state (0=bypassed, 1=active)
-    
+    pub fx_enabled: bool, // FX - FX state (0=bypassed, 1=active)
+
     // Track ID
-    pub track_id: Option<String>,               // TRACKID - REAPER track id
-    
+    pub track_id: Option<String>, // TRACKID - REAPER track id
+
     // Performance options
-    pub perf: Option<i32>,                      // PERF - Performance options (bitwise)
-    
+    pub perf: Option<i32>, // PERF - Performance options (bitwise)
+
     // Layouts
-    pub layouts: Option<(String, String)>,      // LAYOUTS - Active TCP and MCP layouts
-    
+    pub layouts: Option<(String, String)>, // LAYOUTS - Active TCP and MCP layouts
+
     // Extension data
-    pub extension_data: Vec<(String, String)>,  // EXT - Extension-specific persistent data
-    
+    pub extension_data: Vec<(String, String)>, // EXT - Extension-specific persistent data
+
     // Receives
-    pub receives: Vec<ReceiveSettings>,         // AUXRECV - Track receives
-    
+    pub receives: Vec<ReceiveSettings>, // AUXRECV - Track receives
+
     // MIDI output
     pub midi_output: Option<MidiOutputSettings>, // MIDIOUT - MIDI hardware output settings
-    
+
     // Custom note order
-    pub custom_note_order: Option<Vec<i32>>,    // CUSTOM_NOTE_ORDER - Custom note order
-    
+    pub custom_note_order: Option<Vec<i32>>, // CUSTOM_NOTE_ORDER - Custom note order
+
     // MIDI note names
-    pub midi_note_names: Vec<MidiNoteName>,     // MIDINOTENAMES - Custom MIDI note names
-    
+    pub midi_note_names: Vec<MidiNoteName>, // MIDINOTENAMES - Custom MIDI note names
+
     // Master send
     pub master_send: Option<MasterSendSettings>, // MAINSEND - Master/parent send
-    
+
     // Hardware outputs
     pub hardware_outputs: Vec<HardwareOutputSettings>, // HWOUT - Hardware send data
-    
+
     // Nested content
-    pub items: Vec<Item>,                       // ITEM blocks
-    pub envelopes: Vec<Envelope>,               // Envelope blocks
-    pub fx_chain: Option<FxChain>,              // FXCHAIN - FX section
-    pub freeze: Option<FreezeData>,             // FREEZE - Freeze data
-    pub input_fx: Option<FxChain>,              // FXCHAIN_REC - Input FX section
-    
+    pub items: Vec<Item>,           // ITEM blocks
+    pub envelopes: Vec<Envelope>,   // Envelope blocks
+    pub fx_chain: Option<FxChain>,  // FXCHAIN - FX section
+    pub freeze: Option<FreezeData>, // FREEZE - Freeze data
+    pub input_fx: Option<FxChain>,  // FXCHAIN_REC - Input FX section
+
     // Raw content for preservation
     pub raw_content: String,
 }
@@ -474,28 +476,28 @@ pub struct Track {
 /// Receive settings for tracks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReceiveSettings {
-    pub source_track_index: i32,    // field 1 - source track index (zero based)
-    pub mode: i32,                  // field 2 - mode (0=Post Fader, 1=Pre FX, 3=Pre Fader)
-    pub volume: f64,                // field 3 - volume
-    pub pan: f64,                   // field 4 - pan
-    pub mute: bool,                 // field 5 - mute
-    pub mono_sum: bool,             // field 6 - mono sum
-    pub invert_polarity: bool,      // field 7 - invert polarity
+    pub source_track_index: i32, // field 1 - source track index (zero based)
+    pub mode: i32,               // field 2 - mode (0=Post Fader, 1=Pre FX, 3=Pre Fader)
+    pub volume: f64,             // field 3 - volume
+    pub pan: f64,                // field 4 - pan
+    pub mute: bool,              // field 5 - mute
+    pub mono_sum: bool,          // field 6 - mono sum
+    pub invert_polarity: bool,   // field 7 - invert polarity
     pub source_audio_channels: i32, // field 8 - source audio channels
-    pub dest_audio_channels: i32,   // field 9 - dest audio channels
-    pub pan_law: f64,               // field 10 - pan law
-    pub midi_channels: i32,         // field 11 - midi channels
-    pub automation_mode: i32,       // field 12 - automation mode (-1 = use track mode)
+    pub dest_audio_channels: i32, // field 9 - dest audio channels
+    pub pan_law: f64,            // field 10 - pan law
+    pub midi_channels: i32,      // field 11 - midi channels
+    pub automation_mode: i32,    // field 12 - automation mode (-1 = use track mode)
 }
 
 /// MIDI note name
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MidiNoteName {
-    pub channel: i32,               // field 1 - MIDI channel number (-1 = Omni)
-    pub note_number: i32,           // field 2 - 0-based note number
-    pub note_name: String,          // field 3 - note name
-    pub unknown_field_4: i32,       // field 4 - unknown
-    pub note_number_2: i32,         // field 5 - note number
+    pub channel: i32,         // field 1 - MIDI channel number (-1 = Omni)
+    pub note_number: i32,     // field 2 - 0-based note number
+    pub note_name: String,    // field 3 - note name
+    pub unknown_field_4: i32, // field 4 - unknown
+    pub note_number_2: i32,   // field 5 - note number
 }
 
 /// FX Chain (placeholder - will be implemented separately)
@@ -519,7 +521,7 @@ impl Track {
             _ => Err(format!("Expected float or integer, got {:?}", token)),
         }
     }
-    
+
     /// Parse an integer from a token
     fn parse_int(token: &Token) -> Result<i32, String> {
         match token {
@@ -528,16 +530,19 @@ impl Track {
             _ => Err(format!("Expected integer or float, got {:?}", token)),
         }
     }
-    
+
     /// Parse a boolean from a token
     fn parse_bool(token: &Token) -> Result<bool, String> {
         match token {
             Token::Integer(i) => Ok(*i != 0),
             Token::Float(f) => Ok(*f != 0.0),
-            _ => Err(format!("Expected integer or float for boolean, got {:?}", token)),
+            _ => Err(format!(
+                "Expected integer or float for boolean, got {:?}",
+                token
+            )),
         }
     }
-    
+
     /// Parse a string from a token
     fn parse_string(token: &Token) -> Result<String, String> {
         match token {
@@ -598,7 +603,7 @@ impl Track {
         // Convert block back to string for parsing
         let mut content = String::new();
         content.push_str(&format!("<{}", block.name));
-        
+
         // Add parameters if any
         if !block.params.is_empty() {
             for param in &block.params {
@@ -606,12 +611,16 @@ impl Track {
             }
         }
         content.push('\n');
-        
+
         // Add content lines
         for child in &block.children {
             match child {
                 crate::primitives::RppBlockContent::Content(tokens) => {
-                    let line = tokens.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(" ");
+                    let line = tokens
+                        .iter()
+                        .map(|t| t.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ");
                     content.push_str(&format!("  {}\n", line));
                 }
                 crate::primitives::RppBlockContent::Block(nested_block) => {
@@ -619,17 +628,15 @@ impl Track {
                 }
             }
         }
-        
+
         content.push('>');
         track.raw_content = content.clone();
-        
+
         Self::from_rpp_block(&content)
     }
 
     /// Create a Track from a raw RPP track block string
     pub fn from_rpp_block(block_content: &str) -> Result<Self, String> {
-        
-        
         let mut track = Track {
             name: String::new(),
             locked: false,
@@ -671,25 +678,25 @@ impl Track {
             input_fx: None,
             raw_content: block_content.to_string(),
         };
-        
+
         let lines: Vec<&str> = block_content.lines().collect();
         let mut i = 0;
-        
+
         while i < lines.len() {
             let line = lines[i].trim();
-            
+
             // Skip empty lines and comments
             if line.is_empty() || line.starts_with("//") {
                 i += 1;
                 continue;
             }
-            
+
             // Skip the opening <TRACK line
             if line.starts_with("<TRACK") {
                 i += 1;
                 continue;
             }
-            
+
             // Handle nested blocks
             if line.starts_with('<') {
                 if line.starts_with("<ITEM") {
@@ -697,7 +704,7 @@ impl Track {
                     let item_start = i;
                     i += 1;
                     let mut depth = 1; // Track nesting depth
-                    
+
                     while i < lines.len() && depth > 0 {
                         let current_line = lines[i].trim();
                         if current_line.starts_with('<') {
@@ -707,22 +714,25 @@ impl Track {
                         }
                         i += 1;
                     }
-                    
+
                     // Extract item block content
                     let item_lines = &lines[item_start..i];
                     let item_content = item_lines.join("\n");
-                    
+
                     // Parse the item
                     if let Ok(item) = Item::from_rpp_block(&item_content) {
                         track.items.push(item);
                     }
                     continue;
-                } else if line.starts_with("<VOLENV") || line.starts_with("<PANENV") || line.starts_with("<PARMENV") {
+                } else if line.starts_with("<VOLENV")
+                    || line.starts_with("<PANENV")
+                    || line.starts_with("<PARMENV")
+                {
                     // Parse envelope block with proper nested block handling
                     let env_start = i;
                     i += 1;
                     let mut depth = 1; // Track nesting depth
-                    
+
                     while i < lines.len() && depth > 0 {
                         let current_line = lines[i].trim();
                         if current_line.starts_with('<') {
@@ -732,11 +742,11 @@ impl Track {
                         }
                         i += 1;
                     }
-                    
+
                     // Extract envelope block content
                     let env_lines = &lines[env_start..i];
                     let env_content = env_lines.join("\n");
-                    
+
                     // Parse the envelope
                     if let Ok((_, block)) = crate::primitives::block::parse_block(&env_content) {
                         if let Ok(envelope) = Envelope::from_block(&block) {
@@ -749,7 +759,7 @@ impl Track {
                     let fx_start = i;
                     i += 1;
                     let mut depth = 1; // Track nesting depth
-                    
+
                     while i < lines.len() && depth > 0 {
                         let current_line = lines[i].trim();
                         if current_line.starts_with('<') {
@@ -759,11 +769,11 @@ impl Track {
                         }
                         i += 1;
                     }
-                    
+
                     // Extract FX chain block content
                     let fx_lines = &lines[fx_start..i];
                     let fx_content = fx_lines.join("\n");
-                    
+
                     // Parse the FX chain (placeholder for now)
                     track.fx_chain = Some(FxChain {
                         raw_content: fx_content,
@@ -773,7 +783,7 @@ impl Track {
                     // Skip other nested blocks with proper depth handling
                     i += 1;
                     let mut depth = 1; // Track nesting depth
-                    
+
                     while i < lines.len() && depth > 0 {
                         let current_line = lines[i].trim();
                         if current_line.starts_with('<') {
@@ -786,13 +796,13 @@ impl Track {
                     continue;
                 }
             }
-            
+
             // Skip block end markers
             if line == ">" {
                 i += 1;
                 continue;
             }
-            
+
             // Parse token line
             let tokens = match crate::primitives::token::parse_token_line(line) {
                 Ok((_, tokens)) => tokens,
@@ -801,12 +811,12 @@ impl Track {
                     continue;
                 }
             };
-            
+
             if tokens.is_empty() {
                 i += 1;
                 continue;
             }
-            
+
             let identifier = match &tokens[0] {
                 Token::Identifier(id) => id,
                 _ => {
@@ -814,9 +824,9 @@ impl Track {
                     continue;
                 }
             };
-            
+
             match identifier.as_str() {
-                        "NAME" => {
+                "NAME" => {
                     if tokens.len() > 1 {
                         let new_name = Self::parse_string(&tokens[1])?;
                         if track.name.is_empty() {
@@ -1012,14 +1022,14 @@ impl Track {
                             unknown_field_8: Self::parse_int(&tokens[8])?,
                             automation_mode: Self::parse_int(&tokens[9])?,
                         });
-                            }
-                        }
-                        "NCHAN" => {
+                    }
+                }
+                "NCHAN" => {
                     if tokens.len() > 1 {
                         track.channel_count = Self::parse_int(&tokens[1])? as u32;
-                            }
-                        }
-                        "FX" => {
+                    }
+                }
+                "FX" => {
                     if tokens.len() > 1 {
                         track.fx_enabled = Self::parse_bool(&tokens[1])?;
                     }
@@ -1027,13 +1037,13 @@ impl Track {
                 "TRACKID" => {
                     if tokens.len() > 1 {
                         track.track_id = Some(Self::parse_string(&tokens[1])?);
-                            }
-                        }
-                        _ => {
-                    // Ignore unknown parameters for now
-                        }
                     }
-            
+                }
+                _ => {
+                    // Ignore unknown parameters for now
+                }
+            }
+
             i += 1;
         }
 
@@ -1044,87 +1054,124 @@ impl Track {
 impl fmt::Display for Track {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Track: {}", self.name)?;
-        
+
         if self.locked {
             writeln!(f, "  Locked: true")?;
         }
-        
+
         if let Some(ref volpan) = self.volpan {
-            writeln!(f, "  VolPan: volume: {:.2}, pan: {:.2}, pan_law: {:.2}", 
-                     volpan.volume, volpan.pan, volpan.pan_law)?;
+            writeln!(
+                f,
+                "  VolPan: volume: {:.2}, pan: {:.2}, pan_law: {:.2}",
+                volpan.volume, volpan.pan, volpan.pan_law
+            )?;
         }
-        
+
         if let Some(ref mutesolo) = self.mutesolo {
-            writeln!(f, "  MuteSolo: mute: {}, solo: {}, solo_defeat: {}", 
-                     mutesolo.mute, mutesolo.solo, mutesolo.solo_defeat)?;
+            writeln!(
+                f,
+                "  MuteSolo: mute: {}, solo: {}, solo_defeat: {}",
+                mutesolo.mute, mutesolo.solo, mutesolo.solo_defeat
+            )?;
         }
-        
+
         writeln!(f, "  Automation Mode: {}", self.automation_mode)?;
         writeln!(f, "  Channels: {}", self.channel_count)?;
         writeln!(f, "  FX Enabled: {}", self.fx_enabled)?;
-        
+
         if let Some(ref id) = self.track_id {
             writeln!(f, "  Track ID: {}", id)?;
         }
-        
+
         if let Some(ref folder) = self.folder {
-            writeln!(f, "  Folder: {}, Indentation: {}", folder.folder_state, folder.indentation)?;
+            writeln!(
+                f,
+                "  Folder: {}, Indentation: {}",
+                folder.folder_state, folder.indentation
+            )?;
         }
-        
+
         if let Some(ref free_mode) = self.free_mode {
             writeln!(f, "  Free Mode: {}", free_mode)?;
         }
-        
+
         if let Some(ref record) = self.record {
-            writeln!(f, "  Record: armed: {}, mode: {}, monitor: {}", 
-                     record.armed, record.record_mode, record.monitor)?;
+            writeln!(
+                f,
+                "  Record: armed: {}, mode: {}, monitor: {}",
+                record.armed, record.record_mode, record.monitor
+            )?;
         }
-        
-        writeln!(f, "  Items: {}, Envelopes: {}, Receives: {}", 
-                 self.items.len(), self.envelopes.len(), self.receives.len())?;
-        
+
+        writeln!(
+            f,
+            "  Items: {}, Envelopes: {}, Receives: {}",
+            self.items.len(),
+            self.envelopes.len(),
+            self.receives.len()
+        )?;
+
         Ok(())
     }
 }
 
 impl fmt::Display for VolPanSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "volume: {:.2}, pan: {:.2}, pan_law: {:.2}", 
-               self.volume, self.pan, self.pan_law)
+        write!(
+            f,
+            "volume: {:.2}, pan: {:.2}, pan_law: {:.2}",
+            self.volume, self.pan, self.pan_law
+        )
     }
 }
 
 impl fmt::Display for MuteSoloSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "mute: {}, solo: {}, solo_defeat: {}", 
-               self.mute, self.solo, self.solo_defeat)
+        write!(
+            f,
+            "mute: {}, solo: {}, solo_defeat: {}",
+            self.mute, self.solo, self.solo_defeat
+        )
     }
 }
 
 impl fmt::Display for FolderSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "state: {}, indentation: {}", self.folder_state, self.indentation)
+        write!(
+            f,
+            "state: {}, indentation: {}",
+            self.folder_state, self.indentation
+        )
     }
 }
 
 impl fmt::Display for RecordSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "armed: {}, input: {}, mode: {}, monitor: {}", 
-               self.armed, self.input, self.record_mode, self.monitor)
+        write!(
+            f,
+            "armed: {}, input: {}, mode: {}, monitor: {}",
+            self.armed, self.input, self.record_mode, self.monitor
+        )
     }
 }
 
 impl fmt::Display for ReceiveSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "source: {}, mode: {}, volume: {:.2}, pan: {:.2}", 
-               self.source_track_index, self.mode, self.volume, self.pan)
+        write!(
+            f,
+            "source: {}, mode: {}, volume: {:.2}, pan: {:.2}",
+            self.source_track_index, self.mode, self.volume, self.pan
+        )
     }
 }
 
 impl fmt::Display for MidiNoteName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ch: {}, note: {}, name: \"{}\"", 
-               self.channel, self.note_number, self.note_name)
+        write!(
+            f,
+            "ch: {}, note: {}, name: \"{}\"",
+            self.channel, self.note_number, self.note_name
+        )
     }
 }
 
@@ -1145,7 +1192,7 @@ mod tests {
 >"#;
 
         let track = Track::from_rpp_block(track_content).expect("Failed to parse track");
-        
+
         assert_eq!(track.name, "Test Track");
         assert!(track.volpan.is_some());
         assert!(track.mutesolo.is_some());
@@ -1153,7 +1200,7 @@ mod tests {
         assert_eq!(track.channel_count, 2);
         assert!(track.fx_enabled);
         assert!(track.track_id.is_some());
-        
+
         println!("🎵 Parsed Simple Track:");
         println!("==========================================");
         println!("{}", track);
@@ -1557,7 +1604,7 @@ mod tests {
 >"#;
 
         let track = Track::from_rpp_block(track_content).expect("Failed to parse track");
-        
+
         assert_eq!(track.name, "");
         assert!(track.peak_color.is_some());
         assert!(track.beat.is_some());
@@ -1578,24 +1625,29 @@ mod tests {
         assert!(track.midi_output.is_some());
         assert!(track.master_send.is_some());
         assert!(track.fx_chain.is_some());
-        
+
         println!("🎵 Parsed Complex Track:");
         println!("==========================================");
         println!("Track name: '{}'", track.name);
         println!("Track has {} items", track.items.len());
         println!("Track has {} envelopes", track.envelopes.len());
         println!("Track has FX chain: {}", track.fx_chain.is_some());
-        
+
         // Print details about items
         for (i, item) in track.items.iter().enumerate() {
-            println!("  Item {}: {} ({} takes)", i + 1, item.name, item.takes.len());
+            println!(
+                "  Item {}: {} ({} takes)",
+                i + 1,
+                item.name,
+                item.takes.len()
+            );
         }
-        
+
         // Print details about envelopes
         for (i, envelope) in track.envelopes.iter().enumerate() {
             println!("  Envelope {}: {} points", i + 1, envelope.points.len());
         }
-        
+
         println!("{}", track);
     }
 
@@ -1632,7 +1684,10 @@ mod tests {
         assert_eq!(RecordMode::from(2), RecordMode::DisableMonitor);
         assert_eq!(RecordMode::from(4), RecordMode::OutputMidi);
         assert_eq!(RecordMode::from(7), RecordMode::MidiOverdub);
-        assert_eq!(RecordMode::from(11), RecordMode::OutputMultichannelLatencyComp);
+        assert_eq!(
+            RecordMode::from(11),
+            RecordMode::OutputMultichannelLatencyComp
+        );
         assert_eq!(RecordMode::from(99), RecordMode::Unknown(99));
     }
 

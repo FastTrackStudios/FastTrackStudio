@@ -1,5 +1,5 @@
-use dioxus::prelude::*;
 use crate::components::piano::MidiNote;
+use dioxus::prelude::*;
 use lumen_blocks::components::button::{Button, ButtonVariant};
 
 /// MIDI Editor component - unified grid with piano and editor in sync
@@ -7,39 +7,42 @@ use lumen_blocks::components::button::{Button, ButtonVariant};
 pub fn MidiEditor() -> Element {
     // Zoom level (1.0 = 100%, 2.0 = 200%, etc.)
     let mut zoom = use_signal(|| 1.0);
-    
+
     // Computed zoom percentage for display
     let zoom_percent = use_memo(move || (zoom() * 100.0) as u32);
-    
+
     // Selected/pressed keys
     let mut selected_keys = use_signal(|| Vec::<MidiNote>::new());
-    
+
     // Generate all 88 keys (A0 to C8)
     let keys = use_memo(move || {
-        let note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        let note_names = [
+            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+        ];
         let black_key_indices = [1, 3, 6, 8, 10]; // C#, D#, F#, G#, A#
-        
+
         let mut keys = Vec::new();
         let mut midi_note = 21; // A0
-        
+
         while midi_note <= 108 {
             let note_index = (midi_note % 12) as usize;
             let is_black = black_key_indices.contains(&note_index);
             let note_name_str = note_names[note_index];
             let octave = (midi_note / 12) - 1;
             let note_name = format!("{}{}", note_name_str, octave);
-            
+
             keys.push((midi_note, note_name, is_black));
             midi_note += 1;
         }
-        
+
         // Reverse to show lowest at top
         keys.reverse();
         keys
     });
-    
-    let pressed_keys_set: std::collections::HashSet<MidiNote> = selected_keys().iter().copied().collect();
-    
+
+    let pressed_keys_set: std::collections::HashSet<MidiNote> =
+        selected_keys().iter().copied().collect();
+
     rsx! {
         div {
             class: "flex-1 flex flex-col overflow-hidden bg-background",
@@ -74,7 +77,7 @@ pub fn MidiEditor() -> Element {
                     }
                 }
             }
-            
+
             // Unified grid - single scroll container
             div {
                 class: "flex-1 overflow-y-auto overflow-x-hidden",
@@ -149,7 +152,7 @@ pub fn MidiEditor() -> Element {
                                     }
                                 }
                             }
-                            
+
                             // MIDI editor content on the right
                             div {
                                 class: "flex-1 flex items-center px-4",
@@ -165,4 +168,3 @@ pub fn MidiEditor() -> Element {
         }
     }
 }
-

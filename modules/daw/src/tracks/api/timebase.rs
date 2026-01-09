@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Track timebase (BEAT) - how the track handles time
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum TrackTimebase {
     /// Use project default timebase (-1)
     #[default]
@@ -56,5 +55,3 @@ impl fmt::Display for TrackTimebase {
         }
     }
 }
-
-

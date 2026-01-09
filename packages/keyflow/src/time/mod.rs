@@ -5,8 +5,8 @@
 
 // Re-export DAW primitives
 pub use daw::primitives::{
-    Duration, MusicalDuration, MusicalPosition, Position, PPQDuration, PPQPosition, TimeDuration, TimePosition,
-    TimeSignature,
+    Duration, MusicalDuration, MusicalPosition, PPQDuration, PPQPosition, Position, TimeDuration,
+    TimePosition, TimeSignature,
 };
 pub use daw::transport::Tempo;
 
@@ -125,8 +125,10 @@ impl DurationTrait for MusicalDuration {
         let remaining_beats = total_beats - (measures as f64 * beats_per_measure);
         let beats = remaining_beats.floor() as i32;
         let subdivisions = ((remaining_beats - beats as f64) * 1000.0).round() as i32;
-        Box::new(MusicalDuration::try_new(measures, beats, subdivisions.clamp(0, 999))
-            .unwrap_or_else(|_| MusicalDuration::zero()))
+        Box::new(
+            MusicalDuration::try_new(measures, beats, subdivisions.clamp(0, 999))
+                .unwrap_or_else(|_| MusicalDuration::zero()),
+        )
     }
 
     fn clone_box(&self) -> Box<dyn DurationTrait> {
@@ -141,12 +143,13 @@ pub mod conversion {
     use super::*;
 
     /// Convert u32-based duration to DAW's MusicalDuration (i32-based)
-    pub fn u32_to_musical_duration(measures: u32, beats: u32, subdivisions: u32) -> MusicalDuration {
-        MusicalDuration::try_new(
-            measures as i32,
-            beats as i32,
-            subdivisions as i32,
-        ).unwrap_or_else(|_| MusicalDuration::zero())
+    pub fn u32_to_musical_duration(
+        measures: u32,
+        beats: u32,
+        subdivisions: u32,
+    ) -> MusicalDuration {
+        MusicalDuration::try_new(measures as i32, beats as i32, subdivisions as i32)
+            .unwrap_or_else(|_| MusicalDuration::zero())
     }
 
     /// Convert DAW's MusicalDuration (i32-based) to u32 values

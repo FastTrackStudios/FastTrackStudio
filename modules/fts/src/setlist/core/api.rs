@@ -6,10 +6,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Setlist, Song, Section};
+use super::{Section, Setlist, Song};
 
 /// API wrapper for Setlist with computed/derived fields
-/// 
+///
 /// This struct wraps a `Setlist` and provides computed fields that are derived
 /// from REAPER's transport state (active song, active section, etc.).
 /// This is what gets sent over the stream and stored in the global signal.
@@ -34,9 +34,9 @@ pub struct SetlistApi {
 impl SetlistApi {
     /// Create a new SetlistApi from a Setlist with active indices and progress
     pub fn new(
-        setlist: Setlist, 
-        active_song_index: Option<usize>, 
-        active_section_index: Option<usize>, 
+        setlist: Setlist,
+        active_song_index: Option<usize>,
+        active_section_index: Option<usize>,
         active_slide_index: Option<usize>,
         song_progress: Option<f64>,
         section_progress: Option<f64>,
@@ -76,29 +76,26 @@ impl SetlistApi {
 
     /// Get the currently active section
     pub fn active_section(&self) -> Option<&Section> {
-        self.active_song()
-            .and_then(|song| {
-                self.active_section_index
-                    .and_then(|idx| song.sections.get(idx))
-            })
+        self.active_song().and_then(|song| {
+            self.active_section_index
+                .and_then(|idx| song.sections.get(idx))
+        })
     }
 
     /// Get the next section after the active section
     pub fn next_section(&self) -> Option<&Section> {
-        self.active_song()
-            .and_then(|song| {
-                self.active_section_index
-                    .and_then(|idx| song.next_section(idx))
-            })
+        self.active_song().and_then(|song| {
+            self.active_section_index
+                .and_then(|idx| song.next_section(idx))
+        })
     }
 
     /// Get the previous section before the active section
     pub fn previous_section(&self) -> Option<&Section> {
-        self.active_song()
-            .and_then(|song| {
-                self.active_section_index
-                    .and_then(|idx| song.previous_section(idx))
-            })
+        self.active_song().and_then(|song| {
+            self.active_section_index
+                .and_then(|idx| song.previous_section(idx))
+        })
     }
 
     /// Get the active song index
@@ -116,4 +113,3 @@ impl SetlistApi {
         self.active_slide_index
     }
 }
-

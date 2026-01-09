@@ -3,23 +3,29 @@
 //! These are the core actions that are always available for setlist management
 //! and smooth seek operations.
 
+use super::navigation::{
+    go_to_next_section, go_to_next_section_song_smart, go_to_next_song, go_to_previous_section,
+    go_to_previous_section_song_smart, go_to_previous_song,
+};
 use super::zoom::zoom_horizontally_to_song;
-use super::navigation::{go_to_previous_song, go_to_next_song, go_to_next_section, go_to_previous_section, go_to_next_section_song_smart, go_to_previous_section_song_smart};
-use crate::infrastructure::action_registry::{ActionDef, register_actions, get_registered_actions_storage};
-use fts::setlist::infra::reaper::{read_markers_from_project, ReaperTransport};
-use fts::setlist::infra::traits::SetlistBuilder;
+use crate::infrastructure::action_registry::{
+    ActionDef, get_registered_actions_storage, register_actions,
+};
 use crate::live::tracks::tab_navigation::TabNavigator;
-use reaper_high::{Reaper, Project, ActionKind};
-use reaper_medium::{PositionInSeconds, ProjectRef, SetEditCurPosOptions};
 use daw::transport::TransportActions;
-use tracing::{info, debug, warn};
+use fts::setlist::infra::reaper::{ReaperTransport, read_markers_from_project};
+use fts::setlist::infra::traits::SetlistBuilder;
+use reaper_high::{ActionKind, Project, Reaper};
+use reaper_medium::{PositionInSeconds, ProjectRef, SetEditCurPosOptions};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use tracing::{debug, info, warn};
 
 /// Helper: Find Count-In marker position in a project
 fn find_count_in_marker(project: &Project) -> Option<f64> {
     let markers = read_markers_from_project(project).ok()?;
-    markers.iter()
+    markers
+        .iter()
         .find(|m| m.name.trim().eq_ignore_ascii_case("Count-In"))
         .map(|m| m.position.time.to_seconds())
 }
@@ -28,7 +34,7 @@ fn find_count_in_marker(project: &Project) -> Option<f64> {
 fn stop_all_projects() {
     let reaper = Reaper::get();
     let medium_reaper = reaper.medium_reaper();
-    
+
     // Stop all projects by iterating through tabs
     for i in 0..128u32 {
         if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
@@ -99,7 +105,7 @@ fn setlist_resume_smart() {
 fn is_any_project_playing() -> bool {
     let reaper = Reaper::get();
     let medium_reaper = reaper.medium_reaper();
-    
+
     for i in 0..128u32 {
         if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
             let project = Project::new(result.project);
@@ -118,7 +124,7 @@ fn is_any_project_playing() -> bool {
 pub fn setlist_play_pause_toggle() {
     let reaper = Reaper::get();
     let is_playing = is_any_project_playing();
-    
+
     if is_playing {
         debug!("Setlist Play/Pause toggle: Currently playing, pausing");
         pause_current_project();
@@ -132,7 +138,7 @@ pub fn setlist_play_pause_toggle() {
 fn setlist_play_stop_toggle() {
     let reaper = Reaper::get();
     let is_playing = is_any_project_playing();
-    
+
     if is_playing {
         debug!("Setlist Play/Stop toggle: Currently playing, stopping");
         stop_all_projects();
@@ -146,9 +152,9 @@ fn setlist_play_stop_toggle() {
 fn reset_to_beginning_of_song() {
     let reaper = Reaper::get();
     let medium_reaper = reaper.medium_reaper();
-    
+
     info!("Reset to Beginning of Song action executed");
-    
+
     // Get current project
     let project_result = match medium_reaper.enum_projects(ProjectRef::Current, 0) {
         Some(result) => result,
@@ -158,30 +164,37 @@ fn reset_to_beginning_of_song() {
             return;
         }
     };
-    
+
     let project = Project::new(project_result.project);
-    let project_name = project_result.file_path
+    let project_name = project_result
+        .file_path
         .as_ref()
         .and_then(|p| p.as_std_path().file_stem())
         .and_then(|s| s.to_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| "unsaved".to_string());
-    
+
     // Calculate start position (use Count-In marker if available, otherwise 0.0)
     let start_pos = if let Some(count_in) = find_count_in_marker(&project) {
         PositionInSeconds::new(count_in).unwrap_or(PositionInSeconds::ZERO)
     } else {
         PositionInSeconds::ZERO
     };
-    
+
     // Stop playback if playing
     if project.is_playing() || project.is_paused() {
         project.stop();
     }
-    
+
     // Set cursor to beginning position
-    project.set_edit_cursor_position(start_pos, SetEditCurPosOptions { move_view: false, seek_play: false });
-    
+    project.set_edit_cursor_position(
+        start_pos,
+        SetEditCurPosOptions {
+            move_view: false,
+            seek_play: false,
+        },
+    );
+
     info!(
         project_name = %project_name,
         position = start_pos.get(),
@@ -194,29 +207,31 @@ fn reset_to_beginning_of_song() {
 fn reset_to_beginning_of_setlist() {
     let reaper = Reaper::get();
     let medium_reaper = reaper.medium_reaper();
-    
+
     info!("Reset to Beginning of Setlist action executed");
-    
+
     // Build setlist from tabs - use trait method on Reaper (operates on all open projects)
     let setlist = match reaper.build_setlist_from_open_projects(None) {
         Ok(s) => s,
         Err(e) => {
             warn!(error = %e, "Failed to build setlist for reset");
-            reaper.show_console_msg("Reset to Beginning of Setlist: Failed to build setlist\n".to_string());
+            reaper.show_console_msg(
+                "Reset to Beginning of Setlist: Failed to build setlist\n".to_string(),
+            );
             return;
         }
     };
-    
+
     if setlist.songs.is_empty() {
         warn!("Setlist is empty, resetting current project instead");
         reset_to_beginning_of_song();
         return;
     }
-    
+
     // Get first song
     let first_song = &setlist.songs[0];
     let first_project_name = first_song.project_name_from_metadata();
-    
+
     // Find tab index for first song
     let tab_index = {
         let mut found_index = None;
@@ -232,10 +247,10 @@ fn reset_to_beginning_of_setlist() {
                 } else {
                     format!("Tab {}", i)
                 };
-                
+
                 let normalized_tab = tab_name.to_uppercase().replace('_', "-");
                 let normalized_target = first_project_name.to_uppercase().replace('_', "-");
-                
+
                 if normalized_tab == normalized_target {
                     found_index = Some(i);
                     break;
@@ -244,50 +259,66 @@ fn reset_to_beginning_of_setlist() {
         }
         found_index
     };
-    
+
     let tab_index = match tab_index {
         Some(idx) => idx,
         None => {
             warn!(project_name = %first_project_name, "First setlist project not found");
-            reaper.show_console_msg(format!("Reset to Beginning of Setlist: Project '{}' not found\n", first_project_name));
+            reaper.show_console_msg(format!(
+                "Reset to Beginning of Setlist: Project '{}' not found\n",
+                first_project_name
+            ));
             return;
         }
     };
-    
+
     // Calculate start position for first song (use Count-In marker if available, otherwise 0.0)
     let start_pos = if let Some(count_in_marker) = &first_song.count_in_marker {
-        PositionInSeconds::new(count_in_marker.position.time.to_seconds()).unwrap_or(PositionInSeconds::ZERO)
+        PositionInSeconds::new(count_in_marker.position.time.to_seconds())
+            .unwrap_or(PositionInSeconds::ZERO)
     } else {
         PositionInSeconds::ZERO
     };
-    
+
     // Stop all playback
     stop_all_projects();
-    
+
     // Switch to first tab using TabNavigator
     let tab_navigator = TabNavigator::new();
     if let Err(e) = tab_navigator.switch_to_tab(tab_index as usize) {
         warn!(error = %e, tab_index, "Failed to switch to first tab");
-        reaper.show_console_msg(format!("Reset to Beginning of Setlist: Failed to switch to tab {}: {}\n", tab_index, e));
+        reaper.show_console_msg(format!(
+            "Reset to Beginning of Setlist: Failed to switch to tab {}: {}\n",
+            tab_index, e
+        ));
         return;
     }
-    
+
     // Small delay for tab switch to complete
     std::thread::sleep(std::time::Duration::from_millis(50));
-    
+
     // Get the now-current project and set cursor
     if let Some(result) = medium_reaper.enum_projects(ProjectRef::Current, 0) {
         let project = Project::new(result.project);
-        project.set_edit_cursor_position(start_pos, SetEditCurPosOptions { move_view: false, seek_play: false });
+        project.set_edit_cursor_position(
+            start_pos,
+            SetEditCurPosOptions {
+                move_view: false,
+                seek_play: false,
+            },
+        );
     }
-    
+
     info!(
         tab_index,
         project_name = %first_project_name,
         position = start_pos.get(),
         "Reset to beginning of setlist"
     );
-    reaper.show_console_msg(format!("Reset to Beginning of Setlist: {} (tab {})\n", first_project_name, tab_index));
+    reaper.show_console_msg(format!(
+        "Reset to Beginning of Setlist: {} (tab {})\n",
+        first_project_name, tab_index
+    ));
 }
 
 /// Track last execution time for double-tap detection
@@ -303,7 +334,7 @@ fn reset_to_beginning_smart() {
     let reaper = Reaper::get();
     let now = Instant::now();
     let double_tap_window = Duration::from_millis(1000); // 1 second window
-    
+
     // Check if this is a double-tap
     let is_double_tap = {
         let mut last_time = get_last_reset_time().lock().unwrap();
@@ -324,7 +355,7 @@ fn reset_to_beginning_smart() {
             false
         }
     };
-    
+
     if is_double_tap {
         info!("Smart Reset: Double-tap detected, going to beginning of setlist");
         reset_to_beginning_of_setlist();
@@ -463,11 +494,11 @@ pub fn domain_actions() -> Vec<ActionDef> {
 /// Register toggleable actions separately (they need ActionKind::Toggleable)
 pub fn register_toggleable_actions() {
     use tracing::info;
-    
+
     info!("Live Tracks: Registering toggleable actions");
-    
+
     let reaper = Reaper::get();
-    
+
     // Register Play/Pause toggle
     let play_pause_toggle_handler = setlist_play_pause_toggle;
     let play_pause_state_check = || is_any_project_playing();
@@ -478,7 +509,7 @@ pub fn register_toggleable_actions() {
         move || play_pause_toggle_handler(),
         ActionKind::Toggleable(Box::new(move || play_pause_state_check())),
     );
-    
+
     // Register Play/Stop toggle
     let play_stop_toggle_handler = setlist_play_stop_toggle;
     let play_stop_state_check = || is_any_project_playing();
@@ -489,24 +520,22 @@ pub fn register_toggleable_actions() {
         move || play_stop_toggle_handler(),
         ActionKind::Toggleable(Box::new(move || play_stop_state_check())),
     );
-    
+
     // Store the RegisteredActions to keep them alive
     if let Ok(mut storage) = get_registered_actions_storage().lock() {
         storage.push(registered_action1);
         storage.push(registered_action2);
     }
-    
+
     // Look up and store command IDs for toggleable actions (must be done on main thread)
     // This allows background threads to trigger these actions
     let medium_reaper = reaper.medium_reaper();
-    let command_ids_map = crate::infrastructure::action_registry::COMMAND_IDS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let command_ids_map = crate::infrastructure::action_registry::COMMAND_IDS
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
     if let Ok(mut map) = command_ids_map.lock() {
         // Look up command IDs for toggleable actions
-        let toggleable_command_ids = [
-            "FTS_LIVE_SETLIST_PLAY_PAUSE",
-            "FTS_LIVE_SETLIST_PLAY_STOP",
-        ];
-        
+        let toggleable_command_ids = ["FTS_LIVE_SETLIST_PLAY_PAUSE", "FTS_LIVE_SETLIST_PLAY_STOP"];
+
         for command_id_str in &toggleable_command_ids {
             // Try both with and without underscore prefix
             let lookup_names = [*command_id_str, &format!("_{}", command_id_str)];
@@ -522,22 +551,22 @@ pub fn register_toggleable_actions() {
                 }
             }
         }
-        
+
         info!(
             stored_toggleable_count = map.len(),
             "Stored command IDs for toggleable actions"
         );
     }
-    
+
     info!("Live Tracks: Toggleable actions registered");
 }
 
 /// Register all live tracks actions with REAPER
 pub fn register_all_actions() {
     use tracing::info;
-    
+
     info!("Live Tracks: Starting action registration");
-    
+
     // Get all actions
     let actions = domain_actions();
     info!(
@@ -545,20 +574,19 @@ pub fn register_all_actions() {
         "Live Tracks: Created {} actions, registering now",
         actions.len()
     );
-    
+
     if actions.is_empty() {
         warn!("Live Tracks: WARNING - No actions to register!");
         return;
     }
-    
+
     // Convert Vec<ActionDef> to &[ActionDef] for register_actions
     register_actions(&actions, "Live Tracks");
     info!("Live Tracks: Action registration complete");
-    
+
     // Register toggleable actions separately
     register_toggleable_actions();
 }
 
 // Re-export as ACTION_DEFS for compatibility (empty for now, can be populated if needed)
 pub static ACTION_DEFS: &[()] = &[];
-

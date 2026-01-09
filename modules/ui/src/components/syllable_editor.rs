@@ -1,9 +1,9 @@
 //! Syllable editor component for editing notes and rhythms of each syllable
 
+use crate::components::piano::{MidiNote, Piano, PianoProps};
 use dioxus::prelude::*;
-use fts::lyrics::core::{Lyrics, LyricSection, LyricLine, Word, Syllable, split_line_into_words};
-use crate::components::piano::{Piano, PianoProps, MidiNote};
-use lucide_dioxus::{Play, Pause, Square};
+use fts::lyrics::core::{LyricLine, LyricSection, Lyrics, Syllable, Word, split_line_into_words};
+use lucide_dioxus::{Pause, Play, Square};
 
 /// Props for the syllable editor
 #[derive(Props, Clone, PartialEq)]
@@ -32,22 +32,22 @@ pub struct SyllableKey {
 pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
     let mut selected_syllable = use_signal::<Option<SyllableKey>>(|| None);
     let mut piano_zoom = use_signal(|| 1.0f64);
-    
+
     // Playback state
     let mut is_playing = use_signal(|| false);
     let mut current_time = use_signal(|| 0.0f64);
     let mut playback_start_time = use_signal(|| None::<f64>);
     let mut paused_time = use_signal(|| 0.0f64);
-    
+
     // Compute zoom percentage for display
     let zoom_percent = use_memo(move || (piano_zoom() * 100.0) as u32);
-    
+
     // Update current time during playback using a simple interval
     use_effect(move || {
         if !is_playing() {
             return;
         }
-        
+
         // Start playback if not already started
         if playback_start_time().is_none() {
             #[cfg(target_arch = "wasm32")]
@@ -65,19 +65,19 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                 playback_start_time.set(Some(now));
             }
         }
-        
+
         // Schedule periodic updates
         let mut playing = is_playing;
         let mut start_time = playback_start_time;
         let mut paused = paused_time;
         let mut current = current_time;
-        
+
         spawn(async move {
             loop {
                 if !playing() {
                     break;
                 }
-                
+
                 #[cfg(target_arch = "wasm32")]
                 {
                     if let Some(start) = start_time() {
@@ -86,15 +86,18 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                         current.set(paused() + elapsed);
                     }
                     // Use web API for timing
-                    wasm_bindgen_futures::JsFuture::from(
-                        js_sys::Promise::new(&mut |resolve, _| {
+                    wasm_bindgen_futures::JsFuture::from(js_sys::Promise::new(
+                        &mut |resolve, _| {
                             let window = web_sys::window().unwrap();
-                            window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                &resolve,
-                                16, // ~60fps
-                            ).unwrap();
-                        })
-                    ).await.ok();
+                            window
+                                .set_timeout_with_callback_and_timeout_and_arguments_0(
+                                    &resolve, 16, // ~60fps
+                                )
+                                .unwrap();
+                        },
+                    ))
+                    .await
+                    .ok();
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 {
@@ -113,16 +116,16 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
             }
         });
     });
-    
+
     // Parse lyrics into words and syllables
     let syllable_data = use_memo(move || {
         let lyrics = match &props.lyrics {
             Some(l) => l,
             None => return Vec::<(SyllableKey, String, String, String, Syllable)>::new(),
         };
-        
+
         let mut result = Vec::new();
-        
+
         for (section_idx, section) in lyrics.sections.iter().enumerate() {
             for (line_idx, line) in section.lines.iter().enumerate() {
                 // Skip parenthetical lines for now
@@ -130,9 +133,9 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                 if regular_text.trim().is_empty() {
                     continue;
                 }
-                
+
                 let words = split_line_into_words(&regular_text);
-                
+
                 for (word_idx, word) in words.iter().enumerate() {
                     for (syllable_idx, syllable) in word.syllables.iter().enumerate() {
                         result.push((
@@ -151,33 +154,44 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                 }
             }
         }
-        
+
         result
     });
-    
+
     // Group syllables by line for display
     let lines_data = use_memo(move || {
-        let mut lines: Vec<(usize, usize, String, Vec<(SyllableKey, String, Syllable)>)> = Vec::new();
-        
+        let mut lines: Vec<(usize, usize, String, Vec<(SyllableKey, String, Syllable)>)> =
+            Vec::new();
+
         for (key, section_name, line_text, word_text, syllable) in syllable_data().iter() {
             // Find or create line entry
             let line_key = (key.section_idx, key.line_idx);
-            let line_entry = lines.iter_mut().find(|(s_idx, l_idx, _, _)| *s_idx == line_key.0 && *l_idx == line_key.1);
-            
+            let line_entry = lines
+                .iter_mut()
+                .find(|(s_idx, l_idx, _, _)| *s_idx == line_key.0 && *l_idx == line_key.1);
+
             if let Some(entry) = line_entry {
-                entry.3.push((key.clone(), word_text.clone(), syllable.clone()));
+                entry
+                    .3
+                    .push((key.clone(), word_text.clone(), syllable.clone()));
             } else {
-                lines.push((line_key.0, line_key.1, line_text.clone(), vec![(key.clone(), word_text.clone(), syllable.clone())]));
+                lines.push((
+                    line_key.0,
+                    line_key.1,
+                    line_text.clone(),
+                    vec![(key.clone(), word_text.clone(), syllable.clone())],
+                ));
             }
         }
-        
+
         lines
     });
-    
+
     // Find currently active syllable based on current_time
     let active_syllable_key = use_memo(move || {
         let time = current_time();
-        syllable_data().iter()
+        syllable_data()
+            .iter()
             .find(|(_, _, _, _, syllable)| {
                 if let (Some(start), Some(end)) = (syllable.start_time, syllable.end_time) {
                     time >= start && time <= end
@@ -187,14 +201,15 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
             })
             .map(|(key, _, _, _, _)| key.clone())
     });
-    
+
     // Find total duration of all syllables
     let max_duration = use_memo(move || {
-        syllable_data().iter()
+        syllable_data()
+            .iter()
             .filter_map(|(_, _, _, _, syllable)| syllable.end_time)
             .fold(0.0f64, |max, end| max.max(end))
     });
-    
+
     rsx! {
         div {
             class: "flex flex-col h-full w-full overflow-hidden bg-background",
@@ -222,7 +237,7 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                     }
                     if is_playing() { "Pause" } else { "Play" }
                 }
-                
+
                 // Stop button
                 button {
                     class: "px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors flex items-center gap-2",
@@ -235,7 +250,7 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                     Square { size: 16, color: "currentColor" }
                     "Stop"
                 }
-                
+
                 // Time display
                 div {
                     class: "flex items-center gap-2 ml-auto",
@@ -250,7 +265,7 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                         }
                     }
                 }
-                
+
                 // Timeline scrubber
                 if max_duration() > 0.0 {
                     div {
@@ -275,7 +290,7 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                     }
                 }
             }
-            
+
             // Piano sidebar and main editor area
             div {
                 class: "flex flex-1 overflow-hidden",
@@ -343,7 +358,7 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                         }
                     }
                 }
-                
+
                 // Main editor area (right)
                 div {
                     class: "flex-1 overflow-y-auto",
@@ -363,7 +378,7 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                                         class: "text-sm font-semibold text-foreground/70 mb-2",
                                         "{line_text}"
                                     }
-                                    
+
                                     // Syllables in this line
                                     div {
                                         class: "flex flex-wrap items-center gap-2",
@@ -377,7 +392,7 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                                                         " "
                                                     }
                                                 }
-                                                
+
                                                 // Syllable button
                                                 {
                                                     let key_clone = key.clone();
@@ -385,7 +400,7 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                                                     let is_selected = selected == Some(key_clone.clone());
                                                     let has_note = syllable.midi_note.is_some();
                                                     let is_active = active_syllable_key() == Some(key_clone.clone());
-                                                    
+
                                                     rsx! {
                                                         button {
                                                             class: if is_active {
@@ -409,7 +424,7 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                                                             span {
                                                                 "{syllable.text}"
                                                             }
-                                                            
+
                                                             // MIDI note indicator
                                                             if let Some(note) = syllable.midi_note {
                                                                 span {
@@ -417,7 +432,7 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
                                                                     "({note})"
                                                                 }
                                                             }
-                                                            
+
                                                             // Timing indicator
                                                             if let (Some(start), Some(end)) = (syllable.start_time, syllable.end_time) {
                                                                 span {
@@ -440,4 +455,3 @@ pub fn SyllableEditor(props: SyllableEditorProps) -> Element {
         }
     }
 }
-

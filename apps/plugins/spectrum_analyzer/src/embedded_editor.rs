@@ -271,7 +271,13 @@ impl SpectrumEmbeddedEditor {
         let right_y = self.db_to_y(right_db, height, db_range);
 
         if left_y < height {
-            bitmap.fill_rect(left_x, left_y, METER_WIDTH, height - left_y, colors::METER_LEFT);
+            bitmap.fill_rect(
+                left_x,
+                left_y,
+                METER_WIDTH,
+                height - left_y,
+                colors::METER_LEFT,
+            );
         }
         if right_y < height {
             bitmap.fill_rect(

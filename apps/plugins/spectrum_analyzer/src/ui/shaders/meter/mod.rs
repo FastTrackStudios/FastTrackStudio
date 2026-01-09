@@ -66,7 +66,13 @@ impl Primitive for MeterPrimitive {
         viewport: &nih_plug_iced::graphics::Viewport,
     ) {
         let physical_size = viewport.physical_size();
-        pipeline.update(queue, &self.bounds, physical_size, self.left_db, self.right_db);
+        pipeline.update(
+            queue,
+            &self.bounds,
+            physical_size,
+            self.left_db,
+            self.right_db,
+        );
     }
 
     fn render(

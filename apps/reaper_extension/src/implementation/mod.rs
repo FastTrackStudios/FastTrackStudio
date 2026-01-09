@@ -8,4 +8,3 @@ pub mod project;
 
 // Re-export project wrapper for convenience
 pub use project::create_reaper_project_wrapper;
-

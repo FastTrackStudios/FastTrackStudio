@@ -37,14 +37,14 @@ fn james_dupre_another_love_song() {
         "31.AnotherLoveSong Joe MIX_01.wav",
         "Click 128.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
 }

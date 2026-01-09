@@ -2,8 +2,8 @@
 //!
 //! Configuration options for chart parsing and display
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Chart configuration settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

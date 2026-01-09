@@ -3,10 +3,10 @@
 //! This module provides a unified interface for accessing tempo and time signature information
 //! from different sources (REAPER API, RPP files, etc.)
 
+use crate::primitives::Position;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::fmt;
-use crate::primitives::Position;
 
 /// A tempo/time signature change point
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -66,7 +66,7 @@ impl TempoTimePoint {
             metronome_pattern,
         }
     }
-    
+
     /// Create a new tempo/time signature point with full information from seconds (for convenience)
     pub fn new_full_from_seconds(
         position_seconds: f64,
@@ -87,12 +87,12 @@ impl TempoTimePoint {
             metronome_pattern,
         )
     }
-    
+
     /// Get the position in seconds (for convenience)
     pub fn position_seconds(&self) -> f64 {
         self.position.time.to_seconds()
     }
-    
+
     /// Get the musical position (measure, beat, subdivision)
     pub fn musical_position(&self) -> &crate::primitives::MusicalPosition {
         &self.position.musical

@@ -7,9 +7,9 @@
 //! NOTE: This is a legacy implementation. The preferred approach is to use
 //! the direct trait implementations on `Reaper` and `Project` types in `trait_impls.rs`.
 
-use crate::setlist::infra::traits::SetlistBuilder;
-use crate::setlist::core::{Setlist, SetlistError, Song};
 use super::song_builder::{build_setlist_from_open_projects, build_song_from_current_project};
+use crate::setlist::core::{Setlist, SetlistError, Song};
+use crate::setlist::infra::traits::SetlistBuilder;
 
 /// REAPER implementation of SetlistBuilder
 /// This is a legacy wrapper - prefer using the trait directly on Reaper instances
@@ -28,7 +28,7 @@ impl SetlistBuilder for ReaperSetlistBuilder {
     ) -> Result<Setlist, SetlistError> {
         build_setlist_from_open_projects(existing_setlist)
     }
-    
+
     fn build_song_from_current_project(&self) -> Result<Song, SetlistError> {
         build_song_from_current_project()
     }

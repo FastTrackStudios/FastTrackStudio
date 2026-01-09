@@ -1,8 +1,8 @@
 //! MIDI Note behaviors
 
-use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorId, BehaviorDisplay};
 #[allow(unused_imports)]
 use crate::define_behavior_enum;
+use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorDisplay, BehaviorId};
 
 /// MIDI Note left drag behaviors
 define_behavior_enum! {

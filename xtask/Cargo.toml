@@ -1,13 +1,16 @@
 [package]
 name = "xtask"
 version.workspace = true
-edition.workspace = true
+edition = "2021"  # Use 2021 for compatibility with nih_plug_xtask
 authors.workspace = true
 license.workspace = true
 
 [dependencies]
 # Local dependencies - import all modules that export types
 daw = { path = "../modules/daw" }
+
+# NIH-plug xtask for bundling plugins
+nih_plug_xtask = { path = "../libs/nih-plug/nih_plug_xtask" }
 
 # Utilities
 anyhow = "1.0"

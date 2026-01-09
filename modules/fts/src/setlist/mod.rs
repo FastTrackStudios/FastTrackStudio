@@ -12,27 +12,27 @@ pub mod reactive;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use infra::stream::{
-    SetlistStreamApi, SetlistStateProvider, SetlistUpdateMessage, SetlistCommandHandler,
-    TransportCommand, NavigationCommand, SeekToSection, SeekToSong, SeekToTime, ToggleLoop,
+    NavigationCommand, SeekToSection, SeekToSong, SeekToTime, SetlistCommandHandler,
+    SetlistStateProvider, SetlistStreamApi, SetlistUpdateMessage, ToggleLoop, TransportCommand,
 };
 
 #[cfg(feature = "dioxus")]
 pub use infra::dioxus::{
-    SETLIST, TRANSPORT_INFO, ProjectTransportInfo, CURRENT_POSITION_SECONDS, ACTIVE_SLIDE_INDEX,
-    SONG_TRACKS, SONG_TRANSPORT, SETLIST_STRUCTURE, ACTIVE_INDICES,
+    ACTIVE_INDICES, ACTIVE_SLIDE_INDEX, CURRENT_POSITION_SECONDS, ProjectTransportInfo, SETLIST,
+    SETLIST_STRUCTURE, SONG_TRACKS, SONG_TRANSPORT, TRANSPORT_INFO,
 };
 
 pub use core::{
-    Section, SectionType, Setlist, SetlistApi, SetlistEntry, SetlistError, SetlistOrder, SetlistSummary, Song,
-    SongSummary,
+    Section, SectionType, Setlist, SetlistApi, SetlistEntry, SetlistError, SetlistOrder,
+    SetlistSummary, Song, SongSummary,
 };
 pub use reactive::{
-    SetlistReactiveStreams, SetlistStreams, SongStreams, LyricsStreams, ActiveIndicesStreams, EventStreamSubject,
-    SetlistReactiveService, SetlistReactiveState,
+    ActiveIndicesStreams, EventStreamSubject, LyricsStreams, SetlistReactiveService,
+    SetlistReactiveState, SetlistReactiveStreams, SetlistStreams, SongStreams,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use reactive::irpc::{SetlistReactiveProtocol, SetlistReactiveApi};
+pub use reactive::irpc::{SetlistReactiveApi, SetlistReactiveProtocol};
 
 pub fn default_setlist() -> Result<Setlist, SetlistError> {
     Setlist::default_app_setlist()
@@ -58,8 +58,7 @@ pub fn validate_setlist(setlist: &Setlist) -> Result<(), SetlistError> {
 }
 
 pub fn parse_section_type(input: &str) -> Result<SectionType, SetlistError> {
-    SectionType::parse(input)
-        .map_err(|e| SetlistError::invalid_section(&e))
+    SectionType::parse(input).map_err(|e| SetlistError::invalid_section(&e))
 }
 
 pub fn create_setlist(name: &str) -> Result<Setlist, SetlistError> {
@@ -88,4 +87,3 @@ pub fn create_section(
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const MODULE_NAME: &str = "setlist";
-

@@ -75,8 +75,7 @@ impl ChordMemory {
     ) -> String {
         // Determine if this chord has explicit quality information
         // Strip rhythm notation (/, _, ') from token before checking length
-        let token_chord_part = if let Some(pos) = token.find(['/', '_', '\''])
-        {
+        let token_chord_part = if let Some(pos) = token.find(['/', '_', '\'']) {
             &token[..pos]
         } else {
             token
@@ -127,7 +126,7 @@ impl ChordMemory {
     ///
     /// Returns a full chord symbol with the appropriate quality appended to the original root
     fn infer_from_key(root: &str, key: Option<&crate::key::Key>) -> Option<String> {
-        use crate::key::scale::harmonization::{harmonize_scale, HarmonizationDepth};
+        use crate::key::scale::harmonization::{HarmonizationDepth, harmonize_scale};
 
         let key = key?;
 
@@ -490,8 +489,8 @@ mod tests {
 
     #[test]
     fn test_debug_csharp_major_harmonization() {
-        use crate::key::scale::harmonization::{harmonize_scale, HarmonizationDepth};
         use crate::key::Key;
+        use crate::key::scale::harmonization::{HarmonizationDepth, harmonize_scale};
         use crate::primitives::MusicalNote;
 
         // Create C# major key from semitone

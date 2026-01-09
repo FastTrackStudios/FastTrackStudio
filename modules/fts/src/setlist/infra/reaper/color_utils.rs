@@ -6,8 +6,8 @@
 //! REAPER stores colors in BGR format (Blue-Green-Red), not RGB.
 //! This module provides utilities to convert between formats consistently.
 
-use reaper_medium::{NativeColor, RgbColor};
 use reaper_high::Reaper;
+use reaper_medium::{NativeColor, RgbColor};
 
 /// Pack an RGB color into a u32 for storage/serialization
 /// Format: (r << 16) | (g << 8) | b
@@ -27,15 +27,15 @@ pub fn unpack_u32_to_rgb(packed: u32) -> RgbColor {
 }
 
 /// Extract color from REAPER native color, returning packed RGB u32 or None if black
-/// 
+///
 /// REAPER stores colors internally in BGR format (Blue-Green-Red), but the
 /// `color_from_native()` API function converts from OS-dependent format to RGB.
-/// 
+///
 /// We pack the RGB values as (r << 16) | (g << 8) | b for consistent transmission
 /// to the web UI, which expects RGB format.
-/// 
+///
 /// Black (0x000000) is treated as "no color" and returns None.
-/// 
+///
 /// # Format
 /// - Packed format: `(r << 16) | (g << 8) | b` where r, g, b are u8 values
 /// - Frontend extracts: `r = (packed >>> 16) & 0xFF, g = (packed >>> 8) & 0xFF, b = packed & 0xFF`
@@ -43,13 +43,9 @@ pub fn extract_color_from_native(native_color: NativeColor) -> Option<u32> {
     let reaper = Reaper::get();
     let rgb = reaper.medium_reaper().color_from_native(native_color);
     let packed = pack_rgb_to_u32(rgb);
-    
+
     // Only store if not black (0x000000), as black typically means "no color" in REAPER
-    if packed == 0 {
-        None
-    } else {
-        Some(packed)
-    }
+    if packed == 0 { None } else { Some(packed) }
 }
 
 /// Convert a packed RGB u32 to hex string format (#RRGGBB)

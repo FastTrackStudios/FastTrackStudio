@@ -11,10 +11,10 @@ use std::os::raw::c_void;
 use std::panic::catch_unwind;
 use std::ptr::null_mut;
 
-use std::collections::HashMap;
 use fragile::Fragile;
 use reaper_common_types::RgbColor;
 use reaper_medium::{Hbrush, Hdc, Hfont, Hwnd};
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 /// Creates a window according to the given dialog resource.

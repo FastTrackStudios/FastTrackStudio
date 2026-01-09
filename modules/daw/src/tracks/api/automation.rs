@@ -67,4 +67,3 @@ impl fmt::Display for AutomationMode {
         }
     }
 }
-

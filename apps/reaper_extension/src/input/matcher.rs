@@ -2,8 +2,8 @@
 //!
 //! Matches key sequences against bindings and builds commands.
 
-use crate::input::state::{CommandState, ActionType, Command, ActionKey};
-use crate::input::bindings::{Bindings, BindingEntry};
+use crate::input::bindings::{BindingEntry, Bindings};
+use crate::input::state::{ActionKey, ActionType, Command, CommandState};
 use std::collections::HashMap;
 
 /// Possible action sequences for a given mode and context
@@ -71,22 +71,25 @@ pub fn match_sequence(
 ) -> Option<(Command, Option<Completions>)> {
     let key_sequence = &state.key_sequence;
     let mode_sequences = sequences.for_mode(&state.mode);
-    
+
     // Try to match against each possible action sequence
     for action_sequence in mode_sequences {
         if let Some(command) = try_match_sequence(key_sequence, action_sequence, bindings, state) {
             return Some((command, None));
         }
     }
-    
+
     // If no match, return completions
     let completions = build_completions(key_sequence, sequences, bindings, state);
-    Some((Command {
-        action_sequence: vec![],
-        action_keys: vec![],
-        mode: state.mode,
-        context: state.context,
-    }, completions))
+    Some((
+        Command {
+            action_sequence: vec![],
+            action_keys: vec![],
+            mode: state.mode,
+            context: state.context,
+        },
+        completions,
+    ))
 }
 
 /// Try to match a key sequence against a specific action sequence pattern
@@ -98,16 +101,18 @@ fn try_match_sequence(
 ) -> Option<Command> {
     let mut remaining = key_sequence;
     let mut action_keys = Vec::new();
-    
+
     for action_type in action_sequence {
-        if let Some((new_remaining, action_key)) = extract_action_key(remaining, action_type, bindings, state) {
+        if let Some((new_remaining, action_key)) =
+            extract_action_key(remaining, action_type, bindings, state)
+        {
             action_keys.push(action_key);
             remaining = new_remaining;
         } else {
             return None;
         }
     }
-    
+
     // If we consumed the entire sequence, we have a match
     if remaining.is_empty() {
         Some(Command {
@@ -130,11 +135,11 @@ fn extract_action_key<'a>(
 ) -> Option<(&'a str, ActionKey)> {
     // Get bindings for this action type
     let bindings_map = bindings.get_bindings(action_type, state.context)?;
-    
+
     // Try to match from longest to shortest
     let mut best_match: Option<(&str, ActionKey)> = None;
     let mut best_len = 0;
-    
+
     for (binding_key, entry) in bindings_map {
         if key_sequence.starts_with(binding_key) && binding_key.len() > best_len {
             if let BindingEntry::Action(action_id) = entry {
@@ -150,7 +155,7 @@ fn extract_action_key<'a>(
             }
         }
     }
-    
+
     best_match
 }
 
@@ -163,14 +168,16 @@ fn build_completions(
 ) -> Option<Completions> {
     // Find which action type we're currently matching
     let mode_sequences = sequences.for_mode(&state.mode);
-    
+
     for action_sequence in mode_sequences {
         // Try to match as much as possible
         let mut remaining = key_sequence;
         let mut matched_types = Vec::new();
-        
+
         for action_type in action_sequence {
-            if let Some((new_remaining, _)) = extract_action_key(remaining, action_type, bindings, state) {
+            if let Some((new_remaining, _)) =
+                extract_action_key(remaining, action_type, bindings, state)
+            {
                 matched_types.push(action_type.clone());
                 remaining = new_remaining;
             } else {
@@ -181,7 +188,7 @@ fn build_completions(
                         .filter(|k| k.starts_with(remaining))
                         .cloned()
                         .collect();
-                    
+
                     if !possible_keys.is_empty() {
                         return Some(Completions {
                             action_type: action_type.clone(),
@@ -193,6 +200,6 @@ fn build_completions(
             }
         }
     }
-    
+
     None
 }

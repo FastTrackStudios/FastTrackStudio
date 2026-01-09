@@ -55,4 +55,3 @@ impl fmt::Display for FreeMode {
         }
     }
 }
-

@@ -11,25 +11,24 @@
 pub mod primitives;
 
 pub use primitives::{
-    Duration, MusicalDuration, MusicalPosition, Position, TimeDuration, TimePosition,
-    TimeRange, TimeSignature,
+    Duration, MusicalDuration, MusicalPosition, Position, TimeDuration, TimePosition, TimeRange,
+    TimeSignature,
 };
-pub mod transport;
 pub mod marker_region;
-pub mod tracks;
-pub mod project;
 pub mod mix_fx;
-pub mod streams;
+pub mod project;
 pub mod state;
+pub mod streams;
+pub mod tracks;
+pub mod transport;
 
 // Re-export commonly used types for convenience
+pub use marker_region::{Marker, MarkerRegionSource, Region};
 pub use primitives::*;
-pub use transport::{Transport, TransportActions, TransportError, PlayState, RecordMode, Tempo};
-pub use marker_region::{Marker, Region, MarkerRegionSource};
-pub use tracks::{Track, Item, Envelope, FxChain};
 pub use project::Project;
-pub use streams::{DawStreams, ProjectStreams, EventStreamSubject};
 pub use state::DawReactiveState;
-pub use transport::reactive::TransportStreams;
+pub use streams::{DawStreams, EventStreamSubject, ProjectStreams};
 pub use tracks::reactive::TrackStreams;
-
+pub use tracks::{Envelope, FxChain, Item, Track};
+pub use transport::reactive::TransportStreams;
+pub use transport::{PlayState, RecordMode, Tempo, Transport, TransportActions, TransportError};

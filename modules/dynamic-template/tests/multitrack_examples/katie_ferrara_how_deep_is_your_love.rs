@@ -70,14 +70,14 @@ fn katie_ferrara_how_deep_is_your_love() {
         "Steve Vocal SILK RED 100%_01.wav",
         "Steve Vocal SILK RED 50%_01.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
 }

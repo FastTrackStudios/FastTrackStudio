@@ -32,14 +32,14 @@ fn laura_clapp_davidson_hey_hey_sister() {
         "26.Laura Hey Hey Mid 2_01.wav",
         "27. Hey Hey Sister_01.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
 }

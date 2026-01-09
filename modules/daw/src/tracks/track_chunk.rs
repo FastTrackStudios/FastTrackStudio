@@ -5,15 +5,17 @@
 //!
 //! This parser converts REAPER state chunk format to daw::tracks::Track structs.
 
-use crate::tracks::{Track, TrackGuid};
-use crate::tracks::api::folder::{TcpFolderState, McpFolderState, FolderDepthChange};
-use crate::tracks::api::solo::SoloMode;
 use crate::tracks::api::automation::AutomationMode;
+use crate::tracks::api::collapse::{
+    ArrangeCollapseState, BusCompactSettings, MixerCollapseState, WiringCollapseState,
+};
+use crate::tracks::api::folder::{FolderDepthChange, McpFolderState, TcpFolderState};
+use crate::tracks::api::solo::SoloMode;
 use crate::tracks::api::timebase::TrackTimebase;
-use crate::tracks::api::collapse::{ArrangeCollapseState, MixerCollapseState, WiringCollapseState, BusCompactSettings};
+use crate::tracks::{Track, TrackGuid};
 
 /// Parse a track state chunk into a Track struct
-/// 
+///
 /// The chunk should be in the format returned by GetTrackStateChunk:
 /// <TRACK
 ///   NAME "Track Name"
@@ -22,32 +24,36 @@ use crate::tracks::api::collapse::{ArrangeCollapseState, MixerCollapseState, Wir
 /// >
 pub fn parse_track_chunk(chunk: &str, default_index: usize) -> Result<ParsedTrackChunk, String> {
     let mut parsed = ParsedTrackChunk::default(default_index);
-    
+
     for line in chunk.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with("//") {
             continue;
         }
-        
+
         // Skip block markers
         if trimmed.starts_with('<') || trimmed == ">" {
             continue;
         }
-        
+
         // Parse token line - split by whitespace
         let tokens: Vec<&str> = trimmed.split_whitespace().collect();
         if tokens.is_empty() {
             continue;
         }
-        
+
         let identifier = tokens[0];
-        
+
         match identifier {
             "NAME" => {
                 if tokens.len() > 1 {
                     let name = tokens[1..].join(" ");
                     // Remove quotes if present
-                    let cleaned_name = name.trim_matches('"').trim_matches('\'').trim_matches('`').to_string();
+                    let cleaned_name = name
+                        .trim_matches('"')
+                        .trim_matches('\'')
+                        .trim_matches('`')
+                        .to_string();
                     parsed.name = cleaned_name;
                 }
                 // If NAME field exists but has no value, we leave the default name from ParsedTrackChunk::default
@@ -114,7 +120,8 @@ pub fn parse_track_chunk(chunk: &str, default_index: usize) -> Result<ParsedTrac
                         // ISBUS field 2 is the relative indentation change (folder_depth_change)
                         // This is the relative change: 0=normal, 1=folder start, -1=closes one level, etc.
                         let depth_change_value = parse_int(tokens[2])?;
-                        parsed.folder_depth_change = FolderDepthChange::from_reaper_value(depth_change_value);
+                        parsed.folder_depth_change =
+                            FolderDepthChange::from_reaper_value(depth_change_value);
                         // Note: track_depth (absolute cumulative depth) will be calculated
                         // in the implementation layer by summing folder_depth_change values
                     }
@@ -149,7 +156,7 @@ pub fn parse_track_chunk(chunk: &str, default_index: usize) -> Result<ParsedTrac
                     } else {
                         0
                     };
-                    
+
                     parsed.bus_compact = Some(BusCompactSettings {
                         arrange,
                         mixer,
@@ -218,7 +225,7 @@ pub fn parse_track_chunk(chunk: &str, default_index: usize) -> Result<ParsedTrac
             }
         }
     }
-    
+
     Ok(parsed)
 }
 
@@ -281,7 +288,7 @@ impl ParsedTrackChunk {
             guid: None,
         }
     }
-    
+
     /// Convert to daw::tracks::Track
     pub fn to_track(self, index: Option<usize>, selected: bool) -> Track {
         let mut track = Track::new(self.name);
@@ -319,8 +326,7 @@ impl ParsedTrackChunk {
 fn parse_int(s: &str) -> Result<i32, String> {
     // Handle hex format
     if s.starts_with("0x") || s.starts_with("0X") {
-        i32::from_str_radix(&s[2..], 16)
-            .map_err(|e| format!("Invalid hex integer '{}': {}", s, e))
+        i32::from_str_radix(&s[2..], 16).map_err(|e| format!("Invalid hex integer '{}': {}", s, e))
     } else {
         s.parse::<i32>()
             .map_err(|e| format!("Invalid integer '{}': {}", s, e))
@@ -332,4 +338,3 @@ fn parse_float(s: &str) -> Result<f64, String> {
     s.parse::<f64>()
         .map_err(|e| format!("Invalid float '{}': {}", s, e))
 }
-

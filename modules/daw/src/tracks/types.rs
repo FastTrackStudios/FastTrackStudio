@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A newtype for track names to provide type safety and prevent "string-ly typed" bugs.
@@ -115,4 +115,3 @@ impl MetadataKey {
     pub const MODES: &'static str = "fts.modes";
     pub const USE_PLAYLIST: &'static str = "fts.use_playlist";
 }
-

@@ -84,52 +84,53 @@ impl Slides {
                 if num_patterns < 2 {
                     continue; // Need at least 2 patterns
                 }
-                
+
                 // Check if lines repeat in this pattern
                 // Compare regular text (ignoring background vocals for pattern detection)
                 let mut is_pattern = true;
-                
+
                 for pattern_idx in 1..num_patterns {
                     let start1 = 0;
                     let start2 = pattern_idx * pattern_len;
-                    
+
                     // Compare line structures (similarity check)
                     for i in 0..pattern_len {
                         let line1 = &lines[start1 + i];
                         let line2 = &lines[start2 + i];
-                        
+
                         // Compare regular text only (ignore parenthetical parts for pattern detection)
                         let text1 = line1.regular_text();
                         let text2 = line2.regular_text();
-                        
+
                         // If both are empty, they match
                         if text1.is_empty() && text2.is_empty() {
                             continue;
                         }
-                        
+
                         // If one is empty and the other isn't, they don't match
                         if text1.is_empty() || text2.is_empty() {
                             is_pattern = false;
                             break;
                         }
-                        
+
                         let len1 = text1.chars().count();
                         let len2 = text2.chars().count();
-                        
+
                         // Allow variance in length (up to 40% difference for pattern detection)
                         // This handles cases where background vocals are added
                         if len1 > 0 && len2 > 0 {
-                            let diff_ratio = (len1 as f64 - len2 as f64).abs() / len1.max(len2) as f64;
+                            let diff_ratio =
+                                (len1 as f64 - len2 as f64).abs() / len1.max(len2) as f64;
                             if diff_ratio > 0.4 {
                                 is_pattern = false;
                                 break;
                             }
                         }
-                        
+
                         // Also check if the first few words are similar (for better pattern detection)
                         let words1: Vec<&str> = text1.split_whitespace().take(3).collect();
                         let words2: Vec<&str> = text2.split_whitespace().take(3).collect();
-                        
+
                         if !words1.is_empty() && !words2.is_empty() {
                             // Check if at least the first word matches (case-insensitive)
                             if words1[0].to_lowercase() != words2[0].to_lowercase() {
@@ -138,12 +139,12 @@ impl Slides {
                             }
                         }
                     }
-                    
+
                     if !is_pattern {
                         break;
                     }
                 }
-                
+
                 if is_pattern {
                     // Found a pattern! Mark boundaries
                     let mut pattern_boundaries = Vec::new();
@@ -154,7 +155,7 @@ impl Slides {
                 }
             }
         }
-        
+
         // No clear pattern found, treat as single pattern
         vec![0]
     }
@@ -175,7 +176,7 @@ impl Slides {
         for (section_idx, section) in lyrics.sections.iter().enumerate() {
             // Detect patterns in this section
             let pattern_boundaries = Self::detect_patterns(section);
-            
+
             // Process each pattern separately
             for pattern_idx in 0..pattern_boundaries.len() {
                 let pattern_start = pattern_boundaries[pattern_idx];
@@ -184,26 +185,27 @@ impl Slides {
                 } else {
                     section.lines.len()
                 };
-                
+
                 let pattern_lines = &section.lines[pattern_start..pattern_end];
-                
+
                 // Calculate ideal lines per slide for even distribution
                 let total_lines = pattern_lines.len();
                 if total_lines == 0 {
                     continue;
                 }
-                
+
                 // Calculate word counts for each line
-                let line_word_counts: Vec<usize> = pattern_lines.iter()
+                let line_word_counts: Vec<usize> = pattern_lines
+                    .iter()
                     .map(|l| l.regular_text().split_whitespace().count())
                     .collect();
-                
+
                 // Target: 2 lines per slide for even distribution (preferred)
                 let mut target_lines_per_slide = 2;
-                
+
                 // Enforce strict 19-word maximum per slide
                 let max_words_per_slide = config.max_words.min(19);
-                
+
                 // Check if we can fit 2 lines per slide based on word limits
                 // Look at the maximum words in any 2 consecutive lines
                 let mut max_words_in_two_lines = 0;
@@ -211,7 +213,7 @@ impl Slides {
                     let words_in_two = line_word_counts[i] + line_word_counts[i + 1];
                     max_words_in_two_lines = max_words_in_two_lines.max(words_in_two);
                 }
-                
+
                 // If the max words in 2 lines exceeds the limit, use 1 line per slide
                 if max_words_in_two_lines > max_words_per_slide {
                     target_lines_per_slide = 1;
@@ -220,49 +222,52 @@ impl Slides {
                     // Only use 3 if it results in perfectly even distribution
                     let mut max_words_in_three_lines = 0;
                     for i in 0..(total_lines.saturating_sub(2)) {
-                        let words_in_three = line_word_counts[i] + line_word_counts[i + 1] + line_word_counts[i + 2];
+                        let words_in_three =
+                            line_word_counts[i] + line_word_counts[i + 1] + line_word_counts[i + 2];
                         max_words_in_three_lines = max_words_in_three_lines.max(words_in_three);
                     }
-                    
+
                     // Only use 3 if:
                     // 1. It fits within word limits (max 19 words)
                     // 2. It results in perfectly even distribution (total_lines % 3 == 0)
                     // 3. It's better than using 2 (e.g., 9 lines: 3,3,3 vs 2,2,2,2,1)
-                    if max_words_in_three_lines <= max_words_per_slide && 
-                       total_lines % 3 == 0 && 
-                       total_lines >= 6 {
+                    if max_words_in_three_lines <= max_words_per_slide
+                        && total_lines % 3 == 0
+                        && total_lines >= 6
+                    {
                         target_lines_per_slide = 3;
                     } else {
                         // Default to 2 for even distribution
                         target_lines_per_slide = 2;
                     }
                 }
-                
+
                 // Create slides with even distribution within this pattern
                 // Calculate ideal number of slides for even distribution (aim for 2 lines per slide)
-                let num_slides = (total_lines as f64 / target_lines_per_slide as f64).ceil() as usize;
+                let num_slides =
+                    (total_lines as f64 / target_lines_per_slide as f64).ceil() as usize;
                 let ideal_lines_per_slide = if num_slides > 0 {
                     (total_lines as f64 / num_slides as f64).ceil() as usize
                 } else {
                     target_lines_per_slide
                 };
-                
+
                 // Pre-calculate how many lines each slide should get for even distribution
                 // For 8 lines with target 2, we want: 2, 2, 2, 2
                 let mut lines_per_slide: Vec<usize> = Vec::new();
                 let base_lines = total_lines / num_slides;
                 let extra_lines = total_lines % num_slides;
-                
+
                 // Distribute base_lines to all slides, then add 1 to the first extra_lines slides
                 for i in 0..num_slides {
                     let lines = base_lines + if i < extra_lines { 1 } else { 0 };
                     lines_per_slide.push(lines);
                 }
-                
+
                 let mut line_idx = 0;
                 let mut slide_num = 0;
                 let mut current_slide_lines = Vec::new();
-                
+
                 while line_idx < total_lines && slide_num < lines_per_slide.len() {
                     // Check for custom slide break at this position
                     let absolute_line_idx = pattern_start + line_idx;
@@ -277,7 +282,7 @@ impl Slides {
                             .map(|l: &LyricLine| l.display_text())
                             .collect::<Vec<_>>()
                             .join("\n");
-                        
+
                         slides.push(Slide {
                             section_name: section.name.clone(),
                             text: slide_text,
@@ -290,10 +295,10 @@ impl Slides {
 
                     let mut slide_lines = Vec::new();
                     let mut slide_words = 0;
-                    
+
                     // Get target lines for this slide from pre-calculated distribution
                     let target_lines = lines_per_slide[slide_num];
-                    
+
                     // Take the lines for this slide, prioritizing word limits
                     // Enforce strict 19-word maximum per slide
                     let max_words_per_slide = config.max_words.min(19);
@@ -301,35 +306,37 @@ impl Slides {
                     for i in 0..target_lines.min(total_lines - line_idx) {
                         let line = &pattern_lines[line_idx + i];
                         let line_words = line_word_counts[line_idx + i];
-                        
+
                         // Check if adding this line would exceed word limit (primary check)
                         // Use the stricter of config.max_words and 19
                         let would_exceed_words = slide_words + line_words > max_words_per_slide;
-                        
+
                         // If we haven't taken any lines yet and this would exceed, we must take it anyway
                         // (exception for very long lines - they get their own slide)
                         if would_exceed_words && lines_taken > 0 {
                             break; // Stop here, this line goes to next slide
                         }
-                        
+
                         // Also check character limit as a safety check (but not primary)
                         let line_text = line.regular_text();
                         let line_chars = line_text.chars().count();
-                        let current_slide_chars: usize = slide_lines.iter()
+                        let current_slide_chars: usize = slide_lines
+                            .iter()
                             .map(|l: &LyricLine| l.regular_text().chars().count())
                             .sum();
-                        let would_exceed_chars = current_slide_chars + line_chars > config.max_chars;
-                        
+                        let would_exceed_chars =
+                            current_slide_chars + line_chars > config.max_chars;
+
                         // Only break on char limit if we already have at least one line
                         if would_exceed_chars && lines_taken > 0 {
                             break;
                         }
-                        
+
                         slide_lines.push(line.clone());
                         slide_words += line_words;
                         lines_taken += 1;
                     }
-                    
+
                     if !slide_lines.is_empty() {
                         let lines_count = slide_lines.len();
                         let slide_text = slide_lines
@@ -337,14 +344,14 @@ impl Slides {
                             .map(|l| l.display_text())
                             .collect::<Vec<_>>()
                             .join("\n");
-                        
+
                         slides.push(Slide {
                             section_name: section.name.clone(),
                             text: slide_text,
                             is_section_header: false,
                             lines: slide_lines,
                         });
-                        
+
                         line_idx += lines_count;
                         slide_num += 1;
                     } else {
@@ -361,7 +368,7 @@ impl Slides {
                         slide_num += 1;
                     }
                 }
-                
+
                 // Add any remaining lines
                 while line_idx < total_lines {
                     let line = pattern_lines[line_idx].clone();
@@ -467,9 +474,7 @@ impl MidiGenerator {
 
                 for syllable in syllables {
                     let start_time = line.start_time.unwrap_or(current_time);
-                    let end_time = line
-                        .end_time
-                        .unwrap_or(start_time + duration_per_syllable);
+                    let end_time = line.end_time.unwrap_or(start_time + duration_per_syllable);
 
                     events.push(MidiEvent {
                         start_time,
@@ -555,12 +560,12 @@ Picking up the loose puzzle pieces"#;
             min_words_to_bundle: 8,
         };
         let slides = Slides::generate_with_config(&lyrics, config);
-        
+
         // Should bundle the first two short lines together
         assert!(slides.len() >= 2); // Section header + at least 1 content slide
         let content_slides: Vec<_> = slides.iter().filter(|s| !s.is_section_header).collect();
         assert!(!content_slides.is_empty());
-        
+
         // First slide should contain both short lines
         let first_slide = &content_slides[0];
         assert!(first_slide.text.contains("Waiting, I'm patient"));
@@ -589,4 +594,3 @@ Test line"#;
         assert_eq!(events[0].note, 60);
     }
 }
-

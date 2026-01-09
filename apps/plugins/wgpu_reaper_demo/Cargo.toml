@@ -1,0 +1,17 @@
+[package]
+name = "wgpu_reaper_demo"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition = "2021"  # nih_plug requires 2021
+description = "Demo plugin showcasing Dioxus rendering in windowed and REAPER embedded modes"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { workspace = true, features = ["assert_process_allocs"] }
+nih_plug_dioxus = { workspace = true, features = ["embedded"] }
+atomic_float = { workspace = true }
+lumen-blocks = { workspace = true }
+futures-timer = "3"

@@ -97,7 +97,7 @@ impl Key {
     }
 
     /// Convert this key to LilyPond notation
-    /// 
+    ///
     /// # Returns
     /// LilyPond key notation (e.g., "\\key cis \\major", "\\key des \\minor")
     pub fn to_lilypond(&self) -> String {

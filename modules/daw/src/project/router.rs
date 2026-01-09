@@ -1,8 +1,8 @@
 use crate::project::Project;
+use crate::transport::{TransportActions, create_transport_http_router};
 use axum::{Router, extract::State, http::StatusCode, response::Json, routing::get};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::transport::{TransportActions, create_transport_http_router};
 
 /// Generic HTTP project router that composes domain routers (transport, audio, midi, etc.)
 /// This router expects to receive individual project state, not a provider

@@ -1,0 +1,38 @@
+[package]
+name = "fts-control"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "FTS Control - Native desktop app for visualizing and controlling FTS plugins"
+
+[[bin]]
+name = "fts-control"
+path = "src/main.rs"
+
+[dependencies]
+# Dioxus with native renderer (Blitz)
+dioxus = { workspace = true, features = ["native", "hooks", "signals", "macro", "html", "launch"] }
+
+# Plugin hub for cross-plugin communication
+plugin-hub = { path = "../../modules/plugin-hub", features = ["host"] }
+
+# Shared UI components and plugin cores
+fts-plugins-ui = { path = "../../modules/plugins/ui" }
+fts-gain-core = { path = "../../modules/plugins/gain", features = ["ui"] }
+
+# Async runtime
+tokio = { workspace = true, features = ["full"] }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = { workspace = true }

@@ -1,6 +1,6 @@
-use dioxus::prelude::*;
 use crate::components::ruler::RULER_HEIGHT;
 use daw::tracks::Track;
+use dioxus::prelude::*;
 
 /// Track Control Panel (TCP) - vertical panel showing track names and controls
 #[component]
@@ -30,44 +30,48 @@ pub fn TrackControlPanel(
         for track in tracks_for_memo.iter() {
             depths.push(running_depth as u32);
             running_depth += track.folder_depth_change.to_reaper_value();
-            if running_depth < 0 { running_depth = 0; }
+            if running_depth < 0 {
+                running_depth = 0;
+            }
         }
         depths
     });
 
-                // Compute visible tracks (filter out children of collapsed folders)
-                let collapsed_state = collapsed_folders();
-                let visible_indices: Vec<usize> = tracks.iter().enumerate()
-                    .filter_map(|(idx, track)| {
+    // Compute visible tracks (filter out children of collapsed folders)
+    let collapsed_state = collapsed_folders();
+    let visible_indices: Vec<usize> = tracks
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, track)| {
             let depths = absolute_depths();
             let current_depth = depths[idx];
-            
-                        // Check all ancestor folders (walk backwards through tracks)
-                        // A track is hidden if ANY of its ancestor folders is collapsed
-                        for check_idx in (0..idx).rev() {
+
+            // Check all ancestor folders (walk backwards through tracks)
+            // A track is hidden if ANY of its ancestor folders is collapsed
+            for check_idx in (0..idx).rev() {
                 let check_depth = depths[check_idx];
-                            
-                            // Skip tracks that are not ancestors (same or higher depth)
+
+                // Skip tracks that are not ancestors (same or higher depth)
                 if check_depth >= current_depth {
-                                continue;
-                            }
-                            
-                            // This is a potential ancestor - check if it's a folder
+                    continue;
+                }
+
+                // This is a potential ancestor - check if it's a folder
                 let check_track = &tracks[check_idx];
-                            if check_track.is_folder {
-                                // Check if this ancestor folder is collapsed
-                                if collapsed_state.get(check_idx).copied().unwrap_or(false) {
-                                    // Found a collapsed ancestor - hide this track
-                                    return None;
-                                        }
-                            }
-                        }
-                        
-                        // No collapsed ancestor folders found - track is visible
-                        Some(idx)
-                    })
-                    .collect();
-                
+                if check_track.is_folder {
+                    // Check if this ancestor folder is collapsed
+                    if collapsed_state.get(check_idx).copied().unwrap_or(false) {
+                        // Found a collapsed ancestor - hide this track
+                        return None;
+                    }
+                }
+            }
+
+            // No collapsed ancestor folders found - track is visible
+            Some(idx)
+        })
+        .collect();
+
     rsx! {
         div {
             class: "w-64 flex-shrink-0 border-r border-border bg-card flex flex-col h-full",
@@ -113,16 +117,21 @@ fn TrackList(
 ) -> Element {
     // Precompute which tracks have children (for collapse button visibility)
     // A track has children if any following track has higher depth
-    let tracks_with_children: Vec<bool> = tracks.iter().enumerate().map(|(idx, _track)| {
-        let depths = absolute_depths();
-        let current_depth = depths[idx];
-        // Check if any following track has higher depth
-        depths.iter().skip(idx + 1).any(|&next_depth| {
-            next_depth > current_depth
+    let tracks_with_children: Vec<bool> = tracks
+        .iter()
+        .enumerate()
+        .map(|(idx, _track)| {
+            let depths = absolute_depths();
+            let current_depth = depths[idx];
+            // Check if any following track has higher depth
+            depths
+                .iter()
+                .skip(idx + 1)
+                .any(|&next_depth| next_depth > current_depth)
         })
-    }).collect();
-    
-                rsx! {
+        .collect();
+
+    rsx! {
                     div {
                         class: "flex flex-col flex-1 bg-card/50 overflow-y-auto",
                         for original_idx in visible_indices.iter() {
@@ -159,18 +168,21 @@ fn TrackRow(
     on_track_solo: Option<Callback<(String, usize, daw::tracks::api::solo::SoloMode)>>,
     on_track_height_change: Option<Callback<(usize, f64)>>,
 ) -> Element {
-                            let track_color = track.color.map(|c| {
-                                let r = ((c >> 16) & 0xFF) as u8;
-                                let g = ((c >> 8) & 0xFF) as u8;
-                                let b = (c & 0xFF) as u8;
-                                format!("rgb({}, {}, {})", r, g, b)
-                            }).unwrap_or_else(|| "transparent".to_string());
-                            
-                            let indent_px = (depth * 20) as f64; // 20px per depth level for better spacing
+    let track_color = track
+        .color
+        .map(|c| {
+            let r = ((c >> 16) & 0xFF) as u8;
+            let g = ((c >> 8) & 0xFF) as u8;
+            let b = (c & 0xFF) as u8;
+            format!("rgb({}, {}, {})", r, g, b)
+        })
+        .unwrap_or_else(|| "transparent".to_string());
+
+    let indent_px = (depth * 20) as f64; // 20px per depth level for better spacing
     let collapsed_state = collapsed_folders();
     let is_collapsed = collapsed_state.get(original_idx).copied().unwrap_or(false);
     let track_height = track_heights().get(original_idx).copied().unwrap_or(64.0);
-    
+
     // Clone values needed for button handlers (to avoid move issues)
     let on_mute_cb = on_track_mute.clone();
     let on_solo_cb = on_track_solo.clone();
@@ -184,7 +196,7 @@ fn TrackRow(
     // Clone track state for button handlers (will be updated when track prop changes)
     let track_muted = track.muted;
     let track_solo_state = track.solo_state.clone();
-                            
+
     rsx! {
                             div {
                                 key: "{original_idx}",
@@ -205,11 +217,11 @@ fn TrackRow(
                     }
                 }
             }
-            
+
                                 div {
                 class: "relative h-full flex items-center gap-2 px-3 z-10",
                                     style: format!("padding-left: {}px;", indent_px + 12.0),
-                
+
                 // Collapse button - show for folders or any track with children
                                     if track.is_folder || has_children {
                                         button {
@@ -242,7 +254,7 @@ fn TrackRow(
                         div { class: "w-6 flex-shrink-0" } // Spacer for top-level tracks
                                     }
                 }
-                
+
                                     // Mute button - use track.muted directly for reactivity
                                     button {
                                         class: format!(
@@ -262,7 +274,7 @@ fn TrackRow(
                                         title: if track.muted { "Unmute" } else { "Mute" },
                                         "M"
                                     }
-                
+
                                     // Solo button - use track.solo_state directly for reactivity
                                     button {
                                         class: format!(
@@ -290,7 +302,7 @@ fn TrackRow(
                                         },
                                         "S"
                                     }
-                
+
                 // Track name with better styling
                                     div {
                     class: "flex-1 text-sm text-foreground truncate flex items-center gap-2 min-w-0 pl-1",
@@ -309,17 +321,17 @@ fn TrackRow(
                     span {
                         class: format!(
                             "truncate select-none {}",
-                            if track.is_folder { 
-                                "font-semibold text-foreground" 
-                            } else { 
-                                "text-foreground/90" 
+                            if track.is_folder {
+                                "font-semibold text-foreground"
+                            } else {
+                                "text-foreground/90"
                             }
                         ),
                                         "{track.name}"
                                     }
                                 }
             }
-            
+
             // Resize handle with drag functionality
                                 div {
                 class: "absolute bottom-0 left-0 right-0 h-3 bg-transparent hover:bg-primary/10 cursor-ns-resize transition-colors group",
@@ -328,24 +340,24 @@ fn TrackRow(
                         let start_y = evt.data.client_coordinates().y;
                         let start_height = track_height;
                         let track_idx = track_idx_height;
-                        
+
                         // Prevent default to avoid text selection
                         evt.prevent_default();
-                        
+
                         // Set up drag handling
                         spawn(async move {
                             use dioxus::prelude::*;
-                            
+
                             // For now, implement a simple click-to-cycle approach
                             // Full drag would require global mouse event listeners
                             // which is more complex in Dioxus
                             let min_height = 32.0;
                             let max_height = 256.0;
-                            
+
                             // Cycle through common heights: 32, 48, 64, 96, 128
                             let heights = [32.0, 48.0, 64.0, 96.0, 128.0, 192.0, 256.0];
                             let current = start_height;
-                            
+
                             // Find next height in sequence
                             let new_height = heights.iter()
                                 .find(|&&h| h > current)
@@ -353,7 +365,7 @@ fn TrackRow(
                                 .unwrap_or(heights[0])
                                 .max(min_height)
                                 .min(max_height);
-                            
+
                             cb.call((track_idx, new_height));
                         });
                     }

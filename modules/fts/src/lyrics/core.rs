@@ -408,10 +408,10 @@ impl Word {
     /// ```
     pub fn from_text(text: &str) -> Self {
         use crate::lyrics::syllables::syllables_in_word;
-        
+
         // Get estimated syllable count
         let expected_count = syllables_in_word(text);
-        
+
         // If it's a single syllable word, return it as-is
         if expected_count <= 1 {
             return Self {
@@ -483,35 +483,36 @@ impl Word {
 
         // Group consecutive vowels
         let vowel_groups = Self::group_vowels(&vowel_positions);
-        
+
         // Build split points based on vowel groups and expected syllable count
         let mut split_points = vec![0];
         let mut vowel_idx = 0;
-        
+
         // Distribute vowel groups across syllables
         for syllable_num in 0..expected_count.saturating_sub(1) {
             if vowel_idx >= vowel_groups.len() {
                 break;
             }
-            
+
             // Calculate how many vowel groups should go in this syllable
             let remaining_syllables = expected_count - syllable_num;
             let remaining_vowel_groups = vowel_groups.len() - vowel_idx;
-            let groups_per_syllable = (remaining_vowel_groups as f64 / remaining_syllables as f64).ceil() as usize;
+            let groups_per_syllable =
+                (remaining_vowel_groups as f64 / remaining_syllables as f64).ceil() as usize;
             let groups_to_use = groups_per_syllable.min(remaining_vowel_groups);
-            
+
             if groups_to_use == 0 {
                 break;
             }
-            
+
             // Get the last vowel group we're using for this syllable
             let last_group_idx = vowel_idx + groups_to_use - 1;
             let last_group = &vowel_groups[last_group_idx];
             let vowel_end = last_group[last_group.len() - 1];
-            
+
             // Count consonants after this vowel group
             let consonants_after = Self::count_consonants(&chars, vowel_end + 1);
-            
+
             // Determine split point
             let split_point = if consonants_after >= 2 {
                 // Multiple consonants: split after first consonant
@@ -531,9 +532,10 @@ impl Word {
                 // No consonants: end at vowel
                 vowel_end + 1
             };
-            
+
             // Make sure we're making progress
-            if split_point > split_points.last().copied().unwrap_or(0) && split_point < chars.len() {
+            if split_point > split_points.last().copied().unwrap_or(0) && split_point < chars.len()
+            {
                 split_points.push(split_point);
                 vowel_idx = last_group_idx + 1;
             } else {
@@ -541,19 +543,19 @@ impl Word {
                 break;
             }
         }
-        
+
         // Add final position
         split_points.push(chars.len());
-        
+
         // Create syllables from split points
         let mut syllables = Vec::new();
         for i in 0..split_points.len().saturating_sub(1) {
             let start = split_points[i];
             let end = split_points[i + 1];
-            
+
             if end > start && end <= chars.len() {
                 let syllable_text: String = chars[start..end].iter().collect();
-                
+
                 if !syllable_text.trim().is_empty() {
                     syllables.push(Syllable {
                         text: syllable_text,
@@ -571,37 +573,40 @@ impl Word {
             syllables.clear();
             split_points.clear();
             split_points.push(0);
-            
+
             // Try to split at vowel boundaries more evenly
-            let vowels_per_syllable = (vowel_positions.len() as f64 / expected_count as f64).ceil() as usize;
-            
+            let vowels_per_syllable =
+                (vowel_positions.len() as f64 / expected_count as f64).ceil() as usize;
+
             for syllable_num in 0..expected_count.saturating_sub(1) {
                 let vowel_idx_for_split = (syllable_num + 1) * vowels_per_syllable;
-                
+
                 if vowel_idx_for_split < vowel_positions.len() {
                     let vowel_pos = vowel_positions[vowel_idx_for_split];
                     // Count consonants before this vowel
                     let consonants_before = Self::count_consonants_before(&chars, vowel_pos);
-                    
+
                     let split_point = if consonants_before >= 1 {
                         vowel_pos - consonants_before
                     } else {
                         vowel_pos
                     };
-                    
-                    if split_point > split_points.last().copied().unwrap_or(0) && split_point < chars.len() {
+
+                    if split_point > split_points.last().copied().unwrap_or(0)
+                        && split_point < chars.len()
+                    {
                         split_points.push(split_point);
                     }
                 }
             }
-            
+
             split_points.push(chars.len());
-            
+
             // Create syllables
             for i in 0..split_points.len().saturating_sub(1) {
                 let start = split_points[i];
                 let end = split_points[i + 1];
-                
+
                 if end > start && end <= chars.len() {
                     let syllable_text: String = chars[start..end].iter().collect();
                     if !syllable_text.trim().is_empty() {
@@ -621,7 +626,7 @@ impl Word {
         if syllables.len() != expected_count && expected_count > 1 {
             syllables.clear();
             let chars_per_syllable = (chars.len() as f64 / expected_count as f64).ceil() as usize;
-            
+
             for i in 0..expected_count {
                 let start = i * chars_per_syllable;
                 let end = if i == expected_count - 1 {
@@ -629,7 +634,7 @@ impl Word {
                 } else {
                     ((i + 1) * chars_per_syllable).min(chars.len())
                 };
-                
+
                 if start < chars.len() && end > start {
                     let syllable_text: String = chars[start..end].iter().collect();
                     syllables.push(Syllable {
@@ -735,7 +740,7 @@ pub fn split_line_into_words(line: &str) -> Vec<Word> {
     // Remove parenthetical text markers for word splitting
     // We'll preserve them in the word text but split on whitespace
     let trimmed = line.trim();
-    
+
     if trimmed.is_empty() {
         return Vec::new();
     }
@@ -784,7 +789,7 @@ mod tests {
     fn test_split_line_into_words_empty() {
         let words = split_line_into_words("");
         assert!(words.is_empty());
-        
+
         let words2 = split_line_into_words("   ");
         assert!(words2.is_empty());
     }
@@ -793,12 +798,12 @@ mod tests {
     fn test_split_line_into_words_syllables() {
         let words = split_line_into_words("hello beautiful world");
         assert_eq!(words.len(), 3);
-        
+
         // Check that each word has syllables
         assert!(!words[0].syllables.is_empty()); // hello = 2 syllables
         assert!(!words[1].syllables.is_empty()); // beautiful = 3 syllables
         assert!(!words[2].syllables.is_empty()); // world = 1 syllable
-        
+
         // Verify syllable counts match expected
         assert_eq!(words[0].syllables.len(), 2); // hello
         assert_eq!(words[1].syllables.len(), 3); // beautiful
@@ -809,21 +814,31 @@ mod tests {
     fn test_split_line_into_words_complex_line() {
         let line = "Drowning, fishing, dropping, screaming under the lights";
         let words = split_line_into_words(line);
-        
+
         // Should have 7 words: Drowning, fishing, dropping, screaming, under, the, lights
         assert_eq!(words.len(), 7, "Expected 7 words, got {}", words.len());
-        
+
         // Verify all words have syllables
         for word in &words {
-            assert!(!word.syllables.is_empty(), "Word '{}' should have syllables", word.text);
+            assert!(
+                !word.syllables.is_empty(),
+                "Word '{}' should have syllables",
+                word.text
+            );
         }
-        
+
         // Check specific words
         assert_eq!(words[0].text, "Drowning,");
-        assert!(words[0].syllables.len() >= 1, "Drowning should have at least 1 syllable");
-        
+        assert!(
+            words[0].syllables.len() >= 1,
+            "Drowning should have at least 1 syllable"
+        );
+
         assert_eq!(words[3].text, "screaming");
-        assert!(words[3].syllables.len() >= 1, "Screaming should have at least 1 syllable");
+        assert!(
+            words[3].syllables.len() >= 1,
+            "Screaming should have at least 1 syllable"
+        );
     }
 
     #[test]
@@ -841,12 +856,15 @@ mod tests {
         for line in test_cases {
             let words = split_line_into_words(line);
             assert!(!words.is_empty(), "Line '{}' should produce words", line);
-            
+
             // Verify each word has syllables
             for word in &words {
-                assert!(!word.syllables.is_empty(), 
-                    "Word '{}' from line '{}' should have syllables", 
-                    word.text, line);
+                assert!(
+                    !word.syllables.is_empty(),
+                    "Word '{}' from line '{}' should have syllables",
+                    word.text,
+                    line
+                );
             }
         }
     }
@@ -855,28 +873,32 @@ mod tests {
     fn test_syllable_text_content() {
         // Test that syllables actually contain text segments
         use crate::lyrics::syllables::syllables_in_word;
-        
+
         let test_cases: Vec<(&str, Vec<&str>)> = vec![
             ("hello", vec!["hel", "lo"]),
             ("beautiful", vec!["beau", "ti", "ful"]),
             ("drowning", vec!["drow", "ning"]),
-            ("supercalifragilistic", vec!["super", "ca", "lif", "ra", "gi", "lis", "tic"]),
+            (
+                "supercalifragilistic",
+                vec!["super", "ca", "lif", "ra", "gi", "lis", "tic"],
+            ),
         ];
 
         for (word_text, expected_syllables) in test_cases {
             // Get the actual count from the counter
             let expected_count = syllables_in_word(word_text);
-            
+
             // Skip words that the counter thinks have 1 syllable (they won't be split)
             if expected_count <= 1 {
                 continue;
             }
-            
+
             let word = Word::from_text(word_text);
-            
+
             // Extract actual syllable texts
-            let actual_syllables: Vec<&str> = word.syllables.iter().map(|s| s.text.as_str()).collect();
-            
+            let actual_syllables: Vec<&str> =
+                word.syllables.iter().map(|s| s.text.as_str()).collect();
+
             // Print output syllable vec
             println!(
                 "Word: '{}' -> {} syllables: {:?}",
@@ -884,7 +906,7 @@ mod tests {
                 word.syllables.len(),
                 actual_syllables
             );
-            
+
             // Verify we have the right number of syllables
             assert_eq!(
                 word.syllables.len(),
@@ -895,17 +917,14 @@ mod tests {
                 word.syllables.len(),
                 actual_syllables
             );
-            
+
             // Directly compare against expected syllable vec
             assert_eq!(
-                actual_syllables,
-                expected_syllables,
+                actual_syllables, expected_syllables,
                 "Word '{}' syllables don't match expected. Expected: {:?}, Got: {:?}",
-                word_text,
-                expected_syllables,
-                actual_syllables
+                word_text, expected_syllables, actual_syllables
             );
-            
+
             // Verify each syllable has text content
             for (i, syllable) in word.syllables.iter().enumerate() {
                 assert!(
@@ -916,7 +935,7 @@ mod tests {
                     syllable.text
                 );
             }
-            
+
             // Verify the syllables combine to form the original word (ignoring case and punctuation)
             let combined: String = word.syllables.iter().map(|s| s.text.as_str()).collect();
             let word_clean: String = word_text.chars().filter(|c| c.is_alphanumeric()).collect();
@@ -936,12 +955,12 @@ mod tests {
     fn test_split_line_into_words_syllable_text() {
         // Test that split_line_into_words returns words with actual syllable text
         use crate::lyrics::syllables::syllables_in_word;
-        
+
         let line = "Hello beautiful supercalifragilistic";
         let words = split_line_into_words(line);
-        
+
         assert_eq!(words.len(), 3);
-        
+
         // Check first word
         let word1 = &words[0];
         assert_eq!(word1.text, "Hello");
@@ -953,12 +972,17 @@ mod tests {
             expected_syllables_1,
             word1.syllables.len()
         );
-        
+
         // Verify syllables have text
         for (i, syllable) in word1.syllables.iter().enumerate() {
-            assert!(!syllable.text.is_empty(), "Syllable {} should have text: {:?}", i, syllable.text);
+            assert!(
+                !syllable.text.is_empty(),
+                "Syllable {} should have text: {:?}",
+                i,
+                syllable.text
+            );
         }
-        
+
         // Check second word
         let word2 = &words[1];
         assert_eq!(word2.text, "beautiful");
@@ -970,7 +994,7 @@ mod tests {
             expected_syllables_2,
             word2.syllables.len()
         );
-        
+
         // Check third word
         let word3 = &words[2];
         assert_eq!(word3.text, "supercalifragilistic");
@@ -982,20 +1006,22 @@ mod tests {
             expected_syllables_3,
             word3.syllables.len()
         );
-        
+
         // Print for debugging
         println!("Word: {}", word3.text);
         for (i, syllable) in word3.syllables.iter().enumerate() {
             println!("  Syllable {}: '{}'", i, syllable.text);
         }
-        
+
         // Verify all syllables have text content
         for word in &words {
             for syllable in &word.syllables {
-                assert!(!syllable.text.is_empty(), "Syllable should have text: '{}'", syllable.text);
+                assert!(
+                    !syllable.text.is_empty(),
+                    "Syllable should have text: '{}'",
+                    syllable.text
+                );
             }
         }
     }
 }
-
-

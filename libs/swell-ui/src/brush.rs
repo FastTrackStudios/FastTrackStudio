@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use reaper_common_types::RgbColor;
 use reaper_low::Swell;
 use reaper_medium::Hbrush;
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 #[derive(Debug, Default)]
 pub struct BrushCache {

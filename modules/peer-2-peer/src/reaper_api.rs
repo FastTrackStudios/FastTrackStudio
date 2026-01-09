@@ -3,9 +3,9 @@
 //! Defines the RPC protocol for communication between the desktop app and REAPER extension.
 //! Uses irpc for type-safe, streaming RPC over QUIC.
 
+use fts::setlist::Setlist;
 use irpc::{channel::mpsc, rpc_requests};
 use serde::{Deserialize, Serialize};
-use fts::setlist::Setlist;
 
 /// Transport state information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,10 +70,10 @@ pub enum ClientRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ReaperProtocol {
     /// Bidirectional stream: REAPER sends state updates, client sends requests
-    /// 
+    ///
     /// - rx: Client sends ClientRequest messages
     /// - tx: REAPER sends SetlistState and TransportState messages
-    /// 
+    ///
     /// The client can send requests at any time, and REAPER will stream
     /// state updates continuously.
     #[rpc(rx = mpsc::Receiver<ClientRequest>, tx = mpsc::Sender<ReaperStateUpdate>)]
@@ -104,7 +104,15 @@ impl SetlistState {
 
 /// Helper to serialize Setlist into SetlistState
 impl From<(Setlist, usize, usize, Option<f64>, Option<f64>)> for SetlistState {
-    fn from((setlist, song_idx, section_idx, song_progress, section_progress): (Setlist, usize, usize, Option<f64>, Option<f64>)) -> Self {
+    fn from(
+        (setlist, song_idx, section_idx, song_progress, section_progress): (
+            Setlist,
+            usize,
+            usize,
+            Option<f64>,
+            Option<f64>,
+        ),
+    ) -> Self {
         let setlist_json = serde_json::to_string(&setlist).unwrap_or_default();
         Self {
             setlist_json,
@@ -115,4 +123,3 @@ impl From<(Setlist, usize, usize, Option<f64>, Option<f64>)> for SetlistState {
         }
     }
 }
-

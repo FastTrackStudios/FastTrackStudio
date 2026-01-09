@@ -2,8 +2,8 @@
 //!
 //! Provides setlist state to the stream API.
 
-use std::sync::Arc;
 use crate::setlist::{SetlistApi, SetlistStateProvider};
+use std::sync::Arc;
 
 /// REAPER implementation of SetlistStateProvider
 pub struct ReaperSetlistStateProvider {
@@ -30,7 +30,8 @@ impl SetlistStateProvider for ReaperSetlistStateProvider {
             Some(api) => Ok(api.clone()),
             None => {
                 // Log periodically to avoid spam
-                static MISSING_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                static MISSING_COUNT: std::sync::atomic::AtomicU64 =
+                    std::sync::atomic::AtomicU64::new(0);
                 let count = MISSING_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if count % 1000 == 0 {
                     tracing::debug!(

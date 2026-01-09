@@ -3,8 +3,8 @@
 //! Special commands that can be applied to chords, melodies, or rhythms
 //! Commands can be specified with slash syntax (/fermata) or shorthand (->)
 
-use std::fmt;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Commands that can be applied to musical elements
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

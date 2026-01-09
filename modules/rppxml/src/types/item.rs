@@ -55,7 +55,7 @@ pub enum ChannelMode {
     MonoDownmix = 2,
     MonoLeft = 3,
     MonoRight = 4,
-    MonoChannel(u8), // 5-194 for mono channels 3-128
+    MonoChannel(u8),  // 5-194 for mono channels 3-128
     StereChannel(u8), // 67-257 for stereo channels 1-128
     Unknown(i32),
 }
@@ -100,14 +100,14 @@ pub enum PitchMode {
     SoundTouchPreset1 = 0,
     SoundTouchPreset2 = 1,
     SoundTouchPreset3 = 2,
-    DiracLE(u8),                    // 0-31 presets (65536-65567)
-    LowQualityWindowed(u8),         // 0-47 presets (131072-131119)
-    ElastiquePro(u8),               // 0-31 presets (196608-196639)
-    ElastiqueEfficient(u8),         // 0-3 presets (262144-262147)
-    ElastiqueSoloist(u8),           // 0-3 presets (327680-327683)
-    Elastique21Pro(u8),             // 0-31 presets (393216-393247)
-    Elastique21Efficient(u8),       // 0-3 presets (458752-458755)
-    Elastique21Soloist(u8),         // 0-3 presets (524288-524291)
+    DiracLE(u8),              // 0-31 presets (65536-65567)
+    LowQualityWindowed(u8),   // 0-47 presets (131072-131119)
+    ElastiquePro(u8),         // 0-31 presets (196608-196639)
+    ElastiqueEfficient(u8),   // 0-3 presets (262144-262147)
+    ElastiqueSoloist(u8),     // 0-3 presets (327680-327683)
+    Elastique21Pro(u8),       // 0-31 presets (393216-393247)
+    Elastique21Efficient(u8), // 0-3 presets (458752-458755)
+    Elastique21Soloist(u8),   // 0-3 presets (524288-524291)
     Unknown(i32),
 }
 
@@ -139,13 +139,25 @@ impl fmt::Display for PitchMode {
             PitchMode::SoundTouchPreset2 => write!(f, "Sound Touch (Preset 2)"),
             PitchMode::SoundTouchPreset3 => write!(f, "Sound Touch (Preset 3)"),
             PitchMode::DiracLE(preset) => write!(f, "Dirac LE (Preset {})", preset + 1),
-            PitchMode::LowQualityWindowed(preset) => write!(f, "Low Quality Windowed (Preset {})", preset + 1),
+            PitchMode::LowQualityWindowed(preset) => {
+                write!(f, "Low Quality Windowed (Preset {})", preset + 1)
+            }
             PitchMode::ElastiquePro(preset) => write!(f, "élastique Pro (Preset {})", preset + 1),
-            PitchMode::ElastiqueEfficient(preset) => write!(f, "élastique Efficient (Preset {})", preset + 1),
-            PitchMode::ElastiqueSoloist(preset) => write!(f, "élastique SOLOIST (Preset {})", preset + 1),
-            PitchMode::Elastique21Pro(preset) => write!(f, "élastique 2.1 Pro (Preset {})", preset + 1),
-            PitchMode::Elastique21Efficient(preset) => write!(f, "élastique 2.1 Efficient (Preset {})", preset + 1),
-            PitchMode::Elastique21Soloist(preset) => write!(f, "élastique 2.1 SOLOIST (Preset {})", preset + 1),
+            PitchMode::ElastiqueEfficient(preset) => {
+                write!(f, "élastique Efficient (Preset {})", preset + 1)
+            }
+            PitchMode::ElastiqueSoloist(preset) => {
+                write!(f, "élastique SOLOIST (Preset {})", preset + 1)
+            }
+            PitchMode::Elastique21Pro(preset) => {
+                write!(f, "élastique 2.1 Pro (Preset {})", preset + 1)
+            }
+            PitchMode::Elastique21Efficient(preset) => {
+                write!(f, "élastique 2.1 Efficient (Preset {})", preset + 1)
+            }
+            PitchMode::Elastique21Soloist(preset) => {
+                write!(f, "élastique 2.1 SOLOIST (Preset {})", preset + 1)
+            }
             PitchMode::Unknown(val) => write!(f, "Unknown({})", val),
         }
     }
@@ -250,38 +262,38 @@ impl fmt::Display for ItemTimebase {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     // Basic item properties
-    pub position: f64,                    // POSITION - Position on timeline in seconds
-    pub snap_offset: f64,                 // SNAPOFFS - Snap offset in seconds
-    pub length: f64,                      // LENGTH - Item length in seconds
-    pub loop_source: bool,                // LOOP - Loop source flag
-    pub play_all_takes: bool,             // ALLTAKES - Play all takes flag
-    pub color: Option<i32>,               // COLOR - Item color (optional)
-    pub beat: Option<ItemTimebase>,       // BEAT - Item timebase (optional)
-    pub selected: bool,                   // SEL - Is item selected
-    
+    pub position: f64,              // POSITION - Position on timeline in seconds
+    pub snap_offset: f64,           // SNAPOFFS - Snap offset in seconds
+    pub length: f64,                // LENGTH - Item length in seconds
+    pub loop_source: bool,          // LOOP - Loop source flag
+    pub play_all_takes: bool,       // ALLTAKES - Play all takes flag
+    pub color: Option<i32>,         // COLOR - Item color (optional)
+    pub beat: Option<ItemTimebase>, // BEAT - Item timebase (optional)
+    pub selected: bool,             // SEL - Is item selected
+
     // Fade settings
-    pub fade_in: Option<FadeSettings>,    // FADEIN - Fade in settings
-    pub fade_out: Option<FadeSettings>,   // FADEOUT - Fade out settings
-    
+    pub fade_in: Option<FadeSettings>,  // FADEIN - Fade in settings
+    pub fade_out: Option<FadeSettings>, // FADEOUT - Fade out settings
+
     // Mute/Solo settings
-    pub mute: Option<MuteSettings>,       // MUTE - Mute and solo settings
-    
+    pub mute: Option<MuteSettings>, // MUTE - Mute and solo settings
+
     // Item identification
-    pub item_guid: Option<String>,        // IGUID - Item GUID
-    pub item_id: Option<i32>,             // IID - Item ordinal number (deprecated)
-    
+    pub item_guid: Option<String>, // IGUID - Item GUID
+    pub item_id: Option<i32>,      // IID - Item ordinal number (deprecated)
+
     // Item properties
-    pub name: String,                     // NAME - Item name
-    pub volpan: Option<VolPanSettings>,   // VOLPAN - Volume and pan settings
-    pub slip_offset: f64,                 // SOFFS - Slip offset in seconds
+    pub name: String,                       // NAME - Item name
+    pub volpan: Option<VolPanSettings>,     // VOLPAN - Volume and pan settings
+    pub slip_offset: f64,                   // SOFFS - Slip offset in seconds
     pub playrate: Option<PlayRateSettings>, // PLAYRATE - Play rate settings
-    pub channel_mode: ChannelMode,        // CHANMODE - Channel mode
-    pub take_guid: Option<String>,        // GUID - Take GUID
-    pub rec_pass: Option<i32>,            // RECPASS - Recording pass number
-    
+    pub channel_mode: ChannelMode,          // CHANMODE - Channel mode
+    pub take_guid: Option<String>,          // GUID - Take GUID
+    pub rec_pass: Option<i32>,              // RECPASS - Recording pass number
+
     // Takes
     pub takes: Vec<Take>,
-    
+
     // Raw content for preservation
     pub raw_content: String,
 }
@@ -289,63 +301,63 @@ pub struct Item {
 /// Fade settings for an item
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FadeSettings {
-    pub curve_type: FadeCurveType,        // field 1 - fade curve type
-    pub time: f64,                        // field 2 - fade time in seconds
-    pub unknown_field_3: f64,             // field 3 - unknown
-    pub unknown_field_4: i32,             // field 4 - unknown
-    pub unknown_field_5: i32,             // field 5 - unknown
-    pub unknown_field_6: i32,             // field 6 - unknown
-    pub unknown_field_7: i32,             // field 7 - unknown
+    pub curve_type: FadeCurveType, // field 1 - fade curve type
+    pub time: f64,                 // field 2 - fade time in seconds
+    pub unknown_field_3: f64,      // field 3 - unknown
+    pub unknown_field_4: i32,      // field 4 - unknown
+    pub unknown_field_5: i32,      // field 5 - unknown
+    pub unknown_field_6: i32,      // field 6 - unknown
+    pub unknown_field_7: i32,      // field 7 - unknown
 }
 
 /// Mute and solo settings for an item
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MuteSettings {
-    pub muted: bool,                      // field 1 - item is muted
-    pub solo_state: SoloState,            // field 2 - solo state (-1, 0, 1)
+    pub muted: bool,           // field 1 - item is muted
+    pub solo_state: SoloState, // field 2 - solo state (-1, 0, 1)
 }
 
 /// Volume and pan settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VolPanSettings {
-    pub item_trim: f64,                   // field 1 - item trim (1.0 = 0 dB)
-    pub take_pan: f64,                    // field 2 - take pan (-1.0 to 1.0)
-    pub take_volume: f64,                 // field 3 - take volume
-    pub take_pan_law: f64,                // field 4 - take pan law
+    pub item_trim: f64,    // field 1 - item trim (1.0 = 0 dB)
+    pub take_pan: f64,     // field 2 - take pan (-1.0 to 1.0)
+    pub take_volume: f64,  // field 3 - take volume
+    pub take_pan_law: f64, // field 4 - take pan law
 }
 
 /// Play rate settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlayRateSettings {
-    pub rate: f64,                        // field 1 - play rate
-    pub preserve_pitch: bool,             // field 2 - preserve pitch while changing rate
-    pub pitch_adjust: f64,                // field 3 - pitch adjust in semitones.cents
-    pub pitch_mode: PitchMode,            // field 4 - pitch shifting/time stretch mode
-    pub unknown_field_5: i32,             // field 5 - unknown
-    pub unknown_field_6: f64,             // field 6 - unknown
+    pub rate: f64,             // field 1 - play rate
+    pub preserve_pitch: bool,  // field 2 - preserve pitch while changing rate
+    pub pitch_adjust: f64,     // field 3 - pitch adjust in semitones.cents
+    pub pitch_mode: PitchMode, // field 4 - pitch shifting/time stretch mode
+    pub unknown_field_5: i32,  // field 5 - unknown
+    pub unknown_field_6: f64,  // field 6 - unknown
 }
 
 /// A take within a media item
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Take {
-    pub is_selected: bool,                // TAKE SEL - Is this take selected
-    pub name: String,                     // NAME - Take name
-    pub volpan: Option<VolPanSettings>,   // TAKEVOLPAN - Take volume and pan
-    pub slip_offset: f64,                 // SOFFS - Take slip offset
+    pub is_selected: bool,                  // TAKE SEL - Is this take selected
+    pub name: String,                       // NAME - Take name
+    pub volpan: Option<VolPanSettings>,     // TAKEVOLPAN - Take volume and pan
+    pub slip_offset: f64,                   // SOFFS - Take slip offset
     pub playrate: Option<PlayRateSettings>, // PLAYRATE - Take play rate
-    pub channel_mode: ChannelMode,        // CHANMODE - Take channel mode
-    pub take_color: Option<i32>,          // TAKECOLOR - Take color
-    pub take_guid: Option<String>,        // GUID - Take GUID
-    pub rec_pass: Option<i32>,            // RECPASS - Recording pass number
-    pub source: Option<SourceBlock>,      // SOURCE block
+    pub channel_mode: ChannelMode,          // CHANMODE - Take channel mode
+    pub take_color: Option<i32>,            // TAKECOLOR - Take color
+    pub take_guid: Option<String>,          // GUID - Take GUID
+    pub rec_pass: Option<i32>,              // RECPASS - Recording pass number
+    pub source: Option<SourceBlock>,        // SOURCE block
 }
 
 /// Source block for a take
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceBlock {
-    pub source_type: SourceType,          // WAVE, MIDI, etc.
-    pub file_path: String,                // FILE - Source file path
-    pub raw_content: String,              // Raw content for preservation
+    pub source_type: SourceType, // WAVE, MIDI, etc.
+    pub file_path: String,       // FILE - Source file path
+    pub raw_content: String,     // Raw content for preservation
 }
 
 impl Item {
@@ -354,7 +366,7 @@ impl Item {
         // Convert the block back to string format for parsing
         let mut content = String::new();
         content.push_str(&format!("<{}", block.name));
-        
+
         // Add parameters if any
         if !block.params.is_empty() {
             for param in &block.params {
@@ -362,12 +374,16 @@ impl Item {
             }
         }
         content.push('\n');
-        
+
         // Add content lines
         for child in &block.children {
             match child {
                 crate::primitives::RppBlockContent::Content(tokens) => {
-                    let line = tokens.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(" ");
+                    let line = tokens
+                        .iter()
+                        .map(|t| t.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ");
                     content.push_str(&format!("  {}\n", line));
                 }
                 crate::primitives::RppBlockContent::Block(nested_block) => {
@@ -377,18 +393,18 @@ impl Item {
                 }
             }
         }
-        
+
         content.push('>');
-        
+
         Self::from_rpp_block(&content)
     }
 
     /// Create an Item from a raw RPP item block string
-    /// 
+    ///
     /// # Example
     /// ```
     /// use rpp_parser::Item;
-    /// 
+    ///
     /// let rpp_content = r#"<ITEM
     ///   POSITION 0.5
     ///   SNAPOFFS 0
@@ -424,12 +440,12 @@ impl Item {
     ///     FILE "/home/cody/Documents/REAPER Media/01-250919_0416-01.wav"
     ///   >
     /// >"#;
-    /// 
+    ///
     /// let item = Item::from_rpp_block(rpp_content).unwrap();
     /// ```
     pub fn from_rpp_block(block_content: &str) -> Result<Self, String> {
         use crate::primitives::token::parse_token_line;
-        
+
         let mut item = Item {
             position: 0.0,
             snap_offset: 0.0,
@@ -454,7 +470,7 @@ impl Item {
             takes: Vec::new(),
             raw_content: block_content.to_string(),
         };
-        
+
         let lines: Vec<&str> = block_content.lines().collect();
         let mut i = 0;
         let mut current_take: Option<Take> = Some(Take {
@@ -470,54 +486,53 @@ impl Item {
             source: None,
         });
         let mut in_take_context = false; // Track whether we're parsing take-level fields
-        
+
         while i < lines.len() {
             let line = lines[i].trim();
-            
-            
+
             // Skip empty lines and comments
             if line.is_empty() || line.starts_with("//") {
                 i += 1;
                 continue;
             }
-            
+
             // Handle SOURCE blocks first (before token parsing)
             if line.starts_with("<SOURCE") {
                 let mut source_lines = Vec::new();
                 source_lines.push(line);
                 i += 1;
-                
+
                 while i < lines.len() {
                     let current_line = lines[i].trim();
                     source_lines.push(current_line);
-                    
+
                     if current_line == ">" {
                         break;
                     }
                     i += 1;
                 }
-                
+
                 if i >= lines.len() {
                     return Err("SOURCE block not properly closed with '>'".to_string());
                 }
-                
+
                 let source_block_content = source_lines.join("\n");
                 let source_block = Self::parse_source_block(&source_block_content)?;
-                
+
                 if let Some(ref mut take) = current_take {
                     take.source = Some(source_block);
                 }
-                
+
                 // Skip the increment at the end since we already incremented in the loop
                 continue;
             }
-            
+
             // Skip block start/end markers
             if line.starts_with('<') || line == ">" {
                 i += 1;
                 continue;
             }
-            
+
             // Parse token line
             let tokens = match parse_token_line(line) {
                 Ok((_, tokens)) => tokens,
@@ -526,12 +541,12 @@ impl Item {
                     continue;
                 }
             };
-            
+
             if tokens.is_empty() {
                 i += 1;
                 continue;
             }
-            
+
             let identifier = match &tokens[0] {
                 Token::Identifier(id) => id,
                 _ => {
@@ -539,7 +554,7 @@ impl Item {
                     continue;
                 }
             };
-            
+
             match identifier.as_str() {
                 "POSITION" => {
                     if tokens.len() > 1 {
@@ -586,11 +601,31 @@ impl Item {
                         item.fade_in = Some(FadeSettings {
                             curve_type: FadeCurveType::from(Self::parse_int(&tokens[1])?),
                             time: Self::parse_float(&tokens[2])?,
-                            unknown_field_3: if tokens.len() > 3 { Self::parse_float(&tokens[3])? } else { 0.0 },
-                            unknown_field_4: if tokens.len() > 4 { Self::parse_int(&tokens[4])? } else { 0 },
-                            unknown_field_5: if tokens.len() > 5 { Self::parse_int(&tokens[5])? } else { 0 },
-                            unknown_field_6: if tokens.len() > 6 { Self::parse_int(&tokens[6])? } else { 0 },
-                            unknown_field_7: if tokens.len() > 7 { Self::parse_int(&tokens[7])? } else { 0 },
+                            unknown_field_3: if tokens.len() > 3 {
+                                Self::parse_float(&tokens[3])?
+                            } else {
+                                0.0
+                            },
+                            unknown_field_4: if tokens.len() > 4 {
+                                Self::parse_int(&tokens[4])?
+                            } else {
+                                0
+                            },
+                            unknown_field_5: if tokens.len() > 5 {
+                                Self::parse_int(&tokens[5])?
+                            } else {
+                                0
+                            },
+                            unknown_field_6: if tokens.len() > 6 {
+                                Self::parse_int(&tokens[6])?
+                            } else {
+                                0
+                            },
+                            unknown_field_7: if tokens.len() > 7 {
+                                Self::parse_int(&tokens[7])?
+                            } else {
+                                0
+                            },
                         });
                     }
                 }
@@ -599,11 +634,31 @@ impl Item {
                         item.fade_out = Some(FadeSettings {
                             curve_type: FadeCurveType::from(Self::parse_int(&tokens[1])?),
                             time: Self::parse_float(&tokens[2])?,
-                            unknown_field_3: if tokens.len() > 3 { Self::parse_float(&tokens[3])? } else { 0.0 },
-                            unknown_field_4: if tokens.len() > 4 { Self::parse_int(&tokens[4])? } else { 0 },
-                            unknown_field_5: if tokens.len() > 5 { Self::parse_int(&tokens[5])? } else { 0 },
-                            unknown_field_6: if tokens.len() > 6 { Self::parse_int(&tokens[6])? } else { 0 },
-                            unknown_field_7: if tokens.len() > 7 { Self::parse_int(&tokens[7])? } else { 0 },
+                            unknown_field_3: if tokens.len() > 3 {
+                                Self::parse_float(&tokens[3])?
+                            } else {
+                                0.0
+                            },
+                            unknown_field_4: if tokens.len() > 4 {
+                                Self::parse_int(&tokens[4])?
+                            } else {
+                                0
+                            },
+                            unknown_field_5: if tokens.len() > 5 {
+                                Self::parse_int(&tokens[5])?
+                            } else {
+                                0
+                            },
+                            unknown_field_6: if tokens.len() > 6 {
+                                Self::parse_int(&tokens[6])?
+                            } else {
+                                0
+                            },
+                            unknown_field_7: if tokens.len() > 7 {
+                                Self::parse_int(&tokens[7])?
+                            } else {
+                                0
+                            },
                         });
                     }
                 }
@@ -661,8 +716,16 @@ impl Item {
                             preserve_pitch: Self::parse_bool(&tokens[2])?,
                             pitch_adjust: Self::parse_float(&tokens[3])?,
                             pitch_mode: PitchMode::from(Self::parse_int(&tokens[4])?),
-                            unknown_field_5: if tokens.len() > 5 { Self::parse_int(&tokens[5])? } else { 0 },
-                            unknown_field_6: if tokens.len() > 6 { Self::parse_float(&tokens[6])? } else { 0.0 },
+                            unknown_field_5: if tokens.len() > 5 {
+                                Self::parse_int(&tokens[5])?
+                            } else {
+                                0
+                            },
+                            unknown_field_6: if tokens.len() > 6 {
+                                Self::parse_float(&tokens[6])?
+                            } else {
+                                0.0
+                            },
                         });
                     }
                 }
@@ -705,8 +768,9 @@ impl Item {
                 }
                 "TAKE" => {
                     // Check if this is TAKE SEL
-                    let is_selected = tokens.len() > 1 && tokens[1] == Token::Identifier("SEL".to_string());
-                    
+                    let is_selected =
+                        tokens.len() > 1 && tokens[1] == Token::Identifier("SEL".to_string());
+
                     // Start of a new take
                     if let Some(take) = current_take.take() {
                         item.takes.push(take);
@@ -760,14 +824,23 @@ impl Item {
                                         preserve_pitch: Self::parse_bool(&tokens[2])?,
                                         pitch_adjust: Self::parse_float(&tokens[3])?,
                                         pitch_mode: PitchMode::from(Self::parse_int(&tokens[4])?),
-                                        unknown_field_5: if tokens.len() > 5 { Self::parse_int(&tokens[5])? } else { 0 },
-                                        unknown_field_6: if tokens.len() > 6 { Self::parse_float(&tokens[6])? } else { 0.0 },
+                                        unknown_field_5: if tokens.len() > 5 {
+                                            Self::parse_int(&tokens[5])?
+                                        } else {
+                                            0
+                                        },
+                                        unknown_field_6: if tokens.len() > 6 {
+                                            Self::parse_float(&tokens[6])?
+                                        } else {
+                                            0.0
+                                        },
                                     });
                                 }
                             }
                             "CHANMODE" => {
                                 if tokens.len() > 1 {
-                                    take.channel_mode = ChannelMode::from(Self::parse_int(&tokens[1])?);
+                                    take.channel_mode =
+                                        ChannelMode::from(Self::parse_int(&tokens[1])?);
                                 }
                             }
                             _ => {}
@@ -775,40 +848,39 @@ impl Item {
                     }
                 }
             }
-            
-            
+
             i += 1;
         }
-        
+
         // Add the last take if it exists
         if let Some(take) = current_take {
             item.takes.push(take);
         }
-        
+
         Ok(item)
     }
-    
+
     /// Parse a SOURCE block
     fn parse_source_block(block_content: &str) -> Result<SourceBlock, String> {
         let lines: Vec<&str> = block_content.lines().collect();
-        
+
         if lines.len() < 3 {
             return Err("SOURCE block must have at least 3 lines".to_string());
         }
-        
+
         // First line should be "<SOURCE TYPE"
         let first_line = lines[0].trim();
         if !first_line.starts_with("<SOURCE") {
             return Err("Expected SOURCE block to start with '<SOURCE'".to_string());
         }
-        
+
         // Parse source type
         let source_type_str = first_line.replace("<SOURCE", "").trim().to_string();
         let source_type = SourceType::from(source_type_str.as_str());
-        
+
         // Find FILE line
         let mut file_path = String::new();
-        for line in &lines[1..lines.len()-1] {
+        for line in &lines[1..lines.len() - 1] {
             let line = line.trim();
             if line.starts_with("FILE") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -816,7 +888,7 @@ impl Item {
                     file_path = parts[1..].join(" ");
                     // Remove quotes if present
                     if file_path.starts_with('"') && file_path.ends_with('"') {
-                        file_path = file_path[1..file_path.len()-1].to_string();
+                        file_path = file_path[1..file_path.len() - 1].to_string();
                     }
                     // Fix double-escaped backslashes
                     file_path = file_path.replace("\\\\", "\\");
@@ -824,14 +896,14 @@ impl Item {
                 break;
             }
         }
-        
+
         Ok(SourceBlock {
             source_type,
             file_path,
             raw_content: block_content.to_string(),
         })
     }
-    
+
     /// Parse a float from a token
     fn parse_float(token: &Token) -> Result<f64, String> {
         match token {
@@ -840,7 +912,7 @@ impl Item {
             _ => Err(format!("Expected float or integer, got {:?}", token)),
         }
     }
-    
+
     /// Parse an integer from a token
     fn parse_int(token: &Token) -> Result<i32, String> {
         match token {
@@ -849,16 +921,19 @@ impl Item {
             _ => Err(format!("Expected integer or float, got {:?}", token)),
         }
     }
-    
+
     /// Parse a boolean from a token
     fn parse_bool(token: &Token) -> Result<bool, String> {
         match token {
             Token::Integer(i) => Ok(*i != 0),
             Token::Float(f) => Ok(*f != 0.0),
-            _ => Err(format!("Expected integer or float for boolean, got {:?}", token)),
+            _ => Err(format!(
+                "Expected integer or float for boolean, got {:?}",
+                token
+            )),
         }
     }
-    
+
     /// Parse a string from a token
     fn parse_string(token: &Token) -> Result<String, String> {
         match token {
@@ -915,15 +990,21 @@ impl fmt::Display for MuteSettings {
 
 impl fmt::Display for VolPanSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "trim: {:.2}, pan: {:.2}, vol: {:.2}", 
-               self.item_trim, self.take_pan, self.take_volume)
+        write!(
+            f,
+            "trim: {:.2}, pan: {:.2}, vol: {:.2}",
+            self.item_trim, self.take_pan, self.take_volume
+        )
     }
 }
 
 impl fmt::Display for PlayRateSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "rate: {:.3}, preserve_pitch: {}, pitch: {:.2}, mode: {}", 
-               self.rate, self.preserve_pitch, self.pitch_adjust, self.pitch_mode)
+        write!(
+            f,
+            "rate: {:.3}, preserve_pitch: {}, pitch: {:.2}, mode: {}",
+            self.rate, self.preserve_pitch, self.pitch_adjust, self.pitch_mode
+        )
     }
 }
 
@@ -1000,18 +1081,24 @@ mod tests {
 >"#;
 
         let item = Item::from_rpp_block(rpp_content).unwrap();
-        
+
         println!("\n🎵 Parsed Complex Item:");
         println!("{}", "=".repeat(60));
         println!("Item: {}", item);
-        println!("  Position: {:.3}s, Length: {:.3}s", item.position, item.length);
+        println!(
+            "  Position: {:.3}s, Length: {:.3}s",
+            item.position, item.length
+        );
         println!("  Snap Offset: {:.3}s", item.snap_offset);
-        println!("  Loop Source: {}, Play All Takes: {}", item.loop_source, item.play_all_takes);
+        println!(
+            "  Loop Source: {}, Play All Takes: {}",
+            item.loop_source, item.play_all_takes
+        );
         println!("  Selected: {}", item.selected);
         println!("  Item GUID: {}", format_guid(&item.item_guid));
         println!("  Item ID: {}", format_option(&item.item_id));
         println!("  Recording Pass: {}", format_option(&item.rec_pass));
-        
+
         if let Some(ref fade_in) = item.fade_in {
             println!("  Fade In: {}", fade_in);
         }
@@ -1027,7 +1114,7 @@ mod tests {
         if let Some(ref playrate) = item.playrate {
             println!("  PlayRate: {}", playrate);
         }
-        
+
         println!("\n  Takes ({}):", item.takes.len());
         for (i, take) in item.takes.iter().enumerate() {
             println!("    Take {}: {}", i + 1, take);
@@ -1037,7 +1124,7 @@ mod tests {
             println!("      Take Color: {}", format_option(&take.take_color));
             println!("      Take GUID: {}", format_guid(&take.take_guid));
             println!("      Recording Pass: {}", format_option(&take.rec_pass));
-            
+
             if let Some(ref volpan) = take.volpan {
                 println!("      VolPan: {}", volpan);
             }
@@ -1049,7 +1136,7 @@ mod tests {
             }
             println!();
         }
-        
+
         // Verify basic item properties
         assert_eq!(item.position, 0.5);
         assert_eq!(item.snap_offset, 0.0);
@@ -1060,7 +1147,7 @@ mod tests {
         assert_eq!(item.name, "01-250919_0416.wav");
         assert_eq!(item.item_id, Some(3));
         assert_eq!(item.rec_pass, Some(1));
-        
+
         // Verify fade settings
         assert!(item.fade_in.is_some());
         let fade_in = item.fade_in.unwrap();
@@ -1071,7 +1158,7 @@ mod tests {
         assert_eq!(fade_in.unknown_field_5, 0);
         assert_eq!(fade_in.unknown_field_6, 0);
         assert_eq!(fade_in.unknown_field_7, 0);
-        
+
         assert!(item.fade_out.is_some());
         let fade_out = item.fade_out.unwrap();
         assert_eq!(fade_out.curve_type, FadeCurveType::Square);
@@ -1081,13 +1168,13 @@ mod tests {
         assert_eq!(fade_out.unknown_field_5, 0);
         assert_eq!(fade_out.unknown_field_6, 0);
         assert_eq!(fade_out.unknown_field_7, 0);
-        
+
         // Verify mute settings
         assert!(item.mute.is_some());
         let mute = item.mute.unwrap();
         assert!(!mute.muted);
         assert_eq!(mute.solo_state, SoloState::NotSoloed);
-        
+
         // Verify volpan settings
         assert!(item.volpan.is_some());
         let volpan = item.volpan.unwrap();
@@ -1095,7 +1182,7 @@ mod tests {
         assert_eq!(volpan.take_pan, 0.0);
         assert_eq!(volpan.take_volume, 1.0);
         assert_eq!(volpan.take_pan_law, -1.0);
-        
+
         // Verify playrate settings
         assert!(item.playrate.is_some());
         let playrate = item.playrate.unwrap();
@@ -1103,10 +1190,10 @@ mod tests {
         assert!(playrate.preserve_pitch);
         assert_eq!(playrate.pitch_adjust, 0.0);
         assert_eq!(playrate.pitch_mode, PitchMode::ProjectDefault);
-        
+
         // Verify takes
         assert_eq!(item.takes.len(), 4);
-        
+
         // First take (implicit, not selected)
         let take1 = &item.takes[0];
         assert!(!take1.is_selected);
@@ -1115,27 +1202,33 @@ mod tests {
         assert!(take1.source.is_some());
         let source1 = take1.source.as_ref().unwrap();
         assert_eq!(source1.source_type, SourceType::Wave);
-        assert_eq!(source1.file_path, "/home/cody/Documents/REAPER Media/01-250919_0416.wav");
-        
+        assert_eq!(
+            source1.file_path,
+            "/home/cody/Documents/REAPER Media/01-250919_0416.wav"
+        );
+
         // Second take (selected)
         let take2 = &item.takes[1];
         assert!(take2.is_selected);
         assert_eq!(take2.name, "01-250919_0416-01.wav");
         assert_eq!(take2.rec_pass, Some(2));
-        
+
         // Third take
         let take3 = &item.takes[2];
         assert!(!take3.is_selected);
         assert_eq!(take3.name, "01-250919_0416-02.wav");
         assert_eq!(take3.rec_pass, Some(3));
-        
+
         // Fourth take
         let take4 = &item.takes[3];
         assert!(!take4.is_selected);
         assert_eq!(take4.name, "01-250919_0416-03.wav");
         assert_eq!(take4.rec_pass, Some(4));
-        
-        println!("✅ Successfully parsed complex item with {} takes!", item.takes.len());
+
+        println!(
+            "✅ Successfully parsed complex item with {} takes!",
+            item.takes.len()
+        );
     }
 
     #[test]
@@ -1158,19 +1251,27 @@ mod tests {
 >"#;
 
         let item = Item::from_rpp_block(rpp_content).unwrap();
-        
+
         println!("\n🎵 Parsed Simple Item:");
         println!("{}", "=".repeat(40));
         println!("Item: {}", item);
-        println!("  Position: {:.3}s, Length: {:.3}s", item.position, item.length);
+        println!(
+            "  Position: {:.3}s, Length: {:.3}s",
+            item.position, item.length
+        );
         println!("  Name: {}", item.name);
         println!("  Takes: {}", item.takes.len());
-        
+
         // Debug: show take details
         for (i, take) in item.takes.iter().enumerate() {
-            println!("  Take {}: name='{}', source={}", i, take.name, take.source.is_some());
+            println!(
+                "  Take {}: name='{}', source={}",
+                i,
+                take.name,
+                take.source.is_some()
+            );
         }
-        
+
         // Verify basic properties
         assert_eq!(item.position, 0.0);
         assert_eq!(item.length, 145.5);
@@ -1179,7 +1280,7 @@ mod tests {
         assert!(item.selected);
         assert_eq!(item.name, "Simple Item");
         assert_eq!(item.takes.len(), 1);
-        
+
         // Verify the single take
         let take = &item.takes[0];
         assert!(!take.is_selected);
@@ -1187,7 +1288,7 @@ mod tests {
         let source = take.source.as_ref().unwrap();
         assert_eq!(source.source_type, SourceType::Wave);
         assert_eq!(source.file_path, "C:\\Path\\To\\AudioFile.wav");
-        
+
         println!("✅ Successfully parsed simple item!");
     }
 }

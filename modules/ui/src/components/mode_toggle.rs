@@ -1,18 +1,14 @@
 //! Mode toggle component for switching between local and server modes
 
 use dioxus::prelude::*;
-use lumen_blocks::components::button::{Button, ButtonVariant, ButtonSize};
+use lumen_blocks::components::button::{Button, ButtonSize, ButtonVariant};
 
 /// Mode toggle component
-/// 
+///
 /// Displays a toggle button that switches between Local and Server modes.
 /// This is a pure UI component - all logic is handled via callbacks.
 #[component]
-pub fn ModeToggle(
-    is_server_mode: bool,
-    is_connected: bool,
-    on_toggle: Callback<()>,
-) -> Element {
+pub fn ModeToggle(is_server_mode: bool, is_connected: bool, on_toggle: Callback<()>) -> Element {
     rsx! {
         div {
             class: "flex items-center gap-2",
@@ -43,4 +39,3 @@ pub fn ModeToggle(
         }
     }
 }
-

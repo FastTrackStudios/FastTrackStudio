@@ -12,8 +12,8 @@ use crate::iroh_connection_manager::{
 use anyhow::Result;
 use dioxus::prelude::*;
 use fts::setlist::{
-    SetlistStreamApi, SetlistUpdateMessage, ACTIVE_INDICES, ACTIVE_SLIDE_INDEX, SETLIST,
-    SETLIST_STRUCTURE, SONG_TRACKS, SONG_TRANSPORT,
+    ACTIVE_INDICES, ACTIVE_SLIDE_INDEX, SETLIST, SETLIST_STRUCTURE, SONG_TRACKS, SONG_TRANSPORT,
+    SetlistStreamApi, SetlistUpdateMessage,
 };
 use std::sync::OnceLock;
 use tracing::{debug, error, info, warn};
@@ -90,7 +90,10 @@ async fn connect_with_retry() {
         let _ = status_tx.send(false);
     }
 
-    info!("[Setlist Connection] Starting reconnection loop - will continuously retry every {} seconds until connected", RETRY_INTERVAL_SECONDS);
+    info!(
+        "[Setlist Connection] Starting reconnection loop - will continuously retry every {} seconds until connected",
+        RETRY_INTERVAL_SECONDS
+    );
 
     // Infinite retry loop - never stops trying to reconnect
     loop {
@@ -115,7 +118,9 @@ async fn connect_with_retry() {
 
                 // Wait for the disconnect signal (connection lost)
                 // This will block until the connection actually fails
-                info!("[Setlist Connection] Waiting for connection to be established and receiving updates...");
+                info!(
+                    "[Setlist Connection] Waiting for connection to be established and receiving updates..."
+                );
                 let _ = disconnect_rx.await;
                 warn!("[Setlist Connection] ❌ Connection lost, will retry immediately...");
 
@@ -241,7 +246,9 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
         .await
         {
             Ok(Ok((structure, active_indices, tracks, transport))) => {
-                info!("[Setlist Connection] ✅ Successfully connected and subscribed to all 4 streams (Structure, ActiveIndices, Tracks, Transport)");
+                info!(
+                    "[Setlist Connection] ✅ Successfully connected and subscribed to all 4 streams (Structure, ActiveIndices, Tracks, Transport)"
+                );
                 (structure, active_indices, tracks, transport)
             }
             Ok(Err(e)) => {
@@ -255,7 +262,10 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
                 ));
             }
             Err(_) => {
-                warn!("[Setlist Connection] ❌ Connection timeout after {:?} - REAPER extension may not be running or unreachable", connection_timeout);
+                warn!(
+                    "[Setlist Connection] ❌ Connection timeout after {:?} - REAPER extension may not be running or unreachable",
+                    connection_timeout
+                );
                 return Err(anyhow::anyhow!(
                     "Connection timeout after {:?}",
                     connection_timeout
@@ -285,7 +295,9 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
 
         static RECV_COUNT: AtomicU64 = AtomicU64::new(0);
 
-        info!("[Setlist Connection] ✅ Started receiving setlist updates from all streams - signal will now update");
+        info!(
+            "[Setlist Connection] ✅ Started receiving setlist updates from all streams - signal will now update"
+        );
         let mut message_count = 0u64;
 
         // Merge all streams using tokio::select!
@@ -393,7 +405,9 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
         // Signal disconnect - this will trigger reconnection
         let _ = tx.send(());
 
-        info!("[Setlist Connection] Update receiver task ended - reconnection loop will create a new one");
+        info!(
+            "[Setlist Connection] Update receiver task ended - reconnection loop will create a new one"
+        );
     });
 
     Ok(rx)
@@ -439,9 +453,13 @@ async fn handle_message(
             *ACTIVE_SLIDE_INDEX.write() = active_slide_index;
 
             if *message_count == 1 {
-                info!("[Setlist Connection] ✅ Received first full setlist update (structure only, tracks/transport sent separately)");
+                info!(
+                    "[Setlist Connection] ✅ Received first full setlist update (structure only, tracks/transport sent separately)"
+                );
             } else {
-                info!("[Setlist Connection] Received full setlist structure update (major change detected)");
+                info!(
+                    "[Setlist Connection] Received full setlist structure update (major change detected)"
+                );
             }
         }
         SetlistUpdateMessage::SongTracks { song_index, tracks } => {

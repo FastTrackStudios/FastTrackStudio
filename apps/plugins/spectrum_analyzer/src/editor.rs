@@ -196,7 +196,8 @@ impl IcedEditor for PluginEditor {
             Message::RequestResize(size) => {
                 nih_plug::nih_log!(
                     "[RESIZE] RequestResize received: {}x{}",
-                    size.width, size.height
+                    size.width,
+                    size.height
                 );
                 // User dragged resize handle - request window resize through iced/baseview
                 // This will trigger a Window::Resized event which will call Message::WindowResized
@@ -205,7 +206,8 @@ impl IcedEditor for PluginEditor {
             Message::WindowResized(size) => {
                 nih_plug::nih_log!(
                     "[RESIZE] WindowResized received: {}x{}",
-                    size.width, size.height
+                    size.width,
+                    size.height
                 );
                 // Window was actually resized (from baseview)
                 // Update iced_state to persist the size for next time window opens

@@ -26,14 +26,14 @@ fn katie_ferrara_valerie() {
         "20.Vocal.Magic_01-01.wav",
         "21.Valerie Mix_01-01.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
 }

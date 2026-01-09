@@ -4,11 +4,7 @@
 //! This protocol is backend-agnostic and can be implemented by any DAW backend.
 
 use crate::transport::core::transport::Transport;
-use irpc::{
-    channel::mpsc,
-    rpc::RemoteService,
-    rpc_requests, Client, WithChannels,
-};
+use irpc::{Client, WithChannels, channel::mpsc, rpc::RemoteService, rpc_requests};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -54,14 +50,14 @@ pub enum TransportStreamProtocol {
 }
 
 /// Trait for backends that can provide transport state
-/// 
+///
 /// This allows the transport stream actor to get transport state
 /// from different sources (REAPER, other DAWs, etc.)
 #[async_trait::async_trait]
 pub trait TransportStateProvider: Send + Sync {
     /// Get the current transport state
     async fn get_transport(&self) -> Result<Transport, String>;
-    
+
     /// Get the current project name (optional, for determining active song)
     async fn get_project_name(&self) -> Result<Option<String>, String> {
         Ok(None) // Default implementation returns None
@@ -115,49 +111,61 @@ impl TransportStreamActor {
             TransportStreamMessage::SubscribeTransport(sub) => {
                 info!("[Transport Stream] Client subscribed to transport updates");
                 let WithChannels { tx, .. } = sub;
-                
+
                 // CRITICAL: In irpc server streaming, the tx from WithChannels must stay alive
                 // for the connection to remain open. We spawn a forwarding task that:
                 // 1. Keeps the original tx alive
                 // 2. Receives from the broadcast channel
                 // 3. Forwards messages to the client's tx
-                
+
                 // Create a receiver for this subscriber from the broadcast channel
                 let mut broadcast_rx = self.broadcast_tx.subscribe();
-                
+
                 // Get current transport state for initial update
                 let state_provider_for_initial = self.state_provider.clone();
                 let tx_for_initial = tx.clone();
-                
+
                 // Spawn a forwarding task for this subscriber
                 // This task keeps the original tx alive and forwards messages
                 tokio::task::spawn(async move {
                     info!("[Transport Stream] 🚀 Started forwarding task for subscriber");
-                    
+
                     // Send an initial update immediately with current state
                     match state_provider_for_initial.get_transport().await {
                         Ok(transport) => {
-                            let project_name = state_provider_for_initial.get_project_name().await.ok().flatten();
-                            let initial_update = TransportUpdateMessage { 
+                            let project_name = state_provider_for_initial
+                                .get_project_name()
+                                .await
+                                .ok()
+                                .flatten();
+                            let initial_update = TransportUpdateMessage {
                                 transport,
                                 project_name,
                             };
                             match tx_for_initial.send(initial_update).await {
                                 Ok(_) => {
-                                    info!("[Transport Stream] ✅ Sent initial transport update to new subscriber");
+                                    info!(
+                                        "[Transport Stream] ✅ Sent initial transport update to new subscriber"
+                                    );
                                 }
                                 Err(e) => {
-                                    warn!("[Transport Stream] ❌ Failed to send initial transport update: {}", e);
+                                    warn!(
+                                        "[Transport Stream] ❌ Failed to send initial transport update: {}",
+                                        e
+                                    );
                                     return; // Client disconnected
                                 }
                             }
                         }
                         Err(e) => {
-                            warn!("[Transport Stream] Failed to get initial transport state: {}", e);
+                            warn!(
+                                "[Transport Stream] Failed to get initial transport state: {}",
+                                e
+                            );
                             // Continue anyway - we'll get updates from the broadcast channel
                         }
                     }
-                    
+
                     // Forward all subsequent updates from the broadcast channel
                     loop {
                         match broadcast_rx.recv().await {
@@ -165,26 +173,33 @@ impl TransportStreamActor {
                                 // Forward to client - this will block if the client isn't consuming
                                 // but that's okay, we want backpressure
                                 if tx.send(update).await.is_err() {
-                                    info!("[Transport Stream] Client disconnected (tx.send failed), stopping forwarder");
+                                    info!(
+                                        "[Transport Stream] Client disconnected (tx.send failed), stopping forwarder"
+                                    );
                                     break;
                                 }
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                                info!("[Transport Stream] Broadcast channel closed, stopping forwarder");
+                                info!(
+                                    "[Transport Stream] Broadcast channel closed, stopping forwarder"
+                                );
                                 break;
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                                warn!("[Transport Stream] Subscriber lagged, skipped {} messages", skipped);
+                                warn!(
+                                    "[Transport Stream] Subscriber lagged, skipped {} messages",
+                                    skipped
+                                );
                                 // Continue - we'll send the next available message
                             }
                         }
                     }
-                    
+
                     // Keep the original tx alive until the task ends
                     // When tx is dropped, the connection closes
                     info!("[Transport Stream] Forwarding task ended, connection will close");
                 });
-                
+
                 info!("[Transport Stream] ✅ Subscriber forwarding task spawned");
             }
         }
@@ -199,11 +214,11 @@ impl TransportStreamActor {
 
         loop {
             interval.tick().await;
-            
+
             // Get current transport state and project name from the provider
             if let Ok(transport) = state_provider.get_transport().await {
                 let project_name = state_provider.get_project_name().await.ok().flatten();
-                let update = TransportUpdateMessage { 
+                let update = TransportUpdateMessage {
                     transport,
                     project_name,
                 };
@@ -224,7 +239,7 @@ impl TransportStreamApi {
     pub const ALPN: &[u8] = b"irpc-iroh/transport-stream/1";
 
     /// Create a new transport stream API with a state provider
-    /// 
+    ///
     /// This is called by the server (e.g., REAPER extension) to create
     /// a transport stream service. The state provider implementation
     /// (e.g., ReaperTransportStateProvider) is specific to the backend.
@@ -233,7 +248,7 @@ impl TransportStreamApi {
     }
 
     /// Connect to a remote transport stream service using endpoint ID
-    /// 
+    ///
     /// This is called by clients (e.g., playground app) to connect to
     /// a transport stream service. Clients don't need to know about
     /// the backend implementation - they just connect via irpc.
@@ -256,7 +271,9 @@ impl TransportStreamApi {
             .inner
             .as_local()
             .context("cannot listen on remote service")?;
-        Ok(IrohProtocol::new(TransportStreamProtocol::remote_handler(local)))
+        Ok(IrohProtocol::new(TransportStreamProtocol::remote_handler(
+            local,
+        )))
     }
 
     /// Subscribe to transport state updates

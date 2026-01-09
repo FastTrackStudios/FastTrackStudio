@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Quantize to position
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum QuantizeToPos {
     /// Previous position
     Previous = -1,
@@ -43,10 +42,8 @@ impl fmt::Display for QuantizeToPos {
     }
 }
 
-
 /// Record path
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RecordPath {
     /// Primary path
     #[default]
@@ -84,7 +81,6 @@ impl fmt::Display for RecordPath {
     }
 }
 
-
 /// Input quantize settings for tracks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InputQuantize {
@@ -120,4 +116,3 @@ impl Default for InputQuantize {
         }
     }
 }
-

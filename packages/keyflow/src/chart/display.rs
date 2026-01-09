@@ -22,48 +22,48 @@ mod colors {
     pub const TEMPO: &str = "";
     pub const MEASURE_NUM: &str = "";
     pub const BORDER: &str = "";
-    
+
     // String formatters that return plain strings
     pub fn format_metadata(s: &str) -> String {
         s.to_string()
     }
-    
+
     pub fn format_section(s: &str) -> String {
         s.to_string()
     }
-    
+
     pub fn format_duration(s: &str) -> String {
         s.to_string()
     }
-    
+
     pub fn format_chord(s: &str) -> String {
         // Convert "maj" to "M" in chord symbols (e.g., "2maj" -> "2M", "Cmaj7" -> "CM7")
         s.replace("maj", "M")
     }
-    
+
     pub fn format_key_sig(s: &str) -> String {
         s.to_string()
     }
-    
+
     pub fn format_time_sig(s: &str) -> String {
         s.to_string()
     }
-    
+
     pub fn format_tempo(s: &str) -> String {
         s.to_string()
     }
-    
+
     pub fn format_border(s: &str) -> String {
         s.to_string()
     }
-    
+
     pub fn format_dim(s: &str) -> String {
         s.to_string()
     }
 }
 
 /// Format a chord symbol for display, converting "maj" to "M"
-/// 
+///
 /// Examples:
 /// - "2maj" -> "2M"
 /// - "Cmaj7" -> "CM7"
@@ -105,11 +105,9 @@ impl Chart {
         measures: &[crate::chart::types::Measure],
         section_start_measures: u32,
     ) -> std::fmt::Result {
-        Self::display_measures_grid_with_next_section(
-            f, measures, section_start_measures, None
-        )
+        Self::display_measures_grid_with_next_section(f, measures, section_start_measures, None)
     }
-    
+
     fn display_measures_grid_with_next_section(
         f: &mut std::fmt::Formatter<'_>,
         measures: &[crate::chart::types::Measure],
@@ -120,10 +118,13 @@ impl Chart {
         const MEASURES_PER_LINE: usize = 4;
         const SLOTS_PER_MEASURE: usize = 16; // 16th notes in 4/4 time
         const CHARS_PER_SLOT: usize = 4; // Fixed width per slot - accommodates chords like "2maj" (4 chars)
-        
+
         let mut measure_idx = 0;
         let time_sig = if !measures.is_empty() {
-            crate::time::TimeSignature::new(measures[0].time_signature.0 as i32, measures[0].time_signature.1 as i32)
+            crate::time::TimeSignature::new(
+                measures[0].time_signature.0 as i32,
+                measures[0].time_signature.1 as i32,
+            )
         } else {
             crate::time::TimeSignature::common_time()
         };
@@ -142,58 +143,74 @@ impl Chart {
             // Collect all chords from measures on this line with their positions
             // Handle pushed chords that belong to previous measure
             // Also check next section's pushed chords if provided
-            let mut chords_with_positions: Vec<(usize, usize, &crate::chart::types::ChordInstance)> = Vec::new();
-            
+            let mut chords_with_positions: Vec<(
+                usize,
+                usize,
+                &crate::chart::types::ChordInstance,
+            )> = Vec::new();
+
             // Check next section's pushed chords if provided and if last measure is on this line
             if let Some(next_chords) = next_section_first_measure_chords {
                 let last_measure_abs = section_start_measures + measures.len() as u32 - 1;
                 let last_measure_idx = measures.len() - 1;
-                
+
                 // Check if last measure is on this line
                 if last_measure_idx >= measure_idx && last_measure_idx < line_end_idx {
                     for chord in next_chords.iter() {
-                        let chord_abs_measures = chord.position.total_duration.measure.max(0) as u32;
+                        let chord_abs_measures =
+                            chord.position.total_duration.measure.max(0) as u32;
                         // If this chord belongs to the last measure of current section (pushed from next section)
                         if chord_abs_measures == last_measure_abs {
                             let chord_abs_beats = chord.position.total_duration.beat.max(0) as u32;
-                            let chord_abs_subdivisions = chord.position.total_duration.subdivision.clamp(0, 999) as u32;
+                            let chord_abs_subdivisions =
+                                chord.position.total_duration.subdivision.clamp(0, 999) as u32;
                             let beats_in_slots = chord_abs_beats as usize * slots_per_beat;
-                            let subdivisions_in_slots = (chord_abs_subdivisions as usize * SLOTS_PER_MEASURE) / (beats_per_measure * 1000);
+                            let subdivisions_in_slots = (chord_abs_subdivisions as usize
+                                * SLOTS_PER_MEASURE)
+                                / (beats_per_measure * 1000);
                             let slot = beats_in_slots + subdivisions_in_slots;
                             let target_m_idx = last_measure_idx - measure_idx;
                             if target_m_idx < measures_on_line {
-                                chords_with_positions.push((target_m_idx, slot.min(SLOTS_PER_MEASURE - 1), *chord));
+                                chords_with_positions.push((
+                                    target_m_idx,
+                                    slot.min(SLOTS_PER_MEASURE - 1),
+                                    *chord,
+                                ));
                             }
                         }
                     }
                 }
             }
-            
+
             // Collect all chords from all measures on this line, then place them by their actual position
             for (m_idx, measure) in measures[measure_idx..line_end_idx].iter().enumerate() {
                 let _measure_abs_measures = section_start_measures + (measure_idx + m_idx) as u32;
-                
+
                 for chord in &measure.chords {
                     // Calculate position within the measure
                     // chord.position.total_duration is absolute from song start
                     let chord_abs_measures = chord.position.total_duration.measure.max(0) as u32;
                     let chord_abs_beats = chord.position.total_duration.beat.max(0) as u32;
-                    let chord_abs_subdivisions = chord.position.total_duration.subdivision.clamp(0, 999) as u32;
-                    
+                    let chord_abs_subdivisions =
+                        chord.position.total_duration.subdivision.clamp(0, 999) as u32;
+
                     // Determine which measure on this line this chord belongs to based on its position
                     // Chords can be pushed into previous measures, so check all measures on this line
                     let target_measure_abs = chord_abs_measures;
-                    
+
                     // Check if this chord belongs to any measure on this line
                     let target_m_idx_opt = (0..measures_on_line).find(|&line_m_idx| {
-                        let line_measure_abs = section_start_measures + (measure_idx + line_m_idx) as u32;
+                        let line_measure_abs =
+                            section_start_measures + (measure_idx + line_m_idx) as u32;
                         target_measure_abs == line_measure_abs
                     });
-                    
+
                     if let Some(target_m_idx) = target_m_idx_opt {
                         // Calculate slot within the target measure
                         let beats_in_slots = chord_abs_beats as usize * slots_per_beat;
-                        let subdivisions_in_slots = (chord_abs_subdivisions as usize * SLOTS_PER_MEASURE) / (beats_per_measure * 1000);
+                        let subdivisions_in_slots = (chord_abs_subdivisions as usize
+                            * SLOTS_PER_MEASURE)
+                            / (beats_per_measure * 1000);
                         let slot = beats_in_slots + subdivisions_in_slots;
                         let slot = slot.min(SLOTS_PER_MEASURE - 1);
                         chords_with_positions.push((target_m_idx, slot, chord));
@@ -202,7 +219,7 @@ impl Chart {
             }
 
             // Create grid for this line: [measure][slot]
-            let mut grid: Vec<Vec<Option<&crate::chart::types::ChordInstance>>> = 
+            let mut grid: Vec<Vec<Option<&crate::chart::types::ChordInstance>>> =
                 vec![vec![None; SLOTS_PER_MEASURE]; measures_on_line];
 
             // Place chords in grid
@@ -215,16 +232,11 @@ impl Chart {
             // Simple display: show chords with their positions and durations for debugging
             for measure_idx_in_line in 0..measures_on_line {
                 let measure = &measures[measure_idx + measure_idx_in_line];
-                
+
                 // Show text cues if any
                 if !measure.text_cues.is_empty() {
                     for cue in &measure.text_cues {
-                        write!(
-                            f,
-                            "@{} \"{}\" ",
-                            cue.group,
-                            cue.text
-                        )?;
+                        write!(f, "@{} \"{}\" ", cue.group, cue.text)?;
                     }
                 }
 
@@ -232,33 +244,39 @@ impl Chart {
                 let mut chord_parts = Vec::new();
                 for chord in &measure.chords {
                     let mut chord_text = String::new();
-                    
+
                     // Show push/pull notation
                     if let Some((is_push, _amount)) = chord.push_pull {
                         if is_push {
                             chord_text.push('\'');
                         }
                     }
-                    
+
                     chord_text.push_str(&chord.full_symbol);
-                    
+
                     // Show bass note for slash chords
                     if let Some(ref bass) = chord.parsed.bass {
                         chord_text.push_str(&format!("/{}", bass));
                     }
-                    
+
                     // Show pull notation
                     if let Some((is_push, _amount)) = chord.push_pull {
                         if !is_push {
                             chord_text.push('\'');
                         }
                     }
-                    
+
                     chord_parts.push(chord_text);
                 }
-                
+
                 if !chord_parts.is_empty() {
-                    write!(f, "{}{}{}", fmt.chord_color, fmt.bold, chord_parts.join(" "))?;
+                    write!(
+                        f,
+                        "{}{}{}",
+                        fmt.chord_color,
+                        fmt.bold,
+                        chord_parts.join(" ")
+                    )?;
                     write!(f, "{}", fmt.reset)?;
                 }
 
@@ -324,22 +342,24 @@ impl Chart {
     fn calculate_content_width(&self) -> usize {
         const MEASURES_PER_LINE: usize = 4;
         const CHARS_PER_SLOT: usize = 2;
-        
+
         // Get time signature (default to 4/4 if not set)
-        let time_sig = self.time_signature.unwrap_or_else(crate::time::TimeSignature::common_time);
+        let time_sig = self
+            .time_signature
+            .unwrap_or_else(crate::time::TimeSignature::common_time);
         let beats_per_measure = time_sig.numerator as usize;
         let slots_per_measure = 16; // 16th notes (works for 4/4, adjust for other time sigs if needed)
-        
+
         // Calculate width for one measure:
         // - Slots: slots_per_measure * CHARS_PER_SLOT
         // - Beat markers: (beats_per_measure - 1) * 1 (the · character)
         let measure_width = (slots_per_measure * CHARS_PER_SLOT) + (beats_per_measure - 1);
-        
+
         // Calculate width for 4 measures:
         // - 4 measures
         // - 3 measure separators (|) with spacing: 3 chars each
         let content_width = (measure_width * MEASURES_PER_LINE) + (3 * (MEASURES_PER_LINE - 1));
-        
+
         // Add border padding: "║ " at start (2 chars) + " " at end (1 char) = 3
         content_width + 3
     }
@@ -368,36 +388,36 @@ impl std::fmt::Display for Chart {
                 let mut chord_names = Vec::new();
                 for chord in &measure.chords {
                     let mut chord_text = String::new();
-                    
+
                     // Push/pull notation
                     if let Some((is_push, _amount)) = chord.push_pull {
                         if is_push {
                             chord_text.push('\'');
                         }
                     }
-                    
+
                     chord_text.push_str(&chord.full_symbol);
-                    
+
                     // Bass note for slash chords
                     if let Some(ref bass) = chord.parsed.bass {
                         chord_text.push_str(&format!("/{}", bass));
                     }
-                    
+
                     // Pull notation
                     if let Some((is_push, _amount)) = chord.push_pull {
                         if !is_push {
                             chord_text.push('\'');
                         }
                     }
-                    
+
                     chord_names.push(chord_text);
                 }
-                
+
                 if !chord_names.is_empty() {
                     all_chords.push(chord_names.join(" "));
-                    }
+                }
             }
-            
+
             // Print all chords separated by |
             if !all_chords.is_empty() {
                 writeln!(f, "{}", all_chords.join(" | "))?;

@@ -50,19 +50,18 @@ impl GpuContext {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
             force_fallback_adapter: false,
-        })).ok()?;
+        }))
+        .ok()?;
 
         // Request device and queue (wgpu 27+ API)
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("Embedded Editor Device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                memory_hints: Default::default(),
-                trace: Default::default(),
-                experimental_features: Default::default(),
-            },
-        ))
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("Embedded Editor Device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: Default::default(),
+            trace: Default::default(),
+            experimental_features: Default::default(),
+        }))
         .ok()?;
 
         // Use BGRA format to match LICE bitmap format

@@ -4,15 +4,16 @@
 
 use crate::tracks::Track;
 use async_trait::async_trait;
+use iroh::{Endpoint, EndpointAddr, protocol::ProtocolHandler};
 use irpc::{
+    Client, Request, WithChannels,
     channel::{mpsc, oneshot},
     rpc::RemoteService,
-    rpc_requests, Client, Request, WithChannels,
+    rpc_requests,
 };
-use serde::{Deserialize, Serialize};
-use iroh::{protocol::ProtocolHandler, Endpoint, EndpointAddr};
 use irpc_iroh::{IrohLazyRemoteConnection, IrohProtocol};
 use rxrust::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -91,22 +92,38 @@ pub enum TrackProtocol {
 }
 
 /// Trait for backends that can handle track commands
-/// 
+///
 /// This allows the track API to execute commands
 /// on different backends (REAPER, other DAWs, etc.)
 #[async_trait]
 pub trait TrackCommandHandler: Send + Sync {
     /// Set track mute
-    async fn set_track_mute(&self, project_id: String, track_index: usize, muted: bool) -> Result<(), String>;
-    
+    async fn set_track_mute(
+        &self,
+        project_id: String,
+        track_index: usize,
+        muted: bool,
+    ) -> Result<(), String>;
+
     /// Set track solo
-    async fn set_track_solo(&self, project_id: String, track_index: usize, solo_mode: crate::tracks::api::solo::SoloMode) -> Result<(), String>;
+    async fn set_track_solo(
+        &self,
+        project_id: String,
+        track_index: usize,
+        solo_mode: crate::tracks::api::solo::SoloMode,
+    ) -> Result<(), String>;
 }
 
 /// Track API client
 pub struct TrackApi {
     inner: Client<TrackProtocol>,
-    pub(crate) handler_data: Option<(mpsc::Receiver<TrackMessage>, broadcast::Sender<TrackUpdateMessage>, broadcast::Sender<TrackUpdateMessage>, broadcast::Sender<TrackUpdateMessage>, broadcast::Sender<TrackUpdateMessage>)>,
+    pub(crate) handler_data: Option<(
+        mpsc::Receiver<TrackMessage>,
+        broadcast::Sender<TrackUpdateMessage>,
+        broadcast::Sender<TrackUpdateMessage>,
+        broadcast::Sender<TrackUpdateMessage>,
+        broadcast::Sender<TrackUpdateMessage>,
+    )>,
     pub(crate) command_handler: Option<Arc<dyn TrackCommandHandler>>,
 }
 
@@ -189,7 +206,13 @@ impl TrackApi {
         }
 
         // Store channels for later spawning in tokio runtime
-        let handler_data = (rx, tracks_broadcast, track_changed_broadcast, track_added_broadcast, track_removed_broadcast);
+        let handler_data = (
+            rx,
+            tracks_broadcast,
+            track_changed_broadcast,
+            track_added_broadcast,
+            track_removed_broadcast,
+        );
 
         TrackApi {
             inner: Client::local(tx),
@@ -199,7 +222,15 @@ impl TrackApi {
     }
 
     /// Extract handler data for spawning in tokio runtime
-    pub fn take_handler_data(&mut self) -> Option<(mpsc::Receiver<TrackMessage>, broadcast::Sender<TrackUpdateMessage>, broadcast::Sender<TrackUpdateMessage>, broadcast::Sender<TrackUpdateMessage>, broadcast::Sender<TrackUpdateMessage>)> {
+    pub fn take_handler_data(
+        &mut self,
+    ) -> Option<(
+        mpsc::Receiver<TrackMessage>,
+        broadcast::Sender<TrackUpdateMessage>,
+        broadcast::Sender<TrackUpdateMessage>,
+        broadcast::Sender<TrackUpdateMessage>,
+        broadcast::Sender<TrackUpdateMessage>,
+    )> {
         self.handler_data.take()
     }
 
@@ -289,4 +320,3 @@ impl TrackApi {
         }
     }
 }
-

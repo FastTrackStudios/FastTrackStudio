@@ -1,0 +1,20 @@
+[package]
+name = "fts-eq"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "FTS EQ - 4-band parametric equalizer with low/high shelf"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = []
+
+[dependencies]
+fts-plugin-core = { path = "../../../modules/fts-plugin-core" }
+nih_plug = { workspace = true }
+nih_plug_dioxus = { workspace = true }
+atomic_float = { workspace = true }

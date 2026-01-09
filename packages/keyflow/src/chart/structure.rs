@@ -165,7 +165,8 @@ impl Chart {
                     total_duration.measure + 1,
                     total_duration.beat,
                     total_duration.subdivision,
-                ).unwrap_or_else(|_| MusicalPosition::start());
+                )
+                .unwrap_or_else(|_| MusicalPosition::start());
             }
         }
 
@@ -177,7 +178,8 @@ impl Chart {
                     total_duration.measure + 1,
                     total_duration.beat,
                     total_duration.subdivision,
-                ).unwrap_or_else(|_| MusicalPosition::start());
+                )
+                .unwrap_or_else(|_| MusicalPosition::start());
             }
         }
 
@@ -185,7 +187,7 @@ impl Chart {
     }
 
     /// Convert the chart back to text syntax
-    /// 
+    ///
     /// This produces a valid syntax string that, when parsed, will result in the same chart structure.
     /// The output may not match the original formatting exactly, but it will be functionally equivalent.
     pub fn to_syntax(&self) -> String {
@@ -203,23 +205,26 @@ impl Chart {
 
         // 2. Tempo, Time Signature, Key
         let mut metadata_parts = Vec::new();
-        
+
         if let Some(tempo) = &self.tempo {
             metadata_parts.push(format!("{}bpm", tempo.bpm as u32));
         }
-        
+
         // Use initial_time_signature if available, otherwise fall back to current time_signature
-        let ts = self.initial_time_signature.as_ref().or(self.time_signature.as_ref());
+        let ts = self
+            .initial_time_signature
+            .as_ref()
+            .or(self.time_signature.as_ref());
         if let Some(ts) = ts {
             metadata_parts.push(format!("{}/{}", ts.numerator, ts.denominator));
         }
-        
+
         if let Some(key) = &self.initial_key {
             // Format key as #G, bBb, or #C (always use # prefix for major keys)
             let key_str = self.format_key_for_syntax(key);
             metadata_parts.push(key_str);
         }
-        
+
         if !metadata_parts.is_empty() {
             output.push_str(&metadata_parts.join(" "));
             output.push('\n');
@@ -246,7 +251,7 @@ impl Chart {
             let mut measure_idx = 0;
             while measure_idx < section.measures.len() {
                 let measure = &section.measures[measure_idx];
-                
+
                 // Check for repeats
                 let repeat_count = measure.repeat_count;
 
@@ -259,7 +264,8 @@ impl Chart {
                 let position = self.calculate_position(section_idx, measure_idx);
                 for key_change in &self.key_changes {
                     if key_change.position.total_duration.measure == position.total_duration.measure
-                        && key_change.section_index == section_idx {
+                        && key_change.section_index == section_idx
+                    {
                         let key_str = self.format_key_for_syntax(&key_change.to_key);
                         output.push_str(&key_str);
                         output.push(' ');
@@ -269,8 +275,13 @@ impl Chart {
                 // Check for time signature change at this position
                 for ts_change in &self.time_signature_changes {
                     if ts_change.position.total_duration.measure == position.total_duration.measure
-                        && ts_change.section_index == section_idx {
-                        output.push_str(&format!("{}/{} ", ts_change.time_signature.numerator, ts_change.time_signature.denominator));
+                        && ts_change.section_index == section_idx
+                    {
+                        output.push_str(&format!(
+                            "{}/{} ",
+                            ts_change.time_signature.numerator,
+                            ts_change.time_signature.denominator
+                        ));
                     }
                 }
 
@@ -285,13 +296,13 @@ impl Chart {
 
                 if !chord_parts.is_empty() {
                     output.push_str(&chord_parts.join(" "));
-                    
+
                     // Add measure separator at end of measure (except last in section)
                     // Only add if there are multiple measures or if explicitly needed
                     if measure_idx < section.measures.len() - 1 {
                         output.push_str(" |");
                     }
-                    
+
                     // Add repeat count if > 1
                     if repeat_count > 1 {
                         // Check if this is a smart repeat (would need to check section length)
@@ -308,7 +319,6 @@ impl Chart {
                 output.push('\n');
                 measure_idx += 1;
             }
-
         }
 
         output
@@ -319,10 +329,10 @@ impl Chart {
     fn format_key_for_syntax(&self, key: &Key) -> String {
         let root = key.root();
         let note_name = root.name();
-        
+
         // Remove any existing # or b from note name
         let clean_note = note_name.trim_start_matches('#').trim_start_matches('b');
-        
+
         // For major keys (Ionian), use # prefix
         // For minor keys, we'd use b prefix, but for now all keys are major
         if note_name.contains('b') {
@@ -336,12 +346,12 @@ impl Chart {
     /// Format a section name for syntax output
     fn format_section_name(&self, section: &Section) -> String {
         let mut name = String::new();
-        
+
         // Subsection prefix
         if section.is_subsection {
             name.push('^');
         }
-        
+
         // Section type
         match &section.section_type {
             crate::sections::SectionType::Custom(custom_name) => {
@@ -353,7 +363,7 @@ impl Chart {
                 name.push_str(&section.section_type.abbreviation());
             }
         }
-        
+
         // Number (only if section type should be numbered)
         if section.section_type.should_number() {
             if let Some(num) = section.number {
@@ -361,25 +371,25 @@ impl Chart {
                 name.push_str(&num.to_string());
             }
         }
-        
+
         // Split letter
         if let Some(letter) = section.split_letter {
             name.push(letter);
         }
-        
+
         // Measure count
         if let Some(count) = section.measure_count {
             name.push(' ');
             name.push_str(&count.to_string());
         }
-        
+
         name
     }
 
     /// Format a chord for syntax output
     fn format_chord_for_syntax(&self, chord: &ChordInstance, _time_sig: &(u8, u8)) -> String {
         let mut output = String::new();
-        
+
         // Push notation (leading apostrophes)
         if let Some((is_push, amount)) = &chord.push_pull {
             if *is_push {
@@ -391,13 +401,13 @@ impl Chart {
                 output.push_str(apostrophes);
             }
         }
-        
+
         // Chord symbol (use full_symbol which preserves the original format)
         output.push_str(&chord.full_symbol);
-        
+
         // Rhythm notation
         output.push_str(&self.format_rhythm_for_syntax(&chord.rhythm));
-        
+
         // Pull notation (trailing apostrophes)
         if let Some((is_push, amount)) = &chord.push_pull {
             if !is_push {
@@ -409,7 +419,7 @@ impl Chart {
                 output.push_str(apostrophes);
             }
         }
-        
+
         // Commands
         for command in &chord.commands {
             match command {
@@ -421,7 +431,7 @@ impl Chart {
                 }
             }
         }
-        
+
         output
     }
 
@@ -430,10 +440,13 @@ impl Chart {
         use crate::chord::ChordRhythm;
         match rhythm {
             ChordRhythm::Default => String::new(),
-            ChordRhythm::Slashes(count) => {
-                "/".repeat(*count as usize)
-            }
-            ChordRhythm::Lily { duration, dotted, multiplier, tied } => {
+            ChordRhythm::Slashes(count) => "/".repeat(*count as usize),
+            ChordRhythm::Lily {
+                duration,
+                dotted,
+                multiplier,
+                tied,
+            } => {
                 let mut output = format!("_{}", duration.value());
                 if *dotted {
                     output.push('.');
@@ -446,7 +459,11 @@ impl Chart {
                 }
                 output
             }
-            ChordRhythm::Rest { duration, dotted, multiplier } => {
+            ChordRhythm::Rest {
+                duration,
+                dotted,
+                multiplier,
+            } => {
                 let mut output = format!("r{}", duration.value());
                 if *dotted {
                     output.push('.');
@@ -456,7 +473,11 @@ impl Chart {
                 }
                 output
             }
-            ChordRhythm::Space { duration, dotted, multiplier } => {
+            ChordRhythm::Space {
+                duration,
+                dotted,
+                multiplier,
+            } => {
                 let mut output = format!("s{}", duration.value());
                 if *dotted {
                     output.push('.');
@@ -526,7 +547,7 @@ mod tests {
         let g_major = Key::major(MusicalNote::g());
         let key_change_position = AbsolutePosition::new(
             MusicalPosition::try_new(4, 0, 0).unwrap(), // After 4 measures total
-            1,                             // Section 1 (verse)
+            1,                                          // Section 1 (verse)
         );
         chart.add_key_change(g_major.clone(), key_change_position.clone(), 1);
 
@@ -546,7 +567,7 @@ mod tests {
         let time_6_8 = TimeSignature::new(6, 8);
         let ts_change_position = AbsolutePosition::new(
             MusicalPosition::try_new(6, 0, 0).unwrap(), // After 6 measures total
-            2,                             // Section 2 (chorus)
+            2,                                          // Section 2 (chorus)
         );
         chart.add_time_signature_change(time_6_8, ts_change_position.clone(), 2);
 
@@ -589,8 +610,10 @@ mod tests {
         let key_at_start = chart.key_at_position(&pos_start);
         assert_eq!(key_at_start, Some(&c_major));
 
-        let key_before_change =
-            chart.key_at_position(&AbsolutePosition::new(MusicalPosition::try_new(3, 0, 0).unwrap(), 1));
+        let key_before_change = chart.key_at_position(&AbsolutePosition::new(
+            MusicalPosition::try_new(3, 0, 0).unwrap(),
+            1,
+        ));
         assert_eq!(key_before_change, Some(&c_major));
 
         let key_after_change = chart.key_at_position(&pos_key_change);
@@ -611,7 +634,8 @@ mod tests {
         // Just before the change (end of verse at position 6) - still in 4/4
         // Note: pos_end_verse is at 6.0.0, which is the same as pos_start_chorus!
         // So we need a position just before that
-        let pos_before_change = AbsolutePosition::new(MusicalPosition::try_new(5, 0, 0).unwrap(), 1);
+        let pos_before_change =
+            AbsolutePosition::new(MusicalPosition::try_new(5, 0, 0).unwrap(), 1);
         let ts_before_change = chart.time_signature_at_position(&pos_before_change);
         assert_eq!(ts_before_change, Some(&time_4_4));
 
@@ -731,21 +755,21 @@ F C G Am
 
         // Parse the chart
         let chart1 = Chart::parse(input).expect("Should parse successfully");
-        
+
         // Serialize it
         let output = chart1.to_syntax();
         println!("Serialized output:\n{}", output);
-        
+
         // Parse it again
         let chart2 = Chart::parse(&output).expect("Should parse serialized output");
-        
+
         // Verify they have the same structure
         assert_eq!(chart1.metadata.title, chart2.metadata.title);
         assert_eq!(chart1.metadata.artist, chart2.metadata.artist);
         assert_eq!(chart1.tempo, chart2.tempo);
         assert_eq!(chart1.initial_key, chart2.initial_key);
         assert_eq!(chart1.sections.len(), chart2.sections.len());
-        
+
         // Verify sections have same measure counts
         for (s1, s2) in chart1.sections.iter().zip(chart2.sections.iter()) {
             assert_eq!(s1.measures.len(), s2.measures.len());

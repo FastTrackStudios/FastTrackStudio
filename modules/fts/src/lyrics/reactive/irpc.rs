@@ -4,15 +4,11 @@
 
 use crate::lyrics::core::Lyrics;
 use crate::lyrics::source::LyricsAnnotations;
-use irpc::{
-    channel::mpsc,
-    rpc::RemoteService,
-    rpc_requests, Client,
-};
-use serde::{Deserialize, Serialize};
-use iroh::{protocol::ProtocolHandler, Endpoint, EndpointAddr};
+use iroh::{Endpoint, EndpointAddr, protocol::ProtocolHandler};
+use irpc::{Client, channel::mpsc, rpc::RemoteService, rpc_requests};
 use irpc_iroh::{IrohLazyRemoteConnection, IrohProtocol};
 use rxrust::prelude::*;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 /// Lyrics changed message
@@ -60,7 +56,12 @@ pub enum LyricsProtocol {
 /// Lyrics API client
 pub struct LyricsApi {
     inner: Client<LyricsProtocol>,
-    pub(crate) handler_data: Option<(mpsc::Receiver<LyricsMessage>, broadcast::Sender<LyricsUpdateMessage>, broadcast::Sender<LyricsUpdateMessage>, broadcast::Sender<LyricsUpdateMessage>)>,
+    pub(crate) handler_data: Option<(
+        mpsc::Receiver<LyricsMessage>,
+        broadcast::Sender<LyricsUpdateMessage>,
+        broadcast::Sender<LyricsUpdateMessage>,
+        broadcast::Sender<LyricsUpdateMessage>,
+    )>,
 }
 
 impl LyricsApi {
@@ -93,10 +94,12 @@ impl LyricsApi {
             let active_slide_subject = streams.active_slide_index_changed.borrow().clone();
             let tx = active_slide_broadcast.clone();
             active_slide_subject.subscribe(move |(song_name, slide_index)| {
-                let _ = tx.send(LyricsUpdateMessage::ActiveSlideIndexChanged(ActiveSlideIndexChangedMessage {
-                    song_name,
-                    slide_index,
-                }));
+                let _ = tx.send(LyricsUpdateMessage::ActiveSlideIndexChanged(
+                    ActiveSlideIndexChangedMessage {
+                        song_name,
+                        slide_index,
+                    },
+                ));
             });
         }
 
@@ -104,15 +107,22 @@ impl LyricsApi {
             let annotations_subject = streams.lyrics_annotations_changed.borrow().clone();
             let tx = annotations_broadcast.clone();
             annotations_subject.subscribe(move |(song_name, annotations)| {
-                let _ = tx.send(LyricsUpdateMessage::LyricsAnnotationsChanged(LyricsAnnotationsChangedMessage {
-                    song_name,
-                    annotations,
-                }));
+                let _ = tx.send(LyricsUpdateMessage::LyricsAnnotationsChanged(
+                    LyricsAnnotationsChangedMessage {
+                        song_name,
+                        annotations,
+                    },
+                ));
             });
         }
 
         // Store channels for later spawning in tokio runtime
-        let handler_data = (rx, lyrics_broadcast, active_slide_broadcast, annotations_broadcast);
+        let handler_data = (
+            rx,
+            lyrics_broadcast,
+            active_slide_broadcast,
+            annotations_broadcast,
+        );
 
         LyricsApi {
             inner: Client::local(tx),
@@ -121,7 +131,14 @@ impl LyricsApi {
     }
 
     /// Extract handler data for spawning in tokio runtime
-    pub fn take_handler_data(&mut self) -> Option<(mpsc::Receiver<LyricsMessage>, broadcast::Sender<LyricsUpdateMessage>, broadcast::Sender<LyricsUpdateMessage>, broadcast::Sender<LyricsUpdateMessage>)> {
+    pub fn take_handler_data(
+        &mut self,
+    ) -> Option<(
+        mpsc::Receiver<LyricsMessage>,
+        broadcast::Sender<LyricsUpdateMessage>,
+        broadcast::Sender<LyricsUpdateMessage>,
+        broadcast::Sender<LyricsUpdateMessage>,
+    )> {
         self.handler_data.take()
     }
 
@@ -152,4 +169,3 @@ impl LyricsApi {
         self.inner.server_streaming(SubscribeLyrics, 32).await
     }
 }
-

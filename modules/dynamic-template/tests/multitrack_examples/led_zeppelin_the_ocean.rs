@@ -33,14 +33,14 @@ fn led_zeppelin_the_ocean() {
         "27. Outro Vocal 5_01.wav",
         "28. The Ocean_01.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
 }

@@ -15,8 +15,8 @@ use daw::transport::reactive::{
 };
 use daw::transport::{PlayState, Tempo, Transport};
 
-use super::logging::format_transport_change;
 use super::SetlistProvider;
+use super::logging::format_transport_change;
 use crate::setlist::infra::reaper::ReaperTransport;
 
 /// REAPER implementation of TransportReactiveService

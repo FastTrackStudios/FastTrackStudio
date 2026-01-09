@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
-use lucide_dioxus::{SkipBack, Play, Pause, Repeat2, SkipForward, CircleCheck, CircleX};
-use lumen_blocks::components::button::{Button, ButtonVariant, ButtonSize};
+use lucide_dioxus::{CircleCheck, CircleX, Pause, Play, Repeat2, SkipBack, SkipForward};
+use lumen_blocks::components::button::{Button, ButtonSize, ButtonVariant};
 
 /// Connection status badge component
-/// 
+///
 /// Displays a connection status indicator with an icon and label.
 #[component]
 pub fn ConnectionStatus(is_connected: Signal<bool>) -> Element {
@@ -38,12 +38,12 @@ pub fn ConnectionStatus(is_connected: Signal<bool>) -> Element {
 }
 
 /// Transport control bar component with 4 buttons
-/// 
+///
 /// Provides play/pause, loop, back, and forward controls.
 /// All actions are handled via callbacks to keep the component domain-agnostic.
 #[component]
 pub fn TransportControlBar(
-    is_playing: bool, 
+    is_playing: bool,
     is_looping: bool,
     on_play_pause: Callback<()>,
     on_loop_toggle: Callback<()>,
@@ -53,7 +53,7 @@ pub fn TransportControlBar(
     rsx! {
         div {
             class: "h-36 flex-shrink-0 border-t border-border bg-card grid grid-cols-4 divide-x divide-border",
-            
+
             // Back Button
             div {
                 class: "flex items-center justify-center gap-2 cursor-pointer hover:bg-accent transition-colors",
@@ -68,7 +68,7 @@ pub fn TransportControlBar(
                 }
                 "Back"
             }
-            
+
             // Play/Pause Button
             div {
                 class: if is_playing {
@@ -92,7 +92,7 @@ pub fn TransportControlBar(
                 }
                 if is_playing { "Pause" } else { "Play" }
             }
-            
+
             // Loop Button
             div {
                 class: if is_looping {
@@ -109,7 +109,7 @@ pub fn TransportControlBar(
                 }
                 "Loop"
             }
-            
+
             // Advance Button
             div {
                 class: "flex items-center justify-center gap-2 cursor-pointer hover:bg-accent transition-colors",
@@ -127,4 +127,3 @@ pub fn TransportControlBar(
         }
     }
 }
-

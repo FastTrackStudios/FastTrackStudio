@@ -1,6 +1,6 @@
+use crate::utils::get_project_name;
 use fts::setlist::{Setlist, Song};
 use std::collections::HashMap;
-use crate::utils::get_project_name;
 
 /// Update transport and song positions to a specific section
 pub fn update_position_to_section(
@@ -28,7 +28,8 @@ pub fn reset_song_position(
     let reset_position = if song.effective_start() > 0.0 {
         song.effective_start()
     } else {
-        song.sections.first()
+        song.sections
+            .first()
             .and_then(|s| s.start_seconds())
             .unwrap_or(0.0)
     };
@@ -44,29 +45,41 @@ pub fn navigate_to_next_section(
     song_positions: &mut HashMap<String, f64>,
 ) -> (Option<usize>, Option<usize>) {
     let song_count = setlist.songs.len();
-    
+
     if let Some(song_idx) = current_song_idx {
         if let Some(song) = setlist.songs.get(song_idx) {
             let section_count = song.sections.len();
             if section_count == 0 {
                 return (current_song_idx, current_section_idx);
             }
-            
+
             let current_sec = current_section_idx.unwrap_or(0);
-            
+
             if current_sec < section_count - 1 {
                 // Move to next section in current song
                 let next_sec = current_sec + 1;
-                update_position_to_section(song, song_idx, next_sec, transport_positions, song_positions);
+                update_position_to_section(
+                    song,
+                    song_idx,
+                    next_sec,
+                    transport_positions,
+                    song_positions,
+                );
                 return (Some(song_idx), Some(next_sec));
             } else {
                 // Last section of current song, move to first section of next song
                 if song_idx < song_count - 1 {
                     reset_song_position(song, song_idx, song_positions);
-                    
+
                     if let Some(next_song) = setlist.songs.get(song_idx + 1) {
                         if let Some(section) = next_song.sections.first() {
-                            update_position_to_section(next_song, song_idx + 1, 0, transport_positions, song_positions);
+                            update_position_to_section(
+                                next_song,
+                                song_idx + 1,
+                                0,
+                                transport_positions,
+                                song_positions,
+                            );
                             return (Some(song_idx + 1), Some(0));
                         }
                     }
@@ -76,7 +89,7 @@ pub fn navigate_to_next_section(
             }
         }
     }
-    
+
     // No song selected, go to first section of first song
     if song_count > 0 {
         if let Some(song) = setlist.songs.first() {
@@ -86,7 +99,7 @@ pub fn navigate_to_next_section(
             }
         }
     }
-    
+
     (current_song_idx, current_section_idx)
 }
 
@@ -99,31 +112,43 @@ pub fn navigate_to_previous_section(
     song_positions: &mut HashMap<String, f64>,
 ) -> (Option<usize>, Option<usize>) {
     let song_count = setlist.songs.len();
-    
+
     if let Some(song_idx) = current_song_idx {
         if let Some(song) = setlist.songs.get(song_idx) {
             let section_count = song.sections.len();
             if section_count == 0 {
                 return (current_song_idx, current_section_idx);
             }
-            
+
             let current_sec = current_section_idx.unwrap_or(0);
-            
+
             if current_sec > 0 {
                 // Move to previous section in current song
                 let prev_sec = current_sec - 1;
-                update_position_to_section(song, song_idx, prev_sec, transport_positions, song_positions);
+                update_position_to_section(
+                    song,
+                    song_idx,
+                    prev_sec,
+                    transport_positions,
+                    song_positions,
+                );
                 return (Some(song_idx), Some(prev_sec));
             } else {
                 // First section of current song, move to last section of previous song
                 if song_idx > 0 {
                     reset_song_position(song, song_idx, song_positions);
-                    
+
                     if let Some(prev_song) = setlist.songs.get(song_idx - 1) {
                         let prev_section_count = prev_song.sections.len();
                         if prev_section_count > 0 {
                             let last_section_idx = prev_section_count - 1;
-                            update_position_to_section(prev_song, song_idx - 1, last_section_idx, transport_positions, song_positions);
+                            update_position_to_section(
+                                prev_song,
+                                song_idx - 1,
+                                last_section_idx,
+                                transport_positions,
+                                song_positions,
+                            );
                             return (Some(song_idx - 1), Some(last_section_idx));
                         }
                     }
@@ -133,22 +158,27 @@ pub fn navigate_to_previous_section(
             }
         }
     }
-    
+
     // No song selected, go to last section of last song
     if song_count > 0 {
         if let Some(last_song) = setlist.songs.last() {
             let last_section_count = last_song.sections.len();
             if last_section_count > 0 {
                 let last_section_idx = last_section_count - 1;
-                update_position_to_section(last_song, song_count - 1, last_section_idx, transport_positions, song_positions);
+                update_position_to_section(
+                    last_song,
+                    song_count - 1,
+                    last_section_idx,
+                    transport_positions,
+                    song_positions,
+                );
                 return (Some(song_count - 1), Some(last_section_idx));
             }
         }
     }
-    
+
     (current_song_idx, current_section_idx)
 }
-
 
 /// Handle keyboard navigation for arrow keys
 pub fn handle_keyboard_navigation(
@@ -160,9 +190,20 @@ pub fn handle_keyboard_navigation(
     song_positions: &mut HashMap<String, f64>,
 ) -> (Option<usize>, Option<usize>) {
     if is_right {
-        navigate_to_next_section(setlist, current_song_idx, current_section_idx, transport_positions, song_positions)
+        navigate_to_next_section(
+            setlist,
+            current_song_idx,
+            current_section_idx,
+            transport_positions,
+            song_positions,
+        )
     } else {
-        navigate_to_previous_section(setlist, current_song_idx, current_section_idx, transport_positions, song_positions)
+        navigate_to_previous_section(
+            setlist,
+            current_song_idx,
+            current_section_idx,
+            transport_positions,
+            song_positions,
+        )
     }
 }
-

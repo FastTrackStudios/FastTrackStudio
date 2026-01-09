@@ -5,17 +5,17 @@
 
 use daw::marker_region::{application::TempoTimePoint, core::Marker};
 use daw::primitives::{Position, TimeSignature};
+use daw::project::Project;
+use daw::transport::{Transport, TransportActions, TransportError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use daw::transport::{Transport, TransportActions, TransportError};
-use daw::project::Project;
 
 use crate::lyrics::core::Lyrics;
 use keyflow::Chart;
 
-use super::{Section, SectionType, SectionTypeExt, SetlistError};
 use super::section::validate;
 use super::section::{section_from_seconds, section_new, section_with_id};
+use super::{Section, SectionType, SectionTypeExt, SetlistError};
 
 /// Represents a song in the setlist
 #[derive(Serialize, Deserialize)]
@@ -233,7 +233,10 @@ impl Song {
     }
 
     /// Update project from a TransportActions implementation (call this when you have access to the project)
-    pub fn update_project<T: TransportActions>(&mut self, project_actions: &T) -> Result<(), TransportError> {
+    pub fn update_project<T: TransportActions>(
+        &mut self,
+        project_actions: &T,
+    ) -> Result<(), TransportError> {
         let transport = project_actions.get_transport()?;
         // Create a new project with the transport, or update existing project's transport
         if let Some(existing_project) = &mut self.project {
@@ -465,7 +468,9 @@ impl Song {
         self.tempo_time_sig_changes.push(change);
         // Keep sorted by position
         self.tempo_time_sig_changes.sort_by(|a, b| {
-            a.position_seconds().partial_cmp(&b.position_seconds()).unwrap_or(std::cmp::Ordering::Equal)
+            a.position_seconds()
+                .partial_cmp(&b.position_seconds())
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
 
@@ -474,7 +479,9 @@ impl Song {
         self.tempo_time_sig_changes = changes;
         // Keep sorted by position
         self.tempo_time_sig_changes.sort_by(|a, b| {
-            a.position_seconds().partial_cmp(&b.position_seconds()).unwrap_or(std::cmp::Ordering::Equal)
+            a.position_seconds()
+                .partial_cmp(&b.position_seconds())
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
 
@@ -608,11 +615,18 @@ impl Song {
 
     /// Get the song's color as RGB string (bright variant)
     pub fn color_bright(&self) -> String {
-        let color = self.song_region_start_marker.as_ref()
+        let color = self
+            .song_region_start_marker
+            .as_ref()
             .and_then(|m| m.color)
             .filter(|&c| c != 0)
-            .or_else(|| self.start_marker.as_ref().and_then(|m| m.color).filter(|&c| c != 0));
-        
+            .or_else(|| {
+                self.start_marker
+                    .as_ref()
+                    .and_then(|m| m.color)
+                    .filter(|&c| c != 0)
+            });
+
         if let Some(color_u32) = color {
             let r = ((color_u32 >> 16) & 0xFF) as u8;
             let g = ((color_u32 >> 8) & 0xFF) as u8;
@@ -628,11 +642,18 @@ impl Song {
 
     /// Get the song's color as RGB string (muted variant)
     pub fn color_muted(&self) -> String {
-        let color = self.song_region_start_marker.as_ref()
+        let color = self
+            .song_region_start_marker
+            .as_ref()
             .and_then(|m| m.color)
             .filter(|&c| c != 0)
-            .or_else(|| self.start_marker.as_ref().and_then(|m| m.color).filter(|&c| c != 0));
-        
+            .or_else(|| {
+                self.start_marker
+                    .as_ref()
+                    .and_then(|m| m.color)
+                    .filter(|&c| c != 0)
+            });
+
         if let Some(color_u32) = color {
             let r = ((color_u32 >> 16) & 0xFF) as u8;
             let g = ((color_u32 >> 8) & 0xFF) as u8;
@@ -656,11 +677,11 @@ impl Song {
         let song_start = self.effective_start();
         let song_end = self.effective_end();
         let song_duration = song_end - song_start;
-        
+
         if song_duration <= 0.0 {
             return 0.0;
         }
-        
+
         let relative_position = (transport_position - song_start).max(0.0);
         (relative_position / song_duration).min(1.0) * 100.0
     }
@@ -689,8 +710,12 @@ impl Song {
     }
 
     /// Find the section containing the given transport position (returns index and section)
-    pub fn section_at_position_with_index(&self, transport_position: f64) -> Option<(usize, &Section)> {
-        self.sections.iter()
+    pub fn section_at_position_with_index(
+        &self,
+        transport_position: f64,
+    ) -> Option<(usize, &Section)> {
+        self.sections
+            .iter()
             .enumerate()
             .find(|(_, section)| {
                 if let (Some(start), Some(end)) = (section.start_seconds(), section.end_seconds()) {
@@ -704,7 +729,8 @@ impl Song {
 
     /// Get the current section index based on transport position
     pub fn current_section_index(&self, transport_position: f64) -> Option<usize> {
-        self.section_at_position_with_index(transport_position).map(|(idx, _)| idx)
+        self.section_at_position_with_index(transport_position)
+            .map(|(idx, _)| idx)
     }
 
     /// Get project name from metadata (returns default if not found)
@@ -847,8 +873,8 @@ pub struct SongSummary {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::Section;
+    use super::*;
     use daw::marker_region::core::Marker;
     use daw::transport::TransportActions as _;
 
@@ -991,8 +1017,8 @@ mod tests {
         song.set_end_marker(marker(180.0, "=END"));
         song.set_count_in_marker(marker(-4.0, "COUNT_IN"));
 
-        let verse = section_from_seconds(SectionType::Verse, 0.0, 60.0, "Verse".to_string(), None)
-            .unwrap();
+        let verse =
+            section_from_seconds(SectionType::Verse, 0.0, 60.0, "Verse".to_string(), None).unwrap();
         let chorus =
             section_from_seconds(SectionType::Chorus, 60.0, 120.0, "Chorus".to_string(), None)
                 .unwrap();
@@ -1015,12 +1041,12 @@ mod tests {
         let mut song = Song::new("Transport Song".to_string()).unwrap();
         // Transport info can be accessed from the project
         // For testing, we can create a Transport and Project directly
-        use daw::transport::Transport;
         use daw::project::Project;
+        use daw::transport::Transport;
         let transport = Transport::new();
         let project = Project::new("Test Project", transport);
         song.set_project(project);
-        
+
         assert!(song.transport().is_some());
     }
 }

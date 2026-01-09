@@ -14,7 +14,7 @@ pub trait SetlistBuilder {
         &self,
         existing_setlist: Option<&Setlist>,
     ) -> Result<Setlist, SetlistError>;
-    
+
     /// Build a song from the current active project
     fn build_song_from_current_project(&self) -> Result<Song, SetlistError>;
 }
@@ -23,13 +23,13 @@ pub trait SetlistBuilder {
 pub trait SeekAdapter {
     /// Seek to a section within a song
     fn seek_to_section(&self, song_index: usize, section_index: usize) -> Result<(), String>;
-    
+
     /// Seek to a song
     fn seek_to_song(&self, song_index: usize) -> Result<(), String>;
-    
+
     /// Seek to a time position within a song
     fn seek_to_time(&self, song_index: usize, time_seconds: f64) -> Result<(), String>;
-    
+
     /// Seek to a musical position within a song
     fn seek_to_musical_position(
         &self,
@@ -41,11 +41,17 @@ pub trait SeekAdapter {
 /// Trait for command execution in a DAW
 pub trait CommandAdapter {
     /// Execute a transport command
-    fn execute_transport_command(&self, command: crate::setlist::TransportCommand) -> Result<(), String>;
-    
+    fn execute_transport_command(
+        &self,
+        command: crate::setlist::TransportCommand,
+    ) -> Result<(), String>;
+
     /// Execute a navigation command
-    fn execute_navigation_command(&self, command: crate::setlist::NavigationCommand) -> Result<(), String>;
-    
+    fn execute_navigation_command(
+        &self,
+        command: crate::setlist::NavigationCommand,
+    ) -> Result<(), String>;
+
     /// Toggle loop
     fn toggle_loop(&self) -> Result<(), String>;
 }

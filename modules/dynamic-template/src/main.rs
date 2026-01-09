@@ -1,4 +1,4 @@
-use dynamic_template::{default_config, ItemMetadata, OrganizeIntoTracks};
+use dynamic_template::{ItemMetadata, OrganizeIntoTracks, default_config};
 use monarchy::Parser;
 use std::env;
 

@@ -1,16 +1,16 @@
 //! Lyrics actions for REAPER extension
 
 use crate::infrastructure::action_registry::{ActionDef, register_actions};
-use fts::lyrics::infra::reaper::{read_lyrics_from_reaper, create_text_items_from_lyrics};
+use fts::lyrics::infra::reaper::{create_text_items_from_lyrics, read_lyrics_from_reaper};
 use reaper_high::Reaper;
-use tracing::{info, error};
+use tracing::{error, info};
 
 /// Handler for reading lyrics from REAPER
 fn read_lyrics_from_reaper_handler() {
     let reaper = Reaper::get();
-    
+
     info!("Reading lyrics from REAPER project");
-    
+
     match read_lyrics_from_reaper() {
         Ok(lyrics_data) => {
             let success_msg = format!(
@@ -19,13 +19,13 @@ fn read_lyrics_from_reaper_handler() {
                 lyrics_data.midi_tracks.len()
             );
             reaper.show_console_msg(success_msg.as_str());
-            
+
             info!(
                 slides_count = lyrics_data.slides.len(),
                 midi_tracks_count = lyrics_data.midi_tracks.len(),
                 "Successfully read lyrics from REAPER"
             );
-            
+
             // Log detailed information about what was found
             for (idx, slide) in lyrics_data.slides.iter().enumerate() {
                 info!(
@@ -36,14 +36,14 @@ fn read_lyrics_from_reaper_handler() {
                     "Slide data"
                 );
             }
-            
+
             for track in &lyrics_data.midi_tracks {
                 info!(
                     track_name = %track.name,
                     items_count = track.items.len(),
                     "MIDI track data"
                 );
-                
+
                 for (item_idx, item) in track.items.iter().enumerate() {
                     info!(
                         track_name = %track.name,
@@ -57,7 +57,10 @@ fn read_lyrics_from_reaper_handler() {
             }
         }
         Err(e) => {
-            let error_msg = format!("FastTrackStudio: Failed to read lyrics from REAPER: {}\n", e);
+            let error_msg = format!(
+                "FastTrackStudio: Failed to read lyrics from REAPER: {}\n",
+                e
+            );
             reaper.show_console_msg(error_msg.as_str());
             error!(error = %e, "Failed to read lyrics from REAPER");
         }
@@ -68,10 +71,10 @@ fn read_lyrics_from_reaper_handler() {
 fn create_text_items_from_lyrics_handler() {
     let reaper = Reaper::get();
     let medium_reaper = reaper.medium_reaper();
-    
+
     let captions_csv = "Enter lyrics text,separator=|,extrawidth=500";
     let initial_value = "";
-    
+
     let user_input_result = medium_reaper.get_user_inputs(
         "FastTrackStudio: Create Text Items from Lyrics",
         1,
@@ -79,7 +82,7 @@ fn create_text_items_from_lyrics_handler() {
         initial_value,
         4096, // Max input length
     );
-    
+
     let lyrics_text = match user_input_result {
         Some(input) => {
             let text = input.to_str().trim().to_string();
@@ -123,7 +126,6 @@ pub fn register_lyrics_actions() {
             ..Default::default()
         },
     ];
-    
+
     register_actions(&actions, "Lyrics");
 }
-

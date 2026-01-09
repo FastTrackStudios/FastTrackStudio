@@ -4,14 +4,14 @@
 //! Each measure has the same width, and displays chords, time signatures, and key changes.
 
 use dioxus::prelude::*;
-use keyflow::{Chart, ChartSection, ChordInstance, Key};
-use keyflow::chart::types::Measure;
 use keyflow::chart::display::format_chord;
-use keyflow::time::{TimeSignature, AbsolutePosition, MusicalDuration, MusicalPosition};
-use keyflow::primitives::{MusicalNote, RootNotation};
+use keyflow::chart::types::Measure;
 use keyflow::chord::{Chord, ChordQuality, ChordRhythm};
-use keyflow::sections::{Section, SectionType};
 use keyflow::metadata::SongMetadata;
+use keyflow::primitives::{MusicalNote, RootNotation};
+use keyflow::sections::{Section, SectionType};
+use keyflow::time::{AbsolutePosition, MusicalDuration, MusicalPosition, TimeSignature};
+use keyflow::{Chart, ChartSection, ChordInstance, Key};
 
 /// Default chart text from well_jacob_collier.rs
 const DEFAULT_CHART_TEXT: &str = r#"Well - Jacob Collier
@@ -55,12 +55,10 @@ pub fn ChordTabView(props: ChordTabViewProps) -> Element {
     // Text editor state
     let mut chart_text = use_signal(|| DEFAULT_CHART_TEXT.to_string());
     let mut is_editing = use_signal(|| false);
-    
+
     // Parse chart text in real-time
-    let parsed_chart = use_memo(move || {
-        Chart::parse(&chart_text())
-    });
-    
+    let parsed_chart = use_memo(move || Chart::parse(&chart_text()));
+
     // Determine which chart to use: prop > parsed > test
     let chart = use_memo(move || {
         if let Some(chart) = &props.chart {
@@ -72,10 +70,8 @@ pub fn ChordTabView(props: ChordTabViewProps) -> Element {
             Some(create_test_chart())
         }
     });
-    
-    let parse_error = use_memo(move || {
-        parsed_chart().err()
-    });
+
+    let parse_error = use_memo(move || parsed_chart().err());
 
     rsx! {
         div {
@@ -93,7 +89,7 @@ pub fn ChordTabView(props: ChordTabViewProps) -> Element {
                     if is_editing() { "View" } else { "Edit" }
                 }
             }
-            
+
             // Content area
             div {
                 class: "flex-1 overflow-hidden flex",
@@ -127,7 +123,7 @@ pub fn ChordTabView(props: ChordTabViewProps) -> Element {
                         }
                     }
                 }
-                
+
                 // Chart display (right side when editing, full width when viewing)
                 div {
                     class: if is_editing() { "w-1/2 overflow-y-auto p-6" } else { "flex-1 overflow-y-auto p-6" },
@@ -215,7 +211,7 @@ pub fn ChordTabView(props: ChordTabViewProps) -> Element {
 #[component]
 fn SectionDisplay(section: ChartSection, section_index: usize, chart: Chart) -> Element {
     let section_name = section.section.display_name();
-    
+
     // Calculate starting measure number (sum of all previous sections)
     let start_measure_number = {
         let mut measure_num = 1u32;
@@ -224,7 +220,7 @@ fn SectionDisplay(section: ChartSection, section_index: usize, chart: Chart) -> 
         }
         measure_num
     };
-    
+
     rsx! {
         div {
             class: "section mb-8",
@@ -235,9 +231,15 @@ fn SectionDisplay(section: ChartSection, section_index: usize, chart: Chart) -> 
 }
 
 /// Render measures for a section in rows of 4
-fn render_section_measures(measures: &[Measure], start_measure: u32, section_index: usize, chart: Chart, section_name: String) -> Element {
+fn render_section_measures(
+    measures: &[Measure],
+    start_measure: u32,
+    section_index: usize,
+    chart: Chart,
+    section_name: String,
+) -> Element {
     let rows = chunk_measures(measures, 4);
-    
+
     // Calculate measure numbers for each row
     let mut measure_numbers: Vec<Vec<u32>> = Vec::new();
     let mut current_measure = start_measure;
@@ -249,7 +251,7 @@ fn render_section_measures(measures: &[Measure], start_measure: u32, section_ind
         measure_numbers.push(row_numbers);
         current_measure += row.len() as u32;
     }
-    
+
     rsx! {
         for (row_idx, row) in rows.iter().enumerate() {
             div {
@@ -291,20 +293,32 @@ fn render_section_measures(measures: &[Measure], start_measure: u32, section_ind
 
 /// Display a single measure in sheet music style
 #[component]
-fn MeasureBox(measure: Measure, measure_number: u32, section_index: usize, chart: Chart, is_first_in_row: bool, is_last_in_row: bool) -> Element {
+fn MeasureBox(
+    measure: Measure,
+    measure_number: u32,
+    section_index: usize,
+    chart: Chart,
+    is_first_in_row: bool,
+    is_last_in_row: bool,
+) -> Element {
     // Check for key change at this measure
-    let key_at_measure = chart.key_changes.iter()
+    let key_at_measure = chart
+        .key_changes
+        .iter()
         .find(|kc| {
             kc.position.total_duration.measure == measure_number as i32 - 1
-            && kc.section_index == section_index
+                && kc.section_index == section_index
         })
         .map(|kc| kc.to_key.clone());
-    
+
     // Use time signature from measure (which is stored as (numerator, denominator))
     // Convert to TimeSignature type
-    let time_sig = TimeSignature::new(measure.time_signature.0 as i32, measure.time_signature.1 as i32);
+    let time_sig = TimeSignature::new(
+        measure.time_signature.0 as i32,
+        measure.time_signature.1 as i32,
+    );
     let beats_per_measure = time_sig.numerator as usize;
-    
+
     // Group chords by beat position within this measure
     // Chords are positioned absolutely, so we need to get their beat within this measure
     let mut chords_by_beat: Vec<(usize, Vec<ChordInstance>)> = Vec::new();
@@ -312,8 +326,12 @@ fn MeasureBox(measure: Measure, measure_number: u32, section_index: usize, chart
         // Get the beat position (0-indexed) within the measure
         // The chord's position is absolute, so we need to extract the beat
         let beat = chord.position.total_duration.beat.max(0) as usize;
-        let beat_idx = if beat < beats_per_measure { beat } else { beats_per_measure - 1 };
-        
+        let beat_idx = if beat < beats_per_measure {
+            beat
+        } else {
+            beats_per_measure - 1
+        };
+
         // Find or create entry for this beat
         if let Some(entry) = chords_by_beat.iter_mut().find(|(b, _)| *b == beat_idx) {
             entry.1.push(chord.clone());
@@ -321,7 +339,7 @@ fn MeasureBox(measure: Measure, measure_number: u32, section_index: usize, chart
             chords_by_beat.push((beat_idx, vec![chord.clone()]));
         }
     }
-    
+
     // Calculate beat positions as percentages
     // Position each beat evenly across the measure (0%, 25%, 50%, 75% for 4/4)
     let beat_positions: Vec<(usize, f32)> = (0..beats_per_measure)
@@ -331,7 +349,7 @@ fn MeasureBox(measure: Measure, measure_number: u32, section_index: usize, chart
             (beat_idx, percent)
         })
         .collect();
-    
+
     rsx! {
         div {
             class: "measure flex-1 min-w-0 relative",
@@ -357,7 +375,7 @@ fn MeasureBox(measure: Measure, measure_number: u32, section_index: usize, chart
                         }
                     }
                 }
-                
+
                 // Staff with 5 lines and barlines (barlines only on staff, not extending to chord lane)
                 div {
                     class: "staff relative flex-1 px-2",
@@ -369,13 +387,13 @@ fn MeasureBox(measure: Measure, measure_number: u32, section_index: usize, chart
                             style: format!("top: {}%;", (line_num as f32 * 25.0)),
                         }
                     }
-                    
+
                     // Left barline (only on staff, extends through all staff lines)
                     div {
                         class: "absolute left-0 top-0 bottom-0 w-px bg-foreground",
                         style: "z-index: 10;",
                     }
-                    
+
                     // Right barline (only on last measure of row, only on staff)
                     if is_last_in_row {
                         div {
@@ -383,7 +401,7 @@ fn MeasureBox(measure: Measure, measure_number: u32, section_index: usize, chart
                             style: "z-index: 10;",
                         }
                     }
-                    
+
                     // Clef and key signature (only on first measure of row)
                     if is_first_in_row {
                         // Bass clef symbol - much bigger
@@ -400,7 +418,7 @@ fn MeasureBox(measure: Measure, measure_number: u32, section_index: usize, chart
                             }
                         }
                     }
-                    
+
                     // Beat slashes - bigger and centered on middle staff line (50% = line 2 of 5)
                     for (beat_idx, percent) in &beat_positions {
                         div {
@@ -437,47 +455,61 @@ fn ChordDisplay(chord: ChordInstance) -> Element {
 
 /// Chunk measures into rows of 4
 fn chunk_measures(measures: &[Measure], chunk_size: usize) -> Vec<Vec<Measure>> {
-    measures.chunks(chunk_size).map(|chunk| chunk.to_vec()).collect()
+    measures
+        .chunks(chunk_size)
+        .map(|chunk| chunk.to_vec())
+        .collect()
 }
 
 /// Create a test Chart with hardcoded data based on "Silent Night"
 fn create_test_chart() -> Chart {
     use keyflow::chart::types::Measure;
-    
+
     let mut chart = Chart::new();
-    
+
     // Set metadata
     chart.metadata = SongMetadata {
         title: Some("Silent Night".to_string()),
         artist: None,
         ..Default::default()
     };
-    
+
     // Set initial key (A major)
     let a_major = Key::major(MusicalNote::from_string("A").unwrap());
     chart.initial_key = Some(a_major.clone());
     chart.current_key = Some(a_major.clone());
-    
+
     // Set initial time signature (4/4)
     let time_4_4 = TimeSignature::new(4, 4);
     chart.initial_time_signature = Some(time_4_4);
     chart.time_signature = Some(time_4_4);
-    
+
     // Helper function to create a chord instance
     // We'll calculate positions manually based on section and measure indices
     let mut total_measures = 0i32;
-    let create_chord = |symbol: &str, section_idx: usize, measure_idx: usize, total_measures_before: i32| -> ChordInstance {
+    let create_chord = |symbol: &str,
+                        section_idx: usize,
+                        measure_idx: usize,
+                        total_measures_before: i32|
+     -> ChordInstance {
         // Extract root note from symbol (simplified - just get first letter)
-        let root_str = symbol.chars().take_while(|c| c.is_alphabetic() && *c != 'm' && *c != 'a' && *c != 'd' && *c != 'u' && *c != 's').collect::<String>();
+        let root_str = symbol
+            .chars()
+            .take_while(|c| {
+                c.is_alphabetic() && *c != 'm' && *c != 'a' && *c != 'd' && *c != 'u' && *c != 's'
+            })
+            .collect::<String>();
         let root_note = if root_str.is_empty() {
             MusicalNote::from_string("C").unwrap()
         } else {
-            MusicalNote::from_string(&root_str).unwrap_or_else(|| MusicalNote::from_string("C").unwrap())
+            MusicalNote::from_string(&root_str)
+                .unwrap_or_else(|| MusicalNote::from_string("C").unwrap())
         };
         let root = RootNotation::from_note_name(root_note);
-        
+
         // Parse chord quality from symbol
-        let quality = if symbol.contains('m') && !symbol.contains("maj") && !symbol.contains("add") {
+        let quality = if symbol.contains('m') && !symbol.contains("maj") && !symbol.contains("add")
+        {
             ChordQuality::Minor
         } else if symbol.contains("sus2") {
             ChordQuality::Suspended(keyflow::chord::SuspendedType::Second)
@@ -490,7 +522,7 @@ fn create_test_chart() -> Chart {
         } else {
             ChordQuality::Major
         };
-        
+
         // Parse family (7th type) from symbol
         let family = if symbol.contains("maj7") || symbol.contains("M7") {
             Some(keyflow::chord::ChordFamily::Major7)
@@ -501,19 +533,20 @@ fn create_test_chart() -> Chart {
         } else {
             None
         };
-        
+
         let parsed_chord = if let Some(fam) = family {
             Chord::with_family(root.clone(), quality, fam)
         } else {
             Chord::new(root.clone(), quality)
         };
-        
+
         // Create position manually - measure is total_measures_before + measure_idx, at beat 0
         let position = AbsolutePosition::new(
-            MusicalPosition::try_new(total_measures_before + measure_idx as i32, 0, 0).unwrap_or(MusicalPosition::start()),
+            MusicalPosition::try_new(total_measures_before + measure_idx as i32, 0, 0)
+                .unwrap_or(MusicalPosition::start()),
             section_idx,
         );
-        
+
         ChordInstance::new(
             root,
             symbol.to_string(),
@@ -524,101 +557,136 @@ fn create_test_chart() -> Chart {
             position,
         )
     };
-    
+
     // Section 1: Count-In (1 measure)
     let mut count_in_measures = vec![Measure::new().with_time_signature((4, 4))];
-    count_in_measures[0].chords.push(create_chord("A", 0, 0, total_measures));
-    chart.sections.push(ChartSection::new(
-        Section::new(SectionType::Custom("Count-In".to_string()))
-    ).with_measures(count_in_measures));
+    count_in_measures[0]
+        .chords
+        .push(create_chord("A", 0, 0, total_measures));
+    chart.sections.push(
+        ChartSection::new(Section::new(SectionType::Custom("Count-In".to_string())))
+            .with_measures(count_in_measures),
+    );
     total_measures += 1;
-    
+
     // Section 2: VS 1 (12 measures)
     let mut vs1_measures = Vec::new();
     for i in 0..12 {
         let mut measure = Measure::new().with_time_signature((4, 4));
-        
+
         match i {
             0 => measure.chords.push(create_chord("A", 1, i, total_measures)),
-            6 => measure.chords.push(create_chord("Eadd11", 1, i, total_measures)),
-            9 => measure.chords.push(create_chord("F#m", 1, i, total_measures)),
-            10 => measure.chords.push(create_chord("A/C#", 1, i, total_measures)),
-            12 => measure.chords.push(create_chord("Dsus2", 1, i, total_measures)),
+            6 => measure
+                .chords
+                .push(create_chord("Eadd11", 1, i, total_measures)),
+            9 => measure
+                .chords
+                .push(create_chord("F#m", 1, i, total_measures)),
+            10 => measure
+                .chords
+                .push(create_chord("A/C#", 1, i, total_measures)),
+            12 => measure
+                .chords
+                .push(create_chord("Dsus2", 1, i, total_measures)),
             15 => measure.chords.push(create_chord("A", 1, i, total_measures)),
-            19 => measure.chords.push(create_chord("Dsus2", 1, i, total_measures)),
+            19 => measure
+                .chords
+                .push(create_chord("Dsus2", 1, i, total_measures)),
             22 => measure.chords.push(create_chord("A", 1, i, total_measures)),
             _ => {}
         }
         vs1_measures.push(measure);
     }
-    chart.sections.push(ChartSection::new(
-        Section::new(SectionType::Verse).with_measure_count(12)
-    ).with_measures(vs1_measures));
+    chart.sections.push(
+        ChartSection::new(Section::new(SectionType::Verse).with_measure_count(12))
+            .with_measures(vs1_measures),
+    );
     total_measures += 12;
-    
+
     // Section 3: INST (4 measures)
     let mut inst_measures = Vec::new();
     for i in 0..4 {
         let mut measure = Measure::new().with_time_signature((4, 4));
-        
+
         match i {
-            0 => measure.chords.push(create_chord("F#m", 2, i, total_measures)),
+            0 => measure
+                .chords
+                .push(create_chord("F#m", 2, i, total_measures)),
             1 => measure.chords.push(create_chord("A", 2, i, total_measures)),
-            2 => measure.chords.push(create_chord("Esus4", 2, i, total_measures)),
+            2 => measure
+                .chords
+                .push(create_chord("Esus4", 2, i, total_measures)),
             3 => {
                 measure.chords.push(create_chord("A", 2, i, total_measures));
-                measure.chords.push(create_chord("Asus2/B", 2, i, total_measures));
+                measure
+                    .chords
+                    .push(create_chord("Asus2/B", 2, i, total_measures));
             }
             _ => {}
         }
         inst_measures.push(measure);
     }
-    chart.sections.push(ChartSection::new(
-        Section::new(SectionType::Custom("INST".to_string()))
-    ).with_measures(inst_measures));
+    chart.sections.push(
+        ChartSection::new(Section::new(SectionType::Custom("INST".to_string())))
+            .with_measures(inst_measures),
+    );
     total_measures += 4;
-    
+
     // Section 4: VS 2 (12 measures)
     let mut vs2_measures = Vec::new();
     for i in 0..12 {
         let mut measure = Measure::new().with_time_signature((4, 4));
-        
+
         match i {
-            0 => measure.chords.push(create_chord("Asus2/B", 3, i, total_measures)),
-            1 => measure.chords.push(create_chord("Esus2/F#", 3, i, total_measures)),
-            2 => measure.chords.push(create_chord("Esus2/F#", 3, i, total_measures)),
+            0 => measure
+                .chords
+                .push(create_chord("Asus2/B", 3, i, total_measures)),
+            1 => measure
+                .chords
+                .push(create_chord("Esus2/F#", 3, i, total_measures)),
+            2 => measure
+                .chords
+                .push(create_chord("Esus2/F#", 3, i, total_measures)),
             3 => measure.chords.push(create_chord("A", 3, i, total_measures)),
-            4 => measure.chords.push(create_chord("Asus2/B", 3, i, total_measures)),
-            5 => measure.chords.push(create_chord("Asus4/D", 3, i, total_measures)),
-            6 => measure.chords.push(create_chord("Asus4/D", 3, i, total_measures)),
+            4 => measure
+                .chords
+                .push(create_chord("Asus2/B", 3, i, total_measures)),
+            5 => measure
+                .chords
+                .push(create_chord("Asus4/D", 3, i, total_measures)),
+            6 => measure
+                .chords
+                .push(create_chord("Asus4/D", 3, i, total_measures)),
             7 => measure.chords.push(create_chord("A", 3, i, total_measures)),
             _ => {}
         }
         vs2_measures.push(measure);
     }
-    chart.sections.push(ChartSection::new(
-        Section::new(SectionType::Verse).with_measure_count(12)
-    ).with_measures(vs2_measures));
+    chart.sections.push(
+        ChartSection::new(Section::new(SectionType::Verse).with_measure_count(12))
+            .with_measures(vs2_measures),
+    );
     total_measures += 12;
-    
+
     // Add a few more sections to demonstrate layout
     for section_num in 0..2 {
         let mut section_measures = Vec::new();
         for i in 0..8 {
             let mut measure = Measure::new().with_time_signature((4, 4));
             if i % 2 == 0 {
-                measure.chords.push(create_chord("A", 4 + section_num, i, total_measures));
+                measure
+                    .chords
+                    .push(create_chord("A", 4 + section_num, i, total_measures));
             }
             section_measures.push(measure);
         }
         let section_name = if section_num == 0 { "INST" } else { "VS 3" };
-        chart.sections.push(ChartSection::new(
-            Section::new(SectionType::Custom(section_name.to_string()))
-        ).with_measures(section_measures));
+        chart.sections.push(
+            ChartSection::new(Section::new(SectionType::Custom(section_name.to_string())))
+                .with_measures(section_measures),
+        );
         total_measures += 8;
     }
-    
+
     chart
 }
-
-

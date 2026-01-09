@@ -66,15 +66,15 @@
 //! - Re-implemented using REAPER's public APIs where possible
 //! - Approximated using available REAPER APIs
 
-use reaper_high::Reaper;
-use reaper_low::raw::{HWND, POINT, RECT, MediaItem, MediaItem_Take};
-use reaper_low::Swell;
-use reaper_medium::Reaper as MediumReaper;
-use swell_ui::Window;
-use crate::input::state::Context;
-use crate::input::utils;
 use crate::input::midi_utils;
 use crate::input::reaper_windows;
+use crate::input::state::Context;
+use crate::input::utils;
+use reaper_high::Reaper;
+use reaper_low::Swell;
+use reaper_low::raw::{HWND, MediaItem, MediaItem_Take, POINT, RECT};
+use reaper_medium::Reaper as MediumReaper;
+use swell_ui::Window;
 
 /// Detection mode flags (bitmask)
 #[derive(Debug, Clone, Copy)]
@@ -110,7 +110,7 @@ impl DetectionMode {
     pub fn all() -> Self {
         Self::default()
     }
-    
+
     pub fn minimal() -> Self {
         Self {
             all: false,
@@ -205,43 +205,43 @@ fn get_window_under_mouse(mouse_x: i32, mouse_y: i32) -> HWND {
         x: mouse_x,
         y: mouse_y,
     };
-    unsafe {
-        Swell::get().WindowFromPoint(mouse_point)
-    }
+    unsafe { Swell::get().WindowFromPoint(mouse_point) }
 }
 
 /// Check if an HWND is a MIDI editor window by walking up the parent chain
 /// Returns (cursor_segment, midi_editor_hwnd, subview_hwnd)
 /// Based on BR_MouseInfo::IsHwndMidiEditor
-fn is_hwnd_midi_editor(hwnd: HWND, medium_reaper: &MediumReaper) -> Option<(i32, HWND, Option<HWND>)> {
+fn is_hwnd_midi_editor(
+    hwnd: HWND,
+    medium_reaper: &MediumReaper,
+) -> Option<(i32, HWND, Option<HWND>)> {
     // Check if this window itself is a MIDI editor
-    let mode = unsafe {
-        medium_reaper.low().MIDIEditor_GetMode(hwnd)
-    };
-    
+    let mode = unsafe { medium_reaper.low().MIDIEditor_GetMode(hwnd) };
+
     if mode != -1 {
         // This is a MIDI editor window
         return Some((MIDI_WND_UNKNOWN, hwnd, None));
     }
-    
+
     // Walk up the parent chain to find a MIDI editor parent
     let mut current = hwnd;
     while !current.is_null() {
         let parent = if let Some(window) = Window::new(current) {
-            window.parent().map(|w| w.raw_hwnd().as_ptr()).unwrap_or(std::ptr::null_mut())
+            window
+                .parent()
+                .map(|w| w.raw_hwnd().as_ptr())
+                .unwrap_or(std::ptr::null_mut())
         } else {
             std::ptr::null_mut()
         };
-        
+
         if parent.is_null() {
             break;
         }
-        
+
         // Check if parent is a MIDI editor
-        let parent_mode = unsafe {
-            medium_reaper.low().MIDIEditor_GetMode(parent)
-        };
-        
+        let parent_mode = unsafe { medium_reaper.low().MIDIEditor_GetMode(parent) };
+
         if parent_mode != -1 {
             // Found MIDI editor parent, current is the subview
             // Check if subview is GetNotesView or GetPianoView
@@ -258,10 +258,10 @@ fn is_hwnd_midi_editor(hwnd: HWND, medium_reaper: &MediumReaper) -> Option<(i32,
             // Default to unknown if we can't determine
             return Some((MIDI_WND_UNKNOWN, parent, Some(current)));
         }
-        
+
         current = parent;
     }
-    
+
     None
 }
 
@@ -283,19 +283,29 @@ fn get_arrange_wnd(medium_reaper: &MediumReaper) -> Option<HWND> {
 
 /// Check if point is in arrange view
 /// Based on BR_MouseUtil::IsPointInArrange
-fn is_point_in_arrange(p: POINT, check_point_visibility: bool, medium_reaper: &MediumReaper) -> (bool, Option<HWND>) {
+fn is_point_in_arrange(
+    p: POINT,
+    check_point_visibility: bool,
+    medium_reaper: &MediumReaper,
+) -> (bool, Option<HWND>) {
     if let Some(arrange_hwnd) = get_arrange_wnd(medium_reaper) {
-        let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
         unsafe {
             Swell::get().GetWindowRect(arrange_hwnd, &mut rect);
         }
-        
+
         // Adjust for scrollbars
         rect.right -= SCROLLBAR_W + 1;
         rect.bottom -= SCROLLBAR_W + 1;
-        
-        let point_in_arrange = p.x >= rect.left && p.x <= rect.right && p.y >= rect.top && p.y <= rect.bottom;
-        
+
+        let point_in_arrange =
+            p.x >= rect.left && p.x <= rect.right && p.y >= rect.top && p.y <= rect.bottom;
+
         if check_point_visibility {
             if point_in_arrange {
                 let hwnd_pt = get_window_under_mouse(p.x, p.y);
@@ -313,7 +323,7 @@ fn is_point_in_arrange(p: POINT, check_point_visibility: bool, medium_reaper: &M
             return (point_in_arrange, Some(hwnd_pt));
         }
     }
-    
+
     (false, None)
 }
 
@@ -333,7 +343,7 @@ fn translate_point_to_arrange_scroll_y(p: POINT, medium_reaper: &MediumReaper) -
         unsafe {
             Swell::get().ScreenToClient(arrange_hwnd, &mut client_p);
         }
-        
+
         // TODO: Get scroll position using CF_GetScrollInfo or similar
         // For now, just return client Y
         client_p.y
@@ -362,7 +372,7 @@ fn get_ruler_lane_height(ruler_h: i32, lane: i32) -> i32 {
     // lane: 0 -> regions, 1 -> markers, 2 -> tempo, 3 -> timeline
     let timeline = (ruler_h as f64 / 2.0).round() as i32;
     let markers = ((timeline as f64 / 3.0).trunc() as i32) + 1;
-    
+
     match lane {
         0 => ruler_h - markers * 2 - timeline,
         1 | 2 => markers,
@@ -375,60 +385,70 @@ fn get_ruler_lane_height(ruler_h: i32, lane: i32) -> i32 {
 /// Ports BR_MouseInfo::GetContext
 pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode) -> MouseContext {
     let mut mouse_context = MouseContext::default();
-    
+
     // Get mouse position
     let (mouse_x, mouse_y) = get_mouse_position(medium_reaper);
-    let mouse_point = POINT { x: mouse_x, y: mouse_y };
-    
+    let mouse_point = POINT {
+        x: mouse_x,
+        y: mouse_y,
+    };
+
     // Find window under mouse
     let mouse_window_hwnd = get_window_under_mouse(mouse_x, mouse_y);
-    
+
     if mouse_window_hwnd.is_null() {
         // Fallback to keyboard focus if we can't determine mouse window
-        let (context, context_name, window_title) = crate::input::handler::InputHandler::determine_context();
+        let (context, context_name, window_title) =
+            crate::input::handler::InputHandler::determine_context();
         mouse_context.context = context;
         mouse_context.window_title = window_title;
         mouse_context.window = context_name.to_lowercase().replace(" ", "_");
         return mouse_context;
     }
-    
+
     // Get arrange view info
-    let (mouse_pos, arrange_start, arrange_end, arrange_zoom) = position_at_arrange_point(mouse_point, medium_reaper);
+    let (mouse_pos, arrange_start, arrange_end, arrange_zoom) =
+        position_at_arrange_point(mouse_point, medium_reaper);
     let mouse_display_x = translate_point_to_arrange_display_x(mouse_point, medium_reaper);
-    
+
     let mut found = false;
-    
+
     // Try to get window title
     if let Some(window) = Window::new(mouse_window_hwnd) {
         if let Ok(title) = window.text() {
             mouse_context.window_title = title.clone();
         }
     }
-    
+
     // Ruler detection
     if !found && (mode.all || mode.ruler) {
         if let Some(ruler_hwnd) = utils::get_ruler_wnd(medium_reaper) {
             if ruler_hwnd == mouse_window_hwnd {
                 mouse_context.window = "ruler".to_string();
-                
+
                 let mut ruler_p = mouse_point;
                 unsafe {
                     Swell::get().ScreenToClient(ruler_hwnd, &mut ruler_p);
                 }
-                
-                let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+
+                let mut rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
                 unsafe {
                     Swell::get().GetClientRect(ruler_hwnd, &mut rect);
                 }
-                
+
                 let ruler_h = rect.bottom - rect.top;
                 let mut limit_l = 0;
                 let mut limit_h = 0;
-                
+
                 for i in 0..4 {
                     limit_l = limit_h;
                     limit_h += get_ruler_lane_height(ruler_h, i);
-                    
+
                     mouse_context.segment = match i {
                         0 => "region_lane".to_string(),
                         1 => "marker_lane".to_string(),
@@ -436,18 +456,18 @@ pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode
                         3 => "timeline".to_string(),
                         _ => String::new(),
                     };
-                    
+
                     if ruler_p.y >= limit_l && ruler_p.y < limit_h {
                         break;
                     }
                 }
-                
+
                 mouse_context.position = mouse_pos;
                 found = true;
             }
         }
     }
-    
+
     // Transport detection
     if !found && (mode.all || mode.transport) {
         if let Some(transport_hwnd) = utils::get_transport_wnd(medium_reaper) {
@@ -468,18 +488,18 @@ pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode
             }
         }
     }
-    
+
     // MIDI editor detection
     if !found && (mode.all || mode.midi_editor) {
-        if let Some((cursor_segment, midi_editor_hwnd, _subview)) = is_hwnd_midi_editor(mouse_window_hwnd, medium_reaper) {
+        if let Some((cursor_segment, midi_editor_hwnd, _subview)) =
+            is_hwnd_midi_editor(mouse_window_hwnd, medium_reaper)
+        {
             mouse_context.window = "midi_editor".to_string();
             mouse_context.midi_editor_hwnd = Some(midi_editor_hwnd);
-            
+
             // Check MIDI editor mode
-            let midi_mode = unsafe {
-                medium_reaper.low().MIDIEditor_GetMode(midi_editor_hwnd)
-            };
-            
+            let midi_mode = unsafe { medium_reaper.low().MIDIEditor_GetMode(midi_editor_hwnd) };
+
             match midi_mode {
                 0 => {
                     mouse_context.context = Context::Midi;
@@ -498,14 +518,14 @@ pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode
                     mouse_context.segment = "unknown".to_string();
                 }
             }
-            
+
             // TODO: Full MIDI editor context detection (ruler, CC lanes, note rows, etc.)
             // This would require BR_MidiEditor class and more SWS functions
-            
+
             found = true;
         }
     }
-    
+
     // Arrange view detection
     if !found && (mode.all || mode.arrange || mode.midi_inline) {
         if let Some(arrange_hwnd) = utils::get_arrange_wnd(medium_reaper) {
@@ -513,9 +533,9 @@ pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode
             if arrange_hwnd == mouse_window_hwnd && in_arrange {
                 mouse_context.window = "arrange".to_string();
                 mouse_context.position = mouse_pos;
-                
+
                 let mouse_y = translate_point_to_arrange_scroll_y(mouse_point, medium_reaper);
-                
+
                 // Item detection using GetItemFromPoint
                 let mut take_at_mouse: *mut MediaItem_Take = std::ptr::null_mut();
                 let item_at_mouse = unsafe {
@@ -526,10 +546,10 @@ pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode
                         &mut take_at_mouse,
                     )
                 };
-                
+
                 if !item_at_mouse.is_null() {
                     mouse_context.details = "item".to_string();
-                    
+
                     // Check if it's inline MIDI
                     if !take_at_mouse.is_null() {
                         if midi_utils::is_open_in_inline_editor(take_at_mouse, medium_reaper) {
@@ -537,11 +557,15 @@ pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode
                             mouse_context.segment = "inline".to_string();
                             mouse_context.context = Context::MidiInlineEditor;
                             mouse_context.inline_midi = true;
-                            
+
                             // Get take height for inline MIDI detection
                             let mut take_offset = 0;
-                            let take_height = utils::get_take_height(take_at_mouse, &mut take_offset, medium_reaper);
-                            
+                            let take_height = utils::get_take_height(
+                                take_at_mouse,
+                                &mut take_offset,
+                                medium_reaper,
+                            );
+
                             // TODO: Full inline MIDI context detection (CC lanes, note rows, etc.)
                             // This would require more MIDI editor state
                         }
@@ -549,36 +573,40 @@ pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode
                 } else {
                     mouse_context.details = "empty".to_string();
                 }
-                
+
                 // TODO: GetTrackOrEnvelopeFromY - would need track/envelope detection
                 // TODO: Stretch marker detection
                 // TODO: Envelope point/segment detection
-                
+
                 if mouse_context.segment.is_empty() {
                     mouse_context.segment = "track".to_string(); // Default
                 }
-                
+
                 found = true;
             }
         }
     }
-    
+
     // TCP/MCP detection
     if !found && (mode.all || mode.mcp_tcp) {
         // TODO: HwndToTrack and HwndToEnvelope from SWS
         // For now, we'll use window title matching as fallback
         let title_lower = mouse_context.window_title.to_lowercase();
         if title_lower.contains("track") || title_lower.contains("mixer") {
-            mouse_context.window = if title_lower.contains("mixer") { "mcp".to_string() } else { "tcp".to_string() };
+            mouse_context.window = if title_lower.contains("mixer") {
+                "mcp".to_string()
+            } else {
+                "tcp".to_string()
+            };
             mouse_context.segment = "track".to_string();
             found = true;
         }
     }
-    
+
     // Window title-based fallbacks
     if !found {
         let title_lower = mouse_context.window_title.to_lowercase();
-        
+
         if title_lower.contains("media explorer") || title_lower.contains("mediaexplorer") {
             mouse_context.window = "media_explorer".to_string();
             mouse_context.context = Context::MediaExplorer;
@@ -587,8 +615,9 @@ pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode
             mouse_context.window = "crossfade_editor".to_string();
             mouse_context.context = Context::CrossfadeEditor;
             found = true;
-        } else if (title_lower.contains("inline") || title_lower.contains("midi inline")) 
-            && (title_lower.contains("midi") || title_lower.contains("editor")) {
+        } else if (title_lower.contains("inline") || title_lower.contains("midi inline"))
+            && (title_lower.contains("midi") || title_lower.contains("editor"))
+        {
             mouse_context.window = "midi_editor".to_string();
             mouse_context.segment = "inline".to_string();
             mouse_context.context = Context::MidiInlineEditor;
@@ -596,7 +625,7 @@ pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode
             found = true;
         }
     }
-    
+
     // Set context based on window if not already set
     if mouse_context.context == Context::Main && !found {
         mouse_context.context = match mouse_context.window.as_str() {
@@ -606,7 +635,7 @@ pub fn determine_mouse_context(medium_reaper: &MediumReaper, mode: DetectionMode
             _ => Context::Main,
         };
     }
-    
+
     mouse_context
 }
 
@@ -623,8 +652,13 @@ pub fn get_context_from_mouse_position(medium_reaper: &MediumReaper) -> (Context
         Context::MediaExplorer => "Media Explorer",
         Context::CrossfadeEditor => "Crossfade Editor",
         Context::Global => "Global",
-    }.to_string();
-    (mouse_context.context, context_name, mouse_context.window_title)
+    }
+    .to_string();
+    (
+        mouse_context.context,
+        context_name,
+        mouse_context.window_title,
+    )
 }
 
 /// Get mouse cursor context (BR_GetMouseCursorContext equivalent)
@@ -632,7 +666,11 @@ pub fn get_context_from_mouse_position(medium_reaper: &MediumReaper) -> (Context
 pub fn get_mouse_cursor_context(medium_reaper: &MediumReaper) -> (String, String, String) {
     let mode = DetectionMode::all(); // Use full mode to get all details
     let mouse_context = determine_mouse_context(medium_reaper, mode);
-    
+
     // Return window, segment, details matching BR_GetMouseCursorContext format
-    (mouse_context.window.clone(), mouse_context.segment.clone(), mouse_context.details.clone())
+    (
+        mouse_context.window.clone(),
+        mouse_context.segment.clone(),
+        mouse_context.details.clone(),
+    )
 }

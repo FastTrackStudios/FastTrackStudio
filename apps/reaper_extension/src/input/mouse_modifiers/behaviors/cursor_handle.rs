@@ -1,6 +1,6 @@
 //! Cursor Handle mouse modifier behaviors
 
-use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorId, BehaviorDisplay};
+use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorDisplay, BehaviorId};
 
 /// Cursor Handle behaviors
 #[allow(unused_imports)]
@@ -15,4 +15,3 @@ define_behavior_enum! {
         JogAudioLoopedSegment => (4, "Jog audio (looped-segment mode)"),
     }
 }
-

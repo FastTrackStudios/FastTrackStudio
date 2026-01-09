@@ -244,7 +244,7 @@ impl Note for MusicalNote {
 
 impl MusicalNote {
     /// Convert this note to LilyPond notation
-    /// 
+    ///
     /// Uses English syntax: "s" for sharps and "f" for flats
     /// Examples: C# -> cs, Db -> df, F -> f
     pub fn to_lilypond(&self) -> String {

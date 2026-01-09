@@ -1,6 +1,6 @@
 //! Media Item fade behaviors
 
-use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorId, BehaviorDisplay};
+use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorDisplay, BehaviorId};
 
 /// Media Item fade left drag behaviors
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -84,7 +84,7 @@ impl BehaviorId for MediaItemFadeLeftDragBehavior {
             id => MediaItemFadeLeftDragBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemFadeLeftDragBehavior::MoveFadeIgnoringSnap => 0,
@@ -198,7 +198,7 @@ impl BehaviorId for MediaItemFadeClickBehavior {
             id => MediaItemFadeClickBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemFadeClickBehavior::NoAction => 0,
@@ -219,11 +219,21 @@ impl BehaviorDisplay for MediaItemFadeClickBehavior {
         match self {
             MediaItemFadeClickBehavior::NoAction => "No action",
             MediaItemFadeClickBehavior::DeleteFadeCrossfade => "Delete fade/crossfade",
-            MediaItemFadeClickBehavior::DeleteFadeCrossfadeIgnoringSelection => "Delete fade/crossfade ignoring selection",
-            MediaItemFadeClickBehavior::SetFadeCrossfadeToNextShape => "Set fade/crossfade to next shape",
-            MediaItemFadeClickBehavior::SetFadeCrossfadeToPreviousShape => "Set fade/crossfade to previous shape",
-            MediaItemFadeClickBehavior::SetFadeCrossfadeToPreviousShapeIgnoringSelection => "Set fade/crossfade to previous shape ignoring selection",
-            MediaItemFadeClickBehavior::SetFadeCrossfadeToNextShapeIgnoringSelection => "Set fade/crossfade to next shape ignoring selection",
+            MediaItemFadeClickBehavior::DeleteFadeCrossfadeIgnoringSelection => {
+                "Delete fade/crossfade ignoring selection"
+            }
+            MediaItemFadeClickBehavior::SetFadeCrossfadeToNextShape => {
+                "Set fade/crossfade to next shape"
+            }
+            MediaItemFadeClickBehavior::SetFadeCrossfadeToPreviousShape => {
+                "Set fade/crossfade to previous shape"
+            }
+            MediaItemFadeClickBehavior::SetFadeCrossfadeToPreviousShapeIgnoringSelection => {
+                "Set fade/crossfade to previous shape ignoring selection"
+            }
+            MediaItemFadeClickBehavior::SetFadeCrossfadeToNextShapeIgnoringSelection => {
+                "Set fade/crossfade to next shape ignoring selection"
+            }
             MediaItemFadeClickBehavior::OpenCrossfadeEditor => "Open crossfade editor",
             MediaItemFadeClickBehavior::Unknown(_) => "Unknown behavior",
         }
@@ -248,7 +258,7 @@ impl BehaviorId for MediaItemFadeDoubleClickBehavior {
             id => MediaItemFadeDoubleClickBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemFadeDoubleClickBehavior::NoAction => 0,
@@ -263,10 +273,11 @@ impl BehaviorDisplay for MediaItemFadeDoubleClickBehavior {
     fn display_name(&self) -> &'static str {
         match self {
             MediaItemFadeDoubleClickBehavior::NoAction => "No action",
-            MediaItemFadeDoubleClickBehavior::DeleteItemFadeCrossfade => "Delete item fade/crossfade",
+            MediaItemFadeDoubleClickBehavior::DeleteItemFadeCrossfade => {
+                "Delete item fade/crossfade"
+            }
             MediaItemFadeDoubleClickBehavior::OpenCrossfadeEditor => "Open crossfade editor",
             MediaItemFadeDoubleClickBehavior::Unknown(_) => "Unknown behavior",
         }
     }
 }
-

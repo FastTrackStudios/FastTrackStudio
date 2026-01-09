@@ -1,21 +1,24 @@
-use dioxus::prelude::*;
-use fts::lyrics::{Lyrics, output::{Slides, SlideBreakConfig, Slide}};
-use fts::lyrics::core::{SectionTypeHint, LinePart};
-use std::collections::HashMap;
-use fts::setlist::{SETLIST_STRUCTURE, ACTIVE_INDICES};
-use crate::components::text_fit::{TextFit, TextFitMode};
 use crate::components::syllable_editor::{SyllableEditor, SyllableEditorProps, SyllableKey};
-use crate::reactive_state::{use_lyrics_for_active_song, use_active_slide_for_active_song};
+use crate::components::text_fit::{TextFit, TextFitMode};
+use crate::reactive_state::{use_active_slide_for_active_song, use_lyrics_for_active_song};
+use dioxus::prelude::*;
+use fts::lyrics::core::{LinePart, SectionTypeHint};
+use fts::lyrics::{
+    Lyrics,
+    output::{Slide, SlideBreakConfig, Slides},
+};
+use fts::setlist::{ACTIVE_INDICES, SETLIST_STRUCTURE};
+use std::collections::HashMap;
 
 /// Lyrics view component - full-screen confidence monitor style display
 #[component]
 pub fn LyricsView() -> Element {
     // Get lyrics from current song using reactive state hook
     let lyrics_data = use_lyrics_for_active_song();
-    
+
     // Get active slide index using reactive state hook (must be called at component level)
     let active_slide_idx = use_active_slide_for_active_song();
-    
+
     // Generate slides with config
     let slides = use_memo(move || {
         if let Some(lyrics) = lyrics_data() {
@@ -30,7 +33,7 @@ pub fn LyricsView() -> Element {
             Vec::new()
         }
     });
-    
+
     // Get current slide based on active_slide_index from REAPER (reactive signal)
     // Read the signal inside the memo so Dioxus tracks it for reactivity
     let current_slide = use_memo(move || -> Option<Slide> {
@@ -38,7 +41,7 @@ pub fn LyricsView() -> Element {
         if slides_vec.is_empty() {
             return None;
         }
-        
+
         // Get active slide index from hook (called at component level)
         let active_slide_idx_val = active_slide_idx();
         if let Some(slide_idx) = active_slide_idx_val {
@@ -46,7 +49,7 @@ pub fn LyricsView() -> Element {
                 return Some(slide.clone());
             }
         }
-        
+
         // Fallback: try to get from active section if slide index not available
         let setlist_structure = SETLIST_STRUCTURE.read();
         let active_indices = ACTIVE_INDICES.read();
@@ -66,28 +69,28 @@ pub fn LyricsView() -> Element {
                 }
             }
         }
-        
+
         // Default to first slide if no match found
         Some(slides_vec[0].clone())
     });
-    
+
     // Get next slide (for confidence monitor)
     let next_slide = use_memo(move || {
         let slides_vec = slides();
         if slides_vec.is_empty() {
             return None;
         }
-        
+
         // Get the index of the current slide from hook (called at component level)
         let active_slide_idx_val = active_slide_idx();
         if let Some(current_idx) = active_slide_idx_val {
             // Get next slide after current
             return slides_vec.get(current_idx + 1).cloned();
         }
-        
+
         None
     });
-    
+
     // Compute slide text for current slide (confidence monitor)
     let confidence_current_text = use_memo(move || {
         current_slide().map(|slide| {
@@ -111,7 +114,7 @@ pub fn LyricsView() -> Element {
             text
         })
     });
-    
+
     // Compute slide text for next slide (confidence monitor - yellow tint)
     let confidence_next_text = use_memo(move || {
         next_slide().map(|slide| {
@@ -135,7 +138,7 @@ pub fn LyricsView() -> Element {
             text
         })
     });
-    
+
     rsx! {
         div {
             class: "flex-1 flex overflow-hidden bg-black",
@@ -167,12 +170,12 @@ pub fn LyricsView() -> Element {
                         }
                     }
                 }
-                
+
                 // Divider
                 div {
                     class: "h-0.5 bg-border flex-shrink-0"
                 }
-                
+
                 // Next slide (bottom half)
                 div {
                     class: "@container relative w-full flex-1 bg-black overflow-hidden",
@@ -234,23 +237,23 @@ pub fn LyricsEditView() -> Element {
             };
         }
     };
-    
+
     let edit_view_mode = edit_ctx.edit_view_mode;
     let on_edit_view_change = edit_ctx.on_edit_view_change;
-    
+
     // Initialize edit_view_mode to Slides if not set
     use_effect(move || {
         if edit_view_mode().is_none() {
             on_edit_view_change.call(EditViewMode::Slides);
         }
     });
-    
+
     // Track the selected/active slide (can be set by clicking)
     let selected_slide_index = use_signal(|| None::<usize>);
-    
+
     // Get lyrics from current song using reactive state hook
     let lyrics_data = use_lyrics_for_active_song();
-    
+
     // Generate slides with config
     let slides = use_memo(move || {
         if let Some(lyrics) = lyrics_data() {
@@ -265,7 +268,7 @@ pub fn LyricsEditView() -> Element {
             Vec::new()
         }
     });
-    
+
     // Pre-compute section type map for efficient lookup
     let section_type_map = use_memo(move || {
         let mut map = HashMap::new();
@@ -278,7 +281,7 @@ pub fn LyricsEditView() -> Element {
         }
         map
     });
-    
+
     // Pre-compute section color map from setlist (for actual colors)
     let section_color_map = use_memo(move || {
         let mut map = HashMap::new();
@@ -300,21 +303,21 @@ pub fn LyricsEditView() -> Element {
         }
         map
     });
-    
+
     // Get current slide - prioritize selected slide, then active section from setlist, then first slide
     let current_slide = use_memo(move || {
         let slides_vec = slides();
         if slides_vec.is_empty() {
             return None;
         }
-        
+
         // If user has selected a slide, use that
         if let Some(selected_idx) = selected_slide_index() {
             if let Some(slide) = slides_vec.get(selected_idx) {
                 return Some(slide.clone());
             }
         }
-        
+
         // Try to get active section from setlist
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -337,18 +340,18 @@ pub fn LyricsEditView() -> Element {
                 }
             }
         }
-        
+
         // Default to first slide if no match found
         Some(slides_vec[0].clone())
     });
-    
+
     // Get next slide (for confidence monitor)
     let next_slide = use_memo(move || {
         let slides_vec = slides();
         if slides_vec.is_empty() {
             return None;
         }
-        
+
         // Get the index of the current slide
         let current_idx = if let Some(selected_idx) = selected_slide_index() {
             selected_idx
@@ -365,7 +368,9 @@ pub fn LyricsEditView() -> Element {
                                 if let Some(section) = song.sections.get(active_section_idx) {
                                     // Find slide matching this section name
                                     for (idx, slide) in slides_vec.iter().enumerate() {
-                                        if slide.section_name == section.name.as_deref().unwrap_or("") {
+                                        if slide.section_name
+                                            == section.name.as_deref().unwrap_or("")
+                                        {
                                             return slides_vec.get(idx + 1).cloned();
                                         }
                                     }
@@ -378,12 +383,11 @@ pub fn LyricsEditView() -> Element {
             // Default to first slide's next
             0
         };
-        
+
         // Get next slide after current
         slides_vec.get(current_idx + 1).cloned()
     });
-    
-    
+
     // Auto-select slide when it matches active section (outside of memo to avoid borrow issues)
     use_effect({
         let mut selected_slide_index = selected_slide_index.clone();
@@ -392,7 +396,7 @@ pub fn LyricsEditView() -> Element {
             if slides_vec.is_empty() || selected_slide_index().is_some() {
                 return;
             }
-            
+
             #[cfg(not(target_arch = "wasm32"))]
             {
                 let setlist_structure = SETLIST_STRUCTURE.read();
@@ -404,7 +408,9 @@ pub fn LyricsEditView() -> Element {
                                 if let Some(section) = song.sections.get(active_section_idx) {
                                     // Find slide matching this section name and select it
                                     for (idx, slide) in slides_vec.iter().enumerate() {
-                                        if slide.section_name == section.name.as_deref().unwrap_or("") {
+                                        if slide.section_name
+                                            == section.name.as_deref().unwrap_or("")
+                                        {
                                             selected_slide_index.set(Some(idx));
                                             break;
                                         }
@@ -415,32 +421,40 @@ pub fn LyricsEditView() -> Element {
                     }
                 }
             }
-            
+
             // Default to first slide if nothing selected
             if selected_slide_index().is_none() {
                 selected_slide_index.set(Some(0));
             }
         }
     });
-    
+
     // Compute slide border colors (using actual section colors from setlist)
     let slide_border_colors = use_memo(move || {
-        slides().iter().map(|slide| {
-            section_color_map().get(&slide.section_name)
-                .cloned()
-                .unwrap_or_else(|| "rgb(128, 128, 128)".to_string())
-        }).collect::<Vec<_>>()
+        slides()
+            .iter()
+            .map(|slide| {
+                section_color_map()
+                    .get(&slide.section_name)
+                    .cloned()
+                    .unwrap_or_else(|| "rgb(128, 128, 128)".to_string())
+            })
+            .collect::<Vec<_>>()
     });
-    
+
     // Compute tab background colors (using actual section colors from setlist)
     let tab_bg_colors = use_memo(move || {
-        slides().iter().map(|slide| {
-            section_color_map().get(&slide.section_name)
-                .cloned()
-                .unwrap_or_else(|| "rgb(128, 128, 128)".to_string())
-        }).collect::<Vec<_>>()
+        slides()
+            .iter()
+            .map(|slide| {
+                section_color_map()
+                    .get(&slide.section_name)
+                    .cloned()
+                    .unwrap_or_else(|| "rgb(128, 128, 128)".to_string())
+            })
+            .collect::<Vec<_>>()
     });
-    
+
     // Compute slide classes with selection state (colors applied via inline styles)
     let slide_classes = use_memo(move || {
         let selected_idx = selected_slide_index();
@@ -453,7 +467,7 @@ pub fn LyricsEditView() -> Element {
             format!("rounded-lg border-2 overflow-hidden cursor-pointer transition-all hover:scale-105 flex flex-col {}", selection_class)
         }).collect::<Vec<_>>()
     });
-    
+
     // Compute slide text for Audience Preview
     let audience_slide_text = use_memo(move || {
         current_slide().map(|slide| {
@@ -477,7 +491,7 @@ pub fn LyricsEditView() -> Element {
             text
         })
     });
-    
+
     // Compute slide text for Confidence Monitor (current and next)
     let confidence_current_text = use_memo(move || {
         current_slide().map(|slide| {
@@ -501,7 +515,7 @@ pub fn LyricsEditView() -> Element {
             text
         })
     });
-    
+
     let confidence_next_text = use_memo(move || {
         next_slide().map(|slide| {
             let mut text = String::new();
@@ -524,7 +538,7 @@ pub fn LyricsEditView() -> Element {
             text
         })
     });
-    
+
     rsx! {
         div {
             class: "flex-1 flex overflow-hidden bg-background",
@@ -541,9 +555,9 @@ pub fn LyricsEditView() -> Element {
                             "Lyrics Editor"
                         }
                     }
-                    
+
                 }
-                
+
                 // Conditional rendering based on edit sub-view mode
                 match edit_view_mode().unwrap_or(EditViewMode::Slides) {
                     EditViewMode::Slides => rsx! {
@@ -577,7 +591,7 @@ pub fn LyricsEditView() -> Element {
                                                 ),
                                                 "{slide.section_name}"
                                             }
-                                            
+
                                             // Slide content (16:9 aspect ratio, centered)
                                             div {
                                                 class: "aspect-[16/9] flex flex-col items-center justify-center p-4 bg-black",
@@ -602,7 +616,7 @@ pub fn LyricsEditView() -> Element {
                                     }
                                 }
                             }
-                            
+
                             // Preview Sidebar
                             div {
                                 class: "w-96 flex-shrink-0 border-l border-border bg-card overflow-y-auto",
@@ -642,7 +656,7 @@ pub fn LyricsEditView() -> Element {
                                         }
                                     }
                                     }
-                                    
+
                                     // Confidence Monitor Preview
                                     div {
                                         class: "space-y-2",
@@ -679,12 +693,12 @@ pub fn LyricsEditView() -> Element {
                                                 }
                                             }
                                         }
-                                        
+
                                         // Divider
                                         div {
                                             class: "h-0.5 bg-border"
                                         }
-                                        
+
                                         // Next slide (bottom half)
                                         div {
                                             class: "relative w-full h-1/2 bg-black overflow-hidden",
@@ -735,7 +749,6 @@ pub fn LyricsEditView() -> Element {
     }
 }
 
-
 /// Performance preview component - custom preview for performance
 #[component]
 pub fn PerformancePreview() -> Element {
@@ -753,7 +766,7 @@ pub fn PerformancePreview() -> Element {
         }
         None
     });
-    
+
     // Generate slides with config
     let slides = use_memo(move || {
         if let Some(lyrics) = lyrics_data() {
@@ -768,7 +781,7 @@ pub fn PerformancePreview() -> Element {
             Vec::new()
         }
     });
-    
+
     rsx! {
         div {
             class: "flex-1 flex overflow-hidden bg-background",
@@ -784,9 +797,9 @@ pub fn PerformancePreview() -> Element {
                             "Performance Preview"
                         }
                     }
-                    
+
                 }
-                
+
                 div {
                     class: "space-y-4",
                     p {

@@ -60,7 +60,7 @@ impl SectionType {
     }
 
     /// Parse a section type from a string (name or abbreviation)
-    /// 
+    ///
     /// Handles case-insensitive matching and common typos/variations:
     /// - "verse", "Verse", "VERSE", "vs", "VS", "vErSe", "vrse" -> Verse
     /// - "chorus", "Chorus", "CHORUS", "ch", "CH", "chorous", "corus" -> Chorus
@@ -101,11 +101,7 @@ impl SectionType {
         }
 
         // Intro variations - handle "introduction", "intro", etc.
-        if Self::fuzzy_match(
-            s_lower,
-            "intro",
-            &["intr", "int", "introo", "introduction"],
-        ) {
+        if Self::fuzzy_match(s_lower, "intro", &["intr", "int", "introo", "introduction"]) {
             return Ok(SectionType::Intro);
         }
         // Also check if it starts with "introduction"
@@ -114,11 +110,7 @@ impl SectionType {
         }
 
         // Outro variations - handle "outroduction", "outro", etc.
-        if Self::fuzzy_match(
-            s_lower,
-            "outro",
-            &["outr", "out", "outroo", "outroduction"],
-        ) {
+        if Self::fuzzy_match(s_lower, "outro", &["outr", "out", "outroo", "outroduction"]) {
             return Ok(SectionType::Outro);
         }
         // Also check if it starts with "outroduction"
@@ -186,31 +178,31 @@ impl SectionType {
     }
 
     /// Parse a section marker from input (for chart parsing)
-    /// 
+    ///
     /// Supports:
     /// - Standard sections: "VS 16", "Intro 4", etc.
     /// - Custom sections with brackets: "[Hits]", "[SOLO Keys] 8", etc.
     pub fn parse_with_measure_count(input: &str) -> Option<(Self, Option<usize>)> {
         let input = input.trim();
-        
+
         // Check for custom section with brackets: [Hits] or [SOLO Keys] 8
         if input.starts_with('[') && input.contains(']') {
             // Find the closing bracket
             if let Some(close_bracket_idx) = input[1..].find(']') {
                 let name = &input[1..close_bracket_idx + 1]; // Extract name between brackets
                 let remaining = input[close_bracket_idx + 2..].trim();
-                
+
                 // Parse measure count if present
                 let measure_count = if remaining.is_empty() {
                     None
                 } else {
                     remaining.parse::<usize>().ok()
                 };
-                
+
                 return Some((SectionType::Custom(name.to_string()), measure_count));
             }
         }
-        
+
         // Parse standard sections (case-insensitive)
         let input_lower = input.to_lowercase();
         let parts: Vec<&str> = input_lower.split_whitespace().collect();
@@ -313,7 +305,10 @@ mod tests {
             SectionType::parse_with_measure_count("intro 2"),
             Some((SectionType::Intro, Some(2)))
         );
-        assert_eq!(SectionType::parse_with_measure_count("br"), Some((SectionType::Bridge, None)));
+        assert_eq!(
+            SectionType::parse_with_measure_count("br"),
+            Some((SectionType::Bridge, None))
+        );
     }
 
     #[test]
@@ -329,13 +324,13 @@ mod tests {
             SectionType::parse_with_measure_count("[Hits]"),
             Some((SectionType::Custom("Hits".to_string()), None))
         );
-        
+
         // Custom section with brackets and measure count
         assert_eq!(
             SectionType::parse_with_measure_count("[SOLO Keys] 8"),
             Some((SectionType::Custom("SOLO Keys".to_string()), Some(8)))
         );
-        
+
         // Custom section with brackets, no measure count
         assert_eq!(
             SectionType::parse_with_measure_count("[Bridge Out]"),

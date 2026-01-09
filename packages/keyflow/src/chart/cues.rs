@@ -3,8 +3,8 @@
 //! Provides a system for adding notes and directions to specific instrument groups
 //! using @ notation (e.g., @keys "synth here", @drums "crash on 3")
 
-use std::fmt;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Represents an instrument group that can be targeted by cues
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

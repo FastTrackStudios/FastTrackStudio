@@ -1,12 +1,12 @@
 //! REAPER project data structures and parsing
 
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::collections::HashMap;
+use std::fmt;
 
-use crate::primitives::{RppProject, BlockType, RppBlockContent, Token};
 use super::marker_region::MarkerRegionCollection;
 use super::time_tempo::TempoTimeEnvelope;
+use crate::primitives::{BlockType, RppBlockContent, RppProject, Token};
 
 /// Automation mode for tracks and envelopes
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -29,7 +29,7 @@ impl AutomationMode {
             _ => AutomationMode::TrimRead, // Default fallback
         }
     }
-    
+
     pub fn to_value(&self) -> i32 {
         match self {
             AutomationMode::TrimRead => 0,
@@ -76,7 +76,7 @@ impl EnvelopeShape {
             _ => EnvelopeShape::Linear, // Default fallback
         }
     }
-    
+
     pub fn to_value(&self) -> i32 {
         match self {
             EnvelopeShape::Linear => 0,
@@ -130,7 +130,7 @@ pub struct SplitDefinition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnvelopeSettings {
     pub guid: Option<String>,
-    pub active: (i32, i32), // (active, ?)
+    pub active: (i32, i32),       // (active, ?)
     pub visible: (i32, i32, f64), // (visible, show_in_lane, deprecated_value)
     pub lane_height: (i32, i32),
     pub armed: i32,
@@ -140,7 +140,12 @@ pub struct EnvelopeSettings {
 impl fmt::Display for EnvelopeSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "  Active: {}", self.active.0 != 0)?;
-        writeln!(f, "  Visible: {}, Show in Lane: {}", self.visible.0 != 0, self.visible.1 != 0)?;
+        writeln!(
+            f,
+            "  Visible: {}, Show in Lane: {}",
+            self.visible.0 != 0,
+            self.visible.1 != 0
+        )?;
         writeln!(f, "  Lane Height: {}px", self.lane_height.0)?;
         writeln!(f, "  Armed: {}", self.armed != 0)?;
         writeln!(f, "  Default Shape: {}", self.default_shape.0)?;
@@ -189,92 +194,92 @@ pub struct ReaperProject {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectProperties {
     // Editing behavior
-    pub ripple: Option<(i32, i32)>, // RIPPLE 0 0
+    pub ripple: Option<(i32, i32)>,              // RIPPLE 0 0
     pub group_override: Option<(i32, i32, i32)>, // GROUPOVERRIDE 0 0 0
-    pub auto_xfade: Option<i32>, // AUTOXFADE 129
-    pub env_attach: Option<i32>, // ENVATTACH 3
-    pub pooled_env_attach: Option<i32>, // POOLEDENVATTACH 0
-    
+    pub auto_xfade: Option<i32>,                 // AUTOXFADE 129
+    pub env_attach: Option<i32>,                 // ENVATTACH 3
+    pub pooled_env_attach: Option<i32>,          // POOLEDENVATTACH 0
+
     // UI settings
     pub mixer_ui_flags: Option<(i32, i32)>, // MIXERUIFLAGS 11 48
-    pub env_fade_sz10: Option<i32>, // ENVFADESZ10 40
-    pub peak_gain: Option<i32>, // PEAKGAIN 1
-    pub feedback: Option<i32>, // FEEDBACK 0
-    pub pan_law: Option<i32>, // PANLAW 1
-    
+    pub env_fade_sz10: Option<i32>,         // ENVFADESZ10 40
+    pub peak_gain: Option<i32>,             // PEAKGAIN 1
+    pub feedback: Option<i32>,              // FEEDBACK 0
+    pub pan_law: Option<i32>,               // PANLAW 1
+
     // Project settings
     pub proj_offs: Option<(i32, i32, i32)>, // PROJOFFS 0 0 0
-    pub max_proj_len: Option<(i32, i32)>, // MAXPROJLEN 0 0
+    pub max_proj_len: Option<(i32, i32)>,   // MAXPROJLEN 0 0
     pub grid: Option<(i32, i32, i32, i32, i32, i32, i32, i32)>, // GRID 3199 8 1 8 1 0 0 0
     pub time_mode: Option<(i32, i32, i32, i32, i32, i32, i32)>, // TIMEMODE 1 5 -1 30 0 0 -1
     pub video_config: Option<(i32, i32, i32)>, // VIDEO_CONFIG 0 0 65792
-    pub pan_mode: Option<i32>, // PANMODE 3
-    pub pan_law_flags: Option<i32>, // PANLAWFLAGS 3
-    
+    pub pan_mode: Option<i32>,              // PANMODE 3
+    pub pan_law_flags: Option<i32>,         // PANLAWFLAGS 3
+
     // View settings
-    pub cursor: Option<i32>, // CURSOR 11
+    pub cursor: Option<i32>,           // CURSOR 11
     pub zoom: Option<(i32, i32, i32)>, // ZOOM 100 0 0
     pub v_zoom_ex: Option<(i32, i32)>, // VZOOMEX 6 0
-    
+
     // Recording settings
     pub use_rec_cfg: Option<i32>, // USE_REC_CFG 0
-    pub rec_mode: Option<i32>, // RECMODE 1
+    pub rec_mode: Option<i32>,    // RECMODE 1
     pub smpte_sync: Option<(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)>, // SMPTESYNC 0 30 100 40 1000 300 0 0 1 0 0
-    pub r#loop: Option<i32>, // LOOP 0
-    pub loop_gran: Option<(i32, i32)>, // LOOPGRAN 0 4
+    pub r#loop: Option<i32>,                                                         // LOOP 0
+    pub loop_gran: Option<(i32, i32)>,                                               // LOOPGRAN 0 4
     pub record_path: Option<(String, String)>, // RECORD_PATH "Media" ""
-    
+
     // Render settings
-    pub render_file: Option<String>, // RENDER_FILE ""
-    pub render_pattern: Option<String>, // RENDER_PATTERN ""
+    pub render_file: Option<String>,         // RENDER_FILE ""
+    pub render_pattern: Option<String>,      // RENDER_PATTERN ""
     pub render_fmt: Option<(i32, i32, i32)>, // RENDER_FMT 0 2 0
-    pub render_1x: Option<i32>, // RENDER_1X 0
+    pub render_1x: Option<i32>,              // RENDER_1X 0
     pub render_range: Option<(i32, i32, i32, i32, i32)>, // RENDER_RANGE 1 0 0 0 1000
     pub render_resample: Option<(i32, i32, i32)>, // RENDER_RESAMPLE 3 0 1
-    pub render_add_to_proj: Option<i32>, // RENDER_ADDTOPROJ 0
-    pub render_stems: Option<i32>, // RENDER_STEMS 0
-    pub render_dither: Option<i32>, // RENDER_DITHER 0
+    pub render_add_to_proj: Option<i32>,     // RENDER_ADDTOPROJ 0
+    pub render_stems: Option<i32>,           // RENDER_STEMS 0
+    pub render_dither: Option<i32>,          // RENDER_DITHER 0
     pub render_trim: Option<(i32, i32, i32, i32)>, // RENDER_TRIM 0 0 0 0
-    
+
     // Time settings
-    pub time_lock_mode: Option<i32>, // TIMELOCKMODE 1
-    pub tempo_env_lock_mode: Option<i32>, // TEMPOENVLOCKMODE 1
-    pub item_mix: Option<i32>, // ITEMMIX 1
-    pub def_pitch_mode: Option<(i32, i32)>, // DEFPITCHMODE 589824 0
-    pub take_lane: Option<i32>, // TAKELANE 1
+    pub time_lock_mode: Option<i32>,          // TIMELOCKMODE 1
+    pub tempo_env_lock_mode: Option<i32>,     // TEMPOENVLOCKMODE 1
+    pub item_mix: Option<i32>,                // ITEMMIX 1
+    pub def_pitch_mode: Option<(i32, i32)>,   // DEFPITCHMODE 589824 0
+    pub take_lane: Option<i32>,               // TAKELANE 1
     pub sample_rate: Option<(i32, i32, i32)>, // SAMPLERATE 44100 0 0
-    pub lock: Option<i32>, // LOCK 1
-    
+    pub lock: Option<i32>,                    // LOCK 1
+
     // Tempo and playback
     pub tempo: Option<(i32, i32, i32, i32)>, // TEMPO 120 4 4 0
     pub play_rate: Option<(i32, i32, i32, i32)>, // PLAYRATE 1 0 0.25 4
-    pub selection: Option<(i32, i32)>, // SELECTION 0 0
-    pub selection2: Option<(i32, i32)>, // SELECTION2 0 0
-    
+    pub selection: Option<(i32, i32)>,       // SELECTION 0 0
+    pub selection2: Option<(i32, i32)>,      // SELECTION2 0 0
+
     // Master track settings
-    pub master_auto_mode: Option<i32>, // MASTERAUTOMODE 0
+    pub master_auto_mode: Option<i32>,           // MASTERAUTOMODE 0
     pub master_track_height: Option<(i32, i32)>, // MASTERTRACKHEIGHT 0 0
-    pub master_peak_col: Option<i32>, // MASTERPEAKCOL 16576
-    pub master_mute_solo: Option<i32>, // MASTERMUTESOLO 0
+    pub master_peak_col: Option<i32>,            // MASTERPEAKCOL 16576
+    pub master_mute_solo: Option<i32>,           // MASTERMUTESOLO 0
     pub master_track_view: Option<MasterTrackView>, // MASTERTRACKVIEW 0 0.6667 0.5 0.5 0 0 0 0 0 0 0 0 0 0
     pub master_hw_out: Option<(i32, i32, i32, i32, i32, i32, i32, i32)>, // MASTERHWOUT 0 0 1 0 0 0 0 -1
-    pub master_nch: Option<(i32, i32)>, // MASTER_NCH 2 2
+    pub master_nch: Option<(i32, i32)>,                                  // MASTER_NCH 2 2
     pub master_volume: Option<(i32, i32, i32, i32, i32)>, // MASTER_VOLUME 1 0 -1 -1 1
-    pub master_pan_mode: Option<i32>, // MASTER_PANMODE 3
-    pub master_pan_law_flags: Option<i32>, // MASTER_PANLAWFLAGS 3
-    pub master_fx: Option<i32>, // MASTER_FX 1
-    pub master_sel: Option<i32>, // MASTER_SEL 0
-    
+    pub master_pan_mode: Option<i32>,                     // MASTER_PANMODE 3
+    pub master_pan_law_flags: Option<i32>,                // MASTER_PANLAWFLAGS 3
+    pub master_fx: Option<i32>,                           // MASTER_FX 1
+    pub master_sel: Option<i32>,                          // MASTER_SEL 0
+
     // Global automation
     pub global_auto: Option<i32>, // GLOBAL_AUTO -1
-    
+
     // Metronome settings
     pub metronome: Option<Metronome>, // METRONOME block
-    
+
     // Envelope settings (for project-level envelopes)
     pub master_play_speed_env: Option<EnvelopeSettings>, // MASTERPLAYSPEEDENV
-    pub tempo_env: Option<EnvelopeSettings>, // TEMPOENVEX
-    
+    pub tempo_env: Option<EnvelopeSettings>,             // TEMPOENVEX
+
     // Custom properties (for any we haven't defined yet)
     pub custom_properties: HashMap<String, Vec<Token>>,
 }
@@ -359,7 +364,7 @@ impl ProjectProperties {
     /// Parse project properties from RPP blocks
     pub fn from_blocks(blocks: &[crate::primitives::RppBlock]) -> Self {
         let mut properties = Self::new();
-        
+
         for block in blocks {
             // Handle special blocks first
             match block.name.as_str() {
@@ -386,7 +391,7 @@ impl ProjectProperties {
                 }
             }
         }
-        
+
         properties
     }
 
@@ -396,7 +401,12 @@ impl ProjectProperties {
             volume: (0.25, 0.125), // Default values
             beat_length: 4,
             frequency: (1760, 880, 1),
-            samples: ("".to_string(), "".to_string(), "".to_string(), "".to_string()),
+            samples: (
+                "".to_string(),
+                "".to_string(),
+                "".to_string(),
+                "".to_string(),
+            ),
             split_ignore: (0, 0),
             split_def: Vec::new(),
             pattern: (0, 169),
@@ -411,7 +421,9 @@ impl ProjectProperties {
                         match name {
                             "VOL" => {
                                 if tokens.len() >= 3 {
-                                    if let (Some(a), Some(b)) = (tokens[1].as_number(), tokens[2].as_number()) {
+                                    if let (Some(a), Some(b)) =
+                                        (tokens[1].as_number(), tokens[2].as_number())
+                                    {
                                         metronome.volume = (a, b);
                                     }
                                 }
@@ -424,7 +436,9 @@ impl ProjectProperties {
                             "FREQ" => {
                                 if tokens.len() >= 4 {
                                     if let (Some(a), Some(b), Some(c)) = (
-                                        tokens[1].as_number(), tokens[2].as_number(), tokens[3].as_number()
+                                        tokens[1].as_number(),
+                                        tokens[2].as_number(),
+                                        tokens[3].as_number(),
                                     ) {
                                         metronome.frequency = (a as i32, b as i32, c as i32);
                                     }
@@ -433,25 +447,43 @@ impl ProjectProperties {
                             "SAMPLES" => {
                                 if tokens.len() >= 5 {
                                     if let (Some(a), Some(b), Some(c), Some(d)) = (
-                                        tokens[1].as_string(), tokens[2].as_string(), 
-                                        tokens[3].as_string(), tokens[4].as_string()
+                                        tokens[1].as_string(),
+                                        tokens[2].as_string(),
+                                        tokens[3].as_string(),
+                                        tokens[4].as_string(),
                                     ) {
-                                        metronome.samples = (a.to_string(), b.to_string(), c.to_string(), d.to_string());
+                                        metronome.samples = (
+                                            a.to_string(),
+                                            b.to_string(),
+                                            c.to_string(),
+                                            d.to_string(),
+                                        );
                                     }
                                 }
                             }
                             "SPLIGNORE" => {
                                 if tokens.len() >= 3 {
-                                    if let (Some(a), Some(b)) = (tokens[1].as_number(), tokens[2].as_number()) {
+                                    if let (Some(a), Some(b)) =
+                                        (tokens[1].as_number(), tokens[2].as_number())
+                                    {
                                         metronome.split_ignore = (a as i32, b as i32);
                                     }
                                 }
                             }
                             "SPLDEF" => {
                                 if tokens.len() >= 6 {
-                                    if let (Some(index), Some(freq), Some(sample), Some(flags), Some(name)) = (
-                                        tokens[1].as_number(), tokens[2].as_number(), 
-                                        tokens[3].as_string(), tokens[4].as_number(), tokens[5].as_string()
+                                    if let (
+                                        Some(index),
+                                        Some(freq),
+                                        Some(sample),
+                                        Some(flags),
+                                        Some(name),
+                                    ) = (
+                                        tokens[1].as_number(),
+                                        tokens[2].as_number(),
+                                        tokens[3].as_string(),
+                                        tokens[4].as_number(),
+                                        tokens[5].as_string(),
                                     ) {
                                         metronome.split_def.push(SplitDefinition {
                                             index: index as i32,
@@ -465,7 +497,9 @@ impl ProjectProperties {
                             }
                             "PATTERN" => {
                                 if tokens.len() >= 3 {
-                                    if let (Some(a), Some(b)) = (tokens[1].as_number(), tokens[2].as_number()) {
+                                    if let (Some(a), Some(b)) =
+                                        (tokens[1].as_number(), tokens[2].as_number())
+                                    {
                                         metronome.pattern = (a as i32, b as i32);
                                     }
                                 }
@@ -513,7 +547,9 @@ impl ProjectProperties {
                             }
                             "ACT" => {
                                 if tokens.len() >= 3 {
-                                    if let (Some(a), Some(b)) = (tokens[1].as_number(), tokens[2].as_number()) {
+                                    if let (Some(a), Some(b)) =
+                                        (tokens[1].as_number(), tokens[2].as_number())
+                                    {
                                         envelope.active = (a as i32, b as i32);
                                     }
                                 }
@@ -521,7 +557,9 @@ impl ProjectProperties {
                             "VIS" => {
                                 if tokens.len() >= 4 {
                                     if let (Some(a), Some(b), Some(c)) = (
-                                        tokens[1].as_number(), tokens[2].as_number(), tokens[3].as_number()
+                                        tokens[1].as_number(),
+                                        tokens[2].as_number(),
+                                        tokens[3].as_number(),
                                     ) {
                                         envelope.visible = (a as i32, b as i32, c);
                                     }
@@ -529,7 +567,9 @@ impl ProjectProperties {
                             }
                             "LANEHEIGHT" => {
                                 if tokens.len() >= 3 {
-                                    if let (Some(a), Some(b)) = (tokens[1].as_number(), tokens[2].as_number()) {
+                                    if let (Some(a), Some(b)) =
+                                        (tokens[1].as_number(), tokens[2].as_number())
+                                    {
                                         envelope.lane_height = (a as i32, b as i32);
                                     }
                                 }
@@ -542,12 +582,14 @@ impl ProjectProperties {
                             "DEFSHAPE" => {
                                 if tokens.len() >= 4 {
                                     if let (Some(shape), Some(range), Some(snap)) = (
-                                        tokens[1].as_number(), tokens[2].as_number(), tokens[3].as_number()
+                                        tokens[1].as_number(),
+                                        tokens[2].as_number(),
+                                        tokens[3].as_number(),
                                     ) {
                                         envelope.default_shape = (
                                             EnvelopeShape::from_value(shape as i32),
                                             range as i32,
-                                            snap as i32
+                                            snap as i32,
                                         );
                                     }
                                 }
@@ -575,7 +617,9 @@ impl ProjectProperties {
             "GROUPOVERRIDE" => {
                 if tokens.len() >= 3 {
                     if let (Some(a), Some(b), Some(c)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
                     ) {
                         self.group_override = Some((a as i32, b as i32, c as i32));
                     }
@@ -626,7 +670,9 @@ impl ProjectProperties {
             "PROJOFFS" => {
                 if tokens.len() >= 3 {
                     if let (Some(a), Some(b), Some(c)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
                     ) {
                         self.proj_offs = Some((a as i32, b as i32, c as i32));
                     }
@@ -641,30 +687,55 @@ impl ProjectProperties {
             }
             "GRID" => {
                 if tokens.len() >= 8 {
-                    if let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f), Some(g), Some(h)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number(),
-                        tokens[3].as_number(), tokens[4].as_number(), tokens[5].as_number(),
-                        tokens[6].as_number(), tokens[7].as_number()
+                    if let (
+                        Some(a),
+                        Some(b),
+                        Some(c),
+                        Some(d),
+                        Some(e),
+                        Some(f),
+                        Some(g),
+                        Some(h),
+                    ) = (
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
+                        tokens[3].as_number(),
+                        tokens[4].as_number(),
+                        tokens[5].as_number(),
+                        tokens[6].as_number(),
+                        tokens[7].as_number(),
                     ) {
-                        self.grid = Some((a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32, h as i32));
+                        self.grid = Some((
+                            a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32,
+                            h as i32,
+                        ));
                     }
                 }
             }
             "TIMEMODE" => {
                 if tokens.len() >= 7 {
                     if let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f), Some(g)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number(),
-                        tokens[3].as_number(), tokens[4].as_number(), tokens[5].as_number(),
-                        tokens[6].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
+                        tokens[3].as_number(),
+                        tokens[4].as_number(),
+                        tokens[5].as_number(),
+                        tokens[6].as_number(),
                     ) {
-                        self.time_mode = Some((a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32));
+                        self.time_mode = Some((
+                            a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32,
+                        ));
                     }
                 }
             }
             "VIDEO_CONFIG" => {
                 if tokens.len() >= 3 {
                     if let (Some(a), Some(b), Some(c)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
                     ) {
                         self.video_config = Some((a as i32, b as i32, c as i32));
                     }
@@ -688,7 +759,9 @@ impl ProjectProperties {
             "ZOOM" => {
                 if tokens.len() >= 3 {
                     if let (Some(a), Some(b), Some(c)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
                     ) {
                         self.zoom = Some((a as i32, b as i32, c as i32));
                     }
@@ -713,13 +786,35 @@ impl ProjectProperties {
             }
             "SMPTESYNC" => {
                 if tokens.len() >= 11 {
-                    if let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f), Some(g), Some(h), Some(i), Some(j), Some(k)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number(),
-                        tokens[3].as_number(), tokens[4].as_number(), tokens[5].as_number(),
-                        tokens[6].as_number(), tokens[7].as_number(), tokens[8].as_number(),
-                        tokens[9].as_number(), tokens[10].as_number()
+                    if let (
+                        Some(a),
+                        Some(b),
+                        Some(c),
+                        Some(d),
+                        Some(e),
+                        Some(f),
+                        Some(g),
+                        Some(h),
+                        Some(i),
+                        Some(j),
+                        Some(k),
+                    ) = (
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
+                        tokens[3].as_number(),
+                        tokens[4].as_number(),
+                        tokens[5].as_number(),
+                        tokens[6].as_number(),
+                        tokens[7].as_number(),
+                        tokens[8].as_number(),
+                        tokens[9].as_number(),
+                        tokens[10].as_number(),
                     ) {
-                        self.smpte_sync = Some((a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32, h as i32, i as i32, j as i32, k as i32));
+                        self.smpte_sync = Some((
+                            a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32,
+                            h as i32, i as i32, j as i32, k as i32,
+                        ));
                     }
                 }
             }
@@ -755,7 +850,9 @@ impl ProjectProperties {
             "RENDER_FMT" => {
                 if tokens.len() >= 3 {
                     if let (Some(a), Some(b), Some(c)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
                     ) {
                         self.render_fmt = Some((a as i32, b as i32, c as i32));
                     }
@@ -769,17 +866,23 @@ impl ProjectProperties {
             "RENDER_RANGE" => {
                 if tokens.len() >= 5 {
                     if let (Some(a), Some(b), Some(c), Some(d), Some(e)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number(),
-                        tokens[3].as_number(), tokens[4].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
+                        tokens[3].as_number(),
+                        tokens[4].as_number(),
                     ) {
-                        self.render_range = Some((a as i32, b as i32, c as i32, d as i32, e as i32));
+                        self.render_range =
+                            Some((a as i32, b as i32, c as i32, d as i32, e as i32));
                     }
                 }
             }
             "RENDER_RESAMPLE" => {
                 if tokens.len() >= 3 {
                     if let (Some(a), Some(b), Some(c)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
                     ) {
                         self.render_resample = Some((a as i32, b as i32, c as i32));
                     }
@@ -803,8 +906,10 @@ impl ProjectProperties {
             "RENDER_TRIM" => {
                 if tokens.len() >= 4 {
                     if let (Some(a), Some(b), Some(c), Some(d)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number(),
-                        tokens[3].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
+                        tokens[3].as_number(),
                     ) {
                         self.render_trim = Some((a as i32, b as i32, c as i32, d as i32));
                     }
@@ -840,7 +945,9 @@ impl ProjectProperties {
             "SAMPLERATE" => {
                 if tokens.len() >= 3 {
                     if let (Some(a), Some(b), Some(c)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
                     ) {
                         self.sample_rate = Some((a as i32, b as i32, c as i32));
                     }
@@ -854,8 +961,10 @@ impl ProjectProperties {
             "TEMPO" => {
                 if tokens.len() >= 4 {
                     if let (Some(a), Some(b), Some(c), Some(d)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number(),
-                        tokens[3].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
+                        tokens[3].as_number(),
                     ) {
                         self.tempo = Some((a as i32, b as i32, c as i32, d as i32));
                     }
@@ -864,8 +973,10 @@ impl ProjectProperties {
             "PLAYRATE" => {
                 if tokens.len() >= 4 {
                     if let (Some(a), Some(b), Some(c), Some(d)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number(),
-                        tokens[3].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
+                        tokens[3].as_number(),
                     ) {
                         self.play_rate = Some((a as i32, b as i32, c as i32, d as i32));
                     }
@@ -909,12 +1020,36 @@ impl ProjectProperties {
             }
             "MASTERTRACKVIEW" => {
                 if tokens.len() >= 14 {
-                    if let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f), Some(g), Some(h), Some(i), Some(j), Some(k), Some(l), Some(m), Some(n)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number(),
-                        tokens[3].as_number(), tokens[4].as_number(), tokens[5].as_number(),
-                        tokens[6].as_number(), tokens[7].as_number(), tokens[8].as_number(),
-                        tokens[9].as_number(), tokens[10].as_number(), tokens[11].as_number(),
-                        tokens[12].as_number(), tokens[13].as_number()
+                    if let (
+                        Some(a),
+                        Some(b),
+                        Some(c),
+                        Some(d),
+                        Some(e),
+                        Some(f),
+                        Some(g),
+                        Some(h),
+                        Some(i),
+                        Some(j),
+                        Some(k),
+                        Some(l),
+                        Some(m),
+                        Some(n),
+                    ) = (
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
+                        tokens[3].as_number(),
+                        tokens[4].as_number(),
+                        tokens[5].as_number(),
+                        tokens[6].as_number(),
+                        tokens[7].as_number(),
+                        tokens[8].as_number(),
+                        tokens[9].as_number(),
+                        tokens[10].as_number(),
+                        tokens[11].as_number(),
+                        tokens[12].as_number(),
+                        tokens[13].as_number(),
                     ) {
                         self.master_track_view = Some(MasterTrackView {
                             field1: a as i32,
@@ -937,12 +1072,29 @@ impl ProjectProperties {
             }
             "MASTERHWOUT" => {
                 if tokens.len() >= 8 {
-                    if let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f), Some(g), Some(h)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number(),
-                        tokens[3].as_number(), tokens[4].as_number(), tokens[5].as_number(),
-                        tokens[6].as_number(), tokens[7].as_number()
+                    if let (
+                        Some(a),
+                        Some(b),
+                        Some(c),
+                        Some(d),
+                        Some(e),
+                        Some(f),
+                        Some(g),
+                        Some(h),
+                    ) = (
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
+                        tokens[3].as_number(),
+                        tokens[4].as_number(),
+                        tokens[5].as_number(),
+                        tokens[6].as_number(),
+                        tokens[7].as_number(),
                     ) {
-                        self.master_hw_out = Some((a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32, h as i32));
+                        self.master_hw_out = Some((
+                            a as i32, b as i32, c as i32, d as i32, e as i32, f as i32, g as i32,
+                            h as i32,
+                        ));
                     }
                 }
             }
@@ -956,10 +1108,14 @@ impl ProjectProperties {
             "MASTER_VOLUME" => {
                 if tokens.len() >= 5 {
                     if let (Some(a), Some(b), Some(c), Some(d), Some(e)) = (
-                        tokens[0].as_number(), tokens[1].as_number(), tokens[2].as_number(),
-                        tokens[3].as_number(), tokens[4].as_number()
+                        tokens[0].as_number(),
+                        tokens[1].as_number(),
+                        tokens[2].as_number(),
+                        tokens[3].as_number(),
+                        tokens[4].as_number(),
                     ) {
-                        self.master_volume = Some((a as i32, b as i32, c as i32, d as i32, e as i32));
+                        self.master_volume =
+                            Some((a as i32, b as i32, c as i32, d as i32, e as i32));
                     }
                 }
             }
@@ -990,7 +1146,8 @@ impl ProjectProperties {
             }
             _ => {
                 // Store unknown properties in custom_properties
-                self.custom_properties.insert(name.to_string(), tokens.to_vec());
+                self.custom_properties
+                    .insert(name.to_string(), tokens.to_vec());
             }
         }
     }
@@ -1022,50 +1179,49 @@ impl ReaperProject {
                             if let Some(first_token) = tokens.first() {
                                 if first_token.to_string() == "MARKER" {
                                     // Reconstruct the marker line
-                                    let marker_line = tokens.iter()
+                                    let marker_line = tokens
+                                        .iter()
                                         .map(|t| t.to_string())
                                         .collect::<Vec<_>>()
                                         .join(" ");
-                                    
-                                    match super::marker_region::MarkerRegion::from_marker_line(&marker_line) {
-                                        Ok(marker_region) => project.markers_regions.add(marker_region),
-                                        Err(e) => eprintln!("Warning: Failed to parse marker: {}", e),
+
+                                    match super::marker_region::MarkerRegion::from_marker_line(
+                                        &marker_line,
+                                    ) {
+                                        Ok(marker_region) => {
+                                            project.markers_regions.add(marker_region)
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Warning: Failed to parse marker: {}", e)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                BlockType::Track => {
-                    match Track::from_block(block) {
-                        Ok(track) => project.tracks.push(track),
-                        Err(e) => eprintln!("Warning: Failed to parse track: {}", e),
-                    }
-                }
-                BlockType::Item => {
-                    match Item::from_block(block) {
-                        Ok(item) => project.items.push(item),
-                        Err(e) => eprintln!("Warning: Failed to parse item: {}", e),
-                    }
-                }
-                BlockType::Envelope => {
-                    match Envelope::from_block(block) {
-                        Ok(envelope) => project.envelopes.push(envelope),
-                        Err(e) => eprintln!("Warning: Failed to parse envelope: {}", e),
-                    }
-                }
+                BlockType::Track => match Track::from_block(block) {
+                    Ok(track) => project.tracks.push(track),
+                    Err(e) => eprintln!("Warning: Failed to parse track: {}", e),
+                },
+                BlockType::Item => match Item::from_block(block) {
+                    Ok(item) => project.items.push(item),
+                    Err(e) => eprintln!("Warning: Failed to parse item: {}", e),
+                },
+                BlockType::Envelope => match Envelope::from_block(block) {
+                    Ok(envelope) => project.envelopes.push(envelope),
+                    Err(e) => eprintln!("Warning: Failed to parse envelope: {}", e),
+                },
                 BlockType::TempoEnvEx => {
                     // Parse tempo envelope from TEMPOENVEX block
                     if let Some(tempo_envelope) = Self::parse_tempo_envelope_block(block) {
                         project.tempo_envelope = Some(tempo_envelope);
                     }
                 }
-                BlockType::FxChain => {
-                    match FxChain::from_block(block) {
-                        Ok(fx_chain) => project.fx_chains.push(fx_chain),
-                        Err(e) => eprintln!("Warning: Failed to parse FX chain: {}", e),
-                    }
-                }
+                BlockType::FxChain => match FxChain::from_block(block) {
+                    Ok(fx_chain) => project.fx_chains.push(fx_chain),
+                    Err(e) => eprintln!("Warning: Failed to parse FX chain: {}", e),
+                },
                 _ => {
                     // Ignore other block types for now
                 }
@@ -1077,26 +1233,29 @@ impl ReaperProject {
 
         Ok(project)
     }
-    
+
     /// Parse a TEMPOENVEX block into a TempoTimeEnvelope
-    fn parse_tempo_envelope_block(block: &crate::primitives::RppBlock) -> Option<TempoTimeEnvelope> {
+    fn parse_tempo_envelope_block(
+        block: &crate::primitives::RppBlock,
+    ) -> Option<TempoTimeEnvelope> {
         use super::time_tempo::TempoTimePoint;
-        
+
         let mut points = Vec::new();
         let mut default_tempo = 120.0;
         let mut default_time_signature = (4, 4);
-        
+
         // Parse the block content to extract tempo points
         for child in &block.children {
             if let crate::primitives::RppBlockContent::Content(tokens) = child {
                 if let Some(first_token) = tokens.first() {
                     if first_token.to_string() == "PT" {
                         // Reconstruct the PT line
-                        let pt_line = tokens.iter()
+                        let pt_line = tokens
+                            .iter()
                             .map(|t| t.to_string())
                             .collect::<Vec<_>>()
                             .join(" ");
-                        
+
                         if let Ok(point) = TempoTimePoint::from_pt_line(&pt_line) {
                             points.push(point);
                         }
@@ -1104,19 +1263,23 @@ impl ReaperProject {
                 }
             }
         }
-        
+
         // Create tempo envelope with the parsed points
         if !points.is_empty() {
             // Use the tempo from the first point as the default tempo
             // Sort points by position to ensure we get the earliest one
-            points.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
+            points.sort_by(|a, b| {
+                a.position
+                    .partial_cmp(&b.position)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             default_tempo = points[0].tempo;
-            
+
             // Try to get time signature from the first point
             if let Some(time_sig) = points[0].time_signature() {
                 default_time_signature = time_sig;
             }
-            
+
             let mut envelope = TempoTimeEnvelope::new(default_tempo, default_time_signature);
             for point in points {
                 envelope.add_point(point);
@@ -1130,17 +1293,30 @@ impl ReaperProject {
 
 impl fmt::Display for ReaperProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "REAPER Project v{} ({})", self.version, self.version_string)?;
+        writeln!(
+            f,
+            "REAPER Project v{} ({})",
+            self.version, self.version_string
+        )?;
         writeln!(f, "Timestamp: {}", self.timestamp)?;
         writeln!(f, "Tracks: {}", self.tracks.len())?;
         writeln!(f, "Items: {}", self.items.len())?;
         writeln!(f, "Envelopes: {}", self.envelopes.len())?;
         writeln!(f, "FX Chains: {}", self.fx_chains.len())?;
-        writeln!(f, "Markers: {}, Regions: {}", self.markers_regions.markers.len(), self.markers_regions.regions.len())?;
-        
+        writeln!(
+            f,
+            "Markers: {}, Regions: {}",
+            self.markers_regions.markers.len(),
+            self.markers_regions.regions.len()
+        )?;
+
         // Display key project properties
         if let Some(tempo) = self.properties.tempo {
-            writeln!(f, "Tempo: {} BPM, Time Signature: {}/{}", tempo.0, tempo.1, tempo.2)?;
+            writeln!(
+                f,
+                "Tempo: {} BPM, Time Signature: {}/{}",
+                tempo.0, tempo.1, tempo.2
+            )?;
         }
         if let Some(sample_rate) = self.properties.sample_rate {
             writeln!(f, "Sample Rate: {} Hz", sample_rate.0)?;
@@ -1154,41 +1330,49 @@ impl fmt::Display for ReaperProject {
         if let Some(cursor) = self.properties.cursor {
             writeln!(f, "Cursor: {}", cursor)?;
         }
-        
+
         // Display metronome settings
         if let Some(metronome) = &self.properties.metronome {
             writeln!(f, "\nMetronome:")?;
-            writeln!(f, "  Volume: {:.3} / {:.3}", metronome.volume.0, metronome.volume.1)?;
+            writeln!(
+                f,
+                "  Volume: {:.3} / {:.3}",
+                metronome.volume.0, metronome.volume.1
+            )?;
             writeln!(f, "  Beat Length: {}", metronome.beat_length)?;
-            writeln!(f, "  Frequency: {} / {} Hz", metronome.frequency.0, metronome.frequency.1)?;
+            writeln!(
+                f,
+                "  Frequency: {} / {} Hz",
+                metronome.frequency.0, metronome.frequency.1
+            )?;
             writeln!(f, "  Pattern: {}", metronome.pattern_string)?;
             writeln!(f, "  Multiplier: {}", metronome.mult)?;
         }
-        
+
         // Display envelope settings
         if let Some(master_play_speed_env) = &self.properties.master_play_speed_env {
             writeln!(f, "\nMaster Play Speed Envelope:")?;
             write!(f, "{}", master_play_speed_env)?;
         }
-        
+
         if let Some(tempo_env) = &self.properties.tempo_env {
             writeln!(f, "\nTempo Envelope:")?;
             write!(f, "{}", tempo_env)?;
         }
-        
+
         for (i, track) in self.tracks.iter().enumerate() {
             writeln!(f, "Track {}: {}", i + 1, track.name)?;
         }
-        
+
         Ok(())
     }
 }
 
 // Forward declarations for the types we use
-pub use crate::types::track::Track;
-pub use crate::types::item::Item;
 pub use crate::types::envelope::Envelope;
 pub use crate::types::fx_chain::FxChain;
+pub use crate::types::item::Item;
+pub use crate::types::track::Track;
 
 #[cfg(test)]
 mod tests {
@@ -1204,13 +1388,18 @@ mod tests {
 
         let result = parse_rpp(input);
         assert!(result.is_ok());
-        
+
         let (remaining, rpp_project) = result.unwrap();
         println!("Remaining input: '{}'", remaining);
         println!("Number of blocks: {}", rpp_project.blocks.len());
-        
+
         for (i, block) in rpp_project.blocks.iter().enumerate() {
-            println!("Block {}: {} with {} children", i, block.name, block.children.len());
+            println!(
+                "Block {}: {} with {} children",
+                i,
+                block.name,
+                block.children.len()
+            );
             for (j, child) in block.children.iter().enumerate() {
                 match child {
                     RppBlockContent::Content(tokens) => {
@@ -1222,7 +1411,7 @@ mod tests {
                 }
             }
         }
-        
+
         assert_eq!(remaining, "");
     }
 
@@ -1293,20 +1482,20 @@ mod tests {
 
         let result = parse_rpp(input);
         assert!(result.is_ok());
-        
+
         let (remaining, rpp_project) = result.unwrap();
         assert_eq!(remaining, "");
         assert_eq!(rpp_project.version, 0.1);
         assert_eq!(rpp_project.version_string, "7.42/linux-x86_64");
         assert_eq!(rpp_project.timestamp, 1758257333);
-        
+
         // Test that we can create a ReaperProject with properties
         let reaper_project = ReaperProject::from_rpp_project(&rpp_project);
         assert!(reaper_project.is_ok());
-        
+
         let project = reaper_project.unwrap();
         let props = &project.properties;
-        
+
         // Test some key properties
         assert_eq!(props.ripple, Some((0, 0)));
         assert_eq!(props.group_override, Some((0, 0, 0)));
@@ -1330,10 +1519,16 @@ mod tests {
         assert_eq!(props.v_zoom_ex, Some((6, 0)));
         assert_eq!(props.use_rec_cfg, Some(0));
         assert_eq!(props.rec_mode, Some(1));
-        assert_eq!(props.smpte_sync, Some((0, 30, 100, 40, 1000, 300, 0, 0, 1, 0, 0)));
+        assert_eq!(
+            props.smpte_sync,
+            Some((0, 30, 100, 40, 1000, 300, 0, 0, 1, 0, 0))
+        );
         assert_eq!(props.r#loop, Some(0));
         assert_eq!(props.loop_gran, Some((0, 4)));
-        assert_eq!(props.record_path, Some(("Media".to_string(), "".to_string())));
+        assert_eq!(
+            props.record_path,
+            Some(("Media".to_string(), "".to_string()))
+        );
         assert_eq!(props.render_file, Some("".to_string()));
         assert_eq!(props.render_pattern, Some("".to_string()));
         assert_eq!(props.render_fmt, Some((0, 2, 0)));
@@ -1367,7 +1562,7 @@ mod tests {
         assert_eq!(props.master_fx, Some(1));
         assert_eq!(props.master_sel, Some(0));
         assert_eq!(props.global_auto, Some(-1));
-        
+
         // Test master_track_view
         assert!(props.master_track_view.is_some());
         let master_view = props.master_track_view.as_ref().unwrap();
@@ -1394,13 +1589,13 @@ mod tests {
         assert_eq!(AutomationMode::from_value(2), AutomationMode::Touch);
         assert_eq!(AutomationMode::from_value(3), AutomationMode::Write);
         assert_eq!(AutomationMode::from_value(4), AutomationMode::Latch);
-        
+
         assert_eq!(AutomationMode::TrimRead.to_value(), 0);
         assert_eq!(AutomationMode::Read.to_value(), 1);
         assert_eq!(AutomationMode::Touch.to_value(), 2);
         assert_eq!(AutomationMode::Write.to_value(), 3);
         assert_eq!(AutomationMode::Latch.to_value(), 4);
-        
+
         assert_eq!(format!("{}", AutomationMode::TrimRead), "Trim/Read");
         assert_eq!(format!("{}", AutomationMode::Read), "Read");
         assert_eq!(format!("{}", AutomationMode::Touch), "Touch");
@@ -1416,14 +1611,14 @@ mod tests {
         assert_eq!(EnvelopeShape::from_value(3), EnvelopeShape::FastStart);
         assert_eq!(EnvelopeShape::from_value(4), EnvelopeShape::FastEnd);
         assert_eq!(EnvelopeShape::from_value(5), EnvelopeShape::Bezier);
-        
+
         assert_eq!(EnvelopeShape::Linear.to_value(), 0);
         assert_eq!(EnvelopeShape::Square.to_value(), 1);
         assert_eq!(EnvelopeShape::SlowStartEnd.to_value(), 2);
         assert_eq!(EnvelopeShape::FastStart.to_value(), 3);
         assert_eq!(EnvelopeShape::FastEnd.to_value(), 4);
         assert_eq!(EnvelopeShape::Bezier.to_value(), 5);
-        
+
         assert_eq!(format!("{}", EnvelopeShape::Linear), "Linear");
         assert_eq!(format!("{}", EnvelopeShape::Square), "Square");
         assert_eq!(format!("{}", EnvelopeShape::SlowStartEnd), "Slow Start/End");
@@ -1436,25 +1631,24 @@ mod tests {
     fn test_parse_template_with_takes_lanes() {
         // Read the template file
         let template_path = "resources/Template-with-takes-lanes.RPP";
-        let content = std::fs::read_to_string(template_path)
-            .expect("Failed to read template file");
-        
+        let content = std::fs::read_to_string(template_path).expect("Failed to read template file");
+
         // Parse the RPP file
-        let (remaining, rpp_project) = crate::primitives::project::parse_rpp(&content)
-            .expect("Failed to parse template file");
-        
+        let (remaining, rpp_project) =
+            crate::primitives::project::parse_rpp(&content).expect("Failed to parse template file");
+
         // Verify basic project structure
         assert_eq!(rpp_project.version, 0.1);
         assert_eq!(rpp_project.version_string, "7.42/linux-x86_64");
         assert_eq!(rpp_project.timestamp, 1758257039);
-        
+
         // Verify we have tracks
         assert!(!rpp_project.blocks.is_empty(), "Should have blocks");
-        
+
         // Convert to ReaperProject
         let project = ReaperProject::from_rpp_project(&rpp_project)
             .expect("Failed to convert to ReaperProject");
-        
+
         // Verify basic project properties
         assert_eq!(project.properties.tempo, Some((120, 4, 4, 0)));
         assert_eq!(project.properties.sample_rate, Some((44100, 0, 0)));
@@ -1464,34 +1658,57 @@ mod tests {
         assert_eq!(project.properties.cursor, Some(2));
         assert_eq!(project.properties.zoom, Some((100, 0, 0)));
         assert_eq!(project.properties.r#loop, Some(0));
-        
+
         // Verify we have tracks (the parser is now correctly parsing all blocks)
         // Note: Currently Track::from_block is not implemented, so tracks.len() will be 0
         // But we can verify that the parser is working by checking the total number of blocks
-        assert_eq!(rpp_project.blocks.len(), 67, "Should have 67 total blocks (including nested blocks)");
-        
+        assert_eq!(
+            rpp_project.blocks.len(),
+            67,
+            "Should have 67 total blocks (including nested blocks)"
+        );
+
         // Verify that we have the expected block types
-        let track_blocks: Vec<_> = rpp_project.blocks.iter()
+        let track_blocks: Vec<_> = rpp_project
+            .blocks
+            .iter()
             .filter(|b| b.block_type == crate::primitives::BlockType::Track)
             .collect();
-        let item_blocks: Vec<_> = rpp_project.blocks.iter()
+        let item_blocks: Vec<_> = rpp_project
+            .blocks
+            .iter()
             .filter(|b| b.block_type == crate::primitives::BlockType::Item)
             .collect();
-        
-        assert_eq!(track_blocks.len(), 57, "Should have 57 TRACK blocks (including nested items)");
-        assert_eq!(item_blocks.len(), 0, "Should have 0 top-level ITEM blocks (they're nested in tracks)");
-        
+
+        assert_eq!(
+            track_blocks.len(),
+            57,
+            "Should have 57 TRACK blocks (including nested items)"
+        );
+        assert_eq!(
+            item_blocks.len(),
+            0,
+            "Should have 0 top-level ITEM blocks (they're nested in tracks)"
+        );
+
         // Verify first track block
         let first_track = &track_blocks[0];
         assert_eq!(first_track.name, "TRACK");
-        
+
         // Note: ITEM blocks are now properly nested within TRACK blocks
         // so they don't appear as top-level blocks
-        
+
         // Verify remaining input is minimal (just the final >)
-        assert!(remaining.len() <= 2, "Remaining input should be minimal, got: '{}'", remaining);
-        
-        println!("✅ Successfully parsed template with {} tracks and {} items", 
-                project.tracks.len(), project.items.len());
+        assert!(
+            remaining.len() <= 2,
+            "Remaining input should be minimal, got: '{}'",
+            remaining
+        );
+
+        println!(
+            "✅ Successfully parsed template with {} tracks and {} items",
+            project.tracks.len(),
+            project.items.len()
+        );
     }
 }

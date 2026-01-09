@@ -1,10 +1,10 @@
-use daw::marker_region::{application::TempoTimePoint, Marker};
+use daw::marker_region::{Marker, application::TempoTimePoint};
 use daw::primitives::Position;
 use dioxus::prelude::*;
 use dioxus_router::{Outlet, Routable, Router};
 use fts::setlist::{
-    NavigationCommand, Section, SectionType, Setlist, Song, TransportCommand, ACTIVE_INDICES,
-    SETLIST, SETLIST_STRUCTURE, SONG_TRACKS, SONG_TRANSPORT,
+    ACTIVE_INDICES, NavigationCommand, SETLIST, SETLIST_STRUCTURE, SONG_TRACKS, SONG_TRANSPORT,
+    Section, SectionType, Setlist, Song, TransportCommand,
 };
 use ui::components::chord_tab::ChordTabView;
 use ui::components::chords::ChordsView;
@@ -46,8 +46,8 @@ fn main() {
     #[cfg(feature = "desktop")]
     #[cfg(not(target_arch = "wasm32"))]
     {
-        use tracing_subscriber::prelude::*;
         use tracing_subscriber::EnvFilter;
+        use tracing_subscriber::prelude::*;
 
         let filter = if std::env::var("RUST_LOG").is_ok() {
             // User specified RUST_LOG - use it directly
@@ -856,7 +856,7 @@ fn Chords() -> Element {
 
 #[component]
 fn Chart() -> Element {
-    use pdf::{get_pdf_info, render_pdf_page_with_text, PdfPageData, RotationAngle};
+    use pdf::{PdfPageData, RotationAngle, get_pdf_info, render_pdf_page_with_text};
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -929,7 +929,11 @@ fn Chart() -> Element {
                         ) {
                             Ok(page_data) => {
                                 if page_data.page_index != page_idx {
-                                    tracing::error!("CRITICAL: Page data contamination detected! Expected page {}, got page {}", page_idx, page_data.page_index);
+                                    tracing::error!(
+                                        "CRITICAL: Page data contamination detected! Expected page {}, got page {}",
+                                        page_idx,
+                                        page_data.page_index
+                                    );
                                     continue;
                                 }
                                 tracing::debug!("Successfully loaded page {}", page_idx);
@@ -981,7 +985,11 @@ fn Chart() -> Element {
                         let results = futures::future::join_all(batch_futures).await;
                         for (page_idx, page_data) in results.into_iter().flatten() {
                             if page_data.page_index != page_idx {
-                                tracing::error!("CRITICAL: Page data contamination detected! Expected page {}, got page {}", page_idx, page_data.page_index);
+                                tracing::error!(
+                                    "CRITICAL: Page data contamination detected! Expected page {}, got page {}",
+                                    page_idx,
+                                    page_data.page_index
+                                );
                                 continue;
                             }
                             tracing::debug!("Successfully loaded page {}", page_idx);

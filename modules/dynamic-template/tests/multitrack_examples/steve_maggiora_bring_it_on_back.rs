@@ -67,14 +67,14 @@ fn steve_maggiora_bring_it_on_back() {
         "Wurlitzer_SUM.wav",
         "Xavier VOX.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
 }

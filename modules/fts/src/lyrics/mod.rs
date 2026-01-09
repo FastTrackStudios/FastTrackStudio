@@ -4,27 +4,28 @@
 //! with integration to the setlist system for automatic section matching.
 
 pub mod core;
-pub mod parser;
-pub mod output;
-pub mod syllables;
-pub mod source;
 pub mod infra;
+pub mod output;
+pub mod parser;
+pub mod source;
+pub mod syllables;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod reactive;
 
 pub use core::*;
-pub use parser::{parse_lyrics, parse_lyrics_with_config, ParserConfig, BackgroundVocalPattern, ParseError};
 pub use output::*;
-pub use syllables::*;
+pub use parser::{
+    BackgroundVocalPattern, ParseError, ParserConfig, parse_lyrics, parse_lyrics_with_config,
+};
 pub use source::*;
+pub use syllables::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use reactive::{
-    LyricsStreams, LyricsReactiveState, LyricsReactiveService,
-    DefaultLyricsReactiveService, EventStreamSubject,
+    DefaultLyricsReactiveService, EventStreamSubject, LyricsReactiveService, LyricsReactiveState,
+    LyricsStreams,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use reactive::irpc::{LyricsApi, LyricsProtocol, LyricsUpdateMessage};
-

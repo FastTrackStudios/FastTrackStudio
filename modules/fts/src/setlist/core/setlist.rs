@@ -374,34 +374,37 @@ impl Setlist {
     }
 
     /// Get the active song based on project name and transport position
-    /// 
+    ///
     /// First tries to find a song where the position is within the song's region.
     /// If no song contains the position, returns the closest song based on distance.
-    /// 
+    ///
     /// Returns the song index and reference if a song matches the given project name.
-    pub fn get_active_song(&self, project_name: &str, transport_position: f64) -> Option<(usize, &Song)> {
+    pub fn get_active_song(
+        &self,
+        project_name: &str,
+        transport_position: f64,
+    ) -> Option<(usize, &Song)> {
         // First, try to find a song where the position is within its region
-        let exact_match = self.songs.iter()
-            .enumerate()
-            .find(|(_, song)| {
-                // Check if project name matches
-                let song_project_name = song.project_name_from_metadata();
-                if song_project_name != project_name {
-                    return false;
-                }
-                
-                // Check if transport position is within song's region (includes song region markers)
-                let song_start = song.effective_start();
-                let song_end = song.effective_end();
-                transport_position >= song_start && transport_position <= song_end
-            });
-        
+        let exact_match = self.songs.iter().enumerate().find(|(_, song)| {
+            // Check if project name matches
+            let song_project_name = song.project_name_from_metadata();
+            if song_project_name != project_name {
+                return false;
+            }
+
+            // Check if transport position is within song's region (includes song region markers)
+            let song_start = song.effective_start();
+            let song_end = song.effective_end();
+            transport_position >= song_start && transport_position <= song_end
+        });
+
         if let Some((idx, song)) = exact_match {
             return Some((idx, song));
         }
-        
+
         // If no exact match, find the closest song for this project
-        self.songs.iter()
+        self.songs
+            .iter()
             .enumerate()
             .filter(|(_, song)| {
                 // Only consider songs that match the project name
@@ -412,17 +415,19 @@ impl Setlist {
                 // Calculate distance to each song's region
                 let dist_a = Self::distance_to_song_region(song_a, transport_position);
                 let dist_b = Self::distance_to_song_region(song_b, transport_position);
-                dist_a.partial_cmp(&dist_b).unwrap_or(std::cmp::Ordering::Equal)
+                dist_a
+                    .partial_cmp(&dist_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|(idx, song)| (idx, song))
     }
-    
+
     /// Calculate the distance from a transport position to a song's region
     /// Returns 0.0 if the position is within the song region, otherwise the distance
     fn distance_to_song_region(song: &Song, transport_position: f64) -> f64 {
         let song_start = song.effective_start();
         let song_end = song.effective_end();
-        
+
         if transport_position >= song_start && transport_position <= song_end {
             // Position is within the song region
             0.0
@@ -436,7 +441,11 @@ impl Setlist {
     }
 
     /// Get the active song index based on project name and transport position
-    pub fn get_active_song_index(&self, project_name: &str, transport_position: f64) -> Option<usize> {
+    pub fn get_active_song_index(
+        &self,
+        project_name: &str,
+        transport_position: f64,
+    ) -> Option<usize> {
         self.get_active_song(project_name, transport_position)
             .map(|(idx, _)| idx)
     }
@@ -735,8 +744,8 @@ mod tests {
         song1.set_count_in_marker(Marker::from_seconds(-4.0, "COUNT_IN".to_string()));
 
         use crate::setlist::core::section::section_from_seconds;
-        let verse = section_from_seconds(SectionType::Verse, 0.0, 60.0, "Verse".to_string(), None)
-            .unwrap();
+        let verse =
+            section_from_seconds(SectionType::Verse, 0.0, 60.0, "Verse".to_string(), None).unwrap();
         let chorus =
             section_from_seconds(SectionType::Chorus, 60.0, 120.0, "Chorus".to_string(), None)
                 .unwrap();

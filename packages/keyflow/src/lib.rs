@@ -15,9 +15,9 @@ pub mod time;
 // Re-exports for convenience
 pub use chart::{Chart, ChartSection, ChordInstance, KeyChange, Measure};
 pub use chord::{
-    parse_root, Alteration, Chord, ChordDegree, ChordFamily, ChordParseError, ChordParseErrors,
-    ChordQuality, ChordRhythm, ExtensionQuality, Extensions, LilySyntax, PushPullAmount,
-    RootParseResult, SuspendedType,
+    Alteration, Chord, ChordDegree, ChordFamily, ChordParseError, ChordParseErrors, ChordQuality,
+    ChordRhythm, ExtensionQuality, Extensions, LilySyntax, PushPullAmount, RootParseResult,
+    SuspendedType, parse_root,
 };
 pub use key::{Key, ScaleMode, ScaleType};
 pub use metadata::SongMetadata;
@@ -27,4 +27,7 @@ pub use primitives::{
     RootNotation, ScaleDegreeToken,
 };
 pub use sections::{Section, SectionNumberer, SectionType};
-pub use time::{AbsolutePosition, Duration, DurationTrait, MusicalDuration, MusicalPosition, Position, PPQDuration, PPQPosition, Tempo, TimeDuration, TimePosition, TimeSignature};
+pub use time::{
+    AbsolutePosition, Duration, DurationTrait, MusicalDuration, MusicalPosition, PPQDuration,
+    PPQPosition, Position, Tempo, TimeDuration, TimePosition, TimeSignature,
+};

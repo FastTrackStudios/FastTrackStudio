@@ -1,8 +1,8 @@
 //! Record settings for tracks
 
+use crate::tracks::api::quantize::RecordPath;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use crate::tracks::api::quantize::RecordPath;
 
 /// Wrapper for unknown enum values to preserve them during serialization
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -87,7 +87,9 @@ impl fmt::Display for RecordMode {
             RecordMode::MidiReplace => write!(f, "MIDI Replace"),
             RecordMode::MidiTouchReplace => write!(f, "MIDI Touch Replace"),
             RecordMode::OutputMultichannel => write!(f, "Output (Multichannel)"),
-            RecordMode::OutputMultichannelLatencyComp => write!(f, "Output (Multichannel, Latency Comp)"),
+            RecordMode::OutputMultichannelLatencyComp => {
+                write!(f, "Output (Multichannel, Latency Comp)")
+            }
             RecordMode::Unknown(Hidden(val)) => write!(f, "Unknown({})", val),
         }
     }
@@ -145,11 +147,11 @@ impl fmt::Display for MonitorMode {
 /// Record settings for tracks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordSettings {
-    pub armed: bool,               // field 1 - armed
-    pub input: i32,               // field 2 - input (device + channel coded)
-    pub monitor: MonitorMode,      // field 3 - monitor mode
-    pub record_mode: RecordMode,   // field 4 - record mode
-    pub monitor_track_media: bool, // field 5 - monitor track media while recording
+    pub armed: bool,                // field 1 - armed
+    pub input: i32,                 // field 2 - input (device + channel coded)
+    pub monitor: MonitorMode,       // field 3 - monitor mode
+    pub record_mode: RecordMode,    // field 4 - record mode
+    pub monitor_track_media: bool,  // field 5 - monitor track media while recording
     pub preserve_pdc_delayed: bool, // field 6 - preserve PDC delayed monitoring
     pub record_path: RecordPath,    // field 7 - record path
 }

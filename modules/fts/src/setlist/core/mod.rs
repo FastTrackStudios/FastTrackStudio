@@ -11,7 +11,10 @@ mod song;
 
 pub use api::*;
 pub use error::*;
-pub use section::{Section, SectionType, SectionExt, SectionTypeExt, section_from_seconds, section_from_seconds_with_tempo, section_new, section_with_id, validate};
+pub use section::{
+    Section, SectionExt, SectionType, SectionTypeExt, section_from_seconds,
+    section_from_seconds_with_tempo, section_new, section_with_id, validate,
+};
 pub use setlist::*;
 pub use song::*;
 

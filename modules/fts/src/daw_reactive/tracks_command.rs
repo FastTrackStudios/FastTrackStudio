@@ -9,22 +9,22 @@ use async_trait::async_trait;
 use std::sync::{Arc, OnceLock};
 
 use fragile::Fragile;
-use reaper_high::{Reaper, Project as ReaperProject, TaskSupport};
+use reaper_high::{Project as ReaperProject, Reaper, TaskSupport};
 use reaper_medium::{ProjectRef, SoloMode as ReaperSoloMode};
 use tracing::{info, warn};
 
-use daw::tracks::reactive::irpc::TrackCommandHandler;
 use daw::tracks::api::solo::SoloMode;
+use daw::tracks::reactive::irpc::TrackCommandHandler;
 
-use super::tracks::ReaperTrackReactiveService;
 use super::SetlistProvider;
+use super::tracks::ReaperTrackReactiveService;
 
 /// Type alias for the static track reactive service
 type StaticTrackService = Fragile<Arc<dyn TrackServiceAccessor>>;
 
 /// Trait for accessing the track reactive service
 /// This allows us to store a type-erased reference to the track service
-/// 
+///
 /// Note: This trait is NOT Send + Sync because ReaperTrackReactiveService contains
 /// non-thread-safe types (RefCell/Rc). Access is controlled via Fragile wrapper
 /// which ensures main-thread-only access.
@@ -78,12 +78,13 @@ impl ProjectProvider for DefaultProjectProvider {
     fn get_project_from_name(&self, project_name: &str) -> Option<ReaperProject> {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
-        
+
         // Find project by name
         for i in 0..128u32 {
             if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
                 if let Some(file_path) = result.file_path.as_ref() {
-                    if let Some(name) = file_path.as_std_path().file_stem().and_then(|s| s.to_str()) {
+                    if let Some(name) = file_path.as_std_path().file_stem().and_then(|s| s.to_str())
+                    {
                         if name == project_name {
                             return Some(ReaperProject::new(result.project));
                         }
@@ -93,48 +94,68 @@ impl ProjectProvider for DefaultProjectProvider {
                 break;
             }
         }
-        
+
         None
     }
 }
 
 #[async_trait]
 impl<P: ProjectProvider + 'static> TrackCommandHandler for ReaperTrackCommandHandler<P> {
-    async fn set_track_mute(&self, project_id: String, track_index: usize, muted: bool) -> Result<(), String> {
-        info!("[Track Command] Setting track {} mute to {} in project {}", track_index, muted, project_id);
-        
+    async fn set_track_mute(
+        &self,
+        project_id: String,
+        track_index: usize,
+        muted: bool,
+    ) -> Result<(), String> {
+        info!(
+            "[Track Command] Setting track {} mute to {} in project {}",
+            track_index, muted, project_id
+        );
+
         let project_name = project_id.clone();
         let project_provider = self.project_provider.clone();
-        
+
         // Dispatch to main thread using task_support
         let result = (&*self.task_support)
             .main_thread_future(move || {
                 // This closure runs on the main thread
-                let project = project_provider.get_project_from_name(&project_name)
+                let project = project_provider
+                    .get_project_from_name(&project_name)
                     .ok_or_else(|| format!("Project not found: {}", project_name))?;
-                
-                let track = project.track_by_index(track_index as u32)
-                    .ok_or_else(|| format!("Track {} not found in project {}", track_index, project_name))?;
-                
-                use reaper_medium::GangBehavior;
+
+                let track = project.track_by_index(track_index as u32).ok_or_else(|| {
+                    format!(
+                        "Track {} not found in project {}",
+                        track_index, project_name
+                    )
+                })?;
+
                 use reaper_high::GroupingBehavior;
-                
-                track.set_mute(muted, GangBehavior::DenyGang, GroupingBehavior::PreventGrouping);
-                
+                use reaper_medium::GangBehavior;
+
+                track.set_mute(
+                    muted,
+                    GangBehavior::DenyGang,
+                    GroupingBehavior::PreventGrouping,
+                );
+
                 // Immediately update the reactive service to reflect the change
                 // We're on the main thread, so we can safely access the track service
                 if let Some(track_service) = get_track_reactive_service() {
                     track_service.update_track_from_reaper(project, track_index);
                 }
-                
+
                 Ok(())
             })
             .await
             .map_err(|e| format!("Failed to dispatch to main thread: {}", e))?;
-        
+
         match result {
             Ok(()) => {
-                info!("[Track Command] Successfully set track {} mute to {} in project {}", track_index, muted, project_id);
+                info!(
+                    "[Track Command] Successfully set track {} mute to {} in project {}",
+                    track_index, muted, project_id
+                );
                 Ok(())
             }
             Err(e) => {
@@ -144,12 +165,20 @@ impl<P: ProjectProvider + 'static> TrackCommandHandler for ReaperTrackCommandHan
         }
     }
 
-    async fn set_track_solo(&self, project_id: String, track_index: usize, solo_mode: SoloMode) -> Result<(), String> {
-        info!("[Track Command] Setting track {} solo to {:?} in project {}", track_index, solo_mode, project_id);
-        
+    async fn set_track_solo(
+        &self,
+        project_id: String,
+        track_index: usize,
+        solo_mode: SoloMode,
+    ) -> Result<(), String> {
+        info!(
+            "[Track Command] Setting track {} solo to {:?} in project {}",
+            track_index, solo_mode, project_id
+        );
+
         let project_name = project_id.clone();
         let project_provider = self.project_provider.clone();
-        
+
         // Convert SoloMode to REAPER solo mode (can be done outside main thread)
         let reaper_solo_mode = match solo_mode {
             SoloMode::Off => ReaperSoloMode::Off,
@@ -160,37 +189,48 @@ impl<P: ProjectProvider + 'static> TrackCommandHandler for ReaperTrackCommandHan
             SoloMode::Unknown(hidden) => {
                 // For unknown variants, try to preserve the raw value
                 // REAPER's SoloMode::Unknown is private, so we'll use SoloInPlace as fallback
-                warn!("Unknown solo mode value: {}, using SoloInPlace as fallback", hidden.0);
+                warn!(
+                    "Unknown solo mode value: {}, using SoloInPlace as fallback",
+                    hidden.0
+                );
                 ReaperSoloMode::SoloInPlace
             }
         };
-        
+
         // Dispatch to main thread using task_support
         let result = (&*self.task_support)
             .main_thread_future(move || {
                 // This closure runs on the main thread
-                let project = project_provider.get_project_from_name(&project_name)
+                let project = project_provider
+                    .get_project_from_name(&project_name)
                     .ok_or_else(|| format!("Project not found: {}", project_name))?;
-                
-                let track = project.track_by_index(track_index as u32)
-                    .ok_or_else(|| format!("Track {} not found in project {}", track_index, project_name))?;
-                
+
+                let track = project.track_by_index(track_index as u32).ok_or_else(|| {
+                    format!(
+                        "Track {} not found in project {}",
+                        track_index, project_name
+                    )
+                })?;
+
                 track.set_solo_mode(reaper_solo_mode);
-                
+
                 // Immediately update the reactive service to reflect the change
                 // We're on the main thread, so we can safely access the track service
                 if let Some(track_service) = get_track_reactive_service() {
                     track_service.update_track_from_reaper(project, track_index);
                 }
-                
+
                 Ok(())
             })
             .await
             .map_err(|e| format!("Failed to dispatch to main thread: {}", e))?;
-        
+
         match result {
             Ok(()) => {
-                info!("[Track Command] Successfully set track {} solo to {:?} in project {}", track_index, solo_mode, project_id);
+                info!(
+                    "[Track Command] Successfully set track {} solo to {:?} in project {}",
+                    track_index, solo_mode, project_id
+                );
                 Ok(())
             }
             Err(e) => {

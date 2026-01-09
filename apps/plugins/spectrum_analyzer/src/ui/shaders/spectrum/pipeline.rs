@@ -1,11 +1,11 @@
 use crate::audio::constants;
 use bytemuck::{Pod, Zeroable};
+use nih_plug_iced::renderer::wgpu::primitive::Pipeline;
 use nih_plug_iced::renderer::wgpu::wgpu::{
     self as wgpu, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingType, BufferBindingType, BufferUsages, Device, Queue,
     RenderPipeline, ShaderStages, TextureFormat,
 };
-use nih_plug_iced::renderer::wgpu::primitive::Pipeline;
 use nih_plug_iced::Rectangle;
 
 /// Apply elastic easing to time for bouncy, spring-like animation

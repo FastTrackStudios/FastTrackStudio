@@ -1,6 +1,6 @@
+use crate::primitives::{Position, TimeSignature};
 use crate::transport::core::transport::{PlayState, Transport};
 use crate::transport::core::{RecordMode, Tempo, TransportActions, TransportError};
-use crate::primitives::{Position, TimeSignature};
 
 fn transition_to(transport: &mut Transport, next: PlayState) -> Result<(), TransportError> {
     let current = transport.play_state;

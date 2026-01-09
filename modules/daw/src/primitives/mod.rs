@@ -236,14 +236,18 @@ impl PPQPosition {
     ///
     /// # Returns
     /// A `MusicalPosition` representing the equivalent musical position
-    pub fn to_musical_position(&self, ppq_resolution: f64, time_signature: TimeSignature) -> MusicalPosition {
+    pub fn to_musical_position(
+        &self,
+        ppq_resolution: f64,
+        time_signature: TimeSignature,
+    ) -> MusicalPosition {
         let beats_per_measure = time_signature.numerator as f64;
         let total_beats = self.ppq as f64 / ppq_resolution;
-        
+
         let measures = (total_beats / beats_per_measure).floor() as i32;
         let beats_in_measure = (total_beats % beats_per_measure).floor() as i32;
         let subdivision = ((total_beats % 1.0) * 1000.0).round() as i32;
-        
+
         MusicalPosition::try_new(measures, beats_in_measure, subdivision.clamp(0, 999))
             .unwrap_or_else(|_| MusicalPosition::start())
     }
@@ -278,7 +282,11 @@ pub struct Position {
 
 impl Position {
     pub fn new(musical: MusicalPosition, time: TimePosition) -> Self {
-        Self { musical, time, ppq: None }
+        Self {
+            musical,
+            time,
+            ppq: None,
+        }
     }
 
     pub fn from_musical(musical: MusicalPosition) -> Self {
@@ -473,7 +481,6 @@ impl MusicalDuration {
             subdivision: 0,
         }
     }
-    
 
     /// Convert musical duration to time duration using BPM and time signature
     ///
@@ -531,8 +538,7 @@ impl MusicalDuration {
         let remaining_beats = total_beats - (measures as f64 * beats_per_measure);
         let beats = remaining_beats.floor() as i32;
         let subdivisions = ((remaining_beats - beats as f64) * 1000.0).round() as i32;
-        Self::try_new(measures, beats, subdivisions.clamp(0, 999))
-            .unwrap_or_else(|_| Self::zero())
+        Self::try_new(measures, beats, subdivisions.clamp(0, 999)).unwrap_or_else(|_| Self::zero())
     }
 }
 
@@ -544,13 +550,7 @@ impl Default for MusicalDuration {
 
 impl fmt::Display for MusicalDuration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}.{}.{:03}",
-            self.measure,
-            self.beat,
-            self.subdivision
-        )
+        write!(f, "{}.{}.{:03}", self.measure, self.beat, self.subdivision)
     }
 }
 
@@ -578,14 +578,18 @@ impl PPQDuration {
     ///
     /// # Returns
     /// A `MusicalDuration` representing the equivalent musical duration
-    pub fn to_musical_duration(&self, ppq_resolution: f64, time_signature: TimeSignature) -> MusicalDuration {
+    pub fn to_musical_duration(
+        &self,
+        ppq_resolution: f64,
+        time_signature: TimeSignature,
+    ) -> MusicalDuration {
         let beats_per_measure = time_signature.numerator as f64;
         let total_beats = self.ppq as f64 / ppq_resolution;
-        
+
         let measures = (total_beats / beats_per_measure).floor() as i32;
         let beats_in_measure = (total_beats % beats_per_measure).floor() as i32;
         let subdivision = ((total_beats % 1.0) * 1000.0).round() as i32;
-        
+
         MusicalDuration::try_new(measures, beats_in_measure, subdivision.clamp(0, 999))
             .unwrap_or_else(|_| MusicalDuration::zero())
     }
@@ -744,7 +748,11 @@ pub struct Duration {
 
 impl Duration {
     pub fn new(musical: MusicalDuration, time: TimeDuration) -> Self {
-        Self { musical, time, ppq: None }
+        Self {
+            musical,
+            time,
+            ppq: None,
+        }
     }
 
     pub fn from_musical(musical: MusicalDuration) -> Self {
@@ -782,9 +790,7 @@ impl Duration {
     pub fn musical_duration_string(&self) -> String {
         format!(
             "{}.{}.{:03}",
-            self.musical.measure,
-            self.musical.beat,
-            self.musical.subdivision
+            self.musical.measure, self.musical.beat, self.musical.subdivision
         )
     }
 }

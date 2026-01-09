@@ -1,0 +1,18 @@
+[package]
+name = "fts-plugins-ui"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "Shared UI components for FTS audio plugins (meters, knobs, sliders, etc.)"
+
+[dependencies]
+# Dioxus for UI
+dioxus = { workspace = true, features = ["hooks", "signals", "macro", "html"] }
+
+# Atomic types for real-time safe meter updates
+atomic_float = { workspace = true }
+
+# Serialization for state
+serde = { workspace = true }

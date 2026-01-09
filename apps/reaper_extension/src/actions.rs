@@ -1,7 +1,7 @@
 //! Actions for FastTrackStudio REAPER Extension
 
 use crate::implementation::project::create_reaper_project_wrapper;
-use crate::infrastructure::action_registry::{register_actions, ActionDef};
+use crate::infrastructure::action_registry::{ActionDef, register_actions};
 #[cfg(feature = "lyrics")]
 use crate::lyrics;
 use daw::transport::{PlayState, TransportActions};

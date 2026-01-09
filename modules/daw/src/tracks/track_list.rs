@@ -4,8 +4,8 @@
 //! making it easy to compose track hierarchies.
 
 use super::Track;
-use crate::tracks::hierarchy_builder::build_hierarchy;
 use crate::tracks::api::folder::FolderDepthChange;
+use crate::tracks::hierarchy_builder::build_hierarchy;
 use std::fmt;
 
 /// Helper trait to convert various types into Vec<Track>
@@ -41,8 +41,7 @@ pub trait AddChild {
     fn add_child<T>(self, children: T) -> Vec<Track>
     where
         T: Into<Vec<Track>>;
-    
-    
+
     /// Insert children at a specific position
     ///
     /// Finds the first track with the given name and inserts the children after it.
@@ -70,8 +69,7 @@ impl AddChild for Track {
         let children_vec = children.into();
         build_hierarchy(self, children_vec)
     }
-    
-    
+
     fn insert_children_after<T>(self, after_track_name: &str, children: T) -> Option<Vec<Track>>
     where
         T: Into<Vec<Track>>,
@@ -97,34 +95,32 @@ impl AddChild for Vec<Track> {
         }
         result
     }
-    
-    
+
     fn insert_children_after<T>(mut self, after_track_name: &str, children: T) -> Option<Vec<Track>>
     where
         T: Into<Vec<Track>>,
     {
         let children_vec = children.into();
-        
+
         // Find the position of the track with the given name
-        let insert_pos = self.iter()
-            .position(|t| t.name.0 == after_track_name)?;
-        
+        let insert_pos = self.iter().position(|t| t.name.0 == after_track_name)?;
+
         // Insert children after the found track
         // We need to adjust folder_depth_change for the inserted tracks
         // and update the closing of the folder if needed
-        
+
         // Split the vec at the insertion point
         let after_track = self[insert_pos].clone();
         let mut before = self[..=insert_pos].to_vec();
         let mut after = self[insert_pos + 1..].to_vec();
-        
+
         // If the track we're inserting after is a folder, we need to handle its children
         // For now, let's insert the children right after the track
         // and adjust the closing logic
-        
+
         // Calculate the depth for inserted children (depth is calculated, not stored)
         // The depth will be calculated correctly when the tree is printed
-        
+
         // Update folder_depth_change for inserted children
         let mut inserted_children = children_vec;
         for child in &mut inserted_children {
@@ -133,7 +129,7 @@ impl AddChild for Vec<Track> {
                 child.folder_depth_change = FolderDepthChange::Normal;
             }
         }
-        
+
         // If there are tracks after, we need to update the closing
         // The last inserted child should not close if there are more children
         if !after.is_empty() && !inserted_children.is_empty() {
@@ -151,11 +147,11 @@ impl AddChild for Vec<Track> {
                 }
             }
         }
-        
+
         // Combine: before + inserted + after
         before.extend(inserted_children);
         before.extend(after);
-        
+
         // Update the last track to close the folder if needed
         // First calculate open levels without borrowing mutably
         let mut open_levels = 0;
@@ -167,7 +163,7 @@ impl AddChild for Vec<Track> {
                 open_levels += n; // n is negative, so this subtracts
             }
         }
-        
+
         // Now update the last track if needed
         if let Some(last_track) = before.last_mut() {
             // If it's not already closing, make it close
@@ -175,7 +171,7 @@ impl AddChild for Vec<Track> {
                 last_track.folder_depth_change = FolderDepthChange::ClosesLevels(-open_levels);
             }
         }
-        
+
         Some(before)
     }
 }
@@ -205,32 +201,42 @@ impl PrintTrackTree for Vec<Track> {
 impl PrintTrackTree for &[Track] {
     fn print_tree(&self) -> String {
         use colored::Colorize;
-        
+
         let tracks = self;
-        
+
         if tracks.is_empty() {
             return "(empty track list)\n".to_string();
         }
-        
+
         // Folder icon
         const FOLDER_ICON: &str = "📁";
-        
+
         // Helper function to determine group color based on track
         // Also takes parent track names for better context
-        fn get_group_color(track: &Track, display_name: &str, parent_stack: &[String]) -> Option<colored::ColoredString> {
-            use colored::Colorize;
+        fn get_group_color(
+            track: &Track,
+            display_name: &str,
+            parent_stack: &[String],
+        ) -> Option<colored::ColoredString> {
             use crate::tracks::MetadataKey;
-            
+            use colored::Colorize;
+
             // Try to parse ItemProperties from ext_state
             if let Some(ref ext_state) = track.ext_state {
                 if let Ok(props) = serde_json::from_str::<serde_json::Value>(ext_state) {
                     if let Some(group_prefix) = props.get("group_prefix").and_then(|v| v.as_str()) {
                         let group_prefix = group_prefix.to_lowercase();
-                        if group_prefix.contains("kick") || group_prefix.contains("snare") || 
-                           group_prefix.contains("tom") || group_prefix.contains("cymbal") || 
-                           group_prefix.contains("room") || group_prefix == "k" || 
-                           group_prefix == "s" || group_prefix == "t" || 
-                           group_prefix == "c" || group_prefix == "r" {
+                        if group_prefix.contains("kick")
+                            || group_prefix.contains("snare")
+                            || group_prefix.contains("tom")
+                            || group_prefix.contains("cymbal")
+                            || group_prefix.contains("room")
+                            || group_prefix == "k"
+                            || group_prefix == "s"
+                            || group_prefix == "t"
+                            || group_prefix == "c"
+                            || group_prefix == "r"
+                        {
                             return Some(display_name.red().bold());
                         }
                         if group_prefix.contains("bass") || group_prefix == "b" {
@@ -239,10 +245,14 @@ impl PrintTrackTree for &[Track] {
                         if group_prefix.contains("percussion") || group_prefix.contains("perc") {
                             return Some(display_name.truecolor(255, 165, 0).bold()); // Orange
                         }
-                        if group_prefix.contains("guitar electric") || group_prefix.contains("gtr e") {
+                        if group_prefix.contains("guitar electric")
+                            || group_prefix.contains("gtr e")
+                        {
                             return Some(display_name.blue().bold());
                         }
-                        if group_prefix.contains("guitar acoustic") || group_prefix.contains("gtr a") {
+                        if group_prefix.contains("guitar acoustic")
+                            || group_prefix.contains("gtr a")
+                        {
                             return Some(display_name.truecolor(0, 128, 128).bold());
                         }
                         if group_prefix.contains("keys") {
@@ -260,18 +270,31 @@ impl PrintTrackTree for &[Track] {
                     }
                 }
             }
-            
+
             // Try to use metadata or parent stack context
-            let parent_meta = track.metadata.get(&crate::tracks::MetadataKey::from(crate::tracks::MetadataKey::PARENT)).map(|s| s.to_lowercase());
-            
+            let parent_meta = track
+                .metadata
+                .get(&crate::tracks::MetadataKey::from(
+                    crate::tracks::MetadataKey::PARENT,
+                ))
+                .map(|s| s.to_lowercase());
+
             // Check for drum context
             let is_drum_context = parent_stack.iter().any(|p| {
                 let p = p.to_lowercase();
-                p.contains("kick") || p.contains("snare") || p.contains("tom") || 
-                p.contains("cymbal") || p.contains("room") || p.contains("drum")
+                p.contains("kick")
+                    || p.contains("snare")
+                    || p.contains("tom")
+                    || p.contains("cymbal")
+                    || p.contains("room")
+                    || p.contains("drum")
             }) || parent_meta.as_ref().is_some_and(|p| {
-                p.contains("kick") || p.contains("snare") || p.contains("tom") || 
-                p.contains("cymbal") || p.contains("room") || p.contains("drum")
+                p.contains("kick")
+                    || p.contains("snare")
+                    || p.contains("tom")
+                    || p.contains("cymbal")
+                    || p.contains("room")
+                    || p.contains("drum")
             });
 
             if is_drum_context {
@@ -279,9 +302,11 @@ impl PrintTrackTree for &[Track] {
             }
 
             // Check for bass context
-            let is_bass_context = parent_stack.iter().any(|p| p.to_lowercase().contains("bass")) ||
-                                parent_meta.as_ref().is_some_and(|p| p.contains("bass"));
-            
+            let is_bass_context = parent_stack
+                .iter()
+                .any(|p| p.to_lowercase().contains("bass"))
+                || parent_meta.as_ref().is_some_and(|p| p.contains("bass"));
+
             if is_bass_context {
                 return Some(display_name.yellow().bold());
             }
@@ -290,10 +315,10 @@ impl PrintTrackTree for &[Track] {
             let is_percussion_context = parent_stack.iter().any(|p| {
                 let p = p.to_lowercase();
                 p.contains("percussion") || p.contains("perc")
-            }) || parent_meta.as_ref().is_some_and(|p| {
-                p.contains("percussion") || p.contains("perc")
-            });
-            
+            }) || parent_meta
+                .as_ref()
+                .is_some_and(|p| p.contains("percussion") || p.contains("perc"));
+
             if is_percussion_context {
                 return Some(display_name.truecolor(255, 165, 0).bold()); // Orange
             }
@@ -302,13 +327,15 @@ impl PrintTrackTree for &[Track] {
             let is_guitar_context = parent_stack.iter().any(|p| {
                 let p = p.to_lowercase();
                 p.contains("guitar") || p.contains("gtr")
-            }) || parent_meta.as_ref().is_some_and(|p| {
-                p.contains("guitar") || p.contains("gtr")
-            });
+            }) || parent_meta
+                .as_ref()
+                .is_some_and(|p| p.contains("guitar") || p.contains("gtr"));
 
             if is_guitar_context {
-                let is_acoustic = parent_stack.iter().any(|p| p.to_lowercase().contains("acoustic")) ||
-                                 parent_meta.as_ref().is_some_and(|p| p.contains("acoustic"));
+                let is_acoustic = parent_stack
+                    .iter()
+                    .any(|p| p.to_lowercase().contains("acoustic"))
+                    || parent_meta.as_ref().is_some_and(|p| p.contains("acoustic"));
                 if is_acoustic {
                     return Some(display_name.truecolor(0, 128, 128).bold());
                 }
@@ -319,29 +346,38 @@ impl PrintTrackTree for &[Track] {
             let is_keys_context = parent_stack.iter().any(|p| {
                 let p = p.to_lowercase();
                 p.contains("keys") || p.contains("piano")
-            }) || parent_meta.as_ref().is_some_and(|p| {
-                p.contains("keys") || p.contains("piano")
-            });
+            }) || parent_meta
+                .as_ref()
+                .is_some_and(|p| p.contains("keys") || p.contains("piano"));
 
             if is_keys_context {
                 return Some(display_name.green().bold());
             }
 
             // Check for synth context
-            let is_synth_context = parent_stack.iter().any(|p| p.to_lowercase().contains("synth")) ||
-                                 parent_meta.as_ref().is_some_and(|p| p.contains("synth"));
-            
+            let is_synth_context = parent_stack
+                .iter()
+                .any(|p| p.to_lowercase().contains("synth"))
+                || parent_meta.as_ref().is_some_and(|p| p.contains("synth"));
+
             if is_synth_context {
                 return Some(display_name.purple().bold());
             }
 
             // Check for vocal context
-            let is_vocal_context = parent_stack.iter().any(|p| p.to_lowercase().contains("vocal") || p.to_lowercase() == "v" || p.to_lowercase() == "vocals") ||
-                                 parent_meta.as_ref().is_some_and(|p| p.contains("vocal") || p == "v" || p == "vocals");
-            
+            let is_vocal_context = parent_stack.iter().any(|p| {
+                p.to_lowercase().contains("vocal")
+                    || p.to_lowercase() == "v"
+                    || p.to_lowercase() == "vocals"
+            }) || parent_meta
+                .as_ref()
+                .is_some_and(|p| p.contains("vocal") || p == "v" || p == "vocals");
+
             if is_vocal_context {
-                let is_bgv = parent_stack.iter().any(|p| p.to_lowercase().contains("bgv")) ||
-                            parent_meta.as_ref().is_some_and(|p| p.contains("bgv"));
+                let is_bgv = parent_stack
+                    .iter()
+                    .any(|p| p.to_lowercase().contains("bgv"))
+                    || parent_meta.as_ref().is_some_and(|p| p.contains("bgv"));
                 if is_bgv {
                     return Some(display_name.purple().bold());
                 }
@@ -350,75 +386,98 @@ impl PrintTrackTree for &[Track] {
 
             // Fallback: infer from track name itself
             let name_lower = display_name.to_lowercase();
-            
-            if name_lower.contains("kick") || name_lower.contains("snare") || 
-               name_lower.contains("tom") || name_lower.contains("cymbal") || 
-               name_lower.contains("room") || name_lower.contains("drum") ||
-               name_lower == "in" || name_lower == "out" || name_lower == "trig" ||
-               name_lower == "top" || name_lower == "bottom" || name_lower == "verb" ||
-               name_lower == "sub" || name_lower == "amb" || name_lower == "rooms" ||
-               name_lower == "highhat" || name_lower == "oh" || name_lower == "ride" ||
-               name_lower == "1" || name_lower == "2" {
+
+            if name_lower.contains("kick")
+                || name_lower.contains("snare")
+                || name_lower.contains("tom")
+                || name_lower.contains("cymbal")
+                || name_lower.contains("room")
+                || name_lower.contains("drum")
+                || name_lower == "in"
+                || name_lower == "out"
+                || name_lower == "trig"
+                || name_lower == "top"
+                || name_lower == "bottom"
+                || name_lower == "verb"
+                || name_lower == "sub"
+                || name_lower == "amb"
+                || name_lower == "rooms"
+                || name_lower == "highhat"
+                || name_lower == "oh"
+                || name_lower == "ride"
+                || name_lower == "1"
+                || name_lower == "2"
+            {
                 return Some(display_name.red().bold());
             }
-            
+
             if name_lower.contains("bass") || name_lower == "di" || name_lower == "amp" {
                 return Some(display_name.yellow().bold());
             }
-            
-            if name_lower.contains("percussion") || name_lower.contains("perc") || 
-               name_lower.contains("shaker") || name_lower.contains("tambourine") ||
-               name_lower.contains("conga") || name_lower.contains("bongo") ||
-               name_lower.contains("cowbell") || name_lower.contains("woodblock") ||
-               name_lower.contains("clap") {
+
+            if name_lower.contains("percussion")
+                || name_lower.contains("perc")
+                || name_lower.contains("shaker")
+                || name_lower.contains("tambourine")
+                || name_lower.contains("conga")
+                || name_lower.contains("bongo")
+                || name_lower.contains("cowbell")
+                || name_lower.contains("woodblock")
+                || name_lower.contains("clap")
+            {
                 return Some(display_name.truecolor(255, 165, 0).bold()); // Orange
             }
-            
+
             if name_lower.contains("guitar") || name_lower.contains("gtr") {
                 if name_lower.contains("acoustic") {
                     return Some(display_name.truecolor(0, 128, 128).bold()); // Sea green
                 }
                 return Some(display_name.blue().bold());
             }
-            
-            if name_lower.contains("piano") || name_lower.contains("keys") || name_lower.contains("organ") {
+
+            if name_lower.contains("piano")
+                || name_lower.contains("keys")
+                || name_lower.contains("organ")
+            {
                 return Some(display_name.green().bold());
             }
-            
+
             if name_lower.contains("synth") || name_lower.contains("pad") {
                 return Some(display_name.purple().bold());
             }
-            
+
             if name_lower.contains("vocal") || name_lower == "lead" || name_lower == "double" {
                 if name_lower.contains("bgv") {
                     return Some(display_name.purple().bold());
                 }
                 return Some(display_name.truecolor(255, 192, 203).bold()); // Pink
             }
-            
+
             None
         }
-        
+
         let mut output = String::new();
         let mut parent_stack: Vec<String> = Vec::new();
-        
+
         // Pre-calculate absolute depths for all tracks
         let mut absolute_depths = Vec::with_capacity(tracks.len());
         let mut running_depth = 0;
         for track in tracks.iter() {
             absolute_depths.push(running_depth);
             running_depth += track.folder_depth_change.to_reaper_value();
-            if running_depth < 0 { running_depth = 0; }
+            if running_depth < 0 {
+                running_depth = 0;
+            }
         }
 
         for (i, track) in tracks.iter().enumerate() {
             let depth = absolute_depths[i] as usize;
-            
+
             // Update parent stack
             while parent_stack.len() > depth {
                 parent_stack.pop();
             }
-            
+
             // Determine if this is the last track at this depth (among its siblings)
             let is_last = {
                 let mut found_sibling = false;
@@ -434,7 +493,7 @@ impl PrintTrackTree for &[Track] {
                 }
                 !found_sibling
             };
-            
+
             // Build prefix
             let mut prefix = String::new();
             for j in 0..depth {
@@ -453,17 +512,17 @@ impl PrintTrackTree for &[Track] {
                     }
                     found
                 };
-                
+
                 if has_more_siblings_at_depth {
                     prefix.push_str("│   ");
                 } else {
                     prefix.push_str("    ");
                 }
             }
-            
+
             let connector = if is_last { "└── " } else { "├── " };
             let colored_connector = connector.bright_black();
-            
+
             // Shorten name if it starts with a parent's name
             let mut display_name = track.name.0.clone();
             if !parent_stack.is_empty() {
@@ -473,15 +532,15 @@ impl PrintTrackTree for &[Track] {
                         .replace(" (BUS)", "")
                         .replace(" Sum", "")
                         .replace(" Bus", "");
-                    
+
                     let parent_lower = parent_clean.to_lowercase();
                     let search_prefixes = vec![
                         parent_lower.clone() + " ",
                         if parent_lower.ends_with('s') {
-                            parent_lower[..parent_lower.len()-1].to_string() + " "
+                            parent_lower[..parent_lower.len() - 1].to_string() + " "
                         } else {
                             parent_lower.clone() + "s "
-                        }
+                        },
                     ];
 
                     let mut found_prefix = false;
@@ -491,7 +550,8 @@ impl PrintTrackTree for &[Track] {
                             if remaining.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                                 // If it's numeric, use first char of parent as prefix (e.g., Tom 1 -> T1)
                                 if let Some(first_char) = parent_clean.chars().next() {
-                                    display_name = format!("{}{}", first_char.to_uppercase(), remaining);
+                                    display_name =
+                                        format!("{}{}", first_char.to_uppercase(), remaining);
                                 } else {
                                     display_name = remaining.to_string();
                                 }
@@ -502,29 +562,80 @@ impl PrintTrackTree for &[Track] {
                             break;
                         }
                     }
-                    if found_prefix { break; }
+                    if found_prefix {
+                        break;
+                    }
                 }
             }
-            
+
             // Clean up common labels for display
             display_name = display_name
                 .replace(" (SUM)", " Sum")
                 .replace("(SUM)", "Sum")
                 .replace(" (BUS)", " Bus")
                 .replace("(BUS)", "Bus");
-            
+
             display_name = display_name.trim().to_string();
 
             let colored_name = get_group_color(track, &display_name, &parent_stack)
                 .unwrap_or_else(|| display_name.normal());
-            
+
             // Build item display with colored items
             if track.is_folder {
                 if track.items.is_empty() {
-                    output.push_str(&format!("{}{}{} {}\n", prefix, colored_connector, colored_name, FOLDER_ICON));
+                    output.push_str(&format!(
+                        "{}{}{} {}\n",
+                        prefix, colored_connector, colored_name, FOLDER_ICON
+                    ));
                 } else {
                     // Collect item names
-                    let item_names: Vec<String> = track.items.iter().map(|item| {
+                    let item_names: Vec<String> = track
+                        .items
+                        .iter()
+                        .map(|item| {
+                            if !item.name.is_empty() {
+                                item.name.clone()
+                            } else if let Some(first_take) = item.takes.first() {
+                                if let Some(ref source) = first_take.source {
+                                    source.file_path.clone()
+                                } else if !first_take.name.is_empty() {
+                                    first_take.name.clone()
+                                } else {
+                                    "Item".to_string()
+                                }
+                            } else {
+                                "Item".to_string()
+                            }
+                        })
+                        .collect();
+
+                    // Format with colored items
+                    let colored_items: Vec<colored::ColoredString> =
+                        item_names.iter().map(|name| name.cyan().bold()).collect();
+
+                    let items_str = colored_items
+                        .iter()
+                        .map(|c| c.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    output.push_str(&format!(
+                        "{}{}{} {} : {}\n",
+                        prefix, colored_connector, colored_name, FOLDER_ICON, items_str
+                    ));
+                }
+                parent_stack.push(track.name.0.clone());
+            } else if track.items.is_empty() {
+                output.push_str(&format!(
+                    "{}{}{}\n",
+                    prefix, colored_connector, colored_name
+                ));
+            } else {
+                // Collect item names
+                let item_names: Vec<String> = track
+                    .items
+                    .iter()
+                    .map(|item| {
                         if !item.name.is_empty() {
                             item.name.clone()
                         } else if let Some(first_take) = item.takes.first() {
@@ -538,55 +649,26 @@ impl PrintTrackTree for &[Track] {
                         } else {
                             "Item".to_string()
                         }
-                    }).collect();
-                    
-                    // Format with colored items
-                    let colored_items: Vec<colored::ColoredString> = item_names.iter()
-                        .map(|name| name.cyan().bold())
-                        .collect();
-                    
-                    let items_str = colored_items.iter()
-                        .map(|c| c.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    
-                    output.push_str(&format!("{}{}{} {} : {}\n", prefix, colored_connector, colored_name, FOLDER_ICON, items_str));
-                }
-                parent_stack.push(track.name.0.clone());
-            } else if track.items.is_empty() {
-                output.push_str(&format!("{}{}{}\n", prefix, colored_connector, colored_name));
-            } else {
-                // Collect item names
-                let item_names: Vec<String> = track.items.iter().map(|item| {
-                    if !item.name.is_empty() {
-                        item.name.clone()
-                    } else if let Some(first_take) = item.takes.first() {
-                        if let Some(ref source) = first_take.source {
-                            source.file_path.clone()
-                        } else if !first_take.name.is_empty() {
-                            first_take.name.clone()
-                        } else {
-                            "Item".to_string()
-                        }
-                    } else {
-                        "Item".to_string()
-                    }
-                }).collect();
-                
-                // Format with colored items
-                let colored_items: Vec<colored::ColoredString> = item_names.iter()
-                    .map(|name| name.cyan().bold())
+                    })
                     .collect();
-                
-                let items_str = colored_items.iter()
+
+                // Format with colored items
+                let colored_items: Vec<colored::ColoredString> =
+                    item_names.iter().map(|name| name.cyan().bold()).collect();
+
+                let items_str = colored_items
+                    .iter()
                     .map(|c| c.to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                
-                output.push_str(&format!("{}{}{} : {}\n", prefix, colored_connector, colored_name, items_str));
+
+                output.push_str(&format!(
+                    "{}{}{} : {}\n",
+                    prefix, colored_connector, colored_name, items_str
+                ));
             }
         }
-        
+
         output
     }
 }

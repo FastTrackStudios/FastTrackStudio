@@ -1,6 +1,6 @@
 //! Functions for reading lyrics data from REAPER
 
-use reaper_high::{Reaper, Project, Track};
+use reaper_high::{Project, Reaper, Track};
 use reaper_medium::MediaItemTake;
 use tracing::warn;
 
@@ -19,14 +19,17 @@ pub fn find_track_by_name(project: Project, name: &str) -> Option<Track> {
 /// Find a folder track by name and return all tracks within that folder
 pub fn find_folder_tracks(project: Project, folder_name: &str) -> Option<Vec<Track>> {
     let folder_track = find_track_by_name(project, folder_name)?;
-    
+
     // Check if it's a folder track (folder_depth_change == 1)
     let folder_depth_change = folder_track.folder_depth_change();
     if folder_depth_change != 1 {
-        warn!(folder_name = folder_name, "Track found but is not a folder track");
+        warn!(
+            folder_name = folder_name,
+            "Track found but is not a folder track"
+        );
         return None;
     }
-    
+
     // Get the folder track's raw pointer and index before moving
     let folder_track_raw = folder_track.raw();
     let folder_index = {
@@ -39,52 +42,53 @@ pub fn find_folder_tracks(project: Project, folder_name: &str) -> Option<Vec<Tra
         }
         idx
     };
-    
+
     // Collect all tracks within the folder
     let mut folder_tracks = vec![folder_track];
     let mut folder_depth = 1i32;
-    
+
     // Iterate through tracks after the folder track
     for i in (folder_index + 1)..project.track_count() {
         if let Some(track) = project.track_by_index(i) {
             folder_depth += track.folder_depth_change();
-            
+
             // If we've exited the folder (depth <= 0), stop
             if folder_depth <= 0 {
                 break;
             }
-            
+
             // Add track to folder list
             folder_tracks.push(track);
         }
     }
-    
+
     Some(folder_tracks)
 }
 
 /// Read lyrics from a specific REAPER project
-/// 
+///
 /// Looks for:
 /// - A folder track named "LYRICS"
 /// - A track named "SLIDES" within that folder (contains text items with slide text)
 /// - Other tracks in the LYRICS folder with MIDI items (contains syllable timing and MIDI notes)
 pub fn read_lyrics_from_project(project: Project) -> Result<LyricsData, LyricsReadError> {
     let reaper = Reaper::get();
-    
+
     // Find LYRICS folder
-    let lyrics_folder_tracks = find_folder_tracks(project, "LYRICS")
-        .ok_or(LyricsReadError::LyricsFolderNotFound)?;
-    
+    let lyrics_folder_tracks =
+        find_folder_tracks(project, "LYRICS").ok_or(LyricsReadError::LyricsFolderNotFound)?;
+
     // Find SLIDES track
     let slides_track = lyrics_folder_tracks
         .iter()
         .find(|track| {
-            track.name()
+            track
+                .name()
                 .map(|n| n.to_str().eq_ignore_ascii_case("SLIDES"))
                 .unwrap_or(false)
         })
         .ok_or(LyricsReadError::SlidesTrackNotFound)?;
-    
+
     // Read text items from SLIDES track
     let mut slides = Vec::new();
     for item in slides_track.items() {
@@ -94,7 +98,7 @@ pub fn read_lyrics_from_project(project: Project) -> Result<LyricsData, LyricsRe
             let notes_key = std::ffi::CString::new("P_NOTES").expect("CString::new failed");
             let mut buffer = vec![0u8; 4096];
             let buffer_ptr = buffer.as_mut_ptr() as *mut std::os::raw::c_char;
-            
+
             let item_raw = item.raw();
             let success = medium_reaper.low().GetSetMediaItemInfo_String(
                 item_raw.as_ptr(),
@@ -102,7 +106,7 @@ pub fn read_lyrics_from_project(project: Project) -> Result<LyricsData, LyricsRe
                 buffer_ptr,
                 false, // setNewValue = false (get value)
             );
-            
+
             if success {
                 let c_str = std::ffi::CStr::from_ptr(buffer_ptr);
                 c_str.to_string_lossy().to_string()
@@ -110,11 +114,11 @@ pub fn read_lyrics_from_project(project: Project) -> Result<LyricsData, LyricsRe
                 String::new()
             }
         };
-        
+
         if !notes.trim().is_empty() {
             let position = item.position().get();
             let length = item.length().get();
-            
+
             slides.push(SlideData {
                 text: notes,
                 position,
@@ -122,22 +126,23 @@ pub fn read_lyrics_from_project(project: Project) -> Result<LyricsData, LyricsRe
             });
         }
     }
-    
+
     // Find other tracks in LYRICS folder with MIDI items
     let mut midi_tracks = Vec::new();
     for track in lyrics_folder_tracks {
         // Skip the SLIDES track
-        if track.name()
+        if track
+            .name()
             .map(|n| n.to_str().eq_ignore_ascii_case("SLIDES"))
             .unwrap_or(false)
         {
             continue;
         }
-        
+
         // Check if track has MIDI items
         let mut has_midi = false;
         let mut midi_items = Vec::new();
-        
+
         for item in track.items() {
             // Get active take
             let item_raw = item.raw();
@@ -149,19 +154,19 @@ pub fn read_lyrics_from_project(project: Project) -> Result<LyricsData, LyricsRe
                     None => continue,
                 }
             };
-            
+
             // Check if take is MIDI
             let is_midi = unsafe {
                 let medium_reaper = reaper.medium_reaper();
                 medium_reaper.low().TakeIsMIDI(take.as_ptr())
             };
-            
+
             if is_midi {
                 has_midi = true;
-                
+
                 // Get MIDI events using MIDI_GetAllEvts
                 let midi_events = get_midi_events_from_take(take)?;
-                
+
                 midi_items.push(MidiItemData {
                     position: item.position().get(),
                     length: item.length().get(),
@@ -169,19 +174,20 @@ pub fn read_lyrics_from_project(project: Project) -> Result<LyricsData, LyricsRe
                 });
             }
         }
-        
+
         if has_midi {
-            let track_name = track.name()
+            let track_name = track
+                .name()
                 .map(|n| n.to_str().to_string())
                 .unwrap_or_else(|| "Unknown".to_string());
-            
+
             midi_tracks.push(MidiTrackData {
                 name: track_name.clone(),
                 items: midi_items,
             });
         }
     }
-    
+
     Ok(LyricsData {
         slides,
         midi_tracks,
@@ -189,7 +195,7 @@ pub fn read_lyrics_from_project(project: Project) -> Result<LyricsData, LyricsRe
 }
 
 /// Read lyrics from REAPER project (uses current project)
-/// 
+///
 /// Looks for:
 /// - A folder track named "LYRICS"
 /// - A track named "SLIDES" within that folder (contains text items with slide text)
@@ -207,48 +213,52 @@ pub fn convert_lyrics_data_to_lyrics(
     song_name: String,
     song: &crate::setlist::core::Song,
 ) -> Result<crate::lyrics::core::Lyrics, String> {
-    use crate::lyrics::core::{Lyrics, LyricSection, LyricLine};
-    
+    use crate::lyrics::core::{LyricLine, LyricSection, Lyrics};
+
     let mut lyrics = Lyrics::new(song_name);
-    
+
     // Sort slides by position
     let mut slides = lyrics_data.slides.clone();
-    slides.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap_or(std::cmp::Ordering::Equal));
-    
+    slides.sort_by(|a, b| {
+        a.position
+            .partial_cmp(&b.position)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
     // Create a map of section name -> LyricSection for easy lookup
-    let mut section_map: std::collections::HashMap<String, LyricSection> = std::collections::HashMap::new();
-    
+    let mut section_map: std::collections::HashMap<String, LyricSection> =
+        std::collections::HashMap::new();
+
     // Process each slide
     for slide in &slides {
         // Find which song section this slide belongs to based on position
         let section_name = find_section_for_position(slide.position, song);
-        
+
         // Get or create the lyric section
-        let section = section_map.entry(section_name.clone())
-            .or_insert_with(|| {
-                let mut new_section = LyricSection::new(section_name.clone());
-                // Set color from the matching song section
-                if let Some(song_section) = find_song_section_by_name(&section_name, song) {
-                    if let Some(color) = song_section.color {
-                        new_section.set_metadata("color", color.to_string());
-                    }
+        let section = section_map.entry(section_name.clone()).or_insert_with(|| {
+            let mut new_section = LyricSection::new(section_name.clone());
+            // Set color from the matching song section
+            if let Some(song_section) = find_song_section_by_name(&section_name, song) {
+                if let Some(color) = song_section.color {
+                    new_section.set_metadata("color", color.to_string());
                 }
-                new_section
-            });
-        
+            }
+            new_section
+        });
+
         // Create a lyric line from the slide text
         let mut line = LyricLine::new(slide.text.clone());
-        
+
         // Set timing information from slide position and length
         // Position is absolute project time, but we need song-relative time
         // For now, use absolute position (will be adjusted if needed)
         line.start_time = Some(slide.position);
         line.end_time = Some(slide.position + slide.length);
-        
+
         // Add the line to the section
         section.add_line(line);
     }
-    
+
     // Ensure all song sections are represented, even if they have no slides
     // Add empty lines for sections that don't have any lyrics (like instrumentals)
     for song_section in &song.sections {
@@ -267,23 +277,25 @@ pub fn convert_lyrics_data_to_lyrics(
             }
         }
     }
-    
+
     // Convert section map to vector, sorted by song section order
     // We'll sort by finding the section's position in the song
     let mut sections: Vec<LyricSection> = section_map.into_values().collect();
-    
+
     // Sort sections by their position in the song (using section start time)
     sections.sort_by(|a, b| {
         let a_pos = find_section_start_position(a, song);
         let b_pos = find_section_start_position(b, song);
-        a_pos.partial_cmp(&b_pos).unwrap_or(std::cmp::Ordering::Equal)
+        a_pos
+            .partial_cmp(&b_pos)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
-    
+
     // Add all sections to lyrics
     for section in sections {
         lyrics.add_section(section);
     }
-    
+
     Ok(lyrics)
 }
 
@@ -291,20 +303,27 @@ pub fn convert_lyrics_data_to_lyrics(
 fn find_section_for_position(position_seconds: f64, song: &crate::setlist::core::Song) -> String {
     // Find the section that contains this position
     for section in &song.sections {
-        if let (Some(section_start), Some(section_end)) = (section.start_seconds(), section.end_seconds()) {
+        if let (Some(section_start), Some(section_end)) =
+            (section.start_seconds(), section.end_seconds())
+        {
             if position_seconds >= section_start && position_seconds <= section_end {
                 return section.name.as_deref().unwrap_or("Unknown").to_string();
             }
         }
     }
-    
+
     // If no section found, use "Default"
     "Default".to_string()
 }
 
 /// Find a song section by name
-fn find_song_section_by_name<'a>(name: &str, song: &'a crate::setlist::core::Song) -> Option<&'a crate::setlist::core::Section> {
-    song.sections.iter().find(|s| s.name.as_deref() == Some(name))
+fn find_song_section_by_name<'a>(
+    name: &str,
+    song: &'a crate::setlist::core::Song,
+) -> Option<&'a crate::setlist::core::Section> {
+    song.sections
+        .iter()
+        .find(|s| s.name.as_deref() == Some(name))
 }
 
 /// Find the start position of a section in the song
@@ -318,7 +337,7 @@ fn find_section_start_position(
             return song_section.start_seconds().unwrap_or(0.0);
         }
     }
-    
+
     // If not found, return 0.0 (shouldn't happen, but handle gracefully)
     0.0
 }
@@ -328,37 +347,34 @@ fn get_midi_events_from_take(take: MediaItemTake) -> Result<Vec<MidiEventData>, 
     unsafe {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
-        
+
         // First call: get required buffer size
         let mut buf_size: i32 = 0;
-        let success = medium_reaper.low().MIDI_GetAllEvts(
-            take.as_ptr(),
-            std::ptr::null_mut(),
-            &mut buf_size,
-        );
-        
+        let success =
+            medium_reaper
+                .low()
+                .MIDI_GetAllEvts(take.as_ptr(), std::ptr::null_mut(), &mut buf_size);
+
         if !success || buf_size <= 0 {
             return Ok(Vec::new()); // No MIDI events
         }
-        
+
         // Second call: get actual MIDI data
         let mut buffer = vec![0u8; buf_size as usize];
         let buffer_ptr = buffer.as_mut_ptr() as *mut std::os::raw::c_char;
-        let success = medium_reaper.low().MIDI_GetAllEvts(
-            take.as_ptr(),
-            buffer_ptr,
-            &mut buf_size,
-        );
-        
+        let success = medium_reaper
+            .low()
+            .MIDI_GetAllEvts(take.as_ptr(), buffer_ptr, &mut buf_size);
+
         if !success {
             return Err(LyricsReadError::MidiReadFailed);
         }
-        
+
         // Parse MIDI buffer
         // Format: { int offset, char flag, int msglen, unsigned char msg[] }
         let mut events = Vec::new();
         let mut pos = 0usize;
-        
+
         while pos < buffer.len() {
             // Read offset (i32, 4 bytes)
             if pos + 4 > buffer.len() {
@@ -371,14 +387,14 @@ fn get_midi_events_from_take(take: MediaItemTake) -> Result<Vec<MidiEventData>, 
                 buffer[pos + 3],
             ]);
             pos += 4;
-            
+
             // Read flag (u8, 1 byte)
             if pos >= buffer.len() {
                 break;
             }
             let flag = buffer[pos];
             pos += 1;
-            
+
             // Read msglen (i32, 4 bytes)
             if pos + 4 > buffer.len() {
                 break;
@@ -390,21 +406,21 @@ fn get_midi_events_from_take(take: MediaItemTake) -> Result<Vec<MidiEventData>, 
                 buffer[pos + 3],
             ]);
             pos += 4;
-            
+
             // Read msg (msglen bytes)
             if pos + msglen as usize > buffer.len() {
                 break;
             }
             let msg = buffer[pos..pos + msglen as usize].to_vec();
             pos += msglen as usize;
-            
+
             events.push(MidiEventData {
                 offset_ticks: offset,
                 flag,
                 message: msg,
             });
         }
-        
+
         Ok(events)
     }
 }

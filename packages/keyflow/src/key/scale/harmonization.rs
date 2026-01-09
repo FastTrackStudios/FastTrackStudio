@@ -5,7 +5,7 @@
 ///! - Build chords (triads through 13ths) at each scale degree
 ///! - Analyze harmonic structure of any scale mode
 use super::ScaleMode;
-use crate::chord::{from_semitones, Chord};
+use crate::chord::{Chord, from_semitones};
 use crate::primitives::{MusicalNote, Note, RootNotation};
 use serde::{Deserialize, Serialize};
 
@@ -675,8 +675,7 @@ mod tests {
     fn test_analyze_scale_harmony() {
         let mode = ScaleMode::ionian();
         let root = c_note();
-        let analysis =
-            analyze_scale_harmony(mode, root.clone(), HarmonizationDepth::Triads);
+        let analysis = analyze_scale_harmony(mode, root.clone(), HarmonizationDepth::Triads);
 
         assert!(!analysis.is_empty());
         assert!(analysis.contains("Ionian"));

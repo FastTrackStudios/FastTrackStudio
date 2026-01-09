@@ -29,4 +29,4 @@ atomic_float = { workspace = true }
 futures-timer = "3.0"
 
 # UI component library
-lumen-blocks = { workspace = true }
+# lumen-blocks = { workspace = true }  # Disabled - requires standard dioxus, not dioxus-native

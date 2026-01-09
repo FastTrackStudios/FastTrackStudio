@@ -50,9 +50,9 @@ impl From<DrumKit> for Group<ItemMetadata> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{default_config, OrganizeIntoTracks};
+    use crate::{OrganizeIntoTracks, default_config};
     use daw::tracks::item::Item;
-    use daw::tracks::{assert_tracks_equal, TrackStructureBuilder};
+    use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 
     #[test]
     fn full_drum_kit_integration_test() {

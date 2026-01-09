@@ -167,4 +167,3 @@ impl Default for BusCompactSettings {
         }
     }
 }
-

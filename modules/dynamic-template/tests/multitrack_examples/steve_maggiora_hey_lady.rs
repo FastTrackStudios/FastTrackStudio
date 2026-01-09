@@ -70,14 +70,14 @@ fn steve_maggiora_hey_lady() {
         "Vocal.Magic.83.5BPM.L.wav",
         "Vocal.Magic.83.5BPM.R.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
 }

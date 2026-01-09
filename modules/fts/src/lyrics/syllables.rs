@@ -3,18 +3,20 @@
 //! This module provides functions for counting syllables in words and text.
 //! Uses regex-based heuristics to estimate syllable counts.
 
-use regex::Regex;
 use once_cell::sync::Lazy;
+use regex::Regex;
 
 // Pre-compile regex patterns for better performance
 static REGEX_ALPHA: Lazy<Regex> = Lazy::new(|| Regex::new(r"[^\w\s]").unwrap());
 static REGEX_VOWEL_GROUPS: Lazy<Regex> = Lazy::new(|| Regex::new(r"([aeiuo]+)").unwrap());
 static REGEX_Y_AFTER_CONSONANT: Lazy<Regex> = Lazy::new(|| Regex::new(r"([dlmnrstz]y)").unwrap());
-static REGEX_AXE_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"([aiou][b-df-hj-np-rs-v-z]e)").unwrap());
+static REGEX_AXE_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"([aiou][b-df-hj-np-rs-v-z]e)").unwrap());
 static REGEX_AXES_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"([aiou][cs]es)").unwrap());
 static REGEX_ASTE_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"(aste)").unwrap());
 static REGEX_APSE_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"(apse)").unwrap());
-static REGEX_TED_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"([^b-df-hj-np-tv-z]ted$)").unwrap());
+static REGEX_TED_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"([^b-df-hj-np-tv-z]ted$)").unwrap());
 static REGEX_EXE_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"(e[rsvy]e)").unwrap());
 static REGEX_CONTRACTION_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"(d[nv])").unwrap());
 static REGEX_ELVE_PATTERN: Lazy<Regex> = Lazy::new(|| Regex::new(r"(elve[^t])").unwrap());
@@ -266,12 +268,9 @@ mod tests {
         for case in cases {
             let count = syllables_in_words(case.0);
             assert_eq!(
-                count,
-                case.1,
+                count, case.1,
                 "Failed for line: '{}' - expected {}, got {}",
-                case.0,
-                case.1,
-                count
+                case.0, case.1, count
             );
         }
     }
@@ -292,7 +291,12 @@ mod tests {
             let count = syllables_in_words(line);
             // Verify it's a reasonable count (at least 1, and not absurdly high)
             assert!(count > 0, "Line '{}' should have syllables", line);
-            assert!(count < 50, "Line '{}' has suspiciously high syllable count: {}", line, count);
+            assert!(
+                count < 50,
+                "Line '{}' has suspiciously high syllable count: {}",
+                line,
+                count
+            );
         }
     }
 
@@ -310,10 +314,13 @@ mod tests {
         assert_eq!(syllables_in_words("hello, world!"), 3);
         assert_eq!(syllables_in_words("Well! Well!"), 2);
         assert_eq!(syllables_in_words("(Woo) (Are you ready?)"), 5);
-        
+
         // Test with contractions - these may have different counts
         let count = syllables_in_words("I'm... ready?");
-        assert!(count >= 3, "I'm... ready? should have at least 3 syllables, got {}", count);
+        assert!(
+            count >= 3,
+            "I'm... ready? should have at least 3 syllables, got {}",
+            count
+        );
     }
 }
-

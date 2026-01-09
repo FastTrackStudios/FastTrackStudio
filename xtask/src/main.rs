@@ -70,6 +70,15 @@ enum Task {
         #[arg(long)]
         release: bool,
     },
+    /// Bundle an audio plugin (CLAP/VST3)
+    Bundle {
+        /// The plugin package name(s) to bundle
+        #[arg(required = true)]
+        packages: Vec<String>,
+        /// Build in release mode
+        #[arg(long)]
+        release: bool,
+    },
 }
 
 fn main() {
@@ -91,6 +100,7 @@ fn try_main() -> Result<(), DynError> {
         Task::Ci => run_ci_pipeline()?,
         Task::Dev { skip_types } => start_dev_server(skip_types)?,
         Task::Build { release } => build_desktop_app(release)?,
+        Task::Bundle { packages, release } => bundle_plugin(packages, release)?,
     }
 
     Ok(())
@@ -137,10 +147,7 @@ fn generate_types(output: Option<String>, no_index: bool) -> Result<(), DynError
 }
 
 fn clean_module_bindings() -> Result<(), DynError> {
-    let modules_to_clean = [
-        "modules/daw/bindings",
-        "modules/fts/bindings",
-    ];
+    let modules_to_clean = ["modules/daw/bindings", "modules/fts/bindings"];
 
     for module_bindings in &modules_to_clean {
         let bindings_path = project_root().join(module_bindings);
@@ -323,6 +330,36 @@ fn build_desktop_app(release: bool) -> Result<(), DynError> {
 
     println!("✅ Desktop application built successfully!");
     Ok(())
+}
+
+fn bundle_plugin(packages: Vec<String>, release: bool) -> Result<(), DynError> {
+    println!("📦 Bundling audio plugin(s)...");
+
+    // Build the arguments for nih_plug_xtask
+    let mut args: Vec<String> = vec!["bundle".to_string()];
+
+    for pkg in &packages {
+        args.push("-p".to_string());
+        args.push(pkg.clone());
+    }
+
+    if release {
+        args.push("--release".to_string());
+    }
+
+    // Use nih_plug_xtask's main function directly
+    // We need to set up the environment as if called from cargo xtask
+    std::env::set_current_dir(project_root())?;
+
+    // Call nih_plug_xtask's main with our arguments
+    match nih_plug_xtask::main_with_args("xtask", args) {
+        Ok(()) => {
+            println!("✅ Plugin(s) bundled successfully!");
+            println!("📍 Output: {}/target/bundled/", project_root().display());
+            Ok(())
+        }
+        Err(e) => Err(format!("Plugin bundling failed: {}", e).into()),
+    }
 }
 
 fn cargo() -> String {

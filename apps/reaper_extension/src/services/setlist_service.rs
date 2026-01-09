@@ -5,8 +5,8 @@
 use crate::infrastructure::reactive_polling::ReactivePollingService;
 use daw::project::Project;
 use daw::transport::Transport;
-use fts::setlist::infra::traits::SetlistBuilder;
 use fts::setlist::SetlistApi;
+use fts::setlist::infra::traits::SetlistBuilder;
 use reaper_high::{Project as ReaperProject, Reaper};
 use std::sync::{Arc, Mutex};
 use tracing::info;

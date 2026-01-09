@@ -26,14 +26,14 @@ fn steve_maggiora_its_too_late() {
         "20.Vocal.Magic_02.wav",
         "21.It's Too Late Mix_02.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
 }

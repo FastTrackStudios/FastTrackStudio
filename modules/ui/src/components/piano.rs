@@ -17,19 +17,19 @@ pub struct PianoProps {
     /// Optional width for the piano (default: auto)
     #[props(default = "auto".to_string())]
     pub width: String,
-    
+
     /// Optional height for the piano container (default: 100%)
     #[props(default = "100%".to_string())]
     pub height: String,
-    
+
     /// Zoom level (1.0 = 100%, 2.0 = 200%, etc.)
     #[props(default = 1.0)]
     pub zoom: f64,
-    
+
     /// Callback when a key is clicked
     #[props(default)]
     pub on_key_click: Option<EventHandler<MidiNote>>,
-    
+
     /// Currently pressed/selected keys
     #[props(default)]
     pub pressed_keys: Vec<MidiNote>,
@@ -41,14 +41,16 @@ pub fn Piano(props: PianoProps) -> Element {
     // Generate piano keys (memoized)
     let keys = use_memo(move || {
         let mut keys = Vec::new();
-        
+
         // Piano range: A0 (MIDI 21) to C8 (MIDI 108) = 88 keys
-        let note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        let note_names = [
+            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+        ];
         let black_key_indices = [1, 3, 6, 8, 10]; // C#, D#, F#, G#, A#
-        
+
         // Start from A0 (MIDI 21)
         let mut midi_note = 21;
-        
+
         // Generate all 88 keys
         while midi_note <= 108 {
             let note_index = (midi_note % 12) as usize;
@@ -56,23 +58,24 @@ pub fn Piano(props: PianoProps) -> Element {
             let note_name_str = note_names[note_index];
             let octave = (midi_note / 12) - 1;
             let note_name = format!("{}{}", note_name_str, octave);
-            
+
             keys.push(PianoKey {
                 midi_note,
                 is_black,
                 note_name,
             });
-            
+
             midi_note += 1;
         }
-        
+
         keys
     });
-    
-    let pressed_keys_set: std::collections::HashSet<MidiNote> = props.pressed_keys.iter().copied().collect();
+
+    let pressed_keys_set: std::collections::HashSet<MidiNote> =
+        props.pressed_keys.iter().copied().collect();
     let keys_vec = keys();
     let keys_reversed: Vec<PianoKey> = keys_vec.iter().rev().cloned().collect();
-    
+
     rsx! {
         div {
             class: "relative border border-border rounded-lg overflow-hidden bg-muted w-full h-full",
@@ -150,4 +153,3 @@ pub fn Piano(props: PianoProps) -> Element {
         }
     }
 }
-

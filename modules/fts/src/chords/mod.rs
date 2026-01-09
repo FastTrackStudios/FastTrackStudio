@@ -15,8 +15,8 @@ pub use types::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use reactive::{
-    ChordsStreams, ChordsReactiveState, ChordsReactiveService,
-    DefaultChordsReactiveService, EventStreamSubject,
+    ChordsReactiveService, ChordsReactiveState, ChordsStreams, DefaultChordsReactiveService,
+    EventStreamSubject,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -24,4 +24,3 @@ pub use reactive::irpc::{ChartApi, ChartUpdateMessage};
 
 #[cfg(feature = "dioxus")]
 pub use infra::CHART_STATE as CHART_STATE_SIGNAL;
-

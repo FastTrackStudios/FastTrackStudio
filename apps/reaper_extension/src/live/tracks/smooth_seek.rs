@@ -7,7 +7,7 @@
 //! Based on SWS Region Playlist smooth seek behavior.
 
 use reaper_high::{Project, Reaper};
-use reaper_medium::{PositionInSeconds, BookmarkRef, BookmarkId, MarkerOrRegionPosition};
+use reaper_medium::{BookmarkId, BookmarkRef, MarkerOrRegionPosition, PositionInSeconds};
 use std::sync::{Arc, Mutex, OnceLock};
 use tracing::{debug, info, warn};
 
@@ -70,12 +70,12 @@ impl SmoothSeekState {
             quantize_level: SmoothSeekQuantize::default(),
         }
     }
-    
+
     /// Set the quantize level for smooth seeking
     pub fn set_quantize_level(&mut self, level: SmoothSeekQuantize) {
         self.quantize_level = level;
     }
-    
+
     /// Get the current quantize level
     pub fn quantize_level(&self) -> SmoothSeekQuantize {
         self.quantize_level
@@ -93,14 +93,14 @@ impl SmoothSeekHandler {
             state: Arc::new(Mutex::new(SmoothSeekState::new())),
         }
     }
-    
+
     /// Set the quantize level for smooth seeking
     pub fn set_quantize_level(&self, level: SmoothSeekQuantize) {
         let mut state = self.state.lock().unwrap();
         state.set_quantize_level(level);
         info!(quantize_level = ?level, "Set smooth seek quantize level");
     }
-    
+
     /// Get the current quantize level
     pub fn quantize_level(&self) -> SmoothSeekQuantize {
         let state = self.state.lock().unwrap();
@@ -108,7 +108,7 @@ impl SmoothSeekHandler {
     }
 
     /// Queue a smooth seek to a specific position
-    /// 
+    ///
     /// The seek will be performed at the next measure start (quantize point).
     pub fn queue_seek(
         &self,
@@ -119,35 +119,39 @@ impl SmoothSeekHandler {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
         let project_context = project.context();
-        
+
         // Get current play position using transport adapter
         use fts::setlist::infra::reaper::ReaperTransport;
         let transport = ReaperTransport::new(project.clone());
-        let current_pos = transport.read_transport()
+        let current_pos = transport
+            .read_transport()
             .ok()
             .and_then(|t| Some(PositionInSeconds::new(t.playhead_position.time.to_seconds()).ok()?))
             .unwrap_or_else(|| {
-                project.edit_cursor_position().unwrap_or(PositionInSeconds::ZERO)
+                project
+                    .edit_cursor_position()
+                    .unwrap_or(PositionInSeconds::ZERO)
             });
-        
+
         // Get current beat info
         let beat_info = medium_reaper.time_map_2_time_to_beats(project_context, current_pos);
         let current_measure = beat_info.measure_index;
         let beats_since_measure = beat_info.beats_since_measure.get();
         let time_sig = beat_info.time_signature;
-        
+
         // Get quantize level from state
         let quantize_level = {
             let state = self.state.lock().unwrap();
             state.quantize_level()
         };
-        
+
         // Calculate target quantize position based on quantize level
         let target_quantize_time = match quantize_level {
             SmoothSeekQuantize::Measure => {
                 // Next measure start (current behavior)
-        let target_measure_index = current_measure + 1;
-                let measure_info = medium_reaper.time_map_get_measure_info(project_context, target_measure_index);
+                let target_measure_index = current_measure + 1;
+                let measure_info =
+                    medium_reaper.time_map_get_measure_info(project_context, target_measure_index);
                 measure_info.start_time
             }
             SmoothSeekQuantize::Beat => {
@@ -156,10 +160,12 @@ impl SmoothSeekHandler {
                 // Next beat = floor(beats_since_measure) + 1
                 let next_beat = beats_since_measure.floor() + 1.0;
                 // Get the measure start time
-                let measure_info = medium_reaper.time_map_get_measure_info(project_context, current_measure);
+                let measure_info =
+                    medium_reaper.time_map_get_measure_info(project_context, current_measure);
                 let measure_start = measure_info.start_time.get();
                 // Get the next measure start to calculate measure duration
-                let next_measure_info = medium_reaper.time_map_get_measure_info(project_context, current_measure + 1);
+                let next_measure_info =
+                    medium_reaper.time_map_get_measure_info(project_context, current_measure + 1);
                 let next_measure_start = next_measure_info.start_time.get();
                 let measure_duration = next_measure_start - measure_start;
                 // Calculate time offset within the measure for the target beat
@@ -175,10 +181,12 @@ impl SmoothSeekHandler {
                 // This gives us the next 0.5 beat boundary (000 or 500 subdivisions)
                 let next_half_beat = (beats_since_measure * 2.0).floor() / 2.0 + 0.5;
                 // Get the measure start time
-                let measure_info = medium_reaper.time_map_get_measure_info(project_context, current_measure);
+                let measure_info =
+                    medium_reaper.time_map_get_measure_info(project_context, current_measure);
                 let measure_start = measure_info.start_time.get();
                 // Get the next measure start to calculate measure duration
-                let next_measure_info = medium_reaper.time_map_get_measure_info(project_context, current_measure + 1);
+                let next_measure_info =
+                    medium_reaper.time_map_get_measure_info(project_context, current_measure + 1);
                 let next_measure_start = next_measure_info.start_time.get();
                 let measure_duration = next_measure_start - measure_start;
                 // Calculate time offset within the measure for the target half-beat
@@ -188,19 +196,20 @@ impl SmoothSeekHandler {
                     .unwrap_or_else(|_| next_measure_info.start_time)
             }
         };
-        
+
         // For logging, calculate target measure index (used in old code)
         let target_measure_index = match quantize_level {
             SmoothSeekQuantize::Measure => current_measure + 1,
             _ => {
                 // For beat/half-beat, find which measure the target is in
-                let target_beat_info = medium_reaper.time_map_2_time_to_beats(project_context, target_quantize_time);
+                let target_beat_info =
+                    medium_reaper.time_map_2_time_to_beats(project_context, target_quantize_time);
                 target_beat_info.measure_index
             }
         };
-        
+
         let mut state = self.state.lock().unwrap();
-        
+
         // Clear any existing queued seek - we only allow one seek at a time
         // BUT: Only delete markers if the old seek hasn't been executed yet
         // If it's already executing (seek_executed = true), the markers are still needed
@@ -209,7 +218,7 @@ impl SmoothSeekHandler {
         let mut markers_to_queue_for_later = Vec::new();
         let has_active_verification = state.verification_target.is_some();
         let seek_was_executed = state.seek_executed;
-        
+
         // Extract marker BookmarkIds from old seek before mutating state
         if let Some(ref old_seek) = state.queued_seek {
             // Only delete markers if:
@@ -233,17 +242,17 @@ impl SmoothSeekHandler {
                 }
             }
         }
-        
+
         // Now we can mutate state (old_seek borrow is dropped)
         state.markers_to_delete.extend(markers_to_queue_for_later);
-        
+
         // Clear the queued seek state and any active verification
         state.queued_seek = None;
         state.seek_executed = false;
         state.verification_target = None;
         state.verification_checks = 0;
         drop(state); // Release lock before deleting markers and creating new ones
-        
+
         // Delete old markers immediately (on main thread) before creating/moving new ones
         // Only if they weren't in use by an active smooth seek
         for bookmark_id in markers_to_delete_now {
@@ -251,29 +260,31 @@ impl SmoothSeekHandler {
                 warn!(error = %e, bookmark_id = bookmark_id.to_raw(), "Failed to delete old seek marker");
             }
         }
-        
+
         // Create new markers - we track them by BookmarkId for reliable deletion
         let seek_destination_name = "SEEK_DESTINATION".to_string();
-        let seek_destination_bookmark_id = Self::create_marker(project, &seek_destination_name, target_position)
-            .map_err(|e| anyhow::anyhow!("Failed to create SEEK_DESTINATION marker: {}", e))?;
+        let seek_destination_bookmark_id =
+            Self::create_marker(project, &seek_destination_name, target_position)
+                .map_err(|e| anyhow::anyhow!("Failed to create SEEK_DESTINATION marker: {}", e))?;
         let seek_trigger_name = "SEEK_TRIGGER".to_string();
-        let seek_trigger_bookmark_id = Self::create_marker(project, &seek_trigger_name, target_quantize_time)
-            .map_err(|e| anyhow::anyhow!("Failed to create SEEK_TRIGGER marker: {}", e))?;
-        
+        let seek_trigger_bookmark_id =
+            Self::create_marker(project, &seek_trigger_name, target_quantize_time)
+                .map_err(|e| anyhow::anyhow!("Failed to create SEEK_TRIGGER marker: {}", e))?;
+
         // CRITICAL: Call UpdateTimeline() AFTER both markers are created
         // This ensures REAPER recognizes the markers for smooth seeking
         // Note: create_marker also calls UpdateTimeline(), but we call it again here
         // to ensure everything is synchronized after both markers are ready
         medium_reaper.update_timeline();
-        
+
         // CRITICAL: Call GoToMarker IMMEDIATELY when queuing the seek
         // REAPER's smooth seek system needs the GoToMarker command to be active
         // BEFORE playback reaches the trigger marker, so it can prepare the smooth transition
         let marker_ref = BookmarkRef::Id(seek_destination_bookmark_id);
         medium_reaper.go_to_marker(project_context, marker_ref);
-        
+
         let mut state = self.state.lock().unwrap();
-        
+
         let queued = QueuedSeek {
             target_position,
             target_measure_index,
@@ -281,7 +292,7 @@ impl SmoothSeekHandler {
             seek_destination_bookmark_id: Some(seek_destination_bookmark_id),
             seek_trigger_bookmark_id: Some(seek_trigger_bookmark_id),
         };
-        
+
         state.queued_seek = Some(queued.clone());
         // Store the measure we were in when we queued (for boundary detection)
         state.last_measure_index = Some(current_measure);
@@ -289,7 +300,7 @@ impl SmoothSeekHandler {
         // Set up verification to check if we actually reached the target
         state.verification_target = Some(target_position);
         state.verification_checks = 0;
-        
+
         Ok(())
     }
 
@@ -299,7 +310,7 @@ impl SmoothSeekHandler {
         state.queued_seek = None;
         debug!("Cleared smooth seek queue");
     }
-    
+
     /// Find a marker at the specified position (within tolerance)
     /// Returns Some(BookmarkId) if a marker exists at that position, None otherwise
     fn find_marker_at_position(
@@ -310,15 +321,14 @@ impl SmoothSeekHandler {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
         let project_context = project.context();
-        
+
         let mut idx = 0u32;
         loop {
-            let marker_info = medium_reaper.enum_project_markers_3(project_context, idx, |result| {
-                result.map(|res| {
-                    (res.id, res.position, res.region_end_position.is_some())
-                })
-            });
-            
+            let marker_info =
+                medium_reaper.enum_project_markers_3(project_context, idx, |result| {
+                    result.map(|res| (res.id, res.position, res.region_end_position.is_some()))
+                });
+
             match marker_info {
                 Some((bookmark_id, marker_pos, is_region)) => {
                     // Check if it's a marker (not region) and at the target position
@@ -333,7 +343,7 @@ impl SmoothSeekHandler {
                 None => break,
             }
         }
-        
+
         debug!(
             target_position = position.get(),
             "No marker found at target position"
@@ -343,23 +353,21 @@ impl SmoothSeekHandler {
 
     /// Find a bookmark by its BookmarkId and return its name
     /// Returns None if the bookmark doesn't exist or is a region
-    fn find_bookmark_name_by_id(
-        project: &Project,
-        bookmark_id: BookmarkId,
-    ) -> Option<String> {
+    fn find_bookmark_name_by_id(project: &Project, bookmark_id: BookmarkId) -> Option<String> {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
         let project_context = project.context();
-        
+
         let mut idx = 0u32;
         loop {
-            let marker_info = medium_reaper.enum_project_markers_3(project_context, idx, |result| {
-                result.map(|res| {
-                    let name = res.name.to_str().trim_matches('"').trim().to_string();
-                    (res.id, name, res.region_end_position.is_some())
-                })
-            });
-            
+            let marker_info =
+                medium_reaper.enum_project_markers_3(project_context, idx, |result| {
+                    result.map(|res| {
+                        let name = res.name.to_str().trim_matches('"').trim().to_string();
+                        (res.id, name, res.region_end_position.is_some())
+                    })
+                });
+
             match marker_info {
                 Some((id, name, is_region)) => {
                     if id == bookmark_id && !is_region {
@@ -370,10 +378,10 @@ impl SmoothSeekHandler {
                 None => break,
             }
         }
-        
+
         None
     }
-    
+
     /// Get or create a marker at the specified position
     /// If a marker already exists at that position, reuse it instead of creating a new one
     /// Only deletes existing markers with our exact name (not position-based) to prevent deleting user markers
@@ -386,30 +394,35 @@ impl SmoothSeekHandler {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
         let project_context = project.context();
-        
+
         // First, check if there's already a marker at this position
         // If so, reuse it instead of creating a new one
         // Use a larger tolerance (0.01 seconds = 10ms) to catch markers that are very close
         let position_tolerance = 0.01; // 10ms tolerance
-        if let Some(existing_bookmark_id) = Self::find_marker_at_position(project, position, position_tolerance) {
-            if let Some(_actual_name) = Self::find_bookmark_name_by_id(project, existing_bookmark_id) {
+        if let Some(existing_bookmark_id) =
+            Self::find_marker_at_position(project, position, position_tolerance)
+        {
+            if let Some(_actual_name) =
+                Self::find_bookmark_name_by_id(project, existing_bookmark_id)
+            {
                 return Ok(existing_bookmark_id);
             }
         }
-        
+
         // No marker exists at this position, so we can create one
         // But first, delete any markers with our exact name (from previous seeks)
         let mut idx = 0u32;
         let mut markers_to_delete: Vec<(BookmarkId, String)> = Vec::new();
-        
+
         loop {
-            let marker_info = medium_reaper.enum_project_markers_3(project_context, idx, |result| {
-                result.map(|res| {
-                    let name = res.name.to_str().trim_matches('"').trim().to_string();
-                    (res.id, name, res.region_end_position.is_some())
-                })
-            });
-            
+            let marker_info =
+                medium_reaper.enum_project_markers_3(project_context, idx, |result| {
+                    result.map(|res| {
+                        let name = res.name.to_str().trim_matches('"').trim().to_string();
+                        (res.id, name, res.region_end_position.is_some())
+                    })
+                });
+
             match marker_info {
                 Some((bookmark_id, name, is_region)) => {
                     // Only delete markers (not regions) that have our exact name
@@ -425,30 +438,32 @@ impl SmoothSeekHandler {
                 }
             }
         }
-        
+
         // Delete only markers we created (with our exact name), with verification
         for (bookmark_id, expected_name) in markers_to_delete {
             // Verify the marker still has the expected name before deleting
             // Enumerate all bookmarks to find the one with matching BookmarkId
             let mut idx = 0u32;
             loop {
-                let marker_info = medium_reaper.enum_project_markers_3(project_context, idx, |result| {
-                    result.map(|res| {
-                        let name = res.name.to_str().trim_matches('"').trim().to_string();
-                        (res.id, name, res.region_end_position.is_some())
-                    })
-                });
-                
+                let marker_info =
+                    medium_reaper.enum_project_markers_3(project_context, idx, |result| {
+                        result.map(|res| {
+                            let name = res.name.to_str().trim_matches('"').trim().to_string();
+                            (res.id, name, res.region_end_position.is_some())
+                        })
+                    });
+
                 match marker_info {
                     Some((id, actual_name, is_region)) => {
                         if id == bookmark_id && !is_region {
                             if actual_name == expected_name {
-                                if let Err(e) = Self::delete_seek_marker_by_id(project, bookmark_id) {
+                                if let Err(e) = Self::delete_seek_marker_by_id(project, bookmark_id)
+                                {
                                     warn!(error = %e, bookmark_id = bookmark_id.to_raw(), "Failed to delete existing marker");
                                 }
-                    } else {
+                            } else {
                                 warn!(
-                            bookmark_id = bookmark_id.to_raw(),
+                                    bookmark_id = bookmark_id.to_raw(),
                                     expected_name = expected_name,
                                     actual_name = actual_name,
                                     "Marker name changed, skipping deletion (safety check)"
@@ -461,36 +476,50 @@ impl SmoothSeekHandler {
                     None => break,
                 }
             }
-            
+
             // Marker not found, may have already been deleted (not an error)
         }
-        
+
         // Update timeline after deletions
         medium_reaper.update_timeline();
-        
+
         // Now create a new marker (since no marker exists at this position)
-        let _marker_index = medium_reaper.add_project_marker_2(
-            project_context,
-            MarkerOrRegionPosition::Marker(position),
-            marker_name,
-            None, // at_index: None means append
-            None, // color: None means default
-        )
-        .map_err(|e| anyhow::anyhow!("Failed to create marker {} at position {}: {:?}", marker_name, position.get(), e))?;
-        
+        let _marker_index = medium_reaper
+            .add_project_marker_2(
+                project_context,
+                MarkerOrRegionPosition::Marker(position),
+                marker_name,
+                None, // at_index: None means append
+                None, // color: None means default
+            )
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to create marker {} at position {}: {:?}",
+                    marker_name,
+                    position.get(),
+                    e
+                )
+            })?;
+
         medium_reaper.update_timeline();
-        
+
         // Find the newly created marker by enumerating and matching position and name
         // We can't use marker_index because it may have changed if other markers were deleted
         let mut idx = 0u32;
         loop {
-            let marker_info = medium_reaper.enum_project_markers_3(project_context, idx, |result| {
-                result.map(|res| {
-                    let name = res.name.to_str().trim_matches('"').trim().to_string();
-                    (res.id, res.position, name, res.region_end_position.is_some())
-                })
-            });
-            
+            let marker_info =
+                medium_reaper.enum_project_markers_3(project_context, idx, |result| {
+                    result.map(|res| {
+                        let name = res.name.to_str().trim_matches('"').trim().to_string();
+                        (
+                            res.id,
+                            res.position,
+                            name,
+                            res.region_end_position.is_some(),
+                        )
+                    })
+                });
+
             match marker_info {
                 Some((bookmark_id, marker_pos, actual_name, is_region)) => {
                     if !is_region {
@@ -504,21 +533,21 @@ impl SmoothSeekHandler {
                         // (e.g., due to floating point precision issues). In this case, we should use the
                         // existing marker instead of failing - it will work for smooth seeking anyway.
                         if position_diff < 0.01 && actual_name != marker_name {
-                warn!(
-                    expected_name = marker_name,
-                    actual_name = actual_name,
-                    bookmark_id = bookmark_id.to_raw(),
-                    position = position.get(),
+                            warn!(
+                                expected_name = marker_name,
+                                actual_name = actual_name,
+                                bookmark_id = bookmark_id.to_raw(),
+                                position = position.get(),
                                 "REAPER reused an existing marker at this position. Using it instead of creating a new one."
                             );
                             // Use the existing marker - it will work fine for smooth seeking
                             // Don't try to delete it as it's a user marker
                             info!(
-                    bookmark_id = bookmark_id.to_raw(),
+                                bookmark_id = bookmark_id.to_raw(),
                                 actual_name = actual_name,
-                    position = position.get(),
+                                position = position.get(),
                                 "Using existing marker for smooth seek"
-                );
+                            );
                             return Ok(bookmark_id);
                         }
                     }
@@ -527,7 +556,7 @@ impl SmoothSeekHandler {
                 None => break,
             }
         }
-        
+
         // If we get here, we couldn't find the marker we just created
         // This shouldn't happen, but return an error
         Err(anyhow::anyhow!(
@@ -536,7 +565,7 @@ impl SmoothSeekHandler {
             position.get()
         ))
     }
-    
+
     /// Create a "SEEK_DESTINATION" marker and seek to it immediately
     /// This is a helper function for immediate seeks (not queued for measure boundary)
     pub fn seek_to_position_via_marker(
@@ -547,30 +576,30 @@ impl SmoothSeekHandler {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
         let project_context = project.context();
-        
+
         // Create the SEEK_DESTINATION marker and get its BookmarkId
         let marker_name = "SEEK_DESTINATION".to_string();
         let bookmark_id = Self::create_marker(project, &marker_name, target_position)?;
-        
+
         // Use BookmarkRef::Id directly with the BookmarkId we got
         let marker_ref = BookmarkRef::Id(bookmark_id);
-        
+
         // Use GoToMarker for smooth seeking
         medium_reaper.go_to_marker(project_context, marker_ref);
-        
+
         info!(
             bookmark_id = bookmark_id.to_raw(),
             target_position = target_position.get(),
             "Seeked to position using SEEK_DESTINATION marker"
         );
-        
+
         // Queue marker deletion to happen on main thread
         let mut state = self.state.lock().unwrap();
         state.markers_to_delete.push(bookmark_id);
-        
+
         Ok(())
     }
-    
+
     /// Delete a seek marker by BookmarkId
     /// Enumerate all markers and log them for debugging
     /// Uses safe enum_project_markers_3 API
@@ -579,18 +608,24 @@ impl SmoothSeekHandler {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
         let project_context = project.context();
-        
+
         info!("=== Enumerating all markers ({}) ===", context);
-        
+
         let mut idx = 0u32;
         loop {
-            let marker_info = medium_reaper.enum_project_markers_3(project_context, idx, |result| {
-                result.map(|res| {
-                    let name = res.name.to_str().trim_matches('"').trim().to_string();
-                    (res.id, name, res.position, res.region_end_position.is_some())
-                })
-            });
-            
+            let marker_info =
+                medium_reaper.enum_project_markers_3(project_context, idx, |result| {
+                    result.map(|res| {
+                        let name = res.name.to_str().trim_matches('"').trim().to_string();
+                        (
+                            res.id,
+                            name,
+                            res.position,
+                            res.region_end_position.is_some(),
+                        )
+                    })
+                });
+
             match marker_info {
                 Some((bookmark_id, name, position, is_region)) => {
                     if !is_region {
@@ -611,24 +646,21 @@ impl SmoothSeekHandler {
                 }
             }
         }
-        
+
         info!("=== End marker enumeration ({}) ===", context);
     }
-    
+
     /// Delete a seek marker by BookmarkId with verification
     /// Only deletes markers with names "SEEK_DESTINATION" or "SEEK_TRIGGER" as a safety check
-    fn delete_seek_marker_by_id(
-        project: &Project,
-        bookmark_id: BookmarkId,
-    ) -> anyhow::Result<()> {
+    fn delete_seek_marker_by_id(project: &Project, bookmark_id: BookmarkId) -> anyhow::Result<()> {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
         let project_context = project.context();
-        
+
         // SAFETY CHECK: Verify the marker has one of our expected names before deleting
         // Use our helper function to find the marker name by BookmarkId
         let marker_name = Self::find_bookmark_name_by_id(project, bookmark_id);
-        
+
         // Only delete if it's one of our markers
         if let Some(name) = marker_name {
             if name != "SEEK_DESTINATION" && name != "SEEK_TRIGGER" {
@@ -642,28 +674,27 @@ impl SmoothSeekHandler {
                     name
                 ));
             }
-            
         } else {
             // Marker not found, may have already been deleted (not an error)
             return Ok(());
         }
-        
+
         // Delete by BookmarkId using DeleteProjectMarker
         let result = unsafe {
             medium_reaper.low().DeleteProjectMarker(
                 project_context.to_raw(),
                 bookmark_id.to_raw(), // marker ID
-                false, // is_region: false means delete marker, not region
+                false,                // is_region: false means delete marker, not region
             )
         };
-        
+
         if !result {
             warn!(
                 bookmark_id = bookmark_id.to_raw(),
                 "Failed to delete marker (DeleteProjectMarker returned false)"
             );
         }
-        
+
         Ok(())
     }
 
@@ -676,17 +707,17 @@ impl SmoothSeekHandler {
         current_pos: PositionInSeconds,
     ) -> anyhow::Result<bool> {
         let mut state = self.state.lock().unwrap();
-        
+
         // Check if we need to verify a previous seek
         if let Some(verification_target) = state.verification_target {
             state.verification_checks += 1;
             let current_time = current_pos.get();
             let target_time = verification_target.get();
             let position_diff = (current_time - target_time).abs();
-            
+
             // Store markers to delete when verification completes
             let mut markers_to_delete_on_completion = Vec::new();
-            
+
             // Check if we've reached the target (within 50ms tolerance for smooth seeks)
             if position_diff < 0.05 {
                 // Now that seek has completed, queue markers for deletion
@@ -698,15 +729,17 @@ impl SmoothSeekHandler {
                         markers_to_delete_on_completion.push(dest_id);
                     }
                 }
-                
+
                 // Clear verification and queued seek
                 state.verification_target = None;
                 state.verification_checks = 0;
                 state.queued_seek = None;
                 state.seek_executed = false;
-                
+
                 // Queue marker deletions to happen on main thread
-                state.markers_to_delete.extend(markers_to_delete_on_completion);
+                state
+                    .markers_to_delete
+                    .extend(markers_to_delete_on_completion);
             } else if state.verification_checks > 150 {
                 // After 150 checks (about 5 seconds at 30Hz), give up and log failure
                 warn!(
@@ -718,7 +751,7 @@ impl SmoothSeekHandler {
                     state.verification_checks,
                     position_diff
                 );
-                
+
                 // Even though seek failed, clean up markers
                 if let Some(ref failed_seek) = state.queued_seek {
                     if let Some(trigger_id) = failed_seek.seek_trigger_bookmark_id {
@@ -728,15 +761,17 @@ impl SmoothSeekHandler {
                         markers_to_delete_on_completion.push(dest_id);
                     }
                 }
-                
+
                 // Clear verification and queued seek
                 state.verification_target = None;
                 state.verification_checks = 0;
                 state.queued_seek = None;
                 state.seek_executed = false;
-                
+
                 // Queue marker deletions to happen on main thread
-                state.markers_to_delete.extend(markers_to_delete_on_completion);
+                state
+                    .markers_to_delete
+                    .extend(markers_to_delete_on_completion);
             } else {
                 // Still waiting - log progress every 10 checks
                 if state.verification_checks % 10 == 0 {
@@ -751,26 +786,26 @@ impl SmoothSeekHandler {
                 }
             }
         }
-        
+
         // Note: GoToMarker is now called immediately in queue_seek()
         // We don't need to execute it here - just monitor for verification
         // The verification logic above will handle checking if we reached the target
-        
+
         Ok(false)
     }
-    
+
     /// Process pending marker deletions (called from main thread timer)
     pub fn process_pending_deletions(&self, project: &Project) {
         let mut state = self.state.lock().unwrap();
-        
+
         if state.markers_to_delete.is_empty() {
             return;
         }
-        
+
         // Take all markers to delete
         let markers_to_delete = std::mem::take(&mut state.markers_to_delete);
         drop(state); // Release lock before deleting
-        
+
         for bookmark_id in markers_to_delete {
             if let Err(e) = Self::delete_seek_marker_by_id(project, bookmark_id) {
                 warn!(error = %e, bookmark_id = bookmark_id.to_raw(), "Failed to delete marker");
@@ -794,4 +829,3 @@ static SMOOTH_SEEK_HANDLER: OnceLock<SmoothSeekHandler> = OnceLock::new();
 pub fn get_smooth_seek_handler() -> &'static SmoothSeekHandler {
     SMOOTH_SEEK_HANDLER.get_or_init(|| SmoothSeekHandler::new())
 }
-

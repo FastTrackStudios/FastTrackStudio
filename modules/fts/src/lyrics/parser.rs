@@ -119,17 +119,14 @@ pub fn parse_lyrics_with_config(
 }
 
 /// Split lyrics into lead and background vocal tracks
-fn split_lead_background(
-    lyrics: Lyrics,
-    _config: &ParserConfig,
-) -> Result<Lyrics, ParseError> {
+fn split_lead_background(lyrics: Lyrics, _config: &ParserConfig) -> Result<Lyrics, ParseError> {
     // For now, we'll mark parenthetical parts as background vocals
     // In the future, we could create separate Lyrics objects or add metadata
     let mut processed_lyrics = lyrics;
-    
+
     // Add metadata to indicate this has been split
     processed_lyrics.set_metadata("split_lead_background", "true");
-    
+
     // Process each section
     for section in &mut processed_lyrics.sections {
         for line in &mut section.lines {
@@ -142,7 +139,7 @@ fn split_lead_background(
             }
         }
     }
-    
+
     Ok(processed_lyrics)
 }
 
@@ -166,7 +163,10 @@ mod tests {
     #[test]
     fn test_parse_section_marker() {
         assert_eq!(parse_section_marker("[Intro]"), Some("Intro".to_string()));
-        assert_eq!(parse_section_marker("[Verse 1]"), Some("Verse 1".to_string()));
+        assert_eq!(
+            parse_section_marker("[Verse 1]"),
+            Some("Verse 1".to_string())
+        );
         assert_eq!(parse_section_marker("[Chorus]"), Some("Chorus".to_string()));
         assert_eq!(parse_section_marker("Not a section"), None);
         assert_eq!(parse_section_marker("[Invalid"), None);
@@ -216,7 +216,10 @@ I'm breathing, I'm breathing, I think I'm reading you well"#;
     fn test_parser_config_default() {
         let config = ParserConfig::default();
         assert!(!config.split_lead_background);
-        assert_eq!(config.background_vocal_pattern, BackgroundVocalPattern::Parenthetical);
+        assert_eq!(
+            config.background_vocal_pattern,
+            BackgroundVocalPattern::Parenthetical
+        );
     }
 
     #[test]
@@ -230,6 +233,9 @@ Main lyrics (Hey) more lyrics (Oh)"#;
         };
 
         let lyrics = parse_lyrics_with_config(text, "Test Song".to_string(), config).unwrap();
-        assert_eq!(lyrics.get_metadata("split_lead_background"), Some(&"true".to_string()));
+        assert_eq!(
+            lyrics.get_metadata("split_lead_background"),
+            Some(&"true".to_string())
+        );
     }
 }

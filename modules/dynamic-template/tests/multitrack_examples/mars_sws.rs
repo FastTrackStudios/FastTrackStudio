@@ -120,25 +120,25 @@ fn mars_sws() {
         "Steve VOX.wav",
         "Steve VOX.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
-    
+
     // ============================================================================
     // SUGGESTED TRACK HIERARCHY
     // ============================================================================
-    // 
+    //
     // Bass/
     //   └─ Synth/
     //       ├─ L              ← Bass Synth.L.wav
-    //       ├─ R              ← Bass Synth.R.wav  
+    //       ├─ R              ← Bass Synth.R.wav
     //       └─ Main           ← Bass Synth.wav (x3 duplicates)
     //
     // Keys/

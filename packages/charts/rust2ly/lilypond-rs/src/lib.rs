@@ -101,9 +101,7 @@ pub fn compile(input_file: &str) -> bool {
 /// ```
 pub fn is_lilypond_file(filename: &str) -> bool {
     match Path::new(filename).extension() {
-        Some(ex) => {
-            ex == "ly"
-        }
+        Some(ex) => ex == "ly",
         None => false,
     }
 }

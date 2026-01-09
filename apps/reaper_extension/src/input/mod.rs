@@ -8,20 +8,20 @@
 //! - Context awareness (main, midi, global)
 //! - Macro recording and playback
 
-pub mod state;
+pub mod actions;
 pub mod bindings;
 pub mod event_parser;
-pub mod matcher;
 pub mod executor;
 pub mod handler;
-pub mod actions;
-pub mod wheel_hook;
-pub mod mouse_util;
-pub mod mouse_context;
+pub mod matcher;
 pub mod midi_utils;
-pub mod utils;
-pub mod reaper_windows;
+pub mod mouse_context;
 pub mod mouse_modifiers;
+pub mod mouse_util;
+pub mod reaper_windows;
+pub mod state;
+pub mod utils;
+pub mod wheel_hook;
 
 pub use handler::InputHandler;
-pub use state::{CommandState, Mode, Context};
+pub use state::{CommandState, Context, Mode};

@@ -37,41 +37,40 @@ impl ChordsStreams {
 }
 
 /// State managed by the chords reactive service
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ChordsReactiveState {
     /// Chords for each project (project_name -> chords)
     pub chords: HashMap<String, ChordsData>,
 }
 
 /// Trait for chords reactive service implementations
-/// 
+///
 /// Different backends (REAPER, etc.) can implement this trait
 /// to provide reactive streams using their own event systems.
-/// 
+///
 /// Note: This trait is not `Send` or `Sync` because reactive streams
 /// use `Rc<RefCell<...>>` internally and are designed for single-threaded use.
 /// Implementations should only be used on the main thread.
 pub trait ChordsReactiveService {
     /// Get the reactive streams
     fn streams(&self) -> &ChordsStreams;
-    
+
     /// Get current state (for reading)
     fn get_state(&self) -> Arc<Mutex<ChordsReactiveState>>;
-    
+
     /// Update chords for a specific project
     fn update_chords(&self, project_name: &str, chords: ChordsData);
 }
 
 /// Default implementation of ChordsReactiveService
-/// 
+///
 /// This manages state and emits to reactive streams.
 /// Backend-specific implementations can wrap this and subscribe to backend events.
 #[derive(Debug)]
 pub struct DefaultChordsReactiveService {
     /// Current state
     state: Arc<Mutex<ChordsReactiveState>>,
-    
+
     /// Reactive streams
     streams: ChordsStreams,
 }
@@ -89,11 +88,11 @@ impl ChordsReactiveService for DefaultChordsReactiveService {
     fn streams(&self) -> &ChordsStreams {
         &self.streams
     }
-    
+
     fn get_state(&self) -> Arc<Mutex<ChordsReactiveState>> {
         self.state.clone()
     }
-    
+
     fn update_chords(&self, project_name: &str, chords: ChordsData) {
         let changed = {
             let mut state = self.state.lock().unwrap();
@@ -101,14 +100,18 @@ impl ChordsReactiveService for DefaultChordsReactiveService {
             // For now, always update (could add a custom comparison if needed)
             let changed = !state.chords.contains_key(project_name);
             if changed {
-                state.chords.insert(project_name.to_string(), chords.clone());
+                state
+                    .chords
+                    .insert(project_name.to_string(), chords.clone());
             }
             changed
         };
-        
+
         if changed {
-            self.streams.chords_changed.borrow_mut().next((project_name.to_string(), chords));
+            self.streams
+                .chords_changed
+                .borrow_mut()
+                .next((project_name.to_string(), chords));
         }
     }
 }
-

@@ -1,6 +1,6 @@
 //! Media Item stretch marker behaviors
 
-use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorId, BehaviorDisplay};
+use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorDisplay, BehaviorId};
 
 /// Media Item stretch marker left drag behaviors
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -68,7 +68,7 @@ impl BehaviorId for MediaItemStretchMarkerLeftDragBehavior {
             id => MediaItemStretchMarkerLeftDragBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemStretchMarkerLeftDragBehavior::NoAction => 0,
@@ -184,7 +184,7 @@ impl BehaviorId for MediaItemStretchMarkerRateBehavior {
             id => MediaItemStretchMarkerRateBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemStretchMarkerRateBehavior::NoAction => 0,
@@ -252,7 +252,7 @@ impl BehaviorId for MediaItemStretchMarkerDoubleClickBehavior {
             id => MediaItemStretchMarkerDoubleClickBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemStretchMarkerDoubleClickBehavior::NoAction => 0,
@@ -267,10 +267,13 @@ impl BehaviorDisplay for MediaItemStretchMarkerDoubleClickBehavior {
     fn display_name(&self) -> &'static str {
         match self {
             MediaItemStretchMarkerDoubleClickBehavior::NoAction => "No action",
-            MediaItemStretchMarkerDoubleClickBehavior::ResetStretchMarkerRateTo10 => "Reset stretch marker rate to 1.0",
-            MediaItemStretchMarkerDoubleClickBehavior::EditStretchMarkerRate => "Edit stretch marker rate",
+            MediaItemStretchMarkerDoubleClickBehavior::ResetStretchMarkerRateTo10 => {
+                "Reset stretch marker rate to 1.0"
+            }
+            MediaItemStretchMarkerDoubleClickBehavior::EditStretchMarkerRate => {
+                "Edit stretch marker rate"
+            }
             MediaItemStretchMarkerDoubleClickBehavior::Unknown(_) => "Unknown behavior",
         }
     }
 }
-

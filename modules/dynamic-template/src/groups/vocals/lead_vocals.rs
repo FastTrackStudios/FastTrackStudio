@@ -1,7 +1,7 @@
 //! Lead vocals group definition
 
-use crate::item_metadata::prelude::*;
 use crate::item_metadata::ItemMetadataField;
+use crate::item_metadata::prelude::*;
 
 /// Lead vocals group
 ///
@@ -44,8 +44,8 @@ impl From<LeadVocals> for ItemMetadataGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{default_config, OrganizeIntoTracks};
-    use daw::tracks::{assert_tracks_equal, TrackStructureBuilder};
+    use crate::{OrganizeIntoTracks, default_config};
+    use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 
     #[test]
     fn single_track_no_grouping_needed() {

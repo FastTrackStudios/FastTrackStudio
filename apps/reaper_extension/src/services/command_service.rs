@@ -3,12 +3,12 @@
 //! Handles command execution requests from async tasks.
 //! Commands are queued and executed on the main thread.
 
+use crate::infrastructure::action_registry::get_command_id;
+use fts::setlist::{NavigationCommand, TransportCommand};
+use reaper_medium::{CommandId, ProjectContext};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use fts::setlist::{TransportCommand, NavigationCommand};
-use crate::infrastructure::action_registry::get_command_id;
-use reaper_medium::{CommandId, ProjectContext};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 /// Command execution request
 enum CommandRequest {
@@ -24,9 +24,11 @@ enum CommandRequest {
 #[derive(Debug)]
 pub struct CommandService {
     /// Channel sender for command requests
-    command_tx: Arc<Mutex<Option<mpsc::Sender<(CommandRequest, mpsc::Sender<Result<(), String>>)>>>>,
+    command_tx:
+        Arc<Mutex<Option<mpsc::Sender<(CommandRequest, mpsc::Sender<Result<(), String>>)>>>>,
     /// Channel receiver for command requests (used by timer callback)
-    command_rx: Arc<Mutex<Option<mpsc::Receiver<(CommandRequest, mpsc::Sender<Result<(), String>>)>>>>,
+    command_rx:
+        Arc<Mutex<Option<mpsc::Receiver<(CommandRequest, mpsc::Sender<Result<(), String>>)>>>>,
 }
 
 impl CommandService {
@@ -59,8 +61,15 @@ impl CommandService {
         self.send_command(CommandRequest::SeekToTime(song_index, time_seconds))
     }
 
-    pub fn seek_to_musical_position(&self, song_index: usize, musical_position: daw::primitives::MusicalPosition) -> Result<(), String> {
-        self.send_command(CommandRequest::SeekToMusicalPosition(song_index, musical_position))
+    pub fn seek_to_musical_position(
+        &self,
+        song_index: usize,
+        musical_position: daw::primitives::MusicalPosition,
+    ) -> Result<(), String> {
+        self.send_command(CommandRequest::SeekToMusicalPosition(
+            song_index,
+            musical_position,
+        ))
     }
 
     /// Toggle loop (called from async context)
@@ -71,14 +80,16 @@ impl CommandService {
     /// Send a command request to the main thread
     fn send_command(&self, request: CommandRequest) -> Result<(), String> {
         let (result_tx, result_rx) = mpsc::channel();
-        
+
         if let Ok(guard) = self.command_tx.lock() {
             if let Some(sender) = guard.as_ref() {
-                sender.send((request, result_tx))
+                sender
+                    .send((request, result_tx))
                     .map_err(|e| format!("Failed to send command to main thread: {}", e))?;
-                
+
                 // Wait for the result from main thread
-                result_rx.recv()
+                result_rx
+                    .recv()
                     .map_err(|e| format!("Failed to receive command result: {}", e))?
             } else {
                 Err("Command request channel not initialized".to_string())
@@ -105,7 +116,7 @@ impl CommandService {
     fn execute_command_main_thread(&self, request: CommandRequest) -> Result<(), String> {
         let reaper = reaper_high::Reaper::get();
         let medium_reaper = reaper.medium_reaper();
-        
+
         match request {
             CommandRequest::Transport(cmd) => {
                 let command_id_str = match cmd {
@@ -114,23 +125,27 @@ impl CommandService {
                     TransportCommand::Stop => "FTS_LIVE_SETLIST_STOP",
                     TransportCommand::TogglePlayPause => "FTS_LIVE_SETLIST_PLAY_PAUSE",
                 };
-                
+
                 let cmd_id = get_command_id(command_id_str)
                     .ok_or_else(|| format!("Command ID not found for: {}", command_id_str))?;
-                
+
                 medium_reaper.main_on_command_ex(cmd_id, 0, ProjectContext::CurrentProject);
                 info!("Executed transport command: {:?}", cmd);
                 Ok(())
             }
             CommandRequest::Navigation(cmd) => {
                 let command_id_str = match cmd {
-                    NavigationCommand::NextSectionOrSong => "FTS_LIVE_GO_TO_NEXT_SECTION_SONG_SMART",
-                    NavigationCommand::PreviousSectionOrSong => "FTS_LIVE_GO_TO_PREVIOUS_SECTION_SONG_SMART",
+                    NavigationCommand::NextSectionOrSong => {
+                        "FTS_LIVE_GO_TO_NEXT_SECTION_SONG_SMART"
+                    }
+                    NavigationCommand::PreviousSectionOrSong => {
+                        "FTS_LIVE_GO_TO_PREVIOUS_SECTION_SONG_SMART"
+                    }
                 };
-                
+
                 let cmd_id = get_command_id(command_id_str)
                     .ok_or_else(|| format!("Command ID not found for: {}", command_id_str))?;
-                
+
                 medium_reaper.main_on_command_ex(cmd_id, 0, ProjectContext::CurrentProject);
                 info!("Executed navigation command: {:?}", cmd);
                 Ok(())
@@ -139,16 +154,15 @@ impl CommandService {
                 // Use the trait method directly - it handles all the logic
                 use fts::setlist::infra::traits::SeekAdapter;
                 use reaper_high::Reaper;
-                
+
                 let reaper = Reaper::get();
                 let current_project = reaper.current_project();
-                
-                current_project.seek_to_song(song_index)
-                    .map_err(|e| {
-                        error!(error = %e, song_index, "Failed to seek to song");
-                        e
-                    })?;
-                
+
+                current_project.seek_to_song(song_index).map_err(|e| {
+                    error!(error = %e, song_index, "Failed to seek to song");
+                    e
+                })?;
+
                 info!(song_index, "Executed seek to song");
                 Ok(())
             }
@@ -156,60 +170,72 @@ impl CommandService {
                 #[cfg(feature = "live")]
                 {
                     // Convert musical position to time using REAPER's tempo map
-                    use fts::setlist::infra::traits::SetlistBuilder;
                     use crate::live::tracks::tab_navigation::TabNavigator;
-                    use reaper_high::{Reaper, Project};
-                    use reaper_medium::{ProjectRef, PositionInSeconds, SetEditCurPosOptions, PositionInBeats, MeasureMode};
                     use daw::primitives::MusicalPosition;
-                    
+                    use fts::setlist::infra::traits::SetlistBuilder;
+                    use reaper_high::{Project, Reaper};
+                    use reaper_medium::{
+                        MeasureMode, PositionInBeats, PositionInSeconds, ProjectRef,
+                        SetEditCurPosOptions,
+                    };
+
                     let reaper = Reaper::get();
                     let medium_reaper = reaper.medium_reaper();
-                    
+
                     // Build setlist to find the song - use trait method on Reaper (operates on all open projects)
-                    let setlist = reaper.build_setlist_from_open_projects(None)
+                    let setlist = reaper
+                        .build_setlist_from_open_projects(None)
                         .map_err(|e| format!("Failed to build setlist: {}", e))?;
-                    
+
                     if song_index >= setlist.songs.len() {
                         return Err(format!("Song index {} out of range", song_index));
                     }
-                    
+
                     let song = &setlist.songs[song_index];
-                    
+
                     // Find tab index by matching project name (same approach as seek_to_time)
-                    let project_name = song.metadata.get("project_name")
+                    let project_name = song
+                        .metadata
+                        .get("project_name")
                         .or_else(|| song.metadata.get("Project"))
                         .or_else(|| song.metadata.get("project"))
                         .ok_or_else(|| "Song has no project_name in metadata".to_string())?;
-                    
+
                     let mut found_tab_index = None;
                     for i in 0..128u32 {
                         if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
-                            let tab_name = result.file_path.as_ref()
+                            let tab_name = result
+                                .file_path
+                                .as_ref()
                                 .and_then(|p| p.as_std_path().file_stem())
                                 .and_then(|s| s.to_str())
                                 .map(|s| s.to_string());
-                            
+
                             if tab_name.as_ref() == Some(project_name) {
                                 found_tab_index = Some(i as usize);
                                 break;
                             }
                         }
                     }
-                    
-                    let tab_index = found_tab_index
-                        .ok_or_else(|| format!("Could not find project for song: {}", project_name))?;
-                    
+
+                    let tab_index = found_tab_index.ok_or_else(|| {
+                        format!("Could not find project for song: {}", project_name)
+                    })?;
+
                     // Get current project
-                    let current_project_result = medium_reaper.enum_projects(ProjectRef::Current, 0)
+                    let current_project_result = medium_reaper
+                        .enum_projects(ProjectRef::Current, 0)
                         .ok_or_else(|| "No current project".to_string())?;
                     let current_project = Project::new(current_project_result.project);
-                    
+
                     // Find current tab index
                     let current_tab_index = {
                         let current_project_raw = current_project_result.project;
                         let mut found_current_tab = None;
                         for i in 0..128u32 {
-                            if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
+                            if let Some(result) =
+                                medium_reaper.enum_projects(ProjectRef::Tab(i), 512)
+                            {
                                 if result.project == current_project_raw {
                                     found_current_tab = Some(i as usize);
                                     break;
@@ -218,24 +244,30 @@ impl CommandService {
                         }
                         found_current_tab
                     };
-                    
+
                     // Check if we need to switch tabs
                     let final_project = if current_tab_index != Some(tab_index) {
                         let tab_navigator = TabNavigator::new();
-                        tab_navigator.switch_to_tab(tab_index)
+                        tab_navigator
+                            .switch_to_tab(tab_index)
                             .map_err(|e| format!("Failed to switch to tab {}: {}", tab_index, e))?;
-                        
-                        let project_result = medium_reaper.enum_projects(ProjectRef::Current, 0)
+
+                        let project_result = medium_reaper
+                            .enum_projects(ProjectRef::Current, 0)
                             .ok_or_else(|| "No current project after tab switch".to_string())?;
                         Project::new(project_result.project)
                     } else {
                         current_project
                     };
-                    
+
                     // Get project measure offset
                     let get_project_measure_offset = |project: &Project| -> i32 {
-                        if let Some(offs_result) = medium_reaper.project_config_var_get_offs("projmeasoffs") {
-                            if let Some(addr) = medium_reaper.project_config_var_addr(project.context(), offs_result.offset) {
+                        if let Some(offs_result) =
+                            medium_reaper.project_config_var_get_offs("projmeasoffs")
+                        {
+                            if let Some(addr) = medium_reaper
+                                .project_config_var_addr(project.context(), offs_result.offset)
+                            {
                                 unsafe { *(addr.as_ptr() as *const i32) }
                             } else {
                                 0
@@ -244,25 +276,33 @@ impl CommandService {
                             0
                         }
                     };
-                    
+
                     let measure_offset = get_project_measure_offset(&final_project);
                     let reaper_measure_index = musical_position.measure - measure_offset;
-                    
+
                     // Calculate beats since measure start
-                    let beats_since_measure = musical_position.beat as f64 + (musical_position.subdivision as f64 / 1000.0);
+                    let beats_since_measure = musical_position.beat as f64
+                        + (musical_position.subdivision as f64 / 1000.0);
                     let beats_pos = PositionInBeats::new(beats_since_measure)
                         .map_err(|e| format!("Invalid beats position: {:?}", e))?;
-                    
+
                     // Use TimeMap2_beatsToTime to convert musical position to time
                     let measure_mode = MeasureMode::FromMeasureAtIndex(reaper_measure_index);
-                    let target_pos = medium_reaper.time_map_2_beats_to_time(final_project.context(), measure_mode, beats_pos);
-                    
+                    let target_pos = medium_reaper.time_map_2_beats_to_time(
+                        final_project.context(),
+                        measure_mode,
+                        beats_pos,
+                    );
+
                     // Seek to the position
-                    final_project.set_edit_cursor_position(target_pos, SetEditCurPosOptions { 
-                        move_view: false, 
-                        seek_play: true,
-                    });
-                    
+                    final_project.set_edit_cursor_position(
+                        target_pos,
+                        SetEditCurPosOptions {
+                            move_view: false,
+                            seek_play: true,
+                        },
+                    );
+
                     info!(
                         song_index,
                         musical_position = %musical_position,
@@ -283,96 +323,108 @@ impl CommandService {
                     // Delegate to SeekService for time-based seeks
                     // For now, we'll implement it here since SeekService handles section seeks
                     // TODO: Move this to SeekService
-                    use fts::setlist::infra::traits::SetlistBuilder;
                     use crate::live::tracks::tab_navigation::TabNavigator;
-                use reaper_high::{Reaper, Project};
-                use reaper_medium::{ProjectRef, PositionInSeconds, SetEditCurPosOptions};
-                
-                let reaper = Reaper::get();
-                let medium_reaper = reaper.medium_reaper();
-                
-                // Build setlist to find the song - use trait method on Reaper (operates on all open projects)
-                let setlist = reaper.build_setlist_from_open_projects(None)
-                    .map_err(|e| format!("Failed to build setlist: {}", e))?;
-                
-                if song_index >= setlist.songs.len() {
-                    return Err(format!("Song index {} out of range", song_index));
-                }
-                
-                let song = &setlist.songs[song_index];
-                let project_name = song.project_name_from_metadata();
-                
-                // Find the project tab for this song
-                let mut found_tab_index = None;
-                for i in 0..128u32 {
-                    if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
-                        let tab_name = result.file_path.as_ref()
-                            .and_then(|p| p.as_std_path().file_stem())
-                            .and_then(|s| s.to_str())
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| format!("Tab {}", i));
-                        
-                        if tab_name == project_name {
-                            found_tab_index = Some(i as usize);
-                            break;
-                        }
+                    use fts::setlist::infra::traits::SetlistBuilder;
+                    use reaper_high::{Project, Reaper};
+                    use reaper_medium::{PositionInSeconds, ProjectRef, SetEditCurPosOptions};
+
+                    let reaper = Reaper::get();
+                    let medium_reaper = reaper.medium_reaper();
+
+                    // Build setlist to find the song - use trait method on Reaper (operates on all open projects)
+                    let setlist = reaper
+                        .build_setlist_from_open_projects(None)
+                        .map_err(|e| format!("Failed to build setlist: {}", e))?;
+
+                    if song_index >= setlist.songs.len() {
+                        return Err(format!("Song index {} out of range", song_index));
                     }
-                }
-                
-                let tab_index = found_tab_index
-                    .ok_or_else(|| format!("Could not find project for song: {}", project_name))?;
-                
-                // Get current project to check if we're in the same song
-                let current_project_result = medium_reaper.enum_projects(ProjectRef::Current, 0)
-                    .ok_or_else(|| "No current project".to_string())?;
-                
-                let current_project = Project::new(current_project_result.project);
-                
-                // Check if we're clicking in the same song (same tab)
-                let current_tab_index = {
-                    let current_project_raw = current_project_result.project;
-                    let mut found_current_tab = None;
+
+                    let song = &setlist.songs[song_index];
+                    let project_name = song.project_name_from_metadata();
+
+                    // Find the project tab for this song
+                    let mut found_tab_index = None;
                     for i in 0..128u32 {
                         if let Some(result) = medium_reaper.enum_projects(ProjectRef::Tab(i), 512) {
-                            if result.project == current_project_raw {
-                                found_current_tab = Some(i as usize);
+                            let tab_name = result
+                                .file_path
+                                .as_ref()
+                                .and_then(|p| p.as_std_path().file_stem())
+                                .and_then(|s| s.to_str())
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| format!("Tab {}", i));
+
+                            if tab_name == project_name {
+                                found_tab_index = Some(i as usize);
                                 break;
                             }
                         }
                     }
-                    found_current_tab
-                };
-                
-                let is_same_song = current_tab_index == Some(tab_index);
-                
-                // Calculate absolute time position (song start + relative time)
-                let song_start = song.effective_start();
-                let absolute_time = song_start + time_seconds;
-                
-                let target_pos = PositionInSeconds::new(absolute_time)
-                    .map_err(|e| format!("Invalid position: {}", e))?;
-                
-                // Switch to the tab if needed
-                let final_project = if !is_same_song {
-                    let tab_navigator = TabNavigator::new();
-                    tab_navigator.switch_to_tab(tab_index)
-                        .map_err(|e| format!("Failed to switch to tab {}: {}", tab_index, e))?;
-                    
-                    // Get the current project (now switched to the target song)
-                    let project_result = medium_reaper.enum_projects(ProjectRef::Current, 0)
-                        .ok_or_else(|| "No current project after tab switch".to_string())?;
-                    
-                    Project::new(project_result.project)
-                } else {
-                    current_project
-                };
-                
-                // Seek to the position
-                final_project.set_edit_cursor_position(target_pos, SetEditCurPosOptions { 
-                    move_view: false, 
-                    seek_play: true, // Seek play cursor immediately
-                });
-                
+
+                    let tab_index = found_tab_index.ok_or_else(|| {
+                        format!("Could not find project for song: {}", project_name)
+                    })?;
+
+                    // Get current project to check if we're in the same song
+                    let current_project_result = medium_reaper
+                        .enum_projects(ProjectRef::Current, 0)
+                        .ok_or_else(|| "No current project".to_string())?;
+
+                    let current_project = Project::new(current_project_result.project);
+
+                    // Check if we're clicking in the same song (same tab)
+                    let current_tab_index = {
+                        let current_project_raw = current_project_result.project;
+                        let mut found_current_tab = None;
+                        for i in 0..128u32 {
+                            if let Some(result) =
+                                medium_reaper.enum_projects(ProjectRef::Tab(i), 512)
+                            {
+                                if result.project == current_project_raw {
+                                    found_current_tab = Some(i as usize);
+                                    break;
+                                }
+                            }
+                        }
+                        found_current_tab
+                    };
+
+                    let is_same_song = current_tab_index == Some(tab_index);
+
+                    // Calculate absolute time position (song start + relative time)
+                    let song_start = song.effective_start();
+                    let absolute_time = song_start + time_seconds;
+
+                    let target_pos = PositionInSeconds::new(absolute_time)
+                        .map_err(|e| format!("Invalid position: {}", e))?;
+
+                    // Switch to the tab if needed
+                    let final_project = if !is_same_song {
+                        let tab_navigator = TabNavigator::new();
+                        tab_navigator
+                            .switch_to_tab(tab_index)
+                            .map_err(|e| format!("Failed to switch to tab {}: {}", tab_index, e))?;
+
+                        // Get the current project (now switched to the target song)
+                        let project_result = medium_reaper
+                            .enum_projects(ProjectRef::Current, 0)
+                            .ok_or_else(|| "No current project after tab switch".to_string())?;
+
+                        Project::new(project_result.project)
+                    } else {
+                        current_project
+                    };
+
+                    // Seek to the position
+                    final_project.set_edit_cursor_position(
+                        target_pos,
+                        SetEditCurPosOptions {
+                            move_view: false,
+                            seek_play: true, // Seek play cursor immediately
+                        },
+                    );
+
                     info!(
                         "Seeked to time position {}s (song: {}, absolute: {}s)",
                         time_seconds, song.name, absolute_time
@@ -394,4 +446,3 @@ impl CommandService {
         }
     }
 }
-

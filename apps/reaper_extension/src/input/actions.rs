@@ -11,11 +11,11 @@ use tracing::info;
 fn toggle_input_interception_handler() {
     let is_enabled = InputHandler::toggle();
     let reaper = Reaper::get();
-    
+
     let status = if is_enabled { "enabled" } else { "disabled" };
     reaper.show_console_msg(format!("FTS-Input interception: {}\n", status));
     info!("FTS-Input interception toggled: {}", status);
-    
+
     // Wake up REAPER to refresh action states
     if let Err(e) = reaper.wake_up() {
         tracing::warn!("Failed to wake up REAPER after toggle: {}", e);
@@ -31,11 +31,15 @@ fn get_input_interception_state() -> bool {
 fn toggle_input_passthrough_handler() {
     let is_passthrough = InputHandler::toggle_passthrough();
     let reaper = Reaper::get();
-    
-    let status = if is_passthrough { "enabled (logging only)" } else { "disabled (intercepting)" };
+
+    let status = if is_passthrough {
+        "enabled (logging only)"
+    } else {
+        "disabled (intercepting)"
+    };
     reaper.show_console_msg(format!("FTS-Input passthrough mode: {}\n", status));
     info!("FTS-Input passthrough mode toggled: {}", status);
-    
+
     // Wake up REAPER to refresh action states
     if let Err(e) = reaper.wake_up() {
         tracing::warn!("Failed to wake up REAPER after toggle: {}", e);
@@ -67,6 +71,6 @@ pub fn register_input_actions() {
             toggle_state: Some(get_input_passthrough_state),
         },
     ];
-    
+
     register_actions(&actions, "Input");
 }

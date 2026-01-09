@@ -36,18 +36,18 @@ impl SetlistOrder {
             current_position: 0,
         }
     }
-    
+
     /// Get the current song entry
     pub fn current_entry(&self) -> Option<&SetlistEntry> {
         self.entries.get(self.current_position)
     }
-    
+
     /// Get the next song entry (wraps around)
     pub fn next_entry(&self) -> Option<&SetlistEntry> {
         if self.entries.is_empty() {
             return None;
         }
-        
+
         if self.current_position + 1 < self.entries.len() {
             self.entries.get(self.current_position + 1)
         } else {
@@ -55,13 +55,13 @@ impl SetlistOrder {
             self.entries.first()
         }
     }
-    
+
     /// Get the previous song entry (wraps around)
     pub fn prev_entry(&self) -> Option<&SetlistEntry> {
         if self.entries.is_empty() {
             return None;
         }
-        
+
         if self.current_position > 0 {
             self.entries.get(self.current_position - 1)
         } else {
@@ -69,25 +69,24 @@ impl SetlistOrder {
             self.entries.last()
         }
     }
-    
+
     /// Get entry by tab index
     pub fn entry_by_tab(&self, tab_index: usize) -> Option<&SetlistEntry> {
         self.entries.iter().find(|e| e.tab_index == tab_index)
     }
-    
+
     /// Get entry index by tab index
     pub fn index_by_tab(&self, tab_index: usize) -> Option<usize> {
-        self.entries.iter()
-            .position(|e| e.tab_index == tab_index)
+        self.entries.iter().position(|e| e.tab_index == tab_index)
     }
-    
+
     /// Advance to next song (wraps around)
     pub fn advance(&mut self) {
         if !self.entries.is_empty() {
             self.current_position = (self.current_position + 1) % self.entries.len();
         }
     }
-    
+
     /// Go to previous song (wraps around)
     pub fn retreat(&mut self) {
         if !self.entries.is_empty() {
@@ -98,14 +97,14 @@ impl SetlistOrder {
             }
         }
     }
-    
+
     /// Jump to a specific position (safely bounds-checked)
     pub fn jump_to(&mut self, position: usize) {
         if position < self.entries.len() {
             self.current_position = position;
         }
     }
-    
+
     /// Jump to entry with specific tab index
     pub fn jump_to_tab(&mut self, tab_index: usize) -> bool {
         if let Some(index) = self.index_by_tab(tab_index) {
@@ -115,12 +114,12 @@ impl SetlistOrder {
             false
         }
     }
-    
+
     /// Get total number of entries
     pub fn len(&self) -> usize {
         self.entries.len()
     }
-    
+
     /// Check if setlist is empty
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
@@ -132,4 +131,3 @@ impl Default for SetlistOrder {
         Self::new()
     }
 }
-

@@ -8,8 +8,8 @@
 use super::core::Lyrics;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use uuid::Uuid;
 use thiserror::Error;
+use uuid::Uuid;
 
 /// Represents the source of truth - the raw lyrics text
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -92,14 +92,20 @@ impl LyricTime {
             return Err(TimeParseError::InvalidFormat);
         }
 
-        let minutes: u64 = parts[0].parse().map_err(|_| TimeParseError::InvalidFormat)?;
+        let minutes: u64 = parts[0]
+            .parse()
+            .map_err(|_| TimeParseError::InvalidFormat)?;
         let sec_parts: Vec<&str> = parts[1].split('.').collect();
         if sec_parts.len() != 2 {
             return Err(TimeParseError::InvalidFormat);
         }
 
-        let seconds: u64 = sec_parts[0].parse().map_err(|_| TimeParseError::InvalidFormat)?;
-        let centiseconds: u64 = sec_parts[1].parse().map_err(|_| TimeParseError::InvalidFormat)?;
+        let seconds: u64 = sec_parts[0]
+            .parse()
+            .map_err(|_| TimeParseError::InvalidFormat)?;
+        let centiseconds: u64 = sec_parts[1]
+            .parse()
+            .map_err(|_| TimeParseError::InvalidFormat)?;
 
         let total_seconds = (minutes * 60) as f64 + seconds as f64 + (centiseconds as f64 / 100.0);
 
@@ -228,7 +234,7 @@ impl LyricsAnnotations {
             section_mappings: HashMap::new(),
             metadata: HashMap::new(),
             syllable_timings: HashMap::new(), // Legacy
-            syllable_notes: HashMap::new(), // Legacy
+            syllable_notes: HashMap::new(),   // Legacy
         }
     }
 
@@ -281,24 +287,14 @@ impl LyricsAnnotations {
     }
 
     /// Legacy: Set timing for a syllable (old key-based system)
-    pub fn set_syllable_timing(
-        &mut self,
-        key: SyllableKey,
-        start: LyricTime,
-        end: LyricTime,
-    ) {
-        self.syllable_timings.insert(
-            key,
-            SyllableTiming { start, end },
-        );
+    pub fn set_syllable_timing(&mut self, key: SyllableKey, start: LyricTime, end: LyricTime) {
+        self.syllable_timings
+            .insert(key, SyllableTiming { start, end });
     }
 
     /// Legacy: Set MIDI note for a syllable (old key-based system)
     pub fn set_syllable_note(&mut self, key: SyllableKey, note: u8, velocity: u8) {
-        self.syllable_notes.insert(
-            key,
-            MidiNote { note, velocity },
-        );
+        self.syllable_notes.insert(key, MidiNote { note, velocity });
     }
 
     /// Add a custom slide break
@@ -341,7 +337,10 @@ impl DerivedLyrics {
         // Apply annotations to the parsed lyrics
         Self::apply_annotations(&mut lyrics, &annotations);
 
-        Ok(Self { lyrics, annotations })
+        Ok(Self {
+            lyrics,
+            annotations,
+        })
     }
 
     /// Apply annotations to parsed lyrics
@@ -349,7 +348,7 @@ impl DerivedLyrics {
         // Apply syllable timings and notes
         // Note: This requires reconstructing words from lines, which we'll do on-demand
         // For now, we store the annotations separately and apply them when generating outputs
-        
+
         // Apply section mappings
         for (section_idx, song_section_id) in &annotations.section_mappings {
             if let Some(section) = lyrics.sections.get_mut(*section_idx) {
@@ -370,7 +369,9 @@ impl DerivedLyrics {
 
     /// Check if a slide break is custom (user-defined)
     pub fn is_custom_slide_break(&self, section_idx: usize, line_idx: usize) -> bool {
-        self.annotations.slide_breaks.iter()
+        self.annotations
+            .slide_breaks
+            .iter()
             .any(|b| b.section_idx == section_idx && b.line_idx == line_idx)
     }
 
@@ -388,11 +389,7 @@ impl DerivedLyrics {
         )?;
 
         // Reconcile annotations
-        let result = Self::reconcile_annotations(
-            &self.lyrics,
-            &new_lyrics,
-            &mut self.annotations,
-        );
+        let result = Self::reconcile_annotations(&self.lyrics, &new_lyrics, &mut self.annotations);
 
         // Update lyrics
         self.lyrics = new_lyrics;
@@ -415,12 +412,13 @@ impl DerivedLyrics {
         for (old_idx, old_section) in old_lyrics.sections.iter().enumerate() {
             // Try to find matching section in new lyrics
             for (new_idx, new_section) in new_lyrics.sections.iter().enumerate() {
-                if old_section.name == new_section.name && old_section.lines.len() == new_section.lines.len() {
+                if old_section.name == new_section.name
+                    && old_section.lines.len() == new_section.lines.len()
+                {
                     // Potential match - check if lines are similar
-                    let lines_match = old_section.lines.iter().zip(new_section.lines.iter())
-                        .all(|(old_line, new_line)| {
-                            old_line.regular_text() == new_line.regular_text()
-                        });
+                    let lines_match = old_section.lines.iter().zip(new_section.lines.iter()).all(
+                        |(old_line, new_line)| old_line.regular_text() == new_line.regular_text(),
+                    );
 
                     if lines_match {
                         matched_sections.push((old_idx, new_idx));
@@ -462,7 +460,9 @@ impl DerivedLyrics {
 
             // Update section mappings
             if let Some(song_section_id) = annotations.section_mappings.remove(old_section_idx) {
-                annotations.section_mappings.insert(*new_section_idx, song_section_id);
+                annotations
+                    .section_mappings
+                    .insert(*new_section_idx, song_section_id);
             }
         }
 
@@ -477,8 +477,10 @@ impl DerivedLyrics {
         // Update slide breaks
         let mut new_slide_breaks = Vec::new();
         for break_point in &annotations.slide_breaks {
-            if let Some((_, new_section_idx)) = matched_sections.iter()
-                .find(|(old_idx, _)| *old_idx == break_point.section_idx) {
+            if let Some((_, new_section_idx)) = matched_sections
+                .iter()
+                .find(|(old_idx, _)| *old_idx == break_point.section_idx)
+            {
                 new_slide_breaks.push(SlideBreak {
                     section_idx: *new_section_idx,
                     line_idx: break_point.line_idx,
@@ -502,4 +504,3 @@ pub struct ReconciliationResult {
     /// Number of annotations that were lost (couldn't be matched)
     pub lost_annotations: usize,
 }
-

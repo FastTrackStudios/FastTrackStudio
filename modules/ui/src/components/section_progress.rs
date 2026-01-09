@@ -1,31 +1,29 @@
 use dioxus::prelude::*;
 use fts::setlist::infra::dioxus::SETLIST;
 
-use crate::components::progress::{TimeSignatureCard, TempoCard, ProgressSection, TempoMarker, MeasureIndicator};
+use crate::components::progress::{
+    MeasureIndicator, ProgressSection, TempoCard, TempoMarker, TimeSignatureCard,
+};
 
 /// Section progress bar component
-/// 
+///
 /// Shows progress within the current section as a small bar below the main progress bar.
 /// Can display tempo markers, time signature markers, and measure indicators for a zoomed-in view.
 #[component]
 pub fn SectionProgressBar(
     progress: Signal<f64>,
     sections: Vec<ProgressSection>,
-    #[props(default)]
-    tempo_markers: Vec<TempoMarker>,
-    #[props(default)]
-    measure_indicators: Vec<MeasureIndicator>,
-    #[props(default)]
-    song_key: Option<String>,
-    #[props(default)]
-    on_measure_click: Option<Callback<daw::primitives::MusicalPosition>>,
+    #[props(default)] tempo_markers: Vec<TempoMarker>,
+    #[props(default)] measure_indicators: Vec<MeasureIndicator>,
+    #[props(default)] song_key: Option<String>,
+    #[props(default)] on_measure_click: Option<Callback<daw::primitives::MusicalPosition>>,
 ) -> Element {
     let current_progress = progress();
-    
+
     // Track progress changes to detect jumps and disable animations
     let mut prev_progress = use_signal(|| None::<f64>);
     let mut prev_song_key = use_signal(|| None::<String>);
-    
+
     let song_key_for_memo = song_key.clone();
     let should_animate = use_memo(move || {
         let prev = prev_progress();
@@ -38,7 +36,7 @@ pub fn SectionProgressBar(
         };
         !song_changed && !large_jump && prev.is_some()
     });
-    
+
     let current_progress_for_effect = current_progress;
     let song_key_for_effect = song_key.clone();
     use_effect(move || {
@@ -47,79 +45,91 @@ pub fn SectionProgressBar(
             prev_song_key.set(song_key_for_effect.clone());
         }
     });
-    
+
     // Get the active section color from the SETLIST API (same approach as SongProgressBar)
     // This ensures we use the actual current section, not calculated from progress
-    let base_color = SETLIST.read().as_ref()
+    let base_color = SETLIST
+        .read()
+        .as_ref()
         .and_then(|api| api.active_section())
         .map(|section| section.color_bright())
         .unwrap_or_else(|| {
             // Fallback to first section color if no active section
-            sections.first()
+            sections
+                .first()
                 .map(|s| s.color.clone())
                 .unwrap_or_else(|| "rgb(100, 100, 100)".to_string())
         });
-    
+
     // Convert measure indicators into measure sections for clickable/highlightable measures
-    let measure_sections: Vec<_> = measure_indicators.iter().enumerate().map(|(idx, measure)| {
-        let measure_start = measure.position_percent;
-        // End position is the next measure's start, or 100% if this is the last measure
-        let measure_end = if idx + 1 < measure_indicators.len() {
-            measure_indicators[idx + 1].position_percent
-        } else {
-            100.0
-        };
-        let measure_width = measure_end - measure_start;
-        
-        // Calculate how much of this measure is filled
-        let filled_percent = if current_progress <= measure_start {
-            0.0
-        } else if current_progress >= measure_end {
-            100.0
-        } else {
-            let progress_in_measure = current_progress - measure_start;
-            (progress_in_measure / measure_width) * 100.0
-        };
-        
-        (idx, measure_start, measure_end, measure_width, measure.clone(), filled_percent)
-    }).collect();
-    
+    let measure_sections: Vec<_> = measure_indicators
+        .iter()
+        .enumerate()
+        .map(|(idx, measure)| {
+            let measure_start = measure.position_percent;
+            // End position is the next measure's start, or 100% if this is the last measure
+            let measure_end = if idx + 1 < measure_indicators.len() {
+                measure_indicators[idx + 1].position_percent
+            } else {
+                100.0
+            };
+            let measure_width = measure_end - measure_start;
+
+            // Calculate how much of this measure is filled
+            let filled_percent = if current_progress <= measure_start {
+                0.0
+            } else if current_progress >= measure_end {
+                100.0
+            } else {
+                let progress_in_measure = current_progress - measure_start;
+                (progress_in_measure / measure_width) * 100.0
+            };
+
+            (
+                idx,
+                measure_start,
+                measure_end,
+                measure_width,
+                measure.clone(),
+                filled_percent,
+            )
+        })
+        .collect();
+
     // Find the active measure
-    let active_measure = measure_sections.iter().find(|(_, start, end, _, _, _)| {
-        current_progress >= *start && current_progress < *end
-    }).or_else(|| {
-        if let Some((_, start, end, _, _, _)) = measure_sections.last() {
-            if current_progress >= *start && current_progress <= *end {
-                measure_sections.last()
+    let active_measure = measure_sections
+        .iter()
+        .find(|(_, start, end, _, _, _)| current_progress >= *start && current_progress < *end)
+        .or_else(|| {
+            if let Some((_, start, end, _, _, _)) = measure_sections.last() {
+                if current_progress >= *start && current_progress <= *end {
+                    measure_sections.last()
+                } else {
+                    None
+                }
             } else {
                 None
             }
-        } else {
-            None
-        }
-    });
-    
+        });
+
     // Helper function to check if two markers overlap (same as SongProgressBar)
-    let check_overlap = |pos1: f64, pos2: f64| -> bool {
-        (pos1 - pos2).abs() < 2.0
-    };
-    
+    let check_overlap = |pos1: f64, pos2: f64| -> bool { (pos1 - pos2).abs() < 2.0 };
+
     // Pre-calculate positions for time signature markers (all in same row, no staggering)
     // For section progress bar, use -2rem offset (cards closer to bar for compact display)
     let time_sig_with_positions: Vec<_> = {
-        tempo_markers.iter()
+        tempo_markers
+            .iter()
             .enumerate()
             .filter(|(_, m)| m.is_time_sig)
-            .map(|(orig_idx, marker)| {
-                (orig_idx, marker, "-2rem")
-            })
+            .map(|(orig_idx, marker)| (orig_idx, marker, "-2rem"))
             .collect()
     };
-    
+
     // Calculate line positions dynamically based on card size
     // Lines should go FROM progress bar UP TO bottom of cards
     // Card top is at -2rem (card_top_offset)
-    // For "sm" size cards with horizontal text "4/4": 
+    // For "sm" size cards with horizontal text "4/4":
     //   - text-xs line-height: ~0.75rem
     //   - py-0.5 padding: 0.5rem top + 0.5rem bottom = 1rem total
     //   - border: ~0.125rem (1px top + 1px bottom)
@@ -141,14 +151,15 @@ pub fn SectionProgressBar(
     let card_bottom_rem = -card_top_offset_rem + card_height_rem; // -2 + 1.75 = -0.25
     let line_height_rem = -card_bottom_rem; // 0.25 (distance from 0 to -0.25rem)
     let line_height = format!("{}rem", line_height_rem);
-    
+
     // Pre-calculate positions for tempo markers with staggering
     let tempo_with_positions: Vec<_> = {
-        let tempo_markers_list: Vec<_> = tempo_markers.iter()
+        let tempo_markers_list: Vec<_> = tempo_markers
+            .iter()
             .enumerate()
             .filter(|(_, m)| m.is_tempo)
             .collect();
-        
+
         let mut result = Vec::new();
         for (idx, (orig_idx, marker)) in tempo_markers_list.iter().enumerate() {
             // Check if this marker overlaps with previous ones
@@ -159,17 +170,17 @@ pub fn SectionProgressBar(
             } else {
                 false
             };
-            
+
             let bottom_offset = if needs_stagger && idx % 2 == 1 {
-                "0.75rem"   // Lower lane for odd indices when overlapping
+                "0.75rem" // Lower lane for odd indices when overlapping
             } else {
-                "0.5rem"    // Default higher lane (closer to progress bar)
+                "0.5rem" // Default higher lane (closer to progress bar)
             };
             result.push((*orig_idx, *marker, bottom_offset));
         }
         result
     };
-    
+
     rsx! {
         div {
             class: "relative flex flex-col items-center justify-center w-full",
@@ -222,10 +233,10 @@ pub fn SectionProgressBar(
                 for (measure_idx, measure_start, _measure_end, measure_width, measure, filled_percent) in measure_sections.iter() {
                     div {
                         key: "measure-section-{measure_idx}",
-                        class: if on_measure_click.is_some() { 
-                            "absolute h-full z-10 cursor-pointer transition-all duration-200 hover:brightness-110 hover:ring-2 hover:ring-white hover:ring-opacity-50" 
-                        } else { 
-                            "absolute h-full z-0" 
+                        class: if on_measure_click.is_some() {
+                            "absolute h-full z-10 cursor-pointer transition-all duration-200 hover:brightness-110 hover:ring-2 hover:ring-white hover:ring-opacity-50"
+                        } else {
+                            "absolute h-full z-0"
                         },
                         style: format!(
                             "left: {}%; width: {}%;",

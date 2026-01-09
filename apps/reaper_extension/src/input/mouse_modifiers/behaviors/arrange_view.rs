@@ -1,8 +1,8 @@
 //! Arrange View mouse modifier behaviors
 
-use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorId, BehaviorDisplay};
 #[allow(unused_imports)]
 use crate::define_behavior_enum;
+use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorDisplay, BehaviorId};
 
 /// Arrange View middle drag behaviors
 define_behavior_enum! {

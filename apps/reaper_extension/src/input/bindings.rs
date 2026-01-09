@@ -3,8 +3,8 @@
 //! Defines the key sequence bindings for FTS-Input.
 //! Similar to reaper-keys' bindings.lua, but in Rust.
 
-use std::collections::HashMap;
 use crate::input::state::{ActionType, Context};
+use std::collections::HashMap;
 
 /// A binding entry - maps a key sequence to an action
 #[derive(Debug, Clone)]
@@ -49,43 +49,102 @@ impl Bindings {
             media_explorer: HashMap::new(),
             crossfade_editor: HashMap::new(),
         };
-        
+
         // Initialize timeline_motion bindings (global)
         let mut timeline_motion = HashMap::new();
-        timeline_motion.insert("0".to_string(), BindingEntry::Action("ProjectStart".to_string()));
-        timeline_motion.insert("f".to_string(), BindingEntry::Action("PlayPosition".to_string()));
-        timeline_motion.insert("x".to_string(), BindingEntry::Action("MousePosition".to_string()));
-        timeline_motion.insert("[".to_string(), BindingEntry::Action("LoopStart".to_string()));
+        timeline_motion.insert(
+            "0".to_string(),
+            BindingEntry::Action("ProjectStart".to_string()),
+        );
+        timeline_motion.insert(
+            "f".to_string(),
+            BindingEntry::Action("PlayPosition".to_string()),
+        );
+        timeline_motion.insert(
+            "x".to_string(),
+            BindingEntry::Action("MousePosition".to_string()),
+        );
+        timeline_motion.insert(
+            "[".to_string(),
+            BindingEntry::Action("LoopStart".to_string()),
+        );
         timeline_motion.insert("]".to_string(), BindingEntry::Action("LoopEnd".to_string()));
-        timeline_motion.insert("<left>".to_string(), BindingEntry::Action("PrevMarker".to_string()));
-        timeline_motion.insert("<right>".to_string(), BindingEntry::Action("NextMarker".to_string()));
-        timeline_motion.insert("h".to_string(), BindingEntry::Action("LeftGridDivision".to_string()));
-        timeline_motion.insert("l".to_string(), BindingEntry::Action("RightGridDivision".to_string()));
-        timeline_motion.insert("H".to_string(), BindingEntry::Action("PrevMeasure".to_string()));
-        timeline_motion.insert("L".to_string(), BindingEntry::Action("NextMeasure".to_string()));
-        bindings.global.insert(ActionType::TimelineMotion, timeline_motion);
-        
+        timeline_motion.insert(
+            "<left>".to_string(),
+            BindingEntry::Action("PrevMarker".to_string()),
+        );
+        timeline_motion.insert(
+            "<right>".to_string(),
+            BindingEntry::Action("NextMarker".to_string()),
+        );
+        timeline_motion.insert(
+            "h".to_string(),
+            BindingEntry::Action("LeftGridDivision".to_string()),
+        );
+        timeline_motion.insert(
+            "l".to_string(),
+            BindingEntry::Action("RightGridDivision".to_string()),
+        );
+        timeline_motion.insert(
+            "H".to_string(),
+            BindingEntry::Action("PrevMeasure".to_string()),
+        );
+        timeline_motion.insert(
+            "L".to_string(),
+            BindingEntry::Action("NextMeasure".to_string()),
+        );
+        bindings
+            .global
+            .insert(ActionType::TimelineMotion, timeline_motion);
+
         // Initialize timeline_operator bindings (global)
         let mut timeline_operator = HashMap::new();
         timeline_operator.insert("r".to_string(), BindingEntry::Action("Record".to_string()));
-        timeline_operator.insert("t".to_string(), BindingEntry::Action("PlayAndLoop".to_string()));
-        bindings.global.insert(ActionType::TimelineOperator, timeline_operator);
-        
+        timeline_operator.insert(
+            "t".to_string(),
+            BindingEntry::Action("PlayAndLoop".to_string()),
+        );
+        bindings
+            .global
+            .insert(ActionType::TimelineOperator, timeline_operator);
+
         // Initialize command bindings (global)
         let mut command = HashMap::new();
-        command.insert("<ESC>".to_string(), BindingEntry::Action("Reset".to_string()));
-        command.insert("<return>".to_string(), BindingEntry::Action("StartStop".to_string()));
-        command.insert(".".to_string(), BindingEntry::Action("RepeatLastCommand".to_string()));
-        command.insert("@".to_string(), BindingEntry::Action("PlayMacro".to_string()));
-        command.insert(",".to_string(), BindingEntry::Action("RecordMacro".to_string()));
-        command.insert("v".to_string(), BindingEntry::Action("SetModeVisualTimeline".to_string()));
+        command.insert(
+            "<ESC>".to_string(),
+            BindingEntry::Action("Reset".to_string()),
+        );
+        command.insert(
+            "<return>".to_string(),
+            BindingEntry::Action("StartStop".to_string()),
+        );
+        command.insert(
+            ".".to_string(),
+            BindingEntry::Action("RepeatLastCommand".to_string()),
+        );
+        command.insert(
+            "@".to_string(),
+            BindingEntry::Action("PlayMacro".to_string()),
+        );
+        command.insert(
+            ",".to_string(),
+            BindingEntry::Action("RecordMacro".to_string()),
+        );
+        command.insert(
+            "v".to_string(),
+            BindingEntry::Action("SetModeVisualTimeline".to_string()),
+        );
         bindings.global.insert(ActionType::Command, command);
-        
+
         bindings
     }
-    
+
     /// Get bindings for a specific action type and context
-    pub fn get_bindings(&self, action_type: &ActionType, context: Context) -> Option<&HashMap<String, BindingEntry>> {
+    pub fn get_bindings(
+        &self,
+        action_type: &ActionType,
+        context: Context,
+    ) -> Option<&HashMap<String, BindingEntry>> {
         let context_bindings = match context {
             Context::Main => &self.main,
             Context::Midi => &self.midi,
@@ -95,9 +154,10 @@ impl Bindings {
             Context::CrossfadeEditor => &self.crossfade_editor,
             Context::Global => &self.global,
         };
-        
+
         // Try context-specific first, then global
-        context_bindings.get(action_type)
+        context_bindings
+            .get(action_type)
             .or_else(|| self.global.get(action_type))
     }
 }

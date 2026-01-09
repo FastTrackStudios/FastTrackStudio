@@ -3,8 +3,8 @@
 //! This module provides reactive streams and services for setlist, song, and lyrics state.
 //! Each domain type can define its own reactive behavior, making the system composable.
 
-use crate::setlist::core::{Setlist, Song, Section};
 use crate::lyrics::{Lyrics, LyricsAnnotations};
+use crate::setlist::core::{Section, Setlist, Song};
 use rxrust::prelude::*;
 use std::cell::RefCell;
 
@@ -22,13 +22,13 @@ pub mod irpc;
 pub struct SetlistStreams {
     /// Setlist structure changed (songs, sections, metadata)
     pub setlist_structure_changed: EventStreamSubject<Setlist>,
-    
+
     /// Song added to setlist
     pub song_added: EventStreamSubject<(usize, Song)>,
-    
+
     /// Song removed from setlist
     pub song_removed: EventStreamSubject<usize>,
-    
+
     /// Songs reordered
     pub songs_reordered: EventStreamSubject<Setlist>,
 }
@@ -52,13 +52,13 @@ impl SetlistStreams {
 pub struct SongStreams {
     /// Song metadata changed (name, markers, etc.)
     pub song_changed: EventStreamSubject<(usize, Song)>,
-    
+
     /// Section added to a song
     pub section_added: EventStreamSubject<(usize, usize, Section)>, // song_index, section_index, section
-    
+
     /// Section removed from a song
     pub section_removed: EventStreamSubject<(usize, usize)>, // song_index, section_index
-    
+
     /// Section changed in a song
     pub section_changed: EventStreamSubject<(usize, usize, Section)>, // song_index, section_index, section
 }
@@ -84,7 +84,7 @@ pub struct LyricsStreams {
     /// Note: Lyrics are part of the Song in the setlist, but this stream allows
     /// granular updates when only lyrics change without the whole setlist changing
     pub lyrics_changed: EventStreamSubject<(usize, Lyrics)>,
-    
+
     /// Lyrics annotations changed for a specific song (timing, MIDI notes, slide breaks)
     /// Note: Annotations may be stored separately, but are associated with a song
     pub lyrics_annotations_changed: EventStreamSubject<(usize, LyricsAnnotations)>,
@@ -107,13 +107,13 @@ impl LyricsStreams {
 pub struct ActiveIndicesStreams {
     /// Active indices changed (song/section/slide)
     pub active_indices_changed: EventStreamSubject<(Option<usize>, Option<usize>, Option<usize>)>,
-    
+
     /// Active song index changed
     pub active_song_index_changed: EventStreamSubject<Option<usize>>,
-    
+
     /// Active section index changed
     pub active_section_index_changed: EventStreamSubject<Option<usize>>,
-    
+
     /// Active slide index changed
     pub active_slide_index_changed: EventStreamSubject<Option<usize>>,
 }
@@ -151,4 +151,3 @@ impl SetlistReactiveStreams {
         }
     }
 }
-

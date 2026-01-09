@@ -4,8 +4,8 @@
 //! from transport and tracks modules. Each domain defines its own reactive
 //! behavior, and these types provide a convenient way to access them together.
 
-use crate::transport::reactive::TransportStreams;
 use crate::tracks::reactive::TrackStreams;
+use crate::transport::reactive::TransportStreams;
 use rxrust::prelude::*;
 use std::cell::RefCell;
 
@@ -31,7 +31,7 @@ impl ProjectStreams {
 }
 
 /// All DAW reactive streams composed together
-/// 
+///
 /// This is a convenience type for accessing transport, tracks, and project streams together.
 /// Individual domains define their own reactive behavior in their respective modules.
 #[derive(Clone, Default, Debug)]
@@ -50,4 +50,3 @@ impl DawStreams {
         }
     }
 }
-

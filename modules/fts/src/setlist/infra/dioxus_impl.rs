@@ -5,7 +5,7 @@
 #[cfg(feature = "dioxus")]
 mod dioxus_impl {
     use crate::setlist::core::Setlist;
-    use crate::setlist::infra::api_trait::{SetlistDataSource, TransportState, AppState};
+    use crate::setlist::infra::api_trait::{AppState, SetlistDataSource, TransportState};
     use crate::setlist::infra::dioxus::*;
 
     /// Dioxus-based implementation of SetlistDataSource

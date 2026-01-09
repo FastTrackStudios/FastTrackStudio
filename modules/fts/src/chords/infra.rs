@@ -11,4 +11,3 @@ use std::collections::HashMap;
 /// This is updated by the chart_connection module in the desktop app
 #[cfg(feature = "dioxus")]
 pub static CHART_STATE: GlobalSignal<HashMap<String, Chart>> = Signal::global(|| HashMap::new());
-

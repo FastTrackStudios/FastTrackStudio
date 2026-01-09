@@ -2,7 +2,7 @@
 
 use crate::chart::{build, detection, read};
 use crate::infrastructure::action_registry::{ActionDef, ActionSection};
-use keyflow::chord::midi::{midi_pitch_to_note_name, MidiNoteName};
+use keyflow::chord::midi::{MidiNoteName, midi_pitch_to_note_name};
 use keyflow::time::{MusicalDuration, MusicalPosition, PPQDuration, PPQPosition};
 use reaper_high::{Project, Reaper};
 use reaper_medium::ReaperStringArg;

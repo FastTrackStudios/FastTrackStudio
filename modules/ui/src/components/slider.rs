@@ -21,8 +21,10 @@ pub fn Slider(
 ) -> Element {
     let current_value = value();
     let clamped_value = current_value.clamp(min, max);
-    let percentage = ((clamped_value - min) / (max - min) * 100.0).max(0.0).min(100.0);
-    
+    let percentage = ((clamped_value - min) / (max - min) * 100.0)
+        .max(0.0)
+        .min(100.0);
+
     rsx! {
         div {
             class: "flex flex-col gap-1",
@@ -75,4 +77,3 @@ pub fn Slider(
         }
     }
 }
-

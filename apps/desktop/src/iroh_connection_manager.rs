@@ -4,7 +4,7 @@
 //! subscribing to different streams (ALPNs) on that same connection.
 
 use anyhow::Result;
-use iroh::{Endpoint, EndpointId, EndpointAddr};
+use iroh::{Endpoint, EndpointAddr, EndpointId};
 use peer_2_peer::iroh_connection::read_endpoint_id;
 use std::sync::OnceLock;
 use tracing::{info, warn};
@@ -18,10 +18,17 @@ static ENDPOINT_ID: OnceLock<std::sync::Mutex<Option<EndpointId>>> = OnceLock::n
 /// Initialize the shared Iroh endpoint
 pub async fn init_shared_endpoint() -> Result<()> {
     if ENDPOINT.get().is_none() {
-        let endpoint = Endpoint::builder().bind().await
+        let endpoint = Endpoint::builder()
+            .bind()
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to create client endpoint: {}", e))?;
-        ENDPOINT.set(endpoint).map_err(|_| anyhow::anyhow!("Endpoint already initialized"))?;
-        info!("[IROH Connection Manager] Created shared endpoint: {}", ENDPOINT.get().unwrap().id());
+        ENDPOINT
+            .set(endpoint)
+            .map_err(|_| anyhow::anyhow!("Endpoint already initialized"))?;
+        info!(
+            "[IROH Connection Manager] Created shared endpoint: {}",
+            ENDPOINT.get().unwrap().id()
+        );
     }
     ENDPOINT_ID.get_or_init(|| std::sync::Mutex::new(None));
     Ok(())
@@ -42,7 +49,10 @@ pub fn get_reaper_endpoint_id() -> Result<Option<EndpointId>> {
                 if let Ok(mut guard) = endpoint_id_lock.lock() {
                     if *guard != Some(id) {
                         if let Some(old_id) = *guard {
-                            info!("[IROH Connection Manager] Endpoint ID changed: {} -> {}", old_id, id);
+                            info!(
+                                "[IROH Connection Manager] Endpoint ID changed: {} -> {}",
+                                old_id, id
+                            );
                         } else {
                             info!("[IROH Connection Manager] Found REAPER endpoint ID: {}", id);
                         }
@@ -53,11 +63,16 @@ pub fn get_reaper_endpoint_id() -> Result<Option<EndpointId>> {
             Some(id)
         }
         Ok(None) => {
-            warn!("[IROH Connection Manager] No endpoint ID found, REAPER extension may not be running");
+            warn!(
+                "[IROH Connection Manager] No endpoint ID found, REAPER extension may not be running"
+            );
             None
         }
         Err(e) => {
-            warn!("[IROH Connection Manager] Failed to read endpoint ID: {}", e);
+            warn!(
+                "[IROH Connection Manager] Failed to read endpoint ID: {}",
+                e
+            );
             None
         }
     };
@@ -70,4 +85,3 @@ pub fn get_reaper_endpoint_addr() -> Result<Option<EndpointAddr>> {
         .map(|id| Ok(EndpointAddr::from(id)))
         .transpose()
 }
-

@@ -1,5 +1,5 @@
 //! Infrastructure modules for lyrics
-//! 
+//!
 //! This module contains infrastructure concerns for lyrics operations.
 
 pub mod traits;

@@ -1,6 +1,6 @@
-use dynamic_template::*;
 use daw::tracks::item::Item;
 use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
+use dynamic_template::*;
 
 #[test]
 fn marc_martel_dont_stop_me_now() {
@@ -36,19 +36,18 @@ fn marc_martel_dont_stop_me_now() {
         "BGV3",
         "BGV4",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
     // let expected = TrackStructureBuilder::new()
     //     .build();
-    // 
+    //
     // assert_tracks_equal(&tracks, &expected).unwrap();
 }
-

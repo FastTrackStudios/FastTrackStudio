@@ -25,8 +25,8 @@ pub use unified::{ScaleMode, ScaleType};
 
 // Re-export harmonization types
 pub use harmonization::{
-    analyze_scale_harmony, generate_scale_notes, generate_scale_semitones, harmonize_scale,
-    HarmonizationDepth, ScaleHarmonization,
+    HarmonizationDepth, ScaleHarmonization, analyze_scale_harmony, generate_scale_notes,
+    generate_scale_semitones, harmonize_scale,
 };
 
 #[cfg(test)]

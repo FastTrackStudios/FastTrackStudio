@@ -95,3 +95,6 @@ packages/charts/resources/fonts/
 *.ico
 *.svg
 *.pdf
+
+# Reference materials
+reference/

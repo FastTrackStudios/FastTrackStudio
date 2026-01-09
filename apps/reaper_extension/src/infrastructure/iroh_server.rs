@@ -3,13 +3,13 @@
 //! Manages the IROH server setup for peer-to-peer communication.
 //! Composes multiple IRPC APIs (Transport, Tracks, Setlist) into a single IROH router.
 
-use std::sync::Arc;
-use crate::services::{StreamService, SetlistService};
 use crate::infrastructure::reactive_app_state::ReactiveAppStateService;
-use tracing::{info, error, warn};
+use crate::services::{SetlistService, StreamService};
+use std::sync::Arc;
+use tracing::{error, info, warn};
 
 /// ALPN strings for each IRPC protocol
-/// 
+///
 /// These must match the ALPNs defined in the API structs:
 /// - TransportApi::ALPN
 /// - TrackApi::ALPN
@@ -31,7 +31,7 @@ pub mod alpn {
 }
 
 /// Start the IROH server with all IRPC APIs (Transport, Tracks, Setlist)
-/// 
+///
 /// Note: This must be called from the main thread because reactive services
 /// use `Rc<RefCell<...>>` which is not `Send`. The IRPC APIs are created
 /// on the main thread, then the tokio runtime is spawned in a separate thread
@@ -47,70 +47,73 @@ pub fn start_iroh_server(
     let track_streams = reactive_state.track_service.streams().clone();
     #[cfg(feature = "lyrics")]
     let lyrics_streams = reactive_state.lyrics_service.streams().clone();
-    
+
     // Create transport API using REAPER implementation
-    let transport_service_box: Box<dyn daw::transport::reactive::TransportReactiveService> = 
-        Box::new(fts::daw_reactive::transport::ReaperTransportReactiveService::new(
-            transport_streams,
-            setlist_service.clone(),
-        ));
+    let transport_service_box: Box<dyn daw::transport::reactive::TransportReactiveService> =
+        Box::new(
+            fts::daw_reactive::transport::ReaperTransportReactiveService::new(
+                transport_streams,
+                setlist_service.clone(),
+            ),
+        );
     let mut transport_api = daw::transport::TransportApi::spawn(transport_service_box);
-    
+
     // Create tracks API using REAPER implementation
-    let track_service_box: Box<dyn daw::tracks::reactive::TrackReactiveService> = 
+    let track_service_box: Box<dyn daw::tracks::reactive::TrackReactiveService> =
         Box::new(fts::daw_reactive::tracks::ReaperTrackReactiveService::new(
             track_streams,
             setlist_service.clone(),
         ));
-    
+
     // Create track command handler
     // We need TaskSupport to dispatch work to the main thread
     // Get it from the module-level static
     use crate::infrastructure::task_support::get_task_support;
-    
+
     let task_support = get_task_support()
         .expect("TaskSupport not initialized - this should be set up in plugin_main");
-    
+
     // Initialize track reactive service static for command handler
     // Use the same instance that's in reactive_state
     if let Some(reaper_track_service) = &reactive_state.reaper_track_service {
         // Wrap in TrackServiceWrapper to erase the generic type
-        let wrapper = fts::daw_reactive::tracks_command::TrackServiceWrapper::new(reaper_track_service.clone());
+        let wrapper = fts::daw_reactive::tracks_command::TrackServiceWrapper::new(
+            reaper_track_service.clone(),
+        );
         fts::daw_reactive::tracks_command::init_track_reactive_service(Arc::new(wrapper));
     }
-    
-    let track_command_handler: Arc<dyn daw::tracks::reactive::irpc::TrackCommandHandler> = 
-        Arc::new(fts::daw_reactive::tracks_command::ReaperTrackCommandHandler::new(
+
+    let track_command_handler: Arc<dyn daw::tracks::reactive::irpc::TrackCommandHandler> = Arc::new(
+        fts::daw_reactive::tracks_command::ReaperTrackCommandHandler::new(
             Arc::new(fts::daw_reactive::tracks_command::DefaultProjectProvider),
             task_support,
-        ));
-    
+        ),
+    );
+
     let mut tracks_api = daw::tracks::TrackApi::spawn_with_handler(
         track_service_box,
         Some(track_command_handler.clone()),
     );
-    
+
     // Create lyrics API using REAPER implementation (if lyrics feature is enabled)
     #[cfg(feature = "lyrics")]
     let mut lyrics_api = {
-        let lyrics_service_box: Box<dyn fts::lyrics::reactive::LyricsReactiveService> = 
-            Box::new(fts::lyrics::reactive::reaper::ReaperLyricsReactiveService::new(
-                lyrics_streams,
-            ));
+        let lyrics_service_box: Box<dyn fts::lyrics::reactive::LyricsReactiveService> = Box::new(
+            fts::lyrics::reactive::reaper::ReaperLyricsReactiveService::new(lyrics_streams),
+        );
         fts::lyrics::reactive::irpc::LyricsApi::spawn(lyrics_service_box)
     };
-    
+
     // Create chords API using REAPER implementation (if keyflow feature is enabled)
     #[cfg(feature = "keyflow")]
     let mut chart_api = {
         let chords_streams = fts::chords::reactive::ChordsStreams::new();
-        let chords_service_box: Box<dyn fts::chords::reactive::ChordsReactiveService> = 
-            Box::new(fts::chords::reactive::reaper::ReaperChordsReactiveService::new(
-                chords_streams,
-            ));
+        let chords_service_box: Box<dyn fts::chords::reactive::ChordsReactiveService> = Box::new(
+            fts::chords::reactive::reaper::ReaperChordsReactiveService::new(chords_streams),
+        );
         fts::chords::reactive::irpc::ChartApi::spawn(chords_service_box)
     };
-    
+
     // Create setlist stream API (on main thread)
     let setlist_api = match stream_service.create_stream_api() {
         Ok(api) => api,
@@ -119,7 +122,7 @@ pub fn start_iroh_server(
             return;
         }
     };
-    
+
     // Extract handler data before exposing (expose consumes the API)
     let transport_handler_data = transport_api.take_handler_data();
     let tracks_handler_data = tracks_api.take_handler_data();
@@ -127,7 +130,7 @@ pub fn start_iroh_server(
     let lyrics_handler_data = lyrics_api.take_handler_data();
     #[cfg(feature = "keyflow")]
     let chart_handler_data = chart_api.take_handler_data();
-    
+
     // Expose all handlers (on main thread)
     let transport_handler = match transport_api.expose() {
         Ok(handler) => handler,
@@ -136,7 +139,7 @@ pub fn start_iroh_server(
             return;
         }
     };
-    
+
     let tracks_handler = match tracks_api.expose() {
         Ok(handler) => handler,
         Err(e) => {
@@ -144,7 +147,7 @@ pub fn start_iroh_server(
             return;
         }
     };
-    
+
     // Move setlist_api into closure so we can spawn deferred tasks in tokio runtime
     let mut setlist_api_for_spawn = setlist_api;
     let setlist_handler = match setlist_api_for_spawn.expose() {
@@ -154,7 +157,7 @@ pub fn start_iroh_server(
             return;
         }
     };
-    
+
     #[cfg(feature = "lyrics")]
     let lyrics_handler = match lyrics_api.expose() {
         Ok(handler) => handler,
@@ -163,7 +166,7 @@ pub fn start_iroh_server(
             return;
         }
     };
-    
+
     #[cfg(feature = "keyflow")]
     let chart_handler = match chart_api.expose() {
         Ok(handler) => handler,
@@ -172,13 +175,13 @@ pub fn start_iroh_server(
             return;
         }
     };
-    
+
     // Now spawn the tokio runtime in a separate thread to run the IROH router
     // The handlers are already created and are Send, so we can move them
     // We also need to start the message handlers for transport, tracks, and lyrics
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-        
+
         rt.block_on(async {
             info!("Starting IROH router with all IRPC protocols in tokio runtime...");
             
@@ -503,4 +506,3 @@ pub fn start_iroh_server(
         });
     });
 }
-

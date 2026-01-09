@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// MIDI note name (MIDINOTENAMES)
-/// 
+///
 /// Custom MIDI note names applied to Piano roll in all MIDI items on the track.
 /// Field 1: MIDI channel number, -1 = Omni
 /// Field 2: 0-based note number
@@ -36,4 +36,3 @@ impl MidiNoteName {
         }
     }
 }
-

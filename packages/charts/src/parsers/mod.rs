@@ -8,4 +8,3 @@
 // Note: All parsing functionality (chords, metadata, sections, etc.) is provided by keyflow.
 
 pub mod text_cues;
-

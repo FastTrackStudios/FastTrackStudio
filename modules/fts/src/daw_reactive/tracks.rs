@@ -10,12 +10,12 @@ use rxrust::prelude::Observer;
 use tracing::{debug, info, warn};
 
 use daw::project::Project;
-use daw::tracks::reactive::{TrackReactiveService, TrackReactiveState, TrackStreams};
 use daw::tracks::Track;
+use daw::tracks::reactive::{TrackReactiveService, TrackReactiveState, TrackStreams};
 use daw::transport::Transport;
 
-use super::logging::format_track_change;
 use super::SetlistProvider;
+use super::logging::format_track_change;
 use crate::setlist::infra::reaper::{get_all_tracks, get_track};
 
 /// REAPER implementation of TrackReactiveService

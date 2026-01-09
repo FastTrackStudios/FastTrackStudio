@@ -1,6 +1,6 @@
 //! Media Item lower behaviors
 
-use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorId, BehaviorDisplay};
+use crate::input::mouse_modifiers::behaviors::shared::traits::{BehaviorDisplay, BehaviorId};
 
 /// Media Item lower left drag behaviors
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -142,7 +142,7 @@ impl BehaviorId for MediaItemLowerLeftDragBehavior {
             id => MediaItemLowerLeftDragBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemLowerLeftDragBehavior::PassThroughToItemDragContext => 0,
@@ -334,7 +334,7 @@ impl BehaviorId for MediaItemLowerClickBehavior {
             id => MediaItemLowerClickBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemLowerClickBehavior::PassThroughToItemClickContext => 0,
@@ -416,7 +416,7 @@ impl BehaviorId for MediaItemLowerDoubleClickBehavior {
             id => MediaItemLowerDoubleClickBehavior::Unknown(id),
         }
     }
-    
+
     fn to_behavior_id(&self) -> u32 {
         match self {
             MediaItemLowerDoubleClickBehavior::PassThroughToItemDoubleClickContext => 0,

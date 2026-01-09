@@ -82,7 +82,10 @@ async fn connect_with_retry() {
         let _ = status_tx.send(false);
     }
 
-    info!("[Chart Connection] Starting reconnection loop - will continuously retry every {} seconds until connected", RETRY_INTERVAL_SECONDS);
+    info!(
+        "[Chart Connection] Starting reconnection loop - will continuously retry every {} seconds until connected",
+        RETRY_INTERVAL_SECONDS
+    );
 
     loop {
         retry_count += 1;
@@ -105,7 +108,9 @@ async fn connect_with_retry() {
                 }
 
                 // Wait for the disconnect signal
-                info!("[Chart Connection] Waiting for connection to be established and receiving updates...");
+                info!(
+                    "[Chart Connection] Waiting for connection to be established and receiving updates..."
+                );
                 let _ = disconnect_rx.await;
                 warn!("[Chart Connection] ❌ Connection lost, will retry immediately...");
 

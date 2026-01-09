@@ -3,14 +3,17 @@
 //! Provides functions to send commands to REAPER via the setlist API.
 //! Uses the same storage as setlist_connection to access the API.
 
-use fts::setlist::{TransportCommand, NavigationCommand};
 use crate::setlist_connection::SETLIST_API;
-use tracing::{warn, info};
+use fts::setlist::{NavigationCommand, TransportCommand};
+use tracing::{info, warn};
 
 /// Send a transport command to REAPER
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn send_transport_command(command: TransportCommand) -> Result<(), String> {
-    info!("[Setlist Commands] send_transport_command called: {:?}", command);
+    info!(
+        "[Setlist Commands] send_transport_command called: {:?}",
+        command
+    );
     if let Some(storage) = SETLIST_API.get() {
         info!("[Setlist Commands] API storage found, acquiring lock...");
         let mut guard = storage.lock().await;
@@ -22,11 +25,17 @@ pub async fn send_transport_command(command: TransportCommand) -> Result<(), Str
                     Ok(())
                 }
                 Ok(Err(e)) => {
-                    warn!("[Setlist Commands] ❌ Failed to execute transport command: {}", e);
+                    warn!(
+                        "[Setlist Commands] ❌ Failed to execute transport command: {}",
+                        e
+                    );
                     Err(e)
                 }
                 Err(e) => {
-                    warn!("[Setlist Commands] ❌ RPC error sending transport command: {}", e);
+                    warn!(
+                        "[Setlist Commands] ❌ RPC error sending transport command: {}",
+                        e
+                    );
                     Err(format!("RPC error: {}", e))
                 }
             }
@@ -43,7 +52,10 @@ pub async fn send_transport_command(command: TransportCommand) -> Result<(), Str
 /// Send a navigation command to REAPER
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn send_navigation_command(command: NavigationCommand) -> Result<(), String> {
-    info!("[Setlist Commands] send_navigation_command called: {:?}", command);
+    info!(
+        "[Setlist Commands] send_navigation_command called: {:?}",
+        command
+    );
     if let Some(storage) = SETLIST_API.get() {
         let mut guard = storage.lock().await;
         if let Some(api) = guard.as_ref() {
@@ -53,11 +65,17 @@ pub async fn send_navigation_command(command: NavigationCommand) -> Result<(), S
                     Ok(())
                 }
                 Ok(Err(e)) => {
-                    warn!("[Setlist Commands] ❌ Failed to execute navigation command: {}", e);
+                    warn!(
+                        "[Setlist Commands] ❌ Failed to execute navigation command: {}",
+                        e
+                    );
                     Err(e)
                 }
                 Err(e) => {
-                    warn!("[Setlist Commands] ❌ RPC error sending navigation command: {}", e);
+                    warn!(
+                        "[Setlist Commands] ❌ RPC error sending navigation command: {}",
+                        e
+                    );
                     Err(format!("RPC error: {}", e))
                 }
             }
@@ -79,7 +97,10 @@ pub async fn seek_to_section(song_index: usize, section_index: usize) -> Result<
         if let Some(api) = guard.as_ref() {
             match api.seek_to_section(song_index, section_index).await {
                 Ok(Ok(())) => {
-                    info!("Successfully sought to song {} section {}", song_index, section_index);
+                    info!(
+                        "Successfully sought to song {} section {}",
+                        song_index, section_index
+                    );
                     Ok(())
                 }
                 Ok(Err(e)) => {
@@ -129,14 +150,23 @@ pub async fn seek_to_song(song_index: usize) -> Result<(), String> {
 
 /// Seek to a specific musical position
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn seek_to_musical_position(song_index: usize, musical_position: daw::primitives::MusicalPosition) -> Result<(), String> {
+pub async fn seek_to_musical_position(
+    song_index: usize,
+    musical_position: daw::primitives::MusicalPosition,
+) -> Result<(), String> {
     if let Some(storage) = SETLIST_API.get() {
         let mut guard = storage.lock().await;
         if let Some(api) = guard.as_ref() {
             let musical_pos_for_log = musical_position.clone();
-            match api.seek_to_musical_position(song_index, musical_position).await {
+            match api
+                .seek_to_musical_position(song_index, musical_position)
+                .await
+            {
                 Ok(Ok(())) => {
-                    info!("Successfully sought to song {} musical position {}", song_index, musical_pos_for_log);
+                    info!(
+                        "Successfully sought to song {} musical position {}",
+                        song_index, musical_pos_for_log
+                    );
                     Ok(())
                 }
                 Ok(Err(e)) => {
@@ -157,7 +187,10 @@ pub async fn seek_to_musical_position(song_index: usize, musical_position: daw::
 }
 
 #[cfg(target_arch = "wasm32")]
-pub async fn seek_to_musical_position(_song_index: usize, _musical_position: daw::primitives::MusicalPosition) -> Result<(), String> {
+pub async fn seek_to_musical_position(
+    _song_index: usize,
+    _musical_position: daw::primitives::MusicalPosition,
+) -> Result<(), String> {
     Ok(())
 }
 
@@ -169,7 +202,10 @@ pub async fn seek_to_time(song_index: usize, time_seconds: f64) -> Result<(), St
         if let Some(api) = guard.as_ref() {
             match api.seek_to_time(song_index, time_seconds).await {
                 Ok(Ok(())) => {
-                    info!("Successfully sought to song {} time {}", song_index, time_seconds);
+                    info!(
+                        "Successfully sought to song {} time {}",
+                        song_index, time_seconds
+                    );
                     Ok(())
                 }
                 Ok(Err(e)) => {
@@ -216,4 +252,3 @@ pub async fn toggle_loop() -> Result<(), String> {
         Err("API storage not initialized".to_string())
     }
 }
-

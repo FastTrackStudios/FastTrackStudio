@@ -57,6 +57,8 @@ pub mod dsp;
 pub mod meters;
 
 #[cfg(feature = "gui")]
+pub mod dropdown;
+#[cfg(feature = "gui")]
 pub mod shell;
 
 /// Prelude for convenient imports.

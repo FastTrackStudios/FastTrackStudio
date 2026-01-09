@@ -19,14 +19,14 @@ fn iron_maiden_the_trooper() {
         "23-Vocal 3-TheTrooper.wav",
         "Trooper-mix1.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
 }

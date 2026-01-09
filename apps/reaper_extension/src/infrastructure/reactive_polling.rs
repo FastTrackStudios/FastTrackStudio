@@ -4,11 +4,11 @@
 //! and emits reactive events only when values actually change.
 //! This limits traffic by only sending updates when something changes, not every timer tick.
 
+use daw::transport::Transport;
 use reaper_high::Reaper;
 use rxrust::prelude::*;
 use std::cell::RefCell;
 use tracing::{debug, trace};
-use daw::transport::Transport;
 
 // Re-export EventStreamSubject from rxrust for convenience
 pub use rxrust::prelude::LocalSubject;
@@ -121,13 +121,25 @@ impl ReactivePollingService {
         let project = reaper.current_project();
 
         // Check all changes first, then emit events to avoid nested borrows
-        let (edit_changed, play_changed, transport_pos_changed, transport_changed, edit_pos, play_pos, transport_pos, transport) = {
+        let (
+            edit_changed,
+            play_changed,
+            transport_pos_changed,
+            transport_changed,
+            edit_pos,
+            play_pos,
+            transport_pos,
+            transport,
+        ) = {
             let mut state = self.state.borrow_mut();
-            
+
             // Poll edit cursor position
             let edit_changed = if let Ok(edit_pos) = project.edit_cursor_position() {
                 let edit_pos_seconds = edit_pos.get();
-                let changed = state.last_edit_cursor.map(|p| (p - edit_pos_seconds).abs() > 0.001).unwrap_or(true);
+                let changed = state
+                    .last_edit_cursor
+                    .map(|p| (p - edit_pos_seconds).abs() > 0.001)
+                    .unwrap_or(true);
                 if changed {
                     state.last_edit_cursor = Some(edit_pos_seconds);
                 }
@@ -138,7 +150,10 @@ impl ReactivePollingService {
 
             // Poll play cursor position (latency-compensated)
             let play_pos_seconds = project.play_position_latency_compensated().get();
-            let play_changed = state.last_play_cursor.map(|p| (p - play_pos_seconds).abs() > 0.001).unwrap_or(true);
+            let play_changed = state
+                .last_play_cursor
+                .map(|p| (p - play_pos_seconds).abs() > 0.001)
+                .unwrap_or(true);
             if play_changed {
                 state.last_play_cursor = Some(play_pos_seconds);
             }
@@ -147,11 +162,15 @@ impl ReactivePollingService {
             let transport_pos = if project.is_playing() {
                 play_pos_seconds
             } else {
-                project.edit_cursor_position()
+                project
+                    .edit_cursor_position()
                     .map(|p| p.get())
                     .unwrap_or(play_pos_seconds)
             };
-            let transport_pos_changed = state.last_transport_position.map(|p| (p - transport_pos).abs() > 0.001).unwrap_or(true);
+            let transport_pos_changed = state
+                .last_transport_position
+                .map(|p| (p - transport_pos).abs() > 0.001)
+                .unwrap_or(true);
             if transport_pos_changed {
                 state.last_transport_position = Some(transport_pos);
             }
@@ -163,7 +182,11 @@ impl ReactivePollingService {
                 transport_adapter.read_transport().ok()
             };
             let transport_changed = if let Some(ref new_transport) = transport {
-                state.last_transport.as_ref().map(|old| old != new_transport).unwrap_or(true)
+                state
+                    .last_transport
+                    .as_ref()
+                    .map(|old| old != new_transport)
+                    .unwrap_or(true)
             } else {
                 false
             };
@@ -171,9 +194,18 @@ impl ReactivePollingService {
                 state.last_transport = transport.clone();
             }
 
-            (edit_changed.0, play_changed, transport_pos_changed, transport_changed, edit_changed.1, play_pos_seconds, transport_pos, transport)
+            (
+                edit_changed.0,
+                play_changed,
+                transport_pos_changed,
+                transport_changed,
+                edit_changed.1,
+                play_pos_seconds,
+                transport_pos,
+                transport,
+            )
         };
-        
+
         // Now emit events (state borrow is dropped)
         // Check if we're already emitting to avoid nested next() calls
         if *self.emitting.borrow() {
@@ -182,34 +214,43 @@ impl ReactivePollingService {
             trace!("Skipping poll event emission - already emitting");
             return;
         }
-        
+
         *self.emitting.borrow_mut() = true;
-        
+
         // Emit all events
         if edit_changed {
             if let Some(pos) = edit_pos {
-                self.streams.edit_cursor_position_changed.borrow_mut().next(pos);
+                self.streams
+                    .edit_cursor_position_changed
+                    .borrow_mut()
+                    .next(pos);
                 trace!(position = pos, "Edit cursor position changed");
             }
         }
-        
+
         if play_changed {
-            self.streams.play_cursor_position_changed.borrow_mut().next(play_pos);
+            self.streams
+                .play_cursor_position_changed
+                .borrow_mut()
+                .next(play_pos);
             trace!(position = play_pos, "Play cursor position changed");
         }
-        
+
         if transport_pos_changed {
-            self.streams.transport_position_changed.borrow_mut().next(transport_pos);
+            self.streams
+                .transport_position_changed
+                .borrow_mut()
+                .next(transport_pos);
             trace!(position = transport_pos, "Transport position changed");
         }
-        
+
         if transport_changed {
             if let Some(transport) = transport {
                 self.streams.transport_changed.borrow_mut().next(transport);
                 trace!("Transport state changed");
             }
         }
-        
+
         *self.emitting.borrow_mut() = false;
     }
 
@@ -226,7 +267,7 @@ impl ReactivePollingService {
             let song_changed = state.last_active_song_index != song_index;
             let section_changed = state.last_active_section_index != section_index;
             let slide_changed = state.last_active_slide_index != slide_index;
-            
+
             // Update state values
             if song_changed {
                 state.last_active_song_index = song_index;
@@ -237,10 +278,10 @@ impl ReactivePollingService {
             if slide_changed {
                 state.last_active_slide_index = slide_index;
             }
-            
+
             (song_changed, section_changed, slide_changed)
         };
-        
+
         // Now emit events (state borrow is dropped)
         // Check if we're already emitting to avoid nested next() calls
         if *self.emitting.borrow() {
@@ -249,27 +290,34 @@ impl ReactivePollingService {
             trace!("Skipping active indices event emission - already emitting");
             return;
         }
-        
+
         *self.emitting.borrow_mut() = true;
-        
+
         // Emit all events
         if song_changed {
-            self.streams.active_song_index_changed.borrow_mut().next(song_index);
+            self.streams
+                .active_song_index_changed
+                .borrow_mut()
+                .next(song_index);
             debug!(song_index = ?song_index, "Active song index changed");
         }
-        
+
         if section_changed {
-            self.streams.active_section_index_changed.borrow_mut().next(section_index);
+            self.streams
+                .active_section_index_changed
+                .borrow_mut()
+                .next(section_index);
             debug!(section_index = ?section_index, "Active section index changed");
         }
-        
+
         if slide_changed {
-            self.streams.active_slide_index_changed.borrow_mut().next(slide_index);
+            self.streams
+                .active_slide_index_changed
+                .borrow_mut()
+                .next(slide_index);
             debug!(slide_index = ?slide_index, "Active slide index changed");
         }
-        
+
         *self.emitting.borrow_mut() = false;
     }
 }
-
-

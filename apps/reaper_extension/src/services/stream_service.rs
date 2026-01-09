@@ -2,11 +2,11 @@
 //!
 //! Creates and manages the setlist stream API.
 
-use std::sync::Arc;
+use crate::core::ReaperSetlistCommandHandler;
+use crate::services::{CommandService, SeekService, SetlistService};
 use fts::setlist::SetlistStreamApi;
 use fts::setlist::infra::reaper::ReaperSetlistStateProvider;
-use crate::core::ReaperSetlistCommandHandler;
-use crate::services::{SetlistService, CommandService, SeekService};
+use std::sync::Arc;
 use tracing::info;
 
 /// Service for creating and managing the stream API
@@ -40,10 +40,9 @@ impl StreamService {
             self.command_service.clone(),
             self.seek_service.clone(),
         ));
-        
+
         let api = SetlistStreamApi::spawn_with_handler(state_provider, Some(command_handler));
         info!("[REAPER Setlist] Setlist stream service created with command handler.");
         Ok(api)
     }
 }
-

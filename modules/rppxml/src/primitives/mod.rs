@@ -19,11 +19,11 @@
 //! REAPER-specific data structures (tracks, items, envelopes, FX chains) should be handled
 //! by separate adapter modules that consume these primitives.
 
-pub mod token;
 pub mod block;
 pub mod project;
+pub mod token;
 
 // Re-export the main types for convenience
-pub use token::{Token, QuoteType};
-pub use block::{RppBlock, BlockType, RppBlockContent, parse_blocks};
-pub use project::{RppProject, parse_rpp, parse_project_header};
+pub use block::{parse_blocks, BlockType, RppBlock, RppBlockContent};
+pub use project::{parse_project_header, parse_rpp, RppProject};
+pub use token::{QuoteType, Token};

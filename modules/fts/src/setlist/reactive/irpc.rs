@@ -2,17 +2,13 @@
 //!
 //! Exposes all setlist reactive streams over IRPC so they can be reactive over the network.
 
-use crate::setlist::core::{Setlist, Song, Section};
 use crate::lyrics::{Lyrics, LyricsAnnotations};
-use irpc::{
-    channel::mpsc,
-    rpc::RemoteService,
-    rpc_requests, Client, WithChannels,
-};
+use crate::setlist::core::{Section, Setlist, Song};
+use irpc::{Client, WithChannels, channel::mpsc, rpc::RemoteService, rpc_requests};
 use serde::{Deserialize, Serialize};
 
 #[cfg(not(target_arch = "wasm32"))]
-use iroh::{protocol::ProtocolHandler, Endpoint, EndpointAddr};
+use iroh::{Endpoint, EndpointAddr, protocol::ProtocolHandler};
 #[cfg(not(target_arch = "wasm32"))]
 use irpc_iroh::{IrohLazyRemoteConnection, IrohProtocol};
 
@@ -148,55 +144,55 @@ pub enum SetlistReactiveProtocol {
     /// Subscribe to setlist structure changes (server streaming)
     #[rpc(tx=mpsc::Sender<SetlistStructureChangedMessage>)]
     SubscribeSetlistStructure(SubscribeSetlistStructure),
-    
+
     /// Subscribe to song added (server streaming)
     #[rpc(tx=mpsc::Sender<SongAddedMessage>)]
     SubscribeSongAdded(SubscribeSongAdded),
-    
+
     /// Subscribe to song removed (server streaming)
     #[rpc(tx=mpsc::Sender<SongRemovedMessage>)]
     SubscribeSongRemoved(SubscribeSongRemoved),
-    
+
     /// Subscribe to songs reordered (server streaming)
     #[rpc(tx=mpsc::Sender<SongsReorderedMessage>)]
     SubscribeSongsReordered(SubscribeSongsReordered),
-    
+
     /// Subscribe to song changed (server streaming)
     #[rpc(tx=mpsc::Sender<SongChangedMessage>)]
     SubscribeSongChanged(SubscribeSongChanged),
-    
+
     /// Subscribe to section added (server streaming)
     #[rpc(tx=mpsc::Sender<SectionAddedMessage>)]
     SubscribeSectionAdded(SubscribeSectionAdded),
-    
+
     /// Subscribe to section removed (server streaming)
     #[rpc(tx=mpsc::Sender<SectionRemovedMessage>)]
     SubscribeSectionRemoved(SubscribeSectionRemoved),
-    
+
     /// Subscribe to section changed (server streaming)
     #[rpc(tx=mpsc::Sender<SectionChangedMessage>)]
     SubscribeSectionChanged(SubscribeSectionChanged),
-    
+
     /// Subscribe to lyrics changed (server streaming)
     #[rpc(tx=mpsc::Sender<LyricsChangedMessage>)]
     SubscribeLyrics(SubscribeLyrics),
-    
+
     /// Subscribe to lyrics annotations changed (server streaming)
     #[rpc(tx=mpsc::Sender<LyricsAnnotationsChangedMessage>)]
     SubscribeLyricsAnnotations(SubscribeLyricsAnnotations),
-    
+
     /// Subscribe to active indices changed (server streaming)
     #[rpc(tx=mpsc::Sender<ActiveIndicesChangedMessage>)]
     SubscribeActiveIndices(SubscribeActiveIndices),
-    
+
     /// Subscribe to active song index changed (server streaming)
     #[rpc(tx=mpsc::Sender<ActiveSongIndexChangedMessage>)]
     SubscribeActiveSongIndex(SubscribeActiveSongIndex),
-    
+
     /// Subscribe to active section index changed (server streaming)
     #[rpc(tx=mpsc::Sender<ActiveSectionIndexChangedMessage>)]
     SubscribeActiveSectionIndex(SubscribeActiveSectionIndex),
-    
+
     /// Subscribe to active slide index changed (server streaming)
     #[rpc(tx=mpsc::Sender<ActiveSlideIndexChangedMessage>)]
     SubscribeActiveSlideIndex(SubscribeActiveSlideIndex),
@@ -236,12 +232,18 @@ impl SetlistReactiveApi {
             .inner
             .as_local()
             .context("cannot listen on remote service")?;
-        Ok(IrohProtocol::new(SetlistReactiveProtocol::remote_handler(local)))
+        Ok(IrohProtocol::new(SetlistReactiveProtocol::remote_handler(
+            local,
+        )))
     }
 
     /// Subscribe to setlist structure changes
-    pub async fn subscribe_setlist_structure(&self) -> irpc::Result<mpsc::Receiver<SetlistStructureChangedMessage>> {
-        self.inner.server_streaming(SubscribeSetlistStructure, 32).await
+    pub async fn subscribe_setlist_structure(
+        &self,
+    ) -> irpc::Result<mpsc::Receiver<SetlistStructureChangedMessage>> {
+        self.inner
+            .server_streaming(SubscribeSetlistStructure, 32)
+            .await
     }
 
     /// Subscribe to song added
@@ -255,8 +257,12 @@ impl SetlistReactiveApi {
     }
 
     /// Subscribe to songs reordered
-    pub async fn subscribe_songs_reordered(&self) -> irpc::Result<mpsc::Receiver<SongsReorderedMessage>> {
-        self.inner.server_streaming(SubscribeSongsReordered, 32).await
+    pub async fn subscribe_songs_reordered(
+        &self,
+    ) -> irpc::Result<mpsc::Receiver<SongsReorderedMessage>> {
+        self.inner
+            .server_streaming(SubscribeSongsReordered, 32)
+            .await
     }
 
     /// Subscribe to song changed
@@ -265,18 +271,28 @@ impl SetlistReactiveApi {
     }
 
     /// Subscribe to section added
-    pub async fn subscribe_section_added(&self) -> irpc::Result<mpsc::Receiver<SectionAddedMessage>> {
+    pub async fn subscribe_section_added(
+        &self,
+    ) -> irpc::Result<mpsc::Receiver<SectionAddedMessage>> {
         self.inner.server_streaming(SubscribeSectionAdded, 32).await
     }
 
     /// Subscribe to section removed
-    pub async fn subscribe_section_removed(&self) -> irpc::Result<mpsc::Receiver<SectionRemovedMessage>> {
-        self.inner.server_streaming(SubscribeSectionRemoved, 32).await
+    pub async fn subscribe_section_removed(
+        &self,
+    ) -> irpc::Result<mpsc::Receiver<SectionRemovedMessage>> {
+        self.inner
+            .server_streaming(SubscribeSectionRemoved, 32)
+            .await
     }
 
     /// Subscribe to section changed
-    pub async fn subscribe_section_changed(&self) -> irpc::Result<mpsc::Receiver<SectionChangedMessage>> {
-        self.inner.server_streaming(SubscribeSectionChanged, 32).await
+    pub async fn subscribe_section_changed(
+        &self,
+    ) -> irpc::Result<mpsc::Receiver<SectionChangedMessage>> {
+        self.inner
+            .server_streaming(SubscribeSectionChanged, 32)
+            .await
     }
 
     /// Subscribe to lyrics changed
@@ -285,28 +301,47 @@ impl SetlistReactiveApi {
     }
 
     /// Subscribe to lyrics annotations changed
-    pub async fn subscribe_lyrics_annotations(&self) -> irpc::Result<mpsc::Receiver<LyricsAnnotationsChangedMessage>> {
-        self.inner.server_streaming(SubscribeLyricsAnnotations, 32).await
+    pub async fn subscribe_lyrics_annotations(
+        &self,
+    ) -> irpc::Result<mpsc::Receiver<LyricsAnnotationsChangedMessage>> {
+        self.inner
+            .server_streaming(SubscribeLyricsAnnotations, 32)
+            .await
     }
 
     /// Subscribe to active indices changed
-    pub async fn subscribe_active_indices(&self) -> irpc::Result<mpsc::Receiver<ActiveIndicesChangedMessage>> {
-        self.inner.server_streaming(SubscribeActiveIndices, 32).await
+    pub async fn subscribe_active_indices(
+        &self,
+    ) -> irpc::Result<mpsc::Receiver<ActiveIndicesChangedMessage>> {
+        self.inner
+            .server_streaming(SubscribeActiveIndices, 32)
+            .await
     }
 
     /// Subscribe to active song index changed
-    pub async fn subscribe_active_song_index(&self) -> irpc::Result<mpsc::Receiver<ActiveSongIndexChangedMessage>> {
-        self.inner.server_streaming(SubscribeActiveSongIndex, 32).await
+    pub async fn subscribe_active_song_index(
+        &self,
+    ) -> irpc::Result<mpsc::Receiver<ActiveSongIndexChangedMessage>> {
+        self.inner
+            .server_streaming(SubscribeActiveSongIndex, 32)
+            .await
     }
 
     /// Subscribe to active section index changed
-    pub async fn subscribe_active_section_index(&self) -> irpc::Result<mpsc::Receiver<ActiveSectionIndexChangedMessage>> {
-        self.inner.server_streaming(SubscribeActiveSectionIndex, 32).await
+    pub async fn subscribe_active_section_index(
+        &self,
+    ) -> irpc::Result<mpsc::Receiver<ActiveSectionIndexChangedMessage>> {
+        self.inner
+            .server_streaming(SubscribeActiveSectionIndex, 32)
+            .await
     }
 
     /// Subscribe to active slide index changed
-    pub async fn subscribe_active_slide_index(&self) -> irpc::Result<mpsc::Receiver<ActiveSlideIndexChangedMessage>> {
-        self.inner.server_streaming(SubscribeActiveSlideIndex, 32).await
+    pub async fn subscribe_active_slide_index(
+        &self,
+    ) -> irpc::Result<mpsc::Receiver<ActiveSlideIndexChangedMessage>> {
+        self.inner
+            .server_streaming(SubscribeActiveSlideIndex, 32)
+            .await
     }
 }
-

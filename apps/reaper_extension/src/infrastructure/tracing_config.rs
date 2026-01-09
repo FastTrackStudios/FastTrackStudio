@@ -7,12 +7,7 @@
 //! 2. Defaults to warn level for everything
 //! 3. Local socket IPC logs are shown at info level for visibility
 
-use tracing_subscriber::{
-    fmt,
-    EnvFilter,
-    layer::SubscriberExt,
-    util::SubscriberInitExt,
-};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 static TRACING_INITIALIZED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 
@@ -35,7 +30,11 @@ pub fn init_tracing() {
             // Specifically allow info logs for IPC/RPC and timer callbacks for visibility
             EnvFilter::new("info")
                 .add_directive("reaper_extension=info".parse().unwrap()) // Allow info logs from extension
-                .add_directive("reaper_extension::local_socket_server=info".parse().unwrap())
+                .add_directive(
+                    "reaper_extension::local_socket_server=info"
+                        .parse()
+                        .unwrap(),
+                )
                 .add_directive("reaper_extension::reaper_rpc_server=info".parse().unwrap())
                 .add_directive("peer_2_peer::unix_socket=info".parse().unwrap())
                 .add_directive("peer_2_peer::iroh_connection=info".parse().unwrap())
@@ -46,7 +45,7 @@ pub fn init_tracing() {
                 // Suppress protocol mismatch warnings (error 120: peer doesn't support any known protocol)
                 .add_directive("iroh::protocol=error".parse().unwrap())
         };
-        
+
         // Initialize the subscriber with formatted output
         tracing_subscriber::registry()
             .with(fmt::layer().with_target(true)) // Show module paths for clarity
@@ -54,4 +53,3 @@ pub fn init_tracing() {
             .init();
     });
 }
-

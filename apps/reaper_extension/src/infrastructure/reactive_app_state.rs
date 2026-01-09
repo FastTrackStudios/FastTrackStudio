@@ -13,15 +13,15 @@
 //! - Composable architecture where each domain defines its own reactive behavior
 
 use daw::tracks::reactive::TrackReactiveService;
-use daw::transport::reactive::TransportReactiveService;
 use daw::transport::Transport;
+use daw::transport::reactive::TransportReactiveService;
 use daw::{DawStreams, ProjectStreams};
 #[cfg(feature = "lyrics")]
 use fts::lyrics::reactive::{LyricsReactiveService, LyricsStreams};
 #[cfg(feature = "lyrics")]
 use fts::lyrics::{Lyrics, LyricsAnnotations};
-use fts::setlist::reactive::{SetlistReactiveService, SetlistReactiveStreams};
 use fts::setlist::SetlistApi;
+use fts::setlist::reactive::{SetlistReactiveService, SetlistReactiveStreams};
 use std::sync::Arc;
 
 /// Centralized application state

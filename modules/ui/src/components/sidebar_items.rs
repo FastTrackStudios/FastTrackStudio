@@ -1,8 +1,8 @@
-use dioxus::prelude::*;
 use crate::components::progress::CompactProgressBar;
+use dioxus::prelude::*;
 
 /// Vertical progress bar component for sidebar
-/// 
+///
 /// A simple vertical progress indicator.
 #[component]
 pub fn VerticalProgressBar(
@@ -56,7 +56,7 @@ pub struct SongItemData {
 }
 
 /// Song item component for sidebar
-/// 
+///
 /// A generic component that displays a song with its sections.
 /// All data is passed as props, keeping it domain-agnostic.
 #[component]
@@ -71,7 +71,7 @@ pub fn SongItem(
 ) -> Element {
     // Show progress if the song is expanded OR if it's actively playing
     let show_progress = is_expanded || is_playing;
-    
+
     rsx! {
         div {
             key: "{index}",
@@ -134,4 +134,3 @@ pub fn SongItem(
         }
     }
 }
-

@@ -1,5 +1,5 @@
-use fts::setlist::{Song, Section, SectionType};
-use daw::primitives::{Position, MusicalPosition, TimePosition, TimeSignature};
+use daw::primitives::{MusicalPosition, Position, TimePosition, TimeSignature};
+use fts::setlist::{Section, SectionType, Song};
 use std::collections::HashMap;
 
 pub mod navigation;
@@ -21,26 +21,28 @@ pub fn calculate_song_progress(song: &Song, transport_position: f64) -> f64 {
         song.effective_start()
     } else {
         // Fall back to first section start
-        song.sections.first()
+        song.sections
+            .first()
             .and_then(|s| s.start_seconds())
             .unwrap_or(0.0)
     };
-    
+
     let song_end = if song.effective_end() > 0.0 {
         song.effective_end()
     } else {
         // Fall back to last section end
-        song.sections.last()
+        song.sections
+            .last()
             .and_then(|s| s.end_seconds())
             .unwrap_or(0.0)
     };
-    
+
     let song_duration = song_end - song_start;
-    
+
     if song_duration <= 0.0 {
         return 0.0;
     }
-    
+
     let relative_position = (transport_position - song_start).max(0.0);
     let progress = (relative_position / song_duration).min(1.0);
     progress * 100.0
@@ -51,18 +53,18 @@ pub fn calculate_section_progress(section: &Section, transport_position: f64) ->
     if let (Some(start_pos), Some(end_pos)) = (&section.start_position, &section.end_position) {
         let start = start_pos.time.to_seconds();
         let end = end_pos.time.to_seconds();
-        
+
         if end <= start {
             return 0.0;
         }
-        
+
         if transport_position >= end {
             return 100.0;
         }
         if transport_position < start {
             return 0.0;
         }
-        
+
         let progress = ((transport_position - start) / (end - start)).clamp(0.0, 1.0);
         progress * 100.0
     } else {
@@ -105,16 +107,19 @@ fn mute_color(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
 /// Returns bright variant for progress bars
 pub fn get_song_color_bright(song: &Song) -> String {
     // Get color from song_region_start_marker first (preserves song region color)
-    let color = song.song_region_start_marker.as_ref()
+    let color = song
+        .song_region_start_marker
+        .as_ref()
         .and_then(|m| m.color)
         .filter(|&c| c != 0)
         .or_else(|| {
             // Fallback to start_marker if available
-            song.start_marker.as_ref()
+            song.start_marker
+                .as_ref()
                 .and_then(|m| m.color)
                 .filter(|&c| c != 0)
         });
-    
+
     if let Some(color_u32) = color {
         let (r, g, b) = color_u32_to_rgb(color_u32);
         let (r, g, b) = brighten_color(r, g, b);
@@ -129,16 +134,19 @@ pub fn get_song_color_bright(song: &Song) -> String {
 /// Returns muted variant for backgrounds
 pub fn get_song_color_muted(song: &Song) -> String {
     // Get color from song_region_start_marker first (preserves song region color)
-    let color = song.song_region_start_marker.as_ref()
+    let color = song
+        .song_region_start_marker
+        .as_ref()
         .and_then(|m| m.color)
         .filter(|&c| c != 0)
         .or_else(|| {
             // Fallback to start_marker if available
-            song.start_marker.as_ref()
+            song.start_marker
+                .as_ref()
                 .and_then(|m| m.color)
                 .filter(|&c| c != 0)
         });
-    
+
     if let Some(color_u32) = color {
         let (r, g, b) = color_u32_to_rgb(color_u32);
         let (r, g, b) = mute_color(r, g, b);
@@ -180,7 +188,7 @@ pub fn get_section_color_muted(section: &Section) -> String {
 pub fn get_tempo_at_position(song: &Song, position_seconds: f64) -> f64 {
     // Find the last tempo change before or at this position
     let mut current_tempo = 120.0; // Default tempo
-    
+
     for change in &song.tempo_time_sig_changes {
         if change.position_seconds() <= position_seconds {
             current_tempo = change.tempo;
@@ -188,7 +196,7 @@ pub fn get_tempo_at_position(song: &Song, position_seconds: f64) -> f64 {
             break;
         }
     }
-    
+
     current_tempo
 }
 
@@ -197,7 +205,7 @@ pub fn get_tempo_at_position(song: &Song, position_seconds: f64) -> f64 {
 pub fn get_time_signature_at_position(song: &Song, position_seconds: f64) -> TimeSignature {
     // Find the last time signature change before or at this position
     let mut current_time_sig = TimeSignature::new(4, 4); // Default 4/4
-    
+
     for change in &song.tempo_time_sig_changes {
         if change.position_seconds() <= position_seconds {
             if let Some((num, den)) = change.time_signature {
@@ -207,17 +215,24 @@ pub fn get_time_signature_at_position(song: &Song, position_seconds: f64) -> Tim
             break;
         }
     }
-    
+
     current_time_sig
 }
 
 /// Format musical position as string (e.g., "1.1.000")
 pub fn format_musical_position(musical: &MusicalPosition) -> String {
-    format!("{}.{}.{:03}", musical.measure + 1, musical.beat + 1, musical.subdivision)
+    format!(
+        "{}.{}.{:03}",
+        musical.measure + 1,
+        musical.beat + 1,
+        musical.subdivision
+    )
 }
 
 /// Format time position as string (e.g., "1:23.456")
 pub fn format_time_position(time: &TimePosition) -> String {
-    format!("{}:{:02}.{:03}", time.minutes, time.seconds, time.milliseconds)
+    format!(
+        "{}:{:02}.{:03}",
+        time.minutes, time.seconds, time.milliseconds
+    )
 }
-

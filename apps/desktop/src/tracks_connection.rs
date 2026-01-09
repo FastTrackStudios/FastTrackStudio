@@ -7,8 +7,8 @@ use crate::iroh_connection_manager::{
     get_reaper_endpoint_addr, get_shared_endpoint, init_shared_endpoint,
 };
 use anyhow::Result;
-use daw::tracks::reactive::irpc::{TrackApi, TrackUpdateMessage};
 use daw::tracks::Track;
+use daw::tracks::reactive::irpc::{TrackApi, TrackUpdateMessage};
 use dioxus::prelude::*;
 use fts::setlist::{SETLIST_STRUCTURE, SONG_TRACKS};
 use std::sync::OnceLock;
@@ -37,8 +37,8 @@ pub fn get_connection_status_receiver() -> Option<tokio::sync::watch::Receiver<b
 }
 
 /// Get the current tracks state signal
-pub fn get_tracks_state(
-) -> Option<&'static GlobalSignal<std::collections::HashMap<String, Vec<Track>>>> {
+pub fn get_tracks_state()
+-> Option<&'static GlobalSignal<std::collections::HashMap<String, Vec<Track>>>> {
     TRACKS_STATE.get()
 }
 
@@ -103,7 +103,10 @@ async fn connect_with_retry() {
         let _ = status_tx.send(false);
     }
 
-    info!("[Tracks Connection] Starting reconnection loop - will continuously retry every {} seconds until connected", RETRY_INTERVAL_SECONDS);
+    info!(
+        "[Tracks Connection] Starting reconnection loop - will continuously retry every {} seconds until connected",
+        RETRY_INTERVAL_SECONDS
+    );
 
     loop {
         retry_count += 1;
@@ -126,7 +129,9 @@ async fn connect_with_retry() {
                 }
 
                 // Wait for the disconnect signal
-                info!("[Tracks Connection] Waiting for connection to be established and receiving updates...");
+                info!(
+                    "[Tracks Connection] Waiting for connection to be established and receiving updates..."
+                );
                 let _ = disconnect_rx.await;
                 warn!("[Tracks Connection] ❌ Connection lost, will retry immediately...");
 
@@ -225,7 +230,10 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
             ));
         }
         Err(_) => {
-            warn!("[Tracks Connection] ❌ Connection timeout after {:?} - REAPER extension may not be running or unreachable", connection_timeout);
+            warn!(
+                "[Tracks Connection] ❌ Connection timeout after {:?} - REAPER extension may not be running or unreachable",
+                connection_timeout
+            );
             return Err(anyhow::anyhow!(
                 "Connection timeout after {:?}",
                 connection_timeout
@@ -261,7 +269,10 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
                     handle_message(msg, &mut message_count, &RECV_COUNT).await;
                 }
                 Ok(None) => {
-                    warn!("[Tracks Connection] Tracks stream ended (received {} messages) - will reconnect", message_count);
+                    warn!(
+                        "[Tracks Connection] Tracks stream ended (received {} messages) - will reconnect",
+                        message_count
+                    );
                     break;
                 }
                 Err(e) => {
@@ -283,7 +294,9 @@ async fn try_connect() -> Result<tokio::sync::oneshot::Receiver<()>> {
         // Signal disconnect - this will trigger reconnection
         let _ = tx.send(());
 
-        info!("[Tracks Connection] Update receiver task ended - reconnection loop will create a new one");
+        info!(
+            "[Tracks Connection] Update receiver task ended - reconnection loop will create a new one"
+        );
     });
 
     Ok(rx)
@@ -326,11 +339,18 @@ async fn handle_message(
                     song_index, msg.project_id
                 );
             } else {
-                debug!("[Tracks Connection] Could not find song_index for project: {} - SONG_TRACKS not updated", msg.project_id);
+                debug!(
+                    "[Tracks Connection] Could not find song_index for project: {} - SONG_TRACKS not updated",
+                    msg.project_id
+                );
             }
 
             if *message_count == 1 {
-                info!("[Tracks Connection] ✅ Received first tracks update for project: {} ({} tracks)", msg.project_id, msg.tracks.len());
+                info!(
+                    "[Tracks Connection] ✅ Received first tracks update for project: {} ({} tracks)",
+                    msg.project_id,
+                    msg.tracks.len()
+                );
             } else {
                 debug!(
                     "[Tracks Connection] Updated tracks for project: {} ({} tracks)",

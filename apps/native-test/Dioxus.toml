@@ -1,0 +1,15 @@
+[application]
+name = "native-test"
+default_platform = "desktop"
+
+[web.app]
+title = "Native Test - Blitz CSS"
+
+[web.watcher]
+reload_html = true
+watch_path = ["src", "assets"]
+
+# Tailwind CSS configuration
+[application.tailwind_css]
+input = "assets/tailwind.css"
+output = "assets/tailwind.compiled.css"

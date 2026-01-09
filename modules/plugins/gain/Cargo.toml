@@ -1,0 +1,32 @@
+[package]
+name = "fts-gain-core"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "FTS Gain plugin core - DSP, state, and UI components"
+
+[features]
+default = []
+# Enable DSP processing code
+dsp = []
+# Enable UI components (requires dioxus)
+ui = ["dep:fts-plugins-ui", "dep:dioxus"]
+# Enable both DSP and UI (for plugin wrappers)
+full = ["dsp", "ui"]
+
+[dependencies]
+# Always available
+serde = { workspace = true }
+atomic_float = { workspace = true }
+
+# DSP dependencies (always included, used conditionally)
+# (none for gain - it's simple enough)
+
+# UI dependencies (optional)
+fts-plugins-ui = { path = "../ui", optional = true }
+dioxus = { workspace = true, features = ["hooks", "signals", "macro", "html"], optional = true }
+
+# Plugin hub state types (for state synchronization)
+plugin-hub = { path = "../../plugin-hub", default-features = false }

@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use reaper_low::{raw, Swell};
 use reaper_medium::Hfont;
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 #[derive(Debug, Default)]
 pub struct FontCache {

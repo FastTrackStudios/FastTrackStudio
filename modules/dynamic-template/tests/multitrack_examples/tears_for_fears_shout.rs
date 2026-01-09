@@ -52,14 +52,14 @@ fn tears_for_fears_shout() {
         "46.SHOUT VOX_CHORUS SHOUT R_01-02.R.wav",
         "47.Shout_Neumann BIMM_4824_mst_01-02.wav",
     ];
-    
+
     // Organize into tracks using monarchy sort
     let config = default_config();
     let tracks = items.organize_into_tracks(&config, None).unwrap();
-    
+
     // Display the track list
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
-    
+
     // TODO: Add expected structure once provided
 }

@@ -567,20 +567,24 @@ I_2. IV_2. vi_2. V_2.
     // Intro: explicit qualities with slash notation
     let intro = &chart.sections[0];
     assert_eq!(intro.measures.len(), 2);
-    assert!(intro
-        .measures
-        .iter()
-        .all(|m| matches!(m.chords[0].rhythm, ChordRhythm::Slashes(4))));
+    assert!(
+        intro
+            .measures
+            .iter()
+            .all(|m| matches!(m.chords[0].rhythm, ChordRhythm::Slashes(4)))
+    );
 
     // Verse: note names with underscore notation (recalls memory)
     // g_4 (1) + c_4 (1) + d_4 (1) + g_4 (1) = 4 beats = 1 measure
     let verse = &chart.sections[1];
     assert_eq!(verse.measures.len(), 1);
     assert_eq!(verse.measures[0].chords.len(), 4);
-    assert!(verse.measures[0]
-        .chords
-        .iter()
-        .all(|c| matches!(c.rhythm, ChordRhythm::Lily { .. })));
+    assert!(
+        verse.measures[0]
+            .chords
+            .iter()
+            .all(|c| matches!(c.rhythm, ChordRhythm::Lily { .. }))
+    );
 
     // Pre-chorus: scale degrees with slash notation (infers from key)
     // 1// (2) + 4// (2) = 4 beats = measure 0
@@ -589,10 +593,11 @@ I_2. IV_2. vi_2. V_2.
     assert_eq!(pre.measures.len(), 2);
     assert_eq!(pre.measures[0].chords.len(), 2);
     assert_eq!(pre.measures[1].chords.len(), 2);
-    assert!(pre.measures.iter().all(|m| m
-        .chords
-        .iter()
-        .all(|c| matches!(c.rhythm, ChordRhythm::Slashes(2)))));
+    assert!(pre.measures.iter().all(|m| {
+        m.chords
+            .iter()
+            .all(|c| matches!(c.rhythm, ChordRhythm::Slashes(2)))
+    }));
 
     // Chorus: Roman numerals with dotted underscore notation
     // I_2. (3 beats) + vi_2. (3 beats) = 6 beats, overflow into 2 measures

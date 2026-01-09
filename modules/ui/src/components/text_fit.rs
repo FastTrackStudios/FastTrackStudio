@@ -39,14 +39,14 @@ pub struct TextFitProps {
 }
 
 /// A component that automatically adjusts text size to fit its container
-/// 
+///
 /// This component uses CSS container queries and clamp() to ensure text
 /// fits within its container. It works purely through CSS without requiring
 /// JavaScript or DOM manipulation.
 #[component]
 pub fn TextFit(props: TextFitProps) -> Element {
     let container_id = use_signal(|| format!("text-fit-container-{}", uuid::Uuid::new_v4()));
-    
+
     info!(
         container_id = %container_id.peek(),
         text_length = props.text.len(),
@@ -98,11 +98,13 @@ pub fn TextFit(props: TextFitProps) -> Element {
             let container_scale = 0.85; // Use 85% of container size for calculations
             let line_count = props.text.lines().count().max(1) as f64;
             let line_height_factor = 1.5; // Line height multiplier
-            
+
             // Scale down the container query units
-            let width_based_pct = (props.max_font_size_px * 100.0 / props.text.len().max(1) as f64).min(8.0) * container_scale;
+            let width_based_pct = (props.max_font_size_px * 100.0 / props.text.len().max(1) as f64)
+                .min(8.0)
+                * container_scale;
             let height_based_pct = (100.0 / (line_count * line_height_factor)) * container_scale;
-            
+
             format!(
                 "font-size: clamp({}px, min({}cqw, {}cqh), {}px); word-break: break-word; white-space: pre-wrap;",
                 props.min_font_size_px,

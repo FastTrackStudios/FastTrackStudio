@@ -22,7 +22,7 @@ pub struct Section {
     pub measure_count: Option<usize>,
     /// True if prefixed with ^ (e.g., ^Band-In) - for chart parsing
     pub is_subsection: bool,
-    
+
     // Optional DAW integration fields
     /// Unique identifier for this section (for DAW integration)
     pub id: Option<uuid::Uuid>,
@@ -101,7 +101,13 @@ impl Section {
             return Err("Section name cannot be empty".to_string());
         }
 
-        Ok(Self::with_positions(section_type, start_position, end_position, name, number))
+        Ok(Self::with_positions(
+            section_type,
+            start_position,
+            end_position,
+            name,
+            number,
+        ))
     }
 
     /// Create a new section with ID
@@ -113,7 +119,8 @@ impl Section {
         name: String,
         number: Option<u32>,
     ) -> Result<Self, String> {
-        let mut section = Self::new_with_positions(section_type, start_position, end_position, name, number)?;
+        let mut section =
+            Self::new_with_positions(section_type, start_position, end_position, name, number)?;
         section.id = Some(id);
         Ok(section)
     }
@@ -128,14 +135,14 @@ impl Section {
         number: Option<u32>,
     ) -> Result<Self, String> {
         use daw::primitives::TimeSignature;
-        
+
         Self::from_seconds_with_tempo(
             section_type,
             start_seconds,
             end_seconds,
             name,
             number,
-            120.0, // Default BPM
+            120.0,                    // Default BPM
             TimeSignature::new(4, 4), // Default time signature
         )
     }
@@ -151,9 +158,12 @@ impl Section {
         time_signature: daw::primitives::TimeSignature,
     ) -> Result<Self, String> {
         use daw::primitives::TimePosition;
-        
+
         if start_seconds >= end_seconds {
-            return Err(format!("Invalid time range: start ({}) >= end ({})", start_seconds, end_seconds));
+            return Err(format!(
+                "Invalid time range: start ({}) >= end ({})",
+                start_seconds, end_seconds
+            ));
         }
 
         if name.trim().is_empty() {
@@ -162,15 +172,21 @@ impl Section {
 
         let start_time = TimePosition::from_seconds(start_seconds);
         let end_time = TimePosition::from_seconds(end_seconds);
-        
+
         // Calculate musical positions from time positions
         let start_musical = start_time.to_musical_position(bpm, time_signature);
         let end_musical = end_time.to_musical_position(bpm, time_signature);
-        
+
         let start_position = Position::new(start_musical.clone(), start_time);
         let end_position = Position::new(end_musical, end_time);
-        
-        Ok(Self::with_positions(section_type, start_position, end_position, name, number))
+
+        Ok(Self::with_positions(
+            section_type,
+            start_position,
+            end_position,
+            name,
+            number,
+        ))
     }
 
     pub fn with_subsection(mut self, is_subsection: bool) -> Self {
@@ -191,7 +207,7 @@ impl Section {
             if matches!(self.section_type, SectionType::Custom(_)) {
                 return name.clone();
             }
-            
+
             // For other sections, check if the name already includes the number
             // If not, add number and split letter if present
             let with_number = if let Some(num) = self.number {
@@ -203,7 +219,7 @@ impl Section {
             } else {
                 name.clone()
             };
-            
+
             if let Some(letter) = self.split_letter {
                 if !with_number.ends_with(letter) {
                     format!("{}{}", with_number, letter)
@@ -270,7 +286,7 @@ impl Section {
     }
 
     // DAW integration methods (for FTS compatibility)
-    
+
     /// Calculate the duration of the section in seconds (alias for duration_seconds for compatibility)
     pub fn duration(&self) -> f64 {
         self.duration_seconds().unwrap_or(0.0)
@@ -287,7 +303,8 @@ impl Section {
 
     /// Check if this section overlaps with another time range
     pub fn overlaps_with_range(&self, start: f64, end: f64) -> bool {
-        if let (Some(section_start), Some(section_end)) = (self.start_seconds(), self.end_seconds()) {
+        if let (Some(section_start), Some(section_end)) = (self.start_seconds(), self.end_seconds())
+        {
             !(section_end <= start || section_start >= end)
         } else {
             false
@@ -344,14 +361,14 @@ impl Section {
             if end <= start {
                 return 0.0;
             }
-            
+
             if transport_position >= end {
                 return 100.0;
             }
             if transport_position < start {
                 return 0.0;
             }
-            
+
             ((transport_position - start) / (end - start) * 100.0).clamp(0.0, 100.0)
         } else {
             0.0
@@ -366,25 +383,23 @@ impl Section {
         if let (Some(start_pos), Some(end_pos)) = (&self.start_position, &self.end_position) {
             let start_musical = &start_pos.musical;
             let end_musical = &end_pos.musical;
-            
+
             // Calculate beats per measure from time signature (default to 4/4)
             // TODO: Get actual time signature from song/project metadata
             let beats_per_measure = 4.0;
-            
+
             // Convert musical positions to total measures
             // measure + (beat + subdivision/1000) / beats_per_measure
-            let start_measures = start_musical.measure as f64 
-                + (start_musical.beat as f64 + start_musical.subdivision as f64 / 1000.0) / beats_per_measure;
-            
-            let end_measures = end_musical.measure as f64 
-                + (end_musical.beat as f64 + end_musical.subdivision as f64 / 1000.0) / beats_per_measure;
-            
+            let start_measures = start_musical.measure as f64
+                + (start_musical.beat as f64 + start_musical.subdivision as f64 / 1000.0)
+                    / beats_per_measure;
+
+            let end_measures = end_musical.measure as f64
+                + (end_musical.beat as f64 + end_musical.subdivision as f64 / 1000.0)
+                    / beats_per_measure;
+
             let length = end_measures - start_measures;
-            if length > 0.0 {
-                Some(length)
-            } else {
-                None
-            }
+            if length > 0.0 { Some(length) } else { None }
         } else {
             None
         }
@@ -394,7 +409,10 @@ impl Section {
     pub fn validate(&self) -> Result<(), String> {
         if let (Some(start), Some(end)) = (self.start_seconds(), self.end_seconds()) {
             if start >= end {
-                return Err(format!("Invalid time range: start ({}) >= end ({})", start, end));
+                return Err(format!(
+                    "Invalid time range: start ({}) >= end ({})",
+                    start, end
+                ));
             }
         }
 
@@ -420,13 +438,12 @@ impl Section {
     }
 
     /// Clone this section with a new time range
-    pub fn with_time_range(
-        &self,
-        start_seconds: f64,
-        end_seconds: f64,
-    ) -> Result<Self, String> {
+    pub fn with_time_range(&self, start_seconds: f64, end_seconds: f64) -> Result<Self, String> {
         if start_seconds >= end_seconds {
-            return Err(format!("Invalid time range: start ({}) >= end ({})", start_seconds, end_seconds));
+            return Err(format!(
+                "Invalid time range: start ({}) >= end ({})",
+                start_seconds, end_seconds
+            ));
         }
 
         let start_pos = Position::from_seconds(start_seconds);

@@ -1,0 +1,27 @@
+[package]
+name = "native-test"
+version = "0.1.0"
+edition = "2021"
+description = "Test app for Blitz renderer with Tailwind CSS"
+
+# Standalone workspace - not part of parent workspace
+[workspace]
+
+[features]
+default = ["system_fonts", "vello"]
+system_fonts = ["blitz-dom/system_fonts"]
+vello = ["dioxus-native/vello"]
+
+[dependencies]
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", default-features = false, features = ["prelude"] }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git", default-features = false }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git", default-features = false }
+
+# Lumen blocks components
+lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", branch = "main" }
+
+# Lucide icons (same version as lumen-blocks)
+lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
+
+[lints.rust]
+unused = { level = "allow", priority = -1 }

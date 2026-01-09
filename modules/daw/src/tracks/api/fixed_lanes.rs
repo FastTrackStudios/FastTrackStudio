@@ -15,28 +15,27 @@ pub struct FixedLanesSettings {
 /// Lane solo settings (REAPER 7+)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LaneSoloSettings {
-    pub playing_lanes: i32,        // field 1 - bitfield of playing lanes
-    pub unknown_field_2: i32,      // field 2 - unknown
-    pub unknown_field_3: i32,      // field 3 - unknown
-    pub unknown_field_4: i32,      // field 4 - unknown
-    pub unknown_field_5: i32,      // field 5 - unknown
-    pub unknown_field_6: i32,      // field 6 - unknown
-    pub unknown_field_7: i32,      // field 7 - unknown
-    pub unknown_field_8: i32,      // field 8 - unknown
+    pub playing_lanes: i32,   // field 1 - bitfield of playing lanes
+    pub unknown_field_2: i32, // field 2 - unknown
+    pub unknown_field_3: i32, // field 3 - unknown
+    pub unknown_field_4: i32, // field 4 - unknown
+    pub unknown_field_5: i32, // field 5 - unknown
+    pub unknown_field_6: i32, // field 6 - unknown
+    pub unknown_field_7: i32, // field 7 - unknown
+    pub unknown_field_8: i32, // field 8 - unknown
 }
 
 /// Lane record settings (REAPER 7+)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LaneRecordSettings {
-    pub record_enabled_lane: i32,  // field 1 - 0-based index of record enabled lane
+    pub record_enabled_lane: i32, // field 1 - 0-based index of record enabled lane
     pub comping_enabled_lane: i32, // field 2 - 0-based index of comping enabled lane
-    pub last_comping_lane: i32,    // field 3 - 0-based index of last comping enabled lane
+    pub last_comping_lane: i32,   // field 3 - 0-based index of last comping enabled lane
 }
 
 /// Lane name settings (REAPER 7+)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LaneNameSettings {
-    pub lane_count: i32,           // field 1 - number of lanes
-    pub lane_names: Vec<String>,   // field 2+ - lane names
+    pub lane_count: i32,         // field 1 - number of lanes
+    pub lane_names: Vec<String>, // field 2+ - lane names
 }
-
