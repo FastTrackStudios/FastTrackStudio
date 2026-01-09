@@ -2,6 +2,11 @@
 target/
 **/target/
 
+# Nix
+.direnv/
+result
+result-*
+
 # IDE files
 .vscode/
 .idea/

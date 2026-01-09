@@ -161,7 +161,8 @@ nonstandard_style = "warn"
 nih_plug = { path = "libs/nih-plug" }
 
 # Override blitz crates to use git version for latest CSS support
-# This ensures consistent versions across the workspace
+# NOTE: DO NOT patch stylo from git - the crates.io version works fine,
+# but the git version has E0275 trait recursion overflow
 [patch.crates-io]
 dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git" }
 dioxus-native-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
@@ -171,6 +172,7 @@ blitz-net = { git = "https://github.com/DioxusLabs/blitz.git" }
 blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }
 blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
 blitz-shell = { git = "https://github.com/DioxusLabs/blitz.git" }
+stylo_taffy = { git = "https://github.com/DioxusLabs/blitz.git" }
 
 [workspace.lints.clippy]
 # Core lints - treat as errors

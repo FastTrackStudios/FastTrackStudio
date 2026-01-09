@@ -378,10 +378,8 @@ dev-cycle: link-extension show-reaper-path
 # Audio Plugin Development
 # ============================================================================
 
-# Plugin configuration - use user Library (no sudo required)
-CLAP_DIR := env_var("HOME") / "Library/Audio/Plug-Ins/CLAP"
-VST3_DIR := env_var("HOME") / "Library/Audio/Plug-Ins/VST3"
-NIH_LOG_FILE := env_var("HOME") / "Library/Logs/REAPER/nih.log"
+# Plugin configuration - loaded from .env or uses OS-appropriate defaults
+# These are set as justfile variables but can be overridden by environment variables
 
 # Force rebuild of nih-plug submodule (use when local changes aren't being picked up)
 rebuild-nih-plug:
@@ -401,24 +399,39 @@ bundle PLUGIN:
 bundle-debug PLUGIN:
     cargo xtask bundle {{PLUGIN}}
 
-# Install a bundled plugin to user Library directories (no sudo required)
+# Install a bundled plugin to user plugin directories (no sudo required)
 # Only installs CLAP version by default
 install-plugin PLUGIN: (bundle PLUGIN)
     #!/usr/bin/env bash
     set -euo pipefail
+
+    # Load .env file if it exists
+    JUSTFILE_DIR="{{justfile_directory()}}"
+    if [ -f "$JUSTFILE_DIR/.env" ]; then set -a; source "$JUSTFILE_DIR/.env"; set +a; fi
+
     PLUGIN_NAME="{{PLUGIN}}"
-    
+    BUNDLE_DIR="$JUSTFILE_DIR/target/bundled"
+
+    # Determine CLAP directory with OS-appropriate default
+    if [[ -z "${CLAP_DIR:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) CLAP_DIR="$HOME/Library/Audio/Plug-Ins/CLAP" ;;
+            Linux)  CLAP_DIR="$HOME/.clap" ;;
+            *)      CLAP_DIR="$HOME/.clap" ;;
+        esac
+    fi
+
     # Ensure directory exists
-    mkdir -p "{{CLAP_DIR}}"
-    
-    # Install CLAP only
-    if [ -d "target/bundled/${PLUGIN_NAME}.clap" ]; then
+    mkdir -p "$CLAP_DIR"
+
+    # Install CLAP only (handle both file on Linux and directory on macOS)
+    if [ -e "$BUNDLE_DIR/${PLUGIN_NAME}.clap" ]; then
         echo "Installing CLAP plugin..."
-        rm -rf "{{CLAP_DIR}}/${PLUGIN_NAME}.clap"
-        cp -r "target/bundled/${PLUGIN_NAME}.clap" "{{CLAP_DIR}}/"
-        echo "CLAP installed to: {{CLAP_DIR}}/${PLUGIN_NAME}.clap"
+        rm -rf "$CLAP_DIR/${PLUGIN_NAME}.clap"
+        cp -r "$BUNDLE_DIR/${PLUGIN_NAME}.clap" "$CLAP_DIR/"
+        echo "CLAP installed to: $CLAP_DIR/${PLUGIN_NAME}.clap"
     else
-        echo "Error: CLAP bundle not found at target/bundled/${PLUGIN_NAME}.clap"
+        echo "Error: CLAP bundle not found at $BUNDLE_DIR/${PLUGIN_NAME}.clap"
         exit 1
     fi
 
@@ -426,125 +439,219 @@ install-plugin PLUGIN: (bundle PLUGIN)
 install-plugin-all PLUGIN: (bundle PLUGIN)
     #!/usr/bin/env bash
     set -euo pipefail
+
+    # Load .env file if it exists
+    JUSTFILE_DIR="{{justfile_directory()}}"
+    if [ -f "$JUSTFILE_DIR/.env" ]; then set -a; source "$JUSTFILE_DIR/.env"; set +a; fi
+
     PLUGIN_NAME="{{PLUGIN}}"
-    
-    # Ensure directories exist
-    mkdir -p "{{CLAP_DIR}}"
-    mkdir -p "{{VST3_DIR}}"
-    
-    # Install CLAP
-    if [ -d "target/bundled/${PLUGIN_NAME}.clap" ]; then
-        echo "Installing CLAP plugin..."
-        rm -rf "{{CLAP_DIR}}/${PLUGIN_NAME}.clap"
-        cp -r "target/bundled/${PLUGIN_NAME}.clap" "{{CLAP_DIR}}/"
-        echo "CLAP installed to: {{CLAP_DIR}}/${PLUGIN_NAME}.clap"
+    BUNDLE_DIR="$JUSTFILE_DIR/target/bundled"
+
+    # Determine plugin directories with OS-appropriate defaults
+    if [[ -z "${CLAP_DIR:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) CLAP_DIR="$HOME/Library/Audio/Plug-Ins/CLAP" ;;
+            Linux)  CLAP_DIR="$HOME/.clap" ;;
+            *)      CLAP_DIR="$HOME/.clap" ;;
+        esac
     fi
-    
-    # Install VST3
-    if [ -d "target/bundled/${PLUGIN_NAME}.vst3" ]; then
-        echo "Installing VST3 plugin..."
-        rm -rf "{{VST3_DIR}}/${PLUGIN_NAME}.vst3"
-        cp -r "target/bundled/${PLUGIN_NAME}.vst3" "{{VST3_DIR}}/"
-        echo "VST3 installed to: {{VST3_DIR}}/${PLUGIN_NAME}.vst3"
+    if [[ -z "${VST3_DIR:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) VST3_DIR="$HOME/Library/Audio/Plug-Ins/VST3" ;;
+            Linux)  VST3_DIR="$HOME/.vst3" ;;
+            *)      VST3_DIR="$HOME/.vst3" ;;
+        esac
     fi
 
-# Uninstall a plugin from user Library directories
+    # Ensure directories exist
+    mkdir -p "$CLAP_DIR"
+    mkdir -p "$VST3_DIR"
+
+    # Install CLAP (handle both file on Linux and directory on macOS)
+    if [ -e "$BUNDLE_DIR/${PLUGIN_NAME}.clap" ]; then
+        echo "Installing CLAP plugin..."
+        rm -rf "$CLAP_DIR/${PLUGIN_NAME}.clap"
+        cp -r "$BUNDLE_DIR/${PLUGIN_NAME}.clap" "$CLAP_DIR/"
+        echo "CLAP installed to: $CLAP_DIR/${PLUGIN_NAME}.clap"
+    fi
+
+    # Install VST3 (handle both file on Linux and directory on macOS)
+    if [ -e "$BUNDLE_DIR/${PLUGIN_NAME}.vst3" ]; then
+        echo "Installing VST3 plugin..."
+        rm -rf "$VST3_DIR/${PLUGIN_NAME}.vst3"
+        cp -r "$BUNDLE_DIR/${PLUGIN_NAME}.vst3" "$VST3_DIR/"
+        echo "VST3 installed to: $VST3_DIR/${PLUGIN_NAME}.vst3"
+    fi
+
+# Uninstall a plugin from user plugin directories
 uninstall-plugin PLUGIN:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    # Load .env file if it exists
+    if [ -f .env ]; then set -a; source .env; set +a; fi
+
     PLUGIN_NAME="{{PLUGIN}}"
-    
-    if [ -d "{{CLAP_DIR}}/${PLUGIN_NAME}.clap" ]; then
-        rm -rf "{{CLAP_DIR}}/${PLUGIN_NAME}.clap"
-        echo "Removed CLAP: {{CLAP_DIR}}/${PLUGIN_NAME}.clap"
+
+    # Determine plugin directories with OS-appropriate defaults
+    if [[ -z "${CLAP_DIR:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) CLAP_DIR="$HOME/Library/Audio/Plug-Ins/CLAP" ;;
+            Linux)  CLAP_DIR="$HOME/.clap" ;;
+            *)      CLAP_DIR="$HOME/.clap" ;;
+        esac
     fi
-    
-    if [ -d "{{VST3_DIR}}/${PLUGIN_NAME}.vst3" ]; then
-        rm -rf "{{VST3_DIR}}/${PLUGIN_NAME}.vst3"
-        echo "Removed VST3: {{VST3_DIR}}/${PLUGIN_NAME}.vst3"
+    if [[ -z "${VST3_DIR:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) VST3_DIR="$HOME/Library/Audio/Plug-Ins/VST3" ;;
+            Linux)  VST3_DIR="$HOME/.vst3" ;;
+            *)      VST3_DIR="$HOME/.vst3" ;;
+        esac
+    fi
+
+    if [ -d "$CLAP_DIR/${PLUGIN_NAME}.clap" ]; then
+        rm -rf "$CLAP_DIR/${PLUGIN_NAME}.clap"
+        echo "Removed CLAP: $CLAP_DIR/${PLUGIN_NAME}.clap"
+    fi
+
+    if [ -d "$VST3_DIR/${PLUGIN_NAME}.vst3" ]; then
+        rm -rf "$VST3_DIR/${PLUGIN_NAME}.vst3"
+        echo "Removed VST3: $VST3_DIR/${PLUGIN_NAME}.vst3"
     fi
 
 # Launch REAPER with NIH plugin logging enabled
 reaper-plugin:
     #!/usr/bin/env bash
     set -euo pipefail
-    
+
     # Load .env file if it exists
     if [ -f .env ]; then set -a; source .env; set +a; fi
-    
-    REAPER_EXECUTABLE="${REAPER_EXECUTABLE:-/Users/codywright/Music/FTS-REAPER/FTS-LIVE.app/Contents/MacOS/REAPER}"
-    
-    mkdir -p "$(dirname "{{NIH_LOG_FILE}}")"
+
+    # Determine NIH log file with OS-appropriate default
+    if [[ -z "${NIH_LOG_FILE:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) NIH_LOG_FILE="$HOME/Library/Logs/REAPER/nih.log" ;;
+            Linux)  NIH_LOG_FILE="$HOME/.local/share/REAPER/Logs/nih.log" ;;
+            *)      NIH_LOG_FILE="$HOME/.local/share/REAPER/Logs/nih.log" ;;
+        esac
+    fi
+
+    if [[ -z "${REAPER_EXECUTABLE:-}" ]]; then
+        echo "Error: REAPER_EXECUTABLE not set in .env"
+        exit 1
+    fi
+
+    mkdir -p "$(dirname "$NIH_LOG_FILE")"
     echo "Launching REAPER with NIH logging..."
-    echo "Logs: {{NIH_LOG_FILE}}"
-    
-    APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
-    cd "$APP_DIR/Contents/Resources" || exit 1
-    NIH_LOG="{{NIH_LOG_FILE}}" exec "$REAPER_EXECUTABLE"
+    echo "Logs: $NIH_LOG_FILE"
+
+    # On macOS, change to app Resources directory
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
+        cd "$APP_DIR/Contents/Resources" || exit 1
+    fi
+    NIH_LOG="$NIH_LOG_FILE" exec "$REAPER_EXECUTABLE"
 
 # Launch REAPER with WGPU debug logging
 reaper-plugin-debug:
     #!/usr/bin/env bash
     set -euo pipefail
-    
+
     # Load .env file if it exists
     if [ -f .env ]; then set -a; source .env; set +a; fi
-    
-    REAPER_EXECUTABLE="${REAPER_EXECUTABLE:-/Users/codywright/Music/FTS-REAPER/FTS-LIVE.app/Contents/MacOS/REAPER}"
-    
-    mkdir -p "$(dirname "{{NIH_LOG_FILE}}")"
+
+    # Determine NIH log file with OS-appropriate default
+    if [[ -z "${NIH_LOG_FILE:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) NIH_LOG_FILE="$HOME/Library/Logs/REAPER/nih.log" ;;
+            Linux)  NIH_LOG_FILE="$HOME/.local/share/REAPER/Logs/nih.log" ;;
+            *)      NIH_LOG_FILE="$HOME/.local/share/REAPER/Logs/nih.log" ;;
+        esac
+    fi
+
+    if [[ -z "${REAPER_EXECUTABLE:-}" ]]; then
+        echo "Error: REAPER_EXECUTABLE not set in .env"
+        exit 1
+    fi
+
+    mkdir -p "$(dirname "$NIH_LOG_FILE")"
     echo "Launching REAPER with WGPU debug logging..."
-    echo "Logs: {{NIH_LOG_FILE}}"
-    
-    APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
-    cd "$APP_DIR/Contents/Resources" || exit 1
-    MTL_HUD_ENABLED=1 RUST_LOG=wgpu_core=debug,wgpu_hal=debug NIH_LOG="{{NIH_LOG_FILE}}" exec "$REAPER_EXECUTABLE"
+    echo "Logs: $NIH_LOG_FILE"
+
+    # On macOS, change to app Resources directory
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
+        cd "$APP_DIR/Contents/Resources" || exit 1
+    fi
+    MTL_HUD_ENABLED=1 RUST_LOG=wgpu_core=debug,wgpu_hal=debug NIH_LOG="$NIH_LOG_FILE" exec "$REAPER_EXECUTABLE"
 
 # Plugin development workflow: build, install, launch REAPER with logs
 dev PLUGIN: (install-plugin PLUGIN)
     #!/usr/bin/env bash
     set -euo pipefail
-    
+
     # Load .env file if it exists
     if [ -f .env ]; then set -a; source .env; set +a; fi
-    
-    REAPER_EXECUTABLE="${REAPER_EXECUTABLE:-/Users/codywright/Music/FTS-REAPER/FTS-LIVE.app/Contents/MacOS/REAPER}"
-    
-    mkdir -p "$(dirname "{{NIH_LOG_FILE}}")"
-    
+
+    # Determine NIH log file with OS-appropriate default
+    if [[ -z "${NIH_LOG_FILE:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) NIH_LOG_FILE="$HOME/Library/Logs/REAPER/nih.log" ;;
+            Linux)  NIH_LOG_FILE="$HOME/.local/share/REAPER/Logs/nih.log" ;;
+            *)      NIH_LOG_FILE="$HOME/.local/share/REAPER/Logs/nih.log" ;;
+        esac
+    fi
+
+    if [[ -z "${REAPER_EXECUTABLE:-}" ]]; then
+        echo "Error: REAPER_EXECUTABLE not set in .env"
+        exit 1
+    fi
+
+    mkdir -p "$(dirname "$NIH_LOG_FILE")"
+
     echo ""
     echo "Starting plugin development session for: {{PLUGIN}}"
     echo "================================================"
     echo ""
-    
+
     # Check if we're in tmux
     if [ -n "${TMUX:-}" ]; then
         echo "Detected tmux - splitting panes..."
         echo ""
-        
+
+        # Build the REAPER launch command based on OS
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
+            REAPER_CMD="cd \"$APP_DIR/Contents/Resources\" && NIH_LOG=\"$NIH_LOG_FILE\" \"$REAPER_EXECUTABLE\""
+        else
+            REAPER_CMD="NIH_LOG=\"$NIH_LOG_FILE\" \"$REAPER_EXECUTABLE\""
+        fi
+
         # Split horizontally, run REAPER in new pane on right
-        APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
-        tmux split-window -h "cd \"$APP_DIR/Contents/Resources\" && NIH_LOG=\"{{NIH_LOG_FILE}}\" \"$REAPER_EXECUTABLE\""
-        
+        tmux split-window -h "$REAPER_CMD"
+
         echo "REAPER launched in right pane"
         echo "Use Ctrl+B then arrow keys to switch panes"
         echo ""
         echo "Tailing logs..."
         echo ""
-        
+
         # Wait for log file and tail it
-        while [ ! -f "{{NIH_LOG_FILE}}" ]; do sleep 0.5; done
-        tail -f "{{NIH_LOG_FILE}}"
+        while [ ! -f "$NIH_LOG_FILE" ]; do sleep 0.5; done
+        tail -f "$NIH_LOG_FILE"
     else
         echo "Launching REAPER..."
-        echo "Logs: {{NIH_LOG_FILE}}"
+        echo "Logs: $NIH_LOG_FILE"
         echo ""
         echo "Tip: Run in tmux for split-pane log viewing"
         echo ""
-        
-        APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
-        cd "$APP_DIR/Contents/Resources" || exit 1
-        NIH_LOG="{{NIH_LOG_FILE}}" exec "$REAPER_EXECUTABLE"
+
+        # On macOS, change to app Resources directory
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
+            cd "$APP_DIR/Contents/Resources" || exit 1
+        fi
+        NIH_LOG="$NIH_LOG_FILE" exec "$REAPER_EXECUTABLE"
     fi
 
 # Launch REAPER with logs (no rebuild/install) - same as dev but skip build
@@ -552,60 +659,108 @@ dev PLUGIN: (install-plugin PLUGIN)
 run PLUGIN="":
     #!/usr/bin/env bash
     set -euo pipefail
-    
+
     # Load .env file if it exists
     if [ -f .env ]; then set -a; source .env; set +a; fi
-    
-    REAPER_EXECUTABLE="${REAPER_EXECUTABLE:-/Users/codywright/Music/FTS-REAPER/FTS-LIVE.app/Contents/MacOS/REAPER}"
-    
-    mkdir -p "$(dirname "{{NIH_LOG_FILE}}")"
-    
+
+    # Determine NIH log file with OS-appropriate default
+    if [[ -z "${NIH_LOG_FILE:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) NIH_LOG_FILE="$HOME/Library/Logs/REAPER/nih.log" ;;
+            Linux)  NIH_LOG_FILE="$HOME/.local/share/REAPER/Logs/nih.log" ;;
+            *)      NIH_LOG_FILE="$HOME/.local/share/REAPER/Logs/nih.log" ;;
+        esac
+    fi
+
+    if [[ -z "${REAPER_EXECUTABLE:-}" ]]; then
+        echo "Error: REAPER_EXECUTABLE not set in .env"
+        exit 1
+    fi
+
+    mkdir -p "$(dirname "$NIH_LOG_FILE")"
+
     # Clear old logs
-    rm -f "{{NIH_LOG_FILE}}"
-    
+    rm -f "$NIH_LOG_FILE"
+
     # Check if we're in tmux
     if [ -n "${TMUX:-}" ]; then
         echo "Launching REAPER in tmux split..."
-        
+
+        # Build the REAPER launch command based on OS
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
+            REAPER_CMD="cd \"$APP_DIR/Contents/Resources\" && NIH_LOG=\"$NIH_LOG_FILE\" \"$REAPER_EXECUTABLE\""
+        else
+            REAPER_CMD="NIH_LOG=\"$NIH_LOG_FILE\" \"$REAPER_EXECUTABLE\""
+        fi
+
         # Split horizontally, run REAPER in new pane on right
-        APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
-        tmux split-window -h "cd \"$APP_DIR/Contents/Resources\" && NIH_LOG=\"{{NIH_LOG_FILE}}\" \"$REAPER_EXECUTABLE\""
-        
+        tmux split-window -h "$REAPER_CMD"
+
         echo "REAPER launched in right pane"
         echo "Tailing logs..."
         echo ""
-        
+
         # Wait for log file and tail it
-        while [ ! -f "{{NIH_LOG_FILE}}" ]; do sleep 0.5; done
-        tail -f "{{NIH_LOG_FILE}}"
+        while [ ! -f "$NIH_LOG_FILE" ]; do sleep 0.5; done
+        tail -f "$NIH_LOG_FILE"
     else
         echo "Launching REAPER..."
-        echo "Logs: {{NIH_LOG_FILE}}"
+        echo "Logs: $NIH_LOG_FILE"
         echo "Tip: Run in tmux for split-pane log viewing"
         echo ""
-        
-        APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
-        cd "$APP_DIR/Contents/Resources" || exit 1
-        NIH_LOG="{{NIH_LOG_FILE}}" exec "$REAPER_EXECUTABLE"
+
+        # On macOS, change to app Resources directory
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
+            cd "$APP_DIR/Contents/Resources" || exit 1
+        fi
+        NIH_LOG="$NIH_LOG_FILE" exec "$REAPER_EXECUTABLE"
     fi
 
 # Tail plugin logs
 plugin-logs:
     #!/usr/bin/env bash
-    if [ -f "{{NIH_LOG_FILE}}" ]; then
-        tail -f "{{NIH_LOG_FILE}}"
+
+    # Load .env file if it exists
+    if [ -f .env ]; then set -a; source .env; set +a; fi
+
+    # Determine NIH log file with OS-appropriate default
+    if [[ -z "${NIH_LOG_FILE:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) NIH_LOG_FILE="$HOME/Library/Logs/REAPER/nih.log" ;;
+            Linux)  NIH_LOG_FILE="$HOME/.local/share/REAPER/Logs/nih.log" ;;
+            *)      NIH_LOG_FILE="$HOME/.local/share/REAPER/Logs/nih.log" ;;
+        esac
+    fi
+
+    if [ -f "$NIH_LOG_FILE" ]; then
+        tail -f "$NIH_LOG_FILE"
     else
-        echo "Waiting for log file: {{NIH_LOG_FILE}}"
-        while [ ! -f "{{NIH_LOG_FILE}}" ]; do sleep 0.5; done
-        tail -f "{{NIH_LOG_FILE}}"
+        echo "Waiting for log file: $NIH_LOG_FILE"
+        while [ ! -f "$NIH_LOG_FILE" ]; do sleep 0.5; done
+        tail -f "$NIH_LOG_FILE"
     fi
 
 # Clear plugin logs
 clear-plugin-logs:
     #!/usr/bin/env bash
-    if [ -f "{{NIH_LOG_FILE}}" ]; then
-        rm "{{NIH_LOG_FILE}}"
-        echo "Cleared: {{NIH_LOG_FILE}}"
+
+    # Load .env file if it exists
+    if [ -f .env ]; then set -a; source .env; set +a; fi
+
+    # Determine NIH log file with OS-appropriate default
+    if [[ -z "${NIH_LOG_FILE:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) NIH_LOG_FILE="$HOME/Library/Logs/REAPER/nih.log" ;;
+            Linux)  NIH_LOG_FILE="$HOME/.local/share/REAPER/Logs/nih.log" ;;
+            *)      NIH_LOG_FILE="$HOME/.local/share/REAPER/Logs/nih.log" ;;
+        esac
+    fi
+
+    if [ -f "$NIH_LOG_FILE" ]; then
+        rm "$NIH_LOG_FILE"
+        echo "Cleared: $NIH_LOG_FILE"
     else
         echo "No log file to clear"
     fi
@@ -625,20 +780,40 @@ list-plugins:
 # Show plugin info
 plugin-info PLUGIN:
     #!/usr/bin/env bash
+
+    # Load .env file if it exists
+    if [ -f .env ]; then set -a; source .env; set +a; fi
+
+    # Determine plugin directories with OS-appropriate defaults
+    if [[ -z "${CLAP_DIR:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) CLAP_DIR="$HOME/Library/Audio/Plug-Ins/CLAP" ;;
+            Linux)  CLAP_DIR="$HOME/.clap" ;;
+            *)      CLAP_DIR="$HOME/.clap" ;;
+        esac
+    fi
+    if [[ -z "${VST3_DIR:-}" ]]; then
+        case "$(uname -s)" in
+            Darwin) VST3_DIR="$HOME/Library/Audio/Plug-Ins/VST3" ;;
+            Linux)  VST3_DIR="$HOME/.vst3" ;;
+            *)      VST3_DIR="$HOME/.vst3" ;;
+        esac
+    fi
+
     echo "Plugin: {{PLUGIN}}"
     echo ""
     echo "Source: apps/plugins/{{PLUGIN}}/"
     echo ""
     echo "Installed CLAP:"
-    if [ -d "{{CLAP_DIR}}/{{PLUGIN}}.clap" ]; then
-        ls -la "{{CLAP_DIR}}/{{PLUGIN}}.clap"
+    if [ -d "$CLAP_DIR/{{PLUGIN}}.clap" ]; then
+        ls -la "$CLAP_DIR/{{PLUGIN}}.clap"
     else
         echo "  (not installed)"
     fi
     echo ""
     echo "Installed VST3:"
-    if [ -d "{{VST3_DIR}}/{{PLUGIN}}.vst3" ]; then
-        ls -la "{{VST3_DIR}}/{{PLUGIN}}.vst3"
+    if [ -d "$VST3_DIR/{{PLUGIN}}.vst3" ]; then
+        ls -la "$VST3_DIR/{{PLUGIN}}.vst3"
     else
         echo "  (not installed)"
     fi

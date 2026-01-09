@@ -19,14 +19,20 @@ fts-gain-core = { path = "../../../modules/plugins/gain", features = ["full"] }
 
 # NIH-plug for plugin framework
 fts-plugin-core = { path = "../../../modules/fts-plugin-core" }
+futures-timer = "3.0"
 nih_plug = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nih_plug_dioxus = { workspace = true, features = ["softbuffer-blit"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
 nih_plug_dioxus = { workspace = true }
 
 # Atomic types for meter sharing
 atomic_float = { workspace = true }
 
 # Async utilities for UI polling
-futures-timer = "3.0"
+futures-timer = { version = "3.0" }
 
 # UI component library
 # lumen-blocks = { workspace = true }  # Disabled - requires standard dioxus, not dioxus-native

@@ -18,7 +18,7 @@ serde_json = { workspace = true }
 tracing = "0.1"
 anyhow = "1.0"
 base64 = "0.22"
-rfd = "0.15.3"
+rfd = "0.17"
 futures = { workspace = true }
 # Staff crate - UI feature requires dioxus-web which conflicts with desktop builds
 # staff = { version = "0.11.0", features = ["ui"] }
