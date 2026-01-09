@@ -24,6 +24,7 @@
 //! });
 //! ```
 
+use audioadapter_buffers::direct::SequentialSliceOfVecs;
 use rubato::{
     Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
     WindowFunction,
@@ -113,6 +114,7 @@ pub struct Oversampler {
     upsampler: Async<f32>,
     downsampler: Async<f32>,
     // Work buffers (channel-major: Vec<channel_data>)
+    up_input: Vec<Vec<f32>>,
     up_output: Vec<Vec<f32>>,
     down_output: Vec<Vec<f32>>,
 }
@@ -165,7 +167,8 @@ impl Oversampler {
         )
         .expect("Failed to create downsampler");
 
-        // Pre-allocate output buffers
+        // Pre-allocate buffers
+        let up_input = vec![vec![0.0; max_block_size]; channels];
         let up_output_size = max_block_size * factor_val + params.sinc_len;
         let up_output = vec![vec![0.0; up_output_size]; channels];
         let down_output = vec![vec![0.0; max_block_size + params.sinc_len]; channels];
@@ -176,6 +179,7 @@ impl Oversampler {
             max_block_size,
             upsampler,
             downsampler,
+            up_input,
             up_output,
             down_output,
         }
@@ -197,35 +201,45 @@ impl Oversampler {
     where
         F: FnMut(&mut [f32]),
     {
-        assert_eq!(self.channels, 1, "Use process_interleaved for multi-channel");
+        assert_eq!(self.channels, 1, "Use process_stereo for multi-channel");
         assert!(
             input.len() <= self.max_block_size,
             "Input exceeds max_block_size"
         );
 
-        // Wrap input in channel format
-        let input_channels = [input];
+        let input_len = input.len();
+
+        // Copy input to our buffer
+        self.up_input[0][..input_len].copy_from_slice(input);
+
+        // Create adapters for rubato
+        let input_adapter = SequentialSliceOfVecs::new(&self.up_input, self.channels, input_len)
+            .expect("Failed to create input adapter");
+        let out_capacity = self.up_output[0].len();
+        let mut output_adapter =
+            SequentialSliceOfVecs::new_mut(&mut self.up_output, self.channels, out_capacity)
+                .expect("Failed to create output adapter");
 
         // Upsample
         let (_, up_frames) = self
             .upsampler
-            .process_into_buffer(&input_channels, &mut self.up_output, None)
+            .process_into_buffer(&input_adapter, &mut output_adapter, None)
             .expect("Upsampling failed");
 
         // Process the oversampled buffer
         process(&mut self.up_output[0][..up_frames]);
 
-        // Prepare downsampler input (slice to actual frames)
-        let down_input: Vec<&[f32]> = self
-            .up_output
-            .iter()
-            .map(|ch| &ch[..up_frames])
-            .collect();
-
         // Downsample
+        let down_input_adapter = SequentialSliceOfVecs::new(&self.up_output, self.channels, up_frames)
+            .expect("Failed to create down input adapter");
+        let down_capacity = self.down_output[0].len();
+        let mut down_output_adapter =
+            SequentialSliceOfVecs::new_mut(&mut self.down_output, self.channels, down_capacity)
+                .expect("Failed to create down output adapter");
+
         let (_, down_frames) = self
             .downsampler
-            .process_into_buffer(&down_input, &mut self.down_output, None)
+            .process_into_buffer(&down_input_adapter, &mut down_output_adapter, None)
             .expect("Downsampling failed");
 
         // Copy to output
@@ -258,32 +272,41 @@ impl Oversampler {
             "Input exceeds max_block_size"
         );
 
-        // Wrap inputs in channel format
-        let input_channels = [input_l, input_r];
+        let input_len = input_l.len();
+
+        // Copy inputs to our buffers
+        self.up_input[0][..input_len].copy_from_slice(input_l);
+        self.up_input[1][..input_len].copy_from_slice(input_r);
+
+        // Create adapters for rubato
+        let input_adapter = SequentialSliceOfVecs::new(&self.up_input, self.channels, input_len)
+            .expect("Failed to create input adapter");
+        let out_capacity = self.up_output[0].len();
+        let mut output_adapter =
+            SequentialSliceOfVecs::new_mut(&mut self.up_output, self.channels, out_capacity)
+                .expect("Failed to create output adapter");
 
         // Upsample
         let (_, up_frames) = self
             .upsampler
-            .process_into_buffer(&input_channels, &mut self.up_output, None)
+            .process_into_buffer(&input_adapter, &mut output_adapter, None)
             .expect("Upsampling failed");
 
         // Process oversampled buffers
-        process(
-            &mut self.up_output[0][..up_frames],
-            &mut self.up_output[1][..up_frames],
-        );
-
-        // Prepare downsampler input
-        let down_input: Vec<&[f32]> = self
-            .up_output
-            .iter()
-            .map(|ch| &ch[..up_frames])
-            .collect();
+        let (left, right) = self.up_output.split_at_mut(1);
+        process(&mut left[0][..up_frames], &mut right[0][..up_frames]);
 
         // Downsample
+        let down_input_adapter = SequentialSliceOfVecs::new(&self.up_output, self.channels, up_frames)
+            .expect("Failed to create down input adapter");
+        let down_capacity = self.down_output[0].len();
+        let mut down_output_adapter =
+            SequentialSliceOfVecs::new_mut(&mut self.down_output, self.channels, down_capacity)
+                .expect("Failed to create down output adapter");
+
         let (_, down_frames) = self
             .downsampler
-            .process_into_buffer(&down_input, &mut self.down_output, None)
+            .process_into_buffer(&down_input_adapter, &mut down_output_adapter, None)
             .expect("Downsampling failed");
 
         // Copy to outputs
@@ -316,6 +339,9 @@ impl Oversampler {
         self.downsampler.reset();
 
         // Clear work buffers
+        for ch in &mut self.up_input {
+            ch.fill(0.0);
+        }
         for ch in &mut self.up_output {
             ch.fill(0.0);
         }
