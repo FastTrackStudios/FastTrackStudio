@@ -163,36 +163,36 @@ nonstandard_style = "warn"
 [patch."https://github.com/Cmdv/nih-plug.git"]
 nih_plug = { path = "libs/nih-plug" }
 
-# Override blitz crates from git to use local fork with post-processing support
+# Override blitz crates from upstream git to use our fork with post-processing support
 [patch."https://github.com/DioxusLabs/blitz.git"]
-dioxus-native = { path = "../reference/dioxus/blitz/packages/dioxus-native" }
-dioxus-native-dom = { path = "../reference/dioxus/blitz/packages/dioxus-native-dom" }
-blitz-dom = { path = "../reference/dioxus/blitz/packages/blitz-dom" }
-blitz-html = { path = "../reference/dioxus/blitz/packages/blitz-html" }
-blitz-net = { path = "../reference/dioxus/blitz/packages/blitz-net" }
-blitz-paint = { path = "../reference/dioxus/blitz/packages/blitz-paint" }
-blitz-traits = { path = "../reference/dioxus/blitz/packages/blitz-traits" }
-blitz-shell = { path = "../reference/dioxus/blitz/packages/blitz-shell" }
-stylo_taffy = { path = "../reference/dioxus/blitz/packages/stylo_taffy" }
+dioxus-native = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+dioxus-native-dom = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+blitz-dom = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+blitz-html = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+blitz-net = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+blitz-paint = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+blitz-traits = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+blitz-shell = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+stylo_taffy = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
 
 # Also patch crates-io versions for other crates that use these
 [patch.crates-io]
-dioxus-native = { path = "../reference/dioxus/blitz/packages/dioxus-native" }
-dioxus-native-dom = { path = "../reference/dioxus/blitz/packages/dioxus-native-dom" }
-blitz-dom = { path = "../reference/dioxus/blitz/packages/blitz-dom" }
-blitz-html = { path = "../reference/dioxus/blitz/packages/blitz-html" }
-blitz-net = { path = "../reference/dioxus/blitz/packages/blitz-net" }
-blitz-paint = { path = "../reference/dioxus/blitz/packages/blitz-paint" }
-blitz-traits = { path = "../reference/dioxus/blitz/packages/blitz-traits" }
-blitz-shell = { path = "../reference/dioxus/blitz/packages/blitz-shell" }
-stylo_taffy = { path = "../reference/dioxus/blitz/packages/stylo_taffy" }
+dioxus-native = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+dioxus-native-dom = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+blitz-dom = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+blitz-html = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+blitz-net = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+blitz-paint = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+blitz-traits = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+blitz-shell = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+stylo_taffy = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
 # Anyrender with post-processing support
-anyrender = { path = "../reference/dioxus/anyrender/crates/anyrender" }
-anyrender_vello = { path = "../reference/dioxus/anyrender/crates/anyrender_vello" }
-anyrender_vello_cpu = { path = "../reference/dioxus/anyrender/crates/anyrender_vello_cpu" }
-anyrender_vello_hybrid = { path = "../reference/dioxus/anyrender/crates/anyrender_vello_hybrid" }
-anyrender_svg = { path = "../reference/dioxus/anyrender/crates/anyrender_svg" }
-wgpu_context = { path = "../reference/dioxus/anyrender/crates/wgpu_context" }
+anyrender = { git = "https://github.com/Codys-Wright/anyrender.git", branch = "post-processing" }
+anyrender_vello = { git = "https://github.com/Codys-Wright/anyrender.git", branch = "post-processing" }
+anyrender_vello_cpu = { git = "https://github.com/Codys-Wright/anyrender.git", branch = "post-processing" }
+anyrender_vello_hybrid = { git = "https://github.com/Codys-Wright/anyrender.git", branch = "post-processing" }
+anyrender_svg = { git = "https://github.com/Codys-Wright/anyrender.git", branch = "post-processing" }
+wgpu_context = { git = "https://github.com/Codys-Wright/anyrender.git", branch = "post-processing" }
 
 [workspace.lints.clippy]
 # Core lints - treat as errors
