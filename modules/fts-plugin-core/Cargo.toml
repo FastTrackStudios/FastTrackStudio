@@ -1,0 +1,38 @@
+[package]
+name = "fts-plugin-core"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "Core abstraction layer for FTS audio plugins (nih_plug + dioxus + wgpu)"
+
+[features]
+default = ["gui"]
+# Enable GUI support (dioxus + wgpu)
+gui = ["nih_plug_dioxus"]
+# Enable hub client for cross-plugin communication
+hub = ["plugin-hub/client"]
+
+[dependencies]
+# NIH-plug core
+nih_plug = { workspace = true }
+
+# GUI support (optional)
+nih_plug_dioxus = { workspace = true, optional = true }
+
+# Plugin hub client (optional)
+plugin-hub = { path = "../plugin-hub", optional = true }
+
+# Serialization
+serde = { workspace = true }
+
+# Atomic types
+atomic_float = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
