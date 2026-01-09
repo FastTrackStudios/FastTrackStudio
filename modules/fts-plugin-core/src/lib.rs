@@ -60,6 +60,8 @@ pub mod meters;
 pub mod dropdown;
 #[cfg(feature = "gui")]
 pub mod shell;
+#[cfg(feature = "gui")]
+pub mod sizing;
 
 /// Prelude for convenient imports.
 pub mod prelude {
@@ -69,7 +71,10 @@ pub mod prelude {
     pub use nih_plug_dioxus::prelude::*;
 
     #[cfg(feature = "gui")]
-    pub use crate::shell::{PluginShell, SIZE_PRESET_NAMES, SIZE_PRESETS, TOP_BAR_HEIGHT};
+    pub use crate::shell::{PluginShell, TOP_BAR_HEIGHT};
+
+    #[cfg(feature = "gui")]
+    pub use crate::sizing::{AspectRatio, SizeTier, calculate_size, default_window_size};
 
     #[cfg(feature = "hub")]
     pub use plugin_hub::{MeterData, ParamInfo, PluginInfo, PluginType};
@@ -79,17 +84,26 @@ pub mod prelude {
 }
 
 /// Standard window size for FTS plugins (16:9 aspect ratio).
+#[cfg(feature = "gui")]
+pub const DEFAULT_WINDOW_SIZE: (u32, u32) = sizing::AspectRatio::Widescreen.base_dimensions();
+#[cfg(not(feature = "gui"))]
 pub const DEFAULT_WINDOW_SIZE: (u32, u32) = (640, 360);
 
 /// Minimum window size for FTS plugins.
-pub const MIN_WINDOW_SIZE: (u32, u32) = (320, 180);
+#[cfg(feature = "gui")]
+pub const MIN_WINDOW_SIZE: (u32, u32) = sizing::MIN_WINDOW_SIZE;
+#[cfg(not(feature = "gui"))]
+pub const MIN_WINDOW_SIZE: (u32, u32) = (200, 100);
 
 /// Maximum logical window size (to stay within GPU texture limits).
+#[cfg(feature = "gui")]
+pub const MAX_WINDOW_SIZE: (u32, u32) = sizing::MAX_WINDOW_SIZE;
+#[cfg(not(feature = "gui"))]
 pub const MAX_WINDOW_SIZE: (u32, u32) = (1920, 1080);
 
 /// Create a standard editor state with FTS defaults.
 #[cfg(feature = "gui")]
 #[must_use]
 pub fn default_editor_state() -> std::sync::Arc<DioxusState> {
-    DioxusState::new(|| DEFAULT_WINDOW_SIZE)
+    DioxusState::new(sizing::default_window_size)
 }
