@@ -259,12 +259,12 @@ impl SetlistBuilder for Reaper {
     ) -> Result<Setlist, SetlistError> {
         // Delegate to the existing free function
         // This builds from ALL open projects, which is what Reaper-level operations should do
-        info!("Building setlist from all open projects");
+        debug!("Building setlist from all open projects");
         let result = build_setlist_impl(existing_setlist);
 
         match &result {
             Ok(setlist) => {
-                info!(
+                debug!(
                     song_count = setlist.songs.len(),
                     setlist_name = %setlist.name,
                     "Successfully built setlist"
@@ -281,12 +281,12 @@ impl SetlistBuilder for Reaper {
     fn build_song_from_current_project(&self) -> Result<Song, SetlistError> {
         // Delegate to existing free function
         // Since we're on Reaper, we can build from the current project
-        info!("Building song from current project");
+        debug!("Building song from current project");
         let result = build_song_from_current_project();
 
         match &result {
             Ok(song) => {
-                info!(
+                debug!(
                     song_name = %song.name,
                     section_count = song.sections.len(),
                     "Successfully built song from current project"

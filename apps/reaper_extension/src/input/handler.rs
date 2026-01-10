@@ -426,6 +426,14 @@ impl TranslateAccel for InputHandler {
         // Handle keyboard events
         let msg_type = args.msg.message();
 
+        // Handle key release for continuous actions
+        // This must happen even when interception is disabled to properly stop continuous actions
+        if msg_type == AccelMsgKind::KeyUp || msg_type == AccelMsgKind::SysKeyUp {
+            // Stop any running continuous action on key release
+            crate::input::continuous_action::stop_all_continuous_actions();
+            return TranslateAccelResult::NotOurWindow;
+        }
+
         // Only process KeyDown and SysKeyDown events for keyboard
         if msg_type != AccelMsgKind::KeyDown && msg_type != AccelMsgKind::SysKeyDown {
             // Unknown message type - might be other events we don't handle yet
