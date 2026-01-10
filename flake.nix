@@ -18,14 +18,17 @@
           inherit system overlays;
         };
 
+        isDarwin = pkgs.stdenv.isDarwin;
+        isLinux = pkgs.stdenv.isLinux;
+
         # Rust toolchain - using latest stable
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
           targets = [ "wasm32-unknown-unknown" ];
         };
 
-        # Common build inputs
-        buildInputs = with pkgs; [
+        # Common build inputs for all platforms
+        commonBuildInputs = with pkgs; [
           # Rust toolchain
           rustToolchain
           cargo-watch
@@ -45,6 +48,19 @@
           fontconfig
           freetype
 
+          # Networking
+          openssl
+
+          # Python (for stylo/servo CSS build)
+          python3
+
+          # Other utilities
+          just
+          watchexec
+        ];
+
+        # Linux-specific packages
+        linuxBuildInputs = with pkgs; [
           # Audio development
           alsa-lib
           jack2
@@ -79,26 +95,25 @@
           # WebKitGTK (for dioxus-desktop webview)
           webkitgtk_4_1
           libsoup_3
-
-          # Networking
-          openssl
-
-          # Python (for stylo/servo CSS build)
-          python3
-
-          # Other utilities
-          just
-          watchexec
         ];
+
+        # Darwin-specific packages
+        darwinBuildInputs = with pkgs; [
+          # macOS SDK and frameworks (new unified approach)
+          apple-sdk_15
+          libiconv
+        ];
+
+        buildInputs = commonBuildInputs
+          ++ (if isLinux then linuxBuildInputs else [])
+          ++ (if isDarwin then darwinBuildInputs else []);
 
         # Libraries to link against
-        nativeBuildInputs = with pkgs; [
-          pkg-config
-          wrapGAppsHook3
-        ];
+        nativeBuildInputs = with pkgs; [ pkg-config ]
+          ++ (if isLinux then [ wrapGAppsHook3 ] else []);
 
-        # Runtime library paths
-        libPath = pkgs.lib.makeLibraryPath (with pkgs; [
+        # Linux-specific runtime library paths
+        linuxLibPath = pkgs.lib.makeLibraryPath (with pkgs; [
           fontconfig
           freetype
           alsa-lib
@@ -125,23 +140,38 @@
           openssl
         ]);
 
+        # Darwin-specific runtime library paths
+        darwinLibPath = pkgs.lib.makeLibraryPath (with pkgs; [
+          fontconfig
+          freetype
+          openssl
+          libiconv
+        ]);
+
+        libPath = if isLinux then linuxLibPath else darwinLibPath;
+
       in
       {
         devShells.default = pkgs.mkShell {
           inherit buildInputs nativeBuildInputs;
 
           shellHook = ''
-            export LD_LIBRARY_PATH="${libPath}:$LD_LIBRARY_PATH"
-            export PKG_CONFIG_PATH="${pkgs.fontconfig.dev}/lib/pkgconfig:${pkgs.freetype.dev}/lib/pkgconfig:${pkgs.alsa-lib.dev}/lib/pkgconfig:${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.xorg.libX11.dev}/lib/pkgconfig:${pkgs.xorg.libXcursor.dev}/lib/pkgconfig:${pkgs.xorg.libXrandr.dev}/lib/pkgconfig:${pkgs.xorg.libXi.dev}/lib/pkgconfig:${pkgs.xorg.libxcb.dev}/lib/pkgconfig:${pkgs.libxkbcommon.dev}/lib/pkgconfig:${pkgs.wayland.dev}/lib/pkgconfig:${pkgs.libGL.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
-            export LIBRARY_PATH="${pkgs.xdotool}/lib:$LIBRARY_PATH"
+            ${if isLinux then ''
+              export LD_LIBRARY_PATH="${libPath}:$LD_LIBRARY_PATH"
+              export PKG_CONFIG_PATH="${pkgs.fontconfig.dev}/lib/pkgconfig:${pkgs.freetype.dev}/lib/pkgconfig:${pkgs.alsa-lib.dev}/lib/pkgconfig:${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.xorg.libX11.dev}/lib/pkgconfig:${pkgs.xorg.libXcursor.dev}/lib/pkgconfig:${pkgs.xorg.libXrandr.dev}/lib/pkgconfig:${pkgs.xorg.libXi.dev}/lib/pkgconfig:${pkgs.xorg.libxcb.dev}/lib/pkgconfig:${pkgs.libxkbcommon.dev}/lib/pkgconfig:${pkgs.wayland.dev}/lib/pkgconfig:${pkgs.libGL.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
+              export LIBRARY_PATH="${pkgs.xdotool}/lib:$LIBRARY_PATH"
 
-            # For Wayland
-            export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}:$XDG_DATA_DIRS"
+              # For Wayland
+              export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}:$XDG_DATA_DIRS"
 
-            # Rust flags for linking
-            export RUSTFLAGS="-C link-arg=-Wl,-rpath,${libPath}"
+              # Rust flags for linking
+              export RUSTFLAGS="-C link-arg=-Wl,-rpath,${libPath}"
+            '' else ''
+              export DYLD_LIBRARY_PATH="${libPath}:$DYLD_LIBRARY_PATH"
+              export PKG_CONFIG_PATH="${pkgs.fontconfig.dev}/lib/pkgconfig:${pkgs.freetype.dev}/lib/pkgconfig:${pkgs.openssl.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
+            ''}
 
-            echo "FastTrackStudio development environment loaded"
+            echo "FastTrackStudio development environment loaded (${if isDarwin then "Darwin" else "Linux"})"
             echo "Rust version: $(rustc --version)"
             echo ""
             echo "Available commands:"

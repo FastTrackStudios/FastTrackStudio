@@ -4,4 +4,12 @@
 	branch = reaper-embed-ui
 [submodule "libs/lumen-blocks"]
 	path = libs/lumen-blocks
-	url = git@github.com:Codys-Wright/lumen-blocks.git
+	url = https://github.com/Codys-Wright/lumen-blocks.git
+[submodule "libs/vendor/blitz"]
+	path = libs/vendor/blitz
+	url = https://github.com/Codys-Wright/blitz.git
+	branch = post-processing
+[submodule "libs/vendor/anyrender"]
+	path = libs/vendor/anyrender
+	url = https://github.com/Codys-Wright/anyrender.git
+	branch = post-processing

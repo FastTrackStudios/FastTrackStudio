@@ -4,12 +4,12 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# Use dioxus-native from forked blitz repo with post-processing support
-dioxus-native = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing", features = ["prelude"] }
+# Use dioxus-native from local blitz submodule with post-processing support
+dioxus-native = { path = "../../libs/vendor/blitz/packages/dioxus-native", features = ["prelude"] }
 
-# Blitz crates from fork
-blitz-dom = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
-blitz-traits = { git = "https://github.com/Codys-Wright/blitz.git", branch = "post-processing" }
+# Blitz crates from local submodule
+blitz-dom = { path = "../../libs/vendor/blitz/packages/blitz-dom" }
+blitz-traits = { path = "../../libs/vendor/blitz/packages/blitz-traits" }
 
 # Lumen Blocks - workspace dependency
 lumen-blocks = { workspace = true }
