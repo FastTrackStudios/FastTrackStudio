@@ -9,6 +9,10 @@
 //!
 //! Logs mouse context on clicks and when context changes (on wheel events).
 
+use crate::input::executor::{execute_action, execute_wheel_action};
+use crate::input::keybinds::{self, KeybindContext};
+use crate::input::state::Context;
+use crate::input::workflows;
 use reaper_high::Reaper;
 use reaper_low::Swell;
 use reaper_low::raw::{
@@ -20,10 +24,56 @@ use std::collections::{HashMap, HashSet};
 use std::mem;
 use std::sync::atomic::{AtomicBool, Ordering};
 use swell_ui::Window;
-use tracing::info;
+use tracing::{debug, info, warn};
 
 /// Global state for whether wheel hook is installed
 static WHEEL_HOOK_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+/// Convert input state Context to KeybindContext
+fn context_to_keybind_context(context: Context) -> KeybindContext {
+    match context {
+        Context::Main => KeybindContext::Main,
+        Context::Midi | Context::MidiEventListEditor => KeybindContext::Midi,
+        Context::MidiInlineEditor => KeybindContext::MidiInline,
+        Context::MediaExplorer => KeybindContext::MediaExplorer,
+        Context::CrossfadeEditor | Context::Global => KeybindContext::Global,
+    }
+}
+
+/// Build a modifier string from key state flags
+/// On macOS: ctrl flag actually means Command (⌘)
+fn build_modifier_string(ctrl: bool, shift: bool, alt: bool) -> String {
+    let mut modifiers = Vec::new();
+
+    // On macOS, the ctrl flag from key_states is actually Command
+    #[cfg(target_os = "macos")]
+    {
+        if ctrl {
+            modifiers.push("M"); // Command/Meta
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        if ctrl {
+            modifiers.push("C"); // Control
+        }
+    }
+
+    if shift {
+        modifiers.push("S");
+    }
+
+    if alt {
+        modifiers.push("A");
+    }
+
+    if modifiers.is_empty() {
+        String::new()
+    } else {
+        format!("<{}->" , modifiers.join("-"))
+    }
+}
 
 /// Storage for original window procedures
 thread_local! {
@@ -228,12 +278,12 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
     // Handle mouse click events
     match msg {
         WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {
-            // Get mouse position from lParam
+            // Get mouse position from lParam (client coordinates)
             let x = l as i32 & 0xFFFF;
             let y = (l as i32 >> 16) & 0xFFFF;
             let pt = POINT { x, y };
 
-            // Convert to screen coordinates
+            // Convert to screen coordinates for context detection
             let swell = Swell::get();
             let mut pt_screen = pt;
             swell.ClientToScreen(hwnd, &mut pt_screen);
@@ -244,19 +294,67 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
             let (context, context_name, _window_title) =
                 crate::input::mouse_context::get_context_from_mouse_position(&medium_reaper);
 
-            // Determine button name
-            let button = match msg {
-                WM_LBUTTONDOWN => "Left",
-                WM_RBUTTONDOWN => "Right",
-                WM_MBUTTONDOWN => "Middle",
-                _ => "Unknown",
-            };
-
             // Log mouse click with context
             log_mouse_context(context, &context_name, &_window_title, "click");
-            reaper.show_console_msg(format!("{} click in {}\n", button, context_name));
 
-            // Always pass through mouse clicks to REAPER (don't intercept)
+            // Debug mouse context logging - log MM_CTX info on every click
+            if workflows::is_debug_mouse_context_enabled() {
+                let (mm_ctx, details) = workflows::detect_mouse_modifier_context(pt_screen.x, pt_screen.y);
+                reaper.show_console_msg(format!(
+                    "🖱️ Click: {} | {} | Window: {}\n",
+                    mm_ctx, details, context_name
+                ));
+            }
+
+            // Check if there's an active workflow with an armed click action
+            // Only trigger on left-click
+            if msg == WM_LBUTTONDOWN {
+                // First, try the new armed click action system (preferred)
+                if let Some(armed_click) = workflows::get_armed_click_action() {
+                    // Check if mouse position matches any of the armed contexts
+                    if armed_click.matches_position(pt_screen.x, pt_screen.y) {
+                        debug!(
+                            action = %armed_click.action,
+                            context = %context_name,
+                            mouse_x = pt_screen.x,
+                            mouse_y = pt_screen.y,
+                            "Executing armed click action from workflow"
+                        );
+
+                        // Execute the action
+                        armed_click.execute();
+
+                        // Check if we should pass through or eat the click
+                        if armed_click.pass_through {
+                            return call_original_proc(hwnd, msg, w, l);
+                        }
+
+                        // Eat the click - we handled it
+                        return 0;
+                    }
+                }
+
+                // Fallback: try the old click action system (for backwards compatibility)
+                if context == Context::Main {
+                    if let Some(action_command) = workflows::get_click_action() {
+                        debug!(
+                            action = %action_command,
+                            context = %context_name,
+                            "Executing click action from workflow (legacy)"
+                        );
+
+                        // Execute the action
+                        if let Err(e) = execute_action(&action_command) {
+                            warn!(error = %e, action = %action_command, "Failed to execute click action");
+                        }
+
+                        // Eat the click - we handled it
+                        return 0;
+                    }
+                }
+            }
+
+            // Pass through mouse clicks to REAPER
             return call_original_proc(hwnd, msg, w, l);
         }
         _ => {}
@@ -284,28 +382,46 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
             // Log context change on wheel events
             log_mouse_context(context, &context_name, &_window_title, "wheel");
 
-            // Determine wheel direction and type
-            let direction = if delta > 0 { "up" } else { "down" };
-            let wheel_type = if is_horizontal {
-                "horizontal wheel"
-            } else {
-                "wheel"
-            };
-
-            // Log mouse wheel event
-            reaper.show_console_msg(format!(
-                "Mouse {} {} in {}\n",
-                wheel_type, direction, context_name
-            ));
-
-            // Check passthrough mode
+            // Check passthrough mode - if on, skip binding resolution and pass through
             if crate::input::handler::InputHandler::is_passthrough() {
-                // Passthrough ON: Log but let REAPER handle it
-                call_original_proc(hwnd, msg, w, l)
-            } else {
-                // Passthrough OFF: Eat the message (return 0)
-                0
+                // Log wheel event in passthrough mode
+                let direction = if delta > 0 { "up" } else { "down" };
+                let wheel_type = if is_horizontal { "horizontal wheel" } else { "wheel" };
+                reaper.show_console_msg(format!(
+                    "Mouse {} {} in {} (passthrough)\n",
+                    wheel_type, direction, context_name
+                ));
+                return call_original_proc(hwnd, msg, w, l);
             }
+
+            // Build modifier string for keybind lookup
+            let modifier_str = build_modifier_string(ctrl, shift, alt);
+
+            // Convert context for keybind resolution
+            let kb_context = context_to_keybind_context(context);
+
+            // Try to resolve a wheel binding
+            if let Some(action) = keybinds::resolve_wheel(kb_context, &modifier_str, is_horizontal, delta) {
+                // Found a binding - execute the action with the wheel delta
+                debug!(
+                    action = %action,
+                    delta = delta,
+                    modifiers = %modifier_str,
+                    context = ?context,
+                    "Executing wheel binding"
+                );
+
+                if let Err(e) = execute_wheel_action(&action, delta) {
+                    warn!(error = %e, action = %action, "Failed to execute wheel action");
+                }
+
+                // Eat the message - we handled it
+                return 0;
+            }
+
+            // No binding found - determine if we should eat or pass through
+            // For now, pass through to REAPER for unbound wheel events
+            call_original_proc(hwnd, msg, w, l)
         }
         _ => {
             // Pass all other messages through to original procedure

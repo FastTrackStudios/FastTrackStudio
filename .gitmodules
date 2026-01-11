@@ -13,3 +13,7 @@
 	path = libs/vendor/anyrender
 	url = https://github.com/Codys-Wright/anyrender.git
 	branch = post-processing
+[submodule "libs/vendor/reaper-rs"]
+	path = libs/vendor/reaper-rs
+	url = https://github.com/FastTrackStudios/reaper-rs.git
+	branch = feature/kbd-on-main-action-ex

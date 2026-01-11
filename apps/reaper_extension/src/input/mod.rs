@@ -11,9 +11,11 @@
 pub mod actions;
 pub mod bindings;
 pub mod continuous_action;
+pub mod item_actions;
 pub mod event_parser;
 pub mod executor;
 pub mod handler;
+pub mod keybinds;
 pub mod matcher;
 pub mod midi_utils;
 pub mod mouse_context;
@@ -24,11 +26,17 @@ pub mod state;
 pub mod tempo;
 pub mod utils;
 pub mod wheel_hook;
+pub mod workflows;
 
 pub use continuous_action::{
     is_action_active, register_continuous_action, start_continuous_action,
     stop_all_continuous_actions, ContinuousAction,
 };
 pub use handler::InputHandler;
+pub use keybinds::{
+    ActionSet, BindingConflict, ConflictType, Keybind, KeybindConfig, KeybindContext,
+    KeybindOverride, KeybindPreset, KeybindResolver, MouseModifier, MouseModifierContext,
+    PresetBuilder, WheelBind, WheelDirection,
+};
 pub use state::{CommandState, Context, Mode};
 pub use tempo::{register_move_grid_actions, MoveGridVariant};
