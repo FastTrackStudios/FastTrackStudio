@@ -1,3 +1,4 @@
+use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -5,6 +6,7 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 #[test]
 fn michael_humphries_radius() -> Result<()> {
     // -- Setup & Fixtures
+    // Michael Humphries - Radius: A clean 12-track session with standard rock instrumentation
     let items = vec![
         "01.Kick_01.wav",
         "02.SN Top_01.wav",
@@ -28,7 +30,47 @@ fn michael_humphries_radius() -> Result<()> {
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
-    // TODO: Add expected structure once provided
+    // Expected structure:
+    // Drums/
+    //   ├─ Kick            ← 01.Kick_01.wav
+    //   ├─ Snare/
+    //   │   ├─ Top         ← 02.SN Top_01.wav
+    //   │   └─ Bottom      ← 03.SN Bot_01.wav
+    //   ├─ Toms/
+    //   │   ├─ Tom 1       ← 04.Rack.Tom_01.wav (Rack tom)
+    //   │   └─ Tom 2       ← 05.Flr.Tom_01.wav (Floor tom)
+    //   ├─ Cymbals/
+    //   │   ├─ OH          ← 07.OH_01.wav (Overheads)
+    //   │   └─ Hi Hat      ← 06.Hi Hat_01.wav
+    //   └─ Rooms           ← 08.Room_01.wav
+    // Bass                 ← 09.Bass DI_01.wav
+    // Guitars              ← 10.Gtr Amp_01.wav
+    // Keys                 ← 11.Nord Piano_01.wav (Nord keyboard → Keys)
+    // Reference            ← 12.Radius Mix_01.wav (Mix → Reference)
+    let expected = TrackStructureBuilder::new()
+        .folder("Drums")
+            .track("Kick", "01.Kick_01.wav")
+            .folder("Snare")
+                .track("Top", "02.SN Top_01.wav")
+                .track("Bottom", "03.SN Bot_01.wav")
+            .end()
+            .folder("Toms")
+                .track("Tom 1", "04.Rack.Tom_01.wav")
+                .track("Tom 2", "05.Flr.Tom_01.wav")
+            .end()
+            .folder("Cymbals")
+                .track("OH", "07.OH_01.wav")
+                .track("Hi Hat", "06.Hi Hat_01.wav")
+            .end()
+            .track("Rooms", "08.Room_01.wav")
+        .end()
+        .track("Bass", "09.Bass DI_01.wav")
+        .track("Guitars", "10.Gtr Amp_01.wav")
+        .track("Keys", "11.Nord Piano_01.wav")
+        .track("Reference", "12.Radius Mix_01.wav")
+        .build();
+
+    assert_tracks_equal(&tracks, &expected)?;
 
     Ok(())
 }

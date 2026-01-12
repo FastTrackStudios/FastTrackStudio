@@ -29,3 +29,6 @@
 [submodule "libs/reference/sheet-music/lilypond"]
 	path = libs/reference/sheet-music/lilypond
 	url = https://github.com/lilypond/lilypond.git
+[submodule "libs/reference/graphics/wgpu"]
+	path = libs/reference/graphics/wgpu
+	url = https://github.com/gfx-rs/wgpu.git
