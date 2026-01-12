@@ -1,6 +1,7 @@
 //! Measure (bar) representation.
 
 use super::element::{KeySignature, TimeSignature};
+use super::layout::{LayoutBreak, RehearsalMark};
 use super::Voice;
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +16,12 @@ pub struct Measure {
     pub key_signature: Option<KeySignature>,
     /// Voices in this measure (typically 1-4)
     pub voices: Vec<Voice>,
+    /// Rehearsal mark at the start of this measure (section marker)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rehearsal_mark: Option<RehearsalMark>,
+    /// Layout break after this measure (line/page/section break)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout_break: Option<LayoutBreak>,
 }
 
 impl Measure {
@@ -26,6 +33,8 @@ impl Measure {
             time_signature: None,
             key_signature: None,
             voices: vec![Voice::new()],
+            rehearsal_mark: None,
+            layout_break: None,
         }
     }
 
@@ -41,7 +50,44 @@ impl Measure {
             time_signature,
             key_signature,
             voices: vec![Voice::new()],
+            rehearsal_mark: None,
+            layout_break: None,
         }
+    }
+
+    /// Set a rehearsal mark at the start of this measure.
+    #[must_use]
+    pub fn with_rehearsal_mark(mut self, mark: RehearsalMark) -> Self {
+        self.rehearsal_mark = Some(mark);
+        self
+    }
+
+    /// Set a layout break after this measure.
+    #[must_use]
+    pub fn with_layout_break(mut self, break_type: LayoutBreak) -> Self {
+        self.layout_break = Some(break_type);
+        self
+    }
+
+    /// Check if this measure has a rehearsal mark.
+    #[must_use]
+    pub fn has_rehearsal_mark(&self) -> bool {
+        self.rehearsal_mark.is_some()
+    }
+
+    /// Check if this measure has an explicit line break.
+    #[must_use]
+    pub fn has_line_break(&self) -> bool {
+        matches!(
+            self.layout_break,
+            Some(LayoutBreak::Line) | Some(LayoutBreak::Page) | Some(LayoutBreak::Section)
+        )
+    }
+
+    /// Check if breaks are prevented at this measure.
+    #[must_use]
+    pub fn is_no_break(&self) -> bool {
+        matches!(self.layout_break, Some(LayoutBreak::NoBreak))
     }
 
     /// Get the primary voice (voice 0).

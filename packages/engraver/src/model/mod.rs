@@ -5,6 +5,7 @@
 
 mod duration;
 mod element;
+mod layout;
 mod measure;
 mod note;
 mod part;
@@ -13,6 +14,10 @@ mod score;
 
 pub use duration::{Duration, DurationKind};
 pub use element::{KeySignature, MusicElement, TimeSignature};
+pub use layout::{
+    compute_system_layout, LayoutBreak, LineBreakPolicy, RehearsalMark, RehearsalMarkStyle,
+    SystemInfo, SystemLayout,
+};
 pub use measure::Measure;
 pub use note::{Accidental, Note, NoteHead, Stem};
 pub use part::{Part, PartId};
