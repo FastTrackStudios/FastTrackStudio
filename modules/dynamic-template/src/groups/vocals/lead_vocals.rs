@@ -41,50 +41,51 @@ impl From<LeadVocals> for ItemMetadataGroup {
     }
 }
 
+// region: --- Tests
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{OrganizeIntoTracks, default_config};
     use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 
+    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
     #[test]
-    fn single_track_no_grouping_needed() {
-        // Example 1: Single track - no grouping needed
-        // Input: Vocal Chorus Cody DBL L
-        // Output: Lead Vocals: Vocal Chorus Cody DBL L
-        // Vocals is transparent, so Lead Vocals becomes the top-level name
+    fn single_track_no_grouping_needed() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec!["Vocal Chorus Cody DBL L"];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Single track - all intermediate levels are collapsed
-        // Vocals is NOT transparent, so Vocals name is kept
         let expected = TrackStructureBuilder::new()
             .track("Vocals", "Vocal Chorus Cody DBL L")
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn multiple_sections_grouped() {
-        // Example 2: Multiple sections - grouped under performer
-        // Input: Vocal Verse Cody, Vocal Chorus Cody
-        // Output: Vocals -> Verse, Chorus
+    fn multiple_sections_grouped() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec!["Vocal Verse Cody", "Vocal Chorus Cody"];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Performer (Cody) is collapsed when it's the only one
-        // Lead shares "vocal" pattern with Vocals, so collapses into Vocals
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
             .track("Chorus", "Vocal Chorus Cody")
@@ -92,24 +93,24 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn multiple_performers_grouped() {
-        // Example 3: Multiple performers - grouped under Vocals
-        // Input: Vocal Chorus Cody, Vocal Chorus John
-        // Output: Vocals -> Cody, John
+    fn multiple_performers_grouped() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec!["Vocal Chorus Cody", "Vocal Chorus John"];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Performers are grouped, Chorus and Main are collapsed
-        // Lead shares "vocal" pattern with Vocals, so collapses into Vocals
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
             .track("Cody", "Vocal Chorus Cody")
@@ -117,24 +118,24 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn adding_layers() {
-        // Example 4: Adding layers - Main and DBL
-        // Input: Vocal Chorus Cody, Vocal Chorus Cody DBL
-        // Output: Vocals -> Main, DBL
+    fn adding_layers() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec!["Vocal Chorus Cody", "Vocal Chorus Cody DBL"];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Cody and Chorus are collapsed
-        // Lead shares "vocal" pattern with Vocals, so collapses into Vocals
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
             .track("Main", "Vocal Chorus Cody")
@@ -142,28 +143,28 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn adding_channels() {
-        // Example 5: Adding channels - L, C, R
-        // Input: Vocal Chorus Cody L, Vocal Chorus Cody C, Vocal Chorus Cody R
-        // Output: Vocals -> L, C, R
+    fn adding_channels() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "Vocal Chorus Cody L",
             "Vocal Chorus Cody C",
             "Vocal Chorus Cody R",
         ];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Cody, Chorus, and Main are collapsed
-        // Lead shares "vocal" pattern with Vocals, so collapses into Vocals
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
             .track("L", "Vocal Chorus Cody L")
@@ -172,15 +173,14 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn layers_and_channels_together() {
-        // Example 6: Layers and channels together - layers take priority
-        // Input: Vocal Chorus Cody Main L, Vocal Chorus Cody Main C, Vocal Chorus Cody Main R,
-        //        Vocal Chorus Cody DBL L, Vocal Chorus Cody DBL C, Vocal Chorus Cody DBL R
-        // Output: Vocals -> Main -> L, C, R and DBL -> L, C, R
+    fn layers_and_channels_together() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "Vocal Chorus Cody Main L",
             "Vocal Chorus Cody Main C",
@@ -189,15 +189,15 @@ mod tests {
             "Vocal Chorus Cody DBL C",
             "Vocal Chorus Cody DBL R",
         ];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Cody and Chorus are collapsed
-        // Lead shares "vocal" pattern with Vocals, so collapses into Vocals
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
             .folder("Main")
@@ -213,6 +213,10 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 }
+
+// endregion: --- Tests

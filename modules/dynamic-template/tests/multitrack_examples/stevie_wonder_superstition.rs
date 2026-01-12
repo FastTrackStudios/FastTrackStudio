@@ -1,9 +1,11 @@
 use dynamic_template::*;
 use monarchy::monarchy_sort;
 
+type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
 #[test]
-fn stevie_wonder_superstition() {
-    // Track list from "Stevie Wonder - Superstition"
+fn stevie_wonder_superstition() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec![
         "001 Soprano sax_01.wav",
         "002 Alto sax_01.wav",
@@ -31,16 +33,18 @@ fn stevie_wonder_superstition() {
         "024 Elec Gui 3 Amp Sim B_01.wav",
         "Superstition Mix 1_01.wav",
     ];
-
-    // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.clone().organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
+    // -- Exec
+    let tracks = items.clone().organize_into_tracks(&config, None)?;
+
+    // -- Check
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
     // Snapshot test: capture the hierarchical structure
-    let structure = monarchy_sort(items, config).unwrap();
+    let structure = monarchy_sort(items, config)?;
     insta::assert_snapshot!(structure.to_tree_string());
+
+    Ok(())
 }

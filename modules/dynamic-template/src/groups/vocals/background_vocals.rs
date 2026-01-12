@@ -110,33 +110,34 @@ impl From<BackgroundVocals> for ItemMetadataGroup {
     }
 }
 
+// region: --- Tests
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{OrganizeIntoTracks, default_config};
     use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 
+    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
     #[test]
-    fn bgvs_with_harmony_arrangements() {
-        // Example: BGVs with harmony arrangements
-        // Input: BGV Chorus Cody Soprano, BGV Chorus Cody Alto, BGV Chorus JT High, BGV Chorus JT Low
-        // Output: BGVs -> Cody -> Chorus -> Soprano, Alto and JT -> Chorus -> High, Low
+    fn bgvs_with_harmony_arrangements() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "BGV Chorus Cody Soprano",
             "BGV Chorus Cody Alto",
             "BGV Chorus JT High",
             "BGV Chorus JT Low",
         ];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Vocals -> BGVs collapses to BGVs
-        // Multiple performers (Cody, JT), Chorus is collapsed per performer
-        // Names get title cased
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
             .folder("Cody")
@@ -150,29 +151,29 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn bgvs_with_voice_parts() {
-        // Example: BGVs with voice parts (Soprano, Alto, Tenor, Bass)
-        // Input: BGV Chorus Cody Soprano, BGV Chorus Cody Alto, BGV Chorus Cody Tenor, BGV Chorus Cody Bass
-        // Output: BGVs -> Cody -> Chorus -> Soprano, Alto, Tenor, Bass
+    fn bgvs_with_voice_parts() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "BGV Chorus Cody Soprano",
             "BGV Chorus Cody Alto",
             "BGV Chorus Cody Tenor",
             "BGV Chorus Cody Bass",
         ];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Vocals -> BGVs collapses to BGVs
-        // Cody and Chorus are collapsed
         // NOTE: "Bass" voice part gets stripped to "Vocals" (fallback) due to context stripping
         // TODO: Add "bass" to non-context words to preserve voice part names
         let expected = TrackStructureBuilder::new()
@@ -184,28 +185,28 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn bgvs_with_harmony_descriptors() {
-        // Example: BGVs with harmony descriptors (High, Low, Mid)
-        // Input: BGV Chorus Cody High, BGV Chorus Cody Low, BGV Chorus Cody Mid
-        // Output: BGVs -> Cody -> Chorus -> High, Low, Mid
+    fn bgvs_with_harmony_descriptors() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "BGV Chorus Cody High",
             "BGV Chorus Cody Low",
             "BGV Chorus Cody Mid",
         ];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Vocals -> BGVs collapses to BGVs
-        // Cody and Chorus are collapsed, names get title cased
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
             .track("Low", "BGV Chorus Cody Low")
@@ -214,28 +215,28 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn bgvs_with_numbered_harmonies() {
-        // Example: BGVs with numbered harmonies (Harmony 1, Harmony 2, Harmony 3)
-        // Input: BGV Chorus Cody Harmony 1, BGV Chorus Cody Harmony 2, BGV Chorus Cody Harmony 3
-        // Output: BGVs -> Cody -> Chorus -> Harmony 1, Harmony 2, Harmony 3
+    fn bgvs_with_numbered_harmonies() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "BGV Chorus Cody Harmony 1",
             "BGV Chorus Cody Harmony 2",
             "BGV Chorus Cody Harmony 3",
         ];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Vocals -> BGVs collapses to BGVs
-        // Cody and Chorus are collapsed
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
             .track("Harmony 1", "BGV Chorus Cody Harmony 1")
@@ -244,24 +245,24 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn bgvs_without_harmony_arrangements() {
-        // Example: BGVs without explicit harmony arrangements
-        // Input: BGV Chorus Cody, BGV Chorus JT, BGV Chorus Bri
-        // Output: BGVs -> Cody -> Chorus, JT -> Chorus, Bri -> Chorus
+    fn bgvs_without_harmony_arrangements() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec!["BGV Chorus Cody", "BGV Chorus JT", "BGV Chorus Bri"];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Vocals -> BGVs collapses to BGVs
-        // Chorus and Main are collapsed under each performer
         let expected = TrackStructureBuilder::new()
             .folder("Vocals")
             .track("Bri", "BGV Chorus Bri")
@@ -270,6 +271,10 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 }
+
+// endregion: --- Tests

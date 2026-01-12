@@ -1,8 +1,10 @@
 use dynamic_template::*;
 
+type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
 #[test]
-fn iron_maiden_the_trooper() {
-    // Track list from "Iron Maiden - The Trooper"
+fn iron_maiden_the_trooper() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec![
         "08-Kick-TheTrooper.wav",
         "09-Snare-TheTrooper.wav",
@@ -19,14 +21,16 @@ fn iron_maiden_the_trooper() {
         "23-Vocal 3-TheTrooper.wav",
         "Trooper-mix1.wav",
     ];
-
-    // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
+    // -- Exec
+    let tracks = items.organize_into_tracks(&config, None)?;
+
+    // -- Check
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
     // TODO: Add expected structure once provided
+
+    Ok(())
 }

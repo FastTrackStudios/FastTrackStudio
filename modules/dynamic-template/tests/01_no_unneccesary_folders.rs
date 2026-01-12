@@ -1,46 +1,47 @@
-use daw::tracks::item::Item;
 use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
+type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
 #[test]
-fn single_item_creates_track_at_deepest_group_level() {
-    // Can pass strings directly - they implement Into<Item>
+fn single_item_creates_track_at_deepest_group_level() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec!["Kick In"];
-
-    // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
+    // -- Exec
+    let tracks = items.organize_into_tracks(&config, None)?;
+
+    // -- Check
+    // Philosophy: only create folders when needed to organize multiple things
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
-    // Verify we got a single track "Kick" with the item "Kick In" on it
-    // Philosophy: only create folders when needed to organize multiple things
     let expected = TrackStructureBuilder::new()
         .track("Kick", "Kick In")
         .build();
 
-    assert_tracks_equal(&tracks, &expected).unwrap();
+    assert_tracks_equal(&tracks, &expected)?;
+
+    Ok(())
 }
 
 #[test]
-fn multiple_items_of_same_subgroup_create_folder_with_subtracks() {
-    // Can pass strings directly - they implement Into<Item>
+fn multiple_items_of_same_subgroup_create_folder_with_subtracks() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec!["Kick In", "Kick Out"];
-
-    // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
-    println!("\nTrack list:");
-    daw::tracks::display_tracklist(&tracks);
+    // -- Exec
+    let tracks = items.organize_into_tracks(&config, None)?;
 
-    // Verify we got a folder structure:
+    // -- Check
     // Kick (folder)
     // - In: [Kick In]
     // - Out: [Kick Out]
+    println!("\nTrack list:");
+    daw::tracks::display_tracklist(&tracks);
+
     let expected = TrackStructureBuilder::new()
         .folder("Kick")
         .track("In", "Kick In")
@@ -48,28 +49,29 @@ fn multiple_items_of_same_subgroup_create_folder_with_subtracks() {
         .end()
         .build();
 
-    assert_tracks_equal(&tracks, &expected).unwrap();
+    assert_tracks_equal(&tracks, &expected)?;
+
+    Ok(())
 }
 
 #[test]
-fn multiple_subgroups_create_parent_folder_with_nested_structure() {
-    // Can pass strings directly - they implement Into<Item>
+fn multiple_subgroups_create_parent_folder_with_nested_structure() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec!["Kick In", "Kick Out", "Snare Top"];
-
-    // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
-    println!("\nTrack list:");
-    daw::tracks::display_tracklist(&tracks);
+    // -- Exec
+    let tracks = items.organize_into_tracks(&config, None)?;
 
-    // Verify we got:
+    // -- Check
     // Drums
     // -Kick
     //   --In [Kick In]
     //   --Out [Kick Out]
     // -Snare [Snare Top]
+    println!("\nTrack list:");
+    daw::tracks::display_tracklist(&tracks);
+
     let expected = TrackStructureBuilder::new()
         .folder("Drums")
         .folder("Kick")
@@ -80,23 +82,21 @@ fn multiple_subgroups_create_parent_folder_with_nested_structure() {
         .end()
         .build();
 
-    assert_tracks_equal(&tracks, &expected).unwrap();
+    assert_tracks_equal(&tracks, &expected)?;
+
+    Ok(())
 }
 
 #[test]
-fn items_in_nested_groups_create_nested_track_structure() {
-    // Can pass strings directly - they implement Into<Item>
+fn items_in_nested_groups_create_nested_track_structure() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec!["Kick In", "Kick Out", "Snare Top", "Snare Bottom"];
-
-    // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
-    println!("\nTrack list:");
-    daw::tracks::display_tracklist(&tracks);
+    // -- Exec
+    let tracks = items.organize_into_tracks(&config, None)?;
 
-    // Verify we got:
+    // -- Check
     // Drums
     // -Kick
     //   --In [Kick In]
@@ -104,6 +104,9 @@ fn items_in_nested_groups_create_nested_track_structure() {
     // -Snare
     //   --Top [Snare Top]
     //   --Bottom [Snare Bottom]
+    println!("\nTrack list:");
+    daw::tracks::display_tracklist(&tracks);
+
     let expected = TrackStructureBuilder::new()
         .folder("Drums")
         .folder("Kick")
@@ -117,12 +120,14 @@ fn items_in_nested_groups_create_nested_track_structure() {
         .end()
         .build();
 
-    assert_tracks_equal(&tracks, &expected).unwrap();
+    assert_tracks_equal(&tracks, &expected)?;
+
+    Ok(())
 }
 
 #[test]
-fn group_separator_only_created_when_multiple_sibling_groups_exist() {
-    // Can pass strings directly - they implement Into<Item>
+fn group_separator_only_created_when_multiple_sibling_groups_exist() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec![
         "Kick In",
         "Kick Out",
@@ -131,16 +136,12 @@ fn group_separator_only_created_when_multiple_sibling_groups_exist() {
         "808 Kick",
         "Electronic Snare",
     ];
-
-    // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
-    println!("\nTrack list:");
-    daw::tracks::display_tracklist(&tracks);
+    // -- Exec
+    let tracks = items.organize_into_tracks(&config, None)?;
 
-    // Verify we got:
+    // -- Check
     // Drums
     // -Drum Kit
     //   --Kick
@@ -152,6 +153,9 @@ fn group_separator_only_created_when_multiple_sibling_groups_exist() {
     // -Electronic Kit
     //   --Kick [808 Kick]
     //   --Snare [Electronic Snare]
+    println!("\nTrack list:");
+    daw::tracks::display_tracklist(&tracks);
+
     let expected = TrackStructureBuilder::new()
         .folder("Drums")
         .folder("Drum Kit")
@@ -171,12 +175,14 @@ fn group_separator_only_created_when_multiple_sibling_groups_exist() {
         .end()
         .build();
 
-    assert_tracks_equal(&tracks, &expected).unwrap();
+    assert_tracks_equal(&tracks, &expected)?;
+
+    Ok(())
 }
 
 #[test]
-fn multiple_top_level_groups_create_separate_sections() {
-    // Can pass strings directly - they implement Into<Item>
+fn multiple_top_level_groups_create_separate_sections() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec![
         "Kick In",
         "Kick Out",
@@ -187,16 +193,12 @@ fn multiple_top_level_groups_create_separate_sections() {
         "Bass Guitar",
         "Bass Synth",
     ];
-
-    // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
-    println!("\nTrack list:");
-    daw::tracks::display_tracklist(&tracks);
+    // -- Exec
+    let tracks = items.organize_into_tracks(&config, None)?;
 
-    // Verify we got:
+    // -- Check
     // Drums
     // -Drum Kit
     //   --Kick
@@ -211,6 +213,9 @@ fn multiple_top_level_groups_create_separate_sections() {
     // Bass
     // -Guitar [Bass Guitar]
     // -Synth [Bass Synth]
+    println!("\nTrack list:");
+    daw::tracks::display_tracklist(&tracks);
+
     let expected = TrackStructureBuilder::new()
         .folder("Drums")
         .folder("Drum Kit")
@@ -234,5 +239,7 @@ fn multiple_top_level_groups_create_separate_sections() {
         .end()
         .build();
 
-    assert_tracks_equal(&tracks, &expected).unwrap();
+    assert_tracks_equal(&tracks, &expected)?;
+
+    Ok(())
 }

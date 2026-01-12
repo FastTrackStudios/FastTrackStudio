@@ -47,16 +47,19 @@ impl From<DrumKit> for Group<ItemMetadata> {
     }
 }
 
+// region: --- Tests
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{OrganizeIntoTracks, default_config};
-    use daw::tracks::item::Item;
     use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 
+    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
     #[test]
-    fn full_drum_kit_integration_test() {
-        // Test the complete drum kit with all drum types
+    fn full_drum_kit_integration_test() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "Kick In",
             "Kick Out",
@@ -72,36 +75,15 @@ mod tests {
             "Rooms L",
             "Rooms R",
         ];
-
-        // Organize into tracks using monarchy sort
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
-        // Display the track list
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Verify we got the expected structure:
-        // Drums
-        // -Kick
-        //   --In [Kick In]
-        //   --Out [Kick Out]
-        // -Snare
-        //   --Top [Snare Top]
-        //   --Bottom [Snare Bottom]
-        // -Toms
-        //   --T1 [Tom 1]
-        //   --T2 [Tom 2]
-        //   --T3 [Tom 3]
-        // -Cymbals
-        //   --Hi Hat [Hi Hat]
-        //   --Ride [Ride]
-        //   --OH
-        //     ---L [OH L]
-        //     ---R [OH R]
-        // -Rooms
-        //   --L [Rooms L]
-        //   --R [Rooms R]
         let expected = TrackStructureBuilder::new()
             .folder("Drums")
             .folder("Kick")
@@ -132,6 +114,10 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 }
+
+// endregion: --- Tests

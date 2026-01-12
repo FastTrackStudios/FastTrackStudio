@@ -5,9 +5,11 @@ use monarchy::{
     move_items_matching_any_to_group, reapply_collapse,
 };
 
+type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
 #[test]
-fn beatles_girl() {
-    // Track list from "The Beatles - Girl"
+fn beatles_girl() -> Result<()> {
+    // -- Setup & Fixtures
     // This song features Chad, Lou, Tit doing BGVs and Sam, Perry on acoustic guitars
     let items = vec![
         "AC GTR 1_01.wav",
@@ -35,23 +37,22 @@ fn beatles_girl() {
         "Tit2_01.wav",
         "Tit3_01.wav",
     ];
-
-    // Step 1: Initial sort using monarchy
     let config = default_config();
-    let mut structure = monarchy_sort(items, config.clone()).unwrap();
+
+    // -- Exec
+    // Step 1: Initial sort using monarchy
+    let mut structure = monarchy_sort(items, config.clone())?;
 
     // Step 2: Move all BGV performer tracks from Unsorted to BGVs in one operation
     // Moving all at once allows the organizer to see multiple performers and create subfolders
-    // Move all matching performers at once - this allows proper grouping by Performer
-    let bgv_sorted = move_items_matching_any_to_group(
+    let _bgv_sorted = move_items_matching_any_to_group(
         &mut structure,
         &config,
         &["Chad", "Lou", "Tit"], // All BGV performers at once
         &["Unsorted"],
         "BGVs",
         &["Vocals"],
-    )
-    .unwrap();
+    )?;
 
     // Step 3: Re-apply collapse to clean up hierarchy
     reapply_collapse(&mut structure, &config);
@@ -68,7 +69,7 @@ fn beatles_girl() {
     // Convert to tracks
     let tracks = structure.clone().to_tracks();
 
-    // Always display final structure for easy debugging
+    // -- Check
     println!("\n=== BEATLES GIRL - Final Track Structure ===");
     daw::tracks::display_tracklist(&tracks);
     println!();
@@ -138,7 +139,6 @@ fn beatles_girl() {
 
     // Lead folder is PRESERVED because Lead is a config group that might get siblings (BGVs)
     // Marc items become "Lead", "Lead 2" under the Lead folder
-    // (first item gets parent name when stripped, subsequent items get numbered)
     let lead = TrackGroup::folder("Lead")
         .track("Lead", "Marc VOX.wav")
         .track("Lead 2", "Marc VOX 2.wav")
@@ -168,5 +168,7 @@ fn beatles_girl() {
         .build();
 
     // Full structure assertion
-    assert_tracks_equal(&tracks, &expected).unwrap();
+    assert_tracks_equal(&tracks, &expected)?;
+
+    Ok(())
 }

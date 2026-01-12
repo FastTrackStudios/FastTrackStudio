@@ -27,30 +27,29 @@ impl From<Bass> for ItemMetadataGroup {
     }
 }
 
+// region: --- Tests
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{OrganizeIntoTracks, default_config};
     use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 
+    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
     #[test]
-    fn full_bass_integration_test() {
-        // Test all bass types
+    fn full_bass_integration_test() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec!["Bass Guitar", "Bass Synth", "Upright Bass"];
-
-        // Organize into tracks using monarchy sort
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
-        // Display the track list
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Verify we got the expected structure:
-        // Bass
-        // -Guitar [Bass Guitar]
-        // -Synth [Bass Synth]
-        // -Upright [Upright Bass]  <- "Bass" stripped from context
         let expected = TrackStructureBuilder::new()
             .folder("Bass")
             .track("Guitar", "Bass Guitar")
@@ -59,6 +58,10 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 }
+
+// endregion: --- Tests

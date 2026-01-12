@@ -3,14 +3,20 @@ use daw::tracks::item::Item;
 use daw::tracks::{AddChild, Track, TrackName};
 use monarchy::*;
 
+// region: --- Modules
+
+mod error;
 mod groups;
 mod item_metadata;
 mod metadata_patterns;
 
+pub use error::{Error, Result};
 pub use groups::{
     Bass, Choir, Drums, Guide, Guitars, Keys, Orchestra, Percussion, Reference, SFX, Synths, Vocals,
 };
 pub use item_metadata::ItemMetadata;
+
+// endregion: --- Modules
 
 /// Type alias for our standard Config with ItemMetadata
 pub type DynamicTemplateConfig = Config<ItemMetadata>;
@@ -368,47 +374,55 @@ fn structure_to_tracks<M: Metadata + ToDisplayName>(
     vec![track]
 }
 
+// region: --- Tests
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
     #[test]
-    fn test_acc_guitar_structure() {
-        // Test that Acoustic Guitar stays under Guitars (Guitars is not transparent)
-        // Guitars -> Acoustic -> [item] collapses to Guitars: [item]
+    fn test_acc_guitar_structure() -> Result<()> {
+        // -- Setup & Fixtures
         let inputs = vec!["Acc Guitar"];
         let config = default_config();
-        let result = monarchy_sort(inputs, config).unwrap();
 
+        // -- Exec
+        let result = monarchy_sort(inputs, config)?;
+
+        // -- Check
+        // Guitars is not transparent, so it keeps its name even with a single item
+        // The structure should be: Guitars: [item]
         println!("\nAcc Guitar result:");
         result.print_tree();
 
-        // Guitars is not transparent, so it keeps its name even with a single item
-        // The structure should be: Guitars: [item]
         let guitars = result
             .find_child("Guitars")
             .expect("Should have Guitars folder");
         assert_eq!(guitars.items.len(), 1, "Guitars should have 1 item");
         assert_eq!(guitars.items[0].original, "Acc Guitar");
+
+        Ok(())
     }
 
     #[test]
-    fn test_kick_and_drumkit() {
-        // Just simple string inputs - the system figures out what they are
+    fn test_kick_and_drumkit() -> Result<()> {
+        // -- Setup & Fixtures
         let inputs = vec!["kick_in.wav", "kick_out.wav", "snare.wav"];
-        // Use the default config
         let config = default_config();
-        let result = monarchy_sort(inputs, config).unwrap();
 
-        // Print the structure
-        result.print_tree();
+        // -- Exec
+        let result = monarchy_sort(inputs, config)?;
 
+        // -- Check
         // The structure should be:
         // Drums
         //   Kick (folder with In/Out children)
         //     In: [kick_in.wav]
         //     Out: [kick_out.wav]
         //   Snare: [snare.wav]
+        result.print_tree();
         result
             .assert()
             .has_total_items(3)
@@ -422,11 +436,13 @@ mod tests {
             .group("Snare")
             .contains_exactly(&["snare.wav"])
             .done();
+
+        Ok(())
     }
 
     #[test]
-    fn test_bass_types() {
-        // Test different bass types
+    fn test_bass_types() -> Result<()> {
+        // -- Setup & Fixtures
         // Note: "808_bass" will match Electronic Kit's "808" pattern before Bass Synth,
         // so we use "sub_bass" instead to properly test synth bass categorization
         let inputs = vec![
@@ -437,20 +453,19 @@ mod tests {
             "sub_bass.wav", // Changed from "808_bass.wav" to avoid matching Electronic Kit
             "acoustic_bass.wav",
         ];
-
         let config = default_config();
-        let result = monarchy_sort(inputs, config).unwrap();
 
-        // Print the structure
-        result.print_tree();
+        // -- Exec
+        let result = monarchy_sort(inputs, config)?;
 
-        // Verify bass categorization
+        // -- Check
         // Structure should be:
         // Bass
         //   Guitar: [bass_guitar_di.wav, electric_bass_amp.wav]
         //   Synth: [synth_bass_sub.wav, sub_bass.wav]
         //   Upright Bass: [upright_pizz.wav, acoustic_bass.wav]
         // Note: Group names are "Guitar", "Synth", "Upright Bass" (not prefixed with "Bass")
+        result.print_tree();
         result
             .assert()
             .has_total_items(6)
@@ -468,5 +483,9 @@ mod tests {
             .group("Upright Bass")
             .contains_exactly(&["upright_pizz.wav", "acoustic_bass.wav"])
             .done();
+
+        Ok(())
     }
 }
+
+// endregion: --- Tests

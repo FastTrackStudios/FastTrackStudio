@@ -1,9 +1,11 @@
 use daw::tracks::{TrackGroup, TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
+type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
 #[test]
-fn beatles_day_tripper() {
-    // Track list from "The Beatles - Day Tripper"
+fn beatles_day_tripper() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec![
         "bass hofner_01.wav",
         "bass hofner.Duplicate _01.wav",
@@ -29,12 +31,12 @@ fn beatles_day_tripper() {
         "tambourine_01.wav",
         "warren strat_02.wav",
     ];
-
-    // Organize into tracks
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
+    // -- Exec
+    let tracks = items.organize_into_tracks(&config, None)?;
+
+    // -- Check
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
@@ -122,5 +124,7 @@ fn beatles_day_tripper() {
         .build();
 
     // Full structure assertion
-    assert_tracks_equal(&tracks, &expected).unwrap();
+    assert_tracks_equal(&tracks, &expected)?;
+
+    Ok(())
 }

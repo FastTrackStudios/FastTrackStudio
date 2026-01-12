@@ -17,3 +17,15 @@
 	path = libs/vendor/reaper-rs
 	url = https://github.com/FastTrackStudios/reaper-rs.git
 	branch = feature/kbd-on-main-action-ex
+[submodule "libs/reference/best-practices"]
+	path = libs/reference/best-practices
+	url = https://github.com/Codys-Wright/rust-best-practices.git
+[submodule "libs/reference/sheet-music/osmd"]
+	path = libs/reference/sheet-music/osmd
+	url = https://github.com/opensheetmusicdisplay/opensheetmusicdisplay.git
+[submodule "libs/reference/sheet-music/musescore"]
+	path = libs/reference/sheet-music/musescore
+	url = https://github.com/musescore/MuseScore.git
+[submodule "libs/reference/sheet-music/lilypond"]
+	path = libs/reference/sheet-music/lilypond
+	url = https://github.com/lilypond/lilypond.git

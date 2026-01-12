@@ -1,9 +1,11 @@
 use daw::tracks::{TrackGroup, TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
+type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
 #[test]
-fn beatles_dont_let_me_down() {
-    // Track list from "The Beatles - Don't Let Me Down"
+fn beatles_dont_let_me_down() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec![
         "01.Kick_01.wav",
         "02.Snare_01.wav",
@@ -17,12 +19,12 @@ fn beatles_dont_let_me_down() {
         "10.Caitlin Vocal_01.wav",
         "11.Don't Let Me Down Joe Carrell Mix_01.wav",
     ];
-
-    // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
+    // -- Exec
+    let tracks = items.organize_into_tracks(&config, None)?;
+
+    // -- Check
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
@@ -86,5 +88,7 @@ fn beatles_dont_let_me_down() {
         .build();
 
     // Full structure assertion
-    assert_tracks_equal(&tracks, &expected).unwrap();
+    assert_tracks_equal(&tracks, &expected)?;
+
+    Ok(())
 }

@@ -5,14 +5,17 @@ use monarchy::{
     reapply_collapse,
 };
 
+type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
 /// Count all items in a flat track list
+#[allow(dead_code)]
 fn count_items(tracks: &[Track]) -> usize {
     tracks.iter().map(|t| t.items.len()).sum()
 }
 
 #[test]
-fn radiohead_paranoid_android() {
-    // Track list from "Radiohead - Paranoid Android"
+fn radiohead_paranoid_android() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec![
         "1 Kick In.05_04.wav",
         "10 Rack 10-St.01.R.05_03.wav",
@@ -76,15 +79,15 @@ fn radiohead_paranoid_android() {
         "Paranoid_Android_Cover_PLP_JH_MIX_1_Master.wav",
     ];
 
-    // Step 1: Initial sort using monarchy
     let config = default_config();
-    let mut structure = monarchy_sort(items, config.clone()).unwrap();
+
+    // -- Exec
+    let mut structure = monarchy_sort(items, config.clone())?;
 
     println!("\n=== STEP 1: Initial monarchy_sort ===");
     println!("{}", structure);
 
-    // Step 2: Move Ed/Johny guitar tracks from Unsorted to Electric Guitar
-    // In a real app, this would be triggered by user input: "These are electric guitar tracks"
+    // Move Ed/Johny guitar tracks from Unsorted to Electric Guitar
     println!("\n=== STEP 2: Moving guitar tracks from Unsorted to Electric Guitar ===");
     let guitar_sorted = move_unsorted_to_group(
         &mut structure,
@@ -92,8 +95,7 @@ fn radiohead_paranoid_android() {
         &["Unsorted"],
         "Electric",
         &["Guitars"],
-    )
-    .unwrap();
+    )?;
     println!("Sorted {} guitar items", guitar_sorted);
 
     // Note: FX1/FX2 now automatically go to SFX group (no manual step needed)
@@ -329,8 +331,10 @@ fn radiohead_paranoid_android() {
         .group(unsorted)
         .build();
 
-    // Full structure assertion
-    assert_tracks_equal(&tracks, &expected).unwrap();
+    // -- Check
+    assert_tracks_equal(&tracks, &expected)?;
+
+    Ok(())
 
     // ============================================================================
     // EXPECTED TRACK HIERARCHY (documented version)

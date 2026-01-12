@@ -1,10 +1,10 @@
-use daw::tracks::item::Item;
-use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
+type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
 #[test]
-fn marc_martel_dont_stop_me_now() {
-    // Track list from "Marc Martel - Don't Stop Me Now"
+fn marc_martel_dont_stop_me_now() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec![
         "Kick In",
         "Kick Out",
@@ -36,18 +36,16 @@ fn marc_martel_dont_stop_me_now() {
         "BGV3",
         "BGV4",
     ];
-
-    // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
+    // -- Exec
+    let tracks = items.organize_into_tracks(&config, None)?;
+
+    // -- Check
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
     // TODO: Add expected structure once provided
-    // let expected = TrackStructureBuilder::new()
-    //     .build();
-    //
-    // assert_tracks_equal(&tracks, &expected).unwrap();
+
+    Ok(())
 }

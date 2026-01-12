@@ -1,9 +1,11 @@
 use dynamic_template::*;
 use monarchy::monarchy_sort;
 
+type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
 #[test]
-fn bon_jovi_you_give_love_a_bad_name() {
-    // Track list from "Bon Jovi - You Give Love a Bad Name"
+fn bon_jovi_you_give_love_a_bad_name() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec![
         "095 Pop Tamb.L.wav",
         "095 Pop Tamb.R.wav",
@@ -26,16 +28,18 @@ fn bon_jovi_you_give_love_a_bad_name() {
         "You Give Love A Bad Name.PRINT.L.wav",
         "You Give Love A Bad Name.PRINT.R.wav",
     ];
-
-    // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.clone().organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
+    // -- Exec
+    let tracks = items.clone().organize_into_tracks(&config, None)?;
+
+    // -- Check
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
     // Snapshot test: capture the hierarchical structure
-    let structure = monarchy_sort(items, config).unwrap();
+    let structure = monarchy_sort(items, config)?;
     insta::assert_snapshot!(structure.to_tree_string());
+
+    Ok(())
 }

@@ -117,51 +117,51 @@ impl From<ElectricGuitar> for ItemMetadataGroup {
     }
 }
 
+// region: --- Tests
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{OrganizeIntoTracks, default_config};
-    use daw::tracks::item::Item;
     use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 
+    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
     #[test]
-    fn single_track_no_grouping_needed() {
-        // Example 1: Single track - no grouping needed
-        // Input: Guitar Clean DBL L
-        // Output: Guitars: Guitar Clean DBL L
-        // Guitars has patterns, so the top-level name is preserved
+    fn single_track_no_grouping_needed() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec!["Guitar Clean DBL L"];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Single track with no grouping - all intermediate levels are collapsed
-        // Guitars (with patterns) is kept as the name, Electric is collapsed into it
         let expected = TrackStructureBuilder::new()
             .track("Guitars", "Guitar Clean DBL L")
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn multiple_arrangements_grouped() {
-        // Example 2: Multiple arrangements - grouped under Guitars folder
-        // Input: Guitar Clean, Guitar Drive
-        // Output: Guitars -> Clean, Drive
-        // Guitars (with patterns) is preserved, Electric is collapsed into it
+    fn multiple_arrangements_grouped() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec!["Guitar Clean", "Guitar Drive"];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Note: Order is Clean then Drive (matches config order: ["Clean", "Crunch", "Drive", ...])
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
             .track("Clean", "Guitar Clean")
@@ -169,25 +169,24 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn guitars_with_multi_mics() {
-        // Example 3: Guitars with multi-mics - base track on folder, multi-mic versions as children
-        // Input: Guitar Clean, Guitar Clean Amp, Guitar Clean DI
-        // Output: Electric: [Guitar Clean] -> Amp, DI
-        // Single arrangement (Clean) collapses to Electric, base item on folder, multi-mics as children
+    fn guitars_with_multi_mics() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec!["Guitar Clean", "Guitar Clean Amp", "Guitar Clean DI"];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Guitars (with patterns) is preserved, Electric and Clean are collapsed
-        // All items expand to children (Amp, DI, Electric Clean)
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
             .track("Amp", "Guitar Clean Amp")
@@ -196,14 +195,14 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn multiple_arrangements_with_multi_mics() {
-        // Example 3 extended: Multiple arrangements with multi-mics
-        // Input: Guitar Clean, Guitar Clean Amp, Guitar Clean DI, Guitar Drive, Guitar Drive Amp, Guitar Drive DI
-        // Output: Electric -> Clean -> Amp, DI, Electric Clean and Drive -> Amp, DI, Electric Drive
+    fn multiple_arrangements_with_multi_mics() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "Guitar Clean",
             "Guitar Clean Amp",
@@ -212,16 +211,15 @@ mod tests {
             "Guitar Drive Amp",
             "Guitar Drive DI",
         ];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Guitars (with patterns) is preserved, Electric is collapsed
-        // Each arrangement has items expanded to children
-        // "Clean" and "Drive" are stripped since they're parent folder names
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
             .folder("Clean")
@@ -237,15 +235,14 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn adding_layers() {
-        // Example 4: Adding layers - Main and DBL
-        // Input: Guitar Clean, Guitar Clean Amp, Guitar Clean DI, Guitar Clean DBL, Guitar Clean Amp DBL, Guitar Clean DI DBL
-        // Output: Guitar -> Main [Guitar Clean] -> Amp, DI and DBL [Guitar Clean DBL] -> Amp, DI
-        // Note: Main and DBL are folders with items, Amp and DI are tracks
+    fn adding_layers() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "Guitar Clean",
             "Guitar Clean Amp",
@@ -254,15 +251,15 @@ mod tests {
             "Guitar Clean Amp DBL",
             "Guitar Clean DI DBL",
         ];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Guitars (with patterns) is preserved, Electric and Clean are collapsed
-        // Main and DBL are layers - items expand to individual children
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
             .folder("Main")
@@ -278,15 +275,14 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn adding_channels() {
-        // Example 5: Adding channels - L, C, R
-        // Input: Guitar Clean L, Guitar Clean Amp L, Guitar Clean DI L, etc.
-        // Output: Guitar -> L -> Amp, DI and C -> Amp, DI and R -> Amp, DI
-        // Note: L, C, R are folders, Amp and DI are tracks
+    fn adding_channels() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "Guitar Clean L",
             "Guitar Clean Amp L",
@@ -298,15 +294,15 @@ mod tests {
             "Guitar Clean Amp R",
             "Guitar Clean DI R",
         ];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Guitars (with patterns) is preserved, Electric, Clean, Main are collapsed
-        // Channels (L, C, R) are directly under Guitars, items expand to children
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
             .folder("L")
@@ -327,16 +323,14 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn layers_and_channels_together() {
-        // Example 6: Layers and channels together - layers take priority
-        // Input: Guitar Clean Main L, Guitar Clean Amp Main L, etc. and Guitar Clean DBL L, etc.
-        // Output: Guitar -> Main -> L -> Amp, DI and C -> Amp, DI and R -> Amp, DI
-        //         and DBL -> L -> Amp, DI and C -> Amp, DI and R -> Amp, DI
-        // Note: Layers take priority, then channels, then Amp/DI are tracks
+    fn layers_and_channels_together() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "Guitar Clean Main L",
             "Guitar Clean Amp Main L",
@@ -357,15 +351,15 @@ mod tests {
             "Guitar Clean Amp DBL R",
             "Guitar Clean DI DBL R",
         ];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Guitars (with patterns) is preserved, Electric and Clean are collapsed
-        // Main and DBL are layers, each with channels L, C, R, items expand to children
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
             .folder("Main")
@@ -405,29 +399,29 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn arrangements_and_layers_without_multi_mics() {
-        // Test: Multiple arrangements with layers, but no multi-mics
-        // Input: Guitar Clean, Guitar Clean DBL, Guitar Drive, Guitar Drive DBL
-        // Output: Guitar -> Clean -> Main, DBL and Drive -> Main, DBL
+    fn arrangements_and_layers_without_multi_mics() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "Guitar Clean",
             "Guitar Clean DBL",
             "Guitar Drive",
             "Guitar Drive DBL",
         ];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Guitars (with patterns) is preserved, Electric is collapsed into it
-        // Arrangements (Clean, Drive) are under Guitars
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
             .folder("Clean")
@@ -441,14 +435,14 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn arrangements_and_channels_without_multi_mics() {
-        // Test: Multiple arrangements with channels, but no multi-mics
-        // Input: Guitar Clean L, Guitar Clean C, Guitar Clean R, Guitar Drive L, Guitar Drive C, Guitar Drive R
-        // Output: Guitar -> Clean -> L, C, R and Drive -> L, C, R
+    fn arrangements_and_channels_without_multi_mics() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec![
             "Guitar Clean L",
             "Guitar Clean C",
@@ -457,15 +451,15 @@ mod tests {
             "Guitar Drive C",
             "Guitar Drive R",
         ];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Guitars (with patterns) is preserved, Electric is collapsed into it
-        // Arrangements (Clean, Drive) are under Guitars, each with channels L, C, R
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
             .folder("Clean")
@@ -481,24 +475,24 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn just_layers_without_multi_mics_or_channels() {
-        // Test: Just layers, no multi-mics, no channels
-        // Input: Guitar Clean, Guitar Clean DBL
-        // Output: Guitar -> Main, DBL
+    fn just_layers_without_multi_mics_or_channels() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec!["Guitar Clean", "Guitar Clean DBL"];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Guitars (with patterns) is preserved, Electric and Clean are collapsed into it
-        // Layers (Main, DBL) are directly under Guitars
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
             .track("Main", "Guitar Clean")
@@ -506,24 +500,24 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 
     #[test]
-    fn just_channels_without_multi_mics_or_layers() {
-        // Test: Just channels, no multi-mics, no layers
-        // Input: Guitar Clean L, Guitar Clean C, Guitar Clean R
-        // Output: Guitar -> L, C, R
+    fn just_channels_without_multi_mics_or_layers() -> Result<()> {
+        // -- Setup & Fixtures
         let items = vec!["Guitar Clean L", "Guitar Clean C", "Guitar Clean R"];
-
         let config = default_config();
-        let tracks = items.organize_into_tracks(&config, None).unwrap();
 
+        // -- Exec
+        let tracks = items.organize_into_tracks(&config, None)?;
+
+        // -- Check
         println!("\nTrack list:");
         daw::tracks::display_tracklist(&tracks);
 
-        // Guitars (with patterns) is preserved, Electric, Clean, Main are collapsed into it
-        // Channels (L, C, R) are directly under Guitars
         let expected = TrackStructureBuilder::new()
             .folder("Guitars")
             .track("L", "Guitar Clean L")
@@ -532,6 +526,10 @@ mod tests {
             .end()
             .build();
 
-        assert_tracks_equal(&tracks, &expected).unwrap();
+        assert_tracks_equal(&tracks, &expected)?;
+
+        Ok(())
     }
 }
+
+// endregion: --- Tests

@@ -1,9 +1,11 @@
 use dynamic_template::*;
 use monarchy::monarchy_sort;
 
+type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
 #[test]
-fn neil_young_heart_of_gold() {
-    // Track list from "Neil Young - Heart of Gold"
+fn neil_young_heart_of_gold() -> Result<()> {
+    // -- Setup & Fixtures
     let items = vec![
         "01.Kick OptoComp_01.wav",
         "02.Snare No Compression_01.wav",
@@ -27,16 +29,18 @@ fn neil_young_heart_of_gold() {
         "20.Vocal.HARMONY Dbl OptoComp_01.wav",
         "21.Heart Of Gold Mix_01.wav",
     ];
-
-    // Organize into tracks using monarchy sort
     let config = default_config();
-    let tracks = items.clone().organize_into_tracks(&config, None).unwrap();
 
-    // Display the track list
+    // -- Exec
+    let tracks = items.clone().organize_into_tracks(&config, None)?;
+
+    // -- Check
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
     // Snapshot test: capture the hierarchical structure
-    let structure = monarchy_sort(items, config).unwrap();
+    let structure = monarchy_sort(items, config)?;
     insta::assert_snapshot!(structure.to_tree_string());
+
+    Ok(())
 }
