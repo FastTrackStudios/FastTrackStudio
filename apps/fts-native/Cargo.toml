@@ -1,0 +1,39 @@
+[package]
+name = "fts-native"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# Use dioxus-native from local blitz submodule with post-processing support
+dioxus-native = { path = "../../libs/vendor/blitz/packages/dioxus-native", features = ["prelude"] }
+
+# Blitz crates from local submodule
+blitz-dom = { path = "../../libs/vendor/blitz/packages/blitz-dom" }
+blitz-traits = { path = "../../libs/vendor/blitz/packages/blitz-traits" }
+
+# Lumen Blocks - workspace dependency
+lumen-blocks = { workspace = true }
+
+# Icons
+lucide-dioxus = "2"
+
+# Keyflow for chart parsing
+keyflow = { path = "../../packages/keyflow" }
+
+# WGPU integration (use same version as blitz)
+wgpu = "26"
+bytemuck = { version = "1", features = ["derive"] }
+glam = "0.30"
+
+# Text rendering
+glyphon = "0.10"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+[build-dependencies]
+wesl = "0.2"
+
+[lints]
+workspace = true
