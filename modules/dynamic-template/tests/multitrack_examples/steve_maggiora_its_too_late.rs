@@ -1,3 +1,4 @@
+use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -5,6 +6,7 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 #[test]
 fn steve_maggiora_its_too_late() -> Result<()> {
     // -- Setup & Fixtures
+    // Steve Maggiora - It's Too Late: Classic rock with multiple guitar layers and H3000 effects
     let items = vec![
         "01.Kick_02.wav",
         "02.SN TP_02.wav",
@@ -38,7 +40,49 @@ fn steve_maggiora_its_too_late() -> Result<()> {
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
-    // TODO: Add expected structure once provided
+    let expected = TrackStructureBuilder::new()
+        .folder("Drums")
+            .track("Kick", "01.Kick_02.wav")
+            .track("Snare", "02.SN TP_02.wav")
+            .folder("OH")
+                .track("L", "03.OH.01_02 L.wav")
+                .track("R", "04.OH.01_02 R.wav")
+            .end()
+        .end()
+        .folder("Bass")
+            .track("Bass 1", "05.Bass DI_02.wav")
+            .track("Bass 2", "06.Bass_02.wav")
+        .end()
+        .folder("Guitars")
+            .folder("Electric")
+                .folder("Warren")
+                    .track("Amp", "14.Guitar Amp Solo Warren_01.wav")
+                    .track("DI", "13.Guitar DI Solo Warren_02.wav")
+                .end()
+                .folder("Rhythm")
+                    .track("DI", "08.Guitar DI Rhythm_01.wav")
+                    .track("Rhythm", "09.Guitar Rhythm_01.wav")
+                .end()
+            .end()
+            .track("Acoustic", "07.Acoustic_02.wav")
+            .track("Michael Solo DI", "11.Gtr Di Solo Michael_02.wav")
+            .track("Michael Solo Amp", "12.Gtr Amp Solo Michael_02.wav")
+        .end()
+        .track("Keys", "10.Piano_02.wav")
+        .folder("Vocals")
+            .track("Lead 1", "15.Vocal_02.wav")
+            .track("Lead Plate", "19.Vocal.Eko.Plate_02.wav")
+            .track("Lead 2", "20.Vocal.Magic_02.wav")
+        .end()
+        .folder("SFX")
+            .track("H3000.One", "16.H3000.One_02.wav")
+            .track("H3000.Two", "17.H3000.Two_02.wav")
+            .track("H3000.Three", "18.H3000.Three_02.wav")
+        .end()
+        .track("Reference", "21.It's Too Late Mix_02.wav")
+        .build();
+
+    assert_tracks_equal(&tracks, &expected)?;
 
     Ok(())
 }

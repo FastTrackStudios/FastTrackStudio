@@ -110,8 +110,8 @@ fn gloria_anderson_households() -> Result<()> {
             .track("Strings", "Strings (R).wav")
         .end()
         .folder("Unsorted")
-            .track("01.Households ACO JC MIXX", "01.Households ACO JC MIXX_01.wav")
-            .track("15.Steel", "15.Steel_01.wav")
+            .track("Households ACO JC MIXX", "01.Households ACO JC MIXX_01.wav")
+            .track("Steel", "15.Steel_01.wav")
         .end()
         .build();
 

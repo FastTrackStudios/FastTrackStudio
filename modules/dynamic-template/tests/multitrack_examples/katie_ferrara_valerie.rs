@@ -94,9 +94,9 @@ fn katie_ferrara_valerie() -> Result<()> {
             .end()
         .end()
         .folder("SFX")
-            .track("16.H3000.One_01-01", "16.H3000.One_01-01.wav")
-            .track("17.H3000.Two_01-01", "17.H3000.Two_01-01.wav")
-            .track("18.H3000.Three_01-01", "18.H3000.Three_01-01.wav")
+            .track("H3000.One_01-01", "16.H3000.One_01-01.wav")
+            .track("H3000.Two_01-01", "17.H3000.Two_01-01.wav")
+            .track("H3000.Three_01-01", "18.H3000.Three_01-01.wav")
         .end()
         .track("Reference", "21.Valerie Mix_01-01.wav")
         .build();

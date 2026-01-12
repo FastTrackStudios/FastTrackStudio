@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Note: `Metadata` derive automatically includes `MetadataBuilder` functionality,
 /// so you only need to derive `Metadata` to get both the trait implementation
 /// and the GroupBuilder extension methods (like `.multi_mic()`, `.layers()`, etc.).
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, Metadata)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, Metadata)]
 pub struct ItemMetadata {
     /// Recording tag (e.g., "PASS-01", "TAKE-02", "REC-01")
     pub rec_tag: Option<String>,
@@ -65,6 +65,12 @@ pub struct ItemMetadata {
     /// File extension if parsed from a filename (e.g., ".wav", ".aiff", ".flac")
     /// This is typically not included in string formatting output
     pub file_extension: Option<String>,
+
+    /// Tempo in BPM extracted from the input (e.g., 126.0 from "126bpm", 83.5 from "83.5BPM")
+    /// This preserves tempo information that would otherwise be stripped from display names
+    /// Note: Skipped in Metadata derive since f32 isn't a string type - extracted manually
+    #[metadata(skip)]
+    pub tempo: Option<f32>,
 }
 
 // Type alias for convenience
@@ -93,6 +99,7 @@ pub struct ItemMetadataBuilder {
     unparsed_words: Option<Vec<String>>,
     original_name: Option<String>,
     file_extension: Option<String>,
+    tempo: Option<f32>,
 }
 
 impl ItemMetadataBuilder {
@@ -228,6 +235,12 @@ impl ItemMetadataBuilder {
         self
     }
 
+    /// Set the tempo in BPM
+    pub fn tempo(mut self, value: f32) -> Self {
+        self.tempo = Some(value);
+        self
+    }
+
     /// Build the ItemMetadata
     pub fn build(self) -> ItemMetadata {
         ItemMetadata {
@@ -248,6 +261,7 @@ impl ItemMetadataBuilder {
             unparsed_words: self.unparsed_words,
             original_name: self.original_name,
             file_extension: self.file_extension,
+            tempo: self.tempo,
         }
     }
 }

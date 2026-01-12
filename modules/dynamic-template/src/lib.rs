@@ -9,12 +9,16 @@ mod error;
 mod groups;
 mod item_metadata;
 mod metadata_patterns;
+pub mod song_name;
+mod tempo;
 
 pub use error::{Error, Result};
 pub use groups::{
     Bass, Choir, Drums, Guide, Guitars, Keys, Orchestra, Percussion, Reference, SFX, Synths, Vocals,
 };
 pub use item_metadata::ItemMetadata;
+pub use song_name::{detect_song_names, detect_song_names_with_config, strip_song_names, SongNameConfig};
+pub use tempo::extract_tempo;
 
 // endregion: --- Modules
 
@@ -161,6 +165,9 @@ where
             })
             .collect();
 
+        // Detect song/project names that appear in ALL inputs
+        let detected_song_names = song_name::detect_song_names(&input_strings);
+
         // Create a mapping from item string to original DAW Item
         let item_map: std::collections::HashMap<String, Vec<Item>> =
             items
@@ -179,6 +186,9 @@ where
         // If existing tracks are provided, monarchy can use them via Target trait
         let mut structure = monarchy_sort(input_strings, config.clone())?;
 
+        // Extract tempo from item names and store in metadata
+        extract_tempo_from_structure(&mut structure);
+
         // Apply optional transformations
         if options.collapse_single_child {
             collapse_single_child_folders(&mut structure);
@@ -188,6 +198,10 @@ where
         }
         if options.cleanup_names {
             cleanup_display_names(&mut structure);
+            // Strip detected song names from display names (after standard cleanup)
+            if !detected_song_names.is_empty() {
+                strip_song_names_from_structure(&mut structure, &detected_song_names);
+            }
         }
 
         // Convert Structure to Tracks, preserving original DAW Items
@@ -372,6 +386,49 @@ fn structure_to_tracks<M: Metadata + ToDisplayName>(
     }
 
     vec![track]
+}
+
+/// Extract tempo from all items in a structure and store in their metadata
+///
+/// This function recursively traverses the structure and extracts tempo (BPM)
+/// from each item's original name, storing it in the item's metadata.
+fn extract_tempo_from_structure(structure: &mut Structure<ItemMetadata>) {
+    // Extract tempo for items at this level
+    for item in &mut structure.items {
+        if item.metadata.tempo.is_none() {
+            if let Some(tempo) = tempo::extract_tempo(&item.original) {
+                item.metadata.tempo = Some(tempo);
+            }
+        }
+    }
+
+    // Recursively process children
+    for child in &mut structure.children {
+        extract_tempo_from_structure(child);
+    }
+}
+
+/// Strip detected song names from structure display names
+///
+/// This function recursively traverses the structure and strips song/project names
+/// from each node's display name. Song names are detected as strings that appear
+/// in ALL input items and don't match known audio production patterns.
+fn strip_song_names_from_structure(
+    structure: &mut Structure<ItemMetadata>,
+    song_names: &std::collections::HashSet<String>,
+) {
+    // Strip song names from this node's display name
+    if !structure.name.is_empty() {
+        let cleaned = song_name::strip_song_names(&structure.name, song_names);
+        if !cleaned.is_empty() && cleaned != structure.name {
+            structure.name = cleaned;
+        }
+    }
+
+    // Recursively process children
+    for child in &mut structure.children {
+        strip_song_names_from_structure(child, song_names);
+    }
 }
 
 // region: --- Tests

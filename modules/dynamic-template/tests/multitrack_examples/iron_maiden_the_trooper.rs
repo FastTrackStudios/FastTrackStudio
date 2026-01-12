@@ -33,6 +33,7 @@ fn iron_maiden_the_trooper() -> Result<()> {
     daw::tracks::display_tracklist(&tracks);
 
     // Expected structure:
+    // Note: "TheTrooper"/"Trooper" detected as song name via fuzzy matching and stripped
     // Drums/
     //   ├─ Kick                    ← 08-Kick-TheTrooper.wav
     //   ├─ Snare                   ← 09-Snare-TheTrooper.wav
@@ -41,17 +42,17 @@ fn iron_maiden_the_trooper() -> Result<()> {
     //   ├─ Bass                    ← 12-Bass DI-TheTrooper.wav (DI)
     //   └─ Amp                     ← 13-Bass Amp-TheTrooper.wav
     // Guitars/
-    //   ├─ 15-Rhy L-TheTrooper     ← 15-Rhy Gtr L-TheTrooper.wav (Rhythm L)
-    //   └─ 16-Rhy R-TheTrooper     ← 16-Rhy Gtr R-TheTrooper.wav (Rhythm R)
+    //   ├─ Rhy L                   ← 15-Rhy Gtr L-TheTrooper.wav (song name stripped)
+    //   └─ Rhy R                   ← 16-Rhy Gtr R-TheTrooper.wav (song name stripped)
     // Vocals/
     //   ├─ Vocals 1                ← 21-Vocal 1-TheTrooper.wav
     //   ├─ Vocals 2                ← 22-Vocal 2-TheTrooper.wav
     //   └─ Vocals 3                ← 23-Vocal 3-TheTrooper.wav
     // Reference                    ← Trooper-mix1.wav
     // Unsorted/
-    //   ├─ 17-Solo 1-TheTrooper    ← 17-Solo 1-TheTrooper.wav (guitar solo - ambiguous)
-    //   ├─ 18-Solo 2-TheTrooper    ← 18-Solo 2-TheTrooper.wav
-    //   └─ 19-Solo 3-TheTrooper    ← 19-Solo 3-TheTrooper.wav
+    //   ├─ Solo 1                  ← 17-Solo 1-TheTrooper.wav (song name stripped)
+    //   ├─ Solo 2                  ← 18-Solo 2-TheTrooper.wav (song name stripped)
+    //   └─ Solo 3                  ← 19-Solo 3-TheTrooper.wav (song name stripped)
     let expected = TrackStructureBuilder::new()
         .folder("Drums")
             .track("Kick", "08-Kick-TheTrooper.wav")
@@ -63,8 +64,8 @@ fn iron_maiden_the_trooper() -> Result<()> {
             .track("Amp", "13-Bass Amp-TheTrooper.wav")
         .end()
         .folder("Guitars")
-            .track("15-Rhy L-TheTrooper", "15-Rhy Gtr L-TheTrooper.wav")
-            .track("16-Rhy R-TheTrooper", "16-Rhy Gtr R-TheTrooper.wav")
+            .track("Rhy L", "15-Rhy Gtr L-TheTrooper.wav")
+            .track("Rhy R", "16-Rhy Gtr R-TheTrooper.wav")
         .end()
         .folder("Vocals")
             .track("Vocals 1", "21-Vocal 1-TheTrooper.wav")
@@ -73,9 +74,9 @@ fn iron_maiden_the_trooper() -> Result<()> {
         .end()
         .track("Reference", "Trooper-mix1.wav")
         .folder("Unsorted")
-            .track("17-Solo 1-TheTrooper", "17-Solo 1-TheTrooper.wav")
-            .track("18-Solo 2-TheTrooper", "18-Solo 2-TheTrooper.wav")
-            .track("19-Solo 3-TheTrooper", "19-Solo 3-TheTrooper.wav")
+            .track("Solo 1", "17-Solo 1-TheTrooper.wav")
+            .track("Solo 2", "18-Solo 2-TheTrooper.wav")
+            .track("Solo 3", "19-Solo 3-TheTrooper.wav")
         .end()
         .build();
 

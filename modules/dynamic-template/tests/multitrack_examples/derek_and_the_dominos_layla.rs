@@ -179,8 +179,8 @@ fn derek_and_the_dominos_layla() -> Result<()> {
             .end()
         .end()
         .folder("Reference")
-            .track("52.Soyuz Bomblet Layla Cover Mix 1", "52.Soyuz Bomblet Layla Cover Mix_01.L.wav")
-            .track("52.Soyuz Bomblet Layla Cover Mix 2", "52.Soyuz Bomblet Layla Cover Mix_01.R.wav")
+            .track("Soyuz Bomblet Layla Cover Mix 1", "52.Soyuz Bomblet Layla Cover Mix_01.L.wav")
+            .track("Soyuz Bomblet Layla Cover Mix 2", "52.Soyuz Bomblet Layla Cover Mix_01.R.wav")
         .end()
         .build();
 
