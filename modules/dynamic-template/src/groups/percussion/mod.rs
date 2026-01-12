@@ -33,6 +33,26 @@ impl From<Percussion> for Group<ItemMetadata> {
             .group(Chimes)
             .group(Agogo)
             .group(Castanets)
+            .group(Sidestick)
+            .group(Rimshot)
+            .build()
+    }
+}
+
+pub struct Sidestick;
+impl From<Sidestick> for Group<ItemMetadata> {
+    fn from(_val: Sidestick) -> Self {
+        Group::builder("Sidestick")
+            .patterns(vec!["sidestick", "side stick", "side-stick", "xstick", "x-stick"])
+            .build()
+    }
+}
+
+pub struct Rimshot;
+impl From<Rimshot> for Group<ItemMetadata> {
+    fn from(_val: Rimshot) -> Self {
+        Group::builder("Rimshot")
+            .patterns(vec!["rimshot", "rim shot", "rim-shot", "rim"])
             .build()
     }
 }

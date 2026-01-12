@@ -123,7 +123,7 @@ fn steve_maggiora_hey_lady() -> Result<()> {
         .end()
         .folder("Guitars")
             .track("Guitars 1", "Gtr_57.83.5BPM.wav")
-            .track("Gtr_57.dup", "Gtr_57.dup1.83.5BPM.wav")
+            .track("Gtr.dup", "Gtr_57.dup1.83.5BPM.wav")
             .track("Guitars 2", "Gtr_Di.83.5BPM.wav")
         .end()
         .folder("Keys")

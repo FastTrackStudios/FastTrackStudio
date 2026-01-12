@@ -51,9 +51,11 @@ fn roswell_aint_no_sunshine() -> Result<()> {
     //       ├─ OH                  ← Overhead.wav
     //       └─ Hi Hat              ← HiHat.wav
     // Percussion/
-    //   ├─ Djembe Bottom           ← 01.Djembe Bottom 47X_01.wav
-    //   ├─ Djembe Top 1            ← 02.Djembe Top 67X_01.wav
-    //   └─ Djembe Top 2            ← Djembe Top Quantized.wav
+    //   ├─ Djembe/
+    //   │   ├─ Bottom              ← 01.Djembe Bottom 47X_01.wav
+    //   │   ├─ Top 1               ← 02.Djembe Top 67X_01.wav
+    //   │   └─ Top 2               ← Djembe Top Quantized.wav
+    //   └─ Sidestick               ← Sidestick.wav (now matches Percussion group)
     // Bass/
     //   ├─ Bass                    ← 03.Bass DI.01_02.wav (DI)
     //   └─ Amp                     ← 04.Bass Amp 47X_01.wav
@@ -69,7 +71,6 @@ fn roswell_aint_no_sunshine() -> Result<()> {
     //   ├─ Strings 1               ← STRINGS HIGH.wav
     //   └─ Strings 2               ← STRINGS MAIN.wav
     // Reference                    ← 12.Ain't No Sunshine Mix_Roswell Mini K47x Mini K67x_02.wav
-    // Unsorted                     ← Sidestick.wav (rimshot could be Drums but ambiguous)
     let expected = TrackStructureBuilder::new()
         .folder("Drums")
             .track("Kick", "Kick.wav")
@@ -84,9 +85,12 @@ fn roswell_aint_no_sunshine() -> Result<()> {
             .end()
         .end()
         .folder("Percussion")
-            .track("Djembe Bottom", "01.Djembe Bottom 47X_01.wav")
-            .track("Djembe Top 1", "02.Djembe Top 67X_01.wav")
-            .track("Djembe Top 2", "Djembe Top Quantized.wav")
+            .folder("Djembe")
+                .track("Bottom", "01.Djembe Bottom 47X_01.wav")
+                .track("Top 1", "02.Djembe Top 67X_01.wav")
+                .track("Top 2", "Djembe Top Quantized.wav")
+            .end()
+            .track("Sidestick", "Sidestick.wav")
         .end()
         .folder("Bass")
             .track("Bass", "03.Bass DI.01_02.wav")
@@ -106,7 +110,6 @@ fn roswell_aint_no_sunshine() -> Result<()> {
             .track("Strings 2", "STRINGS MAIN.wav")
         .end()
         .track("Reference", "12.Ain't No Sunshine Mix_Roswell Mini K47x Mini K67x_02.wav")
-        .track("Unsorted", "Sidestick.wav")
         .build();
 
     assert_tracks_equal(&tracks, &expected)?;

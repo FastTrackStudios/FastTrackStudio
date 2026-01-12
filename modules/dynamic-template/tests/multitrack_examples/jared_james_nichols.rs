@@ -64,15 +64,16 @@ fn jared_james_nichols() -> Result<()> {
     //   ├─ Toms/
     //   │   ├─ Floor                ← 09 Floor
     //   │   └─ Toms                 ← 08 Rack
-    //   └─ Cymbals/
-    //       ├─ Hi Hat/              ← Hat, Close RM Hat, Mid RM Hat, Far RM Hat
-    //       ├─ Ride/                ← Close/Mid/Far RM Ride
-    //       └─ OH/                  ← OH Hat, OH Ride, OH Mono
+    //   ├─ Cymbals/
+    //   │   ├─ Hi Hat/              ← Hat, Close RM Hat, Mid RM Hat, Far RM Hat
+    //   │   ├─ Ride/                ← Close/Mid/Far RM Ride
+    //   │   └─ OH/                  ← OH Hat, OH Ride, OH Mono
+    //   └─ Rooms                    ← Crotch (now matches Drums/Rooms group)
     // Bass/                         ← Bass DI, Bass Mic
     // Guitars/                      ← Gtr Bus 1/2, Solo, Solo LEFT/RIGHT
     // Guide                         ← Smart Tempo Multitrack Set 1
     // Reference                     ← Man In the Box Print
-    // Unsorted/                     ← Crotch, Mono, Mono U47, Talk Box, Jared vox
+    // Unsorted/                     ← Mono, Mono U47, Talk Box, Jared vox
     let expected = TrackStructureBuilder::new()
         .folder("Drums")
             .folder("Kick")
@@ -111,6 +112,7 @@ fn jared_james_nichols() -> Result<()> {
                     .track("OH", "12 OH Mono .wav")
                 .end()
             .end()
+            .track("Rooms", "13 Crotch .wav")
         .end()
         .folder("Bass")
             .track("Bass 1", "22 Bass DI .wav")
@@ -126,7 +128,6 @@ fn jared_james_nichols() -> Result<()> {
         .track("Guide", "Smart Tempo Multitrack Set 1.wav")
         .track("Reference", "Man In the Box Print 20220502 v2 .wav")
         .folder("Unsorted")
-            .track("Crotch", "13 Crotch .wav")
             .track("Mono", "20 Mono .wav")
             .track("Mono U47", "21 Mono U47 .wav")
             .track("Talk Box", "29 Talk Box .wav")

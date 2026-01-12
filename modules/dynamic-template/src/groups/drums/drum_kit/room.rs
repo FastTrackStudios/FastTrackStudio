@@ -40,6 +40,12 @@ impl From<Room> for ItemMetadataGroup {
                 "knee",
                 "floor mic",
                 "corner",
+                // Mic placement terms
+                "crotch",    // Between kick and floor tom
+                "midside",   // Mid-side stereo technique
+                "mid side",  // Alternative spelling
+                "mid-side",  // Hyphenated
+                "ms mic",    // Mid-side abbreviation
             ])
             // Exclude cymbal-related patterns so they go to Cymbals group instead
             // Also exclude snare patterns so "SNR VERB" goes to Snare, not Rooms

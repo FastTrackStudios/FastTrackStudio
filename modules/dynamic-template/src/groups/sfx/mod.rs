@@ -24,8 +24,16 @@ impl From<SFX> for Group<ItemMetadata> {
                 "sfx",
                 "effect",
                 "effects",
-                // Hardware FX units
-                "h3000", // Eventide H3000
+                // Hardware FX units / Classic gear
+                "h3000",       // Eventide H3000
+                "echoplex",    // Maestro Echoplex
+                "echo plex",   // Alternative spelling
+                "space echo",  // Roland Space Echo
+                "tape echo",   // Generic tape echo
+                "spring reverb",
+                "plate reverb",
+                "eko",         // Effect abbreviation / Eko brand
+                "mellotron fx", // Mellotron effects
                 // Sound design
                 "whoosh",
                 "impact",
