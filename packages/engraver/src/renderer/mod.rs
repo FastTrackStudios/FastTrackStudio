@@ -3,6 +3,10 @@
 //! This module provides GPU-accelerated rendering of music notation
 //! using Vello for 2D vector graphics.
 
+pub mod canvas2d;
+
+pub use canvas2d::{Canvas2D, Color as Canvas2DColor, Rect as Canvas2DRect, Vertex2D};
+
 use kurbo::{Affine, Point, Rect};
 use peniko::Color;
 use vello::Scene;

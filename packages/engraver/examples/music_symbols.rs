@@ -18,6 +18,11 @@
 
 use std::sync::Arc;
 
+use glyphon::{
+    Attrs, Buffer as TextBuffer, Cache as TextCache, Color as TextColor, Family, FontSystem,
+    Metrics, Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer,
+    Viewport,
+};
 use lyon::lyon_tessellation::{
     BuffersBuilder, FillOptions, FillTessellator, FillVertex, FillVertexConstructor,
     VertexBuffers,
@@ -342,7 +347,8 @@ impl ViewState {
 
         // Calculate zoom factor (smoother for trackpad)
         let zoom_factor = 1.0 + delta * 0.1;
-        self.zoom = (self.zoom * zoom_factor).clamp(0.1, 10.0);
+        // Limit zoom to 4x (8x with retina) for glyphon text rendering stability
+        self.zoom = (self.zoom * zoom_factor).clamp(0.1, 4.0);
 
         // Convert cursor to normalized coordinates (-1 to 1)
         let cursor_ndc_x = (cursor_x / width) * 2.0 - 1.0;
@@ -402,6 +408,96 @@ impl Vertex {
             attributes: &Self::ATTRIBS,
         }
     }
+}
+
+// ============================================================================
+// SDF Rounded Rectangle Support
+// ============================================================================
+
+/// Vertex for SDF-based rounded rectangles - pixel-perfect at any zoom level
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct SdfRectVertex {
+    /// Position in NDC
+    position: [f32; 2],
+    /// Rectangle center in pixels
+    rect_center: [f32; 2],
+    /// Rectangle half-size (from center to corner) in pixels
+    rect_half_size: [f32; 2],
+    /// Corner radius in pixels
+    corner_radius: f32,
+    /// Border width (0 = filled, >0 = stroked)
+    border_width: f32,
+    /// Fill/border color
+    color: [f32; 4],
+}
+
+impl SdfRectVertex {
+    fn desc() -> VertexBufferLayout<'static> {
+        VertexBufferLayout {
+            array_stride: std::mem::size_of::<SdfRectVertex>() as wgpu::BufferAddress,
+            step_mode: VertexStepMode::Vertex,
+            attributes: &[
+                VertexAttribute { offset: 0, shader_location: 0, format: wgpu::VertexFormat::Float32x2 },  // position
+                VertexAttribute { offset: 8, shader_location: 1, format: wgpu::VertexFormat::Float32x2 },  // rect_center
+                VertexAttribute { offset: 16, shader_location: 2, format: wgpu::VertexFormat::Float32x2 }, // rect_half_size
+                VertexAttribute { offset: 24, shader_location: 3, format: wgpu::VertexFormat::Float32 },   // corner_radius
+                VertexAttribute { offset: 28, shader_location: 4, format: wgpu::VertexFormat::Float32 },   // border_width
+                VertexAttribute { offset: 32, shader_location: 5, format: wgpu::VertexFormat::Float32x4 }, // color
+            ],
+        }
+    }
+}
+
+/// Create an SDF rounded rectangle (6 vertices for 2 triangles forming a quad)
+fn create_sdf_rounded_rect(
+    x: f32, y: f32, w: f32, h: f32,
+    corner_radius: f32,
+    border_width: f32,
+    color: [f32; 4],
+    canvas_width: f32,
+    canvas_height: f32,
+) -> Vec<SdfRectVertex> {
+    // Add padding for SDF antialiasing
+    let padding = 2.0;
+    let px = x - padding;
+    let py = y - padding;
+    let pw = w + padding * 2.0;
+    let ph = h + padding * 2.0;
+
+    // Convert to NDC
+    let ndc = |px: f32, py: f32| -> [f32; 2] {
+        [
+            (px / canvas_width) * 2.0 - 1.0,
+            1.0 - (py / canvas_height) * 2.0,
+        ]
+    };
+
+    let rect_center = [x + w / 2.0, y + h / 2.0];
+    let rect_half_size = [w / 2.0, h / 2.0];
+
+    let p1 = ndc(px, py);
+    let p2 = ndc(px + pw, py);
+    let p3 = ndc(px, py + ph);
+    let p4 = ndc(px + pw, py + ph);
+
+    let make_vertex = |pos: [f32; 2]| SdfRectVertex {
+        position: pos,
+        rect_center,
+        rect_half_size,
+        corner_radius,
+        border_width,
+        color,
+    };
+
+    vec![
+        make_vertex(p1),
+        make_vertex(p3),
+        make_vertex(p2),
+        make_vertex(p3),
+        make_vertex(p4),
+        make_vertex(p2),
+    ]
 }
 
 /// Vertex constructor for lyon tessellation
@@ -596,16 +692,35 @@ fn tessellate_glyph(
     vertices
 }
 
+/// Text rendering state using glyphon
+struct TextState {
+    font_system: FontSystem,
+    swash_cache: SwashCache,
+    text_cache: TextCache,
+    viewport: Viewport,
+    atlas: TextAtlas,
+    text_renderer: TextRenderer,
+    /// Rehearsal mark text buffers with computed positions
+    rehearsal_buffers: Vec<(TextBuffer, f32, f32)>, // (buffer, x, y)
+}
+
 struct RenderState {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    // Main geometry pipeline
     pipeline: RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     num_vertices: u32,
+    // SDF pipeline for rounded rectangles
+    sdf_pipeline: RenderPipeline,
+    sdf_vertex_buffer: wgpu::Buffer,
+    sdf_num_vertices: u32,
+    // Shared camera
     camera_buffer: wgpu::Buffer,
     camera_bind_group: BindGroup,
+    text_state: TextState,
 }
 
 struct App {
@@ -728,15 +843,325 @@ fn create_rect(
     ]
 }
 
+/// Create a rounded rectangle frame (outline) with adjustable corner radius
+fn create_rounded_frame_rect(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    radius: f32,
+    thickness: f32,
+    color: [f32; 4],
+    width: f32,
+    height: f32,
+) -> Vec<Vertex> {
+    let mut vertices = Vec::new();
+
+    // Clamp radius to fit within the rectangle
+    let r = radius.min(w / 2.0).min(h / 2.0);
+
+    // Number of segments for each corner arc
+    let segments = 8;
+
+    // Helper to create arc vertices
+    let create_arc = |cx: f32, cy: f32, start_angle: f32, end_angle: f32| -> Vec<Vertex> {
+        let mut arc_verts = Vec::new();
+        for i in 0..segments {
+            let t0 = i as f32 / segments as f32;
+            let t1 = (i + 1) as f32 / segments as f32;
+            let a0 = start_angle + (end_angle - start_angle) * t0;
+            let a1 = start_angle + (end_angle - start_angle) * t1;
+
+            let x0 = cx + r * a0.cos();
+            let y0 = cy + r * a0.sin();
+            let x1 = cx + r * a1.cos();
+            let y1 = cy + r * a1.sin();
+
+            arc_verts.extend_from_slice(&create_line(x0, y0, x1, y1, thickness, color, width, height));
+        }
+        arc_verts
+    };
+
+    use std::f32::consts::PI;
+
+    // Top edge (between top-left and top-right corners)
+    vertices.extend_from_slice(&create_line(x + r, y, x + w - r, y, thickness, color, width, height));
+
+    // Top-right corner arc (from top to right, 270° to 360°)
+    vertices.extend(create_arc(x + w - r, y + r, -PI / 2.0, 0.0));
+
+    // Right edge
+    vertices.extend_from_slice(&create_line(x + w, y + r, x + w, y + h - r, thickness, color, width, height));
+
+    // Bottom-right corner arc (from right to bottom, 0° to 90°)
+    vertices.extend(create_arc(x + w - r, y + h - r, 0.0, PI / 2.0));
+
+    // Bottom edge
+    vertices.extend_from_slice(&create_line(x + w - r, y + h, x + r, y + h, thickness, color, width, height));
+
+    // Bottom-left corner arc (from bottom to left, 90° to 180°)
+    vertices.extend(create_arc(x + r, y + h - r, PI / 2.0, PI));
+
+    // Left edge
+    vertices.extend_from_slice(&create_line(x, y + h - r, x, y + r, thickness, color, width, height));
+
+    // Top-left corner arc (from left to top, 180° to 270°)
+    vertices.extend(create_arc(x + r, y + r, PI, 3.0 * PI / 2.0));
+
+    vertices
+}
+
+// ============================================================================
+// Demo Song Structure for Multi-System Layout
+// ============================================================================
+
+/// Demo song structure with sections and measures
+struct DemoSong {
+    sections: Vec<(&'static str, usize)>, // (section_name, measure_count)
+}
+
+impl DemoSong {
+    fn new() -> Self {
+        Self {
+            sections: vec![
+                ("INTRO", 2),
+                ("VS 1", 8),
+                ("CH 1", 4),
+                ("OUTRO", 4),
+            ],
+        }
+    }
+
+    fn total_measures(&self) -> usize {
+        self.sections.iter().map(|(_, count)| count).sum()
+    }
+
+    /// Get section starts (measure indices where sections begin)
+    fn section_starts(&self) -> Vec<usize> {
+        let mut starts = Vec::new();
+        let mut current = 0;
+        for (_, count) in &self.sections {
+            starts.push(current);
+            current += count;
+        }
+        starts
+    }
+
+    /// Get section name for a given measure
+    fn section_at(&self, measure: usize) -> Option<&'static str> {
+        let mut current = 0;
+        for (name, count) in &self.sections {
+            if measure >= current && measure < current + count {
+                return Some(name);
+            }
+            current += count;
+        }
+        None
+    }
+}
+
+/// Computed position for a rehearsal mark / section label
+#[derive(Debug, Clone)]
+struct RehearsalMarkPosition {
+    name: &'static str,
+    capsule_x: f32,
+    capsule_y: f32,
+    capsule_width: f32,
+    capsule_height: f32,
+}
+
+/// Compute the sky line (highest element Y position) for a system
+/// Returns the minimum Y coordinate where content exists (top of notes/stems)
+fn compute_system_sky_line(
+    staff_y: f32,
+    staff_space: f32,
+    sys_info: &engraver::model::SystemInfo,
+) -> f32 {
+    // Simulate the note drawing logic to find the highest stem tip
+    let mut min_y = staff_y; // Default: top of staff
+
+    let stem_length = staff_space * 3.5;
+    let measures_in_system = sys_info.measure_count;
+
+    for m in 0..measures_in_system {
+        for beat in 0..4 {
+            // Same pitch calculation as build_scene
+            let pitch_offset = ((sys_info.start_measure + m + beat) % 7) as f32;
+            let staff_pos = 4.0 - pitch_offset * 0.5;
+            let note_y = staff_y + (4.0 - staff_pos) * staff_space;
+
+            // Stem direction and end point
+            let stem_up = staff_pos > 2.0;
+            if stem_up {
+                let stem_tip = note_y - stem_length;
+                min_y = min_y.min(stem_tip);
+            }
+        }
+    }
+
+    // Add some padding above the highest element
+    min_y - staff_space * 0.5
+}
+
+/// Compute the positions of all rehearsal marks based on layout
+/// Uses sky line collision avoidance to position marks above content
+fn compute_rehearsal_positions(page_style: &PageStyle, window_width: f32) -> Vec<RehearsalMarkPosition> {
+    use engraver::model::{compute_system_layout, LineBreakPolicy};
+
+    let song = DemoSong::new();
+    let total_measures = song.total_measures();
+    let section_starts = song.section_starts();
+
+    let layout = compute_system_layout(
+        total_measures,
+        &section_starts,
+        &LineBreakPolicy::four_per_line(),
+    );
+
+    // Calculate page dimensions
+    let page_width = page_style.size.width_px(SCREEN_DPI);
+    let page_x = (window_width - page_width) / 2.0;
+    let page_y = 20.0;
+
+    let margins = page_style.margins(false);
+    let margin_left_px = margins.left * SCREEN_DPI;
+    let margin_top_px = margins.top * SCREEN_DPI;
+
+    let content_left = page_x + margin_left_px;
+    let content_top = page_y + margin_top_px;
+
+    let staff_space = page_style.spatium_px(SCREEN_DPI);
+    let system_height = staff_space * 4.0;
+    let system_spacing = staff_space * 8.0;
+    let section_extra_spacing = staff_space * 2.0;
+
+    let mut positions = Vec::new();
+    let mut current_y = content_top + staff_space * 4.0;
+
+    for (sys_idx, sys_info) in layout.systems.iter().enumerate() {
+        // Add extra spacing before section starts (except first)
+        if sys_info.is_section_start && sys_idx > 0 {
+            current_y += section_extra_spacing;
+        }
+
+        let staff_y = current_y;
+
+        // Only record positions for section starts
+        if sys_info.is_section_start {
+            if let Some(name) = song.section_at(sys_info.start_measure) {
+                // Same sizing as build_scene
+                let char_width = staff_space * 0.7;
+                let padding = staff_space * 0.5;
+                let capsule_height = staff_space * 1.8;
+                let capsule_width = (name.len() as f32 * char_width) + (padding * 2.0);
+                let capsule_x = content_left;
+
+                // Compute sky line for collision avoidance
+                let sky_line = compute_system_sky_line(staff_y, staff_space, sys_info);
+
+                // Position capsule well above the sky line (increased clearance)
+                let capsule_y = sky_line - capsule_height - staff_space * 1.5;
+
+                log::debug!(
+                    "Rehearsal '{}': staff_y={:.1}, sky_line={:.1}, capsule_y={:.1}",
+                    name, staff_y, sky_line, capsule_y
+                );
+
+                positions.push(RehearsalMarkPosition {
+                    name,
+                    capsule_x,
+                    capsule_y,
+                    capsule_width,
+                    capsule_height,
+                });
+            }
+        }
+
+        current_y += system_height + system_spacing;
+    }
+
+    positions
+}
+
+/// Rehearsal mark red color - using the original text color values
+/// These are sRGB values that will be converted to linear by the GPU when using sRGB surface
+const REHEARSAL_RED_SRGB: [f32; 4] = [229.0/255.0, 33.0/255.0, 0.0, 1.0];
+
+/// Computed rehearsal mark with actual text-based dimensions
+#[derive(Debug, Clone)]
+struct ComputedRehearsalMark {
+    /// Text to display
+    name: String,
+    /// Capsule position and size (calculated from text)
+    capsule_x: f32,
+    capsule_y: f32,
+    capsule_width: f32,
+    capsule_height: f32,
+    /// Text position (centered in capsule)
+    text_x: f32,
+    text_y: f32,
+}
+
+/// Build SDF vertices for rehearsal mark frames using pre-computed positions
+fn build_sdf_frames_from_computed(marks: &[ComputedRehearsalMark], window_width: f32, window_height: f32) -> Vec<SdfRectVertex> {
+    let mut vertices = Vec::new();
+    for mark in marks {
+        let corner_radius = mark.capsule_height / 4.0; // Subtle rounded corners
+        let border_width = 1.5;
+
+        // The SDF rectangle should match exactly where we placed the text
+        // text is at (text_x, text_y), capsule origin is (text_x - padding, text_y - padding)
+        vertices.extend(create_sdf_rounded_rect(
+            mark.capsule_x,
+            mark.capsule_y,
+            mark.capsule_width,
+            mark.capsule_height,
+            corner_radius,
+            border_width,
+            REHEARSAL_RED_SRGB,
+            window_width,
+            window_height,
+        ));
+    }
+
+    vertices
+}
+
+/// Create debug corner markers for a rectangle (for debugging positioning)
+fn create_debug_corners(
+    x: f32, y: f32, w: f32, h: f32,
+    color: [f32; 4],
+    window_width: f32,
+    window_height: f32,
+) -> Vec<Vertex> {
+    let corner_size = 4.0;
+    let mut vertices = Vec::new();
+
+    // Top-left
+    vertices.extend_from_slice(&create_rect(x, y, corner_size, corner_size, color, window_width, window_height));
+    // Top-right
+    vertices.extend_from_slice(&create_rect(x + w - corner_size, y, corner_size, corner_size, color, window_width, window_height));
+    // Bottom-left
+    vertices.extend_from_slice(&create_rect(x, y + h - corner_size, corner_size, corner_size, color, window_width, window_height));
+    // Bottom-right
+    vertices.extend_from_slice(&create_rect(x + w - corner_size, y + h - corner_size, corner_size, corner_size, color, window_width, window_height));
+
+    vertices
+}
+
 /// Build all the geometry for the music notation demo
 /// Uses the page style to render on proper paper dimensions
 fn build_scene(window_width: f32, window_height: f32, font: Option<&LoadedFont>, page_style: &PageStyle) -> Vec<Vertex> {
+    use engraver::model::{compute_system_layout, LineBreakPolicy};
+
     let mut vertices = Vec::new();
 
     // Colors
     let black = [0.0, 0.0, 0.0, 1.0];
+    let gray = [0.5, 0.5, 0.5, 1.0];
+    let rehearsal_red = [0.898, 0.129, 0.0, 1.0]; // Red-orange for rehearsal marks
     let paper_white = [1.0, 1.0, 1.0, 1.0];
-    let paper_shadow = [0.15, 0.15, 0.17, 1.0]; // Darker shadow for dark background
+    let paper_shadow = [0.15, 0.15, 0.17, 1.0];
 
     // Calculate page dimensions in pixels at screen DPI
     let page_width = page_style.size.width_px(SCREEN_DPI);
@@ -744,9 +1169,9 @@ fn build_scene(window_width: f32, window_height: f32, font: Option<&LoadedFont>,
 
     // Center the page in the window with some padding
     let page_x = (window_width - page_width) / 2.0;
-    let page_y = 20.0; // Small top margin in window
+    let page_y = 20.0;
 
-    // Draw paper shadow (offset slightly down-right)
+    // Draw paper shadow
     let shadow_offset = 4.0;
     let shadow = create_rect(
         page_x + shadow_offset,
@@ -764,366 +1189,196 @@ fn build_scene(window_width: f32, window_height: f32, font: Option<&LoadedFont>,
     vertices.extend_from_slice(&paper);
 
     // Get margins and calculate printable area
-    let margins = page_style.margins(false); // First page (odd)
+    let margins = page_style.margins(false);
     let margin_left_px = margins.left * SCREEN_DPI;
     let margin_top_px = margins.top * SCREEN_DPI;
     let margin_right_px = margins.right * SCREEN_DPI;
-    let margin_bottom_px = margins.bottom * SCREEN_DPI;
 
-    // Content area boundaries (within page margins)
+    // Content area boundaries
     let content_left = page_x + margin_left_px;
     let content_top = page_y + margin_top_px;
     let content_right = page_x + page_width - margin_right_px;
-    let _content_bottom = page_y + page_height - margin_bottom_px;
     let content_width = content_right - content_left;
 
-    // Use spatium from page style for all music spacing
+    // Use spatium from page style
     let staff_space = page_style.spatium_px(SCREEN_DPI);
-    let font_size = staff_space * 4.0; // SMuFL fonts are designed at 4 staff spaces per em
+    let font_size = staff_space * 4.0;
 
-    // === Staff 1: Treble clef with notes ===
-    let staff_y = content_top + staff_space * 2.0; // Small offset from top margin
+    // Create demo song structure
+    let song = DemoSong::new();
+    let total_measures = song.total_measures();
+    let section_starts = song.section_starts();
+
+    // Compute system layout (4 measures per line, breaking at sections)
+    let layout = compute_system_layout(
+        total_measures,
+        &section_starts,
+        &LineBreakPolicy::four_per_line(),
+    );
+
+    // System spacing
+    let system_height = staff_space * 4.0; // 5 lines = 4 spaces
+    let system_spacing = staff_space * 8.0; // Space between systems
+    let section_extra_spacing = staff_space * 2.0; // Extra space before new sections
+
+    // Starting position
     let staff_left = content_left;
     let staff_right = content_right;
+    let mut current_y = content_top + staff_space * 4.0; // Start with some top padding
 
-    // Draw 5 staff lines
-    for i in 0..5 {
-        let y = staff_y + (i as f32) * staff_space;
-        let line = create_line(staff_left, y, staff_right, y, 1.0, black, window_width, window_height);
-        vertices.extend_from_slice(&line);
-    }
-
-    // Left barline
-    let barline = create_line(
-        staff_left,
-        staff_y,
-        staff_left,
-        staff_y + 4.0 * staff_space,
-        2.0,
-        black,
-        window_width,
-        window_height,
-    );
-    vertices.extend_from_slice(&barline);
-
-    // Right barline
-    let barline = create_line(
-        staff_right,
-        staff_y,
-        staff_right,
-        staff_y + 4.0 * staff_space,
-        2.0,
-        black,
-        window_width,
-        window_height,
-    );
-    vertices.extend_from_slice(&barline);
-
-    // Render SMuFL glyphs if font is available
-    if let Some(loaded_font) = font {
-        let font_ref = loaded_font.font_ref();
-
-        // G Clef - SMuFL origin is on the G line (2nd line from bottom = line 1 in 0-4 numbering)
-        // In our coords: staff_y is TOP line (line 0), so G line is at staff_y + 3*staff_space
-        if let Some(gid) = get_glyph_id(&font_ref, Glyph::GClef) {
-            let clef_x = staff_left + staff_space * 0.5;
-            // G line is line 3 (counting from top: 0=top, 4=bottom)
-            let clef_y = staff_y + staff_space * 3.0;
-            let clef_verts = tessellate_glyph(&font_ref, gid, font_size, clef_x, clef_y, black, window_width, window_height);
-            vertices.extend(clef_verts);
+    // Render each system
+    for (sys_idx, sys_info) in layout.systems.iter().enumerate() {
+        // Add extra spacing before section starts (except first)
+        if sys_info.is_section_start && sys_idx > 0 {
+            current_y += section_extra_spacing;
         }
 
-        // Time signature: Common time (4/4)
-        // Origin is centered vertically on the staff (at the middle line B4)
-        if let Some(gid) = get_glyph_id(&font_ref, Glyph::TimeSigCommon) {
-            let ts_x = staff_left + staff_space * 5.0;
-            let ts_y = staff_y + staff_space * 2.0; // Middle line (B4)
-            let ts_verts = tessellate_glyph(&font_ref, gid, font_size, ts_x, ts_y, black, window_width, window_height);
-            vertices.extend(ts_verts);
-        }
+        let staff_y = current_y;
 
-        // Notes - quarter notes (black noteheads with stems)
-        // Positions are now relative to staff_left using staff_space units
-        // Staff positions: 4 = bottom line (E4), 3 = F4, 2 = G4, 1 = A4, 0 = B4 (middle line)
-        let note_start_x = staff_left + staff_space * 8.0;
-        let note_spacing = staff_space * 3.0;
-        let note_positions: [(f32, f32); 8] = [
-            (note_start_x + note_spacing * 0.0, 4.0),  // E4 (bottom line)
-            (note_start_x + note_spacing * 1.0, 3.5),  // F4
-            (note_start_x + note_spacing * 2.0, 3.0),  // G4
-            (note_start_x + note_spacing * 3.0, 2.5),  // A4
-            (note_start_x + note_spacing * 4.0, 2.0),  // B4 (middle line)
-            (note_start_x + note_spacing * 5.0, 1.5),  // C5
-            (note_start_x + note_spacing * 6.0, 1.0),  // D5
-            (note_start_x + note_spacing * 7.0, 0.5),  // E5
-        ];
+        // Get section name if this is a section start
+        let section_name = if sys_info.is_section_start {
+            song.section_at(sys_info.start_measure)
+        } else {
+            None
+        };
 
-        // Get stem thickness from engraving defaults
-        let stem_thickness = loaded_font.metadata.engraving_defaults.stem_thickness
-            .map(|s| f64::from(s) as f32 * staff_space)
-            .unwrap_or(1.2);
-
-        for (x, staff_pos) in note_positions {
-            // Convert staff position to screen Y
-            // staff_pos 4 = bottom line, staff_pos 0 = top line
-            let note_y = staff_y + (4.0 - staff_pos) * staff_space;
-
-            // Black notehead - draw at position
-            if let Some(gid) = get_glyph_id(&font_ref, Glyph::NoteheadBlack) {
-                let nh_verts = tessellate_glyph(&font_ref, gid, font_size, x, note_y, black, window_width, window_height);
-                vertices.extend(nh_verts);
-            }
-
-            // Stem direction: up for notes below middle line (B4), down for notes on/above
-            let stem_up = staff_pos > 2.0;
-            let stem_length = staff_space * 3.5;
-
-            // Use SMuFL anchor points for stem attachment
-            // SMuFL anchors define the CORNER of the stem rectangle, not the center
-            // stemUpSE = bottom-right corner of upward stem
-            // stemDownNW = top-left corner of downward stem
-            let (stem_x, stem_attach_y) = if stem_up {
-                // Stem up: stemUpSE is the bottom-right corner of the stem
-                // So stem center X = anchor.x - stemThickness/2
-                if let Some((ax, ay)) = loaded_font.stem_up_se(Glyph::NoteheadBlack, staff_space) {
-                    // SMuFL Y is up, screen Y is down, so we subtract ay
-                    (x + ax - stem_thickness / 2.0, note_y - ay)
-                } else {
-                    // Fallback: right edge minus half stem
-                    let nh_width = loaded_font.glyph_width(Glyph::NoteheadBlack, staff_space);
-                    (x + nh_width - stem_thickness / 2.0, note_y)
-                }
-            } else {
-                // Stem down: stemDownNW is the top-left corner of the stem
-                // So stem center X = anchor.x + stemThickness/2
-                if let Some((ax, ay)) = loaded_font.stem_down_nw(Glyph::NoteheadBlack, staff_space) {
-                    (x + ax + stem_thickness / 2.0, note_y - ay)
-                } else {
-                    // Fallback: left edge plus half stem
-                    (x + stem_thickness / 2.0, note_y)
-                }
-            };
-
-            let stem_end_y = if stem_up {
-                stem_attach_y - stem_length
-            } else {
-                stem_attach_y + stem_length
-            };
-
-            let stem = create_line(stem_x, stem_attach_y, stem_x, stem_end_y, stem_thickness, black, window_width, window_height);
-            vertices.extend_from_slice(&stem);
-
-            // Ledger lines if needed
-            let notehead_width = loaded_font.glyph_width(Glyph::NoteheadBlack, staff_space);
-            if staff_pos > 4.0 {
-                // Below staff (low notes)
-                let mut ledger_pos = 5.0;
-                while ledger_pos <= staff_pos + 0.25 {
-                    let ledger_y = staff_y + (4.0 - ledger_pos) * staff_space;
-                    let ledger = create_line(
-                        x - staff_space * 0.3,
-                        ledger_y,
-                        x + notehead_width + staff_space * 0.3,
-                        ledger_y,
-                        1.0,
-                        black,
-                        window_width,
-                        window_height,
-                    );
-                    vertices.extend_from_slice(&ledger);
-                    ledger_pos += 1.0;
-                }
-            } else if staff_pos < 0.0 {
-                // Above staff (high notes)
-                let mut ledger_pos = -1.0;
-                while ledger_pos >= staff_pos - 0.25 {
-                    let ledger_y = staff_y + (4.0 - ledger_pos) * staff_space;
-                    let ledger = create_line(
-                        x - staff_space * 0.3,
-                        ledger_y,
-                        x + notehead_width + staff_space * 0.3,
-                        ledger_y,
-                        1.0,
-                        black,
-                        window_width,
-                        window_height,
-                    );
-                    vertices.extend_from_slice(&ledger);
-                    ledger_pos -= 1.0;
-                }
-            }
-        }
-
-        // Half notes (relative to content area)
-        let half_note_positions: [(f32, f32); 2] = [
-            (note_start_x + note_spacing * 9.0, 3.0), // G4 (3rd line from bottom)
-            (note_start_x + note_spacing * 11.0, 2.0), // B4 (middle line)
-        ];
-
-        for (x, staff_pos) in half_note_positions {
-            let note_y = staff_y + (4.0 - staff_pos) * staff_space;
-
-            // Half notehead (open)
-            if let Some(gid) = get_glyph_id(&font_ref, Glyph::NoteheadHalf) {
-                let nh_verts = tessellate_glyph(&font_ref, gid, font_size, x, note_y, black, window_width, window_height);
-                vertices.extend(nh_verts);
-            }
-
-            // Stem up using anchor (stemUpSE is bottom-right corner)
-            let stem_length = staff_space * 3.5;
-            let (stem_x, stem_attach_y) = if let Some((ax, ay)) = loaded_font.stem_up_se(Glyph::NoteheadHalf, staff_space) {
-                (x + ax - stem_thickness / 2.0, note_y - ay)
-            } else {
-                let nh_width = loaded_font.glyph_width(Glyph::NoteheadHalf, staff_space);
-                (x + nh_width - stem_thickness / 2.0, note_y)
-            };
-            let stem = create_line(stem_x, stem_attach_y, stem_x, stem_attach_y - stem_length, stem_thickness, black, window_width, window_height);
-            vertices.extend_from_slice(&stem);
-        }
-
-        // Whole note (no stem) - positioned relative to content area
-        if let Some(gid) = get_glyph_id(&font_ref, Glyph::NoteheadWhole) {
-            let x = note_start_x + note_spacing * 13.0;
-            let note_y = staff_y + (4.0 - 3.0) * staff_space; // G4 (line 3)
-            let nh_verts = tessellate_glyph(&font_ref, gid, font_size, x, note_y, black, window_width, window_height);
-            vertices.extend(nh_verts);
-        }
-
-        // === Second staff: Bass clef with rests ===
-        // Position relative to first staff using staff_space units
-        let staff2_y = staff_y + staff_space * 12.0; // Space between staves
+        // Note: Rehearsal mark frames are now rendered using SDF pipeline for pixel-perfect quality
+        // The old tessellation-based frames have been replaced
 
         // Draw 5 staff lines
         for i in 0..5 {
-            let y = staff2_y + (i as f32) * staff_space;
+            let y = staff_y + (i as f32) * staff_space;
             let line = create_line(staff_left, y, staff_right, y, 1.0, black, window_width, window_height);
             vertices.extend_from_slice(&line);
         }
 
-        // Barlines
-        let barline = create_line(
-            staff_left,
-            staff2_y,
-            staff_left,
-            staff2_y + 4.0 * staff_space,
-            2.0,
-            black,
-            window_width,
-            window_height,
-        );
-        vertices.extend_from_slice(&barline);
-        let barline = create_line(
-            staff_right,
-            staff2_y,
-            staff_right,
-            staff2_y + 4.0 * staff_space,
-            2.0,
-            black,
-            window_width,
-            window_height,
-        );
-        vertices.extend_from_slice(&barline);
+        // Calculate measure positions for this system
+        let measures_in_system = sys_info.measure_count;
+        let measure_width = content_width / measures_in_system as f32;
 
-        // Bass clef (F clef sits on the 4th line from bottom = line 1)
-        if let Some(gid) = get_glyph_id(&font_ref, Glyph::FClef) {
-            let clef_x = staff_left + staff_space * 0.5;
-            let clef_y = staff2_y + staff_space * 1.0; // F line position
-            let clef_verts = tessellate_glyph(&font_ref, gid, font_size, clef_x, clef_y, black, window_width, window_height);
-            vertices.extend(clef_verts);
-        }
+        // Draw barlines for each measure
+        for m in 0..=measures_in_system {
+            let bar_x = staff_left + (m as f32) * measure_width;
+            let thickness = if m == 0 || m == measures_in_system { 2.0 } else { 1.0 };
+            let barline = create_line(
+                bar_x,
+                staff_y,
+                bar_x,
+                staff_y + system_height,
+                thickness,
+                black,
+                window_width,
+                window_height,
+            );
+            vertices.extend_from_slice(&barline);
 
-        // Time signature
-        if let Some(gid) = get_glyph_id(&font_ref, Glyph::TimeSigCommon) {
-            let ts_x = staff_left + staff_space * 5.0;
-            let ts_y = staff2_y + staff_space * 2.0;
-            let ts_verts = tessellate_glyph(&font_ref, gid, font_size, ts_x, ts_y, black, window_width, window_height);
-            vertices.extend(ts_verts);
-        }
-
-        // Rests - positioned relative to content area
-        let rest_start_x = staff_left + staff_space * 10.0;
-        let rest_spacing = staff_space * 6.0;
-        let rests: [(f32, Glyph); 5] = [
-            (rest_start_x + rest_spacing * 0.0, Glyph::RestWhole),
-            (rest_start_x + rest_spacing * 1.0, Glyph::RestHalf),
-            (rest_start_x + rest_spacing * 2.0, Glyph::RestQuarter),
-            (rest_start_x + rest_spacing * 3.0, Glyph::Rest8th),
-            (rest_start_x + rest_spacing * 4.0, Glyph::Rest16th),
-        ];
-
-        for (x, rest_glyph) in rests {
-            if let Some(gid) = get_glyph_id(&font_ref, rest_glyph) {
-                let rest_y = staff2_y + staff_space * 2.0; // Center of staff
-                let rest_verts = tessellate_glyph(&font_ref, gid, font_size, x, rest_y, black, window_width, window_height);
-                vertices.extend(rest_verts);
+            // Draw measure number below first barline of each measure (except first)
+            if m > 0 && m < measures_in_system {
+                let measure_num = sys_info.start_measure + m;
+                // Small tick mark for measure number position
+                let tick = create_line(
+                    bar_x,
+                    staff_y + system_height + staff_space * 0.2,
+                    bar_x,
+                    staff_y + system_height + staff_space * 0.5,
+                    0.5,
+                    gray,
+                    window_width,
+                    window_height,
+                );
+                vertices.extend_from_slice(&tick);
             }
         }
 
-        // Grand staff brace connection
-        let brace_x = staff_left - staff_space * 0.5;
-        let brace = create_line(brace_x, staff_y, brace_x, staff2_y + 4.0 * staff_space, 3.0, black, window_width, window_height);
-        vertices.extend_from_slice(&brace);
+        // Render clef and time signature on first system, clef only on others
+        if let Some(loaded_font) = font {
+            let font_ref = loaded_font.font_ref();
 
-        // === Third row: Accidentals demo ===
-        let acc_y = staff2_y + staff_space * 12.0;
-        let acc_staff_width = content_width * 0.6; // Shorter staff for accidentals
-
-        // Draw staff for accidentals
-        for i in 0..5 {
-            let y = acc_y + (i as f32) * staff_space;
-            let line = create_line(staff_left, y, staff_left + acc_staff_width, y, 1.0, black, window_width, window_height);
-            vertices.extend_from_slice(&line);
-        }
-
-        // Accidentals - positioned relative to content area
-        let acc_spacing = staff_space * 5.0;
-        let accidentals: [(f32, Glyph); 5] = [
-            (staff_left + acc_spacing * 1.0, Glyph::AccidentalDoubleFlat),
-            (staff_left + acc_spacing * 2.0, Glyph::AccidentalFlat),
-            (staff_left + acc_spacing * 3.0, Glyph::AccidentalNatural),
-            (staff_left + acc_spacing * 4.0, Glyph::AccidentalSharp),
-            (staff_left + acc_spacing * 5.0, Glyph::AccidentalDoubleSharp),
-        ];
-
-        for (x, acc_glyph) in accidentals {
-            if let Some(gid) = get_glyph_id(&font_ref, acc_glyph) {
-                let note_y = acc_y + staff_space * 2.0;
-                let acc_verts = tessellate_glyph(&font_ref, gid, font_size, x, note_y, black, window_width, window_height);
-                vertices.extend(acc_verts);
+            // G Clef at start of system
+            if let Some(gid) = get_glyph_id(&font_ref, Glyph::GClef) {
+                let clef_x = staff_left + staff_space * 0.5;
+                let clef_y = staff_y + staff_space * 3.0; // G line
+                let clef_verts = tessellate_glyph(&font_ref, gid, font_size, clef_x, clef_y, black, window_width, window_height);
+                vertices.extend(clef_verts);
             }
 
-            // Notehead after accidental
-            if let Some(gid) = get_glyph_id(&font_ref, Glyph::NoteheadBlack) {
-                let note_y = acc_y + staff_space * 2.0;
-                let nh_verts = tessellate_glyph(&font_ref, gid, font_size, x + staff_space * 1.5, note_y, black, window_width, window_height);
-                vertices.extend(nh_verts);
+            // Time signature only on first system
+            if sys_idx == 0 {
+                if let Some(gid) = get_glyph_id(&font_ref, Glyph::TimeSigCommon) {
+                    let ts_x = staff_left + staff_space * 4.5;
+                    let ts_y = staff_y + staff_space * 2.0;
+                    let ts_verts = tessellate_glyph(&font_ref, gid, font_size, ts_x, ts_y, black, window_width, window_height);
+                    vertices.extend(ts_verts);
+                }
+            }
+
+            // Draw some sample notes in each measure
+            let stem_thickness = loaded_font.metadata.engraving_defaults.stem_thickness
+                .map(|s| f64::from(s) as f32 * staff_space)
+                .unwrap_or(1.2);
+
+            // Content offset (after clef and time sig)
+            let note_area_start = if sys_idx == 0 {
+                staff_left + staff_space * 7.0
+            } else {
+                staff_left + staff_space * 4.0
+            };
+
+            // Simple pattern: one note per beat position
+            for m in 0..measures_in_system {
+                let measure_start = staff_left + (m as f32) * measure_width;
+                let measure_end = measure_start + measure_width;
+                let note_area = measure_end - note_area_start.max(measure_start);
+
+                // Draw 4 quarter notes per measure (simplified)
+                for beat in 0..4 {
+                    let beat_offset = (beat as f32 + 0.5) / 4.0;
+                    let note_x = measure_start.max(note_area_start) + beat_offset * (measure_end - measure_start.max(note_area_start)) * 0.8;
+
+                    // Vary the pitch based on measure and beat
+                    let pitch_offset = ((sys_info.start_measure + m + beat) % 7) as f32;
+                    let staff_pos = 4.0 - pitch_offset * 0.5; // E4 to B4 range
+
+                    let note_y = staff_y + (4.0 - staff_pos) * staff_space;
+
+                    // Draw notehead
+                    if let Some(gid) = get_glyph_id(&font_ref, Glyph::NoteheadBlack) {
+                        let nh_verts = tessellate_glyph(&font_ref, gid, font_size, note_x, note_y, black, window_width, window_height);
+                        vertices.extend(nh_verts);
+                    }
+
+                    // Draw stem
+                    let stem_up = staff_pos > 2.0;
+                    let stem_length = staff_space * 3.5;
+                    let (stem_x, stem_attach_y) = if stem_up {
+                        if let Some((ax, ay)) = loaded_font.stem_up_se(Glyph::NoteheadBlack, staff_space) {
+                            (note_x + ax - stem_thickness / 2.0, note_y - ay)
+                        } else {
+                            let nh_width = loaded_font.glyph_width(Glyph::NoteheadBlack, staff_space);
+                            (note_x + nh_width - stem_thickness / 2.0, note_y)
+                        }
+                    } else {
+                        if let Some((ax, ay)) = loaded_font.stem_down_nw(Glyph::NoteheadBlack, staff_space) {
+                            (note_x + ax + stem_thickness / 2.0, note_y - ay)
+                        } else {
+                            (note_x + stem_thickness / 2.0, note_y)
+                        }
+                    };
+
+                    let stem_end_y = if stem_up {
+                        stem_attach_y - stem_length
+                    } else {
+                        stem_attach_y + stem_length
+                    };
+
+                    let stem = create_line(stem_x, stem_attach_y, stem_x, stem_end_y, stem_thickness, black, window_width, window_height);
+                    vertices.extend_from_slice(&stem);
+                }
             }
         }
 
-        // === Dynamics row ===
-        let dyn_y = acc_y + staff_space * 8.0;
-        let dyn_spacing = staff_space * 4.0;
-
-        let dynamics: [(f32, Glyph); 6] = [
-            (staff_left + dyn_spacing * 0.0, Glyph::DynamicPiano),
-            (staff_left + dyn_spacing * 1.0, Glyph::DynamicMezzo),
-            (staff_left + dyn_spacing * 2.0, Glyph::DynamicForte),
-            (staff_left + dyn_spacing * 4.0, Glyph::DynamicPiano), // pp (would need combining)
-            (staff_left + dyn_spacing * 5.0, Glyph::DynamicForte), // ff
-            (staff_left + dyn_spacing * 6.0, Glyph::DynamicSforzando1),
-        ];
-
-        for (x, dyn_glyph) in dynamics {
-            if let Some(gid) = get_glyph_id(&font_ref, dyn_glyph) {
-                let dyn_verts = tessellate_glyph(&font_ref, gid, font_size * 0.8, x, dyn_y, black, window_width, window_height);
-                vertices.extend(dyn_verts);
-            }
-        }
-
-    } else {
-        // Fallback: placeholder text (no font loaded)
-        let hint_bg = create_rect(content_left, content_top + staff_space * 5.0, content_width * 0.6, staff_space * 4.0, [0.95, 0.90, 0.90, 1.0], window_width, window_height);
-        vertices.extend_from_slice(&hint_bg);
+        // Move to next system position
+        current_y += system_height + system_spacing;
     }
 
     vertices
@@ -1162,6 +1417,95 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     return input.color;
+}
+"#;
+
+/// SDF shader for pixel-perfect rounded rectangles at any zoom level
+const SDF_SHADER_SOURCE: &str = r#"
+struct Camera {
+    transform: vec4<f32>,  // scale_x, scale_y, offset_x, offset_y
+}
+
+@group(0) @binding(0)
+var<uniform> camera: Camera;
+
+struct VertexInput {
+    @location(0) position: vec2<f32>,
+    @location(1) rect_center: vec2<f32>,
+    @location(2) rect_half_size: vec2<f32>,
+    @location(3) corner_radius: f32,
+    @location(4) border_width: f32,
+    @location(5) color: vec4<f32>,
+}
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) rect_center: vec2<f32>,
+    @location(1) rect_half_size: vec2<f32>,
+    @location(2) corner_radius: f32,
+    @location(3) border_width: f32,
+    @location(4) color: vec4<f32>,
+    @location(5) pixel_pos: vec2<f32>,
+    @location(6) zoom: f32,
+}
+
+@vertex
+fn vs_main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+
+    // Apply camera transform (same as main shader)
+    let scaled = in.position * camera.transform.xy;
+    let transformed = scaled + camera.transform.zw;
+    out.clip_position = vec4<f32>(transformed, 0.0, 1.0);
+
+    // Pass through rect parameters for fragment shader
+    out.rect_center = in.rect_center;
+    out.rect_half_size = in.rect_half_size;
+    out.corner_radius = in.corner_radius;
+    out.border_width = in.border_width;
+    out.color = in.color;
+    out.zoom = camera.transform.x;  // Pass zoom level to fragment shader
+
+    // Calculate pixel position from NDC position (using window dimensions)
+    out.pixel_pos = (in.position + 1.0) * 0.5 * vec2<f32>(1200.0, 900.0);
+    out.pixel_pos.y = 900.0 - out.pixel_pos.y;  // Flip Y
+
+    return out;
+}
+
+// Signed Distance Field for rounded rectangle
+fn sdf_rounded_rect(p: vec2<f32>, center: vec2<f32>, half_size: vec2<f32>, radius: f32) -> f32 {
+    let d = abs(p - center) - half_size + radius;
+    return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - radius;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let dist = sdf_rounded_rect(
+        in.pixel_pos,
+        in.rect_center,
+        in.rect_half_size,
+        in.corner_radius
+    );
+
+    var color = in.color;
+
+    // Scale the antialiasing width inversely with zoom for crisp edges at all zoom levels
+    // At zoom 1.0, aa_width = 0.5 (standard). At zoom 2.0, aa_width = 0.25, etc.
+    let aa_width = 0.5 / in.zoom;
+
+    if in.border_width > 0.0 {
+        // Stroked rectangle
+        let inner_dist = dist + in.border_width;
+        let outer_alpha = 1.0 - smoothstep(-aa_width, aa_width, dist);
+        let inner_alpha = smoothstep(-aa_width, aa_width, inner_dist);
+        color.a *= outer_alpha * inner_alpha;
+    } else {
+        // Filled rectangle
+        color.a *= 1.0 - smoothstep(-aa_width, aa_width, dist);
+    }
+
+    return color;
 }
 "#;
 
@@ -1210,8 +1554,9 @@ impl ApplicationHandler for App {
                 required_features: Features::empty(),
                 required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::default(),
+                experimental_features: Default::default(),
+                trace: Default::default(),
             },
-            None,
         ))
         .expect("Failed to create device");
 
@@ -1248,7 +1593,7 @@ impl ApplicationHandler for App {
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Music Pipeline Layout"),
             bind_group_layouts: &[&camera_bind_group_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
@@ -1272,7 +1617,7 @@ impl ApplicationHandler for App {
             },
             depth_stencil: None,
             multisample: MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -1285,6 +1630,136 @@ impl ApplicationHandler for App {
             usage: BufferUsages::VERTEX,
         });
 
+        // Initialize text rendering with glyphon FIRST to measure text dimensions
+        let mut font_system = FontSystem::new();
+        log::info!("FontSystem initialized with {} fonts", font_system.db().len());
+
+        let swash_cache = SwashCache::new();
+        let text_cache = TextCache::new(&device);
+        let viewport = Viewport::new(&device, &text_cache);
+        let mut atlas = TextAtlas::new(&device, &queue, &text_cache, config.format);
+        let text_renderer = TextRenderer::new(
+            &mut atlas,
+            &device,
+            MultisampleState::default(),
+            None,
+        );
+
+        // Get base positions from layout calculator
+        let base_positions = compute_rehearsal_positions(&self.page_style, WINDOW_WIDTH as f32);
+
+        // Create text buffers and compute actual dimensions
+        let font_size = 14.0;
+        let line_height = 18.0;
+        let padding_h = 8.0; // Horizontal padding around text
+        let padding_v = 4.0; // Vertical padding around text
+
+        let mut rehearsal_buffers = Vec::new();
+        let mut computed_marks = Vec::new();
+
+        for pos in &base_positions {
+            // Create text buffer without size constraints to measure natural size
+            let mut buffer = TextBuffer::new(&mut font_system, Metrics::new(font_size, line_height));
+            buffer.set_size(&mut font_system, Some(500.0), Some(100.0)); // Large initial size
+            buffer.set_text(
+                &mut font_system,
+                pos.name,
+                &Attrs::new().family(Family::SansSerif).weight(glyphon::Weight::BOLD),
+                Shaping::Advanced,
+                None,
+            );
+            buffer.shape_until_scroll(&mut font_system, false);
+
+            // Get the actual text dimensions from the buffer layout
+            let text_width: f32 = buffer.layout_runs()
+                .map(|run| run.line_w)
+                .next()
+                .unwrap_or(50.0);
+            let text_height = line_height;
+
+            // TEXT POSITION FIRST: use the capsule position as the text anchor point
+            // The layout calculator gives us where the label should appear
+            let text_x = pos.capsule_x;
+            let text_y = pos.capsule_y;
+
+            // CAPSULE WRAPS AROUND TEXT: derive capsule bounds from text position and size
+            let capsule_x = text_x - padding_h;
+            let capsule_y = text_y - padding_v;
+            let capsule_width = text_width + padding_h * 2.0;
+            let capsule_height = text_height + padding_v * 2.0;
+
+            log::info!("Rehearsal '{}': text=({:.1}, {:.1}, {:.1}x{:.1}) -> capsule=({:.1}, {:.1}, {:.1}x{:.1})",
+                pos.name, text_x, text_y, text_width, text_height, capsule_x, capsule_y, capsule_width, capsule_height);
+
+            rehearsal_buffers.push((buffer, text_x, text_y));
+            computed_marks.push(ComputedRehearsalMark {
+                name: pos.name.to_string(),
+                capsule_x,
+                capsule_y,
+                capsule_width,
+                capsule_height,
+                text_x,
+                text_y,
+            });
+        }
+
+        // Create SDF pipeline for pixel-perfect rounded rectangles
+        let sdf_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("SDF Shader"),
+            source: wgpu::ShaderSource::Wgsl(SDF_SHADER_SOURCE.into()),
+        });
+
+        let sdf_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: Some("SDF Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: VertexState {
+                module: &sdf_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[SdfRectVertex::desc()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(FragmentState {
+                module: &sdf_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        // Build SDF vertices using computed text-based dimensions
+        let sdf_vertices = build_sdf_frames_from_computed(&computed_marks, WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32);
+        let sdf_num_vertices = sdf_vertices.len() as u32;
+
+        let sdf_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("SDF Vertex Buffer"),
+            contents: bytemuck::cast_slice(&sdf_vertices),
+            usage: BufferUsages::VERTEX,
+        });
+
+        log::info!("SDF pipeline created with {} vertices for {} rehearsal frames", sdf_num_vertices, computed_marks.len());
+
+        let text_state = TextState {
+            font_system,
+            swash_cache,
+            text_cache,
+            viewport,
+            atlas,
+            text_renderer,
+            rehearsal_buffers,
+        };
+
         self.render_state = Some(RenderState {
             surface,
             config,
@@ -1293,8 +1768,12 @@ impl ApplicationHandler for App {
             pipeline,
             vertex_buffer,
             num_vertices,
+            sdf_pipeline,
+            sdf_vertex_buffer,
+            sdf_num_vertices,
             camera_buffer,
             camera_bind_group,
+            text_state,
         });
 
         window.request_redraw();
@@ -1432,7 +1911,9 @@ impl ApplicationHandler for App {
                     state.config.height = size.height.max(1);
                     state.surface.configure(&state.device, &state.config);
 
-                    let vertices = build_scene(size.width as f32, size.height as f32, self.font.as_ref(), &self.page_style);
+                    // Use constant window dimensions for consistent layout
+                    // (the scene is designed for WINDOW_WIDTH x WINDOW_HEIGHT, camera handles zoom/pan)
+                    let vertices = build_scene(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32, self.font.as_ref(), &self.page_style);
                     state.num_vertices = vertices.len() as u32;
                     state.vertex_buffer =
                         state.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1448,7 +1929,7 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::RedrawRequested => {
-                let Some(state) = &self.render_state else {
+                let Some(state) = &mut self.render_state else {
                     return;
                 };
 
@@ -1464,6 +1945,79 @@ impl ApplicationHandler for App {
                         label: Some("Render Encoder"),
                     });
 
+                // Text rendering setup - must happen before render pass
+                let text_state = &mut state.text_state;
+
+                // Update viewport with current surface size
+                text_state.viewport.update(
+                    &state.queue,
+                    Resolution {
+                        width: state.config.width,
+                        height: state.config.height,
+                    },
+                );
+
+                // Build text areas for each rehearsal mark with camera transform
+                let width = state.config.width as f32;
+                let height = state.config.height as f32;
+                let zoom = self.view.zoom;
+                let pan_x = self.view.pan_x;
+                let pan_y = self.view.pan_y;
+
+                // Scale factor for retina displays (physical / logical)
+                let scale_factor = width / WINDOW_WIDTH as f32;
+
+                let text_areas: Vec<TextArea> = text_state
+                    .rehearsal_buffers
+                    .iter()
+                    .map(|(buffer, page_x, page_y)| {
+                        // Convert page coordinates to NDC (same as geometry vertices)
+                        let ndc_x = (*page_x / WINDOW_WIDTH as f32) * 2.0 - 1.0;
+                        let ndc_y = 1.0 - (*page_y / WINDOW_HEIGHT as f32) * 2.0;
+
+                        // Apply camera transform (same as vertex shader)
+                        let cam_x = ndc_x * zoom + pan_x;
+                        let cam_y = ndc_y * zoom + pan_y;
+
+                        // Convert back to logical screen coords, then scale to physical
+                        let logical_x = (cam_x + 1.0) * WINDOW_WIDTH as f32 / 2.0;
+                        let logical_y = (1.0 - cam_y) * WINDOW_HEIGHT as f32 / 2.0;
+
+                        // Scale to physical screen coords
+                        let screen_x = logical_x * scale_factor;
+                        let screen_y = logical_y * scale_factor;
+
+                        TextArea {
+                            buffer,
+                            left: screen_x,
+                            top: screen_y,
+                            scale: zoom * scale_factor, // Scale with both zoom and DPI
+                            bounds: TextBounds {
+                                left: 0,
+                                top: 0,
+                                right: width as i32,
+                                bottom: height as i32,
+                            },
+                            default_color: TextColor::rgba(229, 33, 0, 255), // Matches REHEARSAL_RED_SRGB
+                            custom_glyphs: &[],
+                        }
+                    })
+                    .collect();
+
+                // Prepare text for rendering (must happen before render pass)
+                if let Err(e) = text_state.text_renderer.prepare(
+                    &state.device,
+                    &state.queue,
+                    &mut text_state.font_system,
+                    &mut text_state.atlas,
+                    &text_state.viewport,
+                    text_areas,
+                    &mut text_state.swash_cache,
+                ) {
+                    log::error!("Failed to prepare text: {:?}", e);
+                }
+
+                // Single render pass for both geometry and text
                 {
                     let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
                         label: Some("Music Render Pass"),
@@ -1480,16 +2034,36 @@ impl ApplicationHandler for App {
                                 }),
                                 store: StoreOp::Store,
                             },
+                            depth_slice: None,
                         })],
                         depth_stencil_attachment: None,
                         timestamp_writes: None,
                         occlusion_query_set: None,
+                        multiview_mask: None,
                     });
 
+                    // Draw main geometry (staff lines, notes, etc.)
                     render_pass.set_pipeline(&state.pipeline);
                     render_pass.set_bind_group(0, &state.camera_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, state.vertex_buffer.slice(..));
                     render_pass.draw(0..state.num_vertices, 0..1);
+
+                    // Draw SDF rounded rectangles (rehearsal mark frames)
+                    if state.sdf_num_vertices > 0 {
+                        render_pass.set_pipeline(&state.sdf_pipeline);
+                        render_pass.set_bind_group(0, &state.camera_bind_group, &[]);
+                        render_pass.set_vertex_buffer(0, state.sdf_vertex_buffer.slice(..));
+                        render_pass.draw(0..state.sdf_num_vertices, 0..1);
+                    }
+
+                    // Draw text in the same pass
+                    if let Err(e) = text_state.text_renderer.render(
+                        &text_state.atlas,
+                        &text_state.viewport,
+                        &mut render_pass,
+                    ) {
+                        log::error!("Failed to render text: {:?}", e);
+                    }
                 }
 
                 state.queue.submit(Some(encoder.finish()));
