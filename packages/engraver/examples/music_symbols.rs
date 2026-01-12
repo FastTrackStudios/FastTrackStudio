@@ -1083,9 +1083,33 @@ fn compute_rehearsal_positions(page_style: &PageStyle, window_width: f32) -> Vec
     positions
 }
 
-/// Rehearsal mark red color - using the original text color values
-/// These are sRGB values that will be converted to linear by the GPU when using sRGB surface
-const REHEARSAL_RED_SRGB: [f32; 4] = [229.0/255.0, 33.0/255.0, 0.0, 1.0];
+/// Convert a single sRGB component (0.0-1.0) to linear color space
+/// This is needed because the GPU expects linear colors but blends in linear space,
+/// then converts to sRGB on output. If we pass sRGB values directly, they get
+/// double-gamma corrected and appear washed out/orange.
+fn srgb_to_linear(srgb: f32) -> f32 {
+    if srgb <= 0.04045 {
+        srgb / 12.92
+    } else {
+        ((srgb + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Convert sRGB color (0-255 values) to linear color space for GPU rendering
+fn srgb_color_to_linear(r: u8, g: u8, b: u8, a: u8) -> [f32; 4] {
+    [
+        srgb_to_linear(r as f32 / 255.0),
+        srgb_to_linear(g as f32 / 255.0),
+        srgb_to_linear(b as f32 / 255.0),
+        a as f32 / 255.0, // Alpha is already linear
+    ]
+}
+
+/// Rehearsal mark red color - converted from sRGB (229, 33, 0) to linear color space
+/// This matches the text color which uses TextColor::rgba(229, 33, 0, 255)
+fn rehearsal_red_linear() -> [f32; 4] {
+    srgb_color_to_linear(229, 33, 0, 255)
+}
 
 /// Computed rehearsal mark with actual text-based dimensions
 #[derive(Debug, Clone)]
@@ -1105,6 +1129,8 @@ struct ComputedRehearsalMark {
 /// Build SDF vertices for rehearsal mark frames using pre-computed positions
 fn build_sdf_frames_from_computed(marks: &[ComputedRehearsalMark], window_width: f32, window_height: f32) -> Vec<SdfRectVertex> {
     let mut vertices = Vec::new();
+    let color = rehearsal_red_linear(); // Use linear color space for correct GPU blending
+
     for mark in marks {
         let corner_radius = mark.capsule_height / 4.0; // Subtle rounded corners
         let border_width = 1.5;
@@ -1118,7 +1144,7 @@ fn build_sdf_frames_from_computed(marks: &[ComputedRehearsalMark], window_width:
             mark.capsule_height,
             corner_radius,
             border_width,
-            REHEARSAL_RED_SRGB,
+            color,
             window_width,
             window_height,
         ));
