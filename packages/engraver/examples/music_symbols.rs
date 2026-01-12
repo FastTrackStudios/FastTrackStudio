@@ -700,8 +700,8 @@ struct TextState {
     viewport: Viewport,
     atlas: TextAtlas,
     text_renderer: TextRenderer,
-    /// Rehearsal mark text buffers with computed positions
-    rehearsal_buffers: Vec<(TextBuffer, f32, f32)>, // (buffer, x, y)
+    /// Rehearsal mark text buffers with computed positions and scale
+    rehearsal_buffers: Vec<(TextBuffer, f32, f32, f32)>, // (buffer, x, y, scale)
 }
 
 struct RenderState {
@@ -1135,10 +1135,10 @@ fn srgb_color_to_linear(r: u8, g: u8, b: u8, a: u8) -> [f32; 4] {
     ]
 }
 
-/// Rehearsal mark red color - converted from sRGB (229, 33, 0) to linear color space
-/// This matches the text color which uses TextColor::rgba(229, 33, 0, 255)
+/// Rehearsal mark red color - pure red to match LilyPond capsule-utils.ly
+/// LilyPond uses (ly:stencil-in-color ... 1.0 0.0 0.0)
 fn rehearsal_red_linear() -> [f32; 4] {
-    srgb_color_to_linear(229, 33, 0, 255)
+    [1.0, 0.0, 0.0, 1.0] // Pure red, already in linear space
 }
 
 /// Computed rehearsal mark with actual text-based dimensions
@@ -1151,9 +1151,11 @@ struct ComputedRehearsalMark {
     capsule_y: f32,
     capsule_width: f32,
     capsule_height: f32,
-    /// Text position (centered in capsule)
+    /// Text position (centered in capsule, accounting for scale)
     text_x: f32,
     text_y: f32,
+    /// Scale factor for text (1.0 = normal, <1.0 = shrunk to fit)
+    text_scale: f32,
 }
 
 /// Build SDF vertices for rehearsal mark frames using pre-computed positions
@@ -1734,34 +1736,51 @@ impl ApplicationHandler for App {
             let text_height = line_height;
 
             // Position text and capsule based on mode
-            let (text_x, text_y, capsule_x, capsule_y, capsule_width, capsule_height) = match self.rehearsal_mode {
+            let (text_x, text_y, capsule_x, capsule_y, capsule_width, capsule_height, text_scale) = match self.rehearsal_mode {
                 RehearsalMarkMode::AboveStaff => {
-                    // Text-first: capsule wraps around text with padding
+                    // Text-first: capsule wraps around text with padding, no scaling needed
                     let tx = pos.capsule_x;
                     let ty = pos.capsule_y;
                     let cx = tx - padding_h;
                     let cy = ty - padding_v;
                     let cw = text_width + padding_h * 2.0;
                     let ch = text_height + padding_v * 2.0;
-                    (tx, ty, cx, cy, cw, ch)
+                    (tx, ty, cx, cy, cw, ch, 1.0)
                 }
                 RehearsalMarkMode::LeftMargin => {
-                    // Fixed capsule: text centered within
+                    // Fixed capsule: scale text to fit if needed
                     let cx = pos.capsule_x;
                     let cy = pos.capsule_y;
                     let cw = pos.capsule_width;
                     let ch = pos.capsule_height;
-                    // Center text horizontally and vertically within capsule
-                    let tx = cx + (cw - text_width) / 2.0;
-                    let ty = cy + (ch - text_height) / 2.0;
-                    (tx, ty, cx, cy, cw, ch)
+
+                    // Calculate available space for text (minimal internal padding)
+                    let internal_padding_h = 1.0;
+                    let internal_padding_v = 1.0;
+                    let available_width = cw - internal_padding_h * 2.0;
+                    let available_height = ch - internal_padding_v * 2.0;
+
+                    // Calculate scale to fit (use minimum to maintain aspect ratio)
+                    let scale_x = if text_width > available_width { available_width / text_width } else { 1.0 };
+                    let scale_y = if text_height > available_height { available_height / text_height } else { 1.0 };
+                    let scale = scale_x.min(scale_y);
+
+                    // Scaled text dimensions for centering
+                    let scaled_width = text_width * scale;
+                    let scaled_height = text_height * scale;
+
+                    // Center scaled text within capsule
+                    let tx = cx + (cw - scaled_width) / 2.0;
+                    let ty = cy + (ch - scaled_height) / 2.0;
+
+                    (tx, ty, cx, cy, cw, ch, scale)
                 }
             };
 
-            log::info!("Rehearsal '{}' ({:?}): text=({:.1}, {:.1}, {:.1}x{:.1}) -> capsule=({:.1}, {:.1}, {:.1}x{:.1})",
-                pos.name, self.rehearsal_mode, text_x, text_y, text_width, text_height, capsule_x, capsule_y, capsule_width, capsule_height);
+            log::info!("Rehearsal '{}' ({:?}): text=({:.1}, {:.1}, {:.1}x{:.1}) scale={:.2} -> capsule=({:.1}, {:.1}, {:.1}x{:.1})",
+                pos.name, self.rehearsal_mode, text_x, text_y, text_width, text_height, text_scale, capsule_x, capsule_y, capsule_width, capsule_height);
 
-            rehearsal_buffers.push((buffer, text_x, text_y));
+            rehearsal_buffers.push((buffer, text_x, text_y, text_scale));
             computed_marks.push(ComputedRehearsalMark {
                 name: pos.name.to_string(),
                 capsule_x,
@@ -1770,6 +1789,7 @@ impl ApplicationHandler for App {
                 capsule_height,
                 text_x,
                 text_y,
+                text_scale,
             });
         }
 
@@ -2040,7 +2060,7 @@ impl ApplicationHandler for App {
                 let text_areas: Vec<TextArea> = text_state
                     .rehearsal_buffers
                     .iter()
-                    .map(|(buffer, page_x, page_y)| {
+                    .map(|(buffer, page_x, page_y, text_scale)| {
                         // Convert page coordinates to NDC (same as geometry vertices)
                         let ndc_x = (*page_x / WINDOW_WIDTH as f32) * 2.0 - 1.0;
                         let ndc_y = 1.0 - (*page_y / WINDOW_HEIGHT as f32) * 2.0;
@@ -2061,14 +2081,15 @@ impl ApplicationHandler for App {
                             buffer,
                             left: screen_x,
                             top: screen_y,
-                            scale: zoom * scale_factor, // Scale with both zoom and DPI
+                            // Apply zoom, DPI scale, AND per-mark text scaling
+                            scale: zoom * scale_factor * text_scale,
                             bounds: TextBounds {
                                 left: 0,
                                 top: 0,
                                 right: width as i32,
                                 bottom: height as i32,
                             },
-                            default_color: TextColor::rgba(229, 33, 0, 255), // Matches REHEARSAL_RED_SRGB
+                            default_color: TextColor::rgba(255, 0, 0, 255), // Pure red, matches LilyPond
                             custom_glyphs: &[],
                         }
                     })
