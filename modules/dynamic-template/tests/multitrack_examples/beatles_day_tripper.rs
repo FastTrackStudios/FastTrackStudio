@@ -63,9 +63,10 @@ fn beatles_day_tripper() -> Result<()> {
 
     // --- Bass ---
     // Items expand to separate tracks with variant names
+    // Note: "Duplicate" is stripped as equipment metadata
     let bass = TrackGroup::folder("Bass")
         .track("Hofner Guitar", "bass hofner_01.wav")
-        .track("Hofner Guitar Duplicate", "bass hofner.Duplicate _01.wav")
+        .track("Hofner Guitar", "bass hofner.Duplicate _01.wav")
         .end();
 
     // --- Guitars ---

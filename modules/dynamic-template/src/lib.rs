@@ -5,6 +5,7 @@ use monarchy::*;
 
 // region: --- Modules
 
+pub mod equipment;
 mod error;
 mod groups;
 mod item_metadata;
@@ -211,6 +212,8 @@ where
             strip_tempo_from_structure(&mut structure);
             // Strip Pro Tools playlist/take markers from display names
             strip_protools_from_structure(&mut structure);
+            // Strip equipment names (mics, preamps, synth hardware) from display names
+            strip_equipment_from_structure(&mut structure);
         }
 
         // Convert Structure to Tracks, preserving original DAW Items
@@ -475,6 +478,26 @@ fn strip_protools_from_structure(structure: &mut Structure<ItemMetadata>) {
     // Recursively process children
     for child in &mut structure.children {
         strip_protools_from_structure(child);
+    }
+}
+
+/// Strip equipment names from structure display names
+///
+/// This function recursively traverses the structure and strips equipment-related
+/// metadata like mic models (U47, SM57), preamp models (OptoComp, 1176),
+/// processing markers (LIM, EDT), and synth hardware (CASIO, Roland FA06).
+fn strip_equipment_from_structure(structure: &mut Structure<ItemMetadata>) {
+    // Strip equipment from this node's display name
+    if !structure.name.is_empty() {
+        let cleaned = equipment::strip_equipment(&structure.name);
+        if !cleaned.is_empty() && cleaned != structure.name {
+            structure.name = cleaned;
+        }
+    }
+
+    // Recursively process children
+    for child in &mut structure.children {
+        strip_equipment_from_structure(child);
     }
 }
 

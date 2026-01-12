@@ -129,7 +129,7 @@ fn jared_james_nichols() -> Result<()> {
         .track("Reference", "Man In the Box Print 20220502 v2 .wav")
         .folder("Unsorted")
             .track("Mono", "20 Mono .wav")
-            .track("Mono U47", "21 Mono U47 .wav")
+            .track("Mono", "21 Mono U47 .wav")
             .track("Talk Box", "29 Talk Box .wav")
             .track("Jared", "30 Jared .wav")
             .track("Jared Call Back", "31 Jared call back .wav")
