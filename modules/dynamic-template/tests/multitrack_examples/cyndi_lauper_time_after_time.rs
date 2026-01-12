@@ -58,11 +58,11 @@ fn cyndi_lauper_time_after_time() -> Result<()> {
     //   │   ├─ Left            ← 04.Electric.Gtr.Left.Warren.TimeAfterTime.126bpm_01.wav
     //   │   └─ Right           ← 05.Electric.Gtr.Right.Warren.TimeAfterTime.126bpm_01.wav
     //   └─ Acoustic            ← 03.Acoustic Guitar.Nick.TimeAfterTime.126bpm_01.wav
+    // Vocals/
+    //   ├─ Lead                ← 01.LV BECCA.TimeAfterTime.126bpm_01.wav (LV = Lead Vocal)
+    //   └─ BGVs                ← 02.BV LUCA.TimeAfterTime.126bpm_01.wav (BV = Background Vocal)
     // Guide                    ← 17.Click.Print_01.wav
     // Reference                ← 18.Time After Time Presonus HD8 Mix_01.wav
-    // Unsorted/
-    //   ├─ 01.LV BECCA...      ← 01.LV BECCA.TimeAfterTime.126bpm_01.wav (Lead Vocal - LV not recognized)
-    //   └─ 02.BV LUCA...       ← 02.BV LUCA.TimeAfterTime.126bpm_01.wav (Background Vocal - BV not recognized)
     let expected = TrackStructureBuilder::new()
         .folder("Drums")
             .track("Kick", "08.Kick.TimeAfterTime.126bpm_01.wav")
@@ -92,12 +92,12 @@ fn cyndi_lauper_time_after_time() -> Result<()> {
             .end()
             .track("Acoustic", "03.Acoustic Guitar.Nick.TimeAfterTime.126bpm_01.wav")
         .end()
+        .folder("Vocals")
+            .track("Lead", "01.LV BECCA.TimeAfterTime.126bpm_01.wav")
+            .track("BGVs", "02.BV LUCA.TimeAfterTime.126bpm_01.wav")
+        .end()
         .track("Guide", "17.Click.Print_01.wav")
         .track("Reference", "18.Time After Time Presonus HD8 Mix_01.wav")
-        .folder("Unsorted")
-            .track("01.LV BECCA.TimeAfterTime.126bpm", "01.LV BECCA.TimeAfterTime.126bpm_01.wav")
-            .track("02.BV LUCA.TimeAfterTime.126bpm", "02.BV LUCA.TimeAfterTime.126bpm_01.wav")
-        .end()
         .build();
 
     assert_tracks_equal(&tracks, &expected)?;

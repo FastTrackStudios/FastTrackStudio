@@ -50,6 +50,9 @@ fn led_zeppelin_the_ocean() -> Result<()> {
     // Drums/
     //   ├─ Kick               ← 01.Kick_01.wav
     //   ├─ Snare              ← 02.SNR_01.wav
+    //   ├─ OH/
+    //   │   ├─ OH 1           ← 03. OHL_01.wav (now recognized via "ohl" pattern)
+    //   │   └─ OH 2           ← 04. OHR_01.wav (now recognized via "ohr" pattern)
     //   └─ Rooms/
     //       ├─ L              ← 05. Room_01 L.wav
     //       └─ R              ← 06. Room_01 R.wav
@@ -77,8 +80,6 @@ fn led_zeppelin_the_ocean() -> Result<()> {
     //   ├─ 20. LA LA Voc 1    ← 20. LA LA Voc 1_01.wav
     //   └─ 21. LA LA Voc 2    ← 21. LA LA Voc 2_01.wav
     // Unsorted/
-    //   ├─ 03. OHL            ← 03. OHL_01.wav (overhead L - not recognized)
-    //   ├─ 04. OHR            ← 04. OHR_01.wav (overhead R - not recognized)
     //   ├─ 15. Lead_1.A1      ← 15. lead_1.A1_01.wav (guitar lead - ambiguous)
     //   ├─ 16. Lead_1.A2      ← 16. lead_1.A2_01.wav
     //   ├─ 17. Lead_2.A1      ← 17. lead_2.A1_01.wav
@@ -88,6 +89,10 @@ fn led_zeppelin_the_ocean() -> Result<()> {
         .folder("Drums")
             .track("Kick", "01.Kick_01.wav")
             .track("Snare", "02.SNR_01.wav")
+            .folder("OH")
+                .track("OH 1", "03. OHL_01.wav")
+                .track("OH 2", "04. OHR_01.wav")
+            .end()
             .folder("Rooms")
                 .track("L", "05. Room_01 L.wav")
                 .track("R", "06. Room_01 R.wav")
@@ -123,8 +128,6 @@ fn led_zeppelin_the_ocean() -> Result<()> {
             .track("21. LA LA Voc 2", "21. LA LA Voc 2_01.wav")
         .end()
         .folder("Unsorted")
-            .track("03. OHL", "03. OHL_01.wav")
-            .track("04. OHR", "04. OHR_01.wav")
             .track("15. Lead_1.A1", "15. lead_1.A1_01.wav")
             .track("16. Lead_1.A2", "16. lead_1.A2_01.wav")
             .track("17. Lead_2.A1", "17. lead_2.A1_01.wav")

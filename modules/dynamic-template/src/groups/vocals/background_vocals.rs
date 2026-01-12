@@ -95,7 +95,7 @@ impl From<BackgroundVocals> for ItemMetadataGroup {
         // are already specific enough patterns that uniquely identify background vocals
         ItemMetadataGroup::builder("BGVs")
             .prefix("BGV")
-            .patterns(["bgv", "background", "backing", "harmony", "choir"])
+            .patterns(["bgv", "bv", "background", "backing", "harmony", "choir"])
             .performer(ItemMetadataGroup::builder("Performer").build()) // Priority 1: Performer (uses global patterns)
             .section(ItemMetadataGroup::builder("Section").build()) // Priority 2: Section (uses global patterns)
             .arrangement(harmony_arrangement) // Priority 3: Arrangement (harmony-specific patterns)

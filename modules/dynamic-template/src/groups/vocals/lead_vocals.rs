@@ -18,7 +18,7 @@ impl From<LeadVocals> for ItemMetadataGroup {
             // Patterns for lead vocals - includes generic vocal patterns since Lead is the
             // default destination for vocal tracks that don't match BGVs patterns
             .patterns([
-                "lead", "main", "solo", "ld", "ldv", "vox", "vocal", "voca", "voice",
+                "lead", "main", "solo", "ld", "ldv", "lv", "vox", "vocal", "voca", "voice",
             ])
             // Only match if parent (Vocals) also matches - prevents "JohnyLead" from matching
             // just because it contains "Lead" without any vocal-related patterns
