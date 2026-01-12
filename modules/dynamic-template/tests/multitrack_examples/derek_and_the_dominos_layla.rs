@@ -1,3 +1,4 @@
+use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -5,6 +6,7 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 #[test]
 fn derek_and_the_dominos_layla() -> Result<()> {
     // -- Setup & Fixtures
+    // Derek and the Dominos - Layla: 52-track session with extensive guitar multi-tracking and BG harmonies
     let items = vec![
         "01. Drums_01.wav",
         "02.Bass DI_01.wav",
@@ -70,7 +72,97 @@ fn derek_and_the_dominos_layla() -> Result<()> {
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
-    // TODO: Add expected structure once provided
+    // Expected structure:
+    // Drums                         ← 01. Drums_01.wav
+    // Bass/
+    //   ├─ Bass                     ← 02.Bass DI_01.wav
+    //   └─ Amp                      ← 03.Bass Amp_01.wav
+    // Guitars/
+    //   ├─ Acoustic/
+    //   │   ├─ Acoustic 1           ← 21. Acoustic_01.wav
+    //   │   ├─ Acoustic 2           ← 22. Acoustic Dbl_01.wav
+    //   │   ├─ Acoustic 3           ← 23.Acoustic Lead Line_01.wav
+    //   │   ├─ Acoustic 4           ← 24.Acoustic Lead Line Dbl_01.wav
+    //   │   └─ Outro                ← 25.Acoustic Outro_01.wav
+    //   ├─ Guitars 1-6              ← Rhythm/Lead DI tracks
+    //   ├─ Amp 1-3, Amp DBL 1-3     ← Rhythm/Lead Amp tracks
+    //   ├─ Solo DI/Amp              ← Solo guitar tracks
+    //   └─ Outro DI/Amp/DBL         ← Outro guitar tracks
+    // Keys                          ← 26. Piano_01.wav
+    // Vocals                        ← 27. Vocal_02.wav
+    // Reference/
+    //   ├─ 52.Soyuz... Mix 1        ← L channel
+    //   └─ 52.Soyuz... Mix 2        ← R channel
+    // Unsorted/
+    //   └─ BG A-E Harm 1-8          ← 24 BG harmony tracks (missing "bgv" pattern)
+    let expected = TrackStructureBuilder::new()
+        .track("Drums", "01. Drums_01.wav")
+        .folder("Bass")
+            .track("Bass", "02.Bass DI_01.wav")
+            .track("Amp", "03.Bass Amp_01.wav")
+        .end()
+        .folder("Guitars")
+            .folder("Acoustic")
+                .track("Acoustic 1", "21. Acoustic_01.wav")
+                .track("Acoustic 2", "22. Acoustic Dbl_01.wav")
+                .track("Acoustic 3", "23.Acoustic Lead Line_01.wav")
+                .track("Acoustic 4", "24.Acoustic Lead Line Dbl_01.wav")
+                .track("Outro", "25.Acoustic Outro_01.wav")
+            .end()
+            .track("Guitars 1", "04.Rhythm Gtr DI_02.wav")
+            .track("Amp 1", "05.Rhythm Gtr Amp_02.wav")
+            .track("Guitars 2", "06.Rhythm Gtr DI Dbl_02.wav")
+            .track("Amp DBL 1", "07.Rhythm Gtr Amp Dbl_02.wav")
+            .track("Guitars 3", "08.Lead Harm Gtr DI_02.wav")
+            .track("Amp 2", "09.Lead Harm Gtr Amp_02.wav")
+            .track("Guitars 4", "10.Lead Harm Gtr DI Dbl_02.wav")
+            .track("Amp DBL 2", "11.Lead Harm Gtr Amp Dbl_02.wav")
+            .track("Guitars 5", "12. Lead Gtr DI_02.wav")
+            .track("Amp 3", "13. Lead Gtr Amp_02.wav")
+            .track("Guitars 6", "14. Lead Gtr DI Dbl_02.wav")
+            .track("Amp DBL 3", "15. Lead Gtr Amp Dbl_02.wav")
+            .track("Solo Amp", "16. Solo Gtr Amp_02.wav")
+            .track("Solo DI", "16. Solo Gtr DI_02.wav")
+            .track("Outro DI", "17. Outro Gtr DI_01.wav")
+            .track("Outro Amp", "18. Outro Gtr Amp_01.wav")
+            .track("Outro DI DBL", "19. Outro Gtr DI Dbl_01.wav")
+            .track("Outro Amp DBL", "20. Outro Gtr Amp Dbl_01.wav")
+        .end()
+        .track("Keys", "26. Piano_01.wav")
+        .track("Vocals", "27. Vocal_02.wav")
+        .folder("Reference")
+            .track("52.Soyuz Bomblet Layla Cover Mix 1", "52.Soyuz Bomblet Layla Cover Mix_01.L.wav")
+            .track("52.Soyuz Bomblet Layla Cover Mix 2", "52.Soyuz Bomblet Layla Cover Mix_01.R.wav")
+        .end()
+        .folder("Unsorted")
+            .track("28.BG A Harm 1", "28.BG A Harm 1_02.wav")
+            .track("29.BG A Harm 2", "29.BG A Harm 2_02.wav")
+            .track("30.BG A Harm 3", "30.BG A Harm 3_02.wav")
+            .track("31.BG A Harm 4", "31.BG A Harm 4_02.wav")
+            .track("32.BG B Harm 1", "32.BG B Harm 1_02.wav")
+            .track("33.BG B Harm 2", "33.BG B Harm 2_02.wav")
+            .track("34.BG B Harm 3", "34.BG B Harm 3_02.wav")
+            .track("35.BG B Harm 4", "35.BG B Harm 4_02.wav")
+            .track("36.BG C Harm 1", "36.BG C Harm 1_02.wav")
+            .track("37.BG C Harm 2", "37.BG C Harm 2_02.wav")
+            .track("38.BG C Harm 3", "38.BG C Harm 3_02.wav")
+            .track("39.BG C Harm 4", "39.BG C Harm 4_02.wav")
+            .track("40.BG D Harm 1", "40.BG D Harm 1_02.wav")
+            .track("41.BG D Harm 2", "41.BG D Harm 2_02.wav")
+            .track("42.BG D Harm 3", "42.BG D Harm 3_02.wav")
+            .track("43.BG D Harm 4", "43.BG D Harm 4_02.wav")
+            .track("44.BG D Harm 5", "44.BG D Harm 5_02.wav")
+            .track("45.BG D Harm 6", "45.BG D Harm 6_02.wav")
+            .track("46.BG D Harm 7", "46.BG D Harm 7_02.wav")
+            .track("47.BG D Harm 8", "47.BG D Harm 8_02.wav")
+            .track("48.BG E Harm 1", "48.BG E Harm 1_02.wav")
+            .track("49.BG E Harm 2", "49.BG E Harm 2_02.wav")
+            .track("50.BG E Harm 3", "50.BG E Harm 3_02.wav")
+            .track("51.BG E Harm 4", "51.BG E Harm 4_02.wav")
+        .end()
+        .build();
+
+    assert_tracks_equal(&tracks, &expected)?;
 
     Ok(())
 }

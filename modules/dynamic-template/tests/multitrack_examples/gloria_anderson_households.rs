@@ -1,3 +1,4 @@
+use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -5,6 +6,7 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 #[test]
 fn gloria_anderson_households() -> Result<()> {
     // -- Setup & Fixtures
+    // Gloria Anderson - Households: 22-track session with Nashville guitars and string arrangements
     let items = vec![
         "01.Households ACO JC MIXX_01.wav",
         "02.Kick LIM_01.wav",
@@ -38,7 +40,81 @@ fn gloria_anderson_households() -> Result<()> {
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
-    // TODO: Add expected structure once provided
+    // Expected structure:
+    // Drums/
+    //   ├─ Kick/
+    //   │   ├─ SUM                  ← 03.Kick Out LIM
+    //   │   └─ Lim                  ← 02.Kick LIM
+    //   ├─ Snare/
+    //   │   ├─ Snare 1              ← 04.Sn T (Top)
+    //   │   └─ Snare 2              ← 05.Sn B (Bottom)
+    //   ├─ Toms/
+    //   │   ├─ T1                   ← 07.Tom 1 EDT
+    //   │   └─ T2                   ← 08.Tom 2 EDT
+    //   ├─ Cymbals/
+    //   │   ├─ OH                   ← 09.OH
+    //   │   └─ Hi Hat               ← 06.Hat
+    //   └─ Rooms                    ← 10.Room
+    // Bass/                         ← Body, Neck
+    // Guitars/
+    //   ├─ Tim L                    ← Households_TimHoek_NashGtrL
+    //   └─ Tim R                    ← Households_TimHoek_NashGtrR
+    // Keys                          ← 14.Piano
+    // Vocals/
+    //   ├─ Lead                     ← 16.Vocal
+    //   └─ BGVs/                    ← Choir, Vocal harmony (D)
+    // Orchestra/
+    //   ├─ Strings Tim              ← Households_TimHoek_Strings
+    //   └─ Strings                  ← Strings (R)
+    // Unsorted/                     ← ACO JC MIXX, AG 1, Steel
+    let expected = TrackStructureBuilder::new()
+        .folder("Drums")
+            .folder("Kick")
+                .track("SUM", "03.Kick Out LIM_01.wav")
+                .track("Lim", "02.Kick LIM_01.wav")
+            .end()
+            .folder("Snare")
+                .track("Snare 1", "04.Sn T_01.wav")
+                .track("Snare 2", "05.Sn B_01.wav")
+            .end()
+            .folder("Toms")
+                .track("T1", "07.Tom 1 EDT_01.wav")
+                .track("T2", "08.Tom 2 EDT_01.wav")
+            .end()
+            .folder("Cymbals")
+                .track("OH", "09.OH_01.wav")
+                .track("Hi Hat", "06.Hat_01.wav")
+            .end()
+            .track("Rooms", "10.Room_01.wav")
+        .end()
+        .folder("Bass")
+            .track("Bass 1", "11.Bass Body_01.wav")
+            .track("Bass 2", "12.Bass Neck_01.wav")
+        .end()
+        .folder("Guitars")
+            .track("Tim L", "Households_TimHoek_NashGtrL.wav")
+            .track("Tim R", "Households_TimHoek_NashGtrR.wav")
+        .end()
+        .track("Keys", "14.Piano_01.wav")
+        .folder("Vocals")
+            .track("Lead", "16.Vocal_01.wav")
+            .folder("BGVs")
+                .track("BGVs 1", "Choir.wav")
+                .track("BGVs 2", "Vocal harmony (D).wav")
+            .end()
+        .end()
+        .folder("Orchestra")
+            .track("Strings Tim", "Households_TimHoek_Strings.wav")
+            .track("Strings", "Strings (R).wav")
+        .end()
+        .folder("Unsorted")
+            .track("01.Households ACO JC MIXX", "01.Households ACO JC MIXX_01.wav")
+            .track("13.AG 1", "13.AG 1_01.wav")
+            .track("15.Steel", "15.Steel_01.wav")
+        .end()
+        .build();
+
+    assert_tracks_equal(&tracks, &expected)?;
 
     Ok(())
 }

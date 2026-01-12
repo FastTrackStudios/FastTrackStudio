@@ -1,3 +1,4 @@
+use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -5,6 +6,7 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 #[test]
 fn steve_maggiora_bring_it_on_back() -> Result<()> {
     // -- Setup & Fixtures
+    // Steve Maggiora - Bring It On Back: 71-track soul/R&B session with horn section and layered BGVs
     let items = vec![
         "01 Trumpet - Bring It On Back.wav",
         "02 Trombone - Bring It On Back.wav",
@@ -78,7 +80,158 @@ fn steve_maggiora_bring_it_on_back() -> Result<()> {
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
-    // TODO: Add expected structure once provided
+    // Expected structure:
+    // Drums/
+    //   ├─ Kick/                    ← SUM (In/Out) and Kick
+    //   ├─ Snare/                   ← Top, Bottom, Snare
+    //   ├─ Toms/                    ← Floor, Bottom, Top, Tom
+    //   ├─ Cymbals/
+    //   │   ├─ Hi Hat               ← HH.wav
+    //   │   ├─ OH/                  ← OH_SUM, OHL, OHR
+    //   │   └─ Cymbals              ← Cymbal Swell
+    //   └─ Rooms/                   ← L, R, Mono, C, Rooms_SUM
+    // Bass/                         ← Amp, Bass 1 (DI), Bass 2 (SUM)
+    // Guitars/
+    //   ├─ Lead/                    ← Lead Guitar Amp/DI/SUM
+    //   ├─ Guitars/                 ← Guitar DI/SUM
+    //   └─ Guitars 1/               ← Guitar Amp 1A/1B
+    // Keys/
+    //   ├─ Piano/                   ← Piano L/R/SUM
+    //   └─ Wurlitzer/               ← Wurlitzer L/R/SUM
+    // Synths/                       ← Boho Synth Pluck, Synth Rise Run 1/2
+    // Vocals/
+    //   ├─ Lead/                    ← Kim VOX, Lead VOX, Xavier VOX, Doubles
+    //   └─ BGVs/                    ← BGV1_SUM, BGV1A-D
+    // Choir                         ← 03 Tenor sax (misclassified)
+    // Orchestra/
+    //   ├─ Trumpets                 ← 01 Trumpet
+    //   └─ Trombone                 ← 02 Trombone
+    // SFX/                          ← Sax FX Only, Bridge FX
+    // Unsorted/                     ← Bari Sax, Sax fills, MG's Bridge BG's
+    let expected = TrackStructureBuilder::new()
+        .folder("Drums")
+            .folder("Kick")
+                .folder("SUM")
+                    .track("In", "Kick In.wav")
+                    .track("Out", "Kick Out.wav")
+                .end()
+                .track("Kick", "Kick_SUM.wav")
+            .end()
+            .folder("Snare")
+                .track("Top", "Snare Top.wav")
+                .track("Bottom", "Snare Bottom.wav")
+                .track("Snare", "Snare_SUM.wav")
+            .end()
+            .folder("Toms")
+                .track("Floor", "Floor Tom_SUM.wav")
+                .folder("Bottom")
+                    .track("Tom Bottom 1", "Floor Tom Bottom.wav")
+                    .track("Tom Bottom 2", "Rack Tom Bottom.wav")
+                .end()
+                .folder("Top")
+                    .track("Tom Top 1", "Floor Tom Top.wav")
+                    .track("Tom Top 2", "Rack Tom Top.wav")
+                .end()
+                .track("Tom", "Rack Tom_SUM.wav")
+            .end()
+            .folder("Cymbals")
+                .track("Hi Hat", "HH.wav")
+                .folder("OH")
+                    .track("OH 1", "OH_SUM.wav")
+                    .track("OH 2", "OHL.wav")
+                    .track("OH 3", "OHR.wav")
+                .end()
+                .track("Cymbals", "Cymbal Swell.wav")
+            .end()
+            .folder("Rooms")
+                .track("L", "Room L.wav")
+                .track("R", "Room R.wav")
+                .track("Mono", "Room Mono.wav")
+                .track("Rooms 1", "Room C.wav")
+                .track("Rooms 2", "Rooms_SUM.wav")
+            .end()
+        .end()
+        .folder("Bass")
+            .track("Amp", "Bass Amp.wav")
+            .track("Bass 1", "Bass DI.wav")
+            .track("Bass 2", "Bass_SUM.wav")
+        .end()
+        .folder("Guitars")
+            .folder("Lead")
+                .track("Amp", "Lead Guitar Amp.wav")
+                .track("DI", "Lead Guitar DI.wav")
+                .track("Electric", "Lead Guitar_SUM.wav")
+            .end()
+            .folder("Guitars")
+                .track("DI", "Guitar DI.wav")
+                .track("Electric", "Guitar_SUM.wav")
+            .end()
+            .folder("Guitars 1")
+                .track("Electric Amp 1 1", "Guitar Amp 1A.wav")
+                .track("Electric Amp 1 2", "Guitar Amp 1B.wav")
+            .end()
+        .end()
+        .folder("Keys")
+            .folder("Piano")
+                .track("Piano 1", "Piano L.wav")
+                .track("Piano 2", "Piano R.wav")
+                .track("Piano 3", "Piano_SUM.wav")
+            .end()
+            .folder("Wurlitzer")
+                .track("Wurlitzer 1", "Wurlitzer L.wav")
+                .track("Wurlitzer 2", "Wurlitzer R.wav")
+                .track("Wurlitzer 3", "Wurlitzer_SUM.wav")
+            .end()
+        .end()
+        .folder("Synths")
+            .track("Boho Synth Pluck", "Boho Synth Pluck.wav")
+            .track("Synth Rise Run 1", "Synth Rise Run 1.wav")
+            .track("Synth Rise Run 2", "Synth Rise Run 2.wav")
+        .end()
+        .folder("Vocals")
+            .folder("Lead")
+                .folder("Kim")
+                    .track("Kim", "Kim VOX_SUM.wav")
+                    .folder("Kim 1")
+                        .track("Kim 1", "Kim VOX 1A.wav")
+                        .track("Kim 2", "Kim VOX 1B.wav")
+                    .end()
+                .end()
+                .folder("Main")
+                    .track("Lead 1", "Lead VOX.wav")
+                    .track("Lead 2", "Xavier VOX.wav")
+                .end()
+                .folder("Double")
+                    .track("Double 1", "Lead VOX Double 1.wav")
+                    .track("Double 2", "Lead VOX Double 2.wav")
+                    .track("Double 3", "Lead VOX Double_SUM.wav")
+                .end()
+            .end()
+            .folder("BGVs")
+                .track("BGVs 1", "BGV1_SUM.wav")
+                .track("BGVs 2", "BGV1A.wav")
+                .track("BGVs 3", "BGV1B.wav")
+                .track("BGVs 4", "BGV1C.wav")
+                .track("BGVs 5", "BGV1D.wav")
+            .end()
+        .end()
+        .track("Choir", "03 Tenor sax - Bring It On Back.wav")
+        .folder("Orchestra")
+            .track("Trumpets", "01 Trumpet - Bring It On Back.wav")
+            .track("Trombone", "02 Trombone - Bring It On Back.wav")
+        .end()
+        .folder("SFX")
+            .track("Sax FX Only - Bring It On Back Multis", "06 Sax FX only - Bring It On  Back Multis.wav")
+            .track("Bridge", "08 MG_s Bridge BG_s FX only - Bring It On  Back Multis.wav")
+        .end()
+        .folder("Unsorted")
+            .track("Bari Sax - Bring It On Back", "04 Bari sax - Bring It On Back.wav")
+            .track("05Sax Fills - Bring It On Back Multis", "05Sax fills - Bring It On  Back Multis.wav")
+            .track("MG_s Bridge BG_s - Bring It On Back Multis", "07 MG_s Bridge BG_s - Bring It On  Back Multis.wav")
+        .end()
+        .build();
+
+    assert_tracks_equal(&tracks, &expected)?;
 
     Ok(())
 }

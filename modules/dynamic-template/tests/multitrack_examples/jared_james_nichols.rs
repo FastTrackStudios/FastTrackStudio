@@ -1,3 +1,4 @@
+use daw::tracks::{TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -5,6 +6,7 @@ type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 #[test]
 fn jared_james_nichols() -> Result<()> {
     // -- Setup & Fixtures
+    // Jared James Nichols: 35-track rock session with detailed drum room mics and guitar buses
     let items = vec![
         "01 Kick In .wav",
         "02 Kick Out .wav",
@@ -51,7 +53,91 @@ fn jared_james_nichols() -> Result<()> {
     println!("\nTrack list:");
     daw::tracks::display_tracklist(&tracks);
 
-    // TODO: Add expected structure once provided
+    // Expected structure:
+    // Drums/
+    //   ├─ Kick/
+    //   │   ├─ SUM/                 ← In/Out
+    //   │   └─ Kick                 ← Sub Kick
+    //   ├─ Snare/
+    //   │   ├─ Top/                 ← Top 1/2 (dup)
+    //   │   └─ Bottom               ← Snare Bot
+    //   ├─ Toms/
+    //   │   ├─ Floor                ← 09 Floor
+    //   │   └─ Toms                 ← 08 Rack
+    //   └─ Cymbals/
+    //       ├─ Hi Hat/              ← Hat, Close RM Hat, Mid RM Hat, Far RM Hat
+    //       ├─ Ride/                ← Close/Mid/Far RM Ride
+    //       └─ OH/                  ← OH Hat, OH Ride, OH Mono
+    // Bass/                         ← Bass DI, Bass Mic
+    // Guitars/                      ← Gtr Bus 1/2, Solo, Solo LEFT/RIGHT
+    // Guide                         ← Smart Tempo Multitrack Set 1
+    // Reference                     ← Man In the Box Print
+    // Unsorted/                     ← Crotch, Mono, Mono U47, Talk Box, Jared vox
+    let expected = TrackStructureBuilder::new()
+        .folder("Drums")
+            .folder("Kick")
+                .folder("SUM")
+                    .track("In", "01 Kick In .wav")
+                    .track("Out", "02 Kick Out .wav")
+                .end()
+                .track("Kick", "03 Sub Kick .wav")
+            .end()
+            .folder("Snare")
+                .folder("Top")
+                    .track("Top 1", "04 Snare Top .wav")
+                    .track("Top 2", "05 Snare Top.dup2 .wav")
+                .end()
+                .track("Bottom", "06 Snare Bot .wav")
+            .end()
+            .folder("Toms")
+                .track("Floor", "09 Floor .wav")
+                .track("Toms", "08 Rack .wav")
+            .end()
+            .folder("Cymbals")
+                .folder("Hi Hat")
+                    .track("Hi Hat 1", "07 Hat .wav")
+                    .track("Hi Hat 2", "14 Close RM Hat .wav")
+                    .track("Hi Hat 3", "16 Mid RM Hat .wav")
+                    .track("Hi Hat 4", "18 Far RM Hat .wav")
+                .end()
+                .folder("Ride")
+                    .track("Ride 1", "15 Close RM Ride .wav")
+                    .track("Ride 2", "17 Mid RM Ride .wav")
+                    .track("Ride 3", "19 Far RM Ride .wav")
+                .end()
+                .folder("OH")
+                    .track("Hi Hat", "10 OH Hat .wav")
+                    .track("Ride", "11 OH Ride .wav")
+                    .track("OH", "12 OH Mono .wav")
+                .end()
+            .end()
+        .end()
+        .folder("Bass")
+            .track("Bass 1", "22 Bass DI .wav")
+            .track("Bass 2", "23 Bass Mic .wav")
+        .end()
+        .folder("Guitars")
+            .track("Bus 1", "24 Gtr Bus .wav")
+            .track("Bus 2", "25 Gtr Bus.dup1 .wav")
+            .track("Solo", "26 SoloGtr Bus.d .wav")
+            .track("Solo LEFT", "27 SoloGtr RM Left .wav")
+            .track("Solo RIGHT", "28 SoloGtr RM Right .wav")
+        .end()
+        .track("Guide", "Smart Tempo Multitrack Set 1.wav")
+        .track("Reference", "Man In the Box Print 20220502 v2 .wav")
+        .folder("Unsorted")
+            .track("Crotch", "13 Crotch .wav")
+            .track("Mono", "20 Mono .wav")
+            .track("Mono U47", "21 Mono U47 .wav")
+            .track("Talk Box", "29 Talk Box .wav")
+            .track("Jared", "30 Jared .wav")
+            .track("Jared Call Back", "31 Jared call back .wav")
+            .track("Jared Harm 1", "32 Jared Harm .wav")
+            .track("Jared Harm 2", "33 Jared Harm.dup1 .wav")
+        .end()
+        .build();
+
+    assert_tracks_equal(&tracks, &expected)?;
 
     Ok(())
 }
