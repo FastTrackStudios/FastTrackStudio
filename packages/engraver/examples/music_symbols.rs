@@ -729,6 +729,7 @@ struct App {
     view: ViewState,
     font: Option<LoadedFont>,
     page_style: PageStyle,
+    rehearsal_mode: RehearsalMarkMode,
 }
 
 impl App {
@@ -765,6 +766,7 @@ impl App {
             view: ViewState::default(),
             font,
             page_style,
+            rehearsal_mode: RehearsalMarkMode::LeftMargin, // Use margin mode
         }
     }
 
@@ -960,6 +962,15 @@ impl DemoSong {
     }
 }
 
+/// Positioning mode for rehearsal marks
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RehearsalMarkMode {
+    /// Free positioning above the staff, width based on text
+    AboveStaff,
+    /// Fixed width in the left margin, vertically aligned with staff
+    LeftMargin,
+}
+
 /// Computed position for a rehearsal mark / section label
 #[derive(Debug, Clone)]
 struct RehearsalMarkPosition {
@@ -1003,9 +1014,12 @@ fn compute_system_sky_line(
     min_y - staff_space * 0.5
 }
 
-/// Compute the positions of all rehearsal marks based on layout
-/// Uses sky line collision avoidance to position marks above content
-fn compute_rehearsal_positions(page_style: &PageStyle, window_width: f32) -> Vec<RehearsalMarkPosition> {
+/// Compute the positions of all rehearsal marks based on layout and positioning mode
+fn compute_rehearsal_positions(
+    page_style: &PageStyle,
+    window_width: f32,
+    mode: RehearsalMarkMode,
+) -> Vec<RehearsalMarkPosition> {
     use engraver::model::{compute_system_layout, LineBreakPolicy};
 
     let song = DemoSong::new();
@@ -1035,6 +1049,11 @@ fn compute_rehearsal_positions(page_style: &PageStyle, window_width: f32) -> Vec
     let system_spacing = staff_space * 8.0;
     let section_extra_spacing = staff_space * 2.0;
 
+    // For margin mode: calculate fixed capsule dimensions
+    let margin_padding_h = 2.0; // Tiny horizontal padding from page edge and staff
+    let margin_capsule_width = margin_left_px - (margin_padding_h * 2.0);
+    let margin_capsule_x = page_x + margin_padding_h;
+
     let mut positions = Vec::new();
     let mut current_y = content_top + staff_space * 4.0;
 
@@ -1049,22 +1068,33 @@ fn compute_rehearsal_positions(page_style: &PageStyle, window_width: f32) -> Vec
         // Only record positions for section starts
         if sys_info.is_section_start {
             if let Some(name) = song.section_at(sys_info.start_measure) {
-                // Same sizing as build_scene
-                let char_width = staff_space * 0.7;
-                let padding = staff_space * 0.5;
-                let capsule_height = staff_space * 1.8;
-                let capsule_width = (name.len() as f32 * char_width) + (padding * 2.0);
-                let capsule_x = content_left;
+                let (capsule_x, capsule_y, capsule_width, capsule_height) = match mode {
+                    RehearsalMarkMode::AboveStaff => {
+                        // Free positioning above staff, width based on text
+                        let char_width = staff_space * 0.7;
+                        let padding = staff_space * 0.5;
+                        let height = staff_space * 1.8;
+                        let width = (name.len() as f32 * char_width) + (padding * 2.0);
 
-                // Compute sky line for collision avoidance
-                let sky_line = compute_system_sky_line(staff_y, staff_space, sys_info);
+                        // Compute sky line for collision avoidance
+                        let sky_line = compute_system_sky_line(staff_y, staff_space, sys_info);
+                        let y = sky_line - height - staff_space * 1.5;
 
-                // Position capsule well above the sky line (increased clearance)
-                let capsule_y = sky_line - capsule_height - staff_space * 1.5;
+                        (content_left, y, width, height)
+                    }
+                    RehearsalMarkMode::LeftMargin => {
+                        // Fixed width in margin, height slightly smaller than staff
+                        let margin_padding_v = 3.0; // Vertical padding above/below staff
+                        let height = system_height - (margin_padding_v * 2.0);
+                        let y = staff_y + margin_padding_v; // Inset from top of staff
+
+                        (margin_capsule_x, y, margin_capsule_width, height)
+                    }
+                };
 
                 log::debug!(
-                    "Rehearsal '{}': staff_y={:.1}, sky_line={:.1}, capsule_y={:.1}",
-                    name, staff_y, sky_line, capsule_y
+                    "Rehearsal '{}' ({:?}): pos=({:.1}, {:.1}), size=({:.1}x{:.1})",
+                    name, mode, capsule_x, capsule_y, capsule_width, capsule_height
                 );
 
                 positions.push(RehearsalMarkPosition {
@@ -1672,7 +1702,7 @@ impl ApplicationHandler for App {
         );
 
         // Get base positions from layout calculator
-        let base_positions = compute_rehearsal_positions(&self.page_style, WINDOW_WIDTH as f32);
+        let base_positions = compute_rehearsal_positions(&self.page_style, WINDOW_WIDTH as f32, self.rehearsal_mode);
 
         // Create text buffers and compute actual dimensions
         let font_size = 14.0;
@@ -1703,19 +1733,33 @@ impl ApplicationHandler for App {
                 .unwrap_or(50.0);
             let text_height = line_height;
 
-            // TEXT POSITION FIRST: use the capsule position as the text anchor point
-            // The layout calculator gives us where the label should appear
-            let text_x = pos.capsule_x;
-            let text_y = pos.capsule_y;
+            // Position text and capsule based on mode
+            let (text_x, text_y, capsule_x, capsule_y, capsule_width, capsule_height) = match self.rehearsal_mode {
+                RehearsalMarkMode::AboveStaff => {
+                    // Text-first: capsule wraps around text with padding
+                    let tx = pos.capsule_x;
+                    let ty = pos.capsule_y;
+                    let cx = tx - padding_h;
+                    let cy = ty - padding_v;
+                    let cw = text_width + padding_h * 2.0;
+                    let ch = text_height + padding_v * 2.0;
+                    (tx, ty, cx, cy, cw, ch)
+                }
+                RehearsalMarkMode::LeftMargin => {
+                    // Fixed capsule: text centered within
+                    let cx = pos.capsule_x;
+                    let cy = pos.capsule_y;
+                    let cw = pos.capsule_width;
+                    let ch = pos.capsule_height;
+                    // Center text horizontally and vertically within capsule
+                    let tx = cx + (cw - text_width) / 2.0;
+                    let ty = cy + (ch - text_height) / 2.0;
+                    (tx, ty, cx, cy, cw, ch)
+                }
+            };
 
-            // CAPSULE WRAPS AROUND TEXT: derive capsule bounds from text position and size
-            let capsule_x = text_x - padding_h;
-            let capsule_y = text_y - padding_v;
-            let capsule_width = text_width + padding_h * 2.0;
-            let capsule_height = text_height + padding_v * 2.0;
-
-            log::info!("Rehearsal '{}': text=({:.1}, {:.1}, {:.1}x{:.1}) -> capsule=({:.1}, {:.1}, {:.1}x{:.1})",
-                pos.name, text_x, text_y, text_width, text_height, capsule_x, capsule_y, capsule_width, capsule_height);
+            log::info!("Rehearsal '{}' ({:?}): text=({:.1}, {:.1}, {:.1}x{:.1}) -> capsule=({:.1}, {:.1}, {:.1}x{:.1})",
+                pos.name, self.rehearsal_mode, text_x, text_y, text_width, text_height, capsule_x, capsule_y, capsule_width, capsule_height);
 
             rehearsal_buffers.push((buffer, text_x, text_y));
             computed_marks.push(ComputedRehearsalMark {
