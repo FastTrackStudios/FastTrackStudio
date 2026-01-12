@@ -270,7 +270,7 @@ impl PageStyle {
 }
 
 // Path to Leland font files
-const LELAND_FONT_PATH: &str = "libs/reference/sheet-music/fonts/leland/Leland.otf";
+const LELAND_FONT_PATH: &str = "libs/reference/sheet-music/musescore/fonts/leland/Leland.otf";
 const LELAND_METADATA_PATH: &str = "libs/reference/sheet-music/fonts/leland/leland_metadata.json";
 
 /// Camera/view transform uniform
@@ -279,18 +279,22 @@ const LELAND_METADATA_PATH: &str = "libs/reference/sheet-music/fonts/leland/lela
 struct CameraUniform {
     /// Combined transform: [scale_x, scale_y, offset_x, offset_y]
     transform: [f32; 4],
+    /// Resolution: [width, height, unused, unused]
+    resolution: [f32; 4],
 }
 
 impl CameraUniform {
     fn new() -> Self {
         Self {
             transform: [1.0, 1.0, 0.0, 0.0],
+            resolution: [WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32, 0.0, 0.0],
         }
     }
 
     fn from_view(view: &ViewState) -> Self {
         Self {
             transform: [view.zoom, view.zoom, view.pan_x, view.pan_y],
+            resolution: [WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32, 0.0, 0.0],
         }
     }
 }
@@ -1612,7 +1616,6 @@ impl ApplicationHandler for App {
                 required_features: Features::empty(),
                 required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::default(),
-                experimental_features: Default::default(),
                 trace: Default::default(),
             },
         ))
@@ -1651,7 +1654,7 @@ impl ApplicationHandler for App {
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Music Pipeline Layout"),
             bind_group_layouts: &[&camera_bind_group_layout],
-            immediate_size: 0,
+            push_constant_ranges: &[],
         });
 
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
@@ -1675,7 +1678,7 @@ impl ApplicationHandler for App {
             },
             depth_stencil: None,
             multisample: MultisampleState::default(),
-            multiview_mask: None,
+            multiview: None,
             cache: None,
         });
 
@@ -1724,7 +1727,6 @@ impl ApplicationHandler for App {
                 pos.name,
                 &Attrs::new().family(Family::SansSerif).weight(glyphon::Weight::BOLD),
                 Shaping::Advanced,
-                None,
             );
             buffer.shape_until_scroll(&mut font_system, false);
 
@@ -1824,7 +1826,7 @@ impl ApplicationHandler for App {
             },
             depth_stencil: None,
             multisample: MultisampleState::default(),
-            multiview_mask: None,
+            multiview: None,
             cache: None,
         });
 
@@ -2130,7 +2132,6 @@ impl ApplicationHandler for App {
                         depth_stencil_attachment: None,
                         timestamp_writes: None,
                         occlusion_query_set: None,
-                        multiview_mask: None,
                     });
 
                     // Draw main geometry (staff lines, notes, etc.)

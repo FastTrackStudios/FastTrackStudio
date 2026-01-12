@@ -4,8 +4,14 @@
 //! using Vello for 2D vector graphics.
 
 pub mod canvas2d;
+pub mod primitives;
 
 pub use canvas2d::{Canvas2D, Color as Canvas2DColor, Rect as Canvas2DRect, Vertex2D};
+pub use primitives::{
+    create_camera_bind_group_layout, create_line, create_main_pipeline, create_rect,
+    create_sdf_pipeline, create_sdf_rounded_rect, px_to_ndc, CameraUniform, SdfRectVertex,
+    Vertex, SDF_SHADER_SOURCE, SHADER_SOURCE,
+};
 
 use kurbo::{Affine, Point, Rect};
 use peniko::Color;

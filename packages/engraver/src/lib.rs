@@ -26,6 +26,7 @@ pub mod layout;
 pub mod model;
 pub mod renderer;
 pub mod scene;
+pub mod ui;
 
 // Re-export main types
 pub use model::{Measure, MusicElement, Part, Score, Voice};
