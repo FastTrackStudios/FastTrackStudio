@@ -67,18 +67,17 @@ fn led_zeppelin_the_ocean() -> Result<()> {
     //   ├─ 13. Gtr_R.A1       ← 13. Gtr_R.A1_01.wav
     //   └─ 14. Gtr_R.A2       ← 14. Gtr_R.A2_01.wav
     // Vocals/
-    //   ├─ Lead/
-    //   │   ├─ Outro/
-    //   │   │   ├─ Outro 1    ← 23. Outro Vocal 1_01.wav
-    //   │   │   ├─ Outro 2    ← 24. Outro Vocal 2_01.wav
-    //   │   │   ├─ Outro 3    ← 25. Outro Vocal 3_01.wav
-    //   │   │   ├─ Outro 4    ← 26. Outro Vocal 4_01.wav
-    //   │   │   └─ Outro 5    ← 27. Outro Vocal 5_01.wav
-    //   │   └─ Lead/
-    //   │       ├─ Lead 1     ← 19. lead_Vox_01.wav
-    //   │       └─ Lead 2     ← 22. Vocal Adlib_01.wav
-    //   ├─ 20. LA LA Voc 1    ← 20. LA LA Voc 1_01.wav
-    //   └─ 21. LA LA Voc 2    ← 21. LA LA Voc 2_01.wav
+    //   ├─ Outro/
+    //   │   ├─ Outro 1        ← 23. Outro Vocal 1_01.wav
+    //   │   ├─ Outro 2        ← 24. Outro Vocal 2_01.wav
+    //   │   ├─ Outro 3        ← 25. Outro Vocal 3_01.wav
+    //   │   ├─ Outro 4        ← 26. Outro Vocal 4_01.wav
+    //   │   └─ Outro 5        ← 27. Outro Vocal 5_01.wav
+    //   ├─ Vocals/
+    //   │   ├─ Lead 1         ← 19. lead_Vox_01.wav
+    //   │   └─ Lead 2         ← 22. Vocal Adlib_01.wav
+    //   ├─ Vocals 1           ← 20. LA LA Voc 1_01.wav
+    //   └─ Vocals 2           ← 21. LA LA Voc 2_01.wav
     // Unsorted/
     //   ├─ 15. Lead_1.A1      ← 15. lead_1.A1_01.wav (guitar lead - ambiguous)
     //   ├─ 16. Lead_1.A2      ← 16. lead_1.A2_01.wav
@@ -111,21 +110,19 @@ fn led_zeppelin_the_ocean() -> Result<()> {
             .track("14. Gtr_R.A2", "14. Gtr_R.A2_01.wav")
         .end()
         .folder("Vocals")
-            .folder("Lead")
-                .folder("Outro")
-                    .track("Outro 1", "23. Outro Vocal 1_01.wav")
-                    .track("Outro 2", "24. Outro Vocal 2_01.wav")
-                    .track("Outro 3", "25. Outro Vocal 3_01.wav")
-                    .track("Outro 4", "26. Outro Vocal 4_01.wav")
-                    .track("Outro 5", "27. Outro Vocal 5_01.wav")
-                .end()
-                .folder("Lead")
-                    .track("Lead 1", "19. lead_Vox_01.wav")
-                    .track("Lead 2", "22. Vocal Adlib_01.wav")
-                .end()
+            .folder("Outro")
+                .track("Outro 1", "23. Outro Vocal 1_01.wav")
+                .track("Outro 2", "24. Outro Vocal 2_01.wav")
+                .track("Outro 3", "25. Outro Vocal 3_01.wav")
+                .track("Outro 4", "26. Outro Vocal 4_01.wav")
+                .track("Outro 5", "27. Outro Vocal 5_01.wav")
             .end()
-            .track("20. LA LA Voc 1", "20. LA LA Voc 1_01.wav")
-            .track("21. LA LA Voc 2", "21. LA LA Voc 2_01.wav")
+            .folder("Vocals")
+                .track("Lead 1", "19. lead_Vox_01.wav")
+                .track("Lead 2", "22. Vocal Adlib_01.wav")
+            .end()
+            .track("Vocals 1", "20. LA LA Voc 1_01.wav")
+            .track("Vocals 2", "21. LA LA Voc 2_01.wav")
         .end()
         .folder("Unsorted")
             .track("15. Lead_1.A1", "15. lead_1.A1_01.wav")

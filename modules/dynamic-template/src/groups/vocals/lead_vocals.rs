@@ -17,8 +17,11 @@ impl From<LeadVocals> for ItemMetadataGroup {
         ItemMetadataGroup::builder("Lead")
             // Patterns for lead vocals - includes generic vocal patterns since Lead is the
             // default destination for vocal tracks that don't match BGVs patterns
+            // NOTE: "lead" and "solo" are intentionally excluded - they're ambiguous without
+            // vocal context (could be guitar lead/solo). Use requires_parent_match() to ensure
+            // parent Vocals group matches first, providing the vocal context.
             .patterns([
-                "lead", "main", "solo", "ld", "ldv", "lv", "vox", "vocal", "voca", "voice",
+                "main", "ld", "ldv", "lv", "voc", "vox", "vocal", "voca", "voice",
             ])
             // Only match if parent (Vocals) also matches - prevents "JohnyLead" from matching
             // just because it contains "Lead" without any vocal-related patterns
