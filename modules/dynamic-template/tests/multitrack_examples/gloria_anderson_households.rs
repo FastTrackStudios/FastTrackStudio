@@ -57,6 +57,7 @@ fn gloria_anderson_households() -> Result<()> {
     //   └─ Rooms                    ← 10.Room
     // Bass/                         ← Body, Neck
     // Guitars/
+    //   ├─ Acoustic                 ← 13.AG 1
     //   ├─ Tim L                    ← Households_TimHoek_NashGtrL
     //   └─ Tim R                    ← Households_TimHoek_NashGtrR
     // Keys                          ← 14.Piano
@@ -66,7 +67,7 @@ fn gloria_anderson_households() -> Result<()> {
     // Orchestra/
     //   ├─ Strings Tim              ← Households_TimHoek_Strings
     //   └─ Strings                  ← Strings (R)
-    // Unsorted/                     ← ACO JC MIXX, AG 1, Steel
+    // Unsorted/                     ← ACO JC MIXX, Steel
     let expected = TrackStructureBuilder::new()
         .folder("Drums")
             .folder("Kick")
@@ -92,6 +93,7 @@ fn gloria_anderson_households() -> Result<()> {
             .track("Bass 2", "12.Bass Neck_01.wav")
         .end()
         .folder("Guitars")
+            .track("Acoustic", "13.AG 1_01.wav")
             .track("Tim L", "Households_TimHoek_NashGtrL.wav")
             .track("Tim R", "Households_TimHoek_NashGtrR.wav")
         .end()
@@ -109,7 +111,6 @@ fn gloria_anderson_households() -> Result<()> {
         .end()
         .folder("Unsorted")
             .track("01.Households ACO JC MIXX", "01.Households ACO JC MIXX_01.wav")
-            .track("13.AG 1", "13.AG 1_01.wav")
             .track("15.Steel", "15.Steel_01.wav")
         .end()
         .build();

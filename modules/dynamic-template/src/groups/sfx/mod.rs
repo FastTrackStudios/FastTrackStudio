@@ -24,6 +24,8 @@ impl From<SFX> for Group<ItemMetadata> {
                 "sfx",
                 "effect",
                 "effects",
+                // Hardware FX units
+                "h3000", // Eventide H3000
                 // Sound design
                 "whoosh",
                 "impact",

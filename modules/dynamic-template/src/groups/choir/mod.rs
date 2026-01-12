@@ -26,6 +26,18 @@ impl From<Choir> for Group<ItemMetadata> {
                 "a_cappella",
                 "acappella",
             ])
+            // Exclude instrument contexts - "Tenor sax" should NOT match choir
+            .exclude(vec![
+                "sax",
+                "saxophone",
+                "trumpet",
+                "trombone",
+                "horn",
+                "clarinet",
+                "flute",
+                "oboe",
+                "bassoon",
+            ])
             .build()
     }
 }

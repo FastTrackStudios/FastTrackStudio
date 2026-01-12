@@ -61,8 +61,8 @@ fn katie_ferrara_valerie() -> Result<()> {
     //   └─ BGVs/
     //       ├─ Main                 ← 14.KD.BV
     //       └─ DBL                  ← 15.KD.BV Dbl
+    // SFX/                          ← H3000 effects (Eventide H3000)
     // Reference                     ← 21.Valerie Mix
-    // Unsorted/                     ← H3000 effects (unrecognized)
     let expected = TrackStructureBuilder::new()
         .folder("Drums")
             .track("Kick", "01.Kick_01-01.wav")
@@ -93,12 +93,12 @@ fn katie_ferrara_valerie() -> Result<()> {
                 .track("DBL", "15.KD.BV Dbl_01-01.wav")
             .end()
         .end()
-        .track("Reference", "21.Valerie Mix_01-01.wav")
-        .folder("Unsorted")
+        .folder("SFX")
             .track("16.H3000.One_01-01", "16.H3000.One_01-01.wav")
             .track("17.H3000.Two_01-01", "17.H3000.Two_01-01.wav")
             .track("18.H3000.Three_01-01", "18.H3000.Three_01-01.wav")
         .end()
+        .track("Reference", "21.Valerie Mix_01-01.wav")
         .build();
 
     assert_tracks_equal(&tracks, &expected)?;

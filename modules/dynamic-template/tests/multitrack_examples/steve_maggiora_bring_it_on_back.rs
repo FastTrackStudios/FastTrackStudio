@@ -101,13 +101,14 @@ fn steve_maggiora_bring_it_on_back() -> Result<()> {
     // Synths/                       ← Boho Synth Pluck, Synth Rise Run 1/2
     // Vocals/
     //   ├─ Lead/                    ← Kim VOX, Lead VOX, Xavier VOX, Doubles
-    //   └─ BGVs/                    ← BGV1_SUM, BGV1A-D
-    // Choir                         ← 03 Tenor sax (misclassified)
+    //   └─ BGVs/
+    //       ├─ Bridge/              ← MG's Bridge BG's (now recognized as BG)
+    //       └─ BGVs/                ← BGV1_SUM, BGV1A-D
     // Orchestra/
     //   ├─ Trumpets                 ← 01 Trumpet
     //   └─ Trombone                 ← 02 Trombone
-    // SFX/                          ← Sax FX Only, Bridge FX
-    // Unsorted/                     ← Bari Sax, Sax fills, MG's Bridge BG's
+    // SFX                           ← 06 Sax FX only
+    // Unsorted/                     ← Tenor/Bari Sax, Sax fills (Tenor sax no longer matches Choir)
     let expected = TrackStructureBuilder::new()
         .folder("Drums")
             .folder("Kick")
@@ -208,26 +209,28 @@ fn steve_maggiora_bring_it_on_back() -> Result<()> {
                 .end()
             .end()
             .folder("BGVs")
-                .track("BGVs 1", "BGV1_SUM.wav")
-                .track("BGVs 2", "BGV1A.wav")
-                .track("BGVs 3", "BGV1B.wav")
-                .track("BGVs 4", "BGV1C.wav")
-                .track("BGVs 5", "BGV1D.wav")
+                .folder("Bridge")
+                    .track("Bridge 1", "07 MG_s Bridge BG_s - Bring It On  Back Multis.wav")
+                    .track("Bridge 2", "08 MG_s Bridge BG_s FX only - Bring It On  Back Multis.wav")
+                .end()
+                .folder("BGVs")
+                    .track("BGVs 1", "BGV1_SUM.wav")
+                    .track("BGVs 2", "BGV1A.wav")
+                    .track("BGVs 3", "BGV1B.wav")
+                    .track("BGVs 4", "BGV1C.wav")
+                    .track("BGVs 5", "BGV1D.wav")
+                .end()
             .end()
         .end()
-        .track("Choir", "03 Tenor sax - Bring It On Back.wav")
         .folder("Orchestra")
             .track("Trumpets", "01 Trumpet - Bring It On Back.wav")
             .track("Trombone", "02 Trombone - Bring It On Back.wav")
         .end()
-        .folder("SFX")
-            .track("Sax FX Only - Bring It On Back Multis", "06 Sax FX only - Bring It On  Back Multis.wav")
-            .track("Bridge", "08 MG_s Bridge BG_s FX only - Bring It On  Back Multis.wav")
-        .end()
+        .track("SFX", "06 Sax FX only - Bring It On  Back Multis.wav")
         .folder("Unsorted")
+            .track("Tenor Sax - Bring It On Back", "03 Tenor sax - Bring It On Back.wav")
             .track("Bari Sax - Bring It On Back", "04 Bari sax - Bring It On Back.wav")
             .track("05Sax Fills - Bring It On Back Multis", "05Sax fills - Bring It On  Back Multis.wav")
-            .track("MG_s Bridge BG_s - Bring It On Back Multis", "07 MG_s Bridge BG_s - Bring It On  Back Multis.wav")
         .end()
         .build();
 
