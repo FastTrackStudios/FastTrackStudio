@@ -50,7 +50,7 @@ pub struct Tambourine;
 impl From<Tambourine> for Group<ItemMetadata> {
     fn from(_val: Tambourine) -> Self {
         Group::builder("Tambourine")
-            .patterns(vec!["tambourine", "tamb"])
+            .patterns(vec!["tambourine", "tamb", "tambo"])
             .build()
     }
 }

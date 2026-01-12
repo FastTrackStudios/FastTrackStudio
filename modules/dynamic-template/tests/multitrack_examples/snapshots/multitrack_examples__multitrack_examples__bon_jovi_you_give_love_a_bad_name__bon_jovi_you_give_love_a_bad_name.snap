@@ -10,8 +10,9 @@ expression: structure.to_tree_string()
 ---Solo: [Guitar Solo.wav]
 ---Main: [Guitar Slide.wav]
 --Acoustic: [Acoustic.Right.wav, Acoustic.wav]
+--Banjo: [banjo.One.wav, banjo.Solo.wav, banjo.Two.wav]
 -Vocals
 --Lead: [Vocal.Tune.Lead.wav]
 --BGVs: [Vocal.Harmony.One.wav, Vocal.Harmony.Two.wav]
 -Reference: [You Give Love A Bad Name.PRINT.L.wav, You Give Love A Bad Name.PRINT.R.wav]
--Unsorted: [banjo.One.wav, banjo.Solo.wav, ... and 4 more]
+-Unsorted: [Fiddle PNT.L.wav, Fiddle PNT.R.wav, Mando.wav]

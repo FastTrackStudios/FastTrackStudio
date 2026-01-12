@@ -99,6 +99,8 @@ fn steve_maggiora_bring_it_on_back() -> Result<()> {
     //   ├─ Piano/                   ← Piano L/R/SUM
     //   └─ Wurlitzer/               ← Wurlitzer L/R/SUM
     // Synths/                       ← Boho Synth Pluck, Synth Rise Run 1/2
+    // Horns/
+    //   └─ Saxophone 1-3            ← Tenor sax, Bari sax, Sax FX
     // Vocals/
     //   ├─ Lead/                    ← Kim VOX, Lead VOX, Xavier VOX, Doubles
     //   └─ BGVs/
@@ -107,8 +109,7 @@ fn steve_maggiora_bring_it_on_back() -> Result<()> {
     // Orchestra/
     //   ├─ Trumpets                 ← 01 Trumpet
     //   └─ Trombone                 ← 02 Trombone
-    // SFX                           ← 06 Sax FX only
-    // Unsorted/                     ← Tenor/Bari Sax, Sax fills (Tenor sax no longer matches Choir)
+    // Unsorted                      ← 05Sax fills (single track, not a folder)
     let expected = TrackStructureBuilder::new()
         .folder("Drums")
             .folder("Kick")
@@ -189,6 +190,11 @@ fn steve_maggiora_bring_it_on_back() -> Result<()> {
             .track("Synth Rise Run 1", "Synth Rise Run 1.wav")
             .track("Synth Rise Run 2", "Synth Rise Run 2.wav")
         .end()
+        .folder("Horns")
+            .track("Saxophone 1", "03 Tenor sax - Bring It On Back.wav")
+            .track("Saxophone 2", "04 Bari sax - Bring It On Back.wav")
+            .track("Saxophone 3", "06 Sax FX only - Bring It On  Back Multis.wav")
+        .end()
         .folder("Vocals")
             .folder("Lead")
                 .folder("Kim")
@@ -226,12 +232,7 @@ fn steve_maggiora_bring_it_on_back() -> Result<()> {
             .track("Trumpets", "01 Trumpet - Bring It On Back.wav")
             .track("Trombone", "02 Trombone - Bring It On Back.wav")
         .end()
-        .track("SFX", "06 Sax FX only - Bring It On  Back Multis.wav")
-        .folder("Unsorted")
-            .track("Tenor Sax - Bring It On Back", "03 Tenor sax - Bring It On Back.wav")
-            .track("Bari Sax - Bring It On Back", "04 Bari sax - Bring It On Back.wav")
-            .track("05Sax Fills - Bring It On Back Multis", "05Sax fills - Bring It On  Back Multis.wav")
-        .end()
+        .track("Unsorted", "05Sax fills - Bring It On  Back Multis.wav")
         .build();
 
     assert_tracks_equal(&tracks, &expected)?;

@@ -13,7 +13,8 @@ impl From<AcousticGuitar> for Group<ItemMetadata> {
             .patterns(vec![
                 // Generic acoustic patterns
                 "acoustic",
-                "ag", // Common abbreviation for Acoustic Guitar
+                "ag",  // Common abbreviation for Acoustic Guitar
+                "aco", // Another common abbreviation
                 "acc",
                 "nylon",
                 "classical",

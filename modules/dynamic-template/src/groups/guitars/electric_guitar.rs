@@ -78,6 +78,7 @@ impl From<ElectricGuitar> for ItemMetadataGroup {
             .patterns([
                 "electric",
                 "guitar",
+                "eg", // Common abbreviation for Electric Guitar
                 "lead guitar",
                 "lead_guitar",
                 "leadguitar",

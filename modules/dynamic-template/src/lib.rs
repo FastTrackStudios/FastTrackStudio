@@ -14,11 +14,12 @@ mod tempo;
 
 pub use error::{Error, Result};
 pub use groups::{
-    Bass, Choir, Drums, Guide, Guitars, Keys, Orchestra, Percussion, Reference, SFX, Synths, Vocals,
+    Bass, Choir, Drums, Guide, Guitars, Harmonica, Horns, Keys, Orchestra, Percussion, Reference,
+    SFX, Synths, Vocals,
 };
 pub use item_metadata::ItemMetadata;
 pub use song_name::{detect_song_names, detect_song_names_with_config, strip_song_names, SongNameConfig};
-pub use tempo::extract_tempo;
+pub use tempo::{extract_tempo, strip_tempo};
 
 // endregion: --- Modules
 
@@ -47,6 +48,8 @@ pub fn default_config() -> DynamicTemplateConfig {
         .group(Guitars)
         .group(Keys)
         .group(Synths)
+        .group(Horns)
+        .group(Harmonica)
         .group(Vocals)
         .group(Choir)
         .group(Orchestra)
@@ -202,6 +205,8 @@ where
             if !detected_song_names.is_empty() {
                 strip_song_names_from_structure(&mut structure, &detected_song_names);
             }
+            // Strip tempo/BPM markers from display names
+            strip_tempo_from_structure(&mut structure);
         }
 
         // Convert Structure to Tracks, preserving original DAW Items
@@ -428,6 +433,25 @@ fn strip_song_names_from_structure(
     // Recursively process children
     for child in &mut structure.children {
         strip_song_names_from_structure(child, song_names);
+    }
+}
+
+/// Strip tempo/BPM markers from structure display names
+///
+/// This function recursively traverses the structure and strips tempo patterns
+/// like "126bpm", "83.5BPM" from each node's display name.
+fn strip_tempo_from_structure(structure: &mut Structure<ItemMetadata>) {
+    // Strip tempo from this node's display name
+    if !structure.name.is_empty() {
+        let cleaned = tempo::strip_tempo(&structure.name);
+        if !cleaned.is_empty() && cleaned != structure.name {
+            structure.name = cleaned;
+        }
+    }
+
+    // Recursively process children
+    for child in &mut structure.children {
+        strip_tempo_from_structure(child);
     }
 }
 

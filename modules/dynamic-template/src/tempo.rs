@@ -2,6 +2,85 @@
 //!
 //! Extracts tempo/BPM values from track names like "126bpm", "83.5BPM", etc.
 
+/// Strip tempo/BPM from a string
+///
+/// Removes patterns like "126bpm", "83.5BPM", etc. from the string
+/// and cleans up surrounding punctuation.
+///
+/// # Examples
+///
+/// ```
+/// use dynamic_template::strip_tempo;
+///
+/// assert_eq!(strip_tempo("Track.126bpm.wav"), "Track.wav");
+/// assert_eq!(strip_tempo("83.5BPM_song"), "song");
+/// assert_eq!(strip_tempo("AD.Big Kit.83.5BPM.L.wav"), "AD.Big Kit.L.wav");
+/// ```
+pub fn strip_tempo(input: &str) -> String {
+    let lower = input.to_lowercase();
+
+    // Find "bpm" in the string
+    let Some(bpm_idx) = lower.find("bpm") else {
+        return input.to_string();
+    };
+
+    let bpm_end = bpm_idx + 3; // length of "bpm"
+
+    // Look backwards from bpm to find the start of the number
+    let prefix = &input[..bpm_idx];
+    let prefix_trimmed = prefix.trim_end();
+
+    let mut num_start = prefix_trimmed.len();
+    let mut found_digit = false;
+    let mut has_decimal = false;
+
+    for (i, c) in prefix_trimmed.char_indices().rev() {
+        if c.is_ascii_digit() {
+            num_start = i;
+            found_digit = true;
+        } else if c == '.' && found_digit && !has_decimal {
+            num_start = i;
+            has_decimal = true;
+        } else if found_digit {
+            break;
+        }
+    }
+
+    if !found_digit {
+        return input.to_string();
+    }
+
+    // Build the result by removing the tempo pattern
+    let before = &input[..num_start];
+    let after = &input[bpm_end..];
+
+    // Clean up separators around the removed portion
+    let before = before.trim_end_matches(|c: char| c == '.' || c == '_' || c == ' ' || c == '-');
+    let after = after.trim_start_matches(|c: char| c == '.' || c == '_' || c == ' ' || c == '-');
+
+    if before.is_empty() {
+        after.to_string()
+    } else if after.is_empty() {
+        before.to_string()
+    } else {
+        // Try to preserve the original separator style by looking at what was around the tempo
+        // Look at the character immediately before the number in the original string
+        let sep_before = if num_start > 0 {
+            input.chars().nth(num_start - 1)
+        } else {
+            None
+        };
+
+        let separator = match sep_before {
+            Some('_') => "_",
+            Some('-') => "-",
+            Some(' ') => " ",
+            _ => ".",
+        };
+        format!("{before}{separator}{after}")
+    }
+}
+
 /// Extract tempo in BPM from a string
 ///
 /// Looks for patterns like:
@@ -110,5 +189,42 @@ mod tests {
         assert_eq!(extract_tempo("abc123bpm"), Some(123.0));
         // Decimal at end
         assert_eq!(extract_tempo("120.bpm"), Some(120.0));
+    }
+
+    // Tests for strip_tempo
+
+    #[test]
+    fn strip_tempo_basic() {
+        assert_eq!(strip_tempo("126bpm"), "");
+        assert_eq!(strip_tempo("Track.126bpm"), "Track");
+        assert_eq!(strip_tempo("Track.126bpm.wav"), "Track.wav");
+    }
+
+    #[test]
+    fn strip_tempo_decimal() {
+        assert_eq!(strip_tempo("83.5BPM_song"), "song");
+        assert_eq!(strip_tempo("AD.Big Kit.83.5BPM.L.wav"), "AD.Big Kit.L.wav");
+        assert_eq!(strip_tempo("Vocal.Comp.83.5BPM.wav"), "Vocal.Comp.wav");
+    }
+
+    #[test]
+    fn strip_tempo_preserves_separators() {
+        assert_eq!(strip_tempo("Track_120bpm_v2"), "Track_v2");
+        assert_eq!(strip_tempo("Audio.120bpm.stem"), "Audio.stem");
+    }
+
+    #[test]
+    fn strip_tempo_no_tempo() {
+        assert_eq!(strip_tempo("Kick In.wav"), "Kick In.wav");
+        assert_eq!(strip_tempo("Vocal Track"), "Vocal Track");
+        assert_eq!(strip_tempo("Bass DI"), "Bass DI");
+    }
+
+    #[test]
+    fn strip_tempo_real_world() {
+        // From steve_maggiora_hey_lady test
+        assert_eq!(strip_tempo("AD.Big Kit Gretch.83.5BPM.L"), "AD.Big Kit Gretch.L");
+        assert_eq!(strip_tempo("Bass.Di.83.5BPM"), "Bass.Di");
+        assert_eq!(strip_tempo("H3000.One.New.83.5BPM.L"), "H3000.One.New.L");
     }
 }

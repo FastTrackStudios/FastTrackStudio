@@ -1,5 +1,6 @@
 ---
 source: modules/dynamic-template/tests/multitrack_examples/neil_young_heart_of_gold.rs
+assertion_line: 43
 expression: structure.to_tree_string()
 ---
 -Drums
@@ -11,8 +12,8 @@ expression: structure.to_tree_string()
 ----R: [04.OH R 260VU_01.wav]
 -Bass: [05.Bass DI OptoComp_01.wav, 06.Bass Amp 44A. 260VU_01.wav, 07.Bass Amp 421 260VU_01.wav]
 -Guitars
---Electric: [13.Steel Guitar OptoComp_01.wav]
 --Acoustic: [08.Acoustic OptoComp_01.wav, 09.Acoustic Dbl OptoComp_01.wav, ... and 2 more]
+--Steel: [13.Steel Guitar OptoComp_01.wav]
 -Keys: [14.Piano 260VU_01.wav, 15.Piano Lead 260VU_01.wav]
 -Vocals
 --Lead
