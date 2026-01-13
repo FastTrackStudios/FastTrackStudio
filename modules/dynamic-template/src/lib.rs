@@ -171,8 +171,9 @@ where
             })
             .collect();
 
-        // Detect song/project names that appear in ALL inputs
-        let detected_song_names = song_name::detect_song_names(&input_strings);
+        // Detect song/project names that appear in 80%+ of inputs
+        let song_name_config = song_name::SongNameConfig::default().with_threshold(0.8);
+        let detected_song_names = song_name::detect_song_names_with_config(&input_strings, &song_name_config);
 
         // Create a mapping from item string to original DAW Item
         let item_map: std::collections::HashMap<String, Vec<Item>> =
