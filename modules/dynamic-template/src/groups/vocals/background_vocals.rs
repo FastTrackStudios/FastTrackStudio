@@ -39,11 +39,15 @@ impl From<BackgroundVocals> for ItemMetadataGroup {
                 "high harmony",
                 "high harm",
                 "upper",
+                "Highest",
+                "highest",
                 "Low",
                 "low",
                 "low harmony",
                 "low harm",
                 "lower",
+                "Lowest",
+                "lowest",
                 "Mid",
                 "mid",
                 "middle",
@@ -95,7 +99,15 @@ impl From<BackgroundVocals> for ItemMetadataGroup {
         // are already specific enough patterns that uniquely identify background vocals
         ItemMetadataGroup::builder("BGVs")
             .prefix("BGV")
-            .patterns(["bgv", "bg", "bv", "background", "backing", "harmony", "choir"])
+            .patterns([
+                // Standard abbreviations
+                "bgv", "bg", "bv", "background", "backing", "harmony", "choir",
+                // Harmony position descriptors - these indicate BGV content
+                "high harmony", "low harmony", "mid harmony",
+                "upper harmony", "lower harmony", "middle harmony",
+                // "Hey Hey" is a common vocal hook/response pattern in pop/rock
+                "hey hey",
+            ])
             .performer(ItemMetadataGroup::builder("Performer").build()) // Priority 1: Performer (uses global patterns)
             .section(ItemMetadataGroup::builder("Section").build()) // Priority 2: Section (uses global patterns)
             .arrangement(harmony_arrangement) // Priority 3: Arrangement (harmony-specific patterns)
