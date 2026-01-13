@@ -3,6 +3,21 @@
 use super::{Duration, Note};
 use serde::{Deserialize, Serialize};
 
+/// Unique identifier for a music element (for layout references).
+///
+/// Used by the layout system to track elements during positioning
+/// and collision detection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ElementId(pub usize);
+
+impl ElementId {
+    /// Create a new element ID.
+    #[must_use]
+    pub const fn new(id: usize) -> Self {
+        Self(id)
+    }
+}
+
 /// Rest (silence).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rest {

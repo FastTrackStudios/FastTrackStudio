@@ -190,6 +190,188 @@ pub struct SystemLayout {
     pub total_measures: usize,
 }
 
+/// Information about a page in the score.
+#[derive(Debug, Clone, Default)]
+pub struct PageInfo {
+    /// Page number (1-indexed for display)
+    pub page_number: usize,
+    /// Index of the first system on this page
+    pub first_system_index: usize,
+    /// Number of systems on this page
+    pub system_count: usize,
+}
+
+impl PageInfo {
+    /// Create a new page info.
+    #[must_use]
+    pub fn new(page_number: usize, first_system_index: usize, system_count: usize) -> Self {
+        Self {
+            page_number,
+            first_system_index,
+            system_count,
+        }
+    }
+
+    /// Get the index of the last system on this page.
+    #[must_use]
+    pub fn last_system_index(&self) -> usize {
+        self.first_system_index + self.system_count.saturating_sub(1)
+    }
+}
+
+/// Configuration for page layout calculations.
+#[derive(Debug, Clone, Copy)]
+pub struct PageLayoutConfig {
+    /// Available content height in pixels (page height minus margins)
+    pub content_height: f32,
+    /// Height of a single system (5-line staff) in pixels
+    pub system_height: f32,
+    /// Vertical spacing between systems in pixels
+    pub system_spacing: f32,
+    /// Extra spacing before section starts in pixels
+    pub section_extra_spacing: f32,
+    /// Top padding before first system in pixels
+    pub top_padding: f32,
+    /// Height reserved for header on first page (0.0 if no header)
+    pub first_page_header_height: f32,
+    /// Height reserved for footer on each page (0.0 if no footer)
+    pub footer_height: f32,
+
+    // MuseScore-style vertical spread options
+    /// Whether to spread systems to fill the page vertically
+    pub enable_vertical_spread: bool,
+    /// Minimum spread distance between systems (in pixels)
+    pub min_system_spread: f32,
+    /// Maximum spread distance between systems (in pixels)
+    pub max_system_spread: f32,
+    /// Whether to align first/last systems to margins
+    pub align_to_margins: bool,
+}
+
+impl Default for PageLayoutConfig {
+    fn default() -> Self {
+        Self {
+            content_height: 900.0,
+            system_height: 40.0,
+            system_spacing: 60.0,
+            section_extra_spacing: 20.0,
+            top_padding: 40.0,
+            first_page_header_height: 0.0,
+            footer_height: 0.0,
+            // Spread defaults (disabled by default)
+            enable_vertical_spread: false,
+            min_system_spread: 40.0,
+            max_system_spread: 160.0,
+            align_to_margins: true,
+        }
+    }
+}
+
+/// Computed bounds for a single page's content area.
+///
+/// This struct provides the exact pixel coordinates where content can be rendered
+/// on a page, accounting for margins, headers, and footers.
+#[derive(Debug, Clone, Copy)]
+pub struct PageContentBounds {
+    /// Left edge of content area (after left margin)
+    pub left: f32,
+    /// Right edge of content area (before right margin)
+    pub right: f32,
+    /// Top edge where systems can start (after margin, header, and padding)
+    pub top: f32,
+    /// Bottom edge where content must stop (before footer and margin)
+    pub bottom: f32,
+}
+
+impl PageContentBounds {
+    /// Create bounds for a page.
+    #[must_use]
+    pub fn new(left: f32, right: f32, top: f32, bottom: f32) -> Self {
+        Self { left, right, top, bottom }
+    }
+
+    /// Get the content width.
+    #[must_use]
+    pub fn width(&self) -> f32 {
+        self.right - self.left
+    }
+
+    /// Get the content height.
+    #[must_use]
+    pub fn height(&self) -> f32 {
+        self.bottom - self.top
+    }
+
+    /// Check if a Y position is within the content bounds.
+    #[must_use]
+    pub fn y_in_bounds(&self, y: f32) -> bool {
+        y >= self.top && y <= self.bottom
+    }
+
+    /// Check if a rectangle is fully within the content bounds.
+    #[must_use]
+    pub fn rect_in_bounds(&self, x: f32, y: f32, width: f32, height: f32) -> bool {
+        x >= self.left && (x + width) <= self.right &&
+        y >= self.top && (y + height) <= self.bottom
+    }
+
+    /// Clamp a Y position to within the content bounds.
+    #[must_use]
+    pub fn clamp_y(&self, y: f32) -> f32 {
+        y.clamp(self.top, self.bottom)
+    }
+}
+
+/// Result of laying out systems across pages.
+#[derive(Debug, Clone, Default)]
+pub struct PageLayout {
+    /// Information about each page
+    pub pages: Vec<PageInfo>,
+    /// The system layout this was computed from
+    pub system_layout: SystemLayout,
+}
+
+impl PageLayout {
+    /// Create a new page layout from a system layout.
+    #[must_use]
+    pub fn new(system_layout: SystemLayout) -> Self {
+        Self {
+            pages: Vec::new(),
+            system_layout,
+        }
+    }
+
+    /// Get the number of pages.
+    #[must_use]
+    pub fn page_count(&self) -> usize {
+        self.pages.len()
+    }
+
+    /// Get information about a specific page.
+    #[must_use]
+    pub fn get_page(&self, index: usize) -> Option<&PageInfo> {
+        self.pages.get(index)
+    }
+
+    /// Find which page a system belongs to.
+    #[must_use]
+    pub fn page_for_system(&self, system_index: usize) -> Option<usize> {
+        self.pages.iter().position(|page| {
+            system_index >= page.first_system_index
+                && system_index <= page.last_system_index()
+        })
+    }
+
+    /// Get systems for a specific page.
+    #[must_use]
+    pub fn systems_on_page(&self, page_index: usize) -> Option<&[SystemInfo]> {
+        let page = self.pages.get(page_index)?;
+        let start = page.first_system_index;
+        let end = start + page.system_count;
+        self.system_layout.systems.get(start..end)
+    }
+}
+
 impl SystemLayout {
     /// Create a new empty system layout.
     #[must_use]
@@ -367,6 +549,348 @@ fn compute_section_based_layout(total_measures: usize, section_starts: &[usize])
     }
 }
 
+/// Compute page layout from a system layout.
+///
+/// This function takes a system layout and computes which systems should go
+/// on each page based on the available content height and system sizes.
+/// It follows the MuseScore approach: accumulate systems onto a page until
+/// the next system wouldn't fit, then start a new page.
+///
+/// The first page accounts for header height, and all pages account for footer height.
+///
+/// # Arguments
+/// * `system_layout` - The system layout to paginate
+/// * `config` - Configuration for page dimensions and spacing
+///
+/// # Returns
+/// A `PageLayout` describing how systems are distributed across pages
+pub fn compute_page_layout(system_layout: SystemLayout, config: &PageLayoutConfig) -> PageLayout {
+    if system_layout.systems.is_empty() {
+        return PageLayout {
+            pages: vec![],
+            system_layout,
+        };
+    }
+
+    let mut pages: Vec<PageInfo> = Vec::new();
+    let mut current_page_start = 0;
+    let mut systems_on_current_page = 0;
+
+    // Calculate effective content height for first page (accounting for header)
+    let first_page_available = config.content_height
+        - config.first_page_header_height
+        - config.footer_height;
+
+    // Calculate effective content height for subsequent pages (no header)
+    let other_pages_available = config.content_height - config.footer_height;
+
+    // Start position accounting for header on first page
+    let mut current_y = config.top_padding;
+    let mut current_page_available = first_page_available;
+
+    for (sys_idx, sys_info) in system_layout.systems.iter().enumerate() {
+        // Calculate the height this system will require
+        let extra_spacing = if sys_info.is_section_start && sys_idx > 0 && systems_on_current_page > 0 {
+            config.section_extra_spacing
+        } else {
+            0.0
+        };
+
+        let spacing = if systems_on_current_page > 0 {
+            config.system_spacing
+        } else {
+            0.0
+        };
+
+        let system_total_height = extra_spacing + spacing + config.system_height;
+
+        // Check if this system fits on the current page
+        let would_exceed = current_y + system_total_height > current_page_available;
+
+        if would_exceed && systems_on_current_page > 0 {
+            // Finalize the current page
+            pages.push(PageInfo::new(
+                pages.len() + 1,
+                current_page_start,
+                systems_on_current_page,
+            ));
+
+            // Start a new page (no header on subsequent pages)
+            current_page_start = sys_idx;
+            current_y = config.top_padding + config.system_height;
+            current_page_available = other_pages_available;
+            systems_on_current_page = 1;
+        } else {
+            // Add system to current page
+            current_y += system_total_height;
+            systems_on_current_page += 1;
+        }
+    }
+
+    // Finalize the last page
+    if systems_on_current_page > 0 {
+        pages.push(PageInfo::new(
+            pages.len() + 1,
+            current_page_start,
+            systems_on_current_page,
+        ));
+    }
+
+    PageLayout {
+        pages,
+        system_layout,
+    }
+}
+
+/// Compute page layout from a system layout, also marking which systems start new pages.
+///
+/// This is similar to `compute_page_layout` but also updates the `starts_new_page` flag
+/// on each SystemInfo.
+///
+/// # Arguments
+/// * `system_layout` - The system layout to paginate (will be modified)
+/// * `config` - Configuration for page dimensions and spacing
+///
+/// # Returns
+/// A `PageLayout` describing how systems are distributed across pages
+pub fn compute_page_layout_mut(
+    mut system_layout: SystemLayout,
+    config: &PageLayoutConfig,
+) -> PageLayout {
+    if system_layout.systems.is_empty() {
+        return PageLayout {
+            pages: vec![],
+            system_layout,
+        };
+    }
+
+    let mut pages: Vec<PageInfo> = Vec::new();
+    let mut current_page_start = 0;
+    let mut systems_on_current_page = 0;
+
+    // Calculate effective content height for first page (accounting for header)
+    let first_page_available = config.content_height
+        - config.first_page_header_height
+        - config.footer_height;
+
+    // Calculate effective content height for subsequent pages (no header)
+    let other_pages_available = config.content_height - config.footer_height;
+
+    // Start position accounting for header on first page
+    let mut current_y = config.top_padding;
+    let mut current_page_available = first_page_available;
+
+    for sys_idx in 0..system_layout.systems.len() {
+        let sys_info = &system_layout.systems[sys_idx];
+
+        // Calculate the height this system will require
+        let extra_spacing = if sys_info.is_section_start && sys_idx > 0 && systems_on_current_page > 0 {
+            config.section_extra_spacing
+        } else {
+            0.0
+        };
+
+        let spacing = if systems_on_current_page > 0 {
+            config.system_spacing
+        } else {
+            0.0
+        };
+
+        let system_total_height = extra_spacing + spacing + config.system_height;
+
+        // Check if this system fits on the current page
+        let would_exceed = current_y + system_total_height > current_page_available;
+
+        if would_exceed && systems_on_current_page > 0 {
+            // Finalize the current page
+            pages.push(PageInfo::new(
+                pages.len() + 1,
+                current_page_start,
+                systems_on_current_page,
+            ));
+
+            // Mark this system as starting a new page
+            system_layout.systems[sys_idx].starts_new_page = true;
+
+            // Start a new page (no header on subsequent pages)
+            current_page_start = sys_idx;
+            current_y = config.top_padding + config.system_height;
+            current_page_available = other_pages_available;
+            systems_on_current_page = 1;
+        } else {
+            // Add system to current page
+            current_y += system_total_height;
+            systems_on_current_page += 1;
+        }
+    }
+
+    // Finalize the last page
+    if systems_on_current_page > 0 {
+        pages.push(PageInfo::new(
+            pages.len() + 1,
+            current_page_start,
+            systems_on_current_page,
+        ));
+    }
+
+    PageLayout {
+        pages,
+        system_layout,
+    }
+}
+
+/// Y position for a system on a page.
+#[derive(Debug, Clone, Copy)]
+pub struct SystemYPosition {
+    /// Index of the system
+    pub system_index: usize,
+    /// Y position of the top of the system (staff top line)
+    pub y: f32,
+    /// Height of the system
+    pub height: f32,
+}
+
+/// Distribute systems to fill a page vertically (MuseScore's spreadPage algorithm).
+///
+/// This function takes the systems on a single page and calculates their Y positions
+/// such that they are evenly distributed to fill the available content area.
+///
+/// # Arguments
+/// * `system_indices` - Indices of systems on this page
+/// * `content_top` - Top of content area (Y coordinate)
+/// * `content_bottom` - Bottom of content area (Y coordinate)
+/// * `system_height` - Height of each system
+/// * `config` - Layout configuration with spread settings
+///
+/// # Returns
+/// Vector of Y positions for each system
+pub fn spread_systems_on_page(
+    system_indices: &[usize],
+    content_top: f32,
+    content_bottom: f32,
+    system_height: f32,
+    config: &PageLayoutConfig,
+) -> Vec<SystemYPosition> {
+    if system_indices.is_empty() {
+        return Vec::new();
+    }
+
+    let system_count = system_indices.len();
+    let available_height = content_bottom - content_top;
+    let total_system_height = system_height * system_count as f32;
+
+    // If spread is disabled, use fixed spacing
+    if !config.enable_vertical_spread {
+        return system_indices
+            .iter()
+            .enumerate()
+            .map(|(i, &sys_idx)| {
+                let y = content_top
+                    + config.top_padding
+                    + (i as f32 * (system_height + config.system_spacing));
+                SystemYPosition {
+                    system_index: sys_idx,
+                    y,
+                    height: system_height,
+                }
+            })
+            .collect();
+    }
+
+    // Only one system - center it or align to top
+    if system_count == 1 {
+        let y = if config.align_to_margins {
+            content_top + config.top_padding
+        } else {
+            content_top + (available_height - system_height) / 2.0
+        };
+        return vec![SystemYPosition {
+            system_index: system_indices[0],
+            y,
+            height: system_height,
+        }];
+    }
+
+    // Calculate gaps between systems
+    let gaps = system_count - 1;
+    let available_for_gaps = available_height - total_system_height - config.top_padding;
+
+    // Calculate spread amount per gap, respecting min/max
+    let spread_per_gap = if gaps > 0 {
+        (available_for_gaps / gaps as f32)
+            .clamp(config.min_system_spread, config.max_system_spread)
+    } else {
+        config.system_spacing
+    };
+
+    // If we can't achieve good spread, fall back to fixed spacing
+    let actual_total = config.top_padding + total_system_height + (spread_per_gap * gaps as f32);
+    let start_y = if config.align_to_margins {
+        content_top + config.top_padding
+    } else {
+        // Center the content block
+        content_top + (available_height - actual_total) / 2.0 + config.top_padding
+    };
+
+    // Calculate Y position for each system
+    let mut current_y = start_y;
+    system_indices
+        .iter()
+        .map(|&sys_idx| {
+            let pos = SystemYPosition {
+                system_index: sys_idx,
+                y: current_y,
+                height: system_height,
+            };
+            current_y += system_height + spread_per_gap;
+            pos
+        })
+        .collect()
+}
+
+/// Calculate Y positions for all systems across all pages.
+///
+/// This convenience function combines page layout with vertical spreading
+/// to produce final Y coordinates for every system in the score.
+///
+/// # Arguments
+/// * `page_layout` - The page layout computed from `compute_page_layout`
+/// * `config` - Layout configuration
+/// * `content_bounds_per_page` - Function to get content bounds for each page
+///
+/// # Returns
+/// Vector of Y positions for all systems
+pub fn compute_all_system_y_positions<F>(
+    page_layout: &PageLayout,
+    config: &PageLayoutConfig,
+    content_bounds_per_page: F,
+) -> Vec<SystemYPosition>
+where
+    F: Fn(usize) -> PageContentBounds,
+{
+    let mut all_positions = Vec::new();
+
+    for (page_idx, page) in page_layout.pages.iter().enumerate() {
+        let bounds = content_bounds_per_page(page_idx);
+
+        // Get system indices for this page
+        let system_indices: Vec<usize> =
+            (page.first_system_index..page.first_system_index + page.system_count).collect();
+
+        let positions = spread_systems_on_page(
+            &system_indices,
+            bounds.top,
+            bounds.bottom,
+            config.system_height,
+            config,
+        );
+
+        all_positions.extend(positions);
+    }
+
+    all_positions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,5 +932,143 @@ mod tests {
         assert_eq!(layout.systems[0].measure_count, 4);
         assert_eq!(layout.systems[1].measure_count, 8);
         assert_eq!(layout.systems[2].measure_count, 4);
+    }
+
+    #[test]
+    fn test_page_layout_single_page() {
+        // Create a system layout with 4 systems
+        let system_layout = SystemLayout::fixed_measures_per_line(16, 4);
+
+        // Config that fits all systems on one page
+        let config = PageLayoutConfig {
+            content_height: 500.0,
+            system_height: 40.0,
+            system_spacing: 60.0,
+            section_extra_spacing: 20.0,
+            top_padding: 40.0,
+            ..Default::default()
+        };
+
+        let page_layout = compute_page_layout(system_layout, &config);
+
+        assert_eq!(page_layout.page_count(), 1);
+        assert_eq!(page_layout.pages[0].system_count, 4);
+    }
+
+    #[test]
+    fn test_page_layout_multiple_pages() {
+        // Create a system layout with 8 systems
+        let system_layout = SystemLayout::fixed_measures_per_line(32, 4);
+
+        // Config that only fits 2 systems per page
+        // First system: top_padding (40) + system_height (40) = 80
+        // Each additional: system_spacing (60) + system_height (40) = 100
+        // 1 system: 80
+        // 2 systems: 80 + 100 = 180
+        // 3 systems: 180 + 100 = 280 > 250 (doesn't fit)
+        let config = PageLayoutConfig {
+            content_height: 250.0,
+            system_height: 40.0,
+            system_spacing: 60.0,
+            section_extra_spacing: 20.0,
+            top_padding: 40.0,
+            ..Default::default()
+        };
+
+        let page_layout = compute_page_layout(system_layout, &config);
+
+        // 8 systems, 2 per page = 4 pages
+        assert_eq!(page_layout.page_count(), 4);
+        assert_eq!(page_layout.pages[0].system_count, 2);
+        assert_eq!(page_layout.pages[1].system_count, 2);
+        assert_eq!(page_layout.pages[2].system_count, 2);
+        assert_eq!(page_layout.pages[3].system_count, 2);
+    }
+
+    #[test]
+    fn test_page_layout_with_sections() {
+        // Create a system layout with sections
+        let section_starts = vec![0, 8];
+        let system_layout = compute_system_layout(
+            32,
+            &section_starts,
+            &LineBreakPolicy::FixedMeasuresPerLine {
+                measures: 4,
+                break_at_sections: true,
+            },
+        );
+
+        // Config with section extra spacing
+        let config = PageLayoutConfig {
+            content_height: 400.0,
+            system_height: 40.0,
+            system_spacing: 60.0,
+            section_extra_spacing: 30.0, // Extra spacing for sections
+            top_padding: 40.0,
+            ..Default::default()
+        };
+
+        let page_layout = compute_page_layout(system_layout, &config);
+
+        // Should create multiple pages
+        assert!(page_layout.page_count() >= 2);
+    }
+
+    #[test]
+    fn test_page_for_system() {
+        let system_layout = SystemLayout::fixed_measures_per_line(32, 4);
+
+        // Config with 2 systems per page
+        let config = PageLayoutConfig {
+            content_height: 250.0,
+            system_height: 40.0,
+            system_spacing: 60.0,
+            section_extra_spacing: 20.0,
+            top_padding: 40.0,
+            ..Default::default()
+        };
+
+        let page_layout = compute_page_layout(system_layout, &config);
+
+        // First 2 systems on page 0
+        assert_eq!(page_layout.page_for_system(0), Some(0));
+        assert_eq!(page_layout.page_for_system(1), Some(0));
+
+        // Systems 2-3 on page 1
+        assert_eq!(page_layout.page_for_system(2), Some(1));
+        assert_eq!(page_layout.page_for_system(3), Some(1));
+
+        // Systems 4-5 on page 2
+        assert_eq!(page_layout.page_for_system(4), Some(2));
+        assert_eq!(page_layout.page_for_system(5), Some(2));
+
+        // Systems 6-7 on page 3
+        assert_eq!(page_layout.page_for_system(6), Some(3));
+        assert_eq!(page_layout.page_for_system(7), Some(3));
+    }
+
+    #[test]
+    fn test_systems_on_page() {
+        let system_layout = SystemLayout::fixed_measures_per_line(16, 4);
+
+        let config = PageLayoutConfig {
+            content_height: 300.0,
+            system_height: 40.0,
+            system_spacing: 60.0,
+            section_extra_spacing: 20.0,
+            top_padding: 40.0,
+            ..Default::default()
+        };
+
+        let page_layout = compute_page_layout(system_layout, &config);
+
+        // Get systems on first page
+        let systems_page_0 = page_layout.systems_on_page(0).unwrap();
+        assert!(!systems_page_0.is_empty());
+
+        // Each system should have 4 measures
+        for sys in systems_page_0 {
+            assert_eq!(sys.measure_count, 4);
+        }
     }
 }

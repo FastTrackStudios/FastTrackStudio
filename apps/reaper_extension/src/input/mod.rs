@@ -8,13 +8,17 @@
 //! - Context awareness (main, midi, global)
 //! - Macro recording and playback
 
+// region: --- Modules
+
 pub mod actions;
 pub mod bindings;
+pub mod constants;
 pub mod continuous_action;
-pub mod item_actions;
+pub mod error;
 pub mod event_parser;
 pub mod executor;
 pub mod handler;
+pub mod item_actions;
 pub mod keybinds;
 pub mod matcher;
 pub mod midi_utils;
@@ -26,7 +30,10 @@ pub mod state;
 pub mod tempo;
 pub mod utils;
 pub mod wheel_hook;
+pub mod window_detection;
 pub mod workflows;
+
+// endregion: --- Modules
 
 pub use continuous_action::{
     is_action_active, register_continuous_action, start_continuous_action,

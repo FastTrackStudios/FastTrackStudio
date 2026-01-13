@@ -186,6 +186,21 @@ impl Chart {
         AbsolutePosition::new(total_duration, section_index)
     }
 
+    /// Generate rhythm slashes for all measures in the chart.
+    ///
+    /// This fills in beats that don't have explicit chords with slash noteheads,
+    /// which is standard lead sheet notation. Call this after parsing or before rendering.
+    pub fn generate_rhythm_slashes(&mut self) {
+        let mut current_measure: i32 = 0;
+
+        for (section_idx, section) in self.sections.iter_mut().enumerate() {
+            for measure in &mut section.measures {
+                measure.generate_rhythm_slashes(current_measure, section_idx);
+                current_measure += 1;
+            }
+        }
+    }
+
     /// Convert the chart back to text syntax
     ///
     /// This produces a valid syntax string that, when parsed, will result in the same chart structure.

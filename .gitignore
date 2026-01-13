@@ -101,5 +101,7 @@ packages/charts/resources/fonts/
 *.svg
 *.pdf
 
-# Reference materials
+# Reference materials (except tracked submodules)
 reference/
+!libs/reference/
+!libs/reference/sheet-music/

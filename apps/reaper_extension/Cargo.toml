@@ -22,8 +22,14 @@ lyrics = ["core"]
 iroh_server = ["core"]
 # Enable Keyflow engine for understanding music (chord detection, chart building)
 keyflow = ["core"]
+# Enable Dynamic-Template for track organization and sorting
+dynamic_template = ["core", "dep:dynamic-template"]
+# Enable Visibility Manager for dynamic track visibility groups
+visibility_manager = ["core", "dep:visibility-manager"]
 
 [dependencies]
+dynamic-template = { path = "../../modules/dynamic-template", optional = true }
+visibility-manager = { path = "../../modules/visibility-manager", optional = true }
 reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-macros = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
@@ -37,8 +43,8 @@ swell-ui = { path = "../../libs/swell-ui" }
 anyhow = "1.0"
 async-trait = "0.1"
 thiserror = "2.0.17"
-daw = { path = "../../modules/daw" }
-fts = { path = "../../modules/fts", features = ["reaper"] }
+daw = { path = "../../modules/daw", features = ["iroh"] }
+fts = { path = "../../modules/fts", features = ["reaper", "iroh"] }
 keyflow = { path = "../../packages/keyflow" }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 enumflags2 = "0.7"
@@ -52,6 +58,7 @@ irpc-iroh = "0.11.0"
 iroh = { version = "0.95", features = ["discovery-local-network"] }
 n0-future = "0.3.0"
 crossbeam-channel = "0.5"
+helgoboss-midi = "0.4.0"
 
 [lib]
 name = "reaper_extension"

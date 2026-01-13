@@ -3,10 +3,12 @@
 //! Actions for controlling the FTS-Input key sequence system.
 
 use crate::infrastructure::action_registry::{ActionDef, register_actions};
+use crate::infrastructure::workflow_selector;
 use crate::input::continuous_action::start_continuous_action;
 use crate::input::handler::InputHandler;
 use crate::input::item_actions;
 use crate::input::keybinds;
+use crate::input::mouse_modifiers::core::{set_mouse_modifier, MouseModifierFlag};
 use crate::input::mouse_modifiers::manager as mouse_manager;
 use crate::input::workflows;
 use crate::input::tempo::{
@@ -382,6 +384,79 @@ fn wake_reaper() {
     }
 }
 
+// === Dev Actions for Mouse Modifier Discovery ===
+
+/// Dev action: Test and log mouse modifier behavior IDs for MM_CTX_ITEM_CLK
+/// Sets behavior IDs 0-30 to different modifier flags so you can check REAPER preferences
+fn dev_test_mouse_modifier_ids_handler() {
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+
+    reaper.show_console_msg("\n=== Mouse Modifier Behavior ID Test ===\n");
+    reaper.show_console_msg("Context: MM_CTX_ITEM_CLK (Media Item - left click)\n");
+    reaper.show_console_msg("Setting behavior IDs to modifier flags for discovery...\n\n");
+
+    // Test context - can be changed to test other contexts
+    let context = "MM_CTX_ITEM_CLK";
+
+    // Set IDs 16-25 to flags 0-9 to discover the unknown behaviors
+    reaper.show_console_msg("Setting IDs 16-25 to discover unknown behaviors:\n");
+    reaper.show_console_msg("  Flag 0 (Default) = ID 16\n");
+    reaper.show_console_msg("  Flag 1 (Shift) = ID 17\n");
+    reaper.show_console_msg("  Flag 2 (Cmd) = ID 18\n");
+    reaper.show_console_msg("  Flag 3 (Shift+Cmd) = ID 19\n");
+    reaper.show_console_msg("  Flag 4 (Alt) = ID 20\n");
+    reaper.show_console_msg("  Flag 5 (Shift+Alt) = ID 21\n");
+    reaper.show_console_msg("  Flag 6 (Cmd+Alt) = ID 22\n");
+    reaper.show_console_msg("  Flag 7 (Shift+Cmd+Alt) = ID 23\n");
+    reaper.show_console_msg("  Flag 8 (Win/Ctrl-Mac) = ID 24\n");
+    reaper.show_console_msg("  Flag 9 (Shift+Win) = ID 25\n\n");
+
+    // Set IDs 16-25 to flags 0-9
+    for (i, id) in (16..=25).enumerate() {
+        let flag = MouseModifierFlag::from_flag(i as i32);
+        let behavior_str = format!("{} m", id);
+        if let Err(e) = set_mouse_modifier(context, flag, &behavior_str, medium_reaper) {
+            reaper.show_console_msg(format!("  Error setting ID {}: {}\n", id, e));
+        }
+    }
+
+    reaper.show_console_msg("Done! Open REAPER Preferences > Mouse Modifiers > Media item > left click\n");
+    reaper.show_console_msg("to see what behavior names correspond to each modifier.\n\n");
+    reaper.show_console_msg("The modifier flags map as follows:\n");
+    reaper.show_console_msg("  Default action = ID 16\n");
+    reaper.show_console_msg("  Shift = ID 17\n");
+    reaper.show_console_msg("  Cmd = ID 18\n");
+    reaper.show_console_msg("  Shift+Cmd = ID 19\n");
+    reaper.show_console_msg("  Opt = ID 20 (should be 'Extend razor edit area' per docs)\n");
+    reaper.show_console_msg("  Shift+Opt = ID 21\n");
+    reaper.show_console_msg("  Cmd+Opt = ID 22\n");
+    reaper.show_console_msg("  Shift+Cmd+Opt = ID 23\n");
+    reaper.show_console_msg("  Ctrl (Mac) / Win (Windows) = ID 24\n");
+    reaper.show_console_msg("  Shift+Ctrl/Win = ID 25\n");
+
+    info!("Mouse modifier behavior ID test complete - check REAPER preferences");
+}
+
+/// Dev action: Reset MM_CTX_ITEM_CLK to defaults
+fn dev_reset_item_click_modifiers_handler() {
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+
+    reaper.show_console_msg("\n=== Resetting MM_CTX_ITEM_CLK to defaults ===\n");
+
+    let context = "MM_CTX_ITEM_CLK";
+
+    // Reset all 16 modifier flags to default (-1)
+    for flag_num in 0..16 {
+        let flag = MouseModifierFlag::from_flag(flag_num);
+        let _ = set_mouse_modifier(context, flag, "-1", medium_reaper);
+    }
+
+    reaper.show_console_msg("Done! All Media Item click modifiers reset to defaults.\n");
+    info!("MM_CTX_ITEM_CLK reset to defaults");
+}
+
 /// Get all FTS-Input action definitions (for batch registration)
 pub fn get_input_action_defs() -> Vec<ActionDef> {
     // First, register the continuous actions with the continuous action system
@@ -590,6 +665,41 @@ pub fn get_input_action_defs() -> Vec<ActionDef> {
             command_id: "FTS_SPLIT_ITEMS_CROSSFADE_LEFT",
             display_name: "FTS: Split selected items at cursor with crossfade on left".to_string(),
             handler: split_items_crossfade_left_handler,
+            appears_in_menu: true,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
+            toggle_state: None,
+        },
+        // === Profile Selector ===
+        ActionDef {
+            command_id: "FTS_PROFILE_SELECTOR",
+            display_name: "FTS: Profile Selector (popup menu)".to_string(),
+            handler: workflow_selector::profile_selector_handler,
+            appears_in_menu: true,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
+            toggle_state: Some(workflow_selector::get_profile_selector_state),
+        },
+        // === Workflow Selector ===
+        ActionDef {
+            command_id: "FTS_WORKFLOW_SELECTOR",
+            display_name: "FTS: Workflow Selector (popup menu)".to_string(),
+            handler: workflow_selector::workflow_selector_handler,
+            appears_in_menu: true,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
+            toggle_state: Some(workflow_selector::get_workflow_selector_state),
+        },
+        // === Dev Actions for Mouse Modifier Discovery ===
+        ActionDef {
+            command_id: "FTS_DEV_TEST_MOUSE_MODIFIER_IDS",
+            display_name: "Test Mouse Modifier Behavior IDs (sets IDs 16-25 to discover names)".to_string(),
+            handler: dev_test_mouse_modifier_ids_handler,
+            appears_in_menu: true,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
+            toggle_state: None,
+        },
+        ActionDef {
+            command_id: "FTS_DEV_RESET_ITEM_CLICK_MODIFIERS",
+            display_name: "Reset Media Item Click Modifiers to defaults".to_string(),
+            handler: dev_reset_item_click_modifiers_handler,
             appears_in_menu: true,
             section: crate::infrastructure::action_registry::ActionSection::Main,
             toggle_state: None,

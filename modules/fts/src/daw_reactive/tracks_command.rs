@@ -14,6 +14,7 @@ use reaper_medium::{ProjectRef, SoloMode as ReaperSoloMode};
 use tracing::{info, warn};
 
 use daw::tracks::api::solo::SoloMode;
+#[cfg(all(not(target_arch = "wasm32"), feature = "iroh"))]
 use daw::tracks::reactive::irpc::TrackCommandHandler;
 
 use super::SetlistProvider;
@@ -99,6 +100,7 @@ impl ProjectProvider for DefaultProjectProvider {
     }
 }
 
+#[cfg(all(not(target_arch = "wasm32"), feature = "iroh"))]
 #[async_trait]
 impl<P: ProjectProvider + 'static> TrackCommandHandler for ReaperTrackCommandHandler<P> {
     async fn set_track_mute(

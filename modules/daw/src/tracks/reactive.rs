@@ -247,4 +247,5 @@ impl DefaultTrackReactiveService {
     }
 }
 
+#[cfg(feature = "iroh")]
 pub mod irpc;

@@ -66,6 +66,10 @@
 //! - Re-implemented using REAPER's public APIs where possible
 //! - Approximated using available REAPER APIs
 
+use crate::input::constants::{
+    ENV_GAP, ENV_HIT_POINT, ENV_HIT_POINT_DOWN, ENV_HIT_POINT_LEFT, MIDI_RULER_H, MIDI_WND_KEYBOARD,
+    MIDI_WND_NOTEVIEW, MIDI_WND_UNKNOWN, SCROLLBAR_W, STRETCH_M_HIT_POINT, STRETCH_M_MIN_TAKE_HEIGHT,
+};
 use crate::input::midi_utils;
 use crate::input::reaper_windows;
 use crate::input::state::Context;
@@ -175,18 +179,7 @@ impl Default for MouseContext {
     }
 }
 
-/// Constants from BR_MouseUtil.cpp
-const ENV_GAP: i32 = 4;
-const ENV_HIT_POINT: i32 = 5;
-const ENV_HIT_POINT_LEFT: i32 = 6;
-const ENV_HIT_POINT_DOWN: i32 = 6;
-const STRETCH_M_HIT_POINT: i32 = 6;
-const STRETCH_M_MIN_TAKE_HEIGHT: i32 = 8;
-const SCROLLBAR_W: i32 = 17; // Approximate scrollbar width
-const MIDI_RULER_H: i32 = 20; // Approximate MIDI ruler height
-const MIDI_WND_NOTEVIEW: i32 = 1;
-const MIDI_WND_KEYBOARD: i32 = 2;
-const MIDI_WND_UNKNOWN: i32 = 3;
+// Constants are now imported from crate::input::constants
 
 /// Get mouse position in screen coordinates
 fn get_mouse_position(medium_reaper: &MediumReaper) -> (i32, i32) {

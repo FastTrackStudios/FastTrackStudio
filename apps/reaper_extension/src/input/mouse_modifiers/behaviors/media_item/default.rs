@@ -287,6 +287,9 @@ impl BehaviorDisplay for MediaItemLeftDragBehavior {
 }
 
 /// Media Item click behaviors
+///
+/// Note: Behavior IDs are based on Ultraschall documentation.
+/// IDs 0-15 and 20 are confirmed. Other IDs need verification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MediaItemClickBehavior {
     NoAction,
@@ -305,6 +308,7 @@ pub enum MediaItemClickBehavior {
     RestorePreviousZoomScroll,
     RestorePreviousZoomLevel,
     AddStretchMarker,
+    // ID 20 confirmed from Ultraschall docs
     ExtendRazorEditArea,
     Unknown(u32),
 }

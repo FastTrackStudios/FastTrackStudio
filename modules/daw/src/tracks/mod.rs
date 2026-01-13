@@ -26,6 +26,7 @@ pub use envelope::{AutomationItem, Envelope, EnvelopePoint, EnvelopePointShape, 
 pub use fx_chain::{FxChain, Plugin};
 pub use hierarchy_builder::{TrackHierarchyBuilder, build_hierarchy, build_track_hierarchy};
 pub use item::Item;
+#[cfg(feature = "iroh")]
 pub use reactive::irpc::{TrackApi, TrackProtocol, TrackUpdateMessage};
 pub use reactive::{
     DefaultTrackReactiveService, EventStreamSubject as TrackEventStreamSubject,

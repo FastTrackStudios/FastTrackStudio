@@ -973,18 +973,17 @@ impl CleanupDisplayNames {
             }
         }
 
-        // Step 3: Remove leading track numbers (e.g., "49 " from "49 Organ Chords")
-        let parts: Vec<&str> = cleaned.split_whitespace().collect();
-        if parts.len() > 1 {
-            if let Some(first) = parts.first() {
-                // Check if first word is just a number (track number)
-                if first.chars().all(|c| c.is_ascii_digit()) {
-                    cleaned = parts[1..].join(" ");
-                }
-            }
-        }
+        // Step 3: Remove leading track numbers
+        // Handles: "49 Organ", "01.Kick", "02-Snare", "03. Bass"
+        cleaned = Self::strip_leading_track_number(&cleaned);
 
-        // Step 4: Strip context words from ancestors
+        // Step 4: Remove tempo/BPM markers (e.g., "126bpm", "83.5BPM")
+        cleaned = Self::strip_tempo_markers(&cleaned);
+
+        // Step 5: Remove common equipment identifiers
+        cleaned = Self::strip_equipment_identifiers(&cleaned);
+
+        // Step 6: Strip context words from ancestors
         self.strip_context(&cleaned)
     }
 
@@ -1176,6 +1175,197 @@ impl CleanupDisplayNames {
             })
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    /// Strip leading track numbers from a name
+    ///
+    /// Handles various formats:
+    /// - "49 Organ" -> "Organ" (number + space)
+    /// - "01.Kick" -> "Kick" (number + period)
+    /// - "02-Snare" -> "Snare" (number + dash)
+    /// - "03. Bass" -> "Bass" (number + period + space)
+    fn strip_leading_track_number(name: &str) -> String {
+        let trimmed = name.trim();
+
+        // Try to find a leading track number pattern
+        let mut chars = trimmed.chars().peekable();
+        let mut num_end = 0;
+
+        // Consume leading digits
+        while let Some(&c) = chars.peek() {
+            if c.is_ascii_digit() {
+                chars.next();
+                num_end += c.len_utf8();
+            } else {
+                break;
+            }
+        }
+
+        // If we found digits, check for separator
+        if num_end > 0 {
+            if let Some(&sep) = chars.peek() {
+                match sep {
+                    '.' | '-' | '_' => {
+                        chars.next();
+                        let sep_end = num_end + sep.len_utf8();
+                        // Also skip a space after the separator if present
+                        if let Some(&' ') = chars.peek() {
+                            chars.next();
+                            let rest = &trimmed[sep_end + 1..];
+                            if !rest.is_empty() {
+                                return rest.to_string();
+                            }
+                        } else {
+                            let rest = &trimmed[sep_end..];
+                            if !rest.is_empty() {
+                                return rest.to_string();
+                            }
+                        }
+                    }
+                    ' ' => {
+                        // "49 Organ" format
+                        chars.next();
+                        let rest = &trimmed[num_end + 1..];
+                        if !rest.is_empty() {
+                            return rest.to_string();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        trimmed.to_string()
+    }
+
+    /// Strip tempo/BPM markers from a name
+    ///
+    /// Handles:
+    /// - "126bpm" -> removed
+    /// - "83.5BPM" -> removed
+    /// - "Track 120bpm Name" -> "Track Name"
+    fn strip_tempo_markers(name: &str) -> String {
+        let mut result = name.to_string();
+
+        // Pattern: number (optionally with decimal) followed by "bpm" (case insensitive)
+        // We'll do this manually without regex for simplicity
+        let lower = result.to_lowercase();
+
+        // Find "bpm" and work backwards to find the number
+        if let Some(bpm_idx) = lower.find("bpm") {
+            // Look backwards for digits (and optional decimal point)
+            let prefix = &result[..bpm_idx];
+            let mut num_start = bpm_idx;
+
+            // Find where the number starts
+            for (i, c) in prefix.char_indices().rev() {
+                if c.is_ascii_digit() || c == '.' {
+                    num_start = i;
+                } else if c == ' ' || c == '_' || c == '-' {
+                    // Stop at separator but include it in removal
+                    num_start = i;
+                    break;
+                } else {
+                    break;
+                }
+            }
+
+            if num_start < bpm_idx {
+                // Remove the tempo marker
+                let before = result[..num_start].trim_end();
+                let after = result[bpm_idx + 3..].trim_start();
+                result = if before.is_empty() {
+                    after.to_string()
+                } else if after.is_empty() {
+                    before.to_string()
+                } else {
+                    format!("{before} {after}")
+                };
+            }
+        }
+
+        result
+    }
+
+    /// Strip common equipment identifiers from a name
+    ///
+    /// Removes:
+    /// - Compressor names: OptoComp, 260VU, 1176, LA2A
+    /// - Common processing indicators: SILK BLUE, SILK OFF
+    /// - Plugin/hardware presets with percentages
+    fn strip_equipment_identifiers(name: &str) -> String {
+        // Equipment patterns to remove (case-insensitive matching)
+        const EQUIPMENT_PATTERNS: &[&str] = &[
+            // Compressors/processors
+            "optocomp",
+            "260vu",
+            "1176",
+            "la2a",
+            "la-2a",
+            "ssl",
+            "neve",
+            "api",
+            "distressor",
+            "fatso",
+            // Plugin presets
+            "silk blue",
+            "silk off",
+            "silk red",
+            // Percentage patterns are handled separately
+        ];
+
+        let mut result = name.to_string();
+        let lower = result.to_lowercase();
+
+        for pattern in EQUIPMENT_PATTERNS {
+            if let Some(idx) = lower.find(pattern) {
+                let before = result[..idx].trim_end();
+                let after = result[idx + pattern.len()..].trim_start();
+
+                // Also remove any percentage that follows (e.g., "100%")
+                let after = Self::strip_leading_percentage(after);
+
+                result = if before.is_empty() {
+                    after.to_string()
+                } else if after.is_empty() {
+                    before.to_string()
+                } else {
+                    format!("{before} {after}")
+                };
+
+                // Re-lowercase for next iteration
+                // (Note: this is a simplification - ideally we'd track positions)
+            }
+        }
+
+        result
+    }
+
+    /// Strip a leading percentage from a string (e.g., "100% remaining" -> "remaining")
+    fn strip_leading_percentage(s: &str) -> &str {
+        let trimmed = s.trim_start();
+        let mut chars = trimmed.chars().peekable();
+        let mut num_end = 0;
+
+        // Consume digits
+        while let Some(&c) = chars.peek() {
+            if c.is_ascii_digit() {
+                chars.next();
+                num_end += c.len_utf8();
+            } else {
+                break;
+            }
+        }
+
+        // Check for %
+        if num_end > 0 {
+            if let Some(&'%') = chars.peek() {
+                let rest = &trimmed[num_end + 1..].trim_start();
+                return rest;
+            }
+        }
+
+        s
     }
 
     /// Number duplicate names in a list of children

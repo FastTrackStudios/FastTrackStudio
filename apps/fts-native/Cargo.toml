@@ -11,6 +11,10 @@ dioxus-native = { path = "../../libs/vendor/blitz/packages/dioxus-native", featu
 blitz-dom = { path = "../../libs/vendor/blitz/packages/blitz-dom" }
 blitz-traits = { path = "../../libs/vendor/blitz/packages/blitz-traits" }
 
+# Anyrender for CustomPaintSource
+anyrender_vello = { path = "../../libs/vendor/anyrender/crates/anyrender_vello" }
+wgpu_context = { path = "../../libs/vendor/anyrender/crates/wgpu_context" }
+
 # Lumen Blocks - workspace dependency
 lumen-blocks = { workspace = true }
 
@@ -20,17 +24,28 @@ lucide-dioxus = "2"
 # Keyflow for chart parsing
 keyflow = { path = "../../packages/keyflow" }
 
+# Engraver for layout system
+engraver = { path = "../../packages/engraver" }
+
 # WGPU integration (use same version as blitz)
 wgpu = "26"
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.30"
 
-# Text rendering
-glyphon = "0.10"
+# Text rendering (use wgpu 26 compatible commit)
+glyphon = { git = "https://github.com/grovesNL/glyphon", rev = "d4ded1d1309f867b7b613ca91ebd0d1fb1a8b280" }
+
+# Font parsing and tessellation for SMuFL music symbols
+skrifa = "0.28"
+smufl = "0.2"
+lyon = "1.0"
 
 # Logging
 log = "0.4"
 env_logger = "0.11"
+
+# Window management (match blitz version)
+winit = "0.30"
 
 [build-dependencies]
 wesl = "0.2"

@@ -462,6 +462,183 @@ pub fn create_main_pipeline(
     })
 }
 
+// ============================================================================
+// Texture Blit for Retained Rendering
+// ============================================================================
+
+/// Vertex for texture blitting (fullscreen quad with camera transform)
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct BlitVertex {
+    /// Position in NDC (-1 to 1)
+    pub position: [f32; 2],
+    /// UV coordinates (0 to 1)
+    pub uv: [f32; 2],
+}
+
+impl BlitVertex {
+    /// Vertex attributes for WGPU pipeline
+    pub const ATTRIBS: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2];
+
+    /// Vertex buffer layout descriptor
+    #[must_use]
+    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<BlitVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
+
+/// Create vertices for a fullscreen quad for texture blitting
+#[must_use]
+pub fn create_fullscreen_quad() -> [BlitVertex; 6] {
+    [
+        // First triangle
+        BlitVertex {
+            position: [-1.0, -1.0],
+            uv: [0.0, 1.0],
+        },
+        BlitVertex {
+            position: [1.0, -1.0],
+            uv: [1.0, 1.0],
+        },
+        BlitVertex {
+            position: [-1.0, 1.0],
+            uv: [0.0, 0.0],
+        },
+        // Second triangle
+        BlitVertex {
+            position: [1.0, -1.0],
+            uv: [1.0, 1.0],
+        },
+        BlitVertex {
+            position: [1.0, 1.0],
+            uv: [1.0, 0.0],
+        },
+        BlitVertex {
+            position: [-1.0, 1.0],
+            uv: [0.0, 0.0],
+        },
+    ]
+}
+
+/// Shader for texture blitting with camera transform
+pub const BLIT_SHADER_SOURCE: &str = r#"
+struct Camera {
+    transform: vec4<f32>,  // scale_x, scale_y, offset_x, offset_y
+    resolution: vec4<f32>, // width, height, unused, unused
+}
+
+@group(0) @binding(0)
+var<uniform> camera: Camera;
+
+@group(1) @binding(0)
+var scene_texture: texture_2d<f32>;
+
+@group(1) @binding(1)
+var scene_sampler: sampler;
+
+struct VertexInput {
+    @location(0) position: vec2<f32>,
+    @location(1) uv: vec2<f32>,
+}
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+
+@vertex
+fn vs_main(input: VertexInput) -> VertexOutput {
+    var output: VertexOutput;
+    // Apply camera transform to positions
+    let scaled = input.position * camera.transform.xy;
+    let transformed = scaled + camera.transform.zw;
+    output.position = vec4<f32>(transformed, 0.0, 1.0);
+    output.uv = input.uv;
+    return output;
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    return textureSample(scene_texture, scene_sampler, input.uv);
+}
+"#;
+
+/// Create the texture blit bind group layout for scene texture
+#[must_use]
+pub fn create_blit_texture_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Blit Texture Bind Group Layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
+}
+
+/// Create the texture blit pipeline
+#[must_use]
+pub fn create_blit_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    camera_bind_group_layout: &wgpu::BindGroupLayout,
+    texture_bind_group_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("Blit Shader"),
+        source: wgpu::ShaderSource::Wgsl(BLIT_SHADER_SOURCE.into()),
+    });
+
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Blit Pipeline Layout"),
+        bind_group_layouts: &[camera_bind_group_layout, texture_bind_group_layout],
+        push_constant_ranges: &[],
+    });
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Blit Pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[BlitVertex::desc()],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(format.into())],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    })
+}
+
 /// Create the SDF render pipeline for rounded rectangles
 #[must_use]
 pub fn create_sdf_pipeline(

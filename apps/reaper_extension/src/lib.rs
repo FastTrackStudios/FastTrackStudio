@@ -10,10 +10,14 @@ mod services;
 
 #[cfg(feature = "keyflow")]
 mod chart;
+#[cfg(feature = "dynamic_template")]
+mod dynamic_template;
 #[cfg(feature = "live")]
 mod live;
 #[cfg(feature = "lyrics")]
 mod lyrics;
+#[cfg(feature = "visibility_manager")]
+mod visibility_manager;
 
 /// Polling state management for continuous updates
 pub mod polling_state {
@@ -118,16 +122,20 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
             use crate::infrastructure::timer::{increment_tick_count, log_first_timer_call};
             use std::sync::atomic::{AtomicU64, Ordering};
 
-            // Check for and hook MIDI editor windows (if input feature is enabled)
+            // Check for and hook MIDI editor and arrange view windows (if input feature is enabled)
             #[cfg(feature = "input")]
             {
                 if crate::input::handler::InputHandler::is_enabled() {
                     crate::input::wheel_hook::check_and_hook_midi_editors();
+                    crate::input::wheel_hook::check_and_hook_arrange_view();
                 }
             }
 
             // Process main thread tasks from TaskSupport
             crate::infrastructure::task_support::run_middleware();
+
+            // Process deferred toolbar operations
+            crate::infrastructure::toolbar::process_deferred_ops();
 
             // Log first call and increment tick count
             log_first_timer_call();

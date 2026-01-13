@@ -8,20 +8,184 @@
 //!
 //! Examples: Tempo Mapping, Fast Slip Edit, Recording, Mixing
 //!
-//! Workflows can have variants per base profile (e.g., "Logic Tempo Mapping").
+//! ## Profile-Based Implementations
+//!
+//! Workflows are **profile-agnostic** - they represent a concept (e.g., "Tempo Mapping")
+//! rather than a specific implementation. Each profile (FastTrackStudio, Logic, etc.)
+//! can register its own implementation of a workflow, or use the default.
+//!
+//! When a workflow is activated:
+//! 1. Check if the current profile has a registered implementation
+//! 2. If not, use the default implementation
+//! 3. If no implementation exists, return an error
 
 pub mod armed;
+pub mod context_detection;
 
+use crate::infrastructure::toolbar::{self, ToolbarButton, ToolbarTarget};
 use crate::input::keybinds;
 use crate::input::mouse_modifiers::manager as mouse_manager;
 pub use armed::{
     ArmedClickAction, ArmedContext,
     detect_mouse_modifier_context, is_debug_mouse_context_enabled, toggle_debug_mouse_context,
+    // Comprehensive MM_CTX detection
+    MouseModifierContext, MouseContextResult, ItemHitInfo, detect_context_at_point,
 };
 use reaper_high::Reaper;
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 use tracing::{debug, info, warn};
+
+// region: --- Workflow Definition (Profile-Agnostic)
+
+/// A workflow definition - the profile-agnostic concept
+///
+/// This represents "what" a workflow is (e.g., "Tempo Mapping"),
+/// not "how" it's implemented for a specific profile.
+#[derive(Debug, Clone)]
+pub struct WorkflowDefinition {
+    /// Unique workflow ID (e.g., "tempo_mapping")
+    pub id: &'static str,
+    /// Human-readable name (e.g., "Tempo Mapping")
+    pub name: &'static str,
+    /// Short name for toolbar display (e.g., "Tempo")
+    pub short_name: Option<&'static str>,
+    /// Description of what this workflow does
+    pub description: &'static str,
+}
+
+impl WorkflowDefinition {
+    pub fn new(id: &'static str, name: &'static str, description: &'static str) -> Self {
+        Self { id, name, short_name: None, description }
+    }
+
+    pub fn with_short_name(id: &'static str, name: &'static str, short_name: &'static str, description: &'static str) -> Self {
+        Self { id, name, short_name: Some(short_name), description }
+    }
+
+    /// Get the display name for toolbar buttons
+    ///
+    /// Uses short_name if:
+    /// - The name is longer than 12 characters AND has no spaces
+    /// - A short_name is defined
+    ///
+    /// Otherwise uses the full name.
+    pub fn display_name(&self) -> &str {
+        if let Some(short) = self.short_name {
+            // Use short name if full name is > 12 chars with no spaces
+            if self.name.len() > 12 && !self.name.contains(' ') {
+                return short;
+            }
+        }
+        self.name
+    }
+}
+
+// endregion: --- Workflow Definition
+
+// region: --- Workflow Implementation (Profile-Specific)
+
+/// A workflow implementation - the profile-specific settings
+///
+/// This represents "how" a workflow is implemented for a specific profile,
+/// including keybinds, mouse modifiers, REAPER settings, etc.
+#[derive(Debug, Clone, Default)]
+pub struct WorkflowImplementation {
+    /// Keybind overlays to enable
+    pub keybind_overlays: Vec<&'static str>,
+    /// Mouse modifier overlays to enable
+    pub mouse_overlays: Vec<&'static str>,
+    /// REAPER settings to apply
+    pub reaper_settings: Vec<ReaperSetting>,
+    /// Action to arm when workflow is active (uses REAPER's native arm)
+    pub armed_action: Option<ArmedAction>,
+    /// Custom armed click action (intercepts left-clicks)
+    pub armed_click: Option<ArmedClickAction>,
+    /// Toolbar buttons to add when workflow is active
+    pub toolbar_buttons: Vec<ToolbarButton>,
+}
+
+impl WorkflowImplementation {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a keybind overlay to enable
+    pub fn with_keybind_overlay(mut self, overlay: &'static str) -> Self {
+        self.keybind_overlays.push(overlay);
+        self
+    }
+
+    /// Add multiple keybind overlays
+    pub fn with_keybind_overlays(mut self, overlays: impl IntoIterator<Item = &'static str>) -> Self {
+        self.keybind_overlays.extend(overlays);
+        self
+    }
+
+    /// Add a mouse modifier overlay to enable
+    pub fn with_mouse_overlay(mut self, overlay: &'static str) -> Self {
+        self.mouse_overlays.push(overlay);
+        self
+    }
+
+    /// Add multiple mouse modifier overlays
+    pub fn with_mouse_overlays(mut self, overlays: impl IntoIterator<Item = &'static str>) -> Self {
+        self.mouse_overlays.extend(overlays);
+        self
+    }
+
+    /// Add a REAPER setting
+    pub fn with_setting(mut self, setting: ReaperSetting) -> Self {
+        self.reaper_settings.push(setting);
+        self
+    }
+
+    /// Add multiple REAPER settings
+    pub fn with_settings(mut self, settings: impl IntoIterator<Item = ReaperSetting>) -> Self {
+        self.reaper_settings.extend(settings);
+        self
+    }
+
+    /// Set an action to arm when workflow is active
+    pub fn with_armed_action(mut self, action: ArmedAction) -> Self {
+        self.armed_action = Some(action);
+        self
+    }
+
+    /// Set a custom armed click action
+    pub fn with_armed_click(mut self, action: ArmedClickAction) -> Self {
+        self.armed_click = Some(action);
+        self
+    }
+
+    /// Add a toolbar button to a floating toolbar
+    pub fn with_floating_toolbar_button(mut self, toolbar_num: u8, command_name: &str, label: &str) -> Self {
+        self.toolbar_buttons.push(ToolbarButton {
+            command_name: command_name.to_string(),
+            label: label.to_string(),
+            icon: None,
+            toolbar: ToolbarTarget::Floating(toolbar_num),
+            toolbar_flags: toolbar::flags::NORMAL,
+        });
+        self
+    }
+
+    /// Add a toolbar button to the main toolbar
+    pub fn with_main_toolbar_button(mut self, command_name: &str, label: &str) -> Self {
+        self.toolbar_buttons.push(ToolbarButton {
+            command_name: command_name.to_string(),
+            label: label.to_string(),
+            icon: None,
+            toolbar: ToolbarTarget::Main,
+            toolbar_flags: toolbar::flags::NORMAL,
+        });
+        self
+    }
+}
+
+// endregion: --- Workflow Implementation
+
+// region: --- REAPER Settings
 
 /// A REAPER setting that can be toggled
 #[derive(Debug, Clone)]
@@ -86,99 +250,6 @@ impl ReaperSetting {
     }
 }
 
-/// A complete workflow definition
-#[derive(Debug, Clone)]
-pub struct Workflow {
-    /// Unique workflow ID (e.g., "tempo_mapping", "fast_slip_edit")
-    pub id: &'static str,
-    /// Human-readable name
-    pub name: &'static str,
-    /// Description
-    pub description: &'static str,
-    /// Base profile this workflow is designed for (None = works with any)
-    pub base_profile: Option<&'static str>,
-    /// Keybind overlays to enable
-    pub keybind_overlays: Vec<&'static str>,
-    /// Mouse modifier overlays to enable
-    pub mouse_overlays: Vec<&'static str>,
-    /// REAPER settings to apply
-    pub reaper_settings: Vec<ReaperSetting>,
-    /// Action to arm when workflow is active (uses REAPER's native arm - often doesn't work)
-    pub armed_action: Option<ArmedAction>,
-    /// Custom armed click action (intercepts left-clicks - preferred method)
-    pub armed_click: Option<ArmedClickAction>,
-}
-
-impl Workflow {
-    pub fn new(id: &'static str, name: &'static str, description: &'static str) -> Self {
-        Self {
-            id,
-            name,
-            description,
-            base_profile: None,
-            keybind_overlays: Vec::new(),
-            mouse_overlays: Vec::new(),
-            reaper_settings: Vec::new(),
-            armed_action: None,
-            armed_click: None,
-        }
-    }
-
-    /// Set the base profile this workflow is for
-    pub fn for_profile(mut self, profile: &'static str) -> Self {
-        self.base_profile = Some(profile);
-        self
-    }
-
-    /// Add a keybind overlay to enable
-    pub fn with_keybind_overlay(mut self, overlay: &'static str) -> Self {
-        self.keybind_overlays.push(overlay);
-        self
-    }
-
-    /// Add multiple keybind overlays
-    pub fn with_keybind_overlays(mut self, overlays: impl IntoIterator<Item = &'static str>) -> Self {
-        self.keybind_overlays.extend(overlays);
-        self
-    }
-
-    /// Add a mouse modifier overlay to enable
-    pub fn with_mouse_overlay(mut self, overlay: &'static str) -> Self {
-        self.mouse_overlays.push(overlay);
-        self
-    }
-
-    /// Add multiple mouse modifier overlays
-    pub fn with_mouse_overlays(mut self, overlays: impl IntoIterator<Item = &'static str>) -> Self {
-        self.mouse_overlays.extend(overlays);
-        self
-    }
-
-    /// Add a REAPER setting
-    pub fn with_setting(mut self, setting: ReaperSetting) -> Self {
-        self.reaper_settings.push(setting);
-        self
-    }
-
-    /// Add multiple REAPER settings
-    pub fn with_settings(mut self, settings: impl IntoIterator<Item = ReaperSetting>) -> Self {
-        self.reaper_settings.extend(settings);
-        self
-    }
-
-    /// Set an action to arm when workflow is active (uses REAPER's native arm - often doesn't work)
-    pub fn with_armed_action(mut self, action: ArmedAction) -> Self {
-        self.armed_action = Some(action);
-        self
-    }
-
-    /// Set a custom armed click action (intercepts left-clicks in arrange view)
-    /// This is the preferred method as REAPER's native arming doesn't work for most actions
-    pub fn with_armed_click(mut self, action: ArmedClickAction) -> Self {
-        self.armed_click = Some(action);
-        self
-    }
-}
 
 /// Stored state for restoration when workflow is deactivated
 #[derive(Debug, Clone, Default)]
@@ -193,12 +264,27 @@ struct StoredState {
     previous_armed: Option<(i32, String)>,
 }
 
+// endregion: --- Stored State
+
+// region: --- Workflow Manager
+
 /// Manages workflows and their activation state
+///
+/// Workflows are stored as:
+/// - **Definitions**: Profile-agnostic workflow concepts (id, name, description)
+/// - **Default implementations**: The fallback implementation for each workflow
+/// - **Profile implementations**: Profile-specific overrides for workflows
 pub struct WorkflowManager {
-    /// All registered workflows (id -> workflow)
-    workflows: HashMap<String, Workflow>,
+    /// Workflow definitions (id -> definition)
+    definitions: HashMap<String, WorkflowDefinition>,
+    /// Default implementations (workflow_id -> implementation)
+    default_implementations: HashMap<String, WorkflowImplementation>,
+    /// Profile-specific implementations ((workflow_id, profile_id) -> implementation)
+    profile_implementations: HashMap<(String, String), WorkflowImplementation>,
     /// Currently active workflow ID (only one at a time)
     active_workflow: Option<String>,
+    /// The resolved implementation currently in use
+    active_implementation: Option<WorkflowImplementation>,
     /// Stored state for restoration
     stored_state: StoredState,
 }
@@ -206,31 +292,85 @@ pub struct WorkflowManager {
 impl WorkflowManager {
     pub fn new() -> Self {
         Self {
-            workflows: HashMap::new(),
+            definitions: HashMap::new(),
+            default_implementations: HashMap::new(),
+            profile_implementations: HashMap::new(),
             active_workflow: None,
+            active_implementation: None,
             stored_state: StoredState::default(),
         }
     }
 
-    /// Register a workflow
-    pub fn register(&mut self, workflow: Workflow) {
-        debug!(id = %workflow.id, name = %workflow.name, "Registering workflow");
-        self.workflows.insert(workflow.id.to_string(), workflow);
+    // region: --- New API (Profile-Based)
+
+    /// Define a workflow (profile-agnostic)
+    ///
+    /// This creates the workflow concept without any implementation.
+    /// Use `implement()` or `implement_for_profile()` to add implementations.
+    pub fn define(&mut self, id: &'static str, name: &'static str, description: &'static str) {
+        debug!(id = %id, name = %name, "Defining workflow");
+        self.definitions.insert(id.to_string(), WorkflowDefinition::new(id, name, description));
     }
 
-    /// Get all registered workflows
-    pub fn all_workflows(&self) -> impl Iterator<Item = &Workflow> {
-        self.workflows.values()
+    /// Define a workflow with a short name for toolbar display
+    ///
+    /// The short name is used when the full name is > 12 chars with no spaces.
+    pub fn define_with_short_name(&mut self, id: &'static str, name: &'static str, short_name: &'static str, description: &'static str) {
+        debug!(id = %id, name = %name, short_name = %short_name, "Defining workflow with short name");
+        self.definitions.insert(id.to_string(), WorkflowDefinition::with_short_name(id, name, short_name, description));
     }
 
-    /// Get a workflow by ID
-    pub fn get(&self, id: &str) -> Option<&Workflow> {
-        self.workflows.get(id)
+    /// Register the default implementation for a workflow
+    ///
+    /// This is used when no profile-specific implementation is available.
+    pub fn implement(&mut self, workflow_id: &str, implementation: WorkflowImplementation) {
+        debug!(workflow_id = %workflow_id, "Registering default implementation");
+        self.default_implementations.insert(workflow_id.to_string(), implementation);
     }
 
-    /// Get the currently active workflow
-    pub fn active(&self) -> Option<&Workflow> {
-        self.active_workflow.as_ref().and_then(|id| self.workflows.get(id))
+    /// Register a profile-specific implementation for a workflow
+    ///
+    /// This overrides the default implementation for the specified profile.
+    pub fn implement_for_profile(&mut self, workflow_id: &str, profile: &str, implementation: WorkflowImplementation) {
+        debug!(workflow_id = %workflow_id, profile = %profile, "Registering profile implementation");
+        self.profile_implementations.insert((workflow_id.to_string(), profile.to_string()), implementation);
+    }
+
+    /// Get the implementation for a workflow based on the current profile
+    ///
+    /// Returns the profile-specific implementation if available, otherwise the default.
+    pub fn get_implementation(&self, workflow_id: &str, profile: &str) -> Option<&WorkflowImplementation> {
+        // Try profile-specific first
+        let key = (workflow_id.to_string(), profile.to_string());
+        if let Some(impl_) = self.profile_implementations.get(&key) {
+            return Some(impl_);
+        }
+
+        // Fall back to default
+        self.default_implementations.get(workflow_id)
+    }
+
+    /// Get all workflow definitions (profile-agnostic list)
+    pub fn list_definitions(&self) -> Vec<(&str, &str, &str)> {
+        self.definitions
+            .values()
+            .map(|d| (d.id, d.name, d.description))
+            .collect()
+    }
+
+    /// Get a workflow definition by ID
+    pub fn get_definition(&self, id: &str) -> Option<&WorkflowDefinition> {
+        self.definitions.get(id)
+    }
+
+    /// Get the active workflow definition (if any)
+    pub fn active_definition(&self) -> Option<&WorkflowDefinition> {
+        self.active_workflow.as_ref().and_then(|id| self.definitions.get(id))
+    }
+
+    /// List all registered workflows as (id, name, description) tuples
+    pub fn list(&self) -> Vec<(&str, &str, &str)> {
+        self.list_definitions()
     }
 
     /// Check if a workflow is active
@@ -238,38 +378,28 @@ impl WorkflowManager {
         self.active_workflow.as_ref().map(|s| s.as_str()) == Some(id)
     }
 
-    /// Get the best workflow variant for the current base profile
-    ///
-    /// For example, if base profile is "logic" and we want "tempo_mapping":
-    /// 1. First try "tempo_mapping_logic" (profile-specific variant)
-    /// 2. Fall back to "tempo_mapping" (generic)
-    pub fn find_workflow_for_profile(&self, workflow_base_id: &str, profile: &str) -> Option<&Workflow> {
-        // Try profile-specific variant first
-        let profile_specific = format!("{}_{}", workflow_base_id, profile);
-        if let Some(w) = self.workflows.get(&profile_specific) {
-            return Some(w);
-        }
-
-        // Try generic workflow (no base_profile or matching base_profile)
-        if let Some(w) = self.workflows.get(workflow_base_id) {
-            if w.base_profile.is_none() || w.base_profile == Some(profile) {
-                return Some(w);
-            }
-        }
-
-        None
-    }
+    // endregion: --- New API
 
     /// Activate a workflow
     ///
     /// This will:
     /// 1. Deactivate any currently active workflow
-    /// 2. Store current state for restoration
-    /// 3. Enable all overlays for the new workflow
-    /// 4. Apply REAPER settings
+    /// 2. Look up the implementation for the current profile
+    /// 3. Store current state for restoration
+    /// 4. Enable all overlays for the new workflow
+    /// 5. Apply REAPER settings
     pub fn activate(&mut self, id: &str) -> Result<(), String> {
-        let workflow = self.workflows.get(id)
-            .ok_or_else(|| format!("Unknown workflow: {}", id))?
+        // Get workflow definition
+        let definition = self.definitions.get(id)
+            .ok_or_else(|| format!("Unknown workflow: {}", id))?;
+        let name = definition.name;
+
+        // Get current profile
+        let current_profile = keybinds::active_preset_name();
+
+        // Look up implementation for current profile
+        let implementation = self.get_implementation(id, &current_profile)
+            .ok_or_else(|| format!("No implementation for workflow '{}' with profile '{}'", id, current_profile))?
             .clone();
 
         // Deactivate current workflow first (if any)
@@ -277,13 +407,18 @@ impl WorkflowManager {
             self.deactivate();
         }
 
-        info!(id = %id, name = %workflow.name, "Activating workflow");
+        info!(
+            id = %id,
+            name = %name,
+            profile = %current_profile,
+            "Activating workflow"
+        );
 
         // Store current state
-        self.store_current_state(&workflow);
+        self.store_current_state(&implementation);
 
         // Enable keybind overlays
-        for overlay in &workflow.keybind_overlays {
+        for overlay in &implementation.keybind_overlays {
             if !keybinds::is_override_active(overlay) {
                 keybinds::enable_override(overlay);
                 debug!(overlay = %overlay, "Enabled keybind overlay");
@@ -291,7 +426,7 @@ impl WorkflowManager {
         }
 
         // Enable mouse modifier overlays
-        for overlay in &workflow.mouse_overlays {
+        for overlay in &implementation.mouse_overlays {
             if !mouse_manager::is_override_active(overlay) {
                 mouse_manager::enable_override(overlay);
                 debug!(overlay = %overlay, "Enabled mouse modifier overlay");
@@ -299,18 +434,47 @@ impl WorkflowManager {
         }
 
         // Apply REAPER settings
-        self.apply_reaper_settings(&workflow.reaper_settings);
+        self.apply_reaper_settings(&implementation.reaper_settings);
 
         // Arm the action if specified
-        if let Some(ref armed) = workflow.armed_action {
+        if let Some(ref armed) = implementation.armed_action {
             self.arm_action(armed);
         }
 
+        // Add toolbar buttons
+        info!(
+            toolbar_api_available = toolbar::is_available(),
+            button_count = implementation.toolbar_buttons.len(),
+            "Adding toolbar buttons"
+        );
+        for button in &implementation.toolbar_buttons {
+            match toolbar::add_button(button, id) {
+                Ok(cmd_id) => {
+                    info!(
+                        button = %button.command_name,
+                        label = %button.label,
+                        toolbar = ?button.toolbar,
+                        command_id = ?cmd_id,
+                        "Added toolbar button"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        button = %button.command_name,
+                        error = %e,
+                        "Failed to add toolbar button"
+                    );
+                }
+            }
+        }
+
+        // Store the active implementation for deactivation
+        self.active_implementation = Some(implementation);
         self.active_workflow = Some(id.to_string());
 
         // Show notification
         let reaper = Reaper::get();
-        reaper.show_console_msg(format!("Workflow activated: {}\n", workflow.name));
+        reaper.show_console_msg(format!("Workflow activated: {}\n", name));
 
         info!(id = %id, "Workflow activated successfully");
         Ok(())
@@ -322,18 +486,33 @@ impl WorkflowManager {
             return false;
         };
 
-        let workflow = match self.workflows.get(&id) {
-            Some(w) => w.clone(),
+        // Use the stored implementation (preferred) or fall back to definition
+        let implementation = match self.active_implementation.take() {
+            Some(impl_) => impl_,
             None => {
-                warn!(id = %id, "Cannot deactivate unknown workflow");
+                warn!(id = %id, "No stored implementation, cannot fully deactivate");
                 return false;
             }
         };
 
-        info!(id = %id, name = %workflow.name, "Deactivating workflow");
+        // Get the workflow name from definition
+        let name = self.definitions.get(&id)
+            .map(|d| d.name)
+            .unwrap_or("Unknown");
+
+        info!(id = %id, name = %name, "Deactivating workflow");
+
+        // Remove toolbar buttons added by this workflow
+        if let Err(e) = toolbar::remove_workflow_buttons(&id) {
+            warn!(
+                workflow = %id,
+                error = %e,
+                "Failed to remove toolbar buttons"
+            );
+        }
 
         // Disable keybind overlays that the workflow enabled
-        for overlay in &workflow.keybind_overlays {
+        for overlay in &implementation.keybind_overlays {
             // Only disable if it wasn't active before
             if !self.stored_state.keybind_overlays.contains(&overlay.to_string()) {
                 keybinds::disable_override(overlay);
@@ -342,7 +521,7 @@ impl WorkflowManager {
         }
 
         // Disable mouse modifier overlays that the workflow enabled
-        for overlay in &workflow.mouse_overlays {
+        for overlay in &implementation.mouse_overlays {
             if !self.stored_state.mouse_overlays.contains(&overlay.to_string()) {
                 mouse_manager::disable_override(overlay);
                 debug!(overlay = %overlay, "Disabled mouse modifier overlay");
@@ -350,10 +529,10 @@ impl WorkflowManager {
         }
 
         // Restore REAPER settings
-        self.restore_reaper_settings(&workflow.reaper_settings);
+        self.restore_reaper_settings(&implementation.reaper_settings);
 
         // Disarm and restore previous armed command
-        if workflow.armed_action.is_some() {
+        if implementation.armed_action.is_some() {
             self.disarm_and_restore();
         }
 
@@ -362,7 +541,7 @@ impl WorkflowManager {
 
         // Show notification
         let reaper = Reaper::get();
-        reaper.show_console_msg(format!("Workflow deactivated: {}\n", workflow.name));
+        reaper.show_console_msg(format!("Workflow deactivated: {}\n", name));
 
         info!(id = %id, "Workflow deactivated successfully");
         true
@@ -390,7 +569,7 @@ impl WorkflowManager {
     }
 
     /// Store current state before activating a workflow
-    fn store_current_state(&mut self, workflow: &Workflow) {
+    fn store_current_state(&mut self, implementation: &WorkflowImplementation) {
         // Note: We would need to query current overlay states
         // For now, we'll just track what the workflow enables
         // A more complete implementation would query keybinds::get_active_overrides() etc.
@@ -398,7 +577,7 @@ impl WorkflowManager {
         self.stored_state = StoredState::default();
 
         // Store REAPER toggle states
-        for setting in &workflow.reaper_settings {
+        for setting in &implementation.reaper_settings {
             if let Some(current) = self.get_reaper_toggle_state(setting.command) {
                 self.stored_state.reaper_settings.insert(setting.command.to_string(), current);
             }
@@ -647,7 +826,12 @@ pub fn get_manager() -> &'static RwLock<WorkflowManager> {
         // Register built-in workflows
         register_default_workflows(&mut manager);
 
-        info!("Workflow manager initialized with {} workflows", manager.workflows.len());
+        info!(
+            definitions = manager.definitions.len(),
+            default_impls = manager.default_implementations.len(),
+            profile_impls = manager.profile_implementations.len(),
+            "Workflow manager initialized"
+        );
 
         RwLock::new(manager)
     })
@@ -685,7 +869,36 @@ pub fn is_active(id: &str) -> bool {
 /// Get the active workflow name (if any)
 pub fn active_workflow_name() -> Option<String> {
     let manager = get_manager().read().unwrap();
-    manager.active().map(|w| w.name.to_string())
+    manager.active_definition().map(|d| d.name.to_string())
+}
+
+/// Get the active workflow name (alias for active_workflow_name)
+pub fn get_active_workflow_name() -> Option<String> {
+    active_workflow_name()
+}
+
+/// Get the active workflow display name (short name if applicable)
+///
+/// Uses the short name if the full name is > 12 chars with no spaces.
+pub fn get_active_workflow_display_name() -> Option<String> {
+    let manager = get_manager().read().unwrap();
+    manager.active_definition().map(|d| d.display_name().to_string())
+}
+
+/// Get the active workflow ID (if any)
+pub fn get_active_workflow_id() -> Option<String> {
+    let manager = get_manager().read().unwrap();
+    manager.active_workflow.clone()
+}
+
+/// List all registered workflows
+/// Returns a list of (id, name, description) tuples
+pub fn list_workflows() -> Vec<(String, String, String)> {
+    let manager = get_manager().read().unwrap();
+    manager.list()
+        .iter()
+        .map(|(id, name, desc)| (id.to_string(), name.to_string(), desc.to_string()))
+        .collect()
 }
 
 /// Get the click action for the active workflow (if any)
@@ -694,9 +907,9 @@ pub fn active_workflow_name() -> Option<String> {
 /// DEPRECATED: Use get_armed_click_action() instead
 pub fn get_click_action() -> Option<String> {
     let manager = get_manager().read().unwrap();
-    manager
-        .active()
-        .and_then(|w| w.armed_action.as_ref())
+    manager.active_implementation
+        .as_ref()
+        .and_then(|impl_| impl_.armed_action.as_ref())
         .filter(|a| a.intercept_clicks)
         .map(|a| a.command.to_string())
 }
@@ -706,67 +919,76 @@ pub fn get_click_action() -> Option<String> {
 /// ArmedClickAction which includes context matching logic
 pub fn get_armed_click_action() -> Option<ArmedClickAction> {
     let manager = get_manager().read().unwrap();
-    manager
-        .active()
-        .and_then(|w| w.armed_click.clone())
+    manager.active_implementation
+        .as_ref()
+        .and_then(|impl_| impl_.armed_click.clone())
 }
 
 // === Built-in Workflows ===
 
 fn register_default_workflows(manager: &mut WorkflowManager) {
-    // Tempo Mapping workflow (generic - works with any base profile)
-    manager.register(
-        Workflow::new(
-            "tempo_mapping",
-            "Tempo Mapping",
-            "Workflow for tempo mapping audio to the grid"
-        )
-        .with_keybind_overlay("tempo_map")
-        .with_mouse_overlay("tempo_map")
-        // Example REAPER settings that might be useful for tempo mapping:
-        // .with_setting(ReaperSetting::on("Snap to grid", "40754"))
+    // ============================================
+    // Tempo Mapping Workflow
+    // ============================================
+
+    // Define the workflow (profile-agnostic)
+    manager.define(
+        "tempo_mapping",
+        "Tempo Mapping",
+        "Workflow for tempo mapping audio to the grid"
     );
 
-    // Fast Slip Edit workflow (generic)
-    manager.register(
-        Workflow::new(
-            "fast_slip_edit",
-            "Fast Slip Edit",
-            "Quick slip editing workflow for tight timing adjustments"
-        )
-        .with_keybind_overlay("fast_slip_edit") // s/x = split with crossfade
-        .with_mouse_overlay("quick_edit")       // Item lower = move contents, crossfade = move fades
-        // Disable snapping for precise slip editing
-        .with_setting(ReaperSetting::off("Snapping", "1157"))
-        // Enable auto-crossfade on split for seamless edits
-        .with_setting(ReaperSetting::on("Auto-crossfade on split", "40912"))
-        // Custom click interception - clicking on items triggers split with crossfade
-        .with_armed_click(
-            ArmedClickAction::on_item("FTS_SPLIT_ITEMS_CROSSFADE_LEFT")
-        )
+    // Default implementation (used by any profile without a specific override)
+    manager.implement(
+        "tempo_mapping",
+        WorkflowImplementation::new()
+            .with_keybind_overlay("tempo_map")
+            .with_mouse_overlay("tempo_map")
     );
 
-    // Tempo Mapping for Logic users
-    manager.register(
-        Workflow::new(
-            "tempo_mapping_logic",
-            "Tempo Mapping (Logic)",
-            "Tempo mapping with Logic-style behaviors"
-        )
-        .for_profile("logic")
-        .with_keybind_overlay("tempo_map")
-        .with_mouse_overlay("tempo_map")
+    // Logic profile: uses different overlays
+    manager.implement_for_profile(
+        "tempo_mapping",
+        "logic",
+        WorkflowImplementation::new()
+            .with_keybind_overlay("tempo_map_logic")
+            .with_mouse_overlay("tempo_map")
     );
 
-    // Tempo Mapping for FTS users
-    manager.register(
-        Workflow::new(
-            "tempo_mapping_fastrackstudio",
-            "Tempo Mapping (FTS)",
-            "Tempo mapping with FastTrackStudio behaviors"
-        )
-        .for_profile("fastrackstudio")
-        .with_keybind_overlay("tempo_map")
-        .with_mouse_overlay("tempo_map")
+    // FastTrackStudio profile: uses FTS-specific overlays
+    manager.implement_for_profile(
+        "tempo_mapping",
+        "fastrackstudio",
+        WorkflowImplementation::new()
+            .with_keybind_overlay("tempo_map_fts")
+            .with_mouse_overlay("tempo_map")
     );
+
+    // ============================================
+    // Fast Slip Edit Workflow
+    // ============================================
+
+    // Define the workflow
+    manager.define(
+        "fast_slip_edit",
+        "Fast Slip Edit",
+        "Quick slip editing workflow for tight timing adjustments"
+    );
+
+    // Default implementation
+    manager.implement(
+        "fast_slip_edit",
+        WorkflowImplementation::new()
+            .with_keybind_overlay("fast_slip_edit")
+            .with_mouse_overlay("quick_edit")
+            // Disable snapping for precise slip editing
+            .with_setting(ReaperSetting::off("Snapping", "1157"))
+            // Enable auto-crossfade on split for seamless edits
+            .with_setting(ReaperSetting::on("Auto-crossfade on split", "40912"))
+            // Custom click interception - clicking on items triggers split with crossfade
+            .with_armed_click(ArmedClickAction::on_item("FTS_SPLIT_ITEMS_CROSSFADE_LEFT"))
+    );
+
+    // Note: Profiles can add their own implementations here:
+    // manager.implement_for_profile("fast_slip_edit", "logic", ...);
 }

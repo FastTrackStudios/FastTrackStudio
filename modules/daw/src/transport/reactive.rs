@@ -249,4 +249,5 @@ impl DefaultTransportReactiveService {
     }
 }
 
+#[cfg(feature = "iroh")]
 pub mod irpc;

@@ -9,7 +9,7 @@
 //!
 //! Logs mouse context on clicks and when context changes (on wheel events).
 
-use crate::input::executor::{execute_action, execute_wheel_action};
+use crate::input::executor::{execute_action, execute_midi_editor_wheel_action, execute_wheel_action};
 use crate::input::keybinds::{self, KeybindContext};
 use crate::input::state::Context;
 use crate::input::workflows;
@@ -297,12 +297,24 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
             // Log mouse click with context
             log_mouse_context(context, &context_name, &_window_title, "click");
 
-            // Debug mouse context logging - log MM_CTX info on every click
-            if workflows::is_debug_mouse_context_enabled() {
-                let (mm_ctx, details) = workflows::detect_mouse_modifier_context(pt_screen.x, pt_screen.y);
+            // Debug logging for mouse clicks
+            // Check either unified debug logging OR dedicated mouse context debug
+            // This allows testing mouse context detection independently
+            let debug_mouse = crate::input::handler::InputHandler::is_debug_logging()
+                || workflows::is_debug_mouse_context_enabled();
+
+            if debug_mouse {
+                let button = match msg {
+                    WM_LBUTTONDOWN => "left",
+                    WM_RBUTTONDOWN => "right",
+                    WM_MBUTTONDOWN => "middle",
+                    _ => "unknown",
+                };
+                // Use the new comprehensive context detection
+                let mm_result = workflows::detect_context_at_point(pt_screen.x, pt_screen.y);
                 reaper.show_console_msg(format!(
-                    "🖱️ Click: {} | {} | Window: {}\n",
-                    mm_ctx, details, context_name
+                    "[DEBUG] Click: {} | {} | pos: ({}, {}) | {}\n",
+                    button, mm_result.context, pt_screen.x, pt_screen.y, mm_result.details
                 ));
             }
 
@@ -382,6 +394,20 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
             // Log context change on wheel events
             log_mouse_context(context, &context_name, &_window_title, "wheel");
 
+            // Build modifier string for keybind lookup (needed for both debug and binding resolution)
+            let modifier_str = build_modifier_string(ctrl, shift, alt);
+
+            // Debug logging for wheel events - unified with keyboard debug logging
+            if crate::input::handler::InputHandler::is_debug_logging() {
+                let direction = if delta > 0 { "up" } else { "down" };
+                let wheel_type = if is_horizontal { "horizontal" } else { "vertical" };
+                let mods = if modifier_str.is_empty() { "none".to_string() } else { modifier_str.clone() };
+                reaper.show_console_msg(format!(
+                    "[DEBUG] Wheel: {} {} in {} | delta: {} | modifiers: {}\n",
+                    wheel_type, direction, context_name, delta, mods
+                ));
+            }
+
             // Check passthrough mode - if on, skip binding resolution and pass through
             if crate::input::handler::InputHandler::is_passthrough() {
                 // Log wheel event in passthrough mode
@@ -393,9 +419,6 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
                 ));
                 return call_original_proc(hwnd, msg, w, l);
             }
-
-            // Build modifier string for keybind lookup
-            let modifier_str = build_modifier_string(ctrl, shift, alt);
 
             // Convert context for keybind resolution
             let kb_context = context_to_keybind_context(context);
@@ -411,8 +434,16 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
                     "Executing wheel binding"
                 );
 
-                if let Err(e) = execute_wheel_action(&action, delta) {
-                    warn!(error = %e, action = %action, "Failed to execute wheel action");
+                // Use MIDI Editor executor for MIDI contexts (supports smooth scrolling)
+                let result = match context {
+                    Context::Midi | Context::MidiEventListEditor => {
+                        execute_midi_editor_wheel_action(&action, delta)
+                    }
+                    _ => execute_wheel_action(&action, delta),
+                };
+
+                if let Err(e) = result {
+                    warn!(error = %e, action = %action, context = ?context, "Failed to execute wheel action");
                 }
 
                 // Eat the message - we handled it
@@ -552,6 +583,79 @@ pub fn check_and_hook_midi_editors() {
                     "🎹 Hooked MIDI editor window for wheel events\n".to_string(),
                 );
             }
+        }
+    }
+}
+
+/// Install wheel hook on the arrange view window
+/// This is critical for click interception on items
+pub fn install_arrange_view_hook() -> Result<(), Box<dyn std::error::Error>> {
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+
+    // Get arrange view window using the reaper_windows helper
+    if let Some(arrange_hwnd) = crate::input::reaper_windows::get_arrange_wnd(&medium_reaper) {
+        // Check if we've already hooked this window
+        let already_hooked = HOOKED_WINDOWS
+            .try_with(|hooked| hooked.borrow().contains(&arrange_hwnd))
+            .unwrap_or(false);
+
+        if !already_hooked {
+            install_wheel_hook(arrange_hwnd)?;
+            info!("Mouse hook installed on arrange view window");
+        }
+    } else {
+        return Err("Arrange view window not found".into());
+    }
+
+    Ok(())
+}
+
+/// Check for and hook arrange view window (call periodically)
+pub fn check_and_hook_arrange_view() {
+    // Hook if either input handler is enabled OR debug mouse context is enabled
+    let should_hook = crate::input::handler::InputHandler::is_enabled()
+        || workflows::is_debug_mouse_context_enabled();
+
+    if !should_hook {
+        return;
+    }
+
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+
+    // Get arrange view window
+    if let Some(arrange_hwnd) = crate::input::reaper_windows::get_arrange_wnd(&medium_reaper) {
+        hook_window_if_needed(arrange_hwnd, "arrange view");
+    }
+
+    // Also hook the ruler
+    if let Some(ruler_hwnd) = crate::input::reaper_windows::get_ruler_wnd(&medium_reaper) {
+        hook_window_if_needed(ruler_hwnd, "ruler");
+    }
+
+    // Also hook TCP if available
+    let (tcp_hwnd, _) = crate::input::reaper_windows::get_tcp_wnd(&medium_reaper);
+    if let Some(tcp) = tcp_hwnd {
+        hook_window_if_needed(tcp, "TCP");
+    }
+
+    // Hook the main REAPER window to catch clicks in other areas
+    let main_hwnd = medium_reaper.get_main_hwnd();
+    hook_window_if_needed(main_hwnd.as_ptr(), "main window");
+}
+
+/// Hook a window if not already hooked
+fn hook_window_if_needed(hwnd: reaper_low::raw::HWND, name: &str) {
+    let already_hooked = HOOKED_WINDOWS
+        .try_with(|hooked| hooked.borrow().contains(&hwnd))
+        .unwrap_or(false);
+
+    if !already_hooked {
+        if let Err(e) = install_wheel_hook(hwnd) {
+            tracing::warn!("Failed to hook {} window: {}", name, e);
+        } else {
+            info!("Hooked {} window for mouse events", name);
         }
     }
 }

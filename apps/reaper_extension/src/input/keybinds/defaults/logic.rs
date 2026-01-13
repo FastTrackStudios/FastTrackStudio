@@ -5,9 +5,12 @@
 //! - No fade hotspots in item corners (cleaner edge behavior)
 //! - Option+wheel for zoom
 //! - Logic-style transport and navigation
+//! - Numpad for transport and markers
+//! - Logic-style MIDI Editor shortcuts
 
 use crate::input::keybinds::sections::{
-    LogicEditing, LogicMouseModifiers, LogicNavigation, LogicScrolling, LogicTransport,
+    LogicEditing, LogicMidiEditor, LogicMouseModifiers, LogicNavigation, LogicScrolling,
+    LogicTransport, LogicViews,
 };
 use crate::input::keybinds::{KeybindPreset, PresetBuilder};
 
@@ -21,6 +24,8 @@ pub fn logic_preset() -> KeybindPreset {
         .with_section(LogicTransport)
         .with_section(LogicEditing)
         .with_section(LogicScrolling)
+        .with_section(LogicViews)
+        .with_section(LogicMidiEditor)
         .with_section(LogicMouseModifiers) // No fade corners!
         .build()
 }

@@ -8,7 +8,8 @@ edition.workspace = true
 [features]
 default = []
 rpp = ["rpp-parser"]
-full = ["rpp"]
+full = ["rpp", "iroh"]
+iroh = ["dep:irpc", "dep:irpc-iroh", "dep:iroh"]
 
 [dependencies]
 # Core dependencies
@@ -53,9 +54,9 @@ tower-layer = "0.3.3"
 tower-service = "0.3.3"
 tower-http = { version = "0.6.6", features = ["trace", "timeout", "cors"] }
 reqwest = { version = "0.12.24", features = ["json"] }
-irpc = { workspace = true }
-irpc-iroh = "0.11.0"
-iroh = { version = "0.95", features = ["discovery-local-network"] }
+irpc = { workspace = true, optional = true }
+irpc-iroh = { version = "0.11.0", optional = true }
+iroh = { version = "0.95", features = ["discovery-local-network"], optional = true }
 
 # RPP file parsing (optional)
 rpp-parser = { version = "0.1", optional = true }

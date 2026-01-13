@@ -89,10 +89,11 @@ impl Chart {
             return Ok(idx);
         }
 
-        // First non-empty line is typically "Title - Artist"
-        let (title, artist) = SongMetadata::parse_title_artist(lines[idx]);
+        // First non-empty line is typically "Title - Artist" or "Title (Subtitle) - Artist"
+        let (title, artist, subtitle) = SongMetadata::parse_title_artist_subtitle(lines[idx]);
         self.metadata.title = title;
         self.metadata.artist = artist;
+        self.metadata.subtitle = subtitle;
         idx += 1;
 
         // Skip empty lines and parse more settings
@@ -1270,6 +1271,9 @@ impl Chart {
 
         // Calculate absolute positions for all elements
         self.calculate_absolute_positions();
+
+        // Generate rhythm slashes for empty beats in each measure
+        self.generate_rhythm_slashes();
 
         // TODO: Handle template recall
     }

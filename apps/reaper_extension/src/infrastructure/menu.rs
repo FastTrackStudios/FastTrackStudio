@@ -114,6 +114,8 @@ fn extract_category_from_command_id(command_id: &str) -> (String, Option<String>
         ("Lyrics".to_string(), None)
     } else if command_id.starts_with("FTS_INPUT_") {
         ("Input".to_string(), None)
+    } else if command_id.starts_with("FTS_DT_") {
+        ("Dynamic-Template".to_string(), None)
     } else if command_id.starts_with("FTS_KEYFLOW_") {
         ("Keyflow".to_string(), None)
     } else if command_id.starts_with("FTS_DEV_") {
@@ -189,6 +191,7 @@ fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
         "Visibility Manager",
         "Lyrics",
         "Input",
+        "Dynamic-Template",
         "Keyflow",
         "Dev",
     ];

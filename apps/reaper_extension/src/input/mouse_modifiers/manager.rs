@@ -13,8 +13,8 @@
 //! When an override is disabled, the original values are restored.
 
 use super::behaviors::media_item::{
-    MediaItemCrossfadeLeftDragBehavior, MediaItemEdgeLeftDragBehavior,
-    MediaItemLowerLeftDragBehavior,
+    MediaItemClickBehavior, MediaItemCrossfadeLeftDragBehavior, MediaItemEdgeLeftDragBehavior,
+    MediaItemLeftDragBehavior, MediaItemLowerLeftDragBehavior,
 };
 use super::behaviors::shared::traits::BehaviorDisplay;
 use super::core::{get_mouse_modifier, set_mouse_modifier, MouseModifierFlag};
@@ -96,6 +96,43 @@ impl MouseModifierSetting {
         Self::from_behavior(
             context,
             MouseModifierFlag::new(false, false, true, false),
+            behavior,
+        )
+    }
+
+    /// Create a setting with Shift+Cmd/Ctrl modifier from a behavior enum
+    pub fn shift_cmd_behavior<B: BehaviorDisplay>(context: &'static str, behavior: B) -> Self {
+        Self::from_behavior(
+            context,
+            MouseModifierFlag::new(true, true, false, false),
+            behavior,
+        )
+    }
+
+    /// Create a setting with Alt/Opt+Shift modifier from a behavior enum
+    /// Pattern: Shift = "ignoring snap" variant, Alt/Opt = alternate action (e.g., copy vs move)
+    pub fn alt_shift_behavior<B: BehaviorDisplay>(context: &'static str, behavior: B) -> Self {
+        Self::from_behavior(
+            context,
+            MouseModifierFlag::new(true, false, true, false),
+            behavior,
+        )
+    }
+
+    /// Create a setting with Cmd/Ctrl+Alt/Opt modifier from a behavior enum
+    pub fn cmd_opt_behavior<B: BehaviorDisplay>(context: &'static str, behavior: B) -> Self {
+        Self::from_behavior(
+            context,
+            MouseModifierFlag::new(false, true, true, false),
+            behavior,
+        )
+    }
+
+    /// Create a setting with Shift+Cmd/Ctrl+Alt/Opt modifier from a behavior enum
+    pub fn shift_cmd_opt_behavior<B: BehaviorDisplay>(context: &'static str, behavior: B) -> Self {
+        Self::from_behavior(
+            context,
+            MouseModifierFlag::new(true, true, true, false),
             behavior,
         )
     }
@@ -609,36 +646,158 @@ pub fn log_state() {
 // === Built-in Profiles ===
 
 /// FastTrackStudio profile - optimized for creative workflow
+///
+/// ## Modifier Philosophy
+/// - **No modifier**: Default action (move, select, etc.)
+/// - **Shift**: "Ignoring snap" variant of the default action
+/// - **Alt/Opt**: Alternate action (copy instead of move, etc.)
+/// - **Alt/Opt+Shift**: "Ignoring snap" variant of the alternate action
+/// - **Cmd/Ctrl**: Add to selection or secondary behavior
+/// - **Shift+Cmd/Ctrl**: "Ignoring snap" variant of secondary behavior
+///
+/// ## Platform Note
+/// `cmd_behavior` uses Cmd on macOS, Ctrl on Windows/Linux (SuperKey concept)
 fn fts_profile() -> MouseModifierProfile {
     MouseModifierProfile::new("fastrackstudio", "FastTrackStudio optimized mouse modifiers")
         .with_settings([
-            // Item edge: Stretch by default (instead of Move edge)
+            // === Media Item Edge - Stretch Focus ===
+            // Default: Stretch item (instead of Move edge)
             // This makes time-stretching items easier without holding a modifier
             MouseModifierSetting::default_behavior(
                 "MM_CTX_ITEMEDGE",
                 MediaItemEdgeLeftDragBehavior::StretchItem,
             ),
-            // Shift+edge: Move edge (swap with default)
+            // Shift: Move edge (swap with default)
             MouseModifierSetting::shift_behavior(
                 "MM_CTX_ITEMEDGE",
                 MediaItemEdgeLeftDragBehavior::MoveEdge,
             ),
-            // Item lower half: Move item (just move) by default
+            // === Media Item (Main Body) - Move/Copy Focus ===
+            // Default: Move item ignoring time selection
+            MouseModifierSetting::default_behavior(
+                "MM_CTX_ITEM",
+                MediaItemLeftDragBehavior::MoveItemIgnoringTimeSelection,
+            ),
+            // Shift: Move item ignoring snap and time selection
+            MouseModifierSetting::shift_behavior(
+                "MM_CTX_ITEM",
+                MediaItemLeftDragBehavior::MoveItemIgnoringSnapAndTimeSelection,
+            ),
+            // Alt/Opt: Copy item
+            MouseModifierSetting::alt_behavior(
+                "MM_CTX_ITEM",
+                MediaItemLeftDragBehavior::CopyItem,
+            ),
+            // Alt/Opt+Shift: Copy item ignoring snap
+            MouseModifierSetting::alt_shift_behavior(
+                "MM_CTX_ITEM",
+                MediaItemLeftDragBehavior::CopyItemIgnoringSnap,
+            ),
+            // === Media Item Lower Half (Bottom Half) - Razor Edit Focus ===
+            // Default: Select razor edit area
             MouseModifierSetting::default_behavior(
                 "MM_CTX_ITEMLOWER",
-                MediaItemLowerLeftDragBehavior::MoveItem,
+                MediaItemLowerLeftDragBehavior::SelectRazorEditArea,
+            ),
+            // Cmd/Ctrl: Add to razor edit area (add to selection)
+            MouseModifierSetting::cmd_behavior(
+                "MM_CTX_ITEMLOWER",
+                MediaItemLowerLeftDragBehavior::AddToRazorEditArea,
+            ),
+            // Shift: Select razor edit area ignoring snap
+            MouseModifierSetting::shift_behavior(
+                "MM_CTX_ITEMLOWER",
+                MediaItemLowerLeftDragBehavior::SelectRazorEditAreaIgnoringSnap,
+            ),
+            // Shift+Cmd/Ctrl: Add to razor edit area ignoring snap
+            MouseModifierSetting::shift_cmd_behavior(
+                "MM_CTX_ITEMLOWER",
+                MediaItemLowerLeftDragBehavior::AddToRazorEditAreaIgnoringSnap,
+            ),
+            // === Media Item Click (Left Click) ===
+            // Default: Select item and move edit cursor
+            MouseModifierSetting::default_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::SelectItemAndMoveEditCursor,
+            ),
+            // Shift: Add items to selection, if already selected extend time selection
+            MouseModifierSetting::shift_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::AddARangeOfItemsToSelectionIfAlreadySelectedExtendTimeSelection,
+            ),
+            // Cmd/Ctrl: Toggle item selection
+            MouseModifierSetting::cmd_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::ToggleItemSelection,
+            ),
+            // Shift+Cmd/Ctrl: Select item and move edit cursor ignoring snap
+            MouseModifierSetting::shift_cmd_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::SelectItemAndMoveEditCursorIgnoringSnap,
+            ),
+            // Opt: Select item ignoring grouping
+            MouseModifierSetting::alt_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::SelectItemIgnoringGrouping,
+            ),
+            // Shift+Opt: Extend razor edit area
+            MouseModifierSetting::alt_shift_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::ExtendRazorEditArea,
+            ),
+            // Cmd/Ctrl+Opt: Add stretch marker
+            MouseModifierSetting::cmd_opt_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::AddStretchMarker,
             ),
         ])
 }
 
-/// Default REAPER profile
+/// Default REAPER profile - matches REAPER's default mouse modifier settings
 fn reaper_profile() -> MouseModifierProfile {
     MouseModifierProfile::new("reaper", "Default REAPER mouse modifiers")
         .with_settings([
-            // Item edge: Move edge by default (REAPER default)
+            // === Media Item Edge (Left Drag) ===
+            // Default: Move edge (REAPER default)
             MouseModifierSetting::default_behavior(
                 "MM_CTX_ITEMEDGE",
                 MediaItemEdgeLeftDragBehavior::MoveEdge,
+            ),
+            // === Media Item Click (Left Click) ===
+            // Default: Select item and move edit cursor
+            MouseModifierSetting::default_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::SelectItemAndMoveEditCursor,
+            ),
+            // Shift: Add items to selection, if already selected extend time selection
+            MouseModifierSetting::shift_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::AddARangeOfItemsToSelectionIfAlreadySelectedExtendTimeSelection,
+            ),
+            // Cmd/Ctrl: Toggle item selection
+            MouseModifierSetting::cmd_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::ToggleItemSelection,
+            ),
+            // Shift+Cmd/Ctrl: Select item and move edit cursor ignoring snap
+            MouseModifierSetting::shift_cmd_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::SelectItemAndMoveEditCursorIgnoringSnap,
+            ),
+            // Opt: Select item ignoring grouping
+            MouseModifierSetting::alt_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::SelectItemIgnoringGrouping,
+            ),
+            // Shift+Opt: Extend razor edit area
+            MouseModifierSetting::alt_shift_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::ExtendRazorEditArea,
+            ),
+            // Cmd/Ctrl+Opt: Add stretch marker
+            MouseModifierSetting::cmd_opt_behavior(
+                "MM_CTX_ITEM_CLK",
+                MediaItemClickBehavior::AddStretchMarker,
             ),
         ])
 }

@@ -8,24 +8,16 @@
 //! active workflow has an armed click action that matches the current mouse context.
 
 use reaper_high::Reaper;
-use std::sync::atomic::{AtomicBool, Ordering};
+use reaper_low::Swell;
 use tracing::debug;
 
-// === Debug Mouse Context Toggle ===
+// Re-export context detection types and functions from the context_detection module
+pub use super::context_detection::{
+    detect_context_at_point, detect_mouse_modifier_context, is_debug_mouse_context_enabled,
+    toggle_debug_mouse_context, ItemHitInfo, MouseContextResult, MouseModifierContext,
+};
 
-static DEBUG_MOUSE_CONTEXT: AtomicBool = AtomicBool::new(false);
-
-/// Toggle debug mouse context logging
-pub fn toggle_debug_mouse_context() -> bool {
-    let new_state = !DEBUG_MOUSE_CONTEXT.load(Ordering::Relaxed);
-    DEBUG_MOUSE_CONTEXT.store(new_state, Ordering::Relaxed);
-    new_state
-}
-
-/// Check if debug mouse context logging is enabled
-pub fn is_debug_mouse_context_enabled() -> bool {
-    DEBUG_MOUSE_CONTEXT.load(Ordering::Relaxed)
-}
+// region: --- Armed Click Action
 
 /// Defines what contexts an armed click action responds to
 #[derive(Debug, Clone)]
@@ -112,6 +104,28 @@ impl ArmedClickAction {
     }
 }
 
+/// Helper to create common armed click configurations
+impl ArmedClickAction {
+    /// Create an armed action that triggers on any item click
+    pub fn on_item(action: impl Into<String>) -> Self {
+        Self::new(action).with_context(ArmedContext::Item)
+    }
+
+    /// Create an armed action that triggers anywhere in arrange view
+    pub fn in_arrange(action: impl Into<String>) -> Self {
+        Self::new(action).with_context(ArmedContext::Arrange)
+    }
+
+    /// Create an armed action that triggers on item lower half (slip edit zone)
+    pub fn on_item_lower(action: impl Into<String>) -> Self {
+        Self::new(action).with_context(ArmedContext::ItemLower)
+    }
+}
+
+// endregion: --- Armed Click Action
+
+// region: --- Armed Context
+
 /// Context where armed click action can be triggered
 #[derive(Debug, Clone)]
 pub enum ArmedContext {
@@ -169,10 +183,13 @@ impl ArmedContext {
     }
 }
 
+// endregion: --- Armed Context
+
+// region: --- Helper Functions
+
 /// Check if the mouse is in the arrange view
 fn is_in_arrange_view(mouse_x: i32, mouse_y: i32) -> bool {
     use crate::input::reaper_windows;
-    use reaper_low::Swell;
 
     let reaper = Reaper::get();
     let medium = reaper.medium_reaper();
@@ -232,116 +249,4 @@ pub fn get_item_at_point(mouse_x: i32, mouse_y: i32) -> Option<*mut reaper_low::
     }
 }
 
-/// Detect the likely mouse modifier context based on mouse position
-/// Returns (context_name, details) for debugging
-pub fn detect_mouse_modifier_context(mouse_x: i32, mouse_y: i32) -> (String, String) {
-    use crate::input::reaper_windows;
-    use reaper_low::Swell;
-
-    let reaper = Reaper::get();
-    let medium = reaper.medium_reaper();
-
-    // Check if over an item
-    let mut take_out: *mut reaper_low::raw::MediaItem_Take = std::ptr::null_mut();
-    let item = unsafe {
-        medium.low().GetItemFromPoint(mouse_x, mouse_y, true, &mut take_out)
-    };
-
-    if !item.is_null() {
-        // We're over an item - try to determine which part
-        // Get item bounds to determine if we're on edge, lower half, etc.
-        unsafe {
-            let track = medium.low().GetMediaItem_Track(item);
-            let item_pos = medium.low().GetMediaItemInfo_Value(item, c"D_POSITION".as_ptr());
-            let item_len = medium.low().GetMediaItemInfo_Value(item, c"D_LENGTH".as_ptr());
-            let item_top = medium.low().GetMediaItemInfo_Value(item, c"F_FREEMODE_Y".as_ptr());
-            let item_height = medium.low().GetMediaItemInfo_Value(item, c"F_FREEMODE_H".as_ptr());
-
-            // Convert time to screen X
-            let arrange_start = medium.low().GetSet_ArrangeView2(
-                std::ptr::null_mut(),
-                false,
-                0,
-                0,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            );
-
-            // Get arrange window for coordinate conversion
-            if let Some(arrange_hwnd) = reaper_windows::get_arrange_wnd(&medium) {
-                let mut arrange_rect = reaper_low::raw::RECT {
-                    left: 0, top: 0, right: 0, bottom: 0
-                };
-                Swell::get().GetWindowRect(arrange_hwnd, &mut arrange_rect);
-
-                // Convert mouse to client coordinates
-                let mut pt = reaper_low::raw::POINT { x: mouse_x, y: mouse_y };
-                Swell::get().ScreenToClient(arrange_hwnd, &mut pt);
-
-                // Calculate relative position within the item
-                // This is approximate - REAPER's actual detection is more complex
-                let item_screen_left = medium.low().SnapToGrid(std::ptr::null_mut(), item_pos);
-
-                // Estimate edge zones (roughly 5-10 pixels from edge)
-                let edge_threshold = 8;
-
-                // For now, report what we can detect
-                let track_num = if !track.is_null() {
-                    medium.low().GetMediaTrackInfo_Value(track, c"IP_TRACKNUMBER".as_ptr()) as i32
-                } else {
-                    0
-                };
-
-                let details = format!(
-                    "Track {}, Pos: {:.2}s, Len: {:.2}s, Mouse client: ({}, {})",
-                    track_num, item_pos, item_len, pt.x, pt.y
-                );
-
-                // Try to detect edge vs body vs lower half
-                // This is a rough approximation
-                return ("MM_CTX_ITEM (or edge/lower)".to_string(), details);
-            }
-        }
-
-        return ("MM_CTX_ITEM".to_string(), "Over item (bounds unknown)".to_string());
-    }
-
-    // Check if in arrange view
-    if is_in_arrange_view(mouse_x, mouse_y) {
-        // Not over item, but in arrange - likely track or empty area
-        return ("MM_CTX_TRACK (or empty)".to_string(), "In arrange, no item".to_string());
-    }
-
-    // Check for ruler
-    if let Some(ruler_hwnd) = reaper_windows::get_ruler_wnd(&medium) {
-        let mut rect = reaper_low::raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-        unsafe {
-            Swell::get().GetWindowRect(ruler_hwnd, &mut rect);
-        }
-        if mouse_x >= rect.left && mouse_x < rect.right
-            && mouse_y >= rect.top && mouse_y < rect.bottom
-        {
-            return ("MM_CTX_RULER".to_string(), "On timeline ruler".to_string());
-        }
-    }
-
-    ("Unknown".to_string(), format!("Screen pos: ({}, {})", mouse_x, mouse_y))
-}
-
-/// Helper to create common armed click configurations
-impl ArmedClickAction {
-    /// Create an armed action that triggers on any item click
-    pub fn on_item(action: impl Into<String>) -> Self {
-        Self::new(action).with_context(ArmedContext::Item)
-    }
-
-    /// Create an armed action that triggers anywhere in arrange view
-    pub fn in_arrange(action: impl Into<String>) -> Self {
-        Self::new(action).with_context(ArmedContext::Arrange)
-    }
-
-    /// Create an armed action that triggers on item lower half (slip edit zone)
-    pub fn on_item_lower(action: impl Into<String>) -> Self {
-        Self::new(action).with_context(ArmedContext::ItemLower)
-    }
-}
+// endregion: --- Helper Functions

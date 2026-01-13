@@ -233,23 +233,24 @@ pub fn set_mouse_modifier(
         return Err("SetMouseModifier not available".into());
     }
 
-    let context_cstr = match CString::new(context) {
-        Ok(cstr) => cstr,
-        Err(_) => return Err("Invalid context string".into()),
-    };
+    let context_cstr = CString::new(context).map_err(|_| "Invalid context string")?;
     let flag = modifier_flag.to_flag();
 
-    let action_cstr = if action == "-1" {
-        std::ptr::null()
+    // Create the action CString outside the if block to keep it alive
+    // IMPORTANT: CString must stay alive until after SetMouseModifier is called!
+    let action_cstring = if action == "-1" {
+        None
     } else {
-        match CString::new(action) {
-            Ok(cstr) => cstr.as_ptr(),
-            Err(_) => return Err("Invalid action string".into()),
-        }
+        Some(CString::new(action).map_err(|_| "Invalid action string")?)
     };
 
+    let action_ptr = action_cstring
+        .as_ref()
+        .map(|s| s.as_ptr())
+        .unwrap_or(std::ptr::null());
+
     unsafe {
-        low_reaper.SetMouseModifier(context_cstr.as_ptr(), flag, action_cstr);
+        low_reaper.SetMouseModifier(context_cstr.as_ptr(), flag, action_ptr);
     }
 
     Ok(())

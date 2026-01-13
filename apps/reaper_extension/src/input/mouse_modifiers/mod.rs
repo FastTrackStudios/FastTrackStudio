@@ -2,11 +2,19 @@
 //!
 //! Provides functionality to get, set, save, and restore REAPER mouse modifier assignments.
 //! Organized by context categories for easy maintenance.
+//!
+//! ## Key Components
+//!
+//! - [`core`] - Low-level REAPER API wrappers (GetMouseModifier, SetMouseModifier)
+//! - [`manager`] - Layered profile system with stackable overrides
+//! - [`preset`] - JSON preset save/load functionality
+//! - [`types`] - Type-safe context and modifier enums
 
 pub mod actions;
 pub mod behaviors;
 pub mod contexts;
 pub mod core;
+pub mod manager;
 pub mod preset;
 pub mod types;
 

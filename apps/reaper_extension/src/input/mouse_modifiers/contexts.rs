@@ -4,6 +4,11 @@
 //! Uses internal MM_CTX_* names which are the most reliable format.
 //! These correspond to the contexts available in Options > Preferences > Mouse Modifiers
 
+use super::behaviors::media_item::{
+    MediaItemLeftDragBehavior, MediaItemEdgeLeftDragBehavior,
+};
+use super::behaviors::shared::traits::{BehaviorDisplay, BehaviorId};
+
 /// All mouse modifier contexts in REAPER
 /// Using internal MM_CTX_* names for reliability
 /// Based on sockmonkey72's MouseMaps.lua and REAPER's reaper-mouse.ini
@@ -89,6 +94,38 @@ pub const ALL_CONTEXTS: &[&str] = &[
     "MM_CTX_TRACK_CLK",  // Track (left click)
     "MM_CTX_TCP_DBLCLK", // Track control panel (double click)
 ];
+
+/// Get display name for a behavior ID in a specific context
+///
+/// Takes a behavior string like "2 m" or "13 m" and returns a human-readable name
+/// based on the context (e.g., "Stretch item" for "2 m" in MM_CTX_ITEMEDGE)
+pub fn get_behavior_display_name(context: &str, behavior_str: &str) -> String {
+    // Parse the behavior ID from strings like "2 m", "13 m", etc.
+    let behavior_id: Option<u32> = behavior_str
+        .trim()
+        .strip_suffix(" m")
+        .or_else(|| behavior_str.trim().strip_suffix("m"))
+        .or(Some(behavior_str.trim()))
+        .and_then(|s| s.trim().parse().ok());
+
+    let Some(id) = behavior_id else {
+        return behavior_str.to_string();
+    };
+
+    // Map context to behavior enum and get display name
+    match context {
+        "MM_CTX_ITEM" => {
+            let behavior = MediaItemLeftDragBehavior::from_behavior_id(id);
+            behavior.display_name().to_string()
+        }
+        "MM_CTX_ITEMEDGE" => {
+            let behavior = MediaItemEdgeLeftDragBehavior::from_behavior_id(id);
+            behavior.display_name().to_string()
+        }
+        // For contexts we don't have behavior enums for, return the raw string
+        _ => behavior_str.to_string(),
+    }
+}
 
 /// Get display name for a context (for logging/UI)
 pub fn get_display_name(context: &str) -> &str {

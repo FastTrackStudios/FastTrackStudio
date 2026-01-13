@@ -7,41 +7,43 @@ use dioxus_native::prelude::*;
 use dioxus_native::use_wgpu;
 use keyflow::Chart;
 use lumen_blocks::components::button::{Button, ButtonVariant};
+use winit::dpi::LogicalSize;
+use winit::window::WindowAttributes;
 
 mod chart_renderer;
 use chart_renderer::{ChartMessage, ChartPaintSource};
 
 /// Default chart text to start with
-const DEFAULT_CHART_TEXT: &str = r#"Well - Jacob Collier
-120bpm 4/4 #E
+/// Uses keyflow chart syntax: Title - Artist, tempo/time/key, then sections
+/// Chords are written as note names with qualities (Gmaj7, Am7, D7)
+/// Each space-separated chord is one measure by default
+const DEFAULT_CHART_TEXT: &str = r#"Autumn Leaves - Joseph Kosma
+120bpm 4/4 #G
 
-Intro 4
-1_2 2maj_2 | 4 | x2
+intro 4
+Gmaj7 Cmaj7 F#m7b5 B7
 
-VS 16
-1_2 2maj_2 | 4 | x^
+vs 8
+Em7 Am7 D7 Gmaj7 Cmaj7 F#m7b5 B7 Em
 
-[Hits]
-'1_2 '2maj_2 | '4 |
+ch 8
+Am7 D7 Gmaj7 Cmaj7 F#m7b5 B7 Em7 E7
 
-VS
+br 4
+Am7 D7 Gmaj7 B7
 
-[Hits]
-
-INST 8
-
-[SOLO Keys] 8
-
-Br 16
-
-br
-
-Outro 16
+outro 4
+Em7 Am7 D7 Gmaj7
 "#;
 
 fn main() {
     env_logger::init();
-    dioxus_native::launch(app);
+
+    let window_attrs = WindowAttributes::default()
+        .with_title("FTS-Native Chart Editor")
+        .with_inner_size(LogicalSize::new(1400.0, 900.0));
+
+    dioxus_native::launch_cfg(app, vec![], vec![Box::new(window_attrs)]);
 }
 
 fn app() -> Element {
@@ -93,6 +95,15 @@ fn app() -> Element {
                                 }
                             }
                         }
+                        // Syntax help
+                        details { class: "mt-2",
+                            summary { class: "text-xs text-muted-foreground cursor-pointer", "Syntax Help" }
+                            div { class: "text-xs text-muted-foreground mt-1 space-y-1",
+                                p { "Line 1: Title - Artist" }
+                                p { "Line 2: 120bpm 4/4 #C (tempo, time sig, key)" }
+                                p { "Sections: intro, vs, ch, br, pre, post, inst, outro + measure count" }
+                            }
+                        }
                     }
                     // Text editor
                     textarea {
@@ -108,7 +119,17 @@ fn app() -> Element {
                     // Preview header
                     div { class: "flex-shrink-0 p-4 border-b border-border",
                         h2 { class: "text-lg font-semibold", "Chart Preview" }
-                        p { class: "text-sm text-muted-foreground", "WGPU-rendered chart visualization" }
+                        if let Some(ref chart) = chart_for_preview() {
+                            if let Some(ref title) = chart.metadata.title {
+                                p { class: "text-sm text-muted-foreground",
+                                    {format!("{}{}", title, chart.metadata.artist.as_ref().map(|a| format!(" - {}", a)).unwrap_or_default())}
+                                }
+                            } else {
+                                p { class: "text-sm text-muted-foreground", "WGPU-rendered chart visualization" }
+                            }
+                        } else {
+                            p { class: "text-sm text-muted-foreground", "WGPU-rendered chart visualization" }
+                        }
                     }
                     // WGPU canvas
                     div { class: "flex-1 overflow-hidden",
@@ -137,19 +158,44 @@ fn ChartPreviewCanvas(chart: Option<Chart>) -> Element {
         })
     };
 
-    // Send chart updates when chart changes
-    use_effect(move || {
-        if let Some(ref sender) = *sender.borrow() {
-            if let Some(chart) = chart.clone() {
-                let _ = sender.send(ChartMessage::UpdateChart(chart));
-            }
-        }
-    });
+    // Clone sender for event handlers
+    let wheel_sender = sender.clone();
+
+    // Send chart updates on every render (component re-renders when prop changes)
+    // This ensures the renderer always has the latest chart data
+    if let Some(ref sender_ref) = *sender.borrow() {
+        let _ = sender_ref.send(ChartMessage::UpdateChart(chart.clone()));
+    }
 
     rsx! {
         div {
             class: "w-full h-full",
             style: "display: grid;",
+            // Handle mouse wheel for zoom/pan
+            // Option/Alt + scroll = zoom, regular scroll = pan
+            onwheel: move |evt| {
+                if let Some(ref sender) = *wheel_sender.borrow() {
+                    let delta_y = evt.delta().strip_units().y as f32;
+
+                    // Check if Option/Alt key is held for zoom
+                    if evt.modifiers().alt() {
+                        // Zoom - use element coordinates for cursor position
+                        let coords = evt.element_coordinates();
+                        let _ = sender.send(ChartMessage::Zoom {
+                            delta: -delta_y * 0.01,
+                            cursor_x: coords.x as f32,
+                            cursor_y: coords.y as f32,
+                        });
+                    } else {
+                        // Pan
+                        let delta_x = evt.delta().strip_units().x as f32;
+                        let _ = sender.send(ChartMessage::Pan {
+                            dx: delta_x,
+                            dy: delta_y,
+                        });
+                    }
+                }
+            },
             canvas {
                 id: "chart-preview",
                 "src": "{paint_source_id}"
@@ -212,8 +258,12 @@ html, body {
 .p-2 { padding: 0.5rem; }
 .p-4 { padding: 1rem; }
 .mb-2 { margin-bottom: 0.5rem; }
+.mt-1 { margin-top: 0.25rem; }
+.mt-2 { margin-top: 0.5rem; }
+.space-y-1 > * + * { margin-top: 0.25rem; }
 
 /* Typography */
+.text-xs { font-size: 0.75rem; line-height: 1rem; }
 .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
 .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
 .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
@@ -251,4 +301,11 @@ textarea:focus {
 
 .resize-none { resize: none; }
 .focus\:outline-none:focus { outline: none; }
+.cursor-pointer { cursor: pointer; }
+
+/* Details/summary styling */
+details summary { list-style: none; }
+details summary::-webkit-details-marker { display: none; }
+details summary::before { content: '▶ '; font-size: 0.6em; }
+details[open] summary::before { content: '▼ '; }
 "#;

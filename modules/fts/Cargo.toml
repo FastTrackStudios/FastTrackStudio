@@ -45,7 +45,8 @@ default = []
 reaper = ["dep:reaper-high", "dep:reaper-medium", "dep:reaper-low", "dep:enumflags2", "dep:fragile"]
 rpp = ["dep:rpp-parser"]
 dioxus = ["dep:dioxus"]
-full = ["reaper", "rpp"]
+iroh = ["daw/iroh"]
+full = ["reaper", "rpp", "iroh"]
 
 [dependencies.rpp-parser]
 version = "0.1"

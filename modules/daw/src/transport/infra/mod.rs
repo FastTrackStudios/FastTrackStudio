@@ -18,7 +18,7 @@
 //! - `grpc.rs` - gRPC adapter (future)
 
 pub mod http;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "iroh"))]
 pub mod irpc;
 pub mod stream;
 

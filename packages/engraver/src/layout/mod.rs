@@ -1,33 +1,170 @@
 //! Layout engine for music engraving.
 //!
-//! This module implements the core engraving stages:
-//! 1. Punctuation - Calculate horizontal space per duration
-//! 2. Casting Off - Determine measures per system, systems per page
-//! 3. Spacing - Apply proportional spacing rules
-//! 4. Beam Positioning - Calculate beam angles, stem lengths
-//! 5. Collision Detection - Resolve overlapping elements
-//! 6. Fine Tuning - Position dynamics, lyrics, articulations
+//! This module implements the core engraving stages following MuseScore's
+//! proven architecture:
+//!
+//! 1. **Segment Creation** - Group elements by time position
+//! 2. **Horizontal Spacing** - Spring-based note spacing with collision detection
+//! 3. **Vertical Positioning** - Skyline-based system spacing
+//! 4. **Collision Avoidance** - Autoplace for overlapping elements
+//! 5. **Element Layout** - Position-specific layout (chords, text, etc.)
+//!
+//! # Architecture
+//!
+//! - `LayoutContext` - Central orchestrator with configuration and state
+//! - `Shape` - Collision detection geometry
+//! - `Layout` trait - Element-specific layout implementations
+//! - Spring system - Proportional space distribution (Phase 1)
+//! - Segment system - Time-based element grouping (Phase 1)
+//!
+//! # Example
+//!
+//! ```ignore
+//! use engraver::layout::{LayoutContext, LayoutConfiguration};
+//!
+//! let config = LayoutConfiguration::default();
+//! let ctx = LayoutContext::new(config, &score, &style, &font);
+//!
+//! // Future: layout_score() will orchestrate full layout
+//! // let layout_data = layout_score(&ctx);
+//! ```
 
-// TODO: Implement layout engine
-// mod spacing;
-// mod casting;
-// mod beaming;
-// mod collision;
+pub mod context;
+pub mod shape;
+pub mod tlayout;
 
-/// Layout context containing settings and state for the layout process.
-#[derive(Debug, Clone)]
-pub struct LayoutContext {
-    /// Staff space size in pixels
-    pub staff_space: f64,
-    /// Minimum note spacing in staff spaces
-    pub min_note_spacing: f64,
+// Future modules (Phase 1+):
+// mod segment;         // Phase 1: Segment abstraction
+// mod springs;         // Phase 1: Spring system
+// mod duration_stretch;// Phase 1: Duration-based spacing
+// mod spacing;         // Phase 1: HorizontalSpacing algorithm
+// mod autoplace;       // Phase 2: Collision avoidance
+
+pub use context::{LayoutConfiguration, LayoutContext, LayoutMode, LayoutState};
+pub use shape::{Shape, ShapeElement};
+pub use tlayout::{Layout, LayoutData};
+
+/// Unit conversions and newtype wrappers for dimensional safety.
+///
+/// These newtypes prevent common unit confusion bugs at compile time.
+
+/// Staff spaces (fundamental unit in music notation).
+///
+/// One spatium = 1/4 of staff height = distance between two staff lines.
+/// Typically 1.75mm (5 points) in standard engraving.
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+pub struct Spatium(pub f64);
+
+impl Spatium {
+    /// Convert spatium to points.
+    ///
+    /// # Arguments
+    ///
+    /// * `base_spatium` - The base spatium value from MStyle (in points)
+    #[must_use]
+    pub fn to_points(self, base_spatium: f64) -> Points {
+        Points(self.0 * base_spatium)
+    }
+
+    /// Convert spatium to pixels.
+    #[must_use]
+    pub fn to_pixels(self, base_spatium: f64, dpi: f64) -> Pixels {
+        self.to_points(base_spatium).to_pixels(dpi)
+    }
 }
 
-impl Default for LayoutContext {
-    fn default() -> Self {
-        Self {
-            staff_space: 10.0,
-            min_note_spacing: 1.5,
-        }
+impl From<f64> for Spatium {
+    fn from(value: f64) -> Self {
+        Self(value)
+    }
+}
+
+/// Points (1/72 inch - PostScript/PDF standard).
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+pub struct Points(pub f64);
+
+impl Points {
+    /// Convert points to pixels at given DPI.
+    #[must_use]
+    pub fn to_pixels(self, dpi: f64) -> Pixels {
+        Pixels(self.0 * dpi / 72.0)
+    }
+
+    /// Convert points to spatiums.
+    #[must_use]
+    pub fn to_spatium(self, base_spatium: f64) -> Spatium {
+        Spatium(self.0 / base_spatium)
+    }
+}
+
+impl From<f64> for Points {
+    fn from(value: f64) -> Self {
+        Self(value)
+    }
+}
+
+/// Pixels (device-dependent units).
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+pub struct Pixels(pub f64);
+
+impl Pixels {
+    /// Convert pixels to points at given DPI.
+    #[must_use]
+    pub fn to_points(self, dpi: f64) -> Points {
+        Points(self.0 * 72.0 / dpi)
+    }
+}
+
+impl From<f64> for Pixels {
+    fn from(value: f64) -> Self {
+        Self(value)
+    }
+}
+
+// Future: Main layout entry point (Phase 4)
+//
+// pub fn layout_score(ctx: &LayoutContext) -> SceneGraph {
+//     // Phase 1: Create segments from score
+//     // Phase 2: Apply horizontal spacing
+//     // Phase 3: Layout individual elements
+//     // Phase 4: Assemble systems and pages
+// }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_spatium_to_points() {
+        let sp = Spatium(2.0);
+        let base_spatium = 5.0; // 5 points per spatium
+        let pts = sp.to_points(base_spatium);
+        assert_eq!(pts.0, 10.0);
+    }
+
+    #[test]
+    fn test_points_to_pixels() {
+        let pts = Points(72.0);
+        let dpi = 96.0;
+        let pixels = pts.to_pixels(dpi);
+        assert_eq!(pixels.0, 96.0); // 72 points at 96 DPI = 96 pixels
+    }
+
+    #[test]
+    fn test_spatium_to_pixels() {
+        let sp = Spatium(1.0);
+        let base_spatium = 5.0;
+        let dpi = 96.0;
+        let pixels = sp.to_pixels(base_spatium, dpi);
+        // 1 spatium = 5 points, 5 points at 96 DPI = 5 * 96/72 = 6.667 pixels
+        assert!((pixels.0 - 6.666666).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_points_to_spatium() {
+        let pts = Points(10.0);
+        let base_spatium = 5.0;
+        let sp = pts.to_spatium(base_spatium);
+        assert_eq!(sp.0, 2.0);
     }
 }

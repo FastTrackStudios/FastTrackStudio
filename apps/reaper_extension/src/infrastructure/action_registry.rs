@@ -7,7 +7,7 @@ use reaper_medium::{ActionValueChange, CommandId, HookCommand2, SectionContext, 
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::sync::{Mutex, OnceLock};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// Global storage for registered actions (keeps them alive)
 static REGISTERED_ACTIONS: OnceLock<Mutex<Vec<RegisteredAction>>> = OnceLock::new();
@@ -159,11 +159,12 @@ impl ActionDef {
         let command_id = self.command_id;
         let section_id = self.section.section_id();
 
-        debug!(
+        // Use info! level for registration so it's visible in logs
+        info!(
             command_id = %self.command_id,
             display_name = %self.display_name,
             section_id = section_id,
-            "Registering action with REAPER"
+            "🔧 Registering action with REAPER"
         );
 
         // Build full action name with category prefix
@@ -179,6 +180,12 @@ impl ActionDef {
             format!("FTS / Chart: {}", self.display_name)
         } else if self.command_id.starts_with("FTS_INPUT_") {
             format!("FTS / Input: {}", self.display_name)
+        } else if self.command_id.starts_with("FTS_TEMPO_") {
+            format!("FTS / TempoMap: {}", self.display_name)
+        } else if self.command_id.starts_with("FTS_KEYBIND_") {
+            format!("FTS / Keybinds: {}", self.display_name)
+        } else if self.command_id.starts_with("FTS_DT_") {
+            format!("FTS / Dynamic-Template: {}", self.display_name)
         } else {
             format!("FTS: {}", self.display_name)
         };
@@ -210,15 +217,17 @@ impl ActionDef {
                 action_kind,
             );
 
-            // Store the RegisteredAction to keep it alive
+            // Store the RegisteredAction to keep it alive IMMEDIATELY (before any other operations)
+            let reaper_cmd_id = registered_action.command_id();
             if let Ok(mut storage) = get_registered_actions_storage().lock() {
                 storage.push(registered_action);
             }
 
-            debug!(
+            info!(
                 command_id = %self.command_id,
                 action_name = %action_name,
-                "Action successfully registered with REAPER (main section)"
+                reaper_cmd_id = reaper_cmd_id.get(),
+                "✅ Action registered with REAPER (main section)"
             );
         } else {
             // Register to MIDI editor or other sections using low-level custom_action API
@@ -315,10 +324,10 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
         defs_storage.extend(actions.iter().cloned());
     }
 
-    debug!(
+    info!(
         module = %module_name,
         action_count = actions.len(),
-        "Starting action registration for module"
+        "📦 Starting action registration for module"
     );
 
     if actions.is_empty() {
@@ -369,11 +378,11 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
         }
     }
 
-    debug!(
+    info!(
         module = %module_name,
         success_count,
         total = actions.len(),
-        "Completed action registration: {}/{} actions successfully registered",
+        "✅ Completed action registration: {}/{} actions successfully registered",
         success_count,
         actions.len()
     );
@@ -394,27 +403,49 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
     let medium_reaper = Reaper::get().medium_reaper();
     let command_ids = COMMAND_IDS.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(mut map) = command_ids.lock() {
+        let mut found_count = 0;
+        let mut not_found = Vec::new();
+
         for action in actions {
             // Try both with and without underscore prefix
-            let lookup_names = [action.command_id, &format!("_{}", action.command_id)];
-            for lookup_name in &lookup_names {
-                if let Some(cmd_id) = medium_reaper.named_command_lookup(*lookup_name) {
+            let underscore_name = format!("_{}", action.command_id);
+            let mut found = false;
+
+            // Try direct lookup first
+            if let Some(cmd_id) = medium_reaper.named_command_lookup(action.command_id) {
+                map.insert(action.command_id, cmd_id);
+                found_count += 1;
+                found = true;
+            }
+            // Try with underscore prefix
+            if !found {
+                if let Some(cmd_id) = medium_reaper.named_command_lookup(underscore_name.as_str()) {
                     map.insert(action.command_id, cmd_id);
-                    debug!(
-                        command_id = %action.command_id,
-                        lookup_name = %lookup_name,
-                        "Stored command ID for action"
-                    );
-                    break;
+                    found_count += 1;
+                    found = true;
                 }
             }
+
+            if !found {
+                not_found.push(action.command_id);
+            }
         }
-        debug!(
+
+        info!(
             module = %module_name,
-            stored_count = map.len(),
-            "Stored {} command IDs for background thread access",
-            map.len()
+            found_count,
+            not_found_count = not_found.len(),
+            total_stored = map.len(),
+            "🔍 Command ID lookup complete"
         );
+
+        if !not_found.is_empty() {
+            warn!(
+                module = %module_name,
+                not_found = ?not_found,
+                "⚠️ Some actions could not be found in REAPER's action list"
+            );
+        }
     }
 }
 

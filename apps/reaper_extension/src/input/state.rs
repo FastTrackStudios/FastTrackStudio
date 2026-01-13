@@ -2,6 +2,7 @@
 //!
 //! Manages the state of key sequences, modes, and context for FTS-Input.
 
+use crate::input::error::{lock_mut, lock_or_default};
 use std::sync::{Mutex, OnceLock};
 
 /// The current mode of the input system
@@ -120,22 +121,16 @@ static INPUT_STATE: OnceLock<Mutex<CommandState>> = OnceLock::new();
 impl CommandState {
     /// Get the current command state
     pub fn get() -> CommandState {
-        INPUT_STATE
-            .get_or_init(|| Mutex::new(CommandState::default()))
-            .lock()
-            .unwrap()
-            .clone()
+        let mutex = INPUT_STATE.get_or_init(|| Mutex::new(CommandState::default()));
+        lock_or_default(mutex)
     }
 
     /// Set the command state
     pub fn set(state: CommandState) {
-        if let Ok(mut guard) = INPUT_STATE
-            .get_or_init(|| Mutex::new(CommandState::default()))
-            .lock()
-        {
-            *guard = state;
-        }
-
+        let mutex = INPUT_STATE.get_or_init(|| Mutex::new(CommandState::default()));
+        lock_mut(mutex, |current| {
+            *current = state;
+        });
         // TODO: Persist to REAPER's external state for persistence across sessions
     }
 

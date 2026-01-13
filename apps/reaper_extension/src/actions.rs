@@ -1019,16 +1019,39 @@ fn create_text_items_from_lyrics_handler() {
 
 /// Register all actions for FastTrackStudio extension
 pub fn register_all_actions() {
-    // Always register "About" action so menu is always available
-    let about_action = vec![ActionDef {
-        command_id: "FTS_ABOUT",
-        display_name: "About FastTrackStudio".to_string(),
-        handler: about_fasttrackstudio_handler,
-        appears_in_menu: true,
-        section: crate::infrastructure::action_registry::ActionSection::Main,
-        ..Default::default()
-    }];
-    register_actions(&about_action, "FastTrackStudio");
+    // Collect ALL actions into a single batch for registration
+    // (Multiple register_actions() calls cause actions to not appear in REAPER's action list)
+    let mut all_actions: Vec<ActionDef> = vec![
+        ActionDef {
+            command_id: "FTS_ABOUT",
+            display_name: "About FastTrackStudio".to_string(),
+            handler: about_fasttrackstudio_handler,
+            appears_in_menu: true,
+            section: crate::infrastructure::action_registry::ActionSection::Main,
+            ..Default::default()
+        },
+    ];
+
+    // Add Input actions to the batch (if input feature is enabled)
+    #[cfg(feature = "input")]
+    {
+        all_actions.extend(crate::input::actions::get_input_action_defs());
+    }
+
+    // Add Dynamic-Template actions to the batch (if dynamic_template feature is enabled)
+    #[cfg(feature = "dynamic_template")]
+    {
+        all_actions.extend(crate::dynamic_template::actions());
+    }
+
+    // Add Visibility Manager actions to the batch (if visibility_manager feature is enabled)
+    #[cfg(feature = "visibility_manager")]
+    {
+        all_actions.extend(crate::visibility_manager::actions());
+    }
+
+    // Register all actions in a single batch
+    register_actions(&all_actions, "FastTrackStudio");
 
     // Register dev actions (if dev feature is enabled)
     #[cfg(feature = "dev")]
@@ -1133,9 +1156,8 @@ pub fn register_all_actions() {
         crate::chart::actions::register_chart_actions();
     }
 
-    // Register FTS-Input actions (if input feature is enabled)
-    #[cfg(feature = "input")]
-    {
-        crate::input::actions::register_input_actions();
-    }
+    // Note: FTS-Input and Dynamic-Template actions are now included in the main batch above
+    // (Multiple register_actions() calls cause actions to not appear in REAPER's action list)
+
+    info!("✅ register_all_actions() completed");
 }

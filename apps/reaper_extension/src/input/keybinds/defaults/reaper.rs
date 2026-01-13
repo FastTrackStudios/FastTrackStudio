@@ -4,10 +4,13 @@
 //! Includes all standard REAPER behaviors:
 //! - Fade hotspots in item corners
 //! - Standard Ctrl/Cmd+wheel zoom
-//! - Default keyboard shortcuts (most pass through to REAPER)
+//! - Default keyboard shortcuts
+//! - Full track/item/view controls
+//! - MIDI Editor shortcuts
 
 use crate::input::keybinds::sections::{
-    ReaperEditing, ReaperMouseModifiers, ReaperNavigation, ReaperScrolling, ReaperTransport,
+    ReaperEditing, ReaperMidiEditor, ReaperMouseModifiers, ReaperNavigation, ReaperScrolling,
+    ReaperTransport, ReaperViews,
 };
 use crate::input::keybinds::{KeybindPreset, PresetBuilder};
 
@@ -19,11 +22,12 @@ pub fn reaper_preset() -> KeybindPreset {
     )
     .version("1.0.0")
     // Compose from REAPER-style sections
-    // These are minimal - most bindings fall through to REAPER defaults
     .with_section(ReaperNavigation)
     .with_section(ReaperTransport)
     .with_section(ReaperEditing)
     .with_section(ReaperScrolling)
+    .with_section(ReaperViews)
+    .with_section(ReaperMidiEditor)
     .with_section(ReaperMouseModifiers) // Full fade corners and edge behaviors
     .build()
 }

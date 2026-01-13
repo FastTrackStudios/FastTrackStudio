@@ -283,7 +283,6 @@ impl ApplicationHandler for App {
             required_features: Features::empty(),
             required_limits: Default::default(),
             memory_hints: Default::default(),
-            experimental_features: Default::default(),
             trace: Default::default(),
         }))
         .unwrap();
@@ -325,7 +324,6 @@ impl ApplicationHandler for App {
                 text,
                 &Attrs::new().family(Family::SansSerif).weight(glyphon::Weight::BOLD),
                 Shaping::Advanced,
-                None,
             );
             buffer.shape_until_scroll(&mut font_system, false);
 
@@ -400,7 +398,7 @@ impl ApplicationHandler for App {
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Pipeline Layout"),
             bind_group_layouts: &[&camera_bind_group_layout],
-            immediate_size: 0,
+            push_constant_ranges: &[],
         });
 
         let sdf_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
@@ -439,7 +437,7 @@ impl ApplicationHandler for App {
             },
             depth_stencil: None,
             multisample: MultisampleState::default(),
-            multiview_mask: None,
+            multiview: None,
             cache: None,
         });
 
@@ -685,7 +683,6 @@ impl ApplicationHandler for App {
                             depth_stencil_attachment: None,
                             timestamp_writes: None,
                             occlusion_query_set: None,
-                            multiview_mask: None,
                         });
 
                         // Draw SDF rectangles first (behind text)

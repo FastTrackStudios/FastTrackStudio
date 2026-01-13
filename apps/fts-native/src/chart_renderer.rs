@@ -12,9 +12,11 @@ use engraver::model::{
     compute_page_layout, compute_system_layout, ComputedHeaderLayout, HeaderFrameConfig,
     HeaderStyles, HeaderTextAlign, LineBreakPolicy, PageStyle, ScoreHeader,
 };
+use engraver::style::{MStyle, Sid};
 use engraver::renderer::{
-    create_camera_bind_group_layout, create_line, create_main_pipeline, create_rect,
-    create_sdf_pipeline, create_sdf_rounded_rect, CameraUniform, SdfRectVertex, Vertex,
+    create_blit_pipeline, create_blit_texture_bind_group_layout, create_camera_bind_group_layout,
+    create_fullscreen_quad, create_line, create_main_pipeline, create_rect, create_sdf_pipeline,
+    create_sdf_rounded_rect, BlitVertex, CameraUniform, SdfRectVertex, Vertex,
 };
 use engraver::ui::{format_rehearsal_label, CapsuleLabelConfig, CapsuleLabelMode, ComputedCapsuleLabel};
 use glyphon::{
@@ -24,6 +26,7 @@ use glyphon::{
 };
 use keyflow::Chart;
 use skrifa::FontRef;
+use std::collections::VecDeque;
 use std::io::Cursor;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Instant;
@@ -1070,6 +1073,24 @@ impl Default for HarmonyStyle {
     }
 }
 
+impl HarmonyStyle {
+    /// Create HarmonyStyle from MStyle, pulling values from the style system
+    #[must_use]
+    pub fn from_mstyle(style: &MStyle) -> Self {
+        Self {
+            // HarmonyPosAbove is a Y offset in spatiums (negative = above staff)
+            pos_above: (0.0, style.spatium(Sid::HarmonyPosAbove)),
+            pos_below: (0.0, style.spatium(Sid::HarmonyPosBelow)),
+            min_distance: style.spatium(Sid::MinHarmonyDistance),
+            harmony_distance: style.spatium(Sid::MinHarmonyDistance), // Using same value
+            horizontal_align: ChordHorizontalAlign::Center,
+            vertical_align: ChordVerticalAlign::Top,
+            vertically_align_system: true,
+            min_horizontal_clearance: 0.25,
+        }
+    }
+}
+
 /// Calculated position for a chord symbol
 #[derive(Debug, Clone)]
 struct ChordPosition {
@@ -1196,14 +1217,15 @@ fn calculate_chord_positions(
     font_size: f32,
     time_signature: (u8, u8),
     style: &HarmonyStyle,
+    music_style: &MStyle,
 ) -> Vec<ChordPosition> {
     let beats_per_measure = time_signature.0 as f32;
 
-    // MuseScore spacing values (in spatiums):
-    // - barNoteDistance: 1.5 (space from barline to first note)
-    // - noteBarDistance: 1.0 (space from last note to barline)
-    let bar_note_distance = staff_space * 1.5;
-    let note_bar_distance = staff_space * 1.0;
+    // Get MuseScore spacing values from style system (in spatiums):
+    // - barNoteDistance: space from barline to first note (default: 1.5 sp)
+    // - noteBarDistance: space from last note to barline (default: 1.0 sp)
+    let bar_note_distance = staff_space * music_style.spatium(Sid::BarNoteDistance);
+    let note_bar_distance = staff_space * music_style.spatium(Sid::NoteBarDistance);
 
     // Calculate the usable width for chord/note placement
     let usable_width = measure_width - bar_note_distance - note_bar_distance;
@@ -1266,6 +1288,7 @@ fn calculate_system_chord_positions(
     staff_space: f32,
     font_size: f32,
     style: &HarmonyStyle,
+    music_style: &MStyle,
 ) -> Vec<ChordPosition> {
     let mut all_positions = Vec::new();
 
@@ -1291,6 +1314,7 @@ fn calculate_system_chord_positions(
             font_size,
             time_sig,
             style,
+            music_style,
         );
 
         all_positions.extend(positions);
@@ -1387,14 +1411,20 @@ pub struct ChartPaintSource {
     state: ChartRendererState,
     current_chart: Option<Chart>,
     page_style: PageStyle,
+    /// MuseScore-compatible style properties
+    music_style: MStyle,
     view_state: ViewState,
     canvas_size: (u32, u32),
     /// Debug layout mode - shows margins, spacing, and layout guides
     debug_layout: bool,
-    /// FPS tracking
+    /// FPS tracking (using VecDeque for O(1) push/pop instead of Vec::remove(0) which is O(n))
     last_frame_time: Instant,
-    frame_times: Vec<f32>,
+    frame_times: VecDeque<f32>,
     current_fps: f32,
+    /// Cache invalidation: version number that increments when chart/style changes
+    cache_version: u64,
+    /// Last rendered cache version
+    last_rendered_version: u64,
 }
 
 enum ChartRendererState {
@@ -1412,27 +1442,32 @@ impl ChartPaintSource {
             current_chart: None,
             // Use lead_sheet style for LilyPond-based defaults
             page_style: PageStyle::lead_sheet(),
+            // Use MuseScore-compatible lead sheet style
+            music_style: MStyle::lead_sheet(),
             view_state: ViewState::default(),
             // Enable debug layout to visualize spacing parameters
             debug_layout: true,
             canvas_size: (800, 600),
-            // FPS tracking
+            // FPS tracking (VecDeque for O(1) operations)
             last_frame_time: Instant::now(),
-            frame_times: Vec::with_capacity(60),
+            frame_times: VecDeque::with_capacity(64),
             current_fps: 0.0,
+            // Cache invalidation
+            cache_version: 0,
+            last_rendered_version: 0,
         }
     }
 
-    /// Update FPS counter
+    /// Update FPS counter using O(1) VecDeque operations
     fn update_fps(&mut self) {
         let now = Instant::now();
         let frame_time = now.duration_since(self.last_frame_time).as_secs_f32();
         self.last_frame_time = now;
 
-        // Keep last 60 frame times for smoothing
-        self.frame_times.push(frame_time);
+        // Keep last 60 frame times for smoothing (O(1) push_back + pop_front)
+        self.frame_times.push_back(frame_time);
         if self.frame_times.len() > 60 {
-            self.frame_times.remove(0);
+            self.frame_times.pop_front();
         }
 
         // Calculate average FPS
@@ -1451,7 +1486,10 @@ impl ChartPaintSource {
         while let Ok(msg) = self.receiver.try_recv() {
             match msg {
                 ChartMessage::UpdateChart(chart) => {
+                    // Chart already has rhythm slashes generated during parsing
                     self.current_chart = chart;
+                    // Invalidate cache when chart changes
+                    self.cache_version = self.cache_version.wrapping_add(1);
                 }
                 ChartMessage::Zoom {
                     delta,
@@ -1521,9 +1559,11 @@ impl CustomPaintSource for ChartPaintSource {
             height,
             self.current_chart.as_ref(),
             &self.page_style,
+            &self.music_style,
             &self.view_state,
             self.debug_layout,
             self.current_fps,
+            self.cache_version,
         )
     }
 }
@@ -1635,6 +1675,28 @@ struct TextureAndHandle {
     handle: TextureHandle,
 }
 
+/// Cached scene geometry to avoid rebuilding every frame
+struct CachedScene {
+    /// Vertex count for draw call (avoids storing full vertex data)
+    vertex_count: u32,
+    /// SDF vertex count for draw call
+    sdf_vertex_count: u32,
+    /// Text buffers for rendering
+    text_info: Vec<(TextBuffer, f32, f32, f32, TextColor, bool)>,
+    /// Cache version when this scene was built
+    version: u64,
+    /// Canvas size when scene was built
+    canvas_size: (u32, u32),
+}
+
+/// Cached view state to detect when zoom/pan changes
+#[derive(Clone, Copy, PartialEq)]
+struct CachedViewState {
+    zoom: f32,
+    pan_x: f32,
+    pan_y: f32,
+}
+
 struct ActiveChartRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -1652,6 +1714,23 @@ struct ActiveChartRenderer {
     viewport: Viewport,
     // SMuFL font
     loaded_font: Option<LoadedFont>,
+    // Cached scene for performance - only rebuild when chart changes
+    cached_scene: Option<CachedScene>,
+    // Cached GPU buffers (with COPY_DST for efficient updates)
+    cached_vertex_buffer: Option<wgpu::Buffer>,
+    cached_sdf_buffer: Option<wgpu::Buffer>,
+    cached_camera_buffer: Option<wgpu::Buffer>,
+    cached_camera_bind_group: Option<wgpu::BindGroup>,
+    // Retained rendering resources - render chart once, blit with transform on zoom
+    blit_pipeline: wgpu::RenderPipeline,
+    blit_texture_bind_group_layout: wgpu::BindGroupLayout,
+    blit_vertex_buffer: wgpu::Buffer,
+    blit_sampler: wgpu::Sampler,
+    // Scene texture for retained rendering (rendered at identity transform)
+    scene_texture: Option<wgpu::Texture>,
+    scene_texture_bind_group: Option<wgpu::BindGroup>,
+    // Track when scene was last rendered
+    scene_render_version: u64,
 }
 
 impl ActiveChartRenderer {
@@ -1669,6 +1748,35 @@ impl ActiveChartRenderer {
 
         // Create SDF pipeline using shared function
         let sdf_pipeline = create_sdf_pipeline(device, format, &camera_bind_group_layout);
+
+        // Create blit pipeline for retained rendering
+        let blit_texture_bind_group_layout = create_blit_texture_bind_group_layout(device);
+        let blit_pipeline = create_blit_pipeline(
+            device,
+            format,
+            &camera_bind_group_layout,
+            &blit_texture_bind_group_layout,
+        );
+
+        // Create fullscreen quad vertex buffer for blitting
+        let blit_vertices = create_fullscreen_quad();
+        let blit_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Blit Vertex Buffer"),
+            contents: bytemuck::cast_slice(&blit_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        // Create sampler for scene texture
+        let blit_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Blit Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
 
         // Initialize text rendering with custom fonts
         let mut font_system = FontSystem::new();
@@ -1708,6 +1816,20 @@ impl ActiveChartRenderer {
             text_renderer,
             viewport,
             loaded_font,
+            // Cache fields for performance
+            cached_scene: None,
+            cached_vertex_buffer: None,
+            cached_sdf_buffer: None,
+            cached_camera_buffer: None,
+            cached_camera_bind_group: None,
+            // Retained rendering resources
+            blit_pipeline,
+            blit_texture_bind_group_layout,
+            blit_vertex_buffer,
+            blit_sampler,
+            scene_texture: None,
+            scene_texture_bind_group: None,
+            scene_render_version: 0,
         }
     }
 
@@ -1718,11 +1840,13 @@ impl ActiveChartRenderer {
         height: u32,
         chart: Option<&Chart>,
         page_style: &PageStyle,
+        music_style: &MStyle,
         view_state: &ViewState,
         debug_layout: bool,
         current_fps: f32,
+        cache_version: u64,
     ) -> Option<TextureHandle> {
-        // Handle texture management
+        // Handle output texture management
         if self
             .next_texture
             .as_ref()
@@ -1730,6 +1854,8 @@ impl ActiveChartRenderer {
         {
             let handle = self.next_texture.take().unwrap().handle;
             ctx.unregister_texture(handle);
+            // Invalidate geometry cache on resize
+            self.cached_scene = None;
         }
 
         if self.next_texture.is_none() {
@@ -1738,15 +1864,65 @@ impl ActiveChartRenderer {
             self.next_texture = Some(TextureAndHandle { texture, handle });
         }
 
-        // Build scene geometry using shared primitives
-        let (vertices, sdf_vertices, text_info) =
-            self.build_scene(chart, width, height, page_style, debug_layout, current_fps);
+        // Check if we need to rebuild geometry (content changed or size changed)
+        let needs_rebuild = self.cached_scene.as_ref().map_or(true, |cache| {
+            cache.version != cache_version || cache.canvas_size != (width, height)
+        });
 
-        let texture_and_handle = self.next_texture.as_ref().unwrap();
-        let next_texture = &texture_and_handle.texture;
-        let next_texture_handle = texture_and_handle.handle.clone();
+        // Get output texture handle (clone to avoid borrow issues)
+        let next_texture_handle = self.next_texture.as_ref().unwrap().handle.clone();
 
-        // Create camera uniform buffer using shared type (with resolution for SDF shader)
+        // Build or reuse cached geometry
+        if needs_rebuild {
+            let (vertices, sdf_vertices, text_info) =
+                self.build_scene(chart, width, height, page_style, music_style, debug_layout);
+
+            let vertex_count = vertices.len() as u32;
+            let sdf_vertex_count = sdf_vertices.len() as u32;
+
+            // Create GPU buffers
+            self.cached_vertex_buffer = if !vertices.is_empty() {
+                Some(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Chart Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }))
+            } else {
+                None
+            };
+
+            self.cached_sdf_buffer = if !sdf_vertices.is_empty() {
+                Some(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("SDF Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&sdf_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }))
+            } else {
+                None
+            };
+
+            // Update cache
+            self.cached_scene = Some(CachedScene {
+                vertex_count,
+                sdf_vertex_count,
+                text_info,
+                version: cache_version,
+                canvas_size: (width, height),
+            });
+        }
+
+        // Get cached counts
+        let (vertex_count, sdf_vertex_count) = self
+            .cached_scene
+            .as_ref()
+            .map(|c| (c.vertex_count, c.sdf_vertex_count))
+            .unwrap_or((0, 0));
+
+        // Update viewport
+        self.viewport
+            .update(&self.queue, Resolution { width, height });
+
+        // Create or update camera uniform buffer (with zoom/pan)
         let camera_uniform = CameraUniform::with_resolution(
             view_state.zoom,
             view_state.pan_x,
@@ -1754,94 +1930,72 @@ impl ActiveChartRenderer {
             width as f32,
             height as f32,
         );
-        let camera_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+
+        if self.cached_camera_buffer.is_none() {
+            let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Camera Uniform Buffer"),
                 contents: bytemuck::cast_slice(&[camera_uniform]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
-
-        let camera_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Camera Bind Group"),
-            layout: &self.camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-        });
-
-        // Create vertex buffers
-        let vertex_buffer = if !vertices.is_empty() {
-            Some(
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Chart Vertex Buffer"),
-                        contents: bytemuck::cast_slice(&vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            )
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Camera Bind Group"),
+                layout: &self.camera_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }],
+            });
+            self.cached_camera_buffer = Some(buffer);
+            self.cached_camera_bind_group = Some(bind_group);
         } else {
-            None
-        };
-
-        let sdf_vertex_buffer = if !sdf_vertices.is_empty() {
-            Some(
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("SDF Vertex Buffer"),
-                        contents: bytemuck::cast_slice(&sdf_vertices),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            )
-        } else {
-            None
-        };
-
-        // Update viewport
-        self.viewport
-            .update(&self.queue, Resolution { width, height });
+            self.queue.write_buffer(
+                self.cached_camera_buffer.as_ref().unwrap(),
+                0,
+                bytemuck::cast_slice(&[camera_uniform]),
+            );
+        }
 
         // Helper to transform pixel coordinates by camera (zoom + pan)
-        // Converts: pixel -> NDC -> apply camera -> back to pixel
         let transform_by_camera = |px: f32, py: f32| -> (f32, f32) {
             let w = width as f32;
             let h = height as f32;
-
-            // Convert pixel to NDC (-1 to 1)
             let ndc_x = (px / w) * 2.0 - 1.0;
             let ndc_y = 1.0 - (py / h) * 2.0;
-
-            // Apply camera transform: position * zoom + pan
             let transformed_x = ndc_x * view_state.zoom + view_state.pan_x;
             let transformed_y = ndc_y * view_state.zoom + view_state.pan_y;
-
-            // Convert back to pixel coordinates
             let screen_x = (transformed_x + 1.0) / 2.0 * w;
             let screen_y = (1.0 - transformed_y) / 2.0 * h;
-
             (screen_x, screen_y)
         };
 
-        // Prepare text areas with camera-transformed positions
-        // Tuple is: (buffer, x, y, scale, color, screen_space)
-        // screen_space = true means the text stays fixed on screen (like FPS counter)
-        let text_areas: Vec<TextArea> = text_info
-            .iter()
-            .map(|(buffer, x, y, text_scale, color, screen_space)| {
-                let (tx, ty, final_scale) = if *screen_space {
-                    // Screen-space text: no transformation
-                    (*x, *y, *text_scale)
-                } else {
-                    // World-space text: apply camera transformation
-                    let (tx, ty) = transform_by_camera(*x, *y);
-                    (tx, ty, view_state.zoom * text_scale)
-                };
+        // Create FPS counter text buffer (screen-space, not transformed)
+        let fps_text = format!("{:.0} FPS", current_fps);
+        let mut fps_buffer = TextBuffer::new(&mut self.font_system, Metrics::new(28.0, 32.0));
+        fps_buffer.set_size(&mut self.font_system, Some(150.0), Some(40.0));
+        fps_buffer.set_text(
+            &mut self.font_system,
+            &fps_text,
+            &Attrs::new().family(Family::Monospace).weight(Weight::BOLD),
+            Shaping::Advanced,
+        );
+        fps_buffer.shape_until_scroll(&mut self.font_system, false);
+
+        // Build text areas: world-space text (transformed) + FPS counter (screen-space)
+        let mut text_areas: Vec<TextArea> = self
+            .cached_scene
+            .as_ref()
+            .map(|c| &c.text_info)
+            .map(|info| info.iter())
+            .into_iter()
+            .flatten()
+            .map(|(buffer, x, y, text_scale, color, _screen_space)| {
+                // Transform world-space text positions by camera
+                let (tx, ty) = transform_by_camera(*x, *y);
                 TextArea {
                     buffer,
                     left: tx,
                     top: ty,
-                    scale: final_scale,
+                    scale: view_state.zoom * text_scale,
                     bounds: TextBounds {
                         left: 0,
                         top: 0,
@@ -1854,6 +2008,23 @@ impl ActiveChartRenderer {
             })
             .collect();
 
+        // Add FPS counter (screen-space, fixed position)
+        text_areas.push(TextArea {
+            buffer: &fps_buffer,
+            left: width as f32 - 160.0,
+            top: 10.0,
+            scale: 1.0,
+            bounds: TextBounds {
+                left: 0,
+                top: 0,
+                right: width as i32,
+                bottom: height as i32,
+            },
+            default_color: TextColor::rgba(0, 255, 100, 255),
+            custom_glyphs: &[],
+        });
+
+        // Prepare all text
         let _ = self.text_renderer.prepare(
             &self.device,
             &self.queue,
@@ -1864,7 +2035,10 @@ impl ActiveChartRenderer {
             &mut self.swash_cache,
         );
 
-        let texture_view = next_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // Get references for rendering
+        let output_texture = &self.next_texture.as_ref().unwrap().texture;
+        let camera_bind_group = self.cached_camera_bind_group.as_ref().unwrap();
+        let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut encoder = self
             .device
@@ -1872,15 +2046,14 @@ impl ActiveChartRenderer {
                 label: Some("Chart Render Encoder"),
             });
 
-        // Render pass
+        // Single render pass - direct vector rendering with camera transform
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Chart Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &texture_view,
+                    view: &output_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        // Dark gray canvas background (same as music_symbols example)
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: 0.2,
                             g: 0.2,
@@ -1896,23 +2069,23 @@ impl ActiveChartRenderer {
                 occlusion_query_set: None,
             });
 
-            // Draw main geometry (staff lines, notes, glyphs)
-            if let Some(buffer) = &vertex_buffer {
+            // Draw main geometry with camera transform (crisp at any zoom)
+            if let Some(buffer) = &self.cached_vertex_buffer {
                 render_pass.set_pipeline(&self.pipeline);
-                render_pass.set_bind_group(0, &camera_bind_group, &[]);
+                render_pass.set_bind_group(0, camera_bind_group, &[]);
                 render_pass.set_vertex_buffer(0, buffer.slice(..));
-                render_pass.draw(0..vertices.len() as u32, 0..1);
+                render_pass.draw(0..vertex_count, 0..1);
             }
 
-            // Draw SDF rounded rectangles (section labels)
-            if let Some(buffer) = &sdf_vertex_buffer {
+            // Draw SDF shapes with camera transform (pixel-perfect at any zoom)
+            if let Some(buffer) = &self.cached_sdf_buffer {
                 render_pass.set_pipeline(&self.sdf_pipeline);
-                render_pass.set_bind_group(0, &camera_bind_group, &[]);
+                render_pass.set_bind_group(0, camera_bind_group, &[]);
                 render_pass.set_vertex_buffer(0, buffer.slice(..));
-                render_pass.draw(0..sdf_vertices.len() as u32, 0..1);
+                render_pass.draw(0..sdf_vertex_count, 0..1);
             }
 
-            // Draw text
+            // Draw text (already transformed to screen coordinates)
             let _ = self
                 .text_renderer
                 .render(&self.text_atlas, &self.viewport, &mut render_pass);
@@ -1924,14 +2097,30 @@ impl ActiveChartRenderer {
         Some(next_texture_handle)
     }
 
+    /// Get the time signature for a specific measure index in the chart.
+    /// Walks through sections and measures to find the time signature.
+    fn get_measure_time_sig(&self, chart: &Chart, measure_idx: usize) -> (u8, u8) {
+        let mut measures_counted = 0;
+        for section in &chart.sections {
+            for measure in &section.measures {
+                if measures_counted == measure_idx {
+                    return measure.time_signature;
+                }
+                measures_counted += 1;
+            }
+        }
+        // Default to 4/4 if measure not found
+        (4, 4)
+    }
+
     fn build_scene(
         &mut self,
         chart: Option<&Chart>,
         width: u32,
         height: u32,
         page_style: &PageStyle,
+        music_style: &MStyle,
         debug_layout: bool,
-        current_fps: f32,
     ) -> (
         Vec<Vertex>,
         Vec<SdfRectVertex>,
@@ -2287,32 +2476,61 @@ impl ActiveChartRenderer {
                     ));
                 }
 
+                // Calculate offset for first measure to account for clef/key/time signature
+                // Clef glyph at staff_space * 0.5, extends ~4 staff spaces wide
+                // Time sig at staff_space * 4.5, extends ~2 staff spaces wide
+                // Music content should start after time sig: ~7.5 staff spaces on first system
+                let first_measure_offset = if sys_idx == 0 {
+                    staff_space * 8.0 // Clef (~4.5) + time signature (~3.5) on first system
+                } else {
+                    staff_space * 5.5 // Just clef on subsequent systems
+                };
+
+                // Collect all rhythm slashes and time signatures for this system (for SMuFL rendering)
+                let mut all_measure_slashes: Vec<Vec<&keyflow::chart::RhythmSlash>> = Vec::new();
+                let mut all_time_sigs: Vec<(u8, u8)> = Vec::new();
+
+                {
+                    let start_measure = sys_info.start_measure;
+                    for m in 0..measures_in_system {
+                        let global_measure_idx = start_measure + m;
+                        let mut measure_slashes: Vec<&keyflow::chart::RhythmSlash> = Vec::new();
+                        let mut measure_time_sig = (4u8, 4u8);
+                        let mut measures_counted = 0;
+
+                        'outer_slash: for section in &chart.sections {
+                            for measure in &section.measures {
+                                if measures_counted == global_measure_idx {
+                                    for slash in &measure.rhythm_slashes {
+                                        measure_slashes.push(slash);
+                                    }
+                                    measure_time_sig = measure.time_signature;
+                                    break 'outer_slash;
+                                }
+                                measures_counted += 1;
+                            }
+                        }
+
+                        all_measure_slashes.push(measure_slashes);
+                        all_time_sigs.push(measure_time_sig);
+                    }
+                }
+
                 // Render chord symbols above the staff using MuseScore-style positioning
                 // Uses system-level positioning with collision detection and vertical alignment
                 {
                     let start_measure = sys_info.start_measure;
                     let base_chord_font_size = staff_space * 2.0; // ~10pt at default staff_space
-                    let harmony_style = HarmonyStyle::default();
+                    // Create HarmonyStyle from MStyle to use style system values
+                    let harmony_style = HarmonyStyle::from_mstyle(music_style);
 
-                    // Calculate offset for first measure to account for clef/key/time signature
-                    // Clef glyph at staff_space * 0.5, extends ~4 staff spaces wide
-                    // Time sig at staff_space * 4.5, extends ~2 staff spaces wide
-                    // Music content should start after time sig: ~7.5 staff spaces on first system
-                    let first_measure_offset = if sys_idx == 0 {
-                        staff_space * 8.0 // Clef (~4.5) + time signature (~3.5) on first system
-                    } else {
-                        staff_space * 5.5 // Just clef on subsequent systems
-                    };
-
-                    // Phase 1: Collect all chords and time signatures for this system
+                    // Phase 1: Collect all chords for this system
                     let mut all_measure_chords: Vec<Vec<&keyflow::chart::ChordInstance>> = Vec::new();
-                    let mut all_time_sigs: Vec<(u8, u8)> = Vec::new();
                     let mut chord_symbols: Vec<String> = Vec::new(); // For rendering
 
                     for m in 0..measures_in_system {
                         let global_measure_idx = start_measure + m;
                         let mut measure_chords: Vec<&keyflow::chart::ChordInstance> = Vec::new();
-                        let mut measure_time_sig = (4u8, 4u8);
                         let mut measures_counted = 0;
 
                         'outer: for section in &chart.sections {
@@ -2322,7 +2540,6 @@ impl ActiveChartRenderer {
                                         measure_chords.push(chord);
                                         chord_symbols.push(chord.full_symbol.clone());
                                     }
-                                    measure_time_sig = measure.time_signature;
                                     break 'outer;
                                 }
                                 measures_counted += 1;
@@ -2330,7 +2547,6 @@ impl ActiveChartRenderer {
                         }
 
                         all_measure_chords.push(measure_chords);
-                        all_time_sigs.push(measure_time_sig);
                     }
 
                     // Phase 2: Calculate system-level positions with collision detection and alignment
@@ -2344,6 +2560,7 @@ impl ActiveChartRenderer {
                         staff_space,
                         base_chord_font_size,
                         &harmony_style,
+                        music_style,
                     );
 
                     // Phase 3: Render all chords at their calculated positions
@@ -2499,6 +2716,53 @@ impl ActiveChartRenderer {
                                     &font_ref, gid, font_size, ts_x, ts_y, black, w, h,
                                 ));
                                 vertices.extend(ts_verts);
+                            }
+                        }
+
+                        // Render rhythm slashes for empty beats
+                        // Try NoteheadSlashHorizontalEnds first, fallback to RepeatBarSlash
+                        let slash_gid = get_glyph_id(&font_ref, Glyph::NoteheadSlashHorizontalEnds)
+                            .or_else(|| get_glyph_id(&font_ref, Glyph::RepeatBarSlash));
+                        if let Some(slash_gid) = slash_gid {
+                            // Use same spacing as chord symbols (from MStyle)
+                            let bar_note_distance = staff_space * music_style.spatium(Sid::BarNoteDistance);
+                            let note_bar_distance = staff_space * music_style.spatium(Sid::NoteBarDistance);
+
+                            // Position slashes like noteheads: left edge at beat position
+                            // MuseScore positions noteheads with left edge at segment x
+                            // Chord symbols are then aligned relative to the notehead
+                            // For CENTER alignment, chords shift left by notehead_width * 0.5
+                            // We apply the same shift to slashes so they align with chords
+                            let notehead_width = staff_space * 1.18;
+                            let slash_offset = notehead_width * 0.5;
+
+                            for (m, measure_slashes) in all_measure_slashes.iter().enumerate() {
+                                let time_sig = all_time_sigs[m];
+                                let beats_in_measure = time_sig.0 as f32;
+                                let measure_x = content_left + (m as f32) * measure_width;
+
+                                // For first measure, account for clef/time sig
+                                let clef_offset = if m == 0 { first_measure_offset } else { 0.0 };
+
+                                // Match chord positioning: start after bar_note_distance
+                                let adjusted_measure_x = measure_x + clef_offset;
+                                let usable_width = measure_width - clef_offset - bar_note_distance - note_bar_distance;
+
+                                for slash in measure_slashes {
+                                    let beat = slash.beat as f32;
+                                    // Position like chords: beat_fraction * usable_width
+                                    let beat_fraction = beat / beats_in_measure;
+                                    let beat_x = adjusted_measure_x + bar_note_distance + (beat_fraction * usable_width);
+                                    // Apply same offset as chord symbols for alignment
+                                    let slash_x = beat_x - slash_offset;
+                                    // Center line of staff (B4 position)
+                                    let slash_y = staff_y + staff_space * 2.0;
+
+                                    let slash_verts = glyph_vertices_to_vertices(tessellate_glyph_to_ndc(
+                                        &font_ref, slash_gid, font_size, slash_x, slash_y, black, w, h,
+                                    ));
+                                    vertices.extend(slash_verts);
+                                }
                             }
                         }
                     }
@@ -2725,29 +2989,8 @@ impl ActiveChartRenderer {
             }
         }
 
-        // ================================================================
-        // FPS COUNTER (top-right of screen, in screen space)
-        // ================================================================
-        {
-            let fps_text = format!("{:.0} FPS", current_fps);
-            let mut fps_buffer = TextBuffer::new(&mut self.font_system, Metrics::new(14.0, 16.0));
-            fps_buffer.set_size(&mut self.font_system, Some(80.0), Some(20.0));
-            fps_buffer.set_text(
-                &mut self.font_system,
-                &fps_text,
-                &Attrs::new().family(Family::Monospace).weight(Weight::BOLD),
-                Shaping::Advanced,
-            );
-            fps_buffer.shape_until_scroll(&mut self.font_system, false);
-
-            // Position at top-right of screen (fixed position, not affected by zoom/pan)
-            let fps_x = w - 90.0;
-            let fps_y = 10.0;
-
-            // Use a bright color for visibility
-            let fps_color = TextColor::rgba(0, 200, 100, 255); // Green
-            text_buffers.push((fps_buffer, fps_x, fps_y, 1.0, fps_color, true)); // screen_space = true
-        }
+        // NOTE: FPS counter is rendered separately in render() since it changes every frame
+        // and shouldn't be part of the cached scene
 
         (vertices, sdf_vertices, text_buffers)
     }

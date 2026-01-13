@@ -3,7 +3,9 @@
 //! Main handler that processes keypresses and manages the input system.
 //! Uses TranslateAccel to intercept keypresses before REAPER processes them.
 
+use crate::input::keybinds::{self, KeybindContext};
 use crate::input::state::Context;
+use crate::input::window_detection;
 use reaper_high::Reaper;
 use reaper_low::raw;
 use reaper_medium::{
@@ -11,7 +13,7 @@ use reaper_medium::{
     TranslateAccel, TranslateAccelArgs, TranslateAccelResult,
 };
 use swell_ui::Window;
-use tracing::info;
+use tracing::{debug, info};
 
 /// Global state for whether FTS-Input interception is enabled
 static INTERCEPTION_ENABLED: std::sync::atomic::AtomicBool =
@@ -19,6 +21,9 @@ static INTERCEPTION_ENABLED: std::sync::atomic::AtomicBool =
 
 /// Global state for whether FTS-Input should eat keys or just log them (passthrough mode)
 static PASSTHROUGH_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Global state for debug logging mode (logs all key events to REAPER console)
+static DEBUG_LOGGING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Global state for whether the handler is currently registered
 /// When false, the handler is not registered at all (completely transparent)
@@ -50,81 +55,92 @@ impl InputHandler {
         let alt = behavior.contains(AcceleratorBehavior::Alt);
         let shift = behavior.contains(AcceleratorBehavior::Shift);
 
-        // Build modifier prefix
-        let mut prefix = String::new();
-        if ctrl {
-            prefix.push_str("<C-");
+        // Build modifier string (order: C, S, A, M to match parser convention)
+        // On macOS: Command (⌘) is reported as ctrl, Control (⌃) is reported as meta (key codes 91/92)
+        // We swap them so C = Command on macOS, M = Control on macOS
+        #[cfg(target_os = "macos")]
+        let (cmd, ctrl_key) = (ctrl, false); // ctrl flag = Command on macOS
+        #[cfg(not(target_os = "macos"))]
+        let (cmd, ctrl_key) = (false, ctrl);
+
+        let mut modifiers = Vec::new();
+        if ctrl_key {
+            modifiers.push("C"); // Control key (not Command on macOS)
         }
-        if alt {
-            prefix.push_str("<M-");
+        if cmd {
+            modifiers.push("M"); // Command/Meta key
         }
         if shift {
-            prefix.push_str("<S-");
+            modifiers.push("S");
+        }
+        if alt {
+            modifiers.push("A");
         }
 
         // Convert key code to string representation
         let key_str = match key_code {
+            // Modifier keys (return early, don't apply modifier prefixes)
+            16 | 160 | 161 => return "shift".to_string(),  // VK_SHIFT, VK_LSHIFT, VK_RSHIFT
+            #[cfg(target_os = "macos")]
+            17 | 162 | 163 => return "cmd".to_string(),    // On macOS, VK_CONTROL = Command
+            #[cfg(not(target_os = "macos"))]
+            17 | 162 | 163 => return "ctrl".to_string(),   // VK_CONTROL, VK_LCONTROL, VK_RCONTROL
+            18 | 164 | 165 => return "alt".to_string(),    // VK_MENU (Alt/Option), VK_LMENU, VK_RMENU
+            #[cfg(target_os = "macos")]
+            91 => return "ctrl".to_string(),               // On macOS, VK_LWIN = Control
+            #[cfg(target_os = "macos")]
+            92 => return "ctrl".to_string(),               // On macOS, VK_RWIN = Control
+            #[cfg(not(target_os = "macos"))]
+            91 => return "lmeta".to_string(),              // VK_LWIN (Left Win)
+            #[cfg(not(target_os = "macos"))]
+            92 => return "rmeta".to_string(),              // VK_RWIN (Right Win)
             // Letters (A-Z)
             65..=90 => {
-                let ch = if shift {
-                    char::from_u32(key_code as u32).unwrap_or('?')
-                } else {
-                    char::from_u32((key_code + 32) as u32).unwrap_or('?') // Convert to lowercase
-                };
-                ch.to_string()
+                // Always use lowercase for the key name
+                char::from_u32((key_code + 32) as u32).unwrap_or('?').to_string()
             }
             // Numbers (0-9)
             48..=57 => char::from_u32(key_code as u32).unwrap_or('?').to_string(),
             // Special keys
-            8 => "<BS>".to_string(),
-            9 => "<TAB>".to_string(),
-            13 => "<return>".to_string(),
-            27 => "<ESC>".to_string(),
-            32 => "<SPC>".to_string(),
+            8 => "backspace".to_string(),
+            9 => "tab".to_string(),
+            13 => "enter".to_string(),
+            27 => "esc".to_string(),
+            32 => "space".to_string(),
             // Arrow keys (virtual key codes)
-            0x25 => "<left>".to_string(),  // VK_LEFT
-            0x26 => "<up>".to_string(),    // VK_UP
-            0x27 => "<right>".to_string(), // VK_RIGHT
-            0x28 => "<down>".to_string(),  // VK_DOWN
-            // Special characters
-            33 => "!".to_string(),
-            34 => "\"".to_string(),
-            35 => "#".to_string(),
-            36 => "$".to_string(),
-            37 => "%".to_string(),
-            38 => "&".to_string(),
-            40 => "(".to_string(),
-            41 => ")".to_string(),
-            42 => "*".to_string(),
-            43 => "+".to_string(),
-            44 => ",".to_string(),
-            45 => "-".to_string(),
-            46 => ".".to_string(),
-            47 => "/".to_string(),
-            58 => ":".to_string(),
-            59 => ";".to_string(),
-            60 => "<".to_string(),
-            61 => "=".to_string(),
-            62 => ">".to_string(),
-            63 => "?".to_string(),
-            64 => "@".to_string(),
-            91 => "[".to_string(),
-            92 => "\\".to_string(),
-            93 => "]".to_string(),
-            94 => "^".to_string(),
-            95 => "_".to_string(),
-            96 => "`".to_string(),
-            123 => "{".to_string(),
-            124 => "|".to_string(),
-            125 => "}".to_string(),
-            126 => "~".to_string(),
-            _ => format!("<{}>", key_code),
+            0x25 => "left".to_string(),   // VK_LEFT
+            0x26 => "up".to_string(),     // VK_UP
+            0x27 => "right".to_string(),  // VK_RIGHT
+            0x28 => "down".to_string(),   // VK_DOWN
+            // Function keys
+            0x70..=0x7B => format!("f{}", key_code - 0x70 + 1), // F1-F12
+            // Other special keys
+            0x21 => "pageup".to_string(),   // VK_PRIOR
+            0x22 => "pagedown".to_string(), // VK_NEXT
+            0x23 => "end".to_string(),      // VK_END
+            0x24 => "home".to_string(),     // VK_HOME
+            0x2D => "insert".to_string(),   // VK_INSERT
+            0x2E => "delete".to_string(),   // VK_DELETE
+            // OEM keys (these vary by keyboard layout, using US layout)
+            0xBA => ";".to_string(),  // VK_OEM_1 (;:)
+            0xBB => "=".to_string(),  // VK_OEM_PLUS (=+)
+            0xBC => ",".to_string(),  // VK_OEM_COMMA
+            0xBD => "-".to_string(),  // VK_OEM_MINUS
+            0xBE => ".".to_string(),  // VK_OEM_PERIOD
+            0xBF => "/".to_string(),  // VK_OEM_2 (/?)
+            0xC0 => "`".to_string(),  // VK_OEM_3 (`~)
+            0xDB => "[".to_string(),  // VK_OEM_4 ([{)
+            0xDC => "\\".to_string(), // VK_OEM_5 (\|)
+            0xDD => "]".to_string(),  // VK_OEM_6 (]})
+            0xDE => "'".to_string(),  // VK_OEM_7 ('")
+            _ => format!("key{}", key_code),
         };
 
-        if prefix.is_empty() {
+        if modifiers.is_empty() {
             key_str
         } else {
-            format!("{}{}>", prefix, key_str)
+            // Format as <C-S-A-key> style
+            format!("<{}-{}>", modifiers.join("-"), key_str)
         }
     }
 
@@ -144,241 +160,12 @@ impl InputHandler {
     /// Determine context from current focused window
     /// Returns (Context, context_name, window_title)
     /// Made public so wheel_hook can use it
+    ///
+    /// This is now a thin wrapper around window_detection::detect_context_from_focus
     pub fn determine_context() -> (Context, String, String) {
         let reaper = Reaper::get();
         let medium_reaper = reaper.medium_reaper();
-
-        // Get the currently focused window
-        let mut found_window_title = String::new();
-
-        if let Some(focused_window) = Window::focused() {
-            let focused_hwnd = focused_window.raw_hwnd();
-
-            // Get window title for logging (try focused window first)
-            if found_window_title.is_empty() {
-                if let Ok(title) = focused_window.text() {
-                    found_window_title = title.clone();
-                }
-            }
-
-            // Check if the focused window is the active MIDI editor
-            if let Some(midi_editor_hwnd) = medium_reaper.midi_editor_get_active() {
-                // Check if the focused window is the MIDI editor or a child of it
-                let is_in_midi_editor = if focused_hwnd.as_ptr() == midi_editor_hwnd.as_ptr() {
-                    true
-                } else {
-                    // Check if the focused window is a child of the MIDI editor
-                    let mut current = Some(focused_window);
-                    let mut found = false;
-                    while let Some(window) = current {
-                        if window.raw_hwnd().as_ptr() == midi_editor_hwnd.as_ptr() {
-                            found = true;
-                            // Get title from this window if we don't have one yet
-                            if found_window_title.is_empty() {
-                                if let Ok(title) = window.text() {
-                                    found_window_title = title;
-                                }
-                            }
-                            break;
-                        }
-                        current = window.parent();
-                    }
-                    found
-                };
-
-                if is_in_midi_editor {
-                    // Get the MIDI editor mode to determine if it's Event List Editor
-                    // Mode: 0 = piano roll, 1 = event list, -1 = invalid
-                    let mode = unsafe {
-                        medium_reaper
-                            .low()
-                            .MIDIEditor_GetMode(midi_editor_hwnd.as_ptr())
-                    };
-
-                    if mode == 1 {
-                        // Event List Editor mode
-                        return (
-                            Context::MidiEventListEditor,
-                            "MIDI Event List Editor".to_string(),
-                            found_window_title,
-                        );
-                    } else {
-                        // Piano roll mode (or other)
-                        return (Context::Midi, "MIDI Editor".to_string(), found_window_title);
-                    }
-                }
-            }
-
-            // Check if the focused window is the Media Explorer
-            // We identify it by checking the window title
-            if let Ok(window_title) = focused_window.text() {
-                found_window_title = window_title.clone();
-                // Media Explorer window title typically contains "Media Explorer" or similar
-                let title_lower = window_title.to_lowercase();
-                if title_lower.contains("media explorer") || title_lower.contains("mediaexplorer") {
-                    return (
-                        Context::MediaExplorer,
-                        "Media Explorer".to_string(),
-                        found_window_title,
-                    );
-                }
-            }
-
-            // Also check parent windows for Media Explorer
-            let mut current = Some(focused_window);
-            while let Some(window) = current {
-                if let Ok(window_title) = window.text() {
-                    if found_window_title.is_empty() {
-                        found_window_title = window_title.clone();
-                    }
-                    let title_lower = window_title.to_lowercase();
-                    if title_lower.contains("media explorer")
-                        || title_lower.contains("mediaexplorer")
-                    {
-                        return (
-                            Context::MediaExplorer,
-                            "Media Explorer".to_string(),
-                            found_window_title,
-                        );
-                    }
-                }
-                current = window.parent();
-            }
-
-            // Check if the focused window is the MIDI Inline Editor
-            // The inline editor is a child window of the arrange view (main window)
-            // We need to check if we're in the main window and walk up/down the hierarchy
-            // to find the inline editor window
-
-            // First, make sure we're NOT in the MIDI editor (inline editor is separate)
-            let is_in_midi_editor =
-                if let Some(midi_editor_hwnd) = medium_reaper.midi_editor_get_active() {
-                    let mut current = Some(focused_window);
-                    let mut found = false;
-                    while let Some(window) = current {
-                        if window.raw_hwnd().as_ptr() == midi_editor_hwnd.as_ptr() {
-                            found = true;
-                            break;
-                        }
-                        current = window.parent();
-                    }
-                    found
-                } else {
-                    false
-                };
-
-            // If we're not in the MIDI editor, check if we might be in the inline editor
-            if !is_in_midi_editor {
-                // Walk up the parent chain to find the main window
-                let main_hwnd = medium_reaper.get_main_hwnd();
-                let mut current = Some(focused_window);
-                let mut is_in_main_window = false;
-
-                while let Some(window) = current {
-                    if window.raw_hwnd().as_ptr() == main_hwnd.as_ptr() {
-                        is_in_main_window = true;
-                        break;
-                    }
-                    current = window.parent();
-                }
-
-                // If we're in the main window, check if the focused window or its parents
-                // might be the inline editor by checking window titles
-                if is_in_main_window {
-                    let mut check_window = Some(focused_window);
-                    while let Some(window) = check_window {
-                        if let Ok(window_title) = window.text() {
-                            if found_window_title.is_empty() {
-                                found_window_title = window_title.clone();
-                            }
-                            let title_lower = window_title.to_lowercase();
-
-                            // Check for inline editor indicators in the title
-                            if (title_lower.contains("inline")
-                                || title_lower.contains("midi inline"))
-                                && (title_lower.contains("midi") || title_lower.contains("editor"))
-                            {
-                                return (
-                                    Context::MidiInlineEditor,
-                                    "MIDI Inline Editor".to_string(),
-                                    found_window_title,
-                                );
-                            }
-
-                            // Also check child windows of this window for inline editor
-                            for child in window.children() {
-                                if let Ok(child_title) = child.text() {
-                                    let child_title_lower = child_title.to_lowercase();
-                                    if (child_title_lower.contains("inline")
-                                        || child_title_lower.contains("midi inline"))
-                                        && (child_title_lower.contains("midi")
-                                            || child_title_lower.contains("editor"))
-                                    {
-                                        return (
-                                            Context::MidiInlineEditor,
-                                            "MIDI Inline Editor".to_string(),
-                                            found_window_title,
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        check_window = window.parent();
-                    }
-                }
-            }
-
-            // Check if the focused window is the Crossfade Editor
-            // We identify it by checking the window title (no API available)
-            if let Ok(window_title) = focused_window.text() {
-                if found_window_title.is_empty() {
-                    found_window_title = window_title.clone();
-                }
-                let title_lower = window_title.to_lowercase();
-                if title_lower.contains("crossfade") && title_lower.contains("editor") {
-                    return (
-                        Context::CrossfadeEditor,
-                        "Crossfade Editor".to_string(),
-                        found_window_title,
-                    );
-                }
-            }
-
-            // Also check parent windows for editors (excluding MIDI Event List, which is handled above)
-            let mut current = Some(focused_window);
-            while let Some(window) = current {
-                if let Ok(window_title) = window.text() {
-                    if found_window_title.is_empty() {
-                        found_window_title = window_title.clone();
-                    }
-                    let title_lower = window_title.to_lowercase();
-
-                    // Check for MIDI Inline Editor
-                    if (title_lower.contains("inline") || title_lower.contains("midi inline"))
-                        && (title_lower.contains("midi") || title_lower.contains("editor"))
-                    {
-                        return (
-                            Context::MidiInlineEditor,
-                            "MIDI Inline Editor".to_string(),
-                            found_window_title,
-                        );
-                    }
-
-                    // Check for Crossfade Editor
-                    if title_lower.contains("crossfade") && title_lower.contains("editor") {
-                        return (
-                            Context::CrossfadeEditor,
-                            "Crossfade Editor".to_string(),
-                            found_window_title,
-                        );
-                    }
-                }
-                current = window.parent();
-            }
-        }
-
-        // Default to main window context
-        (Context::Main, "Main Window".to_string(), found_window_title)
+        window_detection::detect_context_from_focus_compat(&medium_reaper)
     }
 }
 
@@ -429,6 +216,23 @@ impl TranslateAccel for InputHandler {
         // Handle key release for continuous actions
         // This must happen even when interception is disabled to properly stop continuous actions
         if msg_type == AccelMsgKind::KeyUp || msg_type == AccelMsgKind::SysKeyUp {
+            // Debug log key releases
+            if DEBUG_LOGGING.load(std::sync::atomic::Ordering::Relaxed) {
+                let key = args.msg.key();
+                let behavior = args.msg.behavior();
+                let key_str = Self::key_to_string(key, &behavior);
+                let (context, context_name, _) = Self::determine_context();
+                let reaper = Reaper::get();
+                reaper.show_console_msg(format!(
+                    "[DEBUG] KeyUp: '{}' (raw: {}) in {} | modifiers: ctrl={} shift={} alt={}\n",
+                    key_str,
+                    key.get(),
+                    context_name,
+                    behavior.contains(AcceleratorBehavior::Control),
+                    behavior.contains(AcceleratorBehavior::Shift),
+                    behavior.contains(AcceleratorBehavior::Alt),
+                ));
+            }
             // Stop any running continuous action on key release
             crate::input::continuous_action::stop_all_continuous_actions();
             return TranslateAccelResult::NotOurWindow;
@@ -538,24 +342,31 @@ impl TranslateAccel for InputHandler {
         // Determine context - this now also returns the window title it found
         let (context, context_name, _window_title) = Self::determine_context();
 
-        // Log ALL keypresses to REAPER console for testing (only when interception is enabled)
-        let reaper = Reaper::get();
-        reaper.show_console_msg(format!("Key '{}' pressed in {}\n", key_str, context_name));
-
-        // Determine what to do with the key:
-        // - If passthrough mode is ON: log and pass through to REAPER (NotOurWindow)
-        // - If passthrough mode is OFF: log and intercept the key (Eat)
-        if PASSTHROUGH_MODE.load(std::sync::atomic::Ordering::Relaxed) {
-            // Passthrough ON: Log but let REAPER handle the key
-            TranslateAccelResult::NotOurWindow
-        } else {
-            // Passthrough OFF: Log and intercept the key (prevent REAPER from processing it)
-            // This allows us to intercept keys for custom handling
-            // TODO: Eventually check if we have key bindings configured for this key
-            // If yes, process the binding and Eat the key
-            // If no, we might want to still Eat it or pass it through based on configuration
-            TranslateAccelResult::Eat
+        // Debug logging for key down events
+        if DEBUG_LOGGING.load(std::sync::atomic::Ordering::Relaxed) {
+            let reaper = Reaper::get();
+            reaper.show_console_msg(format!(
+                "[DEBUG] KeyDown: '{}' (raw: {}) in {} | modifiers: ctrl={} shift={} alt={}\n",
+                key_str,
+                key.get(),
+                context_name,
+                behavior.contains(AcceleratorBehavior::Control),
+                behavior.contains(AcceleratorBehavior::Shift),
+                behavior.contains(AcceleratorBehavior::Alt),
+            ));
         }
+
+        // Try to resolve the key to an action via the keybind system
+        if let Some(action) = Self::try_resolve_keybind(&key_str, &context) {
+            debug!(key = %key_str, action = %action, context = %context_name, "Keybind resolved");
+            Self::execute_action(&action);
+            return TranslateAccelResult::Eat;
+        }
+
+        // No keybind found - determine what to do:
+        // - If passthrough mode is ON: pass through to REAPER (NotOurWindow)
+        // - If passthrough mode is OFF: still pass through (we only eat keys we have bindings for)
+        TranslateAccelResult::NotOurWindow
     }
 }
 
@@ -638,6 +449,11 @@ impl InputHandler {
                 tracing::warn!("Failed to install wheel hook: {}", e);
             }
 
+            // Install hook on arrange view window (critical for click interception)
+            if let Err(e) = crate::input::wheel_hook::install_arrange_view_hook() {
+                tracing::warn!("Failed to install arrange view hook: {}", e);
+            }
+
             // Check for and hook MIDI editor windows
             crate::input::wheel_hook::check_and_hook_midi_editors();
 
@@ -680,6 +496,89 @@ impl InputHandler {
         Self::set_passthrough(new_state);
         new_state
     }
+
+    /// Check if debug logging is enabled
+    pub fn is_debug_logging() -> bool {
+        DEBUG_LOGGING.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Set debug logging mode
+    pub fn set_debug_logging(enabled: bool) {
+        DEBUG_LOGGING.store(enabled, std::sync::atomic::Ordering::Relaxed);
+        let reaper = Reaper::get();
+        if enabled {
+            reaper.show_console_msg("FTS-Input: Debug logging ENABLED - all key events will be logged\n");
+        } else {
+            reaper.show_console_msg("FTS-Input: Debug logging DISABLED\n");
+        }
+        info!(
+            "FTS-Input debug logging {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+    }
+
+    /// Toggle debug logging mode
+    pub fn toggle_debug_logging() -> bool {
+        let new_state = !Self::is_debug_logging();
+        Self::set_debug_logging(new_state);
+        new_state
+    }
+
+    /// Convert internal Context to KeybindContext for resolver lookup
+    pub fn context_to_keybind_context(context: &Context) -> KeybindContext {
+        match context {
+            Context::Main => KeybindContext::Main,
+            Context::Midi => KeybindContext::Midi,
+            Context::MidiEventListEditor => KeybindContext::Midi, // Treat as MIDI
+            Context::MidiInlineEditor => KeybindContext::MidiInline,
+            Context::MediaExplorer => KeybindContext::MediaExplorer,
+            Context::CrossfadeEditor => KeybindContext::Main, // Treat as Main
+            Context::Global => KeybindContext::Global,
+        }
+    }
+
+    /// Try to resolve a key to an action using the keybind system
+    /// Returns Some(action) if a binding was found and executed, None otherwise
+    fn try_resolve_keybind(key_str: &str, context: &Context) -> Option<String> {
+        let keybind_context = Self::context_to_keybind_context(context);
+        keybinds::resolve(keybind_context, key_str)
+    }
+
+    /// Execute an action by its command ID (either numeric or named)
+    fn execute_action(action: &str) {
+        let reaper = Reaper::get();
+        let medium_reaper = reaper.medium_reaper();
+
+        // Try parsing as numeric action ID first
+        if let Ok(cmd_id) = action.parse::<u32>() {
+            debug!(action = %action, cmd_id = cmd_id, "Executing numeric action");
+            unsafe {
+                medium_reaper.low().Main_OnCommand(cmd_id as i32, 0);
+            }
+            return;
+        }
+
+        // Try looking up named command
+        if let Some(cmd_id) = medium_reaper.named_command_lookup(action) {
+            debug!(action = %action, cmd_id = ?cmd_id, "Executing named action");
+            unsafe {
+                medium_reaper.low().Main_OnCommand(cmd_id.get() as i32, 0);
+            }
+            return;
+        }
+
+        // Also try with underscore prefix (REAPER convention)
+        let prefixed = format!("_{}", action);
+        if let Some(cmd_id) = medium_reaper.named_command_lookup(prefixed.as_str()) {
+            debug!(action = %action, cmd_id = ?cmd_id, "Executing named action (prefixed)");
+            unsafe {
+                medium_reaper.low().Main_OnCommand(cmd_id.get() as i32, 0);
+            }
+            return;
+        }
+
+        tracing::warn!(action = %action, "Could not find action to execute");
+    }
 }
 
 /// Register the input handler
@@ -691,6 +590,12 @@ pub fn register_input_handler() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     info!("Registering FTS-Input handler");
+
+    // Initialize the keybind system with defaults
+    keybinds::init();
+
+    // Initialize the mouse modifier manager with default profiles
+    super::mouse_modifiers::manager::init();
 
     let reaper = Reaper::get();
     let handler = Box::new(InputHandler::new());

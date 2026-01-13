@@ -6,6 +6,7 @@
 use super::envelope::{move_tempo, TempoEnvelope, MIN_TEMPO_DIST};
 use super::grid::{get_closest_grid_line, get_closest_measure_grid_line, get_next_measure_position, get_previous_measure_position, position_at_mouse_cursor};
 use crate::input::continuous_action::{register_continuous_action, ContinuousAction};
+use crate::input::error::{lock_mut, lock_read, try_lock};
 use reaper_high::Reaper;
 use std::sync::{Mutex, OnceLock};
 use tracing::{debug, info, warn};
@@ -74,20 +75,23 @@ fn get_current_variant() -> &'static Mutex<MoveGridVariant> {
 
 /// Set the variant for the next action execution
 pub fn set_move_grid_variant(variant: MoveGridVariant) {
-    *get_current_variant().lock().unwrap() = variant;
+    lock_mut(get_current_variant(), |v| *v = variant);
 }
 
 /// Initialize/cleanup callback for move grid action
 ///
 /// Called with `true` when action starts, `false` when it ends.
 pub fn move_grid_init(init: bool) -> bool {
-    let mut state = get_state().lock().unwrap();
+    let Ok(mut state) = try_lock(get_state()) else {
+        tracing::error!("Failed to lock move grid state");
+        return false;
+    };
     let reaper = Reaper::get();
     let low = reaper.medium_reaper().low();
 
     if init {
         // Starting action
-        state.variant = *get_current_variant().lock().unwrap();
+        state.variant = lock_read(get_current_variant(), |v| *v).unwrap_or(MoveGridVariant::ClosestMeasure);
         state.locked_id = None;
         state.last_position = 0.0;
         state.moved_grid_once = false;
@@ -130,7 +134,10 @@ pub fn move_grid_init(init: bool) -> bool {
 ///
 /// Creates undo point and returns undo flags when action ends.
 pub fn move_grid_do_undo() -> u32 {
-    let state = get_state().lock().unwrap();
+    let Ok(state) = try_lock(get_state()) else {
+        tracing::error!("Failed to lock move grid state for undo");
+        return 0;
+    };
     let reaper = Reaper::get();
     let low = reaper.medium_reaper().low();
 
@@ -164,7 +171,10 @@ pub fn move_grid_do_undo() -> u32 {
 
 /// Main action callback - called repeatedly while key is held
 pub fn move_grid_to_mouse() {
-    let mut state = get_state().lock().unwrap();
+    let Ok(mut state) = try_lock(get_state()) else {
+        tracing::error!("Failed to lock move grid state for action");
+        return;
+    };
 
     // Initialize tempo map on first call
     if state.tempo_map.is_none() {
@@ -409,7 +419,7 @@ fn init_tempo_map() {
 pub fn register_move_grid_actions() {
     // Register Move Closest Measure Grid Line action
     register_continuous_action(ContinuousAction {
-        command_id: "FTS_MOVE_MEASURE_GRID_TO_MOUSE",
+        command_id: "FTS_TEMPO_MOVE_MEASURE_GRID_TO_MOUSE",
         init: move_grid_init,
         action: || {
             set_move_grid_variant(MoveGridVariant::ClosestMeasure);
@@ -422,7 +432,7 @@ pub fn register_move_grid_actions() {
     // This variant adds an anchor marker one measure before to prevent
     // the tempo change from affecting earlier measures
     register_continuous_action(ContinuousAction {
-        command_id: "FTS_MOVE_MEASURE_GRID_TO_MOUSE_CONSTRAINED",
+        command_id: "FTS_TEMPO_MOVE_MEASURE_GRID_TO_MOUSE_CONSTRAINED",
         init: move_grid_init,
         action: || {
             set_move_grid_variant(MoveGridVariant::ClosestMeasureConstrained);
@@ -435,7 +445,7 @@ pub fn register_move_grid_actions() {
     // This variant adds anchor markers BOTH before and after to only
     // affect the relationship between two adjacent measures
     register_continuous_action(ContinuousAction {
-        command_id: "FTS_MOVE_MEASURE_GRID_TO_MOUSE_FULLY_CONSTRAINED",
+        command_id: "FTS_TEMPO_MOVE_MEASURE_GRID_TO_MOUSE_FULLY_CONSTRAINED",
         init: move_grid_init,
         action: || {
             set_move_grid_variant(MoveGridVariant::ClosestMeasureFullyConstrained);
@@ -446,7 +456,7 @@ pub fn register_move_grid_actions() {
 
     // Register Move Closest Grid Line action
     register_continuous_action(ContinuousAction {
-        command_id: "FTS_MOVE_GRID_TO_MOUSE",
+        command_id: "FTS_TEMPO_MOVE_GRID_TO_MOUSE",
         init: move_grid_init,
         action: || {
             set_move_grid_variant(MoveGridVariant::ClosestGrid);
@@ -457,7 +467,7 @@ pub fn register_move_grid_actions() {
 
     // Register Move Closest Tempo Marker action
     register_continuous_action(ContinuousAction {
-        command_id: "FTS_MOVE_TEMPO_TO_MOUSE",
+        command_id: "FTS_TEMPO_MOVE_MARKER_TO_MOUSE",
         init: move_grid_init,
         action: || {
             set_move_grid_variant(MoveGridVariant::ClosestTempo);

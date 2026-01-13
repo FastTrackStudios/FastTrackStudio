@@ -5,20 +5,36 @@
 
 mod duration;
 mod element;
+mod header;
 mod layout;
 mod measure;
+mod measure_layout;
 mod note;
+mod page_style;
 mod part;
 mod pitch;
 mod score;
 
 pub use duration::{Duration, DurationKind};
-pub use element::{KeySignature, MusicElement, TimeSignature};
+pub use element::{ElementId, KeySignature, MusicElement, TimeSignature};
+pub use header::{
+    ComputedHeaderLayout, HeaderFrameConfig, HeaderStyles, HeaderTextAlign, HeaderTextStyle,
+    ScoreHeader,
+};
 pub use layout::{
-    compute_system_layout, LayoutBreak, LineBreakPolicy, RehearsalMark, RehearsalMarkStyle,
-    SystemInfo, SystemLayout,
+    compute_all_system_y_positions, compute_page_layout, compute_page_layout_mut,
+    compute_system_layout, spread_systems_on_page, LayoutBreak, LineBreakPolicy,
+    PageContentBounds, PageInfo, PageLayout, PageLayoutConfig, RehearsalMark, RehearsalMarkStyle,
+    SystemInfo, SystemLayout, SystemYPosition,
 };
 pub use measure::Measure;
+pub use measure_layout::{
+    calculate_beat_positions, compute_measure_layouts, justify_measure_layouts, BeatPosition,
+    MeasureInfo, MeasureLayout, MeasureLayoutConfig,
+};
+pub use page_style::{
+    LineBreakConfig, Margins, PageStyle, PaperSize, StaffConfig, SystemSpacing,
+};
 pub use note::{Accidental, Note, NoteHead, Stem};
 pub use part::{Part, PartId};
 pub use pitch::{Octave, Pitch, PitchClass};

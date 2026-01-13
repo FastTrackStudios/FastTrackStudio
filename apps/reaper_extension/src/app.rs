@@ -168,6 +168,10 @@ impl App {
             // Don't register by default - handler will be registered when user enables FTS-input
             // This ensures the handler is completely transparent when FTS-input is off
             // The handler will be registered when the user toggles FTS-input on
+
+            // Add workflow selector toolbar button to Floating toolbar 32
+            // This button shows the current keybind preset and allows switching via popup menu
+            crate::infrastructure::workflow_selector::add_toolbar_button();
         }
 
         Ok(())

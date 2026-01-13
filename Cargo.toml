@@ -31,11 +31,13 @@ members = [
     "modules/api",
     "modules/rppxml",
     "modules/fx",
+    "modules/visibility-manager",
 ]
 # Exclude submodules that have their own workspaces
 exclude = ["libs/nih-plug", "libs/vendor/blitz", "libs/vendor/anyrender", "libs/vendor/reaper-rs", "apps/fts-control"]
+# Temporarily using resolver = "2" for stylo compatibility
 # Rust 2024 implies resolver = "3" (Rust-version aware)
-resolver = "3"
+resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
@@ -190,6 +192,9 @@ stylo_taffy = { path = "libs/vendor/blitz/packages/stylo_taffy" }
 
 # Also patch crates-io versions for other crates that use these
 [patch.crates-io]
+# Stylo crate - use git version with recursion_limit fix
+# Note: This patches to a local fork where we've added #![recursion_limit = "512"]
+# stylo = { git = "https://github.com/servo/stylo", tag = "v0.10.0" }
 # Blitz crates - local submodule
 dioxus-native = { path = "libs/vendor/blitz/packages/dioxus-native" }
 dioxus-native-dom = { path = "libs/vendor/blitz/packages/dioxus-native-dom" }

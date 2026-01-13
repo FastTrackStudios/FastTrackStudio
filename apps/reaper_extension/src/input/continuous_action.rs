@@ -9,6 +9,7 @@
 //! 3. The action callback will be called repeatedly until key is released
 //! 4. Key release is detected via pre-hook accelerator (like SWS on macOS)
 
+use crate::input::error::{lock_mut, lock_read, try_lock};
 use reaper_high::Reaper;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -74,9 +75,11 @@ fn get_active() -> &'static Mutex<Option<ActiveAction>> {
 /// Call this during extension initialization to register actions that support
 /// "perform until shortcut released" behavior.
 pub fn register_continuous_action(action: ContinuousAction) {
-    let mut registry = get_registry().lock().unwrap();
-    info!("Registering continuous action: {}", action.command_id);
-    registry.insert(action.command_id, action);
+    let command_id = action.command_id;
+    lock_mut(get_registry(), |registry| {
+        registry.insert(action.command_id, action);
+    });
+    info!("Registering continuous action: {}", command_id);
 }
 
 /// Start a continuous action
@@ -202,23 +205,26 @@ pub fn stop_all_continuous_actions() {
 
 /// Check if a continuous action is currently active
 pub fn is_action_active() -> bool {
-    get_active().lock().unwrap().is_some()
+    lock_read(get_active(), |active| active.is_some()).unwrap_or(false)
 }
 
 /// Get the command ID of the currently active action (if any)
 pub fn get_active_command_id() -> Option<&'static str> {
-    get_active().lock().unwrap().as_ref().map(|a| a.command_id)
+    lock_read(get_active(), |active| active.as_ref().map(|a| a.command_id)).flatten()
 }
 
 /// Timer callback - called repeatedly while action is active
 ///
 /// This is the extern "C" function registered with REAPER's timer system.
 extern "C" fn continuous_action_timer() {
-    // Execute the action
-    let active = get_active().lock().unwrap();
-    if let Some(ref active_action) = *active {
-        // Call the action
-        (active_action.action)();
+    // Execute the action - get the function pointer while holding the lock
+    let action_fn = lock_read(get_active(), |active| {
+        active.as_ref().map(|a| a.action)
+    });
+
+    // Call the action outside the lock
+    if let Some(Some(action)) = action_fn {
+        action();
     }
 }
 

@@ -10,15 +10,21 @@
 //! - [`navigation`] - Cursor and track movement
 //! - [`mouse_modifiers`] - Click+drag behaviors (edge resize, fades, etc.)
 //! - [`editing`] - Cut, copy, paste, split, delete
+//! - [`views`] - Window management, views, automation controls
+//! - [`midi_editor`] - MIDI Editor specific keybindings
 
 pub mod editing;
+pub mod midi_editor;
 pub mod mouse_modifiers;
 pub mod navigation;
 pub mod scrolling;
 pub mod transport;
+pub mod views;
 
 pub use editing::*;
+pub use midi_editor::*;
 pub use mouse_modifiers::*;
 pub use navigation::*;
 pub use scrolling::*;
 pub use transport::*;
+pub use views::*;

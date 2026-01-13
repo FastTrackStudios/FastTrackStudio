@@ -3,20 +3,17 @@
 //! Port of functions from BR_Util.cpp (SWS).
 //! Provides utilities for working with tracks, items, takes, and windows.
 
+use crate::input::constants::{
+    ENV_GAP, ENV_LINE_WIDTH, ITEM_LABEL_MIN_HEIGHT, TAKE_MIN_HEIGHT_COUNT, TAKE_MIN_HEIGHT_HIGH,
+    TAKE_MIN_HEIGHT_LOW, TCP_MASTER_GAP,
+};
 use reaper_high::Reaper;
 use reaper_low::Swell;
 use reaper_low::raw::*;
 use reaper_medium::Reaper as MediumReaper;
 use swell_ui::Window;
 
-/// Constants from BR_Util.cpp
-const TCP_MASTER_GAP: i32 = 5;
-const ITEM_LABEL_MIN_HEIGHT: i32 = 28;
-const ENV_GAP: i32 = 4;
-const ENV_LINE_WIDTH: i32 = 1;
-const TAKE_MIN_HEIGHT_COUNT: i32 = 10;
-const TAKE_MIN_HEIGHT_HIGH: i32 = 12;
-const TAKE_MIN_HEIGHT_LOW: i32 = 6;
+// Constants are now imported from crate::input::constants
 
 /// Get take height and offset
 /// Port of BR_Util::GetTakeHeight(MediaItem_Take* take, int* offsetY)

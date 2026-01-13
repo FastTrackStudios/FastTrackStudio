@@ -18,11 +18,11 @@ example = ["dep:winit", "dep:pollster", "dep:env_logger", "dep:log"]
 # Internal dependencies
 keyflow = { path = "../keyflow" }
 
-# GPU rendering
-wgpu = { version = "28", features = ["wgsl"] }
+# GPU rendering (use wgpu 26 to match blitz/anyrender ecosystem)
+wgpu = { version = "26", features = ["wgsl"] }
 
-# Text rendering
-glyphon = "0.10"
+# Text rendering (use wgpu 26 compatible commit)
+glyphon = { git = "https://github.com/grovesNL/glyphon", rev = "d4ded1d1309f867b7b613ca91ebd0d1fb1a8b280" }
 
 # Linebender stack for 2D vector graphics (for future use)
 vello = "0.4"

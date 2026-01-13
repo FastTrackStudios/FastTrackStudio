@@ -5,12 +5,20 @@
 //!
 //! Uses the `smufl` crate for proper metadata parsing.
 
+pub mod tessellation;
+
 use skrifa::FontRef;
 use std::io::BufReader;
 use std::path::Path;
 
 // Re-export key types from smufl crate
 pub use smufl::{Glyph, Metadata as SMuFLMetadata, StaffSpaces};
+
+// Re-export tessellation utilities
+pub use tessellation::{
+    get_glyph_id, tessellate_glyph, tessellate_glyph_to_ndc, GlyphVertex, GlyphVertexConstructor,
+    LyonPen, TessellatedGlyph,
+};
 
 /// A loaded SMuFL font with its metadata.
 pub struct SMuFLFont<'a> {
@@ -187,4 +195,14 @@ pub mod glyphs {
     // Fermatas
     pub const FERMATA_ABOVE: Glyph = Glyph::FermataAbove;
     pub const FERMATA_BELOW: Glyph = Glyph::FermataBelow;
+
+    // Slash noteheads (for rhythmic notation / rhythm slashes)
+    /// Slash notehead for quarter/eighth notes (filled)
+    pub const NOTEHEAD_SLASH: Glyph = Glyph::NoteheadSlashHorizontalEnds;
+    /// Slash notehead for half notes (open)
+    pub const NOTEHEAD_SLASH_HALF: Glyph = Glyph::NoteheadSlashWhiteHalf;
+    /// Slash notehead for whole notes (open)
+    pub const NOTEHEAD_SLASH_WHOLE: Glyph = Glyph::NoteheadSlashWhiteWhole;
+    /// Slash notehead for double whole notes
+    pub const NOTEHEAD_SLASH_DOUBLE_WHOLE: Glyph = Glyph::NoteheadSlashWhiteDoubleWhole;
 }

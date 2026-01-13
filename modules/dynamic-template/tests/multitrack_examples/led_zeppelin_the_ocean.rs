@@ -73,9 +73,10 @@ fn led_zeppelin_the_ocean() -> Result<()> {
     //   │   ├─ Outro 3        ← 25. Outro Vocal 3_01.wav
     //   │   ├─ Outro 4        ← 26. Outro Vocal 4_01.wav
     //   │   └─ Outro 5        ← 27. Outro Vocal 5_01.wav
+    //   ├─ BGVs/
+    //   │   └─ Vocal Adlib    ← 22. Vocal Adlib_01.wav (now matches BGVs via "adlib")
     //   ├─ Vocals/
-    //   │   ├─ Lead 1         ← 19. lead_Vox_01.wav
-    //   │   └─ Lead 2         ← 22. Vocal Adlib_01.wav
+    //   │   └─ Lead           ← 19. lead_Vox_01.wav
     //   ├─ Vocals 1           ← 20. LA LA Voc 1_01.wav
     //   └─ Vocals 2           ← 21. LA LA Voc 2_01.wav
     // Unsorted/
@@ -110,19 +111,19 @@ fn led_zeppelin_the_ocean() -> Result<()> {
             .track("Gtr_R.A2", "14. Gtr_R.A2_01.wav")
         .end()
         .folder("Vocals")
-            .folder("Outro")
-                .track("Outro 1", "23. Outro Vocal 1_01.wav")
-                .track("Outro 2", "24. Outro Vocal 2_01.wav")
-                .track("Outro 3", "25. Outro Vocal 3_01.wav")
-                .track("Outro 4", "26. Outro Vocal 4_01.wav")
-                .track("Outro 5", "27. Outro Vocal 5_01.wav")
+            .folder("Lead")
+                .folder("Outro")
+                    .track("Outro 1", "23. Outro Vocal 1_01.wav")
+                    .track("Outro 2", "24. Outro Vocal 2_01.wav")
+                    .track("Outro 3", "25. Outro Vocal 3_01.wav")
+                    .track("Outro 4", "26. Outro Vocal 4_01.wav")
+                    .track("Outro 5", "27. Outro Vocal 5_01.wav")
+                .end()
+                .track("Lead", "19. lead_Vox_01.wav")
+                .track("Lead 1", "20. LA LA Voc 1_01.wav")
+                .track("Lead 2", "21. LA LA Voc 2_01.wav")
             .end()
-            .folder("Vocals")
-                .track("Lead 1", "19. lead_Vox_01.wav")
-                .track("Lead 2", "22. Vocal Adlib_01.wav")
-            .end()
-            .track("Vocals 1", "20. LA LA Voc 1_01.wav")
-            .track("Vocals 2", "21. LA LA Voc 2_01.wav")
+            .track("BGVs", "22. Vocal Adlib_01.wav")
         .end()
         .folder("Unsorted")
             .track("Lead_1.A1", "15. lead_1.A1_01.wav")

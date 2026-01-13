@@ -48,6 +48,7 @@ impl From<SFX> for Group<ItemMetadata> {
                 "robot",
                 "vocoder",
                 "talkbox",
+                "talk box",
                 // Foley and ambient
                 "foley",
                 "ambient",

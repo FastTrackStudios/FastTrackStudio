@@ -21,4 +21,4 @@ pub use memory::ChordMemory;
 pub use settings::{ChartSetting, ChartSettings, SettingValue};
 pub use structure::Chart;
 pub use templates::TemplateManager;
-pub use types::{ChartSection, ChordInstance, KeyChange, Measure, TimeSignatureChange};
+pub use types::{ChartSection, ChordInstance, KeyChange, Measure, RhythmSlash, TimeSignatureChange};

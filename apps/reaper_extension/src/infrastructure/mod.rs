@@ -12,7 +12,9 @@ pub mod reactive_logger;
 pub mod reactive_polling;
 pub mod task_support;
 pub mod timer;
+pub mod toolbar;
 pub mod tracing_config;
+pub mod workflow_selector;
 
 // Re-export REAPER reactive services from fts::daw_reactive
 // These are the canonical implementations that live in the fts module
