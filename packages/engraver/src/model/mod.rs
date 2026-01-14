@@ -16,7 +16,7 @@ mod pitch;
 mod score;
 
 pub use duration::{Duration, DurationKind};
-pub use element::{ElementId, KeySignature, MusicElement, TimeSignature};
+pub use element::{Clef, ElementId, KeySignature, MusicElement, Rest, TimeSignature};
 pub use header::{
     ComputedHeaderLayout, HeaderFrameConfig, HeaderStyles, HeaderTextAlign, HeaderTextStyle,
     ScoreHeader,

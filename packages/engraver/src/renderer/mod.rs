@@ -2,9 +2,16 @@
 //!
 //! This module provides GPU-accelerated rendering of music notation
 //! using Vello for 2D vector graphics.
+//!
+//! ## Components
+//!
+//! - [`VelloSceneRenderer`] - Renders scene graph to Vello for GPU output
+//! - [`EngraverRenderer`] - High-level renderer API
+//! - [`primitives`] - Low-level WGPU vertex types and shaders
 
 pub mod canvas2d;
 pub mod primitives;
+pub mod scene_renderer;
 
 pub use canvas2d::{Canvas2D, Color as Canvas2DColor, Rect as Canvas2DRect, Vertex2D};
 pub use primitives::{
@@ -13,6 +20,7 @@ pub use primitives::{
     create_sdf_rounded_rect, px_to_ndc, BlitVertex, CameraUniform, SdfRectVertex, Vertex,
     BLIT_SHADER_SOURCE, SDF_SHADER_SOURCE, SHADER_SOURCE,
 };
+pub use scene_renderer::{SceneRenderBuilder, SceneRenderConfig, VelloSceneRenderer};
 
 use kurbo::{Affine, Point, Rect};
 use peniko::Color;

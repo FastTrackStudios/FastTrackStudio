@@ -126,6 +126,44 @@ impl<'score> LayoutContext<'score> {
         }
     }
 
+    /// Create a minimal layout context with just style information.
+    ///
+    /// This is useful for layout operations that only need spatium/style access
+    /// without requiring a full Score or font.
+    #[must_use]
+    pub fn minimal(style: &'score MStyle) -> Self {
+        // Leak a default Score and SMuFLFont
+        let score = Box::leak(Box::new(Score::default()));
+        let font = Box::leak(Box::new(SMuFLFont::empty()));
+        Self {
+            config: LayoutConfiguration::default(),
+            score,
+            style,
+            font,
+            state: RefCell::new(LayoutState::default()),
+        }
+    }
+
+    /// Create a minimal layout context for testing.
+    ///
+    /// This constructor is only available in test builds and creates a context
+    /// with stub Score and SMuFLFont references. Use for layout tests that only
+    /// need spatium/style access.
+    #[cfg(test)]
+    #[must_use]
+    pub fn new_for_test(config: LayoutConfiguration, style: &'score MStyle) -> Self {
+        // Leak a default Score and SMuFLFont for testing
+        let score = Box::leak(Box::new(Score::default()));
+        let font = Box::leak(Box::new(SMuFLFont::empty()));
+        Self {
+            config,
+            score,
+            style,
+            font,
+            state: RefCell::new(LayoutState::default()),
+        }
+    }
+
     /// Get the base spatium value in points.
     ///
     /// Spatium is the fundamental unit in music notation,

@@ -18,18 +18,18 @@ example = ["dep:winit", "dep:pollster", "dep:env_logger", "dep:log"]
 # Internal dependencies
 keyflow = { path = "../keyflow" }
 
-# GPU rendering (use wgpu 26 to match blitz/anyrender ecosystem)
-wgpu = { version = "26", features = ["wgsl"] }
+# GPU rendering (use wgpu 27 to match vello 0.7)
+wgpu = { version = "27", features = ["wgsl"] }
 
-# Text rendering (use wgpu 26 compatible commit)
-glyphon = { git = "https://github.com/grovesNL/glyphon", rev = "d4ded1d1309f867b7b613ca91ebd0d1fb1a8b280" }
+# Text rendering (wgpu 27 compatible)
+glyphon = "0.10"
 
-# Linebender stack for 2D vector graphics (for future use)
-vello = "0.4"
-peniko = "0.3"
-kurbo = "0.11"
+# Linebender stack for 2D vector graphics (versions matched to vello 0.7)
+vello = "0.7"
+peniko = "0.6"
+kurbo = "0.13"
 parley = "0.3"
-skrifa = "0.28"
+skrifa = "0.40"
 
 # SMuFL music font metadata
 smufl = "0.2"
@@ -37,6 +37,7 @@ smufl = "0.2"
 # 2D tessellation for Canvas2D
 lyon = "1.0"
 bytemuck = { version = "1.14", features = ["derive"] }
+bitflags = { version = "2.4", features = ["serde"] }
 
 # Utility
 serde = { workspace = true }
@@ -63,6 +64,10 @@ required-features = ["example"]
 
 [[example]]
 name = "canvas_sdf"
+required-features = ["example"]
+
+[[example]]
+name = "layout_demo"
 required-features = ["example"]
 
 [lints]

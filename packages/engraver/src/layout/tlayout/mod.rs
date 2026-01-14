@@ -124,12 +124,37 @@ pub trait Layout {
     }
 }
 
-// Element-specific layout modules will be added in future phases:
-// pub mod harmony;    // Chord symbols (Phase 3)
-// pub mod text;       // Generic text (Phase 3)
-// pub mod measure;    // Measures (Phase 3)
-// pub mod chord;      // Notes/chords (Phase 3)
-// pub mod system;     // Systems (Phase 4)
+// Element-specific layout modules
+pub mod accidentals_layout;
+pub mod barline;
+pub mod beam_layout;
+pub mod chord;
+pub mod clef;
+pub mod dynamics;
+pub mod keysig;
+pub mod lyrics;
+pub mod measure;
+pub mod note;
+pub mod rest;
+pub mod timesig;
+
+// Re-exports for convenient access
+pub use accidentals_layout::{
+    layout_accidentals, AccidentalInfo, AccidentalLayoutConfig, AccidentalPlacement,
+};
+pub use barline::{layout_barline, BarlineParams, BarlineType};
+pub use beam_layout::{layout_beam, BeamLayout, BeamLayoutConfig, BeamNote};
+pub use chord::{layout_chord, ChordNote, ChordParams, StemDirection};
+pub use clef::{layout_clef, ClefOctave, ClefParams, ClefType};
+pub use dynamics::{layout_dynamic, DynamicType, DynamicsAlign, DynamicsParams, DynamicsPlacement};
+pub use keysig::{layout_keysig, ClefContext, KeySigParams, KeySigType};
+pub use lyrics::{
+    layout_lyrics, layout_lyrics_dash, layout_melisma, LyricsParams, LyricsPlacement, SyllabicType,
+};
+pub use measure::{layout_measure, layout_system, MeasureParams};
+pub use note::{layout_note, note_shape, Accidental, NoteDuration, NoteParams};
+pub use rest::{layout_multi_measure_rest, layout_rest, RestDuration, RestParams};
+pub use timesig::{layout_timesig, TimeSigParams, TimeSigType};
 
 #[cfg(test)]
 mod tests {

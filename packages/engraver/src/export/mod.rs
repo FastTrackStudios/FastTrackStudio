@@ -1,0 +1,10 @@
+//! Export module for generating output from the scene graph.
+//!
+//! This module provides exporters for various output formats:
+//! - SVG for vector graphics with semantic IDs
+//!
+//! All exporters take a SceneNode and produce output in the target format.
+
+pub mod svg;
+
+pub use svg::{SvgExportConfig, SvgSerializer};

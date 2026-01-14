@@ -1,15 +1,74 @@
-//! Scene graph for efficient rendering and hit testing.
+//! Scene graph for music notation rendering.
 //!
-//! The scene graph provides a hierarchical structure of graphical objects
-//! that can be efficiently rendered and queried for hit testing.
+//! The scene graph provides a hierarchical structure for rendering music scores
+//! to multiple backends (WGPU, SVG). Each node can have:
+//! - A semantic ID linking to source music elements
+//! - Paint commands for rendering
+//! - Child nodes for hierarchical structure
+//! - Transforms for positioning
+//!
+//! # Architecture
+//!
+//! ```text
+//! SceneNode (root)
+//!     ├── SemanticId (page-1)
+//!     ├── transform: Affine
+//!     ├── commands: Vec<PaintCommand>
+//!     └── children: Vec<SceneNode>
+//!         ├── SceneNode (system-1)
+//!         │   └── SceneNode (measure-1)
+//!         │       └── SceneNode (chord-1)
+//!         │           ├── PaintCommand::Glyph (notehead)
+//!         │           └── PaintCommand::Line (stem)
+//!         └── ...
+//! ```
+//!
+//! # Modules
+//!
+//! - [`id`] - Semantic identification for SVG data attributes
+//! - [`node`] - Scene graph node structure
+//! - [`paint`] - Backend-agnostic paint commands
+//! - [`transform`] - Affine transform utilities
+//! - [`traverse`] - Visitor pattern and iterators
+
+pub mod id;
+pub mod node;
+pub mod paint;
+pub mod transform;
+pub mod traverse;
+
+// Re-export main types for convenience
+pub use id::{ElementType, SemanticId};
+pub use node::SceneNode;
+pub use paint::{
+    color_to_svg, path_to_svg_d, FillRule, FontStyle, FontWeight, LineCap, LineJoin, PaintCommand,
+    TextAnchor,
+};
+pub use transform::{
+    affine_to_svg_transform, get_scale, get_translation, is_identity, is_scale, is_translation,
+    position_at, rotate_around, rotation_angle, scale_around, TransformStack,
+};
+pub use traverse::{
+    collect_visible_nodes, traverse, traverse_with_transform, NodeIterator, SceneNodeExt,
+    SceneVisitor, TransformIterator,
+};
+
+// Legacy types for backwards compatibility with interaction module
+// TODO: Migrate interaction module to use SemanticId
 
 use kurbo::{Point, Rect};
 
 /// Unique identifier for a graphical object.
+///
+/// # Deprecated
+/// Use [`SemanticId`] for new code. This type is kept for backwards compatibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GraphicalObjectId(pub u64);
 
 /// Position and shape information for a graphical object.
+///
+/// # Deprecated
+/// Use [`SceneNode`] for new code. This type is kept for backwards compatibility.
 #[derive(Debug, Clone)]
 pub struct PositionAndShape {
     /// Position relative to parent
@@ -31,10 +90,12 @@ impl Default for PositionAndShape {
 }
 
 /// The scene graph containing all graphical objects.
+///
+/// # Deprecated
+/// Use [`SceneNode`] as the scene graph root for new code.
 #[derive(Debug, Default)]
 pub struct SceneGraph {
     next_id: u64,
-    // TODO: Add object storage and spatial indexing
 }
 
 impl SceneGraph {

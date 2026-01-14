@@ -32,3 +32,9 @@
 [submodule "libs/reference/graphics/wgpu"]
 	path = libs/reference/graphics/wgpu
 	url = https://github.com/gfx-rs/wgpu.git
+[submodule "libs/reference/graphics/vello"]
+	path = libs/reference/graphics/vello
+	url = https://github.com/linebender/vello.git
+[submodule "libs/reference/graphics/vello_svg"]
+	path = libs/reference/graphics/vello_svg
+	url = https://github.com/linebender/vello_svg.git

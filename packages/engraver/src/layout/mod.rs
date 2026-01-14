@@ -29,19 +29,31 @@
 //! // let layout_data = layout_score(&ctx);
 //! ```
 
+pub mod autoplace;
 pub mod context;
+pub mod kerning;
+pub mod orchestrator;
+pub mod segment;
+pub mod segment_list;
 pub mod shape;
+pub mod skyline;
+pub mod spacing;
+pub mod springs;
 pub mod tlayout;
 
-// Future modules (Phase 1+):
-// mod segment;         // Phase 1: Segment abstraction
-// mod springs;         // Phase 1: Spring system
-// mod duration_stretch;// Phase 1: Duration-based spacing
-// mod spacing;         // Phase 1: HorizontalSpacing algorithm
-// mod autoplace;       // Phase 2: Collision avoidance
-
+pub use autoplace::{Autoplace, AutoplaceConfig, AutoplaceResult, AutoplaceState};
 pub use context::{LayoutConfiguration, LayoutContext, LayoutMode, LayoutState};
+pub use kerning::{KerningType, SpacingPadding, SpacingPaddingPixels};
+pub use orchestrator::{
+    layout_score, layout_score_with_config, LayoutEngine, LayoutEngineBuilder,
+    LayoutEngineConfig, LayoutResult, PageLayout, PageMargins, SystemLayout,
+};
+pub use segment::{ElementId, Segment, SegmentType, VOICES};
+pub use segment_list::SegmentList;
 pub use shape::{Shape, ShapeElement};
+pub use skyline::{Skyline, SkylineElement, SkylineLine};
+pub use spacing::{HorizontalSpacing, MinimumDistance, SpacingResult};
+pub use springs::{SpacingConfig, Spring, SpringRow};
 pub use tlayout::{Layout, LayoutData};
 
 /// Unit conversions and newtype wrappers for dimensional safety.
@@ -121,14 +133,8 @@ impl From<f64> for Pixels {
     }
 }
 
-// Future: Main layout entry point (Phase 4)
-//
-// pub fn layout_score(ctx: &LayoutContext) -> SceneGraph {
-//     // Phase 1: Create segments from score
-//     // Phase 2: Apply horizontal spacing
-//     // Phase 3: Layout individual elements
-//     // Phase 4: Assemble systems and pages
-// }
+// Main layout entry point is now in orchestrator module.
+// Use layout_score() or LayoutEngine for full score layout.
 
 #[cfg(test)]
 mod tests {

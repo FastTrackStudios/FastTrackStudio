@@ -28,6 +28,10 @@ pub struct SMuFLFont<'a> {
     metadata: SMuFLMetadata,
 }
 
+/// Minimal valid TTF font (empty with just required tables).
+/// This is the smallest valid TrueType font that skrifa will accept.
+static EMPTY_FONT_DATA: &[u8] = include_bytes!("../../tests/data/empty.ttf");
+
 impl<'a> SMuFLFont<'a> {
     /// Load a SMuFL font from font data and metadata.
     ///
@@ -43,6 +47,33 @@ impl<'a> SMuFLFont<'a> {
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let font = FontRef::new(font_data)?;
         Ok(Self { font, metadata })
+    }
+
+    /// Create an empty SMuFL font for minimal contexts.
+    ///
+    /// This font has no glyphs and minimal metadata. Use for layout operations
+    /// that don't need actual font data, such as positioning calculations.
+    ///
+    /// # Panics
+    /// Panics if the empty font data is invalid.
+    #[must_use]
+    pub fn empty() -> Self {
+        let font = FontRef::new(EMPTY_FONT_DATA)
+            .expect("Built-in empty font should be valid");
+
+        // Minimal valid SMuFL metadata JSON
+        let metadata_json = r#"{
+            "fontName": "EmptyTestFont",
+            "engravingDefaults": {},
+            "glyphAdvanceWidths": {},
+            "glyphsWithAnchors": {},
+            "glyphBBoxes": {}
+        }"#;
+
+        let metadata = SMuFLMetadata::from_reader(metadata_json.as_bytes())
+            .expect("Built-in empty metadata should be valid");
+
+        Self { font, metadata }
     }
 
     /// Load a SMuFL font from font data and metadata JSON reader.
