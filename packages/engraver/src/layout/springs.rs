@@ -210,6 +210,99 @@ pub struct SpacingConfig {
     pub measure_spacing: f64,
 }
 
+/// Context for horizontal spacing computation.
+///
+/// This tracks state during the spacing algorithm, including:
+/// - Current X position as we place segments
+/// - Left barrier for lyrics/margin enforcement
+/// - Progressive squeeze factors when fitting content
+///
+/// Based on MuseScore's HorizontalSpacingContext.
+#[derive(Debug, Clone)]
+pub struct HorizontalSpacingContext {
+    /// Current X position in the system
+    pub x_cur: f64,
+
+    /// Left margin barrier (for lyrics, etc.)
+    pub x_left_barrier: f64,
+
+    /// Stretch reduction factor (1.0 = normal, 0.67 = squeezed)
+    /// Reduces duration-based spacing
+    pub stretch_reduction: f64,
+
+    /// Squeeze factor (1.0 = normal, 0.0 = maximum squeeze)
+    /// Reduces collision padding
+    pub squeeze_factor: f64,
+
+    /// Spacing density from style (higher = tighter)
+    pub spacing_density: f64,
+
+    /// Whether to override minimum measure width
+    pub override_min_measure_width: bool,
+
+    /// Whether the system is full (affects margin checks)
+    pub system_is_full: bool,
+}
+
+impl Default for HorizontalSpacingContext {
+    fn default() -> Self {
+        Self {
+            x_cur: 0.0,
+            x_left_barrier: 0.0,
+            stretch_reduction: 1.0,
+            squeeze_factor: 1.0,
+            spacing_density: 1.0,
+            override_min_measure_width: false,
+            system_is_full: false,
+        }
+    }
+}
+
+impl HorizontalSpacingContext {
+    /// Create a new context with default values.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a context for squeeze-to-fit layout.
+    #[must_use]
+    pub fn for_squeeze(stretch_reduction: f64, squeeze_factor: f64) -> Self {
+        Self {
+            stretch_reduction,
+            squeeze_factor,
+            system_is_full: true,
+            override_min_measure_width: true,
+            ..Default::default()
+        }
+    }
+
+    /// Apply stretch reduction to a duration-based width.
+    #[must_use]
+    pub fn apply_stretch(&self, width: f64) -> f64 {
+        width * self.stretch_reduction / self.spacing_density
+    }
+
+    /// Apply squeeze factor to padding.
+    #[must_use]
+    pub fn apply_squeeze(&self, padding: f64) -> f64 {
+        padding * self.squeeze_factor
+    }
+
+    /// Create a spacing config from this context.
+    #[must_use]
+    pub fn to_spacing_config(&self, spatium: f64, measure_spacing: f64) -> SpacingConfig {
+        SpacingConfig {
+            spatium,
+            spacing_density: self.spacing_density,
+            stretch_reduction: self.stretch_reduction,
+            squeeze_factor: self.squeeze_factor,
+            quarter_note_space: 3.5,
+            measure_spacing,
+        }
+    }
+}
+
 impl Default for SpacingConfig {
     fn default() -> Self {
         Self {

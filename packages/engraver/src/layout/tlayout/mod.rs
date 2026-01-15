@@ -137,6 +137,8 @@ pub mod measure;
 pub mod note;
 pub mod rest;
 pub mod timesig;
+pub mod slur_tie;
+pub mod tuplet;
 
 // Re-exports for convenient access
 pub use accidentals_layout::{
@@ -152,9 +154,16 @@ pub use lyrics::{
     layout_lyrics, layout_lyrics_dash, layout_melisma, LyricsParams, LyricsPlacement, SyllabicType,
 };
 pub use measure::{layout_measure, layout_system, MeasureParams};
-pub use note::{layout_note, note_shape, Accidental, NoteDuration, NoteParams};
+pub use note::{layout_note, note_shape, Accidental, NoteDuration, NoteHeadType, NoteParams};
 pub use rest::{layout_multi_measure_rest, layout_rest, RestDuration, RestParams};
 pub use timesig::{layout_timesig, TimeSigParams, TimeSigType};
+pub use slur_tie::{
+    layout_slur, layout_tie, SlurDirection, SlurEndpoint, SlurStyle, SlurTieConfig, SlurTieLayout,
+};
+pub use tuplet::{
+    layout_tuplet, TupletBracketType, TupletConfig, TupletLayout, TupletNote, TupletNumberType,
+    TupletRatio,
+};
 
 #[cfg(test)]
 mod tests {

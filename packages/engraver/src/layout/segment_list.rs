@@ -31,6 +31,19 @@ impl SegmentList {
         }
     }
 
+    /// Create a segment list from a pre-sorted vector.
+    ///
+    /// The caller is responsible for ensuring the segments are sorted
+    /// by tick and then by type. No validation is performed in release builds.
+    #[must_use]
+    pub fn from_sorted(segments: Vec<Segment>) -> Self {
+        debug_assert!(
+            segments.windows(2).all(|w| w[0] <= w[1]),
+            "Segments must be sorted"
+        );
+        Self { segments }
+    }
+
     /// Clear all segments from the list.
     pub fn clear(&mut self) {
         self.segments.clear();

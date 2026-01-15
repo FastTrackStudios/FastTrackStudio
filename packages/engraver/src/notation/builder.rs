@@ -40,6 +40,8 @@ pub struct MeasureBuilder {
     justify: bool,
     /// Unique ID base for elements
     id_base: u64,
+    /// Whether notes should be stemless
+    stemless: bool,
 }
 
 impl Default for MeasureBuilder {
@@ -62,6 +64,7 @@ impl MeasureBuilder {
             width: None,
             justify: false,
             id_base: 1,
+            stemless: false,
         }
     }
 
@@ -98,6 +101,123 @@ impl MeasureBuilder {
     pub fn rhythmic(mut self) -> Self {
         self.mode = NotationMode::Rhythmic;
         self
+    }
+
+    /// Set notes to be stemless (noteheads only, no stems).
+    #[must_use]
+    pub fn stemless(mut self) -> Self {
+        self.stemless = true;
+        self
+    }
+
+    /// Enable automatic stemless detection for rhythmic notation.
+    ///
+    /// In rhythmic/slash notation, consecutive quarter notes (2 or more)
+    /// should be displayed without stems for cleaner chord chart appearance.
+    /// This follows the LilyPond convention where groups of identical
+    /// quarter note slashes are stemless.
+    #[must_use]
+    pub fn auto_stemless(mut self) -> Self {
+        // Only applies to rhythmic mode
+        if matches!(self.mode, NotationMode::Rhythmic) {
+            self.stemless = false; // Will be computed per-note
+        }
+        self
+    }
+
+    /// Compute which notes should be stemless based on consecutive quarter note analysis.
+    ///
+    /// Returns a Vec<bool> where true means the note at that index should be stemless.
+    ///
+    /// The algorithm (based on LilyPond convention):
+    /// 1. Consecutive quarter notes (no dots) are candidates for stemless
+    /// 2. Non-quarter notes break the consecutive chain
+    /// 3. Strong beats also break the chain (in 4/4, beats 1 and 3 are strong)
+    /// 4. Groups of 2+ consecutive quarters within the same beat-group = stemless
+    ///
+    /// For example in 4/4 with quarters on beats 2, 3, 4:
+    /// - Beat 2 is alone before the strong beat 3 -> has stem
+    /// - Beats 3-4 are consecutive after strong beat 3 -> stemless
+    fn compute_auto_stemless(&self) -> Vec<bool> {
+        let mut result = vec![false; self.rhythm.len()];
+
+        // Only apply in rhythmic mode
+        if !matches!(self.mode, NotationMode::Rhythmic) {
+            return result;
+        }
+
+        // Get time signature info for strong beats
+        let ts = self.time_signature.unwrap_or(TimeSignature::COMMON);
+        let (beats_per_measure, beat_unit) = (ts.numerator, ts.denominator);
+        let ticks_per_beat = match beat_unit {
+            4 => 480,  // Quarter note = 480 ticks
+            8 => 240,  // Eighth note = 240 ticks
+            2 => 960,  // Half note = 960 ticks
+            _ => 480,
+        };
+
+        // Determine strong beat positions (in ticks)
+        // In 4/4: beats 1 and 3 are strong (ticks 0 and 960)
+        // In 3/4: only beat 1 is strong (tick 0)
+        // In 2/4: only beat 1 is strong (tick 0)
+        // In 6/8: beats 1 and 4 are strong (ticks 0 and 720)
+        let strong_beat_ticks: Vec<i32> = if beats_per_measure == 4 && beat_unit == 4 {
+            vec![0, ticks_per_beat * 2] // Beats 1 and 3
+        } else if beats_per_measure == 6 && beat_unit == 8 {
+            vec![0, ticks_per_beat * 3] // Beats 1 and 4
+        } else {
+            vec![0] // Only beat 1 is strong
+        };
+
+        // Track tick position and consecutive quarter groups
+        let mut current_tick: i32 = 0;
+        let mut consecutive_quarters: Vec<usize> = Vec::new();
+        let mut last_strong_beat_crossed: i32 = -1;
+
+        // Helper to mark a group as stemless if it has 2+ members
+        let mark_group = |result: &mut Vec<bool>, group: &[usize]| {
+            if group.len() >= 2 {
+                for &idx in group {
+                    result[idx] = true;
+                }
+            }
+        };
+
+        for (i, dur) in self.rhythm.iter().enumerate() {
+            let note_tick = current_tick;
+            let is_quarter = matches!(dur, Duration::Quarter) && dur.dots() == 0;
+
+            // Check if we've crossed a strong beat since the last quarter
+            let crossed_strong_beat = strong_beat_ticks.iter().any(|&sb| {
+                sb > 0 && sb > last_strong_beat_crossed && sb <= note_tick
+            });
+
+            if is_quarter {
+                // If we crossed a strong beat, finalize the previous group
+                if crossed_strong_beat && !consecutive_quarters.is_empty() {
+                    mark_group(&mut result, &consecutive_quarters);
+                    consecutive_quarters.clear();
+                }
+
+                consecutive_quarters.push(i);
+
+                // Update last strong beat if we're on one
+                if strong_beat_ticks.contains(&note_tick) {
+                    last_strong_beat_crossed = note_tick;
+                }
+            } else {
+                // Non-quarter note: finalize the current group
+                mark_group(&mut result, &consecutive_quarters);
+                consecutive_quarters.clear();
+            }
+
+            current_tick += dur.ticks();
+        }
+
+        // Handle any remaining consecutive quarters at end of measure
+        mark_group(&mut result, &consecutive_quarters);
+
+        result
     }
 
     /// Set the rhythm pattern.
@@ -151,6 +271,16 @@ impl MeasureBuilder {
         let mut scene_elements: Vec<SceneElement> = Vec::new();
         let mut current_tick: i32 = 0;
         let mut id = self.id_base;
+
+        // Compute auto-stemless flags for rhythmic notation
+        // If explicit stemless is set, all notes are stemless
+        // Otherwise, compute based on consecutive quarter note analysis
+        let auto_stemless_flags = if self.stemless {
+            vec![true; self.rhythm.len()]
+        } else {
+            self.compute_auto_stemless()
+        };
+        let mut rhythm_index: usize = 0;
 
         // Get mode-specific settings
         let head_type = self.mode.notehead_type();
@@ -219,12 +349,19 @@ impl MeasureBuilder {
 
         // 5. Add chord/rest segments for each note
         for group in &beam_groups {
-            if group.notes.len() == 1 && !group.notes[0].needs_flag() {
-                // Single note, no beaming needed - use chord layout
+            if group.notes.len() == 1 {
+                // Single note - use chord layout (handles both flagged and non-flagged)
+                // Note: layout_beam returns empty for single notes, so we must use chord layout
                 let dur = group.notes[0];
                 let mut seg = Segment::chord_rest(current_tick, dur.ticks());
                 seg.ticks = dur.ticks();
                 segment_vec.push(seg);
+
+                // Get stemless flag for this note from auto-computed or explicit stemless
+                let note_stemless = auto_stemless_flags
+                    .get(rhythm_index)
+                    .copied()
+                    .unwrap_or(false);
 
                 let (_, chord_node) = layout_chord(
                     &ChordParams {
@@ -239,6 +376,7 @@ impl MeasureBuilder {
                         stem_direction: stem_dir,
                         dots: dur.dots(),
                         beamed: false,
+                        stemless: note_stemless,
                     },
                     ctx,
                 );
@@ -250,9 +388,10 @@ impl MeasureBuilder {
                 });
 
                 current_tick += dur.ticks();
+                rhythm_index += 1;
                 id += 1;
-            } else if group.notes.iter().any(|d| d.needs_flag()) {
-                // Beamed group - create beam notes
+            } else if group.notes.len() >= 2 && group.notes.iter().any(|d| d.needs_flag()) {
+                // Beamed group (2+ notes with at least one flagged) - create beam notes
                 let group_start_tick = current_tick;
                 let mut beam_notes: Vec<BeamNoteInfo> = Vec::new();
 
@@ -269,6 +408,7 @@ impl MeasureBuilder {
                     });
 
                     current_tick += dur.ticks();
+                    rhythm_index += 1;
                     id += 1;
                 }
 
@@ -286,6 +426,12 @@ impl MeasureBuilder {
                     seg.ticks = dur.ticks();
                     segment_vec.push(seg);
 
+                    // Get stemless flag for this note from auto-computed or explicit stemless
+                    let note_stemless = auto_stemless_flags
+                        .get(rhythm_index)
+                        .copied()
+                        .unwrap_or(false);
+
                     let (_, chord_node) = layout_chord(
                         &ChordParams {
                             id,
@@ -299,6 +445,7 @@ impl MeasureBuilder {
                             stem_direction: stem_dir,
                             dots: dur.dots(),
                             beamed: false,
+                            stemless: note_stemless,
                         },
                         ctx,
                     );
@@ -310,6 +457,7 @@ impl MeasureBuilder {
                     });
 
                     current_tick += dur.ticks();
+                    rhythm_index += 1;
                     id += 1;
                 }
             }
@@ -718,4 +866,232 @@ fn draw_staff_lines(x: f64, y: f64, width: f64, spatium: f64) -> Vec<PaintComman
     }
 
     commands
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_auto_stemless_all_quarters_in_4_4() {
+        // 4 consecutive quarters in 4/4: beats 1-2 are one group, beats 3-4 are another
+        // Both groups have 2+ quarters, so all are stemless
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythmic()
+            .rhythm(vec![
+                Duration::Quarter,
+                Duration::Quarter,
+                Duration::Quarter,
+                Duration::Quarter,
+            ]);
+
+        let flags = builder.compute_auto_stemless();
+        // Beats 1-2 (before beat 3) = stemless, beats 3-4 (after beat 3) = stemless
+        assert_eq!(flags, vec![true, true, true, true]);
+    }
+
+    #[test]
+    fn test_auto_stemless_two_quarters() {
+        // 2 consecutive quarters should be stemless (minimum threshold)
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythmic()
+            .rhythm(vec![Duration::Quarter, Duration::Quarter]);
+
+        let flags = builder.compute_auto_stemless();
+        assert_eq!(flags, vec![true, true]);
+    }
+
+    #[test]
+    fn test_auto_stemless_single_quarter() {
+        // Single quarter should NOT be stemless (needs 2+)
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythmic()
+            .rhythm(vec![Duration::Quarter]);
+
+        let flags = builder.compute_auto_stemless();
+        assert_eq!(flags, vec![false]);
+    }
+
+    #[test]
+    fn test_auto_stemless_mixed_eighths_quarters() {
+        // 8th 8th Q Q Q starting on beat 1:
+        // - 8th 8th (beat 1) = not quarters
+        // - Q on beat 2 (before strong beat 3) = alone = has stem
+        // - Q Q on beats 3-4 = consecutive after beat 3 = stemless
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythmic()
+            .rhythm(vec![
+                Duration::Eighth,  // beat 1
+                Duration::Eighth,  // beat 1.5
+                Duration::Quarter, // beat 2 (alone before beat 3)
+                Duration::Quarter, // beat 3
+                Duration::Quarter, // beat 4
+            ]);
+
+        let flags = builder.compute_auto_stemless();
+        // Beat 2 quarter is alone before beat 3 = false
+        // Beat 3-4 quarters are consecutive = true
+        assert_eq!(flags, vec![false, false, false, true, true]);
+    }
+
+    #[test]
+    fn test_auto_stemless_quarter_breaks_chain() {
+        // Q 8th Q Q → first Q alone (false), 8th false, last 2 Q consecutive (true)
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythmic()
+            .rhythm(vec![
+                Duration::Quarter, // beat 1 (alone)
+                Duration::Eighth,  // beat 2 (breaks chain)
+                Duration::Quarter, // beat 2.5 (before beat 3)
+                Duration::Quarter, // beat 3
+            ]);
+
+        let flags = builder.compute_auto_stemless();
+        // Q on beat 1 alone, Q before beat 3 alone, Q on beat 3 alone
+        // Actually the last two are at beats 2.5 and 3, crossing beat 3
+        assert_eq!(flags, vec![false, false, false, false]);
+    }
+
+    #[test]
+    fn test_auto_stemless_half_note_breaks_chain() {
+        // Half + Q + Q → half on beats 1-2, Q Q on beats 3-4
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythmic()
+            .rhythm(vec![Duration::Half, Duration::Quarter, Duration::Quarter]);
+
+        let flags = builder.compute_auto_stemless();
+        // Half is not a quarter (false), Q Q on beats 3-4 are consecutive = true
+        assert_eq!(flags, vec![false, true, true]);
+    }
+
+    #[test]
+    fn test_auto_stemless_dotted_quarter_not_plain_quarter() {
+        // Dotted quarters are NOT plain quarters, so they don't form stemless groups
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythmic()
+            .rhythm(vec![
+                Duration::DottedQuarter,
+                Duration::DottedQuarter,
+                Duration::Quarter,
+            ]);
+
+        let flags = builder.compute_auto_stemless();
+        // Dotted quarters are NOT plain quarters, single plain quarter = false
+        assert_eq!(flags, vec![false, false, false]);
+    }
+
+    #[test]
+    fn test_auto_stemless_standard_mode_disabled() {
+        // Auto-stemless only applies to rhythmic mode
+        let builder = MeasureBuilder::new()
+            .mode(NotationMode::Standard)
+            .time_signature(4, 4)
+            .rhythm(vec![
+                Duration::Quarter,
+                Duration::Quarter,
+                Duration::Quarter,
+                Duration::Quarter,
+            ]);
+
+        let flags = builder.compute_auto_stemless();
+        // Standard mode = no auto-stemless
+        assert_eq!(flags, vec![false, false, false, false]);
+    }
+
+    #[test]
+    fn test_auto_stemless_strong_beat_crossing() {
+        // In 4/4: Q rest Q Q starting on beat 2
+        // Beat 2: Q (alone before beat 3) = stem
+        // Beat 3: rest (not a quarter, but starts group after beat 3)
+        // Beats 3.5-4: Q Q = consecutive after beat 3 = stemless
+        // But wait, we start on beat 1, so let's be precise:
+        // If we have rest, Q, Q, Q:
+        // - rest on beat 1
+        // - Q on beat 2 (alone before beat 3)
+        // - Q on beat 3
+        // - Q on beat 4
+        // Beat 2 Q is alone (before beat 3), beats 3-4 are consecutive
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythmic()
+            .rhythm(vec![
+                Duration::Quarter, // beat 1
+                Duration::Quarter, // beat 2
+                Duration::Quarter, // beat 3
+                Duration::Quarter, // beat 4
+            ]);
+
+        let flags = builder.compute_auto_stemless();
+        // Beats 1-2 form one group (2 quarters), beats 3-4 form another
+        assert_eq!(flags, vec![true, true, true, true]);
+    }
+
+    #[test]
+    fn test_auto_stemless_beat_2_3_4_pattern() {
+        // Specific case from user: 8th 8th Q Q Q starting beat 1
+        // 8th on beat 1, 8th on beat 1.5, Q on beat 2, Q on beat 3, Q on beat 4
+        // Q on beat 2 is alone (before strong beat 3) = stem
+        // Q on beats 3-4 are consecutive = stemless
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythmic()
+            .rhythm(vec![
+                Duration::Eighth,  // beat 1
+                Duration::Eighth,  // beat 1.5
+                Duration::Quarter, // beat 2
+                Duration::Quarter, // beat 3
+                Duration::Quarter, // beat 4
+            ]);
+
+        let flags = builder.compute_auto_stemless();
+        // 8ths are not quarters (false), beat 2 Q alone (false), beats 3-4 Q consecutive (true)
+        assert_eq!(flags, vec![false, false, false, true, true]);
+    }
+
+    #[test]
+    fn test_auto_stemless_no_quarters_at_all() {
+        // When there are NO plain quarter notes, all notes should have stems
+        // This tests dotted eighths + sixteenths + eighths pattern
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythmic()
+            .rhythm(vec![
+                Duration::DottedEighth,
+                Duration::Sixteenth,
+                Duration::DottedEighth,
+                Duration::Sixteenth,
+                Duration::DottedEighth,
+                Duration::Sixteenth,
+                Duration::Eighth,
+            ]);
+
+        let flags = builder.compute_auto_stemless();
+        // No plain quarters = no stemless notes
+        assert_eq!(flags, vec![false, false, false, false, false, false, false]);
+    }
+
+    #[test]
+    fn test_auto_stemless_syncopation_no_quarters() {
+        // Complex syncopation with no plain quarters
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythmic()
+            .rhythm(vec![
+                Duration::Eighth,
+                Duration::DottedQuarter,
+                Duration::Eighth,
+                Duration::Half,
+            ]);
+
+        let flags = builder.compute_auto_stemless();
+        // No plain quarters = no stemless notes
+        assert_eq!(flags, vec![false, false, false, false]);
+    }
 }

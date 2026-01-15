@@ -131,10 +131,7 @@ fn test_layout_elements_have_valid_bounds() {
         id: 1,
         duration: NoteDuration::Quarter,
         line: 0,
-        accidental: Accidental::None,
-        dots: 0,
-        offset_x: 0.0,
-        ledger_lines: true,
+        ..Default::default()
     };
     let (layout, _node) = layout_note(&note_params, &ctx);
     assert!(!layout.bbox.is_zero_area(), "Note should have valid bounding box");
@@ -191,10 +188,7 @@ fn test_all_note_durations_have_valid_layout() {
             id: 1,
             duration,
             line: 0,
-            accidental: Accidental::None,
-            dots: 0,
-            offset_x: 0.0,
-            ledger_lines: true,
+            ..Default::default()
         };
         let (layout, node) = layout_note(&params, &ctx);
 
@@ -320,36 +314,24 @@ fn test_note_staff_positions() {
     // Note on line 0 (middle line)
     let params_line_0 = NoteParams {
         id: 1,
-        duration: NoteDuration::Quarter,
         line: 0,
-        accidental: Accidental::None,
-        dots: 0,
-        offset_x: 0.0,
-        ledger_lines: true,
+        ..Default::default()
     };
     let (layout_0, _) = layout_note(&params_line_0, &ctx);
 
     // Note on line 2 (above middle)
     let params_line_2 = NoteParams {
         id: 2,
-        duration: NoteDuration::Quarter,
         line: 2,
-        accidental: Accidental::None,
-        dots: 0,
-        offset_x: 0.0,
-        ledger_lines: true,
+        ..Default::default()
     };
     let (layout_2, _) = layout_note(&params_line_2, &ctx);
 
     // Note on line -2 (below middle)
     let params_line_neg2 = NoteParams {
         id: 3,
-        duration: NoteDuration::Quarter,
         line: -2,
-        accidental: Accidental::None,
-        dots: 0,
-        offset_x: 0.0,
-        ledger_lines: true,
+        ..Default::default()
     };
     let (layout_neg2, _) = layout_note(&params_line_neg2, &ctx);
 
@@ -375,23 +357,17 @@ fn test_note_with_accidental_is_wider() {
 
     let params_no_acc = NoteParams {
         id: 1,
-        duration: NoteDuration::Quarter,
         line: 0,
         accidental: Accidental::None,
-        dots: 0,
-        offset_x: 0.0,
-        ledger_lines: true,
+        ..Default::default()
     };
     let (layout_no_acc, _) = layout_note(&params_no_acc, &ctx);
 
     let params_with_acc = NoteParams {
         id: 2,
-        duration: NoteDuration::Quarter,
         line: 0,
         accidental: Accidental::Sharp,
-        dots: 0,
-        offset_x: 0.0,
-        ledger_lines: true,
+        ..Default::default()
     };
     let (layout_with_acc, _) = layout_note(&params_with_acc, &ctx);
 
@@ -408,23 +384,17 @@ fn test_dotted_note_is_wider() {
 
     let params_no_dot = NoteParams {
         id: 1,
-        duration: NoteDuration::Quarter,
         line: 0,
-        accidental: Accidental::None,
         dots: 0,
-        offset_x: 0.0,
-        ledger_lines: true,
+        ..Default::default()
     };
     let (layout_no_dot, _) = layout_note(&params_no_dot, &ctx);
 
     let params_dotted = NoteParams {
         id: 2,
-        duration: NoteDuration::Quarter,
         line: 0,
-        accidental: Accidental::None,
         dots: 1,
-        offset_x: 0.0,
-        ledger_lines: true,
+        ..Default::default()
     };
     let (layout_dotted, _) = layout_note(&params_dotted, &ctx);
 
@@ -452,9 +422,7 @@ fn test_chord_layout() {
             accidental: Accidental::None,
             tie: false,
         }],
-        stem_direction: StemDirection::Auto,
-        dots: 0,
-        beamed: false,
+        ..Default::default()
     };
     let (single_layout, _) = layout_chord(&single_params, &ctx);
 
@@ -467,9 +435,7 @@ fn test_chord_layout() {
             ChordNote { line: 2, accidental: Accidental::None, tie: false },
             ChordNote { line: 4, accidental: Accidental::None, tie: false },
         ],
-        stem_direction: StemDirection::Auto,
-        dots: 0,
-        beamed: false,
+        ..Default::default()
     };
     let (triad_layout, _) = layout_chord(&triad_params, &ctx);
 
@@ -496,8 +462,7 @@ fn test_chord_stem_direction() {
         duration: NoteDuration::Quarter,
         notes: notes.clone(),
         stem_direction: StemDirection::Up,
-        dots: 0,
-        beamed: false,
+        ..Default::default()
     };
     let (layout_up, _) = layout_chord(&params_up, &ctx);
 
@@ -506,8 +471,7 @@ fn test_chord_stem_direction() {
         duration: NoteDuration::Quarter,
         notes,
         stem_direction: StemDirection::Down,
-        dots: 0,
-        beamed: false,
+        ..Default::default()
     };
     let (layout_down, _) = layout_chord(&params_down, &ctx);
 
@@ -646,12 +610,8 @@ fn test_scene_nodes_have_semantic_ids() {
 
     let params = NoteParams {
         id: 42,
-        duration: NoteDuration::Quarter,
         line: 0,
-        accidental: Accidental::None,
-        dots: 0,
-        offset_x: 0.0,
-        ledger_lines: true,
+        ..Default::default()
     };
     let (_, node) = layout_note(&params, &ctx);
 
@@ -703,24 +663,18 @@ fn test_ledger_line_notes() {
     // High ledger line note
     let params_high = NoteParams {
         id: 1,
-        duration: NoteDuration::Quarter,
         line: 10, // Well above staff
-        accidental: Accidental::None,
-        dots: 0,
-        offset_x: 0.0,
         ledger_lines: true,
+        ..Default::default()
     };
     let (layout_high, node_high) = layout_note(&params_high, &ctx);
 
     // Low ledger line note
     let params_low = NoteParams {
         id: 2,
-        duration: NoteDuration::Quarter,
         line: -10, // Well below staff
-        accidental: Accidental::None,
-        dots: 0,
-        offset_x: 0.0,
         ledger_lines: true,
+        ..Default::default()
     };
     let (layout_low, node_low) = layout_note(&params_low, &ctx);
 

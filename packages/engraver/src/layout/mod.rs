@@ -52,8 +52,8 @@ pub use segment::{ElementId, Segment, SegmentType, VOICES};
 pub use segment_list::SegmentList;
 pub use shape::{Shape, ShapeElement};
 pub use skyline::{Skyline, SkylineElement, SkylineLine};
-pub use spacing::{HorizontalSpacing, MinimumDistance, SpacingResult};
-pub use springs::{SpacingConfig, Spring, SpringRow};
+pub use spacing::{HorizontalSpacing, MinimumDistance, SpacingResult, SqueezeIterator};
+pub use springs::{HorizontalSpacingContext, SpacingConfig, Spring, SpringRow};
 pub use tlayout::{Layout, LayoutData};
 
 /// Unit conversions and newtype wrappers for dimensional safety.

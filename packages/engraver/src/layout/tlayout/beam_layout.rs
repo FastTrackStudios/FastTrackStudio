@@ -41,6 +41,27 @@ impl Default for BeamLayoutConfig {
     }
 }
 
+/// Slope constraint for beams (from MuseScore).
+///
+/// Determines whether a beam should be flat, have a small slope, or be unconstrained.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlopeConstraint {
+    /// Beam must be completely flat (slope = 0)
+    Flat,
+    /// Beam has a small slope (max 0.25 quarter spaces)
+    SmallSlope,
+    /// No constraint on beam slope
+    NoConstraint,
+}
+
+/// Maximum slopes based on note interval (MuseScore's _maxSlopes table).
+/// Index is the interval in half-steps (0 = unison, 1 = second, etc.)
+const MAX_SLOPES: [i32; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
+
+/// Minimum stem lengths in quarter spaces based on beam count.
+/// Index is (beam_count - 1), so beams[0] is for 1 beam (eighth notes).
+const MIN_STEM_LENGTHS: [i32; 8] = [11, 13, 15, 18, 21, 24, 27, 30];
+
 /// Information about a note in a beam group.
 #[derive(Debug, Clone)]
 pub struct BeamNote {
@@ -79,6 +100,153 @@ pub struct BeamLayout {
     pub stem_tips: Vec<f64>,
     /// Bounding box of the entire beam
     pub bbox: Rect,
+}
+
+/// Determine the slope constraint based on note positions.
+///
+/// Implements MuseScore's `getSlopeConstraint` algorithm:
+/// - If start and end notes are the same line, beam is flat
+/// - If any middle note is more extreme than endpoints, beam is flat
+/// - If a middle note equals the extreme endpoint, use small slope
+fn get_slope_constraint(notes: &[BeamNote], stem_up: bool) -> SlopeConstraint {
+    if notes.len() < 2 {
+        return SlopeConstraint::NoConstraint;
+    }
+
+    let start_line = notes[0].line;
+    let end_line = notes.last().unwrap().line;
+
+    // If start and end are the same, beam should be flat
+    if start_line == end_line {
+        return SlopeConstraint::Flat;
+    }
+
+    // For beams with only 2 notes, no additional constraints
+    if notes.len() == 2 {
+        return SlopeConstraint::NoConstraint;
+    }
+
+    // Check middle notes for constraint violations
+    // The "higher" end depends on stem direction:
+    // - Stem up: higher = smaller line number (higher on staff)
+    // - Stem down: higher = larger line number (lower on staff)
+    let (higher_end, lower_end) = if stem_up {
+        (start_line.min(end_line), start_line.max(end_line))
+    } else {
+        (start_line.max(end_line), start_line.min(end_line))
+    };
+
+    // Get sorted line positions of middle notes
+    let middle_lines: Vec<i32> = notes[1..notes.len() - 1].iter().map(|n| n.line).collect();
+
+    for &middle_line in &middle_lines {
+        // Check if middle note is more extreme than higher end
+        let is_more_extreme = if stem_up {
+            middle_line < higher_end // Higher on staff
+        } else {
+            middle_line > higher_end // Lower on staff
+        };
+
+        if is_more_extreme {
+            return SlopeConstraint::Flat;
+        }
+
+        // Check if middle note equals higher end
+        if middle_line == higher_end {
+            // Check if it's adjacent to the endpoint
+            let is_adjacent = (notes[1].line == higher_end && (start_line == higher_end))
+                || (notes[notes.len() - 2].line == higher_end && (end_line == higher_end));
+
+            if is_adjacent {
+                return SlopeConstraint::SmallSlope;
+            } else {
+                return SlopeConstraint::Flat;
+            }
+        }
+    }
+
+    SlopeConstraint::NoConstraint
+}
+
+/// Get maximum slope based on beam width in spatiums.
+///
+/// Longer beams should have shallower maximum slopes.
+fn get_max_slope(beam_width_spatiums: f64) -> i32 {
+    if beam_width_spatiums < 3.0 {
+        MAX_SLOPES[1] // 1
+    } else if beam_width_spatiums < 5.0 {
+        MAX_SLOPES[2] // 2
+    } else if beam_width_spatiums < 7.5 {
+        MAX_SLOPES[3] // 3
+    } else if beam_width_spatiums < 10.0 {
+        MAX_SLOPES[4] // 4
+    } else if beam_width_spatiums < 15.0 {
+        MAX_SLOPES[5] // 5
+    } else if beam_width_spatiums < 20.0 {
+        MAX_SLOPES[6] // 6
+    } else {
+        MAX_SLOPES[7] // 7
+    }
+}
+
+/// Compute the desired slant in quarter spaces.
+///
+/// Takes into account:
+/// - Note interval (distance between first and last notes)
+/// - Beam width (wider beams have shallower slopes)
+/// - Slope constraints (flat, small, or unconstrained)
+fn compute_desired_slant(notes: &[BeamNote], stem_up: bool, spatium: f64) -> i32 {
+    if notes.len() < 2 {
+        return 0;
+    }
+
+    let start_line = notes[0].line;
+    let end_line = notes.last().unwrap().line;
+
+    // Same line = flat beam
+    if start_line == end_line {
+        return 0;
+    }
+
+    // Check slope constraint
+    let constraint = get_slope_constraint(notes, stem_up);
+    match constraint {
+        SlopeConstraint::Flat => return 0,
+        SlopeConstraint::SmallSlope => {
+            // Small slope: just 1 quarter space
+            return if end_line > start_line { 1 } else { -1 };
+        }
+        SlopeConstraint::NoConstraint => {}
+    }
+
+    // Calculate beam width in spatiums
+    let beam_width = (notes.last().unwrap().x - notes[0].x) / spatium;
+
+    // Get max slope based on beam width
+    let max_slope = get_max_slope(beam_width);
+
+    // Calculate interval-based slope limit
+    let interval = (end_line - start_line).unsigned_abs() as usize;
+    let interval_max = MAX_SLOPES[interval.min(MAX_SLOPES.len() - 1)];
+
+    // Use the smaller of the two limits
+    let slope_limit = max_slope.min(interval_max);
+
+    // Direction: positive slope for descending notes (higher line = lower on staff)
+    let direction = if end_line > start_line { 1 } else { -1 };
+
+    // Apply stem direction adjustment (MuseScore multiplies by up ? 1 : -1)
+    // But we're working in screen coords where Y-down, so invert for stem-up
+    slope_limit * direction
+}
+
+/// Get minimum stem length in quarter spaces for a given beam count.
+fn get_min_stem_length_qs(beam_count: usize) -> i32 {
+    if beam_count == 0 {
+        return MIN_STEM_LENGTHS[0];
+    }
+    let idx = (beam_count - 1).min(MIN_STEM_LENGTHS.len() - 1);
+    MIN_STEM_LENGTHS[idx]
 }
 
 /// Layout a beam group.
@@ -233,8 +401,11 @@ fn determine_beam_direction(notes: &[BeamNote]) -> StemDirection {
 
 /// Calculate the Y position of the primary beam at start and end anchor X positions.
 ///
-/// This follows MuseScore's approach: calculate a base beam position using
-/// minimum stem lengths, then apply a slope based on the note contour.
+/// This follows MuseScore's approach:
+/// 1. Calculate base beam positions using minimum stem lengths
+/// 2. Compute desired slant based on note interval and slope constraints
+/// 3. Apply collision avoidance for inner notes
+///
 /// IMPORTANT: Y positions are calculated at BEAM ANCHOR X positions (Start/End anchors),
 /// since the beam is drawn between those positions.
 fn calculate_beam_position(
@@ -250,73 +421,97 @@ fn calculate_beam_position(
     let last_y = last.y_center(spatium);
 
     // Get the beam anchor X positions (where the beam will be drawn)
-    // Following MuseScore: Start anchor for first note, End anchor for last note
     let first_anchor_x = chord_beam_anchor_x(first, stem_dir, ChordBeamAnchorType::Start, spatium);
     let last_anchor_x = chord_beam_anchor_x(last, stem_dir, ChordBeamAnchorType::End, spatium);
 
-    // Calculate base beam positions ensuring minimum stem length for first and last notes
-    let (first_base, last_base) = match stem_dir {
-        StemDirection::Up | StemDirection::Auto => {
-            // Stems go up, beam is above notes (smaller Y in screen coords)
-            (
-                first_y - config.min_stem_length * spatium,
-                last_y - config.min_stem_length * spatium,
-            )
-        }
-        StemDirection::Down => {
-            // Stems go down, beam is below notes (larger Y in screen coords)
-            (
-                first_y + config.min_stem_length * spatium,
-                last_y + config.min_stem_length * spatium,
-            )
-        }
-    };
-
-    // Calculate slope based on STEM ANCHOR positions (not note positions)
-    // This ensures beam Y values are correct where the beam is actually drawn
+    // Calculate beam width for slope constraints
     let run = last_anchor_x - first_anchor_x;
     if run.abs() < 0.001 {
-        // Notes are at same X position, return flat beam
-        let beam_y = (first_base + last_base) / 2.0;
+        // Notes are at same X position, return flat beam with minimum stem length
+        let beam_y = match stem_dir {
+            StemDirection::Up | StemDirection::Auto => first_y - config.min_stem_length * spatium,
+            StemDirection::Down => first_y + config.min_stem_length * spatium,
+        };
         return (beam_y, beam_y);
     }
 
-    // Ideal slope follows the notes but reduced
-    let ideal_slope = (last_base - first_base) / run;
+    // Compute desired slant using slope constraints (from MuseScore algorithm)
+    let stem_up = matches!(stem_dir, StemDirection::Up | StemDirection::Auto);
+    let desired_slant_qs = compute_desired_slant(notes, stem_up, spatium);
 
-    // Clamp slope to maximum (reduces extreme slopes)
-    let clamped_slope = ideal_slope.clamp(-config.max_slope, config.max_slope);
+    // Convert slant from quarter spaces to spatium-based Y offset
+    // Quarter space = spatium / 4
+    let slant_per_spatium = (desired_slant_qs as f64 * spatium / 4.0) / run;
 
-    // Recalculate end position using clamped slope
-    let mut start_y = first_base;
-    let mut end_y = first_base + clamped_slope * run;
+    // Calculate base beam positions ensuring minimum stem length for endpoints
+    // Using MuseScore's approach: dictator (extreme endpoint) and pointer (other endpoint)
+    let max_beam_count = notes.iter().map(|n| n.beam_count()).max().unwrap_or(1);
+    let min_stem_qs = get_min_stem_length_qs(max_beam_count);
+    let min_stem_length = (min_stem_qs as f64 / 4.0) * spatium;
 
-    // Ensure all notes have minimum stem length
-    // Use Middle anchor X for each note's stem position for accurate interpolation
-    for note in notes {
+    // Use the larger of config min or beam-count-based min
+    let effective_min_stem = min_stem_length.max(config.min_stem_length * spatium);
+
+    let (first_base, last_base) = match stem_dir {
+        StemDirection::Up | StemDirection::Auto => {
+            (first_y - effective_min_stem, last_y - effective_min_stem)
+        }
+        StemDirection::Down => {
+            (first_y + effective_min_stem, last_y + effective_min_stem)
+        }
+    };
+
+    // Apply the constrained slope
+    // Start from the endpoint with the more extreme beam position (dictator)
+    let (mut start_y, mut end_y) = if desired_slant_qs == 0 {
+        // Flat beam: use the more conservative position
+        match stem_dir {
+            StemDirection::Up | StemDirection::Auto => {
+                let beam_y = first_base.min(last_base);
+                (beam_y, beam_y)
+            }
+            StemDirection::Down => {
+                let beam_y = first_base.max(last_base);
+                (beam_y, beam_y)
+            }
+        }
+    } else {
+        // Sloped beam: apply calculated slant
+        let slant_y = slant_per_spatium * run;
+        (first_base, first_base + slant_y)
+    };
+
+    // Collision avoidance: ensure all inner notes have minimum stem length
+    // This is MuseScore's offsetBeamToRemoveCollisions algorithm
+    for note in notes.iter() {
         let note_y = note.y_center(spatium);
         let note_stem_x = chord_beam_anchor_x(note, stem_dir, ChordBeamAnchorType::Middle, spatium);
         let t = (note_stem_x - first_anchor_x) / run;
         let beam_at_note = start_y + t * (end_y - start_y);
 
+        // Calculate minimum beam position for this note
+        let note_beam_count = note.beam_count();
+        let note_min_stem_qs = get_min_stem_length_qs(note_beam_count);
+        let note_min_stem = (note_min_stem_qs as f64 / 4.0) * spatium;
+
         let required_beam_y = match stem_dir {
-            StemDirection::Up | StemDirection::Auto => note_y - config.min_stem_length * spatium,
-            StemDirection::Down => note_y + config.min_stem_length * spatium,
+            StemDirection::Up | StemDirection::Auto => note_y - note_min_stem,
+            StemDirection::Down => note_y + note_min_stem,
         };
 
-        // Adjust beam if any note would have too short a stem
+        // Adjust beam if this note would have too short a stem
         match stem_dir {
             StemDirection::Up | StemDirection::Auto => {
-                // Beam must be at or above (smaller Y) the required position
                 if beam_at_note > required_beam_y {
+                    // Need to move beam up (smaller Y)
                     let offset = beam_at_note - required_beam_y;
                     start_y -= offset;
                     end_y -= offset;
                 }
             }
             StemDirection::Down => {
-                // Beam must be at or below (larger Y) the required position
                 if beam_at_note < required_beam_y {
+                    // Need to move beam down (larger Y)
                     let offset = required_beam_y - beam_at_note;
                     start_y += offset;
                     end_y += offset;
@@ -839,5 +1034,150 @@ mod tests {
 
         // Should have primary beam and partial secondary beam
         assert!(!result.commands.is_empty());
+    }
+
+    #[test]
+    fn test_slope_constraint_same_line_is_flat() {
+        // Two notes on the same line should produce a flat beam
+        let notes = vec![
+            BeamNote {
+                x: 0.0,
+                line: 0,
+                duration: NoteDuration::Eighth,
+                stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
+            },
+            BeamNote {
+                x: 25.0,
+                line: 0,
+                duration: NoteDuration::Eighth,
+                stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
+            },
+        ];
+
+        let constraint = get_slope_constraint(&notes, true);
+        assert_eq!(constraint, SlopeConstraint::Flat);
+    }
+
+    #[test]
+    fn test_slope_constraint_middle_more_extreme_is_flat() {
+        // Middle note higher than both endpoints (stem up) should be flat
+        let notes = vec![
+            BeamNote {
+                x: 0.0,
+                line: 0,
+                duration: NoteDuration::Eighth,
+                stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
+            },
+            BeamNote {
+                x: 15.0,
+                line: -4, // Higher on staff (more extreme for stem-up)
+                duration: NoteDuration::Eighth,
+                stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
+            },
+            BeamNote {
+                x: 30.0,
+                line: -2,
+                duration: NoteDuration::Eighth,
+                stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
+            },
+        ];
+
+        let constraint = get_slope_constraint(&notes, true);
+        assert_eq!(constraint, SlopeConstraint::Flat);
+    }
+
+    #[test]
+    fn test_slope_constraint_two_notes_unconstrained() {
+        // Two notes at different lines should be unconstrained
+        let notes = vec![
+            BeamNote {
+                x: 0.0,
+                line: 0,
+                duration: NoteDuration::Eighth,
+                stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
+            },
+            BeamNote {
+                x: 25.0,
+                line: -2,
+                duration: NoteDuration::Eighth,
+                stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
+            },
+        ];
+
+        let constraint = get_slope_constraint(&notes, true);
+        assert_eq!(constraint, SlopeConstraint::NoConstraint);
+    }
+
+    #[test]
+    fn test_compute_desired_slant_flat() {
+        // Same line should produce slant of 0
+        let notes = vec![
+            BeamNote {
+                x: 0.0,
+                line: 0,
+                duration: NoteDuration::Eighth,
+                stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
+            },
+            BeamNote {
+                x: 25.0,
+                line: 0,
+                duration: NoteDuration::Eighth,
+                stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
+            },
+        ];
+
+        let slant = compute_desired_slant(&notes, true, 5.0);
+        assert_eq!(slant, 0);
+    }
+
+    #[test]
+    fn test_compute_desired_slant_interval() {
+        // Different lines should produce non-zero slant
+        let notes = vec![
+            BeamNote {
+                x: 0.0,
+                line: 0,
+                duration: NoteDuration::Eighth,
+                stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
+            },
+            BeamNote {
+                x: 25.0,
+                line: -2, // Interval of 2
+                duration: NoteDuration::Eighth,
+                stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
+            },
+        ];
+
+        let slant = compute_desired_slant(&notes, true, 5.0);
+        // Should be negative (beam goes up as notes go up on staff)
+        assert!(slant < 0);
+    }
+
+    #[test]
+    fn test_get_max_slope_narrow_beam() {
+        // Narrow beams should have smaller max slope
+        assert_eq!(get_max_slope(2.0), 1);
+        assert_eq!(get_max_slope(4.0), 2);
+        assert_eq!(get_max_slope(6.0), 3);
+    }
+
+    #[test]
+    fn test_get_min_stem_length_by_beam_count() {
+        // More beams require longer stems
+        assert_eq!(get_min_stem_length_qs(1), 11);
+        assert_eq!(get_min_stem_length_qs(2), 13);
+        assert_eq!(get_min_stem_length_qs(3), 15);
+        assert_eq!(get_min_stem_length_qs(4), 18);
     }
 }

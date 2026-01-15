@@ -27,7 +27,7 @@ use crate::layout::context::{LayoutConfiguration, LayoutContext};
 use crate::layout::tlayout::chord::{layout_chord, ChordNote, ChordParams, StemDirection};
 use crate::layout::tlayout::clef::{layout_clef, ClefParams, ClefType};
 use crate::layout::tlayout::keysig::{layout_keysig, KeySigParams, KeySigType};
-use crate::layout::tlayout::note::{layout_note, Accidental, NoteDuration, NoteParams};
+use crate::layout::tlayout::note::{layout_note, Accidental, NoteDuration, NoteHeadType, NoteParams};
 use crate::layout::tlayout::rest::{layout_rest, RestDuration, RestParams};
 use crate::layout::tlayout::timesig::{layout_timesig, TimeSigParams, TimeSigType};
 use crate::model::{DurationKind, MusicElement, Score};
@@ -558,6 +558,7 @@ impl<'a> LayoutEngine<'a> {
                         dots: note.duration.dots,
                         offset_x: 0.0,
                         ledger_lines: true,
+                        ..Default::default()
                     };
                     let (_, mut node) = layout_note(&params, ctx);
                     node.transform = Affine::translate((x_pos, 0.0));
@@ -586,10 +587,12 @@ impl<'a> LayoutEngine<'a> {
                         let params = ChordParams {
                             id: elem_id,
                             duration: duration_kind_to_note_duration(first_note.duration.kind),
+                            head_type: NoteHeadType::Normal,
                             notes,
                             stem_direction: model_stem_to_layout(first_note.stem),
                             dots: first_note.duration.dots,
                             beamed: false,
+                            stemless: false,
                         };
                         let (_, mut node) = layout_chord(&params, ctx);
                         node.transform = Affine::translate((x_pos, 0.0));

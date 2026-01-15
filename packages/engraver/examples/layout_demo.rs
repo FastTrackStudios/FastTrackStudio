@@ -1317,7 +1317,6 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
             Duration::DottedEighth,
             Duration::Sixteenth,
         ])
-        .end_barline(BarlineType::Double)
         .id_base(540)
         .build(&ctx);
 
@@ -1325,6 +1324,170 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
     m3_container.transform = Affine::translate((content_x + measure1.width + measure2.width, staff5_middle));
     m3_container.add_child(measure3.scene);
     root.add_child(m3_container);
+
+    // Measure 4: Complex syncopation (dotted quarter + eighth + half)
+    let measure4 = MeasureBuilder::new()
+        .rhythmic()
+        .rhythm(vec![
+            Duration::DottedQuarter,
+            Duration::Eighth,
+            Duration::Half,
+        ])
+        .end_barline(BarlineType::Double)
+        .id_base(560)
+        .build(&ctx);
+
+    let mut m4_container = SceneNode::group(SemanticId::new(ElementType::Measure, 560));
+    m4_container.transform = Affine::translate((content_x + measure1.width + measure2.width + measure3.width, staff5_middle));
+    m4_container.add_child(measure4.scene);
+    root.add_child(m4_container);
+
+    // =========================================================================
+    // SYSTEM 6: Stemless Slash Notation (whole note style slashes)
+    // =========================================================================
+    let staff6_y = staff5_y + 70.0;
+    let staff6_middle = staff6_y + 2.0 * spatium;
+
+    // Draw staff lines
+    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
+        content_x, staff6_y, content_width, spatium,
+    )));
+
+    // Measure 1: Four quarters → all auto-stemless (2+ consecutive quarters)
+    let measure5 = MeasureBuilder::new()
+        .clef(ClefType::Treble)
+        .time_signature(4, 4)
+        .rhythmic()
+        .rhythm(vec![
+            Duration::Quarter,
+            Duration::Quarter,
+            Duration::Quarter,
+            Duration::Quarter,
+        ])
+        .id_base(600)
+        .build(&ctx);
+
+    let mut m5_container = SceneNode::group(SemanticId::new(ElementType::Measure, 600));
+    m5_container.transform = Affine::translate((content_x, staff6_middle));
+    m5_container.add_child(measure5.scene);
+    root.add_child(m5_container);
+
+    // Measure 2: Mixed - eighth notes have stems, quarters after them are stemless
+    // Pattern: 8th 8th Q Q Q → eighths have stems, 3 quarters are consecutive = stemless
+    let measure6 = MeasureBuilder::new()
+        .rhythmic()
+        .rhythm(vec![
+            Duration::Eighth,
+            Duration::Eighth,
+            Duration::Quarter,
+            Duration::Quarter,
+            Duration::Quarter,
+        ])
+        .id_base(620)
+        .build(&ctx);
+
+    let mut m6_container = SceneNode::group(SemanticId::new(ElementType::Measure, 620));
+    m6_container.transform = Affine::translate((content_x + measure5.width, staff6_middle));
+    m6_container.add_child(measure6.scene);
+    root.add_child(m6_container);
+
+    // Measure 3: Single quarter (not stemless - needs 2+ consecutive) + dotted half
+    // Pattern: Q + dotted half → quarter has stem (single), half has stem
+    let measure7 = MeasureBuilder::new()
+        .rhythmic()
+        .rhythm(vec![
+            Duration::Quarter,
+            Duration::DottedHalf,
+        ])
+        .id_base(640)
+        .build(&ctx);
+
+    let mut m7_container = SceneNode::group(SemanticId::new(ElementType::Measure, 640));
+    m7_container.transform = Affine::translate((content_x + measure5.width + measure6.width, staff6_middle));
+    m7_container.add_child(measure7.scene);
+    root.add_child(m7_container);
+
+    // Measure 4: Half + two quarters → half has stem, 2 quarters = stemless
+    let measure8 = MeasureBuilder::new()
+        .rhythmic()
+        .rhythm(vec![
+            Duration::Half,
+            Duration::Quarter,
+            Duration::Quarter,
+        ])
+        .end_barline(BarlineType::End)
+        .id_base(660)
+        .build(&ctx);
+
+    let mut m8_container = SceneNode::group(SemanticId::new(ElementType::Measure, 660));
+    m8_container.transform = Affine::translate((content_x + measure5.width + measure6.width + measure7.width, staff6_middle));
+    m8_container.add_child(measure8.scene);
+    root.add_child(m8_container);
+
+    // =========================================================================
+    // SYSTEM 7: Complex Rhythms (triplets, ties, syncopation patterns)
+    // =========================================================================
+    let staff7_y = staff6_y + 70.0;
+    let staff7_middle = staff7_y + 2.0 * spatium;
+
+    // Draw staff lines
+    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
+        content_x, staff7_y, content_width, spatium,
+    )));
+
+    // Measure 1: 32nd note run
+    let measure9 = MeasureBuilder::new()
+        .clef(ClefType::Treble)
+        .time_signature(4, 4)
+        .rhythmic()
+        .rhythm(vec![
+            Duration::ThirtySecond, Duration::ThirtySecond, Duration::ThirtySecond, Duration::ThirtySecond,
+            Duration::ThirtySecond, Duration::ThirtySecond, Duration::ThirtySecond, Duration::ThirtySecond,
+            Duration::Quarter,
+            Duration::Half,
+        ])
+        .id_base(700)
+        .build(&ctx);
+
+    let mut m9_container = SceneNode::group(SemanticId::new(ElementType::Measure, 700));
+    m9_container.transform = Affine::translate((content_x, staff7_middle));
+    m9_container.add_child(measure9.scene);
+    root.add_child(m9_container);
+
+    // Measure 2: Complex syncopation pattern
+    let measure10 = MeasureBuilder::new()
+        .rhythmic()
+        .rhythm(vec![
+            Duration::Eighth,
+            Duration::DottedQuarter,
+            Duration::Eighth,
+            Duration::Quarter,
+        ])
+        .id_base(720)
+        .build(&ctx);
+
+    let mut m10_container = SceneNode::group(SemanticId::new(ElementType::Measure, 720));
+    m10_container.transform = Affine::translate((content_x + measure9.width, staff7_middle));
+    m10_container.add_child(measure10.scene);
+    root.add_child(m10_container);
+
+    // Measure 3: Dotted rhythms (dotted sixteenth + 32nd pattern)
+    let measure11 = MeasureBuilder::new()
+        .rhythmic()
+        .rhythm(vec![
+            Duration::DottedEighth, Duration::Sixteenth,
+            Duration::DottedEighth, Duration::Sixteenth,
+            Duration::DottedEighth, Duration::Sixteenth,
+            Duration::Eighth,
+        ])
+        .end_barline(BarlineType::End)
+        .id_base(740)
+        .build(&ctx);
+
+    let mut m11_container = SceneNode::group(SemanticId::new(ElementType::Measure, 740));
+    m11_container.transform = Affine::translate((content_x + measure9.width + measure10.width, staff7_middle));
+    m11_container.add_child(measure11.scene);
+    root.add_child(m11_container);
 
     // =========================================================================
     // Labels and Title
@@ -1342,7 +1505,9 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         (content_x, staff2_y - 12.0, "System 2: Chord voicings (triads, 7ths, accidentals)"),
         (content_x, staff3_y - 12.0, "System 3: Lyrics (Amazing Grace, 3/4)"),
         (content_x, staff4_y - 12.0, "System 4: Beamed note groups (8ths, 16ths, mixed)"),
-        (content_x, staff5_y - 12.0, "System 5: Rhythmic slash notation (quarters, 8ths, 16ths, dotted)"),
+        (content_x, staff5_y - 12.0, "System 5: Rhythmic slash notation (quarters, 8ths, 16ths, syncopation)"),
+        (content_x, staff6_y - 12.0, "System 6: Auto-stemless rhythmic notation (2+ consecutive quarters = stemless)"),
+        (content_x, staff7_y - 12.0, "System 7: Complex rhythms (32nds, syncopation, dotted patterns)"),
     ];
 
     for (x, y, text) in labels {

@@ -12,7 +12,7 @@ use crate::scene::id::{ElementType, SemanticId};
 use crate::scene::node::SceneNode;
 use crate::scene::paint::PaintCommand;
 
-use super::note::{layout_note, Accidental, NoteDuration, NoteParams};
+use super::note::{layout_note, Accidental, NoteDuration, NoteHeadType, NoteParams};
 use super::LayoutData;
 
 /// SMuFL codepoints for stems and flags.
@@ -44,7 +44,7 @@ pub enum StemDirection {
 }
 
 impl StemDirection {
-    /// Resolve auto direction based on note positions.
+    /// Resolve auto direction based on note positions and head type.
     #[must_use]
     pub fn resolve(self, avg_line: f64) -> Self {
         match self {
@@ -54,6 +54,28 @@ impl StemDirection {
                     Self::Down
                 } else {
                     Self::Up
+                }
+            }
+            _ => self,
+        }
+    }
+
+    /// Resolve auto direction for a specific notehead type.
+    /// Slash noteheads default to stem down (rhythmic notation convention).
+    #[must_use]
+    pub fn resolve_for_head_type(self, avg_line: f64, head_type: super::note::NoteHeadType) -> Self {
+        match self {
+            Self::Auto => {
+                if head_type == super::note::NoteHeadType::Slash {
+                    // Rhythmic slash notation: stems down by default
+                    Self::Down
+                } else {
+                    // Standard rule: stem down if average note is above middle line
+                    if avg_line > 0.0 {
+                        Self::Down
+                    } else {
+                        Self::Up
+                    }
                 }
             }
             _ => self,
@@ -79,6 +101,8 @@ pub struct ChordParams {
     pub id: u64,
     /// Duration type
     pub duration: NoteDuration,
+    /// Notehead type (Normal, Slash, etc.)
+    pub head_type: NoteHeadType,
     /// Notes in the chord (sorted by line)
     pub notes: Vec<ChordNote>,
     /// Stem direction
@@ -87,6 +111,8 @@ pub struct ChordParams {
     pub dots: u8,
     /// Whether chord is part of a beam (no flags)
     pub beamed: bool,
+    /// Whether to hide the stem (stemless notation)
+    pub stemless: bool,
 }
 
 impl Default for ChordParams {
@@ -94,6 +120,7 @@ impl Default for ChordParams {
         Self {
             id: 0,
             duration: NoteDuration::Quarter,
+            head_type: NoteHeadType::Normal,
             notes: vec![ChordNote {
                 line: 0,
                 accidental: Accidental::None,
@@ -102,6 +129,7 @@ impl Default for ChordParams {
             stem_direction: StemDirection::Auto,
             dots: 0,
             beamed: false,
+            stemless: false,
         }
     }
 }
@@ -126,7 +154,7 @@ pub fn layout_chord(params: &ChordParams, ctx: &LayoutContext) -> (LayoutData, S
     let avg_line: f64 = sorted_notes.iter().map(|n| n.line as f64).sum::<f64>()
         / sorted_notes.len() as f64;
 
-    let stem_dir = params.stem_direction.resolve(avg_line);
+    let stem_dir = params.stem_direction.resolve_for_head_type(avg_line, params.head_type);
 
     // Create chord group node
     let mut chord_node = SceneNode::group(SemanticId::chord(params.id));
@@ -140,6 +168,7 @@ pub fn layout_chord(params: &ChordParams, ctx: &LayoutContext) -> (LayoutData, S
         let note_params = NoteParams {
             id: params.id * 1000 + i as u64,
             duration: params.duration,
+            head_type: params.head_type,
             line: note.line,
             accidental: note.accidental,
             dots: if i == 0 { params.dots } else { 0 }, // Only first note gets dots
@@ -167,12 +196,14 @@ pub fn layout_chord(params: &ChordParams, ctx: &LayoutContext) -> (LayoutData, S
         chord_node.add_child(note_node);
     }
 
-    // Add stem if required
-    if params.duration.has_stem() {
+    // Add stem if required (and not stemless)
+    if params.duration.has_stem() && !params.stemless {
         let stem_commands = draw_stem(
             &sorted_notes,
             stem_dir,
             &notehead_offsets,
+            params.head_type,
+            params.duration,
             spatium,
         );
 
@@ -186,6 +217,7 @@ pub fn layout_chord(params: &ChordParams, ctx: &LayoutContext) -> (LayoutData, S
                 stem_dir,
                 &notehead_offsets,
                 params.duration,
+                params.head_type,
                 spatium,
             );
 
@@ -230,30 +262,52 @@ fn calculate_notehead_offsets(notes: &[ChordNote], stem_dir: StemDirection) -> V
 }
 
 // ============================================================================
-// SMuFL Anchor Points (from Leland font metadata)
+// SMuFL Anchor Points (from Bravura font metadata)
 // ============================================================================
 // These are the exact anchor points for stem attachment from the SMuFL spec.
 // Coordinates are in staff spaces, relative to notehead origin.
 
-/// SMuFL stemUpSE anchor: attachment point for up-stems (South-East corner).
-/// From Leland metadata: [1.3, 0.16]
-const STEM_UP_SE_X: f64 = 1.3;
-const STEM_UP_SE_Y: f64 = 0.16;
+/// SMuFL stemUpSE anchor for normal noteheads: attachment point for up-stems (South-East corner).
+/// From Bravura metadata noteheadBlack: [1.18, 0.168]
+const STEM_UP_SE_X: f64 = 1.18;
+const STEM_UP_SE_Y: f64 = 0.168;
 
-/// SMuFL stemDownNW anchor: attachment point for down-stems (North-West corner).
-/// From Leland metadata: [0.0, -0.168]
+/// SMuFL stemDownNW anchor for normal noteheads: attachment point for down-stems (North-West corner).
+/// From Bravura metadata noteheadBlack: [0.0, -0.168]
 const STEM_DOWN_NW_X: f64 = 0.0;
 const STEM_DOWN_NW_Y: f64 = -0.168;
+
+/// SMuFL stemUpSE anchor for slash noteheads (noteheadSlashHorizontalEnds).
+/// From Bravura metadata: [2.12, 1.0]
+const SLASH_STEM_UP_SE_X: f64 = 2.12;
+const SLASH_STEM_UP_SE_Y: f64 = 1.0;
+
+/// SMuFL stemDownNW anchor for slash noteheads (noteheadSlashHorizontalEnds).
+/// From Bravura metadata: [0.0, -1.0]
+const SLASH_STEM_DOWN_NW_X: f64 = 0.0;
+const SLASH_STEM_DOWN_NW_Y: f64 = -1.0;
+
+/// SMuFL stemUpSE anchor for diamond noteheads (noteheadSlashDiamondWhite).
+/// From Bravura metadata: [2.0, 0.0] - stem connects at center of diamond
+const DIAMOND_STEM_UP_SE_X: f64 = 2.0;
+const DIAMOND_STEM_UP_SE_Y: f64 = 0.0;
+
+/// SMuFL stemDownNW anchor for diamond noteheads (noteheadSlashDiamondWhite).
+/// From Bravura metadata: [0.0, 0.0] - stem connects at center of diamond
+const DIAMOND_STEM_DOWN_NW_X: f64 = 0.0;
+const DIAMOND_STEM_DOWN_NW_Y: f64 = 0.0;
 
 /// Standard stem width in staff spaces (from MuseScore default).
 const STEM_WIDTH: f64 = 0.12;
 
 /// Draw the stem for a chord.
-/// Uses SMuFL anchor points for precise stem attachment matching MuseScore.
+/// Uses SMuFL anchor points for normal noteheads, proportional positioning for slash noteheads.
 fn draw_stem(
     notes: &[ChordNote],
     stem_dir: StemDirection,
     _offsets: &[f64],
+    head_type: NoteHeadType,
+    duration: NoteDuration,
     spatium: f64,
 ) -> Vec<PaintCommand> {
     let stem_width = STEM_WIDTH * spatium;
@@ -265,25 +319,40 @@ fn draw_stem(
     let top_y = -top_note.line as f64 * spatium / 2.0;
     let bottom_y = -bottom_note.line as f64 * spatium / 2.0;
 
+    // Determine if we're using diamond notehead (for half/whole in slash mode)
+    let uses_diamond = head_type == NoteHeadType::Slash
+        && matches!(
+            duration,
+            NoteDuration::Half | NoteDuration::Whole | NoteDuration::DoubleWhole
+        );
+
     let (stem_x, stem_start_y, stem_end_y) = match stem_dir {
         StemDirection::Up | StemDirection::Auto => {
-            // Use SMuFL stemUpSE anchor (right side of notehead)
-            // X: anchor X - half stem width (to center the stem line on the anchor)
-            let x = STEM_UP_SE_X * spatium - stem_width / 2.0;
-            // Y: start at bottom note + Y offset, end going up
-            // SMuFL Y is negated because glyph renderer flips Y
-            let y_offset = -STEM_UP_SE_Y * spatium;
+            // Use SMuFL anchors from Bravura font metadata
+            let (anchor_x, anchor_y) = if uses_diamond {
+                (DIAMOND_STEM_UP_SE_X, DIAMOND_STEM_UP_SE_Y)
+            } else if head_type == NoteHeadType::Slash {
+                (SLASH_STEM_UP_SE_X, SLASH_STEM_UP_SE_Y)
+            } else {
+                (STEM_UP_SE_X, STEM_UP_SE_Y)
+            };
+            let x = anchor_x * spatium - stem_width / 2.0;
+            let y_offset = -anchor_y * spatium;
             let start = bottom_y + y_offset;
             let end = top_y - stem_length;
             (x, start, end)
         }
         StemDirection::Down => {
-            // Use SMuFL stemDownNW anchor (left side of notehead)
-            // X: anchor X + half stem width (to center the stem line on the anchor)
-            let x = STEM_DOWN_NW_X * spatium + stem_width / 2.0;
-            // Y: start at top note + Y offset, end going down
-            // SMuFL Y is negated because glyph renderer flips Y
-            let y_offset = -STEM_DOWN_NW_Y * spatium;
+            // Use SMuFL anchors from Bravura font metadata
+            let (anchor_x, anchor_y) = if uses_diamond {
+                (DIAMOND_STEM_DOWN_NW_X, DIAMOND_STEM_DOWN_NW_Y)
+            } else if head_type == NoteHeadType::Slash {
+                (SLASH_STEM_DOWN_NW_X, SLASH_STEM_DOWN_NW_Y)
+            } else {
+                (STEM_DOWN_NW_X, STEM_DOWN_NW_Y)
+            };
+            let x = anchor_x * spatium + stem_width / 2.0;
+            let y_offset = -anchor_y * spatium;
             let start = top_y + y_offset;
             let end = bottom_y + stem_length;
             (x, start, end)
@@ -299,12 +368,13 @@ fn draw_stem(
 }
 
 /// Draw flags for a chord (eighth notes and shorter).
-/// Uses SMuFL anchor points for precise flag placement matching MuseScore.
+/// Uses SMuFL anchor points for normal noteheads, proportional positioning for slash noteheads.
 fn draw_flags(
     notes: &[ChordNote],
     stem_dir: StemDirection,
     _offsets: &[f64],
     duration: NoteDuration,
+    head_type: NoteHeadType,
     spatium: f64,
 ) -> Vec<PaintCommand> {
     let flag_count = duration.flag_count();
@@ -318,10 +388,16 @@ fn draw_flags(
     let top_note = notes.last().unwrap();
     let bottom_note = notes.first().unwrap();
 
+    // Use same anchor calculations as draw_stem for consistent flag positioning
     let (flag_x, flag_y, glyph) = match stem_dir {
         StemDirection::Up | StemDirection::Auto => {
-            // Flag attaches at stem tip (same X as stem)
-            let x = STEM_UP_SE_X * spatium - stem_width / 2.0;
+            // Flag attaches at stem tip - use same X as stem
+            let anchor_x = if head_type == NoteHeadType::Slash {
+                SLASH_STEM_UP_SE_X
+            } else {
+                STEM_UP_SE_X
+            };
+            let x = anchor_x * spatium - stem_width / 2.0;
             let top_y = -top_note.line as f64 * spatium / 2.0;
             let y = top_y - stem_length;
             let g = match flag_count {
@@ -333,8 +409,13 @@ fn draw_flags(
             (x, y, g)
         }
         StemDirection::Down => {
-            // Flag attaches at stem tip (same X as stem)
-            let x = STEM_DOWN_NW_X * spatium + stem_width / 2.0;
+            // Flag attaches at stem tip - use same X as stem
+            let anchor_x = if head_type == NoteHeadType::Slash {
+                SLASH_STEM_DOWN_NW_X
+            } else {
+                STEM_DOWN_NW_X
+            };
+            let x = anchor_x * spatium + stem_width / 2.0;
             let bottom_y = -bottom_note.line as f64 * spatium / 2.0;
             let y = bottom_y + stem_length;
             let g = match flag_count {

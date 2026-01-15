@@ -25,6 +25,7 @@ pub mod import;
 pub mod interaction;
 pub mod layout;
 pub mod model;
+pub mod notation;
 pub mod renderer;
 pub mod scene;
 pub mod style;

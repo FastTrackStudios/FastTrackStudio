@@ -37,6 +37,19 @@ pub mod glyphs {
     /// White slash double whole note
     pub const NOTEHEAD_SLASH_WHITE_DOUBLE_WHOLE: char = '\u{E10A}';
 
+    // Diamond noteheads (harmonics, also used for rhythmic notation half/whole)
+    /// White diamond whole note
+    pub const NOTEHEAD_DIAMOND_WHOLE: char = '\u{E0DB}';
+    /// White diamond half note
+    pub const NOTEHEAD_DIAMOND_HALF: char = '\u{E0DC}';
+    /// Black diamond (filled, for quarter notes and shorter)
+    pub const NOTEHEAD_DIAMOND_BLACK: char = '\u{E0DD}';
+    /// Large diamond (wide variant)
+    pub const NOTEHEAD_DIAMOND_WIDE: char = '\u{E0DE}';
+    /// Slash diamond white (large white diamond for rhythmic notation)
+    /// Base glyph - use ss08 stylistic set for oversized variant
+    pub const NOTEHEAD_SLASH_DIAMOND_WHITE: char = '\u{E104}';
+
     // Accidentals
     /// Sharp
     pub const ACCIDENTAL_SHARP: char = '\u{E262}';
@@ -77,9 +90,12 @@ impl NoteHeadType {
         match self {
             Self::Normal => duration.notehead_glyph(),
             Self::Slash => match duration {
-                NoteDuration::DoubleWhole => glyphs::NOTEHEAD_SLASH_WHITE_DOUBLE_WHOLE,
-                NoteDuration::Whole => glyphs::NOTEHEAD_SLASH_WHITE_WHOLE,
-                NoteDuration::Half => glyphs::NOTEHEAD_SLASH_WHITE_HALF,
+                // Use large white diamond for half/whole in rhythmic notation
+                // U+E104 noteheadSlashDiamondWhite (use ss08 for oversized variant)
+                // TODO: Make this configurable (diamond vs white slash)
+                NoteDuration::DoubleWhole | NoteDuration::Whole | NoteDuration::Half => {
+                    glyphs::NOTEHEAD_SLASH_DIAMOND_WHITE
+                }
                 // Quarter and shorter use filled slash
                 _ => glyphs::NOTEHEAD_SLASH_HORIZONTAL,
             },
