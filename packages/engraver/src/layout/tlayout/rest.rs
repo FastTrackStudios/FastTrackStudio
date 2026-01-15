@@ -155,20 +155,34 @@ pub fn layout_rest(params: &RestParams, ctx: &LayoutContext) -> (LayoutData, Sce
     let mut total_width = rest_width;
 
     // Draw augmentation dots
+    // MuseScore uses dotNoteDistance = 0.5 spatiums (default)
+    const DOT_NOTE_DISTANCE: f64 = 0.5;
+    const DOT_DOT_DISTANCE: f64 = 0.5;  // between adjacent dots
+    const DOT_GLYPH_WIDTH: f64 = 0.35;  // approximate width of the dot glyph
+
     if params.dots > 0 {
-        let dot_x = x + rest_width + spatium * 0.25;
+        let dot_x = x + rest_width + spatium * DOT_NOTE_DISTANCE;
         let dot_y = y - spatium * 0.25; // Slightly above center
 
         for i in 0..params.dots {
             commands.push(PaintCommand::glyph(
                 super::note::glyphs::AUGMENTATION_DOT,
-                Point::new(dot_x + i as f64 * spatium * 0.5, dot_y),
+                Point::new(dot_x + i as f64 * spatium * DOT_DOT_DISTANCE, dot_y),
                 spatium,
                 Color::BLACK,
             ));
         }
 
-        total_width += spatium * 0.25 + params.dots as f64 * spatium * 0.5;
+        // Width calculation:
+        // - DOT_NOTE_DISTANCE: gap from rest to first dot
+        // - (params.dots - 1) * DOT_DOT_DISTANCE: gaps between adjacent dots
+        // - DOT_GLYPH_WIDTH: width of the last dot's glyph
+        let dots_spacing = if params.dots > 1 {
+            (params.dots - 1) as f64 * DOT_DOT_DISTANCE
+        } else {
+            0.0
+        };
+        total_width += spatium * (DOT_NOTE_DISTANCE + dots_spacing + DOT_GLYPH_WIDTH);
     }
 
     // Calculate bounding box

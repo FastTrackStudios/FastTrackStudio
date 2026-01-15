@@ -63,13 +63,14 @@ use engraver::layout::tlayout::{
     layout_keysig, ClefContext, KeySigParams, KeySigType,
     // Lyrics
     layout_lyrics, layout_lyrics_dash, LyricsParams, LyricsPlacement, SyllabicType,
-    // Notes (for Accidental and NoteDuration types, and layout_note for beamed notes)
-    layout_note, Accidental, NoteDuration, NoteParams,
+    // Notes (for Accidental, NoteDuration, NoteHeadType, and layout_note for beamed notes)
+    layout_note, Accidental, NoteDuration, NoteHeadType, NoteParams,
     // Rests
     layout_rest, RestDuration, RestParams,
     // Time signatures
     layout_timesig, TimeSigParams, TimeSigType,
 };
+use engraver::notation::{Duration, MeasureBuilder, TimeSignature};
 use engraver::renderer::{SceneRenderBuilder, VelloSceneRenderer};
 use engraver::scene::id::{ElementType, SemanticId};
 use engraver::scene::node::SceneNode;
@@ -90,11 +91,12 @@ const POINTS_PER_INCH: f64 = 72.0;
 const DPI_SCALE: f64 = SCREEN_DPI / POINTS_PER_INCH;
 
 // Font paths relative to workspace root
-const LELAND_FONT_PATH: &str = "packages/charts/resources/fonts/musescore/fonts/leland/Leland.otf";
-const LELAND_METADATA_PATH: &str =
-    "packages/charts/resources/fonts/musescore/fonts/leland/leland_metadata.json";
+// Using Bravura instead of Leland because Bravura has slash noteheads (U+E100-E10A)
+// which Leland is missing
+const SMUFL_FONT_PATH: &str = "packages/charts/resources/fonts/musescore/fonts/bravura/Bravura.otf";
+const SMUFL_METADATA_PATH: &str =
+    "packages/charts/resources/fonts/musescore/fonts/bravura/bravura_metadata.json";
 // Use FreeSans for general text (titles, labels, lyrics)
-// LelandText is mainly for music-specific text symbols
 const TEXT_FONT_PATH: &str =
     "packages/charts/resources/fonts/musescore/fonts/FreeSans.ttf";
 
@@ -253,20 +255,20 @@ impl ApplicationHandler for App {
         // Create style (leaked for 'static lifetime in demo)
         let style = Box::leak(Box::new(MStyle::default()));
 
-        // Load SMuFL font (Leland)
+        // Load SMuFL font (Bravura - has slash noteheads that Leland lacks)
         let font_data: &'static [u8] = Box::leak(
-            std::fs::read(LELAND_FONT_PATH)
-                .expect("Failed to read Leland.otf")
+            std::fs::read(SMUFL_FONT_PATH)
+                .expect("Failed to read Bravura.otf")
                 .into_boxed_slice(),
         );
         let metadata_file =
-            std::fs::File::open(LELAND_METADATA_PATH).expect("Failed to open metadata file");
+            std::fs::File::open(SMUFL_METADATA_PATH).expect("Failed to open metadata file");
         let font: &'static SMuFLFont<'static> = Box::leak(Box::new(
             SMuFLFont::from_reader(font_data, metadata_file)
                 .expect("Failed to load SMuFL font"),
         ));
 
-        log::info!("Loaded Leland SMuFL font successfully");
+        log::info!("Loaded Bravura SMuFL font successfully");
 
         // Load text font (FreeSans for general text)
         let text_font_data = Arc::new(
@@ -1147,10 +1149,10 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
 
     // First beam group: 4 eighth notes descending
     let beam1_notes = vec![
-        BeamNote { x: beam1_start, line: -2, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up },
-        BeamNote { x: beam1_start + beam_note_spacing, line: -1, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up },
-        BeamNote { x: beam1_start + beam_note_spacing * 2.0, line: 0, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up },
-        BeamNote { x: beam1_start + beam_note_spacing * 3.0, line: 1, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up },
+        BeamNote { x: beam1_start, line: -2, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
+        BeamNote { x: beam1_start + beam_note_spacing, line: -1, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
+        BeamNote { x: beam1_start + beam_note_spacing * 2.0, line: 0, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
+        BeamNote { x: beam1_start + beam_note_spacing * 3.0, line: 1, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
     ];
 
     // Draw noteheads for beam group 1 (noteheads only - beam draws stems)
@@ -1186,10 +1188,10 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
     // Second beam group: 4 sixteenth notes (2 beams)
     let beam2_start = bar7_x + spatium * 2.0;
     let beam2_notes = vec![
-        BeamNote { x: beam2_start, line: 0, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Down },
-        BeamNote { x: beam2_start + beam_note_spacing * 0.6, line: -1, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Down },
-        BeamNote { x: beam2_start + beam_note_spacing * 1.2, line: -2, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Down },
-        BeamNote { x: beam2_start + beam_note_spacing * 1.8, line: -3, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Down },
+        BeamNote { x: beam2_start, line: 0, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Down, head_type: NoteHeadType::Normal },
+        BeamNote { x: beam2_start + beam_note_spacing * 0.6, line: -1, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Down, head_type: NoteHeadType::Normal },
+        BeamNote { x: beam2_start + beam_note_spacing * 1.2, line: -2, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Down, head_type: NoteHeadType::Normal },
+        BeamNote { x: beam2_start + beam_note_spacing * 1.8, line: -3, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Down, head_type: NoteHeadType::Normal },
     ];
 
     // Draw noteheads for beam group 2 (noteheads only - beam draws stems)
@@ -1216,10 +1218,10 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
     // Third beam group: Mixed rhythms (eighth + 2 sixteenths + eighth)
     let beam3_start = beam2_start + beam_note_spacing * 3.0;
     let beam3_notes = vec![
-        BeamNote { x: beam3_start, line: 2, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up },
-        BeamNote { x: beam3_start + beam_note_spacing * 0.5, line: 1, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Up },
-        BeamNote { x: beam3_start + beam_note_spacing * 0.8, line: 0, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Up },
-        BeamNote { x: beam3_start + beam_note_spacing * 1.5, line: -1, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up },
+        BeamNote { x: beam3_start, line: 2, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
+        BeamNote { x: beam3_start + beam_note_spacing * 0.5, line: 1, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
+        BeamNote { x: beam3_start + beam_note_spacing * 0.8, line: 0, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
+        BeamNote { x: beam3_start + beam_note_spacing * 1.5, line: -1, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
     ];
 
     // Draw noteheads for beam group 3 (noteheads only - beam draws stems)
@@ -1253,6 +1255,78 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
     root.add_child(bl8_c);
 
     // =========================================================================
+    // SYSTEM 5: Rhythmic Slash Notation (using high-level MeasureBuilder API)
+    // =========================================================================
+    let staff5_y = staff4_y + 70.0;
+    let staff5_middle = staff5_y + 2.0 * spatium;
+
+    // Draw staff lines
+    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
+        content_x, staff5_y, content_width, spatium,
+    )));
+
+    // Measure 1: Four quarter notes (with clef and time signature)
+    let measure1 = MeasureBuilder::new()
+        .clef(ClefType::Treble)
+        .time_signature(4, 4)
+        .rhythmic()
+        .rhythm(vec![
+            Duration::Quarter,
+            Duration::Quarter,
+            Duration::Quarter,
+            Duration::Quarter,
+        ])
+        .id_base(500)
+        .build(&ctx);
+
+    let mut m1_container = SceneNode::group(SemanticId::new(ElementType::Measure, 500));
+    m1_container.transform = Affine::translate((content_x, staff5_middle));
+    m1_container.add_child(measure1.scene);
+    root.add_child(m1_container);
+
+    // Measure 2: Eight eighth notes (auto-beamed in groups of 4)
+    let measure2 = MeasureBuilder::new()
+        .rhythmic()
+        .rhythm(vec![
+            Duration::Eighth,
+            Duration::Eighth,
+            Duration::Eighth,
+            Duration::Eighth,
+            Duration::Eighth,
+            Duration::Eighth,
+            Duration::Eighth,
+            Duration::Eighth,
+        ])
+        .id_base(520)
+        .build(&ctx);
+
+    let mut m2_container = SceneNode::group(SemanticId::new(ElementType::Measure, 520));
+    m2_container.transform = Affine::translate((content_x + measure1.width, staff5_middle));
+    m2_container.add_child(measure2.scene);
+    root.add_child(m2_container);
+
+    // Measure 3: Mixed rhythms (16ths + dotted eighth + 16th)
+    // Dotted eighth (3/16) + sixteenth (1/16) = quarter note (4/16) - a common rhythm
+    let measure3 = MeasureBuilder::new()
+        .rhythmic()
+        .rhythm(vec![
+            Duration::Sixteenth,
+            Duration::Sixteenth,
+            Duration::Sixteenth,
+            Duration::Sixteenth,
+            Duration::DottedEighth,
+            Duration::Sixteenth,
+        ])
+        .end_barline(BarlineType::Double)
+        .id_base(540)
+        .build(&ctx);
+
+    let mut m3_container = SceneNode::group(SemanticId::new(ElementType::Measure, 540));
+    m3_container.transform = Affine::translate((content_x + measure1.width + measure2.width, staff5_middle));
+    m3_container.add_child(measure3.scene);
+    root.add_child(m3_container);
+
+    // =========================================================================
     // Labels and Title
     // =========================================================================
     let title_x = page_x + page_width / 2.0 - 100.0;
@@ -1268,6 +1342,7 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         (content_x, staff2_y - 12.0, "System 2: Chord voicings (triads, 7ths, accidentals)"),
         (content_x, staff3_y - 12.0, "System 3: Lyrics (Amazing Grace, 3/4)"),
         (content_x, staff4_y - 12.0, "System 4: Beamed note groups (8ths, 16ths, mixed)"),
+        (content_x, staff5_y - 12.0, "System 5: Rhythmic slash notation (quarters, 8ths, 16ths, dotted)"),
     ];
 
     for (x, y, text) in labels {

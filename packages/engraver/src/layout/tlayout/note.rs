@@ -25,6 +25,18 @@ pub mod glyphs {
     /// Double whole note (breve)
     pub const NOTEHEAD_DOUBLE_WHOLE: char = '\u{E0A0}';
 
+    // Slash noteheads (rhythmic notation)
+    /// Slash notehead with vertical ends (filled, for quarter notes and shorter)
+    pub const NOTEHEAD_SLASH_VERTICAL: char = '\u{E100}';
+    /// Slash notehead with horizontal ends (filled, alternative)
+    pub const NOTEHEAD_SLASH_HORIZONTAL: char = '\u{E101}';
+    /// White slash whole note
+    pub const NOTEHEAD_SLASH_WHITE_WHOLE: char = '\u{E102}';
+    /// White slash half note
+    pub const NOTEHEAD_SLASH_WHITE_HALF: char = '\u{E103}';
+    /// White slash double whole note
+    pub const NOTEHEAD_SLASH_WHITE_DOUBLE_WHOLE: char = '\u{E10A}';
+
     // Accidentals
     /// Sharp
     pub const ACCIDENTAL_SHARP: char = '\u{E262}';
@@ -40,6 +52,53 @@ pub mod glyphs {
     // Augmentation dots
     /// Augmentation dot
     pub const AUGMENTATION_DOT: char = '\u{E1E7}';
+}
+
+/// Notehead type/style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NoteHeadType {
+    /// Standard notehead (black, half, whole)
+    #[default]
+    Normal,
+    /// Slash notehead for rhythmic notation (jazz charts, lead sheets)
+    Slash,
+    /// X notehead (percussion, ghost notes)
+    X,
+    /// Diamond notehead (harmonics)
+    Diamond,
+    /// Triangle notehead
+    Triangle,
+}
+
+impl NoteHeadType {
+    /// Get the SMuFL glyph for this notehead type and duration.
+    #[must_use]
+    pub const fn glyph(&self, duration: NoteDuration) -> char {
+        match self {
+            Self::Normal => duration.notehead_glyph(),
+            Self::Slash => match duration {
+                NoteDuration::DoubleWhole => glyphs::NOTEHEAD_SLASH_WHITE_DOUBLE_WHOLE,
+                NoteDuration::Whole => glyphs::NOTEHEAD_SLASH_WHITE_WHOLE,
+                NoteDuration::Half => glyphs::NOTEHEAD_SLASH_WHITE_HALF,
+                // Quarter and shorter use filled slash
+                _ => glyphs::NOTEHEAD_SLASH_HORIZONTAL,
+            },
+            // Fallback to normal noteheads for unimplemented types
+            Self::X | Self::Diamond | Self::Triangle => duration.notehead_glyph(),
+        }
+    }
+
+    /// Get the width of this notehead type in spatiums.
+    #[must_use]
+    pub const fn width(&self) -> f64 {
+        match self {
+            Self::Normal => 1.18,
+            Self::Slash => 1.5, // Slash noteheads are wider
+            Self::X => 1.2,
+            Self::Diamond => 1.3,
+            Self::Triangle => 1.2,
+        }
+    }
 }
 
 /// Accidental type.
@@ -132,6 +191,8 @@ pub struct NoteParams {
     pub id: u64,
     /// Duration type
     pub duration: NoteDuration,
+    /// Notehead type/style
+    pub head_type: NoteHeadType,
     /// Staff line position (0 = middle line, positive = up)
     pub line: i32,
     /// Accidental to display
@@ -149,6 +210,7 @@ impl Default for NoteParams {
         Self {
             id: 0,
             duration: NoteDuration::Quarter,
+            head_type: NoteHeadType::Normal,
             line: 0,
             accidental: Accidental::None,
             dots: 0,
@@ -196,8 +258,8 @@ pub fn layout_note(params: &NoteParams, ctx: &LayoutContext) -> (LayoutData, Sce
 
     // Draw notehead
     let notehead_x = x + params.offset_x;
-    let notehead_glyph = params.duration.notehead_glyph();
-    let notehead_width = spatium * 1.18; // Standard notehead width
+    let notehead_glyph = params.head_type.glyph(params.duration);
+    let notehead_width = spatium * params.head_type.width();
 
     commands.push(PaintCommand::glyph(
         notehead_glyph,
@@ -215,8 +277,14 @@ pub fn layout_note(params: &NoteParams, ctx: &LayoutContext) -> (LayoutData, Sce
     }
 
     // Draw augmentation dots
+    // MuseScore uses dotNoteDistance = 0.5 spatiums (default)
+    // And dotDotDistance = 0.5 spatiums between multiple dots
+    const DOT_NOTE_DISTANCE: f64 = 0.5; // spatiums
+    const DOT_DOT_DISTANCE: f64 = 0.5;  // spatiums between adjacent dots
+    const DOT_GLYPH_WIDTH: f64 = 0.35;  // approximate width of the dot glyph
+
     if params.dots > 0 {
-        let dot_x = notehead_x + notehead_width + spatium * 0.25;
+        let dot_x = notehead_x + notehead_width + spatium * DOT_NOTE_DISTANCE;
         let dot_y = if params.line % 2 == 0 {
             y - staff_line_distance / 4.0 // Move dot up if on a line
         } else {
@@ -226,13 +294,22 @@ pub fn layout_note(params: &NoteParams, ctx: &LayoutContext) -> (LayoutData, Sce
         for i in 0..params.dots {
             commands.push(PaintCommand::glyph(
                 glyphs::AUGMENTATION_DOT,
-                Point::new(dot_x + i as f64 * spatium * 0.5, dot_y),
+                Point::new(dot_x + i as f64 * spatium * DOT_DOT_DISTANCE, dot_y),
                 spatium,
                 Color::BLACK,
             ));
         }
 
-        total_width += spatium * 0.25 + params.dots as f64 * spatium * 0.5;
+        // Width calculation:
+        // - DOT_NOTE_DISTANCE: gap from notehead to first dot
+        // - (params.dots - 1) * DOT_DOT_DISTANCE: gaps between adjacent dots
+        // - DOT_GLYPH_WIDTH: width of the last dot's glyph
+        let dots_spacing = if params.dots > 1 {
+            (params.dots - 1) as f64 * DOT_DOT_DISTANCE
+        } else {
+            0.0
+        };
+        total_width += spatium * (DOT_NOTE_DISTANCE + dots_spacing + DOT_GLYPH_WIDTH);
     }
 
     // Calculate bounding box (relative to note position)
@@ -306,12 +383,13 @@ pub fn note_shape(params: &NoteParams, ctx: &LayoutContext) -> Shape {
     let y = -params.line as f64 * spatium / 2.0;
     let half_height = spatium * 0.5;
 
-    let mut width = spatium * 1.18; // Notehead width
+    let mut width = spatium * params.head_type.width(); // Notehead width based on type
     if params.accidental != Accidental::None {
         width += params.accidental.width() * spatium + spatium * 0.15;
     }
     if params.dots > 0 {
-        width += spatium * 0.25 + params.dots as f64 * spatium * 0.5;
+        // Match MuseScore's dotNoteDistance (0.5) + dotDotDistance (0.5)
+        width += spatium * 0.5 + params.dots as f64 * spatium * 0.5;
     }
 
     Shape::from_rect(Rect::new(0.0, y - half_height, width, y + half_height))

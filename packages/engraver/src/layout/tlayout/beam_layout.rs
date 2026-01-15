@@ -12,7 +12,7 @@ use peniko::Color;
 use crate::scene::paint::PaintCommand;
 
 use super::chord::StemDirection;
-use super::note::NoteDuration;
+use super::note::{NoteDuration, NoteHeadType};
 
 /// Configuration for beam layout.
 #[derive(Debug, Clone)]
@@ -34,7 +34,7 @@ impl Default for BeamLayoutConfig {
         Self {
             beam_thickness: 0.5,
             beam_spacing: 0.25,
-            min_stem_length: 2.5,
+            min_stem_length: 3.5, // Match chord.rs stem length
             max_slope: 0.5,
             beamlet_length: 1.2,
         }
@@ -52,6 +52,8 @@ pub struct BeamNote {
     pub duration: NoteDuration,
     /// Stem direction (should be consistent within beam)
     pub stem_direction: StemDirection,
+    /// Notehead type (Normal, Slash, etc.) - affects stem attachment
+    pub head_type: NoteHeadType,
 }
 
 impl BeamNote {
@@ -98,11 +100,20 @@ pub fn layout_beam(
     // Determine beam direction (all notes in a beam share direction)
     let stem_dir = determine_beam_direction(notes);
 
-    // Calculate beam endpoints
-    let (start_y, end_y) = calculate_beam_position(notes, stem_dir, spatium, config);
+    // Calculate beam anchor positions (matching MuseScore's approach)
+    // The beam line is defined between start and end anchor points
+    let first_note = &notes[0];
+    let last_note = notes.last().unwrap();
+
+    // Anchor X positions use Start/End anchor types
+    let start_anchor_x = chord_beam_anchor_x(first_note, stem_dir, ChordBeamAnchorType::Start, spatium);
+    let end_anchor_x = chord_beam_anchor_x(last_note, stem_dir, ChordBeamAnchorType::End, spatium);
+
+    // Calculate beam Y positions based on minimum stem length
+    let (start_anchor_y, end_anchor_y) = calculate_beam_position(notes, stem_dir, spatium, config);
 
     // Calculate stem tips for each note
-    let stem_tips = calculate_stem_tips(notes, start_y, end_y, spatium);
+    let stem_tips = calculate_stem_tips(notes, stem_dir, start_anchor_y, end_anchor_y, spatium);
 
     // Generate beam commands
     let mut commands = Vec::new();
@@ -110,43 +121,48 @@ pub fn layout_beam(
 
     // Draw stems from noteheads to beam using SMuFL anchor points
     let stem_width = spatium * STEM_WIDTH;
-    let half_beam_thickness = config.beam_thickness * spatium / 2.0;
 
     // Small overlap to ensure stems fully intersect beam (prevents tiny gaps due to anti-aliasing)
     let stem_beam_overlap = spatium * 0.05;
 
-    // Get beam line parameters for calculating Y at any X position
-    let first_x = notes[0].x;
-    let last_x = notes.last().unwrap().x;
-    let beam_run = last_x - first_x;
+    // Beam run for Y interpolation (using stem anchor X positions)
+    let beam_run = end_anchor_x - start_anchor_x;
 
     for (_i, note) in notes.iter().enumerate() {
         let note_y = note.y_center(spatium);
 
-        // Calculate the actual stem X position (includes notehead width offset)
+        // Calculate the actual stem X position (Middle anchor - center of stem)
         let stem_x = stem_x_for_note(note, stem_dir, spatium);
 
-        // Calculate beam Y at the STEM position, not at note.x
-        // This is critical for angled beams - the stem must reach the beam where it actually is
-        let beam_center_y = if beam_run.abs() < 0.001 {
-            start_y
+        // Calculate beam edge Y at the STEM position by interpolating along the beam line
+        // start_anchor_y/end_anchor_y represent the beam EDGE (not center):
+        // - For DOWN stems: TOP edge of beam
+        // - For UP stems: BOTTOM edge of beam
+        let beam_edge_y = if beam_run.abs() < 0.001 {
+            start_anchor_y
         } else {
-            // Interpolate beam Y at the stem X position
-            let t = (stem_x - first_x) / beam_run;
-            start_y + t * (end_y - start_y)
+            // Interpolate beam edge Y at the stem X position
+            let t = (stem_x - start_anchor_x) / beam_run;
+            start_anchor_y + t * (end_anchor_y - start_anchor_y)
         };
 
-        // Adjust stem tip to connect to the correct edge of the beam
-        // For stem UP: beam is above (smaller Y), stem connects to bottom edge (center + half)
-        // For stem DOWN: beam is below (larger Y), stem connects to top edge (center - half)
-        // Subtract overlap to extend stem INTO the beam for clean visual connection
+        // Stem tip connects directly to the beam edge
+        // Add small overlap to extend stem slightly INTO the beam for clean visual connection
         let stem_tip_y = match stem_dir {
-            StemDirection::Up | StemDirection::Auto => beam_center_y + half_beam_thickness - stem_beam_overlap,
-            StemDirection::Down => beam_center_y - half_beam_thickness + stem_beam_overlap,
+            StemDirection::Up | StemDirection::Auto => {
+                // Beam is above, stem connects to bottom edge of beam
+                // Subtract overlap to extend stem upward into the beam
+                beam_edge_y - stem_beam_overlap
+            }
+            StemDirection::Down => {
+                // Beam is below, stem connects to top edge of beam
+                // Add overlap to extend stem downward into the beam
+                beam_edge_y + stem_beam_overlap
+            }
         };
 
-        // Use SMuFL anchor points for stem attachment
-        let stem_attach_y = note_y + stem_y_offset(stem_dir, spatium);
+        // Use SMuFL anchor points for stem attachment on notehead
+        let stem_attach_y = note_y + stem_y_offset(stem_dir, note.head_type, spatium);
 
         // Stem from notehead anchor to beam edge
         let stem_cmd = PaintCommand::line(
@@ -170,7 +186,7 @@ pub fn layout_beam(
 
     // Draw each beam level
     for level in 0..max_beams {
-        let beam_commands = draw_beam_level(notes, level, start_y, end_y, stem_dir, spatium, config);
+        let beam_commands = draw_beam_level(notes, level, start_anchor_y, end_anchor_y, stem_dir, spatium, config);
         for cmd in &beam_commands {
             if let Some(cmd_bbox) = cmd.bounding_box() {
                 if bbox.is_zero_area() {
@@ -199,6 +215,11 @@ fn determine_beam_direction(notes: &[BeamNote]) -> StemDirection {
         }
     }
 
+    // Slash noteheads default to stem down (rhythmic notation convention)
+    if notes.iter().any(|n| n.head_type == NoteHeadType::Slash) {
+        return StemDirection::Down;
+    }
+
     // Calculate average line position
     let avg_line: f64 = notes.iter().map(|n| n.line as f64).sum::<f64>() / notes.len() as f64;
 
@@ -210,10 +231,12 @@ fn determine_beam_direction(notes: &[BeamNote]) -> StemDirection {
     }
 }
 
-/// Calculate the Y position of the primary beam at start and end.
+/// Calculate the Y position of the primary beam at start and end anchor X positions.
 ///
 /// This follows MuseScore's approach: calculate a base beam position using
 /// minimum stem lengths, then apply a slope based on the note contour.
+/// IMPORTANT: Y positions are calculated at BEAM ANCHOR X positions (Start/End anchors),
+/// since the beam is drawn between those positions.
 fn calculate_beam_position(
     notes: &[BeamNote],
     stem_dir: StemDirection,
@@ -225,6 +248,11 @@ fn calculate_beam_position(
 
     let first_y = first.y_center(spatium);
     let last_y = last.y_center(spatium);
+
+    // Get the beam anchor X positions (where the beam will be drawn)
+    // Following MuseScore: Start anchor for first note, End anchor for last note
+    let first_anchor_x = chord_beam_anchor_x(first, stem_dir, ChordBeamAnchorType::Start, spatium);
+    let last_anchor_x = chord_beam_anchor_x(last, stem_dir, ChordBeamAnchorType::End, spatium);
 
     // Calculate base beam positions ensuring minimum stem length for first and last notes
     let (first_base, last_base) = match stem_dir {
@@ -244,8 +272,9 @@ fn calculate_beam_position(
         }
     };
 
-    // Calculate slope based on note positions
-    let run = last.x - first.x;
+    // Calculate slope based on STEM ANCHOR positions (not note positions)
+    // This ensures beam Y values are correct where the beam is actually drawn
+    let run = last_anchor_x - first_anchor_x;
     if run.abs() < 0.001 {
         // Notes are at same X position, return flat beam
         let beam_y = (first_base + last_base) / 2.0;
@@ -263,9 +292,11 @@ fn calculate_beam_position(
     let mut end_y = first_base + clamped_slope * run;
 
     // Ensure all notes have minimum stem length
+    // Use Middle anchor X for each note's stem position for accurate interpolation
     for note in notes {
         let note_y = note.y_center(spatium);
-        let t = (note.x - first.x) / run;
+        let note_stem_x = chord_beam_anchor_x(note, stem_dir, ChordBeamAnchorType::Middle, spatium);
+        let t = (note_stem_x - first_anchor_x) / run;
         let beam_at_note = start_y + t * (end_y - start_y);
 
         let required_beam_y = match stem_dir {
@@ -298,8 +329,11 @@ fn calculate_beam_position(
 }
 
 /// Calculate stem tip Y position for each note along the beam.
+/// Uses beam anchor X positions (Start/End) for the overall beam line,
+/// and Middle anchor for each note's stem position during interpolation.
 fn calculate_stem_tips(
     notes: &[BeamNote],
+    stem_dir: StemDirection,
     start_y: f64,
     end_y: f64,
     spatium: f64,
@@ -308,9 +342,11 @@ fn calculate_stem_tips(
         return Vec::new();
     }
 
-    let first_x = notes[0].x;
-    let last_x = notes.last().unwrap().x;
-    let run = last_x - first_x;
+    // Use beam anchor X positions (Start/End) for the beam line definition
+    // This matches calculate_beam_position and draw_beam_level
+    let first_anchor_x = chord_beam_anchor_x(&notes[0], stem_dir, ChordBeamAnchorType::Start, spatium);
+    let last_anchor_x = chord_beam_anchor_x(notes.last().unwrap(), stem_dir, ChordBeamAnchorType::End, spatium);
+    let run = last_anchor_x - first_anchor_x;
 
     notes
         .iter()
@@ -318,8 +354,10 @@ fn calculate_stem_tips(
             if run.abs() < 0.001 {
                 start_y
             } else {
-                // Linear interpolation along beam
-                let t = (note.x - first_x) / run;
+                // Interpolate beam Y at this note's STEM position (Middle anchor)
+                // The stem is drawn at the center, so we need the beam Y there
+                let note_stem_x = stem_x_for_note(note, stem_dir, spatium);
+                let t = (note_stem_x - first_anchor_x) / run;
                 start_y + t * (end_y - start_y)
             }
         })
@@ -327,24 +365,34 @@ fn calculate_stem_tips(
 }
 
 // ============================================================================
-// SMuFL Anchor Points (from Leland font metadata)
+// SMuFL Anchor Points (from Bravura font metadata)
 // ============================================================================
 // These are the exact anchor points for stem attachment from the SMuFL spec.
-// Coordinates are in staff spaces, relative to notehead origin (top-left of bbox).
+// Coordinates are in staff spaces, relative to notehead origin.
 
-/// SMuFL stemUpSE anchor: attachment point for up-stems (South-East corner).
-/// From Leland metadata: [1.3, 0.16]
-const STEM_UP_SE_X: f64 = 1.3;
-const STEM_UP_SE_Y: f64 = 0.16;
+/// SMuFL stemUpSE anchor for normal noteheads: attachment point for up-stems (South-East corner).
+/// From Bravura metadata noteheadBlack: [1.18, 0.168]
+const STEM_UP_SE_X: f64 = 1.18;
+const STEM_UP_SE_Y: f64 = 0.168;
 
-/// SMuFL stemDownNW anchor: attachment point for down-stems (North-West corner).
-/// From Leland metadata: [0.0, -0.168]
+/// SMuFL stemDownNW anchor for normal noteheads: attachment point for down-stems (North-West corner).
+/// From Bravura metadata noteheadBlack: [0.0, -0.168]
 const STEM_DOWN_NW_X: f64 = 0.0;
 const STEM_DOWN_NW_Y: f64 = -0.168;
 
+/// SMuFL stemUpSE anchor for slash noteheads (noteheadSlashHorizontalEnds).
+/// From Bravura metadata: [2.12, 1.0]
+const SLASH_STEM_UP_SE_X: f64 = 2.12;
+const SLASH_STEM_UP_SE_Y: f64 = 1.0;
+
+/// SMuFL stemDownNW anchor for slash noteheads (noteheadSlashHorizontalEnds).
+/// From Bravura metadata: [0.0, -1.0]
+const SLASH_STEM_DOWN_NW_X: f64 = 0.0;
+const SLASH_STEM_DOWN_NW_Y: f64 = -1.0;
+
 /// Notehead width for fallback when anchor is unavailable (in staff spaces).
 /// SMuFL noteheadBlack bounding box width.
-const NOTEHEAD_WIDTH: f64 = 1.3;
+const NOTEHEAD_WIDTH: f64 = 1.18;
 
 /// Standard stem width in staff spaces (from MuseScore default).
 const STEM_WIDTH: f64 = 0.12;
@@ -372,18 +420,21 @@ pub enum ChordBeamAnchorType {
 /// Calculate stem X position relative to notehead origin.
 /// Matches MuseScore's `StemLayout::stemPosX(const Chord* item)`.
 ///
-/// For up-stems: returns stemUpSE.x (right side of notehead)
-/// For down-stems: returns stemDownNW.x (left side of notehead)
-fn stem_pos_x(stem_dir: StemDirection) -> f64 {
-    match stem_dir {
-        StemDirection::Up | StemDirection::Auto => {
-            // Use SMuFL stemUpSE anchor
-            // MuseScore also applies noteWidthOffset, but for standard noteheads this is 0
-            STEM_UP_SE_X
+/// Uses SMuFL anchor points from font metadata:
+/// - Normal noteheads: stemUpSE.x / stemDownNW.x
+/// - Slash noteheads: noteheadSlashHorizontalEnds stemUpSE.x / stemDownNW.x
+fn stem_pos_x(stem_dir: StemDirection, head_type: NoteHeadType) -> f64 {
+    if head_type == NoteHeadType::Slash {
+        // Slash noteheads use SMuFL anchors from noteheadSlashHorizontalEnds
+        match stem_dir {
+            StemDirection::Up | StemDirection::Auto => SLASH_STEM_UP_SE_X,
+            StemDirection::Down => SLASH_STEM_DOWN_NW_X,
         }
-        StemDirection::Down => {
-            // Use SMuFL stemDownNW anchor
-            STEM_DOWN_NW_X
+    } else {
+        // Normal noteheads use SMuFL anchor points
+        match stem_dir {
+            StemDirection::Up | StemDirection::Auto => STEM_UP_SE_X,
+            StemDirection::Down => STEM_DOWN_NW_X,
         }
     }
 }
@@ -401,7 +452,7 @@ fn chord_beam_anchor_x(
     anchor_type: ChordBeamAnchorType,
     spatium: f64,
 ) -> f64 {
-    let stem_x = note.x + stem_pos_x(stem_dir) * spatium;
+    let stem_x = note.x + stem_pos_x(stem_dir, note.head_type) * spatium;
     let stem_width = STEM_WIDTH * spatium;
 
     match anchor_type {
@@ -458,21 +509,27 @@ fn stem_x_for_note(note: &BeamNote, stem_dir: StemDirection, spatium: f64) -> f6
 /// Our rendering uses Y-down (screen coordinates) where positive Y is downward.
 /// The glyph renderer applies `Affine::scale_non_uniform(1.0, -1.0)` to flip Y.
 /// Therefore, SMuFL Y coordinates must be negated for our coordinate system.
-fn stem_y_offset(stem_dir: StemDirection, spatium: f64) -> f64 {
+fn stem_y_offset(stem_dir: StemDirection, head_type: NoteHeadType, spatium: f64) -> f64 {
+    let (up_y, down_y) = if head_type == NoteHeadType::Slash {
+        (SLASH_STEM_UP_SE_Y, SLASH_STEM_DOWN_NW_Y)
+    } else {
+        (STEM_UP_SE_Y, STEM_DOWN_NW_Y)
+    };
+
     match stem_dir {
         StemDirection::Up | StemDirection::Auto => {
             // SMuFL stemUpSE.y is positive (below center in SMuFL Y-up)
             // After Y-flip, this becomes negative (above center in screen Y-down)
             // But we want stem to attach at SE corner which is below center in screen coords
             // So we negate to get positive (downward) offset
-            -STEM_UP_SE_Y * spatium
+            -up_y * spatium
         }
         StemDirection::Down => {
             // SMuFL stemDownNW.y is negative (above center in SMuFL Y-up)
             // After Y-flip, this becomes positive (below center in screen Y-down)
             // But we want stem to attach at NW corner which is above center in screen coords
             // So we negate to get negative (upward) offset
-            -STEM_DOWN_NW_Y * spatium
+            -down_y * spatium
         }
     }
 }
@@ -502,50 +559,65 @@ fn draw_beam_level(
     // Find segments where this beam level applies
     let segments = find_beam_segments(notes, level);
 
+    // Beam thickness (used for both main beams and beamlets)
+    let beam_thickness = config.beam_thickness * spatium;
+
+    // Calculate beam anchor X positions for first and last notes of the entire beam group
+    // These define the beam line that all segments interpolate along
+    // Following MuseScore: Start anchor for first note, End anchor for last note
+    let first_stem_x = chord_beam_anchor_x(&notes[0], stem_dir, ChordBeamAnchorType::Start, spatium);
+    let last_stem_x = chord_beam_anchor_x(notes.last().unwrap(), stem_dir, ChordBeamAnchorType::End, spatium);
+    let beam_run = last_stem_x - first_stem_x;
+
     for (start_idx, end_idx) in segments {
         let segment_start = &notes[start_idx];
         let segment_end = &notes[end_idx];
 
-        // Calculate beam anchor X positions for endpoints using correct anchor types
-        // First note of segment uses Start anchor, last note uses End anchor
-        let seg_start_stem_x = chord_beam_anchor_x(
-            segment_start,
-            stem_dir,
-            ChordBeamAnchorType::Start,
-            spatium,
-        );
-        let seg_end_stem_x = chord_beam_anchor_x(
-            segment_end,
-            stem_dir,
-            ChordBeamAnchorType::End,
-            spatium,
-        );
+        // Calculate beam anchor X positions for this segment's endpoints
+        // Following MuseScore: Start anchor for first note, End anchor for last note
+        // This places the beam at the outer edges of the stems
+        let seg_start_x = chord_beam_anchor_x(segment_start, stem_dir, ChordBeamAnchorType::Start, spatium);
+        let seg_end_x = chord_beam_anchor_x(segment_end, stem_dir, ChordBeamAnchorType::End, spatium);
 
-        // Calculate beam Y at segment endpoints using actual stem X positions
-        // This ensures the beam Y matches where the stems actually are
-        let first_x = notes[0].x;
-        let last_x = notes.last().unwrap().x;
-        let run = last_x - first_x;
-
-        let (seg_start_y, seg_end_y) = if run.abs() < 0.001 {
+        // Calculate beam Y at segment endpoints
+        // Interpolate along the beam line defined from first_stem_x to last_stem_x
+        // These Y values represent the beam EDGE where stems connect (not beam center):
+        // - For DOWN stems: this is the TOP edge (stems connect from above)
+        // - For UP stems: this is the BOTTOM edge (stems connect from below)
+        let (seg_start_y, seg_end_y) = if beam_run.abs() < 0.001 {
             (start_y + level_offset, end_y + level_offset)
         } else {
-            // Use stem X positions for Y interpolation, not note.x
-            let t1 = (seg_start_stem_x - first_x) / run;
-            let t2 = (seg_end_stem_x - first_x) / run;
+            // Interpolate Y at the segment's X positions along the beam line
+            let t1 = (seg_start_x - first_stem_x) / beam_run;
+            let t2 = (seg_end_x - first_stem_x) / beam_run;
             let y1 = start_y + t1 * (end_y - start_y) + level_offset;
             let y2 = start_y + t2 * (end_y - start_y) + level_offset;
             (y1, y2)
         };
 
-        // Draw beam as filled polygon (connecting stem positions)
-        let half_thickness = config.beam_thickness * spatium / 2.0;
-
+        // Draw beam as filled polygon
+        // The beam is drawn from the stem connection edge in the direction of the stem
+        // For DOWN stems: stems connect at top, beam extends downward
+        // For UP stems: stems connect at bottom, beam extends upward
         let mut path = BezPath::new();
-        path.move_to(Point::new(seg_start_stem_x, seg_start_y - half_thickness));
-        path.line_to(Point::new(seg_end_stem_x, seg_end_y - half_thickness));
-        path.line_to(Point::new(seg_end_stem_x, seg_end_y + half_thickness));
-        path.line_to(Point::new(seg_start_stem_x, seg_start_y + half_thickness));
+        match stem_dir {
+            StemDirection::Down => {
+                // TOP edge is at seg_start_y/seg_end_y (where stems connect)
+                // Beam extends DOWNWARD (larger Y)
+                path.move_to(Point::new(seg_start_x, seg_start_y)); // top-left
+                path.line_to(Point::new(seg_end_x, seg_end_y)); // top-right
+                path.line_to(Point::new(seg_end_x, seg_end_y + beam_thickness)); // bottom-right
+                path.line_to(Point::new(seg_start_x, seg_start_y + beam_thickness)); // bottom-left
+            }
+            StemDirection::Up | StemDirection::Auto => {
+                // BOTTOM edge is at seg_start_y/seg_end_y (where stems connect)
+                // Beam extends UPWARD (smaller Y)
+                path.move_to(Point::new(seg_start_x, seg_start_y - beam_thickness)); // top-left
+                path.line_to(Point::new(seg_end_x, seg_end_y - beam_thickness)); // top-right
+                path.line_to(Point::new(seg_end_x, seg_end_y)); // bottom-right
+                path.line_to(Point::new(seg_start_x, seg_start_y)); // bottom-left
+            }
+        }
         path.close_path();
 
         commands.push(PaintCommand::filled_path(path, Color::BLACK));
@@ -557,16 +629,12 @@ fn draw_beam_level(
         let note = &notes[note_idx];
         let note_stem_x = stem_x_for_note(note, stem_dir, spatium);
 
-        // Calculate beam Y at the stem position (not note.x)
-        let first_x = notes[0].x;
-        let last_x = notes.last().unwrap().x;
-        let run = last_x - first_x;
-
-        let note_beam_y = if run.abs() < 0.001 {
+        // Calculate beam edge Y at the stem position using the beam line defined by stem anchors
+        let note_beam_y = if beam_run.abs() < 0.001 {
             start_y + level_offset
         } else {
-            // Use stem X for interpolation
-            let t = (note_stem_x - first_x) / run;
+            // Interpolate along the beam line from first_stem_x to last_stem_x
+            let t = (note_stem_x - first_stem_x) / beam_run;
             start_y + t * (end_y - start_y) + level_offset
         };
 
@@ -577,9 +645,9 @@ fn draw_beam_level(
             (note_stem_x, note_stem_x + beamlet_len)
         };
 
-        // Slope adjustment for beamlet endpoints
-        let slope_per_unit = if run.abs() > 0.001 {
-            (end_y - start_y) / run
+        // Slope adjustment for beamlet endpoints using the beam line slope
+        let slope_per_unit = if beam_run.abs() > 0.001 {
+            (end_y - start_y) / beam_run
         } else {
             0.0
         };
@@ -587,13 +655,24 @@ fn draw_beam_level(
         let beamlet_start_y = note_beam_y + slope_per_unit * (beamlet_start_x - note_stem_x);
         let beamlet_end_y = note_beam_y + slope_per_unit * (beamlet_end_x - note_stem_x);
 
-        let half_thickness = config.beam_thickness * spatium / 2.0;
-
+        // Draw beamlet from edge position (matching main beam drawing)
         let mut path = BezPath::new();
-        path.move_to(Point::new(beamlet_start_x, beamlet_start_y - half_thickness));
-        path.line_to(Point::new(beamlet_end_x, beamlet_end_y - half_thickness));
-        path.line_to(Point::new(beamlet_end_x, beamlet_end_y + half_thickness));
-        path.line_to(Point::new(beamlet_start_x, beamlet_start_y + half_thickness));
+        match stem_dir {
+            StemDirection::Down => {
+                // TOP edge at beamlet_y, extends downward
+                path.move_to(Point::new(beamlet_start_x, beamlet_start_y));
+                path.line_to(Point::new(beamlet_end_x, beamlet_end_y));
+                path.line_to(Point::new(beamlet_end_x, beamlet_end_y + beam_thickness));
+                path.line_to(Point::new(beamlet_start_x, beamlet_start_y + beam_thickness));
+            }
+            StemDirection::Up | StemDirection::Auto => {
+                // BOTTOM edge at beamlet_y, extends upward
+                path.move_to(Point::new(beamlet_start_x, beamlet_start_y - beam_thickness));
+                path.line_to(Point::new(beamlet_end_x, beamlet_end_y - beam_thickness));
+                path.line_to(Point::new(beamlet_end_x, beamlet_end_y));
+                path.line_to(Point::new(beamlet_start_x, beamlet_start_y));
+            }
+        }
         path.close_path();
 
         commands.push(PaintCommand::filled_path(path, Color::BLACK));
@@ -642,6 +721,11 @@ fn find_beam_segments(notes: &[BeamNote], level: usize) -> Vec<(usize, usize)> {
 
 /// Find notes that need beamlets at a given level.
 /// Returns (note_index, is_before) pairs.
+///
+/// Beamlet direction rules (following standard engraving practice):
+/// - If the note is the first in the beam group: beamlet points forward (right)
+/// - If the note is the last in the beam group: beamlet points backward (left)
+/// - Otherwise: beamlet points toward the adjacent note that has a beam at a lower level
 fn find_beamlets(notes: &[BeamNote], level: usize) -> Vec<(usize, bool)> {
     let mut beamlets = Vec::new();
 
@@ -657,8 +741,13 @@ fn find_beamlets(notes: &[BeamNote], level: usize) -> Vec<(usize, bool)> {
 
         // Need beamlet if isolated at this level
         if !prev_has && !next_has {
-            // Determine direction based on position in group
-            let is_before = i > notes.len() / 2;
+            // Determine beamlet direction:
+            // - First note in group: point forward (is_before = false)
+            // - Last note or any other position: point backward (is_before = true)
+            // This follows the convention that beamlets point toward the adjacent
+            // note they rhythmically connect with (e.g., sixteenth after dotted-eighth
+            // points back to complete the rhythmic figure)
+            let is_before = i > 0;
             beamlets.push((i, is_before));
         }
     }
@@ -678,12 +767,14 @@ mod tests {
                 line: -2,
                 duration: NoteDuration::Eighth,
                 stem_direction: StemDirection::Auto,
+                head_type: NoteHeadType::Normal,
             },
             BeamNote {
                 x: 20.0,
                 line: -4,
                 duration: NoteDuration::Eighth,
                 stem_direction: StemDirection::Auto,
+                head_type: NoteHeadType::Normal,
             },
         ];
 
@@ -699,12 +790,14 @@ mod tests {
                 line: 0,
                 duration: NoteDuration::Eighth,
                 stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
             },
             BeamNote {
                 x: 25.0,
                 line: -2,
                 duration: NoteDuration::Eighth,
                 stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
             },
         ];
 
@@ -723,18 +816,21 @@ mod tests {
                 line: 0,
                 duration: NoteDuration::Sixteenth,
                 stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
             },
             BeamNote {
                 x: 15.0,
                 line: -1,
                 duration: NoteDuration::Sixteenth,
                 stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
             },
             BeamNote {
                 x: 30.0,
                 line: -2,
                 duration: NoteDuration::Eighth,
                 stem_direction: StemDirection::Up,
+                head_type: NoteHeadType::Normal,
             },
         ];
 
