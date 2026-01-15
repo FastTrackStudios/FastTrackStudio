@@ -135,6 +135,7 @@ pub mod keysig;
 pub mod lyrics;
 pub mod measure;
 pub mod note;
+pub mod rehearsal_mark;
 pub mod rest;
 pub mod timesig;
 pub mod slur_tie;
@@ -163,6 +164,10 @@ pub use slur_tie::{
 pub use tuplet::{
     layout_tuplet, TupletBracketType, TupletConfig, TupletLayout, TupletNote, TupletNumberType,
     TupletRatio,
+};
+pub use rehearsal_mark::{
+    layout_margin_label, layout_rehearsal_mark, layout_section_label, MarginLabelParams,
+    RehearsalMarkLayoutData, RehearsalMarkParams, RehearsalMarkStyle, themes as rehearsal_themes,
 };
 
 #[cfg(test)]

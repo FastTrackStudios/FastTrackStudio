@@ -1,11 +1,10 @@
 //! Layout Demo Example
 //!
-//! Demonstrates all engraver layout features rendering together:
-//! - Notes, chords, rests
-//! - Clefs, key signatures, time signatures
-//! - Lyrics with multi-syllable words and verse stacking
-//! - Dynamics (ppp to fff, sfz, etc.)
-//! - Barlines
+//! Demonstrates rhythmic slash notation using the high-level MeasureBuilder API:
+//! - Rhythmic slash notation with various note durations
+//! - Auto-stemless quarters (2+ consecutive = stemless)
+//! - Complex rhythms (32nds, syncopation, dotted patterns)
+//! - Beat-based beam grouping
 //!
 //! Uses the Scene Graph → VelloSceneRenderer → WGPU pipeline.
 //!
@@ -51,27 +50,11 @@ use engraver::fonts::SMuFLFont;
 use engraver::layout::context::LayoutContext;
 use engraver::model::{PageStyle, PaperSize};
 use engraver::layout::tlayout::{
-    // Barlines
-    layout_barline, BarlineParams, BarlineType,
-    // Beams
-    layout_beam, BeamLayoutConfig, BeamNote,
-    // Chords (used for all notes - provides stem rendering)
-    layout_chord, ChordNote, ChordParams, StemDirection,
-    // Clefs
-    layout_clef, ClefParams, ClefType,
-    // Key signatures
-    layout_keysig, ClefContext, KeySigParams, KeySigType,
-    // Lyrics
-    layout_lyrics, layout_lyrics_dash, LyricsParams, LyricsPlacement, SyllabicType,
-    // Notes (for Accidental, NoteDuration, NoteHeadType, and layout_note for beamed notes)
-    layout_note, Accidental, NoteDuration, NoteHeadType, NoteParams,
-    // Rests
-    layout_rest, RestDuration, RestParams,
-    // Time signatures
-    layout_timesig, TimeSigParams, TimeSigType,
+    BarlineType, ClefType,
+    layout_margin_label, MarginLabelParams, rehearsal_themes,
 };
-use engraver::notation::{Duration, MeasureBuilder, TimeSignature};
-use engraver::renderer::{SceneRenderBuilder, VelloSceneRenderer};
+use engraver::notation::{Duration, MeasureBuilder};
+use engraver::renderer::SceneRenderBuilder;
 use engraver::scene::id::{ElementType, SemanticId};
 use engraver::scene::node::SceneNode;
 use engraver::scene::paint::PaintCommand;
@@ -732,538 +715,36 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
     ]));
 
     // =========================================================================
-    // SYSTEM 1: Melody with varied rhythms
+    // SYSTEM 1: Rhythmic Slash Notation (using high-level MeasureBuilder API)
     // =========================================================================
+    let content_x = page_x + content_left;
     let staff1_y = page_y + margin_top + 50.0;
     let staff1_middle = staff1_y + 2.0 * spatium;
-    let content_x = page_x + content_left;
 
+    // Draw staff lines
     root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
         content_x, staff1_y, content_width, spatium,
     )));
 
-    // Treble clef
-    let clef_x = content_x + spatium * 0.5;
-    let (_, clef_node) = layout_clef(&ClefParams { id: 1, clef_type: ClefType::Treble, ..Default::default() }, &ctx);
-    let mut clef_container = SceneNode::group(SemanticId::new(ElementType::Clef, 1));
-    clef_container.transform = Affine::translate((clef_x, staff1_middle));
-    clef_container.add_child(clef_node);
-    root.add_child(clef_container);
-
-    // Key signature: D major (2 sharps)
-    let keysig_x = clef_x + spatium * 4.5;
-    let (_, keysig_node) = layout_keysig(&KeySigParams { id: 2, key: KeySigType::Standard(2), clef: ClefContext::Treble, ..Default::default() }, &ctx);
-    let mut keysig_container = SceneNode::group(SemanticId::new(ElementType::KeySignature, 2));
-    keysig_container.transform = Affine::translate((keysig_x, staff1_middle));
-    keysig_container.add_child(keysig_node);
-    root.add_child(keysig_container);
-
-    // Time signature: 4/4 numeric
-    let timesig_x = keysig_x + spatium * 2.5;
-    let (_, timesig_node) = layout_timesig(&TimeSigParams {
-        id: 3,
-        sig_type: TimeSigType::Numeric { numerator: 4, denominator: 4 },
-        ..Default::default()
-    }, &ctx);
-    let mut timesig_container = SceneNode::group(SemanticId::new(ElementType::TimeSignature, 3));
-    timesig_container.transform = Affine::translate((timesig_x, staff1_middle));
-    timesig_container.add_child(timesig_node);
-    root.add_child(timesig_container);
-
-    // Measure 1: Varied rhythm - dotted quarter + eighth + two quarters
-    let m1_start = timesig_x + spatium * 4.0;
-    let beat_space = spatium * 5.0;
-
-    // Helper to create single-note chord (notes need stems via chord layout)
-    let single_note = |id: u64, dur: NoteDuration, line: i32, acc: Accidental, dots: u8| -> ChordParams {
-        ChordParams {
-            id,
-            duration: dur,
-            notes: vec![ChordNote { line, accidental: acc, tie: false }],
-            stem_direction: if line <= 0 { StemDirection::Down } else { StemDirection::Up },
-            dots,
+    // Section label: "INTRO" in left margin of staff 1
+    // For lead sheet mode, labels fit perfectly within the margin area
+    let (_, intro_label) = layout_margin_label(
+        &MarginLabelParams {
+            section_type: "Intro".to_string(),
+            abbreviation: "IN".to_string(),
+            number: None,
+            page_x,
+            margin_width: content_left,
+            staff_y: staff1_y,
+            staff_height,
+            style: rehearsal_themes::dark(),
             ..Default::default()
-        }
-    };
-
-    // Dotted quarter (D5, line -1)
-    let (_, n1) = layout_chord(&single_note(10, NoteDuration::Quarter, -1, Accidental::None, 1), &ctx);
-    let mut c1 = SceneNode::group(SemanticId::chord(10));
-    c1.transform = Affine::translate((m1_start, staff1_middle));
-    c1.add_child(n1);
-    root.add_child(c1);
-
-    // Eighth note (E5, line -2)
-    let (_, n2) = layout_chord(&single_note(11, NoteDuration::Eighth, -2, Accidental::None, 0), &ctx);
-    let mut c2 = SceneNode::group(SemanticId::chord(11));
-    c2.transform = Affine::translate((m1_start + beat_space * 1.5, staff1_middle));
-    c2.add_child(n2);
-    root.add_child(c2);
-
-    // Quarter (F#5, line -3)
-    let (_, n3) = layout_chord(&single_note(12, NoteDuration::Quarter, -3, Accidental::None, 0), &ctx);
-    let mut c3 = SceneNode::group(SemanticId::chord(12));
-    c3.transform = Affine::translate((m1_start + beat_space * 2.0, staff1_middle));
-    c3.add_child(n3);
-    root.add_child(c3);
-
-    // Quarter (G5, line -4) with natural
-    let (_, n4) = layout_chord(&single_note(13, NoteDuration::Quarter, -4, Accidental::Natural, 0), &ctx);
-    let mut c4 = SceneNode::group(SemanticId::chord(13));
-    c4.transform = Affine::translate((m1_start + beat_space * 3.0, staff1_middle));
-    c4.add_child(n4);
-    root.add_child(c4);
-
-    // Barline
-    let bar1_x = m1_start + beat_space * 4.0;
-    let (_, bl1) = layout_barline(&BarlineParams { id: 30, barline_type: BarlineType::Single, ..Default::default() }, &ctx);
-    let mut bl1_c = SceneNode::group(SemanticId::new(ElementType::Barline, 30));
-    bl1_c.transform = Affine::translate((bar1_x, staff1_middle));
-    bl1_c.add_child(bl1);
-    root.add_child(bl1_c);
-
-    // Measure 2: Sixteenth notes and rests
-    let m2_start = bar1_x + spatium * 2.0;
-
-    // Sixteenth notes (fast run)
-    for i in 0..4 {
-        let (_, n) = layout_chord(&single_note(20 + i, NoteDuration::Sixteenth, i as i32 - 2, Accidental::None, 0), &ctx);
-        let mut c = SceneNode::group(SemanticId::chord(20 + i));
-        c.transform = Affine::translate((m2_start + (i as f64) * beat_space * 0.25, staff1_middle));
-        c.add_child(n);
-        root.add_child(c);
-    }
-
-    // Quarter rest
-    let (_, r1) = layout_rest(&RestParams { id: 24, duration: RestDuration::Quarter, ..Default::default() }, &ctx);
-    let mut r1_c = SceneNode::group(SemanticId::rest(24));
-    r1_c.transform = Affine::translate((m2_start + beat_space * 1.0, staff1_middle));
-    r1_c.add_child(r1);
-    root.add_child(r1_c);
-
-    // Eighth rest
-    let (_, r2) = layout_rest(&RestParams { id: 25, duration: RestDuration::Eighth, ..Default::default() }, &ctx);
-    let mut r2_c = SceneNode::group(SemanticId::rest(25));
-    r2_c.transform = Affine::translate((m2_start + beat_space * 2.0, staff1_middle));
-    r2_c.add_child(r2);
-    root.add_child(r2_c);
-
-    // Two more eighths
-    let (_, n5) = layout_chord(&single_note(26, NoteDuration::Eighth, 0, Accidental::None, 0), &ctx);
-    let mut c5 = SceneNode::group(SemanticId::chord(26));
-    c5.transform = Affine::translate((m2_start + beat_space * 2.5, staff1_middle));
-    c5.add_child(n5);
-    root.add_child(c5);
-
-    let (_, n6) = layout_chord(&single_note(27, NoteDuration::Eighth, 1, Accidental::None, 0), &ctx);
-    let mut c6 = SceneNode::group(SemanticId::chord(27));
-    c6.transform = Affine::translate((m2_start + beat_space * 3.0, staff1_middle));
-    c6.add_child(n6);
-    root.add_child(c6);
-
-    // Half note
-    let (_, n7) = layout_chord(&single_note(28, NoteDuration::Half, 2, Accidental::None, 0), &ctx);
-    let mut c7 = SceneNode::group(SemanticId::chord(28));
-    c7.transform = Affine::translate((m2_start + beat_space * 3.5, staff1_middle));
-    c7.add_child(n7);
-    root.add_child(c7);
-
-    // Double barline
-    let bar2_x = m2_start + beat_space * 4.5;
-    let (_, bl2) = layout_barline(&BarlineParams { id: 31, barline_type: BarlineType::Double, ..Default::default() }, &ctx);
-    let mut bl2_c = SceneNode::group(SemanticId::new(ElementType::Barline, 31));
-    bl2_c.transform = Affine::translate((bar2_x, staff1_middle));
-    bl2_c.add_child(bl2);
-    root.add_child(bl2_c);
-
-    // =========================================================================
-    // SYSTEM 2: Chords (triads, 7ths, open voicings)
-    // =========================================================================
-    let staff2_y = staff1_y + staff_height + 70.0;
-    let staff2_middle = staff2_y + 2.0 * spatium;
-
-    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff2_y, content_width, spatium,
-    )));
-
-    // Bass clef
-    let (_, bass_clef) = layout_clef(&ClefParams { id: 50, clef_type: ClefType::Bass, ..Default::default() }, &ctx);
-    let mut bass_c = SceneNode::group(SemanticId::new(ElementType::Clef, 50));
-    bass_c.transform = Affine::translate((clef_x, staff2_middle));
-    bass_c.add_child(bass_clef);
-    root.add_child(bass_c);
-
-    // Key sig (D major)
-    let (_, ks2) = layout_keysig(&KeySigParams { id: 51, key: KeySigType::Standard(2), clef: ClefContext::Bass, ..Default::default() }, &ctx);
-    let mut ks2_c = SceneNode::group(SemanticId::new(ElementType::KeySignature, 51));
-    ks2_c.transform = Affine::translate((keysig_x, staff2_middle));
-    ks2_c.add_child(ks2);
-    root.add_child(ks2_c);
-
-    // Time sig 4/4
-    let (_, ts2) = layout_timesig(&TimeSigParams { id: 52, sig_type: TimeSigType::Numeric { numerator: 4, denominator: 4 }, ..Default::default() }, &ctx);
-    let mut ts2_c = SceneNode::group(SemanticId::new(ElementType::TimeSignature, 52));
-    ts2_c.transform = Affine::translate((timesig_x, staff2_middle));
-    ts2_c.add_child(ts2);
-    root.add_child(ts2_c);
-
-    // Chord 1: D major triad (D-F#-A) - root position
-    let chord1_x = timesig_x + spatium * 4.0;
-    let (_, ch1) = layout_chord(&ChordParams {
-        id: 60,
-        duration: NoteDuration::Half,
-        notes: vec![
-            ChordNote { line: 3, accidental: Accidental::None, tie: false },  // D
-            ChordNote { line: 1, accidental: Accidental::None, tie: false },  // F#
-            ChordNote { line: -1, accidental: Accidental::None, tie: false }, // A
-        ],
-        stem_direction: StemDirection::Up,
-        ..Default::default()
-    }, &ctx);
-    let mut ch1_c = SceneNode::group(SemanticId::chord(60));
-    ch1_c.transform = Affine::translate((chord1_x, staff2_middle));
-    ch1_c.add_child(ch1);
-    root.add_child(ch1_c);
-
-    // Chord 2: G major triad (G-B-D)
-    let chord2_x = chord1_x + beat_space * 2.0;
-    let (_, ch2) = layout_chord(&ChordParams {
-        id: 61,
-        duration: NoteDuration::Half,
-        notes: vec![
-            ChordNote { line: 4, accidental: Accidental::None, tie: false },  // G (below staff)
-            ChordNote { line: 2, accidental: Accidental::None, tie: false },  // B
-            ChordNote { line: 0, accidental: Accidental::None, tie: false },  // D
-        ],
-        stem_direction: StemDirection::Up,
-        ..Default::default()
-    }, &ctx);
-    let mut ch2_c = SceneNode::group(SemanticId::chord(61));
-    ch2_c.transform = Affine::translate((chord2_x, staff2_middle));
-    ch2_c.add_child(ch2);
-    root.add_child(ch2_c);
-
-    // Barline
-    let bar3_x = chord2_x + beat_space * 2.0;
-    let (_, bl3) = layout_barline(&BarlineParams { id: 62, barline_type: BarlineType::Single, ..Default::default() }, &ctx);
-    let mut bl3_c = SceneNode::group(SemanticId::new(ElementType::Barline, 62));
-    bl3_c.transform = Affine::translate((bar3_x, staff2_middle));
-    bl3_c.add_child(bl3);
-    root.add_child(bl3_c);
-
-    // Chord 3: A7 chord (A-C#-E-G) with accidentals
-    let chord3_x = bar3_x + spatium * 2.0;
-    let (_, ch3) = layout_chord(&ChordParams {
-        id: 63,
-        duration: NoteDuration::Quarter,
-        notes: vec![
-            ChordNote { line: 2, accidental: Accidental::None, tie: false },    // A
-            ChordNote { line: 0, accidental: Accidental::Sharp, tie: false },   // C#
-            ChordNote { line: -2, accidental: Accidental::None, tie: false },   // E
-            ChordNote { line: -4, accidental: Accidental::Natural, tie: false }, // G natural
-        ],
-        stem_direction: StemDirection::Down,
-        ..Default::default()
-    }, &ctx);
-    let mut ch3_c = SceneNode::group(SemanticId::chord(63));
-    ch3_c.transform = Affine::translate((chord3_x, staff2_middle));
-    ch3_c.add_child(ch3);
-    root.add_child(ch3_c);
-
-    // Chord 4: Dm (D-F-A) with flat
-    let chord4_x = chord3_x + beat_space * 1.0;
-    let (_, ch4) = layout_chord(&ChordParams {
-        id: 64,
-        duration: NoteDuration::Quarter,
-        notes: vec![
-            ChordNote { line: 3, accidental: Accidental::None, tie: false },  // D
-            ChordNote { line: 1, accidental: Accidental::Flat, tie: false },  // F natural (flat cancels sharp)
-            ChordNote { line: -1, accidental: Accidental::None, tie: false }, // A
-        ],
-        stem_direction: StemDirection::Up,
-        ..Default::default()
-    }, &ctx);
-    let mut ch4_c = SceneNode::group(SemanticId::chord(64));
-    ch4_c.transform = Affine::translate((chord4_x, staff2_middle));
-    ch4_c.add_child(ch4);
-    root.add_child(ch4_c);
-
-    // Chord 5: Open voicing (wide spread)
-    let chord5_x = chord4_x + beat_space * 1.0;
-    let (_, ch5) = layout_chord(&ChordParams {
-        id: 65,
-        duration: NoteDuration::Half,
-        notes: vec![
-            ChordNote { line: 6, accidental: Accidental::None, tie: false },   // Low
-            ChordNote { line: 0, accidental: Accidental::None, tie: false },   // Middle
-            ChordNote { line: -4, accidental: Accidental::None, tie: false },  // High
-        ],
-        stem_direction: StemDirection::Down,
-        ..Default::default()
-    }, &ctx);
-    let mut ch5_c = SceneNode::group(SemanticId::chord(65));
-    ch5_c.transform = Affine::translate((chord5_x, staff2_middle));
-    ch5_c.add_child(ch5);
-    root.add_child(ch5_c);
-
-    // End barline
-    let bar4_x = chord5_x + beat_space * 2.0;
-    let (_, bl4) = layout_barline(&BarlineParams { id: 66, barline_type: BarlineType::End, ..Default::default() }, &ctx);
-    let mut bl4_c = SceneNode::group(SemanticId::new(ElementType::Barline, 66));
-    bl4_c.transform = Affine::translate((bar4_x, staff2_middle));
-    bl4_c.add_child(bl4);
-    root.add_child(bl4_c);
-
-    // =========================================================================
-    // SYSTEM 3: Lyrics with melody
-    // =========================================================================
-    let staff3_y = staff2_y + staff_height + 80.0;
-    let staff3_middle = staff3_y + 2.0 * spatium;
-
-    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff3_y, content_width, spatium,
-    )));
-
-    // Treble clef
-    let (_, clef3) = layout_clef(&ClefParams { id: 70, clef_type: ClefType::Treble, ..Default::default() }, &ctx);
-    let mut clef3_c = SceneNode::group(SemanticId::new(ElementType::Clef, 70));
-    clef3_c.transform = Affine::translate((clef_x, staff3_middle));
-    clef3_c.add_child(clef3);
-    root.add_child(clef3_c);
-
-    // Time sig 3/4 (waltz)
-    let (_, ts3) = layout_timesig(&TimeSigParams {
-        id: 71,
-        sig_type: TimeSigType::Numeric { numerator: 3, denominator: 4 },
-        ..Default::default()
-    }, &ctx);
-    let mut ts3_c = SceneNode::group(SemanticId::new(ElementType::TimeSignature, 71));
-    ts3_c.transform = Affine::translate((clef_x + spatium * 4.0, staff3_middle));
-    ts3_c.add_child(ts3);
-    root.add_child(ts3_c);
-
-    // "Amazing Grace" opening: A-ma-zing Grace, how sweet the sound
-    let lyrics_data = [
-        ("A", SyllabicType::Begin, NoteDuration::Quarter, 0, 0),
-        ("ma", SyllabicType::Middle, NoteDuration::Half, -1, 1),
-        ("zing", SyllabicType::End, NoteDuration::Quarter, -2, 2),
-        ("Grace,", SyllabicType::Single, NoteDuration::Half, 0, 3),
-        ("how", SyllabicType::Single, NoteDuration::Quarter, -1, 4),
-        ("sweet", SyllabicType::Single, NoteDuration::Quarter, -2, 5),
-        ("the", SyllabicType::Single, NoteDuration::Quarter, -1, 6),
-        ("sound", SyllabicType::Single, NoteDuration::Half, 0, 7),
-    ];
-
-    let lyrics_start = clef_x + spatium * 7.0;
-    let lyric_spacing = spatium * 4.5;
-    let lyric_y = staff3_y + spatium * 5.5;
-
-    for (text, syllabic, dur, line, idx) in lyrics_data {
-        let x = lyrics_start + idx as f64 * lyric_spacing;
-
-        // Note (using chord layout for stem)
-        let (_, note) = layout_chord(&ChordParams {
-            id: 100 + idx as u64,
-            duration: dur,
-            notes: vec![ChordNote { line, accidental: Accidental::None, tie: false }],
-            stem_direction: if line <= 0 { StemDirection::Down } else { StemDirection::Up },
-            ..Default::default()
-        }, &ctx);
-        let mut note_c = SceneNode::group(SemanticId::chord(100 + idx as u64));
-        note_c.transform = Affine::translate((x, staff3_middle));
-        note_c.add_child(note);
-        root.add_child(note_c);
-
-        // Lyric
-        let (_, lyric) = layout_lyrics(&LyricsParams {
-            id: 200 + idx as u64,
-            text: text.to_string(),
-            syllabic,
-            verse: 0,
-            placement: LyricsPlacement::Below,
-            note_x: 0.0,
-            note_width: spatium,
-            ..Default::default()
-        }, &ctx);
-        let mut lyric_c = SceneNode::group(SemanticId::new(ElementType::Lyrics, 200 + idx as u64));
-        lyric_c.transform = Affine::translate((x, lyric_y));
-        lyric_c.add_child(lyric);
-        root.add_child(lyric_c);
-    }
-
-    // Add lyric dashes
-    let dash_y = lyric_y + spatium * 0.3;
-    // Dash after "A"
-    let (_, dash1) = layout_lyrics_dash(lyrics_start + lyric_spacing * 0.6, lyrics_start + lyric_spacing * 0.9, dash_y, &ctx);
-    root.add_child(dash1);
-    // Dash after "ma"
-    let (_, dash2) = layout_lyrics_dash(lyrics_start + lyric_spacing * 1.6, lyrics_start + lyric_spacing * 1.9, dash_y, &ctx);
-    root.add_child(dash2);
-
-    // Barlines for lyrics section
-    let bar5_x = lyrics_start + lyric_spacing * 3.3;
-    let (_, bl5) = layout_barline(&BarlineParams { id: 80, barline_type: BarlineType::Single, ..Default::default() }, &ctx);
-    let mut bl5_c = SceneNode::group(SemanticId::new(ElementType::Barline, 80));
-    bl5_c.transform = Affine::translate((bar5_x, staff3_middle));
-    bl5_c.add_child(bl5);
-    root.add_child(bl5_c);
-
-    let bar6_x = lyrics_start + lyric_spacing * 7.5;
-    let (_, bl6) = layout_barline(&BarlineParams { id: 81, barline_type: BarlineType::End, ..Default::default() }, &ctx);
-    let mut bl6_c = SceneNode::group(SemanticId::new(ElementType::Barline, 81));
-    bl6_c.transform = Affine::translate((bar6_x, staff3_middle));
-    bl6_c.add_child(bl6);
-    root.add_child(bl6_c);
-
-    // =========================================================================
-    // SYSTEM 4: Beamed note groups
-    // =========================================================================
-    let staff4_y = staff3_y + staff_height + 80.0;
-    let staff4_middle = staff4_y + 2.0 * spatium;
-
-    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff4_y, content_width, spatium,
-    )));
-
-    // Treble clef
-    let (_, clef4) = layout_clef(&ClefParams { id: 90, clef_type: ClefType::Treble, ..Default::default() }, &ctx);
-    let mut clef4_c = SceneNode::group(SemanticId::new(ElementType::Clef, 90));
-    clef4_c.transform = Affine::translate((clef_x, staff4_middle));
-    clef4_c.add_child(clef4);
-    root.add_child(clef4_c);
-
-    // Time sig 4/4
-    let (_, ts4) = layout_timesig(&TimeSigParams {
-        id: 91,
-        sig_type: TimeSigType::Numeric { numerator: 4, denominator: 4 },
-        ..Default::default()
-    }, &ctx);
-    let mut ts4_c = SceneNode::group(SemanticId::new(ElementType::TimeSignature, 91));
-    ts4_c.transform = Affine::translate((clef_x + spatium * 4.0, staff4_middle));
-    ts4_c.add_child(ts4);
-    root.add_child(ts4_c);
-
-    // Beamed eighth notes (group of 4)
-    let beam1_start = clef_x + spatium * 7.0;
-    let beam_note_spacing = spatium * 2.5;
-
-    // First beam group: 4 eighth notes descending
-    let beam1_notes = vec![
-        BeamNote { x: beam1_start, line: -2, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
-        BeamNote { x: beam1_start + beam_note_spacing, line: -1, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
-        BeamNote { x: beam1_start + beam_note_spacing * 2.0, line: 0, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
-        BeamNote { x: beam1_start + beam_note_spacing * 3.0, line: 1, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
-    ];
-
-    // Draw noteheads for beam group 1 (noteheads only - beam draws stems)
-    for (i, bn) in beam1_notes.iter().enumerate() {
-        let (_, note) = layout_note(&NoteParams {
-            id: 300 + i as u64,
-            duration: NoteDuration::Eighth,
-            line: bn.line,
-            accidental: Accidental::None,
-            ..Default::default()
-        }, &ctx);
-        let mut note_c = SceneNode::group(SemanticId::new(ElementType::Note, 300 + i as u64));
-        note_c.transform = Affine::translate((bn.x, staff4_middle));
-        note_c.add_child(note);
-        root.add_child(note_c);
-    }
-
-    // Draw beam for group 1
-    let beam_config = BeamLayoutConfig::default();
-    let beam1_result = layout_beam(&beam1_notes, spatium, &beam_config);
-    let mut beam1_node = SceneNode::anonymous_leaf(beam1_result.commands);
-    beam1_node.transform = Affine::translate((0.0, staff4_middle));
-    root.add_child(beam1_node);
-
-    // Barline after first beam group
-    let bar7_x = beam1_start + beam_note_spacing * 4.0;
-    let (_, bl7) = layout_barline(&BarlineParams { id: 92, barline_type: BarlineType::Single, ..Default::default() }, &ctx);
-    let mut bl7_c = SceneNode::group(SemanticId::new(ElementType::Barline, 92));
-    bl7_c.transform = Affine::translate((bar7_x, staff4_middle));
-    bl7_c.add_child(bl7);
-    root.add_child(bl7_c);
-
-    // Second beam group: 4 sixteenth notes (2 beams)
-    let beam2_start = bar7_x + spatium * 2.0;
-    let beam2_notes = vec![
-        BeamNote { x: beam2_start, line: 0, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Down, head_type: NoteHeadType::Normal },
-        BeamNote { x: beam2_start + beam_note_spacing * 0.6, line: -1, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Down, head_type: NoteHeadType::Normal },
-        BeamNote { x: beam2_start + beam_note_spacing * 1.2, line: -2, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Down, head_type: NoteHeadType::Normal },
-        BeamNote { x: beam2_start + beam_note_spacing * 1.8, line: -3, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Down, head_type: NoteHeadType::Normal },
-    ];
-
-    // Draw noteheads for beam group 2 (noteheads only - beam draws stems)
-    for (i, bn) in beam2_notes.iter().enumerate() {
-        let (_, note) = layout_note(&NoteParams {
-            id: 310 + i as u64,
-            duration: NoteDuration::Sixteenth,
-            line: bn.line,
-            accidental: Accidental::None,
-            ..Default::default()
-        }, &ctx);
-        let mut note_c = SceneNode::group(SemanticId::new(ElementType::Note, 310 + i as u64));
-        note_c.transform = Affine::translate((bn.x, staff4_middle));
-        note_c.add_child(note);
-        root.add_child(note_c);
-    }
-
-    // Draw beam for group 2
-    let beam2_result = layout_beam(&beam2_notes, spatium, &beam_config);
-    let mut beam2_node = SceneNode::anonymous_leaf(beam2_result.commands);
-    beam2_node.transform = Affine::translate((0.0, staff4_middle));
-    root.add_child(beam2_node);
-
-    // Third beam group: Mixed rhythms (eighth + 2 sixteenths + eighth)
-    let beam3_start = beam2_start + beam_note_spacing * 3.0;
-    let beam3_notes = vec![
-        BeamNote { x: beam3_start, line: 2, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
-        BeamNote { x: beam3_start + beam_note_spacing * 0.5, line: 1, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
-        BeamNote { x: beam3_start + beam_note_spacing * 0.8, line: 0, duration: NoteDuration::Sixteenth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
-        BeamNote { x: beam3_start + beam_note_spacing * 1.5, line: -1, duration: NoteDuration::Eighth, stem_direction: StemDirection::Up, head_type: NoteHeadType::Normal },
-    ];
-
-    // Draw noteheads for beam group 3 (noteheads only - beam draws stems)
-    for (i, bn) in beam3_notes.iter().enumerate() {
-        let dur = bn.duration;
-        let (_, note) = layout_note(&NoteParams {
-            id: 320 + i as u64,
-            duration: dur,
-            line: bn.line,
-            accidental: Accidental::None,
-            ..Default::default()
-        }, &ctx);
-        let mut note_c = SceneNode::group(SemanticId::new(ElementType::Note, 320 + i as u64));
-        note_c.transform = Affine::translate((bn.x, staff4_middle));
-        note_c.add_child(note);
-        root.add_child(note_c);
-    }
-
-    // Draw beam for group 3
-    let beam3_result = layout_beam(&beam3_notes, spatium, &beam_config);
-    let mut beam3_node = SceneNode::anonymous_leaf(beam3_result.commands);
-    beam3_node.transform = Affine::translate((0.0, staff4_middle));
-    root.add_child(beam3_node);
-
-    // End barline
-    let bar8_x = beam3_start + beam_note_spacing * 2.5;
-    let (_, bl8) = layout_barline(&BarlineParams { id: 93, barline_type: BarlineType::End, ..Default::default() }, &ctx);
-    let mut bl8_c = SceneNode::group(SemanticId::new(ElementType::Barline, 93));
-    bl8_c.transform = Affine::translate((bar8_x, staff4_middle));
-    bl8_c.add_child(bl8);
-    root.add_child(bl8_c);
-
-    // =========================================================================
-    // SYSTEM 5: Rhythmic Slash Notation (using high-level MeasureBuilder API)
-    // =========================================================================
-    let staff5_y = staff4_y + 70.0;
-    let staff5_middle = staff5_y + 2.0 * spatium;
-
-    // Draw staff lines
-    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff5_y, content_width, spatium,
-    )));
+        },
+        &ctx,
+    );
+    let mut intro_container = SceneNode::group(SemanticId::new(ElementType::RehearsalMark, 1));
+    intro_container.add_child(intro_label);
+    root.add_child(intro_container);
 
     // Measure 1: Four quarter notes (with clef and time signature)
     let measure1 = MeasureBuilder::new()
@@ -1280,7 +761,7 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         .build(&ctx);
 
     let mut m1_container = SceneNode::group(SemanticId::new(ElementType::Measure, 500));
-    m1_container.transform = Affine::translate((content_x, staff5_middle));
+    m1_container.transform = Affine::translate((content_x, staff1_middle));
     m1_container.add_child(measure1.scene);
     root.add_child(m1_container);
 
@@ -1301,7 +782,7 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         .build(&ctx);
 
     let mut m2_container = SceneNode::group(SemanticId::new(ElementType::Measure, 520));
-    m2_container.transform = Affine::translate((content_x + measure1.width, staff5_middle));
+    m2_container.transform = Affine::translate((content_x + measure1.width, staff1_middle));
     m2_container.add_child(measure2.scene);
     root.add_child(m2_container);
 
@@ -1321,7 +802,7 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         .build(&ctx);
 
     let mut m3_container = SceneNode::group(SemanticId::new(ElementType::Measure, 540));
-    m3_container.transform = Affine::translate((content_x + measure1.width + measure2.width, staff5_middle));
+    m3_container.transform = Affine::translate((content_x + measure1.width + measure2.width, staff1_middle));
     m3_container.add_child(measure3.scene);
     root.add_child(m3_container);
 
@@ -1338,20 +819,39 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         .build(&ctx);
 
     let mut m4_container = SceneNode::group(SemanticId::new(ElementType::Measure, 560));
-    m4_container.transform = Affine::translate((content_x + measure1.width + measure2.width + measure3.width, staff5_middle));
+    m4_container.transform = Affine::translate((content_x + measure1.width + measure2.width + measure3.width, staff1_middle));
     m4_container.add_child(measure4.scene);
     root.add_child(m4_container);
 
     // =========================================================================
-    // SYSTEM 6: Stemless Slash Notation (whole note style slashes)
+    // SYSTEM 2: Stemless Slash Notation (whole note style slashes)
     // =========================================================================
-    let staff6_y = staff5_y + 70.0;
-    let staff6_middle = staff6_y + 2.0 * spatium;
+    let staff2_y = staff1_y + staff_height + 70.0;
+    let staff2_middle = staff2_y + 2.0 * spatium;
 
     // Draw staff lines
     root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff6_y, content_width, spatium,
+        content_x, staff2_y, content_width, spatium,
     )));
+
+    // Section label: "VS 1" (Verse 1) in left margin of staff 2
+    let (_, vs1_label) = layout_margin_label(
+        &MarginLabelParams {
+            section_type: "Verse".to_string(),
+            abbreviation: "VS".to_string(),
+            number: Some(1),
+            page_x,
+            margin_width: content_left,
+            staff_y: staff2_y,
+            staff_height,
+            style: rehearsal_themes::blue(),
+            ..Default::default()
+        },
+        &ctx,
+    );
+    let mut vs1_container = SceneNode::group(SemanticId::new(ElementType::RehearsalMark, 2));
+    vs1_container.add_child(vs1_label);
+    root.add_child(vs1_container);
 
     // Measure 1: Four quarters → all auto-stemless (2+ consecutive quarters)
     let measure5 = MeasureBuilder::new()
@@ -1368,7 +868,7 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         .build(&ctx);
 
     let mut m5_container = SceneNode::group(SemanticId::new(ElementType::Measure, 600));
-    m5_container.transform = Affine::translate((content_x, staff6_middle));
+    m5_container.transform = Affine::translate((content_x, staff2_middle));
     m5_container.add_child(measure5.scene);
     root.add_child(m5_container);
 
@@ -1387,7 +887,7 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         .build(&ctx);
 
     let mut m6_container = SceneNode::group(SemanticId::new(ElementType::Measure, 620));
-    m6_container.transform = Affine::translate((content_x + measure5.width, staff6_middle));
+    m6_container.transform = Affine::translate((content_x + measure5.width, staff2_middle));
     m6_container.add_child(measure6.scene);
     root.add_child(m6_container);
 
@@ -1403,7 +903,7 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         .build(&ctx);
 
     let mut m7_container = SceneNode::group(SemanticId::new(ElementType::Measure, 640));
-    m7_container.transform = Affine::translate((content_x + measure5.width + measure6.width, staff6_middle));
+    m7_container.transform = Affine::translate((content_x + measure5.width + measure6.width, staff2_middle));
     m7_container.add_child(measure7.scene);
     root.add_child(m7_container);
 
@@ -1420,20 +920,39 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         .build(&ctx);
 
     let mut m8_container = SceneNode::group(SemanticId::new(ElementType::Measure, 660));
-    m8_container.transform = Affine::translate((content_x + measure5.width + measure6.width + measure7.width, staff6_middle));
+    m8_container.transform = Affine::translate((content_x + measure5.width + measure6.width + measure7.width, staff2_middle));
     m8_container.add_child(measure8.scene);
     root.add_child(m8_container);
 
     // =========================================================================
-    // SYSTEM 7: Complex Rhythms (triplets, ties, syncopation patterns)
+    // SYSTEM 3: Complex Rhythms (triplets, ties, syncopation patterns)
     // =========================================================================
-    let staff7_y = staff6_y + 70.0;
-    let staff7_middle = staff7_y + 2.0 * spatium;
+    let staff3_y = staff2_y + staff_height + 70.0;
+    let staff3_middle = staff3_y + 2.0 * spatium;
 
     // Draw staff lines
     root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff7_y, content_width, spatium,
+        content_x, staff3_y, content_width, spatium,
     )));
+
+    // Section label: "CH 1" (Chorus 1) in left margin of staff 3
+    let (_, ch1_label) = layout_margin_label(
+        &MarginLabelParams {
+            section_type: "Chorus".to_string(),
+            abbreviation: "CH".to_string(),
+            number: Some(1),
+            page_x,
+            margin_width: content_left,
+            staff_y: staff3_y,
+            staff_height,
+            style: rehearsal_themes::green(),
+            ..Default::default()
+        },
+        &ctx,
+    );
+    let mut ch1_container = SceneNode::group(SemanticId::new(ElementType::RehearsalMark, 3));
+    ch1_container.add_child(ch1_label);
+    root.add_child(ch1_container);
 
     // Measure 1: 32nd note run
     let measure9 = MeasureBuilder::new()
@@ -1450,7 +969,7 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         .build(&ctx);
 
     let mut m9_container = SceneNode::group(SemanticId::new(ElementType::Measure, 700));
-    m9_container.transform = Affine::translate((content_x, staff7_middle));
+    m9_container.transform = Affine::translate((content_x, staff3_middle));
     m9_container.add_child(measure9.scene);
     root.add_child(m9_container);
 
@@ -1467,7 +986,7 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         .build(&ctx);
 
     let mut m10_container = SceneNode::group(SemanticId::new(ElementType::Measure, 720));
-    m10_container.transform = Affine::translate((content_x + measure9.width, staff7_middle));
+    m10_container.transform = Affine::translate((content_x + measure9.width, staff3_middle));
     m10_container.add_child(measure10.scene);
     root.add_child(m10_container);
 
@@ -1485,7 +1004,7 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         .build(&ctx);
 
     let mut m11_container = SceneNode::group(SemanticId::new(ElementType::Measure, 740));
-    m11_container.transform = Affine::translate((content_x + measure9.width + measure10.width, staff7_middle));
+    m11_container.transform = Affine::translate((content_x + measure9.width + measure10.width, staff3_middle));
     m11_container.add_child(measure11.scene);
     root.add_child(m11_container);
 
@@ -1501,13 +1020,9 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
 
     // Section labels
     let labels = [
-        (content_x, staff1_y - 12.0, "System 1: Melody with varied rhythms (4/4, D major)"),
-        (content_x, staff2_y - 12.0, "System 2: Chord voicings (triads, 7ths, accidentals)"),
-        (content_x, staff3_y - 12.0, "System 3: Lyrics (Amazing Grace, 3/4)"),
-        (content_x, staff4_y - 12.0, "System 4: Beamed note groups (8ths, 16ths, mixed)"),
-        (content_x, staff5_y - 12.0, "System 5: Rhythmic slash notation (quarters, 8ths, 16ths, syncopation)"),
-        (content_x, staff6_y - 12.0, "System 6: Auto-stemless rhythmic notation (2+ consecutive quarters = stemless)"),
-        (content_x, staff7_y - 12.0, "System 7: Complex rhythms (32nds, syncopation, dotted patterns)"),
+        (content_x, staff1_y - 12.0, "System 1: Rhythmic slash notation (quarters, 8ths, 16ths, syncopation)"),
+        (content_x, staff2_y - 12.0, "System 2: Auto-stemless rhythmic notation (2+ consecutive quarters = stemless)"),
+        (content_x, staff3_y - 12.0, "System 3: Complex rhythms (32nds, syncopation, dotted patterns)"),
     ];
 
     for (x, y, text) in labels {
