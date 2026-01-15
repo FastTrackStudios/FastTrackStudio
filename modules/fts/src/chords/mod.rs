@@ -8,18 +8,18 @@ pub mod types;
 #[cfg(feature = "dioxus")]
 pub mod infra;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "iroh")]
 pub mod reactive;
 
 pub use types::*;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "iroh")]
 pub use reactive::{
     ChordsReactiveService, ChordsReactiveState, ChordsStreams, DefaultChordsReactiveService,
     EventStreamSubject,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "iroh", not(target_arch = "wasm32")))]
 pub use reactive::irpc::{ChartApi, ChartUpdateMessage};
 
 #[cfg(feature = "dioxus")]

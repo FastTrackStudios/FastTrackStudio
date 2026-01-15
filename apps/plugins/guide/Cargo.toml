@@ -1,0 +1,78 @@
+[package]
+name = "fts-guide"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "FTS Guide - Click track, count-in, and section guide plugin for REAPER"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = []
+# Logging feature flags - enable specific areas for detailed logging
+log-count-in = []
+log-transport = []
+log-regions = []
+log-samples = []
+log-audio = []
+log-guide = []
+log-midi = []
+log-general = []
+# Enable all logging features for full debugging
+log-all = [
+    "log-count-in",
+    "log-transport",
+    "log-regions",
+    "log-samples",
+    "log-audio",
+    "log-guide",
+    "log-midi",
+    "log-general",
+]
+
+[dependencies]
+# NIH-plug for plugin framework
+nih_plug = { workspace = true }
+fts-plugin-core = { path = "../../../modules/fts-plugin-core" }
+
+# Audio loading
+symphonium = { version = "0.6", default-features = false, features = ["wav", "pcm", "fft-resampler"] }
+
+# REAPER integration
+reaper-high = { workspace = true }
+reaper-medium = { workspace = true }
+reaper-low = { workspace = true }
+
+# FTS domain (for setlist/section parsing)
+fts = { path = "../../../modules/fts", features = ["reaper"] }
+
+# Reactive state
+rxrust = { workspace = true }
+
+# Atomics
+atomic_float = { workspace = true }
+
+# Async/threading
+once_cell = "1.19"
+
+# Tracing
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nih_plug_dioxus = { workspace = true, features = ["softbuffer-blit"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+nih_plug_dioxus = { workspace = true }
+
+# Override unsafe_code lint for this crate - REAPER integration requires unsafe
+[lints.rust]
+unsafe_code = "allow"
+unused = { level = "allow", priority = -1 }

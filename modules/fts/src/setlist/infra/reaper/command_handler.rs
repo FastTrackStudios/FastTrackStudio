@@ -2,8 +2,7 @@
 //!
 //! Handles commands from the stream API by delegating to services.
 
-use crate::setlist::infra::stream::LyricsState;
-use crate::setlist::{NavigationCommand, SetlistCommandHandler, TransportCommand};
+use crate::setlist::{LyricsState, NavigationCommand, SetlistCommandHandler, TransportCommand};
 use std::sync::Arc;
 
 /// REAPER implementation of SetlistCommandHandler

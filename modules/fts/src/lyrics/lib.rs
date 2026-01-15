@@ -12,7 +12,7 @@ pub mod syllables;
 pub mod source;
 pub mod infra;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "iroh")]
 pub mod reactive;
 
 pub use core::*;
@@ -21,11 +21,11 @@ pub use output::*;
 pub use syllables::*;
 pub use source::*;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "iroh")]
 pub use reactive::{
     LyricsStreams, LyricsReactiveState, LyricsReactiveService,
     DefaultLyricsReactiveService, EventStreamSubject,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "iroh")]
 pub use reactive::irpc::{LyricsApi, LyricsProtocol, LyricsUpdateMessage};

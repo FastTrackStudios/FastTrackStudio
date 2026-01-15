@@ -19,15 +19,17 @@ chrono = { workspace = true }
 splitty = "1.0.2"
 colored = "2.1"
 
-# IROH/IRPC dependencies (server-only)
+# Common async dependencies (used by reaper and iroh features)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-irpc = { workspace = true }
-irpc-iroh = "0.11.0"
-iroh = { version = "0.95", features = ["discovery-local-network"] }
 anyhow = "1.0"
 async-trait = "0.1"
-tokio = { version = "1.0", features = ["full"] }
-rxrust = { workspace = true }
+
+# IROH/IRPC dependencies (server-only, optional)
+irpc = { workspace = true, optional = true }
+irpc-iroh = { version = "0.11.0", optional = true }
+iroh = { version = "0.95", features = ["discovery-local-network"], optional = true }
+tokio = { version = "1.0", features = ["full"], optional = true }
+rxrust = { workspace = true, optional = true }
 
 # Workspace dependencies
 daw = { path = "../../modules/daw" }
@@ -45,7 +47,7 @@ default = []
 reaper = ["dep:reaper-high", "dep:reaper-medium", "dep:reaper-low", "dep:enumflags2", "dep:fragile"]
 rpp = ["dep:rpp-parser"]
 dioxus = ["dep:dioxus"]
-iroh = ["daw/iroh"]
+iroh = ["daw/iroh", "dep:irpc", "dep:irpc-iroh", "dep:iroh", "dep:tokio", "dep:rxrust"]
 full = ["reaper", "rpp", "iroh"]
 
 [dependencies.rpp-parser]

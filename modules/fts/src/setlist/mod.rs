@@ -7,13 +7,19 @@ pub mod core;
 pub mod infra;
 pub mod order;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "iroh")]
 pub mod reactive;
 
+// Command types are always available (shared between iroh and reaper features)
+pub use infra::commands::{LyricsState, NavigationCommand, TransportCommand};
+
+// Trait types are always available (for non-wasm targets)
 #[cfg(not(target_arch = "wasm32"))]
+pub use infra::traits::{SetlistCommandHandler, SetlistStateProvider};
+
+#[cfg(feature = "iroh")]
 pub use infra::stream::{
-    NavigationCommand, SeekToSection, SeekToSong, SeekToTime, SetlistCommandHandler,
-    SetlistStateProvider, SetlistStreamApi, SetlistUpdateMessage, ToggleLoop, TransportCommand,
+    SeekToSection, SeekToSong, SeekToTime, SetlistStreamApi, SetlistUpdateMessage, ToggleLoop,
 };
 
 #[cfg(feature = "dioxus")]
@@ -26,12 +32,14 @@ pub use core::{
     Section, SectionType, Setlist, SetlistApi, SetlistEntry, SetlistError, SetlistOrder,
     SetlistSummary, Song, SongSummary,
 };
+
+#[cfg(feature = "iroh")]
 pub use reactive::{
     ActiveIndicesStreams, EventStreamSubject, LyricsStreams, SetlistReactiveService,
     SetlistReactiveState, SetlistReactiveStreams, SetlistStreams, SongStreams,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(feature = "iroh", not(target_arch = "wasm32")))]
 pub use reactive::irpc::{SetlistReactiveApi, SetlistReactiveProtocol};
 
 pub fn default_setlist() -> Result<Setlist, SetlistError> {

@@ -5,17 +5,17 @@
 
 pub mod types;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "iroh")]
 pub mod reactive;
 
 pub use types::*;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "iroh")]
 pub use reactive::{
     ChordsStreams, ChordsReactiveState, ChordsReactiveService,
     DefaultChordsReactiveService, EventStreamSubject,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "iroh")]
 pub use reactive::irpc::{ChartApi, ChartUpdateMessage};
 

@@ -5,7 +5,7 @@
 
 use crate::lyrics::Syllable;
 use crate::lyrics::core::split_line_into_words;
-use crate::setlist::infra::stream::LyricsState;
+use crate::setlist::LyricsState;
 use reaper_high::Reaper;
 use reaper_medium::{MediaItemTake, PositionInSeconds};
 use std::ffi::CString;

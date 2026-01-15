@@ -28,6 +28,10 @@ use tokio::sync::broadcast;
 use tokio::time;
 use tracing::{debug, error, info, warn};
 
+// Re-export types from shared modules
+pub use super::commands::{LyricsState, NavigationCommand, TransportCommand};
+pub use super::traits::{SetlistCommandHandler, SetlistStateProvider};
+
 /// Granular setlist update message sent over the irpc stream
 ///
 /// Instead of sending the entire setlist on every update, we send only what changed.
@@ -111,21 +115,7 @@ pub struct SubscribeSongTransport;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubscribeSetlist;
 
-/// Transport control commands
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TransportCommand {
-    Play,
-    Pause,
-    Stop,
-    TogglePlayPause,
-}
-
-/// Navigation commands
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum NavigationCommand {
-    NextSectionOrSong,
-    PreviousSectionOrSong,
-}
+// TransportCommand and NavigationCommand are imported from super::commands
 
 /// Seek to a specific section
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,15 +156,7 @@ pub struct AdvanceSyllable;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetLyricsState;
 
-/// Response for GetLyricsState
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LyricsState {
-    pub current_line_index: Option<usize>,
-    pub current_syllable_index: Option<usize>,
-    pub total_syllables: usize,
-    pub line_text: Option<String>,
-    pub has_lyrics: bool,
-}
+// LyricsState is imported from super::commands
 
 /// Assign syllable to MIDI note at edit cursor position
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,63 +225,7 @@ pub enum SetlistStreamProtocol {
     UpdateLyrics(UpdateLyrics),
 }
 
-/// Trait for backends that can provide setlist state
-///
-/// This allows the setlist stream actor to get setlist state
-/// from different sources (REAPER, other DAWs, etc.)
-#[async_trait]
-pub trait SetlistStateProvider: Send + Sync {
-    /// Get the current setlist API state (includes computed fields like active song)
-    async fn get_setlist_api(&self) -> Result<SetlistApi, String>;
-}
-
-/// Trait for backends that can handle setlist commands
-///
-/// This allows the setlist stream actor to execute commands
-/// on different backends (REAPER, other DAWs, etc.)
-#[async_trait]
-pub trait SetlistCommandHandler: Send + Sync {
-    /// Execute a transport command
-    async fn execute_transport_command(&self, command: TransportCommand) -> Result<(), String>;
-
-    /// Execute a navigation command
-    async fn execute_navigation_command(&self, command: NavigationCommand) -> Result<(), String>;
-
-    /// Seek to a specific section
-    async fn seek_to_section(&self, song_index: usize, section_index: usize) -> Result<(), String>;
-
-    /// Seek to a specific song (switches to that song's tab and moves cursor to beginning)
-    async fn seek_to_song(&self, song_index: usize) -> Result<(), String>;
-
-    /// Seek to a specific time position within a song
-    async fn seek_to_time(&self, song_index: usize, time_seconds: f64) -> Result<(), String>;
-
-    /// Seek to a specific musical position within a song
-    async fn seek_to_musical_position(
-        &self,
-        song_index: usize,
-        musical_position: daw::primitives::MusicalPosition,
-    ) -> Result<(), String>;
-
-    /// Toggle loop for current song
-    async fn toggle_loop(&self) -> Result<(), String>;
-
-    /// Advance to the next syllable and assign it to the next MIDI note at edit cursor
-    async fn advance_syllable(&self) -> Result<LyricsState, String>;
-
-    /// Get current lyrics state
-    async fn get_lyrics_state(&self) -> Result<LyricsState, String>;
-
-    /// Assign a specific syllable to the MIDI note at edit cursor position
-    async fn assign_syllable_to_note(&self, syllable_text: String) -> Result<(), String>;
-
-    /// Update lyrics for a song
-    async fn update_lyrics(
-        &self,
-        song_index: usize,
-        lyrics: crate::lyrics::core::Lyrics,
-    ) -> Result<(), String>;
-}
+// SetlistStateProvider and SetlistCommandHandler traits are imported from super::traits
 
 /// Register the broadcast sender for reactive change detection
 /// This allows change detection middleware to broadcast updates reactively

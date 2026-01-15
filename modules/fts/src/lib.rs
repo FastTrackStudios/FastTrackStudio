@@ -14,10 +14,11 @@ pub mod setlist;
 /// DAW Reactive REAPER implementations
 ///
 /// Contains REAPER-specific implementations of the DAW reactive services
-/// (transport, tracks). Only available when the `reaper` feature is enabled.
-#[cfg(feature = "reaper")]
+/// (transport, tracks). Only available when both `reaper` and `iroh` features are enabled
+/// (requires rxrust for reactive streams).
+#[cfg(all(feature = "reaper", feature = "iroh"))]
 pub mod daw_reactive;
 
 // Re-export commonly used types
 pub use lyrics::Lyrics;
-pub use setlist::{Setlist, SetlistApi, Song};
+pub use setlist::{LyricsState, NavigationCommand, Setlist, SetlistApi, Song, TransportCommand};
