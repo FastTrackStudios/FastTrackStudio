@@ -499,12 +499,13 @@ impl MeasureBuilder {
         }
     }
 
-    /// Compute beam groups based on time signature and rhythm.
+    /// Compute beam groups based on beat boundaries.
     ///
     /// Rules:
-    /// - Only flagged notes (8ths, 16ths, etc.) can be beamed together
-    /// - Non-flagged notes (quarters, halves, etc.) are always in their own group
-    /// - Beat boundaries break beam groups
+    /// 1. Non-flagged notes (quarter and longer) are never beamed
+    /// 2. Flagged notes (8ths, 16ths, 32nds) are grouped within beats
+    /// 3. Beam groups never cross beat boundaries
+    /// 4. Within a beat, all consecutive flagged notes are beamed together
     fn compute_beam_groups(&self) -> Vec<BeamGroup> {
         if self.rhythm.is_empty() {
             return Vec::new();
@@ -515,14 +516,18 @@ impl MeasureBuilder {
 
         let mut groups: Vec<BeamGroup> = Vec::new();
         let mut current_group: Vec<Duration> = Vec::new();
-        let mut beat_position: i32 = 0;
+        let mut current_tick: i32 = 0;
 
         for &dur in &self.rhythm {
             let dur_ticks = dur.ticks();
             let needs_flag = dur.needs_flag();
 
+            // Calculate which beat we're starting in
+            let start_beat = current_tick / beat_ticks;
+            let end_tick = current_tick + dur_ticks;
+            let end_beat = (end_tick - 1) / beat_ticks; // -1 because note ending exactly on beat boundary belongs to previous beat
+
             // Non-flagged notes (quarters, halves, etc.) break any current beam group
-            // and go in their own single-note group
             if !needs_flag {
                 // Finish any pending beam group
                 if !current_group.is_empty() {
@@ -530,28 +535,29 @@ impl MeasureBuilder {
                         notes: std::mem::take(&mut current_group),
                     });
                 }
-                // Add this note as its own group
+                // Add this note as its own group (not beamable)
                 groups.push(BeamGroup { notes: vec![dur] });
-                beat_position += dur_ticks;
+                current_tick = end_tick;
                 continue;
             }
 
-            // For flagged notes: check if this note crosses a beat boundary
-            let remaining_in_beat = beat_ticks - (beat_position % beat_ticks);
+            // For flagged notes: check if we're crossing into a new beat
+            let crosses_beat = start_beat != end_beat;
 
-            if dur_ticks > remaining_in_beat && !current_group.is_empty() {
-                // Finish current group before beat boundary
+            // If we're at a beat boundary and have a pending group, finish it
+            if current_tick > 0 && current_tick % beat_ticks == 0 && !current_group.is_empty() {
                 groups.push(BeamGroup {
                     notes: std::mem::take(&mut current_group),
                 });
             }
 
-            // Add flagged note to current group
+            // Add this flagged note to current group
             current_group.push(dur);
-            beat_position += dur_ticks;
+            current_tick = end_tick;
 
-            // Check if we've completed a beat
-            if beat_position % beat_ticks == 0 {
+            // If this note crosses a beat boundary, finish the group
+            // (The note itself completes this beat's group)
+            if crosses_beat || current_tick % beat_ticks == 0 {
                 groups.push(BeamGroup {
                     notes: std::mem::take(&mut current_group),
                 });
@@ -1093,5 +1099,108 @@ mod tests {
         let flags = builder.compute_auto_stemless();
         // No plain quarters = no stemless notes
         assert_eq!(flags, vec![false, false, false, false]);
+    }
+
+    #[test]
+    fn test_beam_groups_sixteenths_by_beat() {
+        // 8 sixteenth notes in 4/4 should create 2 beam groups (4 per beat)
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythm(vec![
+                Duration::Sixteenth,
+                Duration::Sixteenth,
+                Duration::Sixteenth,
+                Duration::Sixteenth, // End of beat 1
+                Duration::Sixteenth,
+                Duration::Sixteenth,
+                Duration::Sixteenth,
+                Duration::Sixteenth, // End of beat 2
+            ]);
+
+        let groups = builder.compute_beam_groups();
+        // Should be 2 groups of 4 sixteenths each
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].notes.len(), 4);
+        assert_eq!(groups[1].notes.len(), 4);
+    }
+
+    #[test]
+    fn test_beam_groups_eighths_by_beat() {
+        // 4 eighth notes in 4/4 should create 2 beam groups (2 per beat)
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythm(vec![
+                Duration::Eighth,
+                Duration::Eighth, // End of beat 1
+                Duration::Eighth,
+                Duration::Eighth, // End of beat 2
+            ]);
+
+        let groups = builder.compute_beam_groups();
+        // Should be 2 groups of 2 eighths each
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].notes.len(), 2);
+        assert_eq!(groups[1].notes.len(), 2);
+    }
+
+    #[test]
+    fn test_beam_groups_mixed_rhythms() {
+        // Quarter + 2 eighths + quarter in 4/4
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythm(vec![
+                Duration::Quarter,  // Beat 1 (not beamed)
+                Duration::Eighth,   // Beat 2
+                Duration::Eighth,   // Beat 2
+                Duration::Quarter,  // Beat 3 (not beamed)
+            ]);
+
+        let groups = builder.compute_beam_groups();
+        // Should be: [Quarter], [Eighth, Eighth], [Quarter]
+        assert_eq!(groups.len(), 3);
+        assert_eq!(groups[0].notes.len(), 1); // Quarter
+        assert_eq!(groups[1].notes.len(), 2); // 2 eighths beamed
+        assert_eq!(groups[2].notes.len(), 1); // Quarter
+    }
+
+    #[test]
+    fn test_beam_groups_32nds_by_beat() {
+        // 8 thirty-second notes in 4/4 (covers half a beat)
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythm(vec![
+                Duration::ThirtySecond,
+                Duration::ThirtySecond,
+                Duration::ThirtySecond,
+                Duration::ThirtySecond,
+                Duration::ThirtySecond,
+                Duration::ThirtySecond,
+                Duration::ThirtySecond,
+                Duration::ThirtySecond, // Half of beat 1
+            ]);
+
+        let groups = builder.compute_beam_groups();
+        // All 8 should be in one group (within beat 1)
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].notes.len(), 8);
+    }
+
+    #[test]
+    fn test_beam_groups_cross_beat_boundary() {
+        // 3 eighths starting on beat 1.5 should break at beat 2
+        // (This is beat 1: eighth, then 2 eighths that cross into beat 2)
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .rhythm(vec![
+                Duration::Eighth,   // Beat 1 first half
+                Duration::Eighth,   // Beat 1 second half - completes beat 1
+                Duration::Eighth,   // Beat 2 first half
+            ]);
+
+        let groups = builder.compute_beam_groups();
+        // Should be: [Eighth, Eighth] (beat 1), [Eighth] (beat 2)
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].notes.len(), 2);
+        assert_eq!(groups[1].notes.len(), 1);
     }
 }
