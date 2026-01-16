@@ -38,6 +38,9 @@ static BRAVURA_METADATA: &[u8] = include_bytes!("../../../packages/charts/resour
 static TEXT_FONT: &[u8] = include_bytes!("../../../packages/charts/resources/fonts/musescore/fonts/FreeSans.ttf");
 static MUSEJAZZ_TEXT_FONT: &[u8] = include_bytes!("../../../packages/charts/resources/fonts/musescore/fonts/musejazz/MuseJazzText.otf");
 
+/// Path to system Arial Bold font on macOS
+const ARIAL_BOLD_PATH: &str = "/System/Library/Fonts/Supplemental/Arial Bold.ttf";
+
 /// Screen DPI for rendering
 const SCREEN_DPI: f64 = 96.0;
 /// Points per inch (typographical standard)
@@ -153,6 +156,7 @@ struct ActiveRenderer {
     smufl_font: SMuFLFont<'static>,
     text_font_data: Arc<Vec<u8>>,
     musejazz_font_data: Arc<Vec<u8>>,
+    bold_font_data: Arc<Vec<u8>>,
     // Layout engine
     layout_engine: ChartLayoutEngine,
 }
@@ -307,6 +311,15 @@ impl CustomPaintSource for ChartVelloPaintSource {
         let text_font_data = Arc::new(TEXT_FONT.to_vec());
         let musejazz_font_data = Arc::new(MUSEJAZZ_TEXT_FONT.to_vec());
 
+        // Load Arial Bold from system fonts (macOS)
+        let bold_font_data = Arc::new(
+            std::fs::read(ARIAL_BOLD_PATH)
+                .unwrap_or_else(|e| {
+                    log::warn!("Failed to load Arial Bold from {}: {}, falling back to text font", ARIAL_BOLD_PATH, e);
+                    TEXT_FONT.to_vec()
+                })
+        );
+
         // Create layout engine with static style
         let style: &'static MStyle = Box::leak(Box::new(MStyle::default()));
         let layout_engine = ChartLayoutEngine::new(
@@ -325,6 +338,7 @@ impl CustomPaintSource for ChartVelloPaintSource {
             smufl_font,
             text_font_data,
             musejazz_font_data,
+            bold_font_data,
             layout_engine,
         }));
 
@@ -454,7 +468,12 @@ impl ActiveRenderer {
                 .with_font(&self.smufl_font)
                 .with_text_font_arc(self.text_font_data.clone())
                 .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone());
+                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                // Section note font - uses the text font (FreeSans/Arial style)
+                .with_named_font_arc("section-note", self.text_font_data.clone())
+                // Bold fonts for title and part name
+                .with_named_font_arc("title-bold", self.bold_font_data.clone())
+                .with_named_font_arc("part-name-bold", self.bold_font_data.clone());
 
             // Apply view transform to scene
             let mut transformed_scene = layout.scene.clone();

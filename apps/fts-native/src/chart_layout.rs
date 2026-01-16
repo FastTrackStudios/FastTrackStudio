@@ -8,17 +8,18 @@ use std::sync::Arc;
 use engraver::layout::context::LayoutContext;
 use engraver::layout::orchestrator::{PageLayout, PageMargins, SystemLayout};
 use engraver::layout::segment::SegmentType;
+use engraver::layout::segment_list::SegmentList;
 use engraver::layout::text_metrics::TextFontMetrics;
 use engraver::layout::tlayout::{
-    layout_clef, layout_harmony, layout_margin_label, layout_tie, layout_timesig, parse_chord,
-    rehearsal_themes, BarlineType, ClefParams, ClefType, HarmonyParams, HarmonyStyle,
-    MarginLabelParams, NoteHeadType, SlurDirection, SlurEndpoint, SlurTieConfig, TimeSigParams,
-    TimeSigType,
+    layout_clef, layout_harmony, layout_margin_label, layout_rest, layout_tie, layout_timesig,
+    parse_chord, rehearsal_themes, BarlineType, ClefParams, ClefType, HarmonyParams, HarmonyStyle,
+    MarginLabelParams, NoteHeadType, RestDuration, RestParams, SlurDirection, SlurEndpoint,
+    SlurTieConfig, TimeSigParams, TimeSigType,
 };
 use engraver::notation::{Duration, MeasureBuilder, MeasureScene};
 use engraver::scene::id::{ElementType, SemanticId};
 use engraver::scene::node::{metadata_keys, SceneNode};
-use engraver::scene::paint::PaintCommand;
+use engraver::scene::paint::{FontStyle, FontWeight, PaintCommand, TextAnchor};
 use engraver::style::MStyle;
 use keyflow::sections::SectionType;
 use keyflow::{Chart, ChartPosition, SourceLink};
@@ -451,7 +452,7 @@ impl Default for ChartLayoutConfig {
     fn default() -> Self {
         Self {
             margins: PageMargins {
-                top: 50.0,
+                top: 36.0, // Reduced from 50 to bring header closer to top
                 right: 50.0,
                 bottom: 50.0,
                 left: 72.0, // Extra left margin for section labels
@@ -561,8 +562,23 @@ impl ChartLayoutEngine {
         let page_offset_y = 20.0;
         let page_gap = 40.0;
 
+        // Track pending count-in measures to merge with next section
+        let mut pending_count_in: Option<usize> = None;
+
+        // Pre-compute section letters for consecutive repeats
+        let section_letters = self.compute_section_letters(&chart.sections);
+
+        // Track if we've added the title header (only on first page)
+        let mut title_header_added = false;
+
         // Process each section
         for (section_idx, chart_section) in chart.sections.iter().enumerate() {
+            // Handle count-in sections: store measure count and skip rendering
+            if chart_section.section.section_type.is_compact() {
+                pending_count_in = Some(chart_section.measures().len());
+                continue; // Don't render count-in as separate section
+            }
+
             // Reset chord tracking at section boundaries (rehearsal marks)
             // so the first chord of each section always shows
             previous_chord_symbol = None;
@@ -602,12 +618,29 @@ impl ChartLayoutEngine {
                 // Calculate page position
                 let page_x = page_offset_x + (page_number as f64 - 1.0) * (page_width + page_gap);
                 let content_x = page_x + self.config.margins.left;
-                let staff_y = page_offset_y + page_y;
 
                 // Add page background if this is first system on page
                 if current_page_systems.is_empty() {
                     self.add_page_background(&mut root, page_x, page_offset_y, page_width, page_height);
+                    self.add_page_footer(&mut root, page_x, page_offset_y, page_width, page_height);
+
+                    // Add title header on first page only
+                    if !title_header_added {
+                        let header_height = self.add_title_header(
+                            &mut root,
+                            page_x,
+                            page_offset_y,
+                            page_width,
+                            &chart.metadata,
+                            chart.tempo.as_ref(),
+                        );
+                        page_y += header_height;
+                        title_header_added = true;
+                    }
                 }
+
+                // Calculate staff_y (after potential header adjustment)
+                let staff_y = page_offset_y + page_y;
 
                 // Calculate system prefix width (clef + time sig) FIRST
                 // Needed to determine staff line width for short systems
@@ -629,20 +662,26 @@ impl ChartLayoutEngine {
                 let num_measures = measure_indices.len();
                 let max_measures = self.config.max_measures_per_system;
 
-                // For short lines (< max_measures), use natural width based on max_measures
-                // This prevents stretching 1-3 measures across the full line width
-                // Like LilyPond's pseudo-indent system
-                let (measure_width, is_short_system) = if num_measures < max_measures {
-                    // Natural width = what a measure would be if we had max_measures
-                    (measures_area_width / max_measures as f64, true)
-                } else {
-                    // Full line - distribute evenly
-                    (measures_area_width / num_measures as f64, false)
-                };
+                // Check if we have pending count-in measures for first system
+                let count_in_measures = if sys_idx == 0 { pending_count_in.take() } else { None };
+                let num_count_in = count_in_measures.unwrap_or(0);
+                let compact_scale = 0.4; // Count-in measures at 40% width
 
-                // Calculate actual system width (for short systems, staff lines are shorter)
+                // Calculate base measure width (what a normal measure would be)
+                let base_measure_width = measures_area_width / max_measures as f64;
+
+                // For width calculation, count-in measures count as fractional
+                let effective_measure_count = num_count_in as f64 * compact_scale + num_measures as f64;
+                let is_short_system = effective_measure_count < max_measures as f64;
+
+                // Regular measure width
+                let measure_width = base_measure_width;
+                // Count-in measure width (compact)
+                let count_in_width = base_measure_width * compact_scale;
+
+                // Calculate actual system width
                 let actual_system_width = if is_short_system {
-                    prefix_width + (num_measures as f64 * measure_width)
+                    prefix_width + (num_count_in as f64 * count_in_width) + (num_measures as f64 * measure_width)
                 } else {
                     content_width
                 };
@@ -654,14 +693,16 @@ impl ChartLayoutEngine {
 
                 let chord_y = staff_y - 8.0; // Above staff
 
-                // Add section label for first system of section
-                if sys_idx == 0 {
+                // Add section label for first system of section (skip for count-in)
+                if sys_idx == 0 && chart_section.section.section_type.should_show_header() {
+                    let letter = section_letters.get(&section_idx).copied();
                     let mut section_label = self.create_section_label(
                         &chart_section.section,
                         page_x,
                         self.config.margins.left,
                         staff_y,
                         staff_height,
+                        letter,
                         &ctx,
                         id_counter,
                     );
@@ -716,6 +757,44 @@ impl ChartLayoutEngine {
                 let time_signature = chart.time_signature
                     .map(|ts| (ts.numerator as u8, ts.denominator as u8))
                     .unwrap_or((4u8, 4u8));
+
+                // Render count-in measures (whole rests) if we have pending count-in
+                for _count_in_idx in 0..num_count_in {
+                    let count_in_result = self.layout_count_in_measure(
+                        count_in_width,
+                        false, // clef rendered separately
+                        false, // time sig rendered separately
+                        time_signature,
+                        &ctx,
+                        id_counter,
+                    );
+                    id_counter += 10;
+
+                    let mut count_in_container = SceneNode::group(
+                        SemanticId::new(ElementType::Measure, id_counter),
+                    );
+                    id_counter += 1;
+                    count_in_container.transform = Affine::translate((
+                        measure_x,
+                        staff_y + 2.0 * self.config.spatium,
+                    ));
+                    count_in_container.metadata.insert("page".to_string(), page_number.to_string());
+                    count_in_container.metadata.insert("count_in".to_string(), "true".to_string());
+                    count_in_container.add_child(count_in_result.scene);
+                    root.add_child(count_in_container);
+
+                    measure_x += count_in_width;
+
+                    // Barline after count-in measure
+                    let mut barline = self.draw_barline(
+                        measure_x,
+                        staff_y,
+                        staff_height,
+                        BarlineType::Single,
+                    );
+                    barline.metadata.insert("page".to_string(), page_number.to_string());
+                    root.add_child(barline);
+                }
 
                 for &measure_idx in measure_indices.iter() {
                     if let Some(measure) = chart_section.measures().get(measure_idx) {
@@ -882,8 +961,20 @@ impl ChartLayoutEngine {
         // Track previous chord to hide duplicates
         let mut previous_chord_symbol: Option<String> = None;
 
+        // Track pending count-in measures to merge with next section
+        let mut pending_count_in: Option<usize> = None;
+
+        // Pre-compute section letters for consecutive repeats
+        let section_letters = self.compute_section_letters(&chart.sections);
+
         // Process each section
         for (section_idx, chart_section) in chart.sections.iter().enumerate() {
+            // Handle count-in sections: store measure count and skip rendering
+            if chart_section.section.section_type.is_compact() {
+                pending_count_in = Some(chart_section.measures().len());
+                continue; // Don't render count-in as separate section
+            }
+
             // Reset chord tracking at section boundaries (rehearsal marks)
             // so the first chord of each section always shows
             previous_chord_symbol = None;
@@ -925,16 +1016,26 @@ impl ChartLayoutEngine {
                 let num_measures = measure_indices.len();
                 let max_measures = self.config.max_measures_per_system;
 
-                // For short lines (< max_measures), use natural width based on max_measures
-                let (measure_width, is_short_system) = if num_measures < max_measures {
-                    (measures_area_width / max_measures as f64, true)
-                } else {
-                    (measures_area_width / num_measures as f64, false)
-                };
+                // Check if we have pending count-in measures for first system
+                let count_in_measures = if sys_idx == 0 { pending_count_in.take() } else { None };
+                let num_count_in = count_in_measures.unwrap_or(0);
+                let compact_scale = 0.4; // Count-in measures at 40% width
 
-                // Calculate actual system width (for short systems, staff lines are shorter)
+                // Calculate base measure width (what a normal measure would be)
+                let base_measure_width = measures_area_width / max_measures as f64;
+
+                // For width calculation, count-in measures count as fractional
+                let effective_measure_count = num_count_in as f64 * compact_scale + num_measures as f64;
+                let is_short_system = effective_measure_count < max_measures as f64;
+
+                // Regular measure width
+                let measure_width = base_measure_width;
+                // Count-in measure width (compact)
+                let count_in_width = base_measure_width * compact_scale;
+
+                // Calculate actual system width
                 let actual_system_width = if is_short_system {
-                    prefix_width + (num_measures as f64 * measure_width)
+                    prefix_width + (num_count_in as f64 * count_in_width) + (num_measures as f64 * measure_width)
                 } else {
                     content_width
                 };
@@ -946,14 +1047,16 @@ impl ChartLayoutEngine {
 
                 let chord_y = staff_y - 8.0;
 
-                // Add section label for first system of section
-                if sys_idx == 0 {
+                // Add section label for first system of section (skip for count-in)
+                if sys_idx == 0 && chart_section.section.section_type.should_show_header() {
+                    let letter = section_letters.get(&section_idx).copied();
                     let section_label = self.create_section_label(
                         &chart_section.section,
                         0.0,
                         self.config.margins.left,
                         staff_y,
                         staff_height,
+                        letter,
                         &ctx,
                         id_counter,
                     );
@@ -1162,6 +1265,7 @@ impl ChartLayoutEngine {
         margin_width: f64,
         staff_y: f64,
         staff_height: f64,
+        letter: Option<char>,
         ctx: &LayoutContext<'_>,
         id: u64,
     ) -> SceneNode {
@@ -1173,6 +1277,8 @@ impl ChartLayoutEngine {
                 section_type,
                 abbreviation,
                 number,
+                letter,
+                note: section.note.clone(),
                 page_x,
                 margin_width,
                 staff_y,
@@ -1188,6 +1294,87 @@ impl ChartLayoutEngine {
         container
     }
 
+    /// Compute section letters for consecutive repeats of the same section type.
+    ///
+    /// When sections of the same type appear consecutively (e.g., Interlude Interlude Interlude),
+    /// they get lettered A, B, C, etc. If a different section type appears in between,
+    /// the lettering sequence resets.
+    ///
+    /// Example: VS VS CH VS becomes VS 1 A, VS 1 B, CH, VS 2 (letters only for consecutive)
+    /// Example: INT INT INT INT becomes INT A, INT B, INT C, INT D
+    fn compute_section_letters(
+        &self,
+        sections: &[keyflow::ChartSection],
+    ) -> std::collections::HashMap<usize, char> {
+        use std::collections::HashMap;
+
+        let mut letters: HashMap<usize, char> = HashMap::new();
+
+        // Track consecutive runs of the same section type
+        // We need to do two passes:
+        // 1. Find all consecutive runs
+        // 2. Assign letters to runs with 2+ sections
+
+        // Group sections by consecutive runs
+        let mut runs: Vec<(String, Vec<usize>)> = Vec::new();
+
+        for (idx, chart_section) in sections.iter().enumerate() {
+            // Skip compact sections (count-in) - they don't get letters
+            if chart_section.section.section_type.is_compact() {
+                continue;
+            }
+
+            // Get a key for the section type (ignoring number)
+            let type_key = self.section_type_key(&chart_section.section.section_type);
+
+            // Check if this continues the current run
+            if let Some((last_key, indices)) = runs.last_mut() {
+                if *last_key == type_key {
+                    indices.push(idx);
+                    continue;
+                }
+            }
+
+            // Start a new run
+            runs.push((type_key, vec![idx]));
+        }
+
+        // Assign letters to runs with 2+ sections
+        for (_, indices) in runs {
+            if indices.len() >= 2 {
+                for (i, idx) in indices.iter().enumerate() {
+                    // A = 0, B = 1, C = 2, etc.
+                    // Support up to Z (26 letters)
+                    if i < 26 {
+                        let letter = (b'A' + i as u8) as char;
+                        letters.insert(*idx, letter);
+                    }
+                }
+            }
+        }
+
+        letters
+    }
+
+    /// Get a string key for section type comparison (ignoring section number).
+    fn section_type_key(&self, section_type: &SectionType) -> String {
+        match section_type {
+            SectionType::Intro => "intro".to_string(),
+            SectionType::Verse => "verse".to_string(),
+            SectionType::Chorus => "chorus".to_string(),
+            SectionType::Bridge => "bridge".to_string(),
+            SectionType::Outro => "outro".to_string(),
+            SectionType::Instrumental => "instrumental".to_string(),
+            SectionType::CountIn => "countin".to_string(),
+            SectionType::Hits => "hits".to_string(),
+            SectionType::Interlude => "interlude".to_string(),
+            SectionType::Breakdown => "breakdown".to_string(),
+            SectionType::Pre(target) => format!("pre_{}", self.section_type_key(target)),
+            SectionType::Post(target) => format!("post_{}", self.section_type_key(target)),
+            SectionType::Custom(name) => format!("custom_{}", name.to_lowercase()),
+        }
+    }
+
     /// Convert SectionType to display strings.
     fn section_type_to_strings(&self, section_type: &SectionType) -> (String, String) {
         match section_type {
@@ -1197,6 +1384,10 @@ impl ChartLayoutEngine {
             SectionType::Bridge => ("Bridge".to_string(), "BR".to_string()),
             SectionType::Outro => ("Outro".to_string(), "OUT".to_string()),
             SectionType::Instrumental => ("Instrumental".to_string(), "INST".to_string()),
+            SectionType::CountIn => ("Count-In".to_string(), "COUNT".to_string()),
+            SectionType::Hits => ("Hits".to_string(), "HITS".to_string()),
+            SectionType::Interlude => ("Interlude".to_string(), "INT".to_string()),
+            SectionType::Breakdown => ("Breakdown".to_string(), "BD".to_string()),
             SectionType::Pre(target) => {
                 let (name, _) = self.section_type_to_strings(target);
                 (format!("Pre-{}", name), "PRE".to_string())
@@ -1217,6 +1408,10 @@ impl ChartLayoutEngine {
             SectionType::Chorus => rehearsal_themes::purple(),
             SectionType::Bridge => rehearsal_themes::light(),
             SectionType::Instrumental => rehearsal_themes::outline(),
+            SectionType::CountIn => rehearsal_themes::outline(), // Minimal style for count-in
+            SectionType::Hits => rehearsal_themes::dark(),
+            SectionType::Interlude => rehearsal_themes::light(),
+            SectionType::Breakdown => rehearsal_themes::dark(),
             SectionType::Pre(_) | SectionType::Post(_) => rehearsal_themes::purple(),
             SectionType::Custom(_) => rehearsal_themes::dark(),
         }
@@ -1327,6 +1522,228 @@ impl ChartLayoutEngine {
                 Color::WHITE,
             ),
         ]));
+    }
+
+    /// Add page footer with "Created with FastTrackStudio" text.
+    fn add_page_footer(
+        &self,
+        root: &mut SceneNode,
+        page_x: f64,
+        page_y: f64,
+        page_width: f64,
+        page_height: f64,
+    ) {
+        let footer_text = "Created with FastTrackStudio";
+        let font_size = 8.0;
+        let footer_y = page_y + page_height - 15.0; // 15 points from bottom
+        let center_x = page_x + page_width / 2.0;
+
+        root.add_child(SceneNode::anonymous_leaf(vec![
+            PaintCommand::Text {
+                text: footer_text.to_string(),
+                font_family: "sans-serif".to_string(),
+                font_size,
+                position: kurbo::Point::new(center_x, footer_y),
+                color: Color::from_rgb8(160, 160, 160), // Light gray
+                anchor: TextAnchor::Middle,
+                weight: FontWeight::Normal,
+                style: FontStyle::Normal,
+            },
+        ]));
+    }
+
+    /// Add title header section on first page (Title, Subtitle, Composer, etc.)
+    /// Returns the height consumed by the header for layout adjustment.
+    fn add_title_header(
+        &self,
+        root: &mut SceneNode,
+        page_x: f64,
+        page_y: f64,
+        page_width: f64,
+        metadata: &keyflow::SongMetadata,
+        tempo: Option<&keyflow::time::Tempo>,
+    ) -> f64 {
+        let mut commands = Vec::new();
+        let center_x = page_x + page_width / 2.0;
+        let right_x = page_x + page_width - self.config.margins.right;
+        let left_x = page_x + self.config.margins.left;
+
+        let frame_top_y = page_y + self.config.margins.top;
+        let line_spacing = 4.0;
+
+        // Title (large, bold, centered) - at the very top of the header
+        // Title is wrapped in quotes like "Thriller"
+        // Using "title-bold" font family for bold rendering
+        let title_font_size = 34.0;
+        let title_y = frame_top_y + title_font_size; // Baseline position
+
+        if let Some(ref title) = metadata.title {
+            let quoted_title = format!("\"{}\"", title);
+            commands.push(PaintCommand::Text {
+                text: quoted_title,
+                font_family: "title-bold".to_string(),
+                font_size: title_font_size,
+                position: kurbo::Point::new(center_x, title_y),
+                color: Color::BLACK,
+                anchor: TextAnchor::Middle,
+                weight: FontWeight::Bold,
+                style: FontStyle::Normal,
+            });
+        }
+
+        // Part name (left) and Composer/Artist (right) - aligned with vertical middle of title
+        // The vertical middle of the title is at: title_y - (title_font_size * 0.35)
+        // Part name/composer starts from that line going down
+        let title_vertical_middle = title_y - (title_font_size * 0.35);
+        let composer_text = metadata.composer.as_ref().or(metadata.artist.as_ref());
+
+        // Determine part name - default to "Master Rhythm" if not specified
+        let part_name = metadata.part_name.as_deref().unwrap_or("Master Rhythm");
+        let is_master_rhythm = part_name.eq_ignore_ascii_case("master rhythm");
+
+        // For Master Rhythm, split into two lines and render in bold caps
+        // For other part names, render as-is
+        let part_name_lines: Vec<String> = if is_master_rhythm {
+            vec!["MASTER".to_string(), "RHYTHM".to_string()]
+        } else {
+            vec![part_name.to_uppercase()]
+        };
+
+        let small_font_size = 11.0;
+        let part_start_y = title_vertical_middle + small_font_size * 0.35; // Align top of small text with title middle
+
+        // Part name - left aligned, bold font
+        for (i, line) in part_name_lines.iter().enumerate() {
+            let line_y = part_start_y + (i as f64 * (small_font_size + 2.0));
+            commands.push(PaintCommand::Text {
+                text: line.clone(),
+                font_family: "part-name-bold".to_string(),
+                font_size: small_font_size,
+                position: kurbo::Point::new(left_x, line_y),
+                color: Color::BLACK,
+                anchor: TextAnchor::Start,
+                weight: FontWeight::Bold,
+                style: FontStyle::Normal,
+            });
+        }
+
+        // Version - below part name, dark gray, not bold
+        // Default to V1 if not specified
+        let version = metadata.version.unwrap_or(1);
+        let version_y = part_start_y + (part_name_lines.len() as f64 * (small_font_size + 2.0));
+        commands.push(PaintCommand::Text {
+            text: format!("V{}", version),
+            font_family: "sans-serif".to_string(),
+            font_size: small_font_size,
+            position: kurbo::Point::new(left_x, version_y),
+            color: Color::from_rgb8(100, 100, 100), // Dark gray
+            anchor: TextAnchor::Start,
+            weight: FontWeight::Normal,
+            style: FontStyle::Normal,
+        });
+
+        // Tempo indicator - below version with padding
+        // Shows quarter note = BPM (e.g., "♩ = 120")
+        // MuseScore uses: text 12pt, symbol 20pt (ratio 5/3), bold text
+        let tempo_padding = 6.0; // Space between version and tempo
+        let tempo_y = version_y + small_font_size + tempo_padding;
+        let tempo_font_size = 12.0; // MuseScore default
+        let tempo_symbol_ratio = 5.0 / 3.0; // MuseScore DEFAULT_SYM_SIZE_RATIO
+        let tempo_symbol_pt = tempo_font_size * tempo_symbol_ratio; // 20pt
+        let tempo_glyph_size = tempo_symbol_pt / self.config.spatium; // Convert to spatiums
+
+        if let Some(tempo_val) = tempo {
+            // Quarter note glyph (SMuFL metNoteQuarterUp at U+ECA5)
+            // Glyph width is approximately 0.5 spatiums at size 1.0
+            let glyph_width = tempo_glyph_size * self.config.spatium * 0.5;
+
+            // Position glyph - adjust Y to align baseline with text
+            // The glyph extends above the baseline, so we need to offset
+            let glyph_y = tempo_y + tempo_symbol_pt * 0.15; // Slight adjustment for baseline alignment
+
+            commands.push(PaintCommand::Glyph {
+                codepoint: '\u{eca5}', // metNoteQuarterUp
+                position: kurbo::Point::new(left_x, glyph_y),
+                size: tempo_glyph_size,
+                color: Color::BLACK,
+            });
+
+            // "= BPM" text after the glyph
+            commands.push(PaintCommand::Text {
+                text: format!("= {}", tempo_val.bpm as u32),
+                font_family: "sans-serif".to_string(),
+                font_size: tempo_font_size,
+                position: kurbo::Point::new(left_x + glyph_width + 4.0, tempo_y),
+                color: Color::BLACK,
+                anchor: TextAnchor::Start,
+                weight: FontWeight::Bold, // MuseScore uses bold for tempo
+                style: FontStyle::Normal,
+            });
+        }
+
+        // Composer/Artist - right aligned
+        // Supports comma-separated artists: "Dirty Loops, Cory Wong" renders as two lines
+        let mut current_y = part_start_y;
+        if let Some(composer) = composer_text {
+            // Split by comma to support multiple artists
+            let artists: Vec<&str> = composer.split(',').map(|s| s.trim()).collect();
+            for (i, artist) in artists.iter().enumerate() {
+                let line_y = part_start_y + (i as f64 * (small_font_size + 2.0));
+                commands.push(PaintCommand::Text {
+                    text: artist.to_string(),
+                    font_family: "sans-serif".to_string(),
+                    font_size: small_font_size,
+                    position: kurbo::Point::new(right_x, line_y),
+                    color: Color::BLACK,
+                    anchor: TextAnchor::End,
+                    weight: FontWeight::Normal,
+                    style: FontStyle::Normal,
+                });
+            }
+
+            // Update current_y to account for all lines
+            let max_lines = part_name_lines.len().max(artists.len());
+            current_y = part_start_y + ((max_lines - 1) as f64 * (small_font_size + 2.0));
+        } else {
+            // Just part name lines
+            current_y = part_start_y + ((part_name_lines.len() - 1) as f64 * (small_font_size + 2.0));
+        }
+
+        // Subtitle (medium, centered) - below the title with minimal spacing
+        // Default to "Transcribed By: ______" if no subtitle provided
+        let subtitle_text = metadata.subtitle.clone()
+            .unwrap_or_else(|| "Transcribed By: ______".to_string());
+        let subtitle_font_size = 12.0;
+        // Position subtitle directly below the title baseline with small spacing
+        let subtitle_y = title_y + subtitle_font_size + 2.0;
+
+        commands.push(PaintCommand::Text {
+            text: subtitle_text,
+            font_family: "sans-serif".to_string(),
+            font_size: subtitle_font_size,
+            position: kurbo::Point::new(center_x, subtitle_y),
+            color: Color::from_rgb8(100, 100, 100),
+            anchor: TextAnchor::Middle,
+            weight: FontWeight::Normal,
+            style: FontStyle::Italic,
+        });
+
+        // Take the maximum of subtitle_y and the left column content (version + tempo)
+        // to ensure header height accounts for all content
+        let left_column_bottom = if tempo.is_some() {
+            tempo_y + tempo_font_size // Tempo is lowest element in left column
+        } else {
+            version_y + small_font_size // Version is lowest if no tempo
+        };
+        current_y = subtitle_y.max(left_column_bottom);
+
+        if !commands.is_empty() {
+            root.add_child(SceneNode::anonymous_leaf(commands));
+        }
+
+        // Return total header height (from margin top to current_y, plus some padding)
+        let header_height = current_y - (page_y + self.config.margins.top) + 20.0;
+        header_height.max(0.0)
     }
 
     /// Layout a single measure, returning the full MeasureScene with segment positions.
@@ -1464,6 +1881,78 @@ impl ChartLayoutEngine {
         }
 
         result
+    }
+
+    /// Layout a count-in measure with a whole rest.
+    ///
+    /// Count-in measures are rendered smaller and show only a whole rest,
+    /// indicating empty beats before the song starts.
+    fn layout_count_in_measure(
+        &self,
+        measure_width: f64,
+        include_clef: bool,
+        include_time_sig: bool,
+        time_signature: (u8, u8),
+        ctx: &LayoutContext<'_>,
+        id_base: u64,
+    ) -> MeasureScene {
+        let spatium = ctx.spatium();
+        let width_spatiums = measure_width / spatium;
+
+        // Create the root scene node for this measure
+        let mut root = SceneNode::group(SemanticId::new(ElementType::Measure, id_base));
+
+        let mut x_offset = 0.0;
+
+        // Optionally render clef
+        if include_clef {
+            let clef_params = ClefParams {
+                id: id_base + 1,
+                clef_type: ClefType::Treble,
+                ..Default::default()
+            };
+            let (clef_layout, mut clef_node) = layout_clef(&clef_params, ctx);
+            clef_node.transform = Affine::translate((x_offset, 0.0));
+            root.add_child(clef_node);
+            x_offset += clef_layout.bbox.width() + spatium * 0.5;
+        }
+
+        // Optionally render time signature
+        if include_time_sig {
+            let ts_params = TimeSigParams {
+                id: id_base + 2,
+                sig_type: TimeSigType::Numeric {
+                    numerator: time_signature.0,
+                    denominator: time_signature.1,
+                },
+                ..Default::default()
+            };
+            let (ts_layout, mut ts_node) = layout_timesig(&ts_params, ctx);
+            ts_node.transform = Affine::translate((x_offset, 0.0));
+            root.add_child(ts_node);
+            x_offset += ts_layout.bbox.width() + spatium * 0.5;
+        }
+
+        // Render whole rest centered in remaining space
+        let rest_params = RestParams {
+            id: id_base + 3,
+            duration: RestDuration::Whole,
+            dots: 0,
+            line: 0, // Center line
+        };
+        let (rest_layout, mut rest_node) = layout_rest(&rest_params, ctx);
+
+        // Center the rest in the remaining measure width
+        let remaining_width = measure_width - x_offset;
+        let rest_x = x_offset + (remaining_width - rest_layout.bbox.width()) / 2.0;
+        rest_node.transform = Affine::translate((rest_x, 0.0));
+        root.add_child(rest_node);
+
+        MeasureScene {
+            scene: root,
+            width: width_spatiums,
+            segments: SegmentList::new(), // Empty segment list for count-in
+        }
     }
 
     /// Add tie arcs for melody notes that cross barlines.
