@@ -30,12 +30,16 @@ visibility_manager = ["core", "dep:visibility-manager"]
 auto_color = ["core", "dep:dynamic-template"]
 # Enable embed test for testing reaper-embed windows
 embed_test = ["dep:reaper-embed", "dep:vello", "dep:raw-window-handle"]
+# Enable trackname overlay (TK_Trackname-style track labels in arrange)
+# Requires input feature for reaper_windows::get_arrange_wnd
+trackname_overlay = ["input", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
 
 [dependencies]
 dynamic-template = { path = "../../modules/dynamic-template", optional = true }
 visibility-manager = { path = "../../modules/visibility-manager", optional = true }
 reaper-embed = { path = "../../libs/reaper-embed", optional = true }
 vello = { version = "0.6", features = ["wgpu"], optional = true }
+skrifa = { version = "0.26", optional = true }
 raw-window-handle = { version = "0.6", optional = true }
 reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
@@ -67,6 +71,10 @@ n0-future = "0.3.0"
 crossbeam-channel = "0.5"
 helgoboss-midi = "0.4.0"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.24.0"
+objc = "0.2.7"
+
 [lib]
 name = "reaper_extension"
 crate-type = ["cdylib", "rlib"]
@@ -74,4 +82,3 @@ crate-type = ["cdylib", "rlib"]
 [lints.rust]
 unsafe_code = "allow"  # Required for low-level REAPER API calls
 unused = { level = "allow", priority = -1 }
-

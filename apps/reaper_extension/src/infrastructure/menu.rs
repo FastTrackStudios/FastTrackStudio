@@ -123,6 +123,10 @@ fn extract_category_from_command_id(command_id: &str) -> (String, Option<String>
     } else if command_id.starts_with("FTS_CHART_") {
         // Legacy chart actions - map to Keyflow
         ("Keyflow".to_string(), None)
+    } else if command_id.starts_with("FTS_TEST_WINDOW_") {
+        ("Test".to_string(), Some("Window".to_string()))
+    } else if command_id.starts_with("FTS_TEST_") {
+        ("Test".to_string(), None)
     } else {
         ("General".to_string(), None)
     }
@@ -184,7 +188,7 @@ fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
     // We'll build categorized menus first, then prepend General actions
     let mut categorized_menu_entries = Vec::new();
 
-    // Define category order (other categories, then Dev)
+    // Define category order (other categories, then Dev/Test)
     // Note: "General" category is handled separately to appear directly in root menu
     let category_order = vec![
         "Live",
@@ -194,6 +198,7 @@ fn extension_menu() -> swell_ui::menu_tree::Menu<String> {
         "Dynamic-Template",
         "Keyflow",
         "Dev",
+        "Test",
     ];
 
     // Add categorized submenus

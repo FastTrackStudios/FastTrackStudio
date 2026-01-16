@@ -22,6 +22,8 @@ mod visibility_manager;
 mod auto_color;
 #[cfg(feature = "embed_test")]
 mod embed_test;
+#[cfg(feature = "trackname_overlay")]
+mod trackname_overlay;
 
 /// Polling state management for continuous updates
 pub mod polling_state {
@@ -270,6 +272,12 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
                 // Process smooth seek queue (check if we should execute queued seeks)
                 app.smooth_seek_service.process_smooth_seek_queue();
+
+                // Refresh trackname overlay (if enabled and open)
+                #[cfg(feature = "trackname_overlay")]
+                {
+                    crate::trackname_overlay::refresh_overlay();
+                }
             } else {
                 warn!("⚠️ App instance not available in timer callback");
             }
