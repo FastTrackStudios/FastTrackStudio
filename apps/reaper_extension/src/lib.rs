@@ -20,6 +20,8 @@ mod lyrics;
 mod visibility_manager;
 #[cfg(feature = "auto_color")]
 mod auto_color;
+#[cfg(feature = "embed_test")]
+mod embed_test;
 
 /// Polling state management for continuous updates
 pub mod polling_state {

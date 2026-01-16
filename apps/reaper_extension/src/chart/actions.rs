@@ -108,7 +108,7 @@ fn format_chart_to_syntax(chart: &keyflow::chart::Chart) -> String {
         output.push_str(&section.section.display_name());
         output.push('\n');
 
-        if section.measures.is_empty() {
+        if section.measures().is_empty() {
             output.push('\n');
             continue;
         }
@@ -119,7 +119,7 @@ fn format_chart_to_syntax(chart: &keyflow::chart::Chart) -> String {
 
         // Format all measures first
         let mut all_measures_formatted = Vec::new();
-        for measure in &section.measures {
+        for measure in section.measures() {
             all_measures_formatted.push(format_measure_to_syntax(measure));
         }
 

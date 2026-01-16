@@ -38,3 +38,6 @@
 [submodule "libs/reference/graphics/vello_svg"]
 	path = libs/reference/graphics/vello_svg
 	url = https://github.com/linebender/vello_svg.git
+[submodule "libs/reference/reaper/reaimgui"]
+	path = libs/reference/reaper/reaimgui
+	url = https://github.com/cfillion/reaimgui.git

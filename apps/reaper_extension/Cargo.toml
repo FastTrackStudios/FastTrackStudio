@@ -28,10 +28,15 @@ dynamic_template = ["core", "dep:dynamic-template"]
 visibility_manager = ["core", "dep:visibility-manager"]
 # Enable Auto Color for automatic track coloring based on classification
 auto_color = ["core", "dep:dynamic-template"]
+# Enable embed test for testing reaper-embed windows
+embed_test = ["dep:reaper-embed", "dep:vello", "dep:raw-window-handle"]
 
 [dependencies]
 dynamic-template = { path = "../../modules/dynamic-template", optional = true }
 visibility-manager = { path = "../../modules/visibility-manager", optional = true }
+reaper-embed = { path = "../../libs/reaper-embed", optional = true }
+vello = { version = "0.6", features = ["wgpu"], optional = true }
+raw-window-handle = { version = "0.6", optional = true }
 reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-macros = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }

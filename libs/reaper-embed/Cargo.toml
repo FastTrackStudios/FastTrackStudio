@@ -1,0 +1,50 @@
+[package]
+name = "reaper-embed"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Embed Dioxus views and Vello scenes into REAPER windows"
+
+[features]
+default = ["vello"]
+vello = []
+dioxus = ["dep:dioxus", "dep:dioxus-native"]
+
+[dependencies]
+# Window management
+baseview = { path = "../vendor/baseview" }
+raw-window-handle = "0.6"
+
+# GPU rendering
+wgpu = { version = "26", features = ["wgsl"] }
+vello = { version = "0.6", features = ["wgpu"] }
+pollster = "0.4"
+
+# REAPER integration
+reaper-low.workspace = true
+reaper-medium.workspace = true
+
+# Utilities
+log = "0.4"
+thiserror.workspace = true
+
+# Optional: Dioxus support
+dioxus = { workspace = true, optional = true }
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", optional = true }
+
+# Platform-specific dependencies
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.24.0"
+objc = "0.2.7"
+core-foundation = "0.9.1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11 = "2.21"
+
+# Allow unsafe for platform-specific window operations
+[lints.rust]
+unsafe_code = "allow"

@@ -1056,6 +1056,12 @@ pub fn register_all_actions() {
         all_actions.extend(crate::auto_color::actions());
     }
 
+    // Add Embed Test actions to the batch (if embed_test feature is enabled)
+    #[cfg(feature = "embed_test")]
+    {
+        all_actions.extend(crate::embed_test::actions());
+    }
+
     // Register all actions in a single batch
     register_actions(&all_actions, "FastTrackStudio");
 
