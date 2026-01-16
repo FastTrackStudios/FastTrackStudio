@@ -17,7 +17,7 @@ pub mod semitone_sequence;
 pub use alteration::Alteration;
 pub use definition::Chord;
 pub use degree::ChordDegree;
-pub use duration::{ChordRhythm, LilySyntax, PushPullAmount};
+pub use duration::{ChordRhythm, LilySyntax, PushPullAmount, PushPullBase};
 pub use error::{ChordParseError, ChordParseErrors};
 pub use extensions::{ExtensionQuality, Extensions};
 pub use family::ChordFamily;

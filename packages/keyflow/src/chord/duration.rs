@@ -81,22 +81,116 @@ impl LilySyntax {
     }
 }
 
-/// Push/Pull amount (number of apostrophes)
+/// Base subdivision for push/pull timing
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum PushPullBase {
+    /// Standard (binary) subdivision
+    #[default]
+    Standard,
+    /// Triplet subdivision (3 in the space of 2)
+    Triplet,
+    /// Arbitrary tuplet (n in the space of the next lower power of 2)
+    Tuplet(u8),
+}
+
+impl PushPullBase {
+    /// Get the multiplier for this base
+    /// For triplets: 2/3 (triplet eighth = 2/3 of regular eighth)
+    /// For tuplets: calculates based on tuplet number
+    pub fn multiplier(&self) -> f64 {
+        match self {
+            PushPullBase::Standard => 1.0,
+            PushPullBase::Triplet => 2.0 / 3.0,
+            PushPullBase::Tuplet(n) => {
+                // For a quintuplet (5): 4/5 (5 notes in space of 4)
+                // For a septuplet (7): 4/7 (7 notes in space of 4)
+                // General: next lower power of 2 / n
+                let power_of_2 = (*n as f64).log2().floor() as u8;
+                let base = 2u8.pow(power_of_2 as u32) as f64;
+                base / (*n as f64)
+            }
+        }
+    }
+}
+
+/// Push/Pull amount (number of apostrophes + optional base)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum PushPullAmount {
-    Eighth,       // ' - one apostrophe
-    Sixteenth,    // '' - two apostrophes
-    ThirtySecond, // ''' - three apostrophes
+pub struct PushPullAmount {
+    /// The subdivision level (1 = eighth, 2 = sixteenth, 3 = thirty-second)
+    pub level: u8,
+    /// The base timing (standard, triplet, or custom tuplet)
+    pub base: PushPullBase,
 }
 
 impl PushPullAmount {
+    /// Create from apostrophe count with standard (binary) timing
     pub fn from_count(count: u8) -> Option<Self> {
-        match count {
-            1 => Some(PushPullAmount::Eighth),
-            2 => Some(PushPullAmount::Sixteenth),
-            3 => Some(PushPullAmount::ThirtySecond),
-            _ => None,
+        if count == 0 || count > 3 {
+            return None;
         }
+        Some(Self {
+            level: count,
+            base: PushPullBase::Standard,
+        })
+    }
+
+    /// Create from apostrophe count with triplet timing
+    pub fn from_count_triplet(count: u8) -> Option<Self> {
+        if count == 0 || count > 3 {
+            return None;
+        }
+        Some(Self {
+            level: count,
+            base: PushPullBase::Triplet,
+        })
+    }
+
+    /// Create from apostrophe count with custom tuplet
+    pub fn from_count_tuplet(count: u8, tuplet: u8) -> Option<Self> {
+        if count == 0 || count > 3 || tuplet < 3 {
+            return None;
+        }
+        Some(Self {
+            level: count,
+            base: PushPullBase::Tuplet(tuplet),
+        })
+    }
+
+    /// Create a single apostrophe amount with a specific base
+    pub fn single(base: PushPullBase) -> Self {
+        Self { level: 1, base }
+    }
+
+    /// Get the beat value for this push/pull amount
+    pub fn to_beats(&self) -> f64 {
+        let base_beats = match self.level {
+            1 => 0.5,   // eighth note
+            2 => 0.25,  // sixteenth note
+            3 => 0.125, // thirty-second note
+            _ => 0.5,   // fallback
+        };
+        base_beats * self.base.multiplier()
+    }
+
+    /// Convenience constructors
+    pub fn eighth() -> Self {
+        Self::from_count(1).unwrap()
+    }
+
+    pub fn sixteenth() -> Self {
+        Self::from_count(2).unwrap()
+    }
+
+    pub fn thirty_second() -> Self {
+        Self::from_count(3).unwrap()
+    }
+
+    pub fn eighth_triplet() -> Self {
+        Self::from_count_triplet(1).unwrap()
+    }
+
+    pub fn sixteenth_triplet() -> Self {
+        Self::from_count_triplet(2).unwrap()
     }
 }
 
@@ -425,15 +519,8 @@ impl ChordRhythm {
                 MusicalDuration::from_beats(total_beats, time_sig)
             }
             ChordRhythm::Push(amount) | ChordRhythm::Pull(amount) => {
-                // Push/pull adjusts by subdivision amount
-                let subdivision_beats = match amount {
-                    PushPullAmount::Eighth => 0.5,
-                    PushPullAmount::Sixteenth => 0.25,
-                    PushPullAmount::ThirtySecond => 0.125,
-                };
-                // For now, return the subdivision amount
-                // TODO: This should adjust the chord's position, not just duration
-                MusicalDuration::from_beats(subdivision_beats, time_sig)
+                // Push/pull adjusts by subdivision amount (now supports triplets/tuplets)
+                MusicalDuration::from_beats(amount.to_beats(), time_sig)
             }
         }
     }

@@ -2,6 +2,7 @@
 //!
 //! Configuration options for chart parsing and display
 
+use crate::chord::PushPullBase;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -10,6 +11,9 @@ use std::collections::HashMap;
 pub struct ChartSettings {
     /// Internal settings storage
     settings: HashMap<ChartSetting, SettingValue>,
+    /// Default push/pull base (standard, triplet, or tuplet)
+    #[serde(default)]
+    pub push_mode: PushPullBase,
 }
 
 /// Available chart settings
@@ -17,6 +21,8 @@ pub struct ChartSettings {
 pub enum ChartSetting {
     /// Automatically group repeated phrases into 4-bar units with repeat signs
     SmartRepeats,
+    /// Default push/pull mode (standard, triplet, or tuplet number)
+    PushMode,
 }
 
 /// Setting value types
@@ -35,7 +41,10 @@ impl ChartSettings {
         // Set defaults
         settings.insert(ChartSetting::SmartRepeats, SettingValue::Bool(false));
 
-        Self { settings }
+        Self {
+            settings,
+            push_mode: PushPullBase::Standard,
+        }
     }
 
     /// Parse a setting line (e.g., "/SMART_REPEATS=true")
@@ -61,7 +70,38 @@ impl ChartSettings {
                 self.set(ChartSetting::SmartRepeats, SettingValue::Bool(bool_value));
                 Ok(())
             }
+            "PUSH" => {
+                self.push_mode = Self::parse_push_mode(value)?;
+                Ok(())
+            }
             _ => Err(format!("Unknown setting: '{}'", key)),
+        }
+    }
+
+    /// Parse push mode value: "standard", "triplet", or a number for tuplet
+    fn parse_push_mode(value: &str) -> Result<PushPullBase, String> {
+        let value_lower = value.to_lowercase();
+        match value_lower.as_str() {
+            "standard" | "normal" | "binary" => Ok(PushPullBase::Standard),
+            "triplet" | "3" => Ok(PushPullBase::Triplet),
+            _ => {
+                // Try to parse as a tuplet number (5, 7, 9, etc.)
+                if let Ok(n) = value.parse::<u8>() {
+                    if n >= 3 {
+                        Ok(PushPullBase::Tuplet(n))
+                    } else {
+                        Err(format!(
+                            "Invalid tuplet value: '{}'. Must be 3 or greater",
+                            value
+                        ))
+                    }
+                } else {
+                    Err(format!(
+                        "Invalid push mode: '{}'. Expected 'standard', 'triplet', or a number",
+                        value
+                    ))
+                }
+            }
         }
     }
 
@@ -128,6 +168,7 @@ impl ChartSetting {
     pub fn name(&self) -> &'static str {
         match self {
             ChartSetting::SmartRepeats => "SMART_REPEATS",
+            ChartSetting::PushMode => "PUSH",
         }
     }
 }

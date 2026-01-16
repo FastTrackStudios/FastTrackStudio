@@ -13,7 +13,7 @@ use super::dynamics::DynamicMarking;
 use super::melody::Melody;
 use super::track::{Track, TrackType};
 use super::types::{ChartSection, ChordInstance, KeyChange, Measure, TempoChange};
-use crate::chord::{Chord, ChordRhythm, PushPullAmount};
+use crate::chord::{Chord, ChordRhythm, PushPullAmount, PushPullBase};
 use crate::key::Key;
 use crate::metadata::SongMetadata;
 use crate::parsing::{Lexer, TextSpan};
@@ -74,6 +74,49 @@ enum RepeatCount {
     Auto,
 }
 
+/// Push/pull modifier extracted from token
+#[derive(Debug, Clone, Copy, Default)]
+struct PushPullModifier {
+    /// Number of apostrophes (1-3)
+    count: usize,
+    /// Explicit triplet marker 't'
+    is_triplet: bool,
+    /// Explicit tuplet number from ':N' syntax
+    tuplet: Option<u8>,
+}
+
+impl PushPullModifier {
+    /// Check if this modifier is present
+    fn is_present(&self) -> bool {
+        self.count > 0
+    }
+
+    /// Convert to PushPullAmount using default base from settings
+    fn to_amount(&self, default_base: PushPullBase) -> Option<PushPullAmount> {
+        if self.count == 0 {
+            return None;
+        }
+
+        // Determine the base: explicit modifiers override default
+        let base = if self.is_triplet {
+            PushPullBase::Triplet
+        } else if let Some(n) = self.tuplet {
+            if n == 3 {
+                PushPullBase::Triplet
+            } else {
+                PushPullBase::Tuplet(n)
+            }
+        } else {
+            default_base
+        };
+
+        Some(PushPullAmount {
+            level: self.count as u8,
+            base,
+        })
+    }
+}
+
 impl Chart {
     /// Strip comments from a line (everything after ;)
     fn strip_comment(line: &str) -> &str {
@@ -87,7 +130,8 @@ impl Chart {
     /// Resolve a measure expression and update section memory
     ///
     /// Returns the resolved measure count, or None if the expression can't be resolved.
-    /// Always updates section memory with the resolved value for subsequent expressions.
+    /// Only absolute expressions update the memory - relative expressions (+N, -N) use
+    /// memory but don't change it, so subsequent sections still use the original base.
     fn resolve_measure_expression(
         &mut self,
         section_type: &SectionType,
@@ -96,10 +140,12 @@ impl Chart {
         let memory = self.section_measure_memory.get(section_type).copied();
         let resolved = expr.resolve(memory);
 
-        // Always update memory with resolved value for subsequent expressions
+        // Only update memory for absolute expressions (not relative +N or -N)
         if let Some(count) = resolved {
-            self.section_measure_memory
-                .insert(section_type.clone(), count);
+            if expr.updates_memory() {
+                self.section_measure_memory
+                    .insert(section_type.clone(), count);
+            }
         }
 
         resolved
@@ -187,6 +233,23 @@ impl Chart {
                 self.parse_metadata_line(line)?;
                 idx += 1;
             }
+        }
+
+        // Skip empty lines and parse settings after metadata line
+        while idx < lines.len() {
+            if lines[idx].is_empty() {
+                idx += 1;
+                continue;
+            }
+
+            // Check for settings (lines starting with /)
+            if lines[idx].starts_with('/') {
+                self.parse_setting(lines[idx])?;
+                idx += 1;
+                continue;
+            }
+
+            break;
         }
 
         Ok(idx)
@@ -293,59 +356,131 @@ impl Chart {
         }
     }
 
-    /// Extract leading apostrophes for push notation
-    /// Examples: "'C" -> (1, "C")
-    ///           "''Em" -> (2, "Em")
-    ///           "C" -> (0, "C")
-    fn extract_leading_apostrophes(token: &str) -> (usize, &str) {
-        let mut count = 0;
-        let chars = token.chars();
+    /// Extract leading push modifiers for push notation
+    /// Examples: "'C" -> (modifier with count=1, "C")
+    ///           "''Em" -> (modifier with count=2, "Em")
+    ///           "'tC" -> (modifier with count=1, triplet=true, "C")
+    ///           "':5C" -> (modifier with count=1, tuplet=5, "C")
+    ///           "C" -> (empty modifier, "C")
+    fn extract_leading_push_modifiers(token: &str) -> (PushPullModifier, &str) {
+        let mut modifier = PushPullModifier::default();
+        let mut pos = 0;
+        let bytes = token.as_bytes();
 
-        for ch in chars {
-            if ch == '\'' {
-                count += 1;
-            } else {
-                // Found non-apostrophe, return count and rest of string
-                return (count, &token[count..]);
+        // Count leading apostrophes
+        while pos < bytes.len() && bytes[pos] == b'\'' {
+            modifier.count += 1;
+            pos += 1;
+        }
+
+        if modifier.count == 0 {
+            return (modifier, token);
+        }
+
+        // Check for triplet 't' marker
+        if pos < bytes.len() && bytes[pos] == b't' {
+            modifier.is_triplet = true;
+            pos += 1;
+        }
+        // Check for tuplet ':N' marker
+        else if pos < bytes.len() && bytes[pos] == b':' {
+            pos += 1;
+            // Parse the number
+            let num_start = pos;
+            while pos < bytes.len() && bytes[pos].is_ascii_digit() {
+                pos += 1;
+            }
+            if pos > num_start {
+                if let Ok(n) = token[num_start..pos].parse::<u8>() {
+                    if n >= 3 {
+                        modifier.tuplet = Some(n);
+                    }
+                }
             }
         }
 
-        // All apostrophes (shouldn't happen in practice)
-        (count, "")
+        (modifier, &token[pos..])
     }
 
-    /// Extract trailing apostrophes for pull notation
-    /// Examples: "C'" -> ("C", 1)
-    ///           "Em''" -> ("Em", 2)
-    ///           "D'//  -> ("D//", 1) - stops at rhythm notation
-    ///           "C" -> ("C", 0)
-    fn extract_trailing_apostrophes(token: &str) -> (String, usize) {
+    /// Extract trailing pull modifiers for pull notation
+    /// Examples: "C'" -> ("C", modifier with count=1)
+    ///           "Em''" -> ("Em", modifier with count=2)
+    ///           "C't" -> ("C", modifier with count=1, triplet=true)
+    ///           "C':5" -> ("C", modifier with count=1, tuplet=5)
+    ///           "D'//  -> ("D//", modifier with count=1) - stops at rhythm notation
+    ///           "C" -> ("C", empty modifier)
+    fn extract_trailing_pull_modifiers(token: &str) -> (String, PushPullModifier) {
         // First, find where the chord part ends and rhythm notation begins
-        // Rhythm notation: /, _, or more apostrophes
+        // Rhythm notation: /, _
         let rhythm_start = token.find(['/', '_']).unwrap_or(token.len());
 
-        // Only extract apostrophes between chord and rhythm
-        let chord_and_apostrophes = &token[..rhythm_start];
+        // Only extract modifiers between chord and rhythm
+        let chord_and_modifiers = &token[..rhythm_start];
         let rhythm_part = &token[rhythm_start..];
 
-        let mut count = 0;
-        // Count trailing apostrophes from the chord part only
-        for ch in chord_and_apostrophes.chars().rev() {
-            if ch == '\'' {
-                count += 1;
-            } else {
-                break;
+        let mut modifier = PushPullModifier::default();
+
+        // Work backwards from end of chord_and_modifiers
+        let bytes = chord_and_modifiers.as_bytes();
+        let mut end_pos = bytes.len();
+
+        // Check for trailing tuplet number first (e.g., ":5" at the end)
+        // Pattern: ':' followed by digits at the very end
+        if end_pos >= 2 {
+            let mut num_end = end_pos;
+            let mut num_start = end_pos;
+
+            // Find digits at end
+            while num_start > 0 && bytes[num_start - 1].is_ascii_digit() {
+                num_start -= 1;
+            }
+
+            // Check if preceded by ':'
+            if num_start > 0 && num_start < num_end && bytes[num_start - 1] == b':' {
+                if let Ok(n) = chord_and_modifiers[num_start..num_end].parse::<u8>() {
+                    if n >= 3 {
+                        modifier.tuplet = Some(n);
+                        end_pos = num_start - 1; // Position before ':'
+                    }
+                }
             }
         }
 
-        if count > 0 {
-            // Remove apostrophes but keep rhythm
-            let chord_only = &chord_and_apostrophes[..chord_and_apostrophes.len() - count];
-            let result = format!("{}{}", chord_only, rhythm_part);
-            (result, count)
-        } else {
-            (token.to_string(), 0)
+        // Check for trailing 't' marker
+        if end_pos > 0 && bytes[end_pos - 1] == b't' {
+            // Make sure it's not part of a chord name - check if preceded by apostrophe
+            if end_pos > 1 && bytes[end_pos - 2] == b'\'' {
+                modifier.is_triplet = true;
+                end_pos -= 1;
+            }
         }
+
+        // Count trailing apostrophes
+        while end_pos > 0 && bytes[end_pos - 1] == b'\'' {
+            modifier.count += 1;
+            end_pos -= 1;
+        }
+
+        if modifier.count > 0 {
+            // Remove modifiers but keep rhythm
+            let chord_only = &chord_and_modifiers[..end_pos];
+            let result = format!("{}{}", chord_only, rhythm_part);
+            (result, modifier)
+        } else {
+            (token.to_string(), modifier)
+        }
+    }
+
+    /// Legacy function for backward compatibility - extracts just apostrophe count
+    fn extract_leading_apostrophes(token: &str) -> (usize, &str) {
+        let (modifier, rest) = Self::extract_leading_push_modifiers(token);
+        (modifier.count, rest)
+    }
+
+    /// Legacy function for backward compatibility - extracts just apostrophe count
+    fn extract_trailing_apostrophes(token: &str) -> (String, usize) {
+        let (result, modifier) = Self::extract_trailing_pull_modifiers(token);
+        (result, modifier.count)
     }
 
     /// Split a slash chord into chord and bass parts
@@ -643,9 +778,11 @@ impl Chart {
             };
 
             // Check if this is a section marker (based on marker part only)
-            if let Some((section_type, measure_expr)) =
-                SectionType::parse_with_measure_count(section_marker)
-            {
+            if let Some(parsed) = SectionType::parse_with_measure_count(section_marker) {
+                let section_type = parsed.section_type;
+                let measure_expr = parsed.measure_expr;
+                let section_note = parsed.note;
+
                 // Resolve the measure expression using section memory
                 let measure_count = if let Some(expr) = measure_expr.as_ref() {
                     self.resolve_measure_expression(&section_type, expr)
@@ -660,6 +797,9 @@ impl Chart {
                         Section::new(section_type.clone()).with_subsection(is_subsection);
                     if let Some(count) = measure_count {
                         section.measure_count = Some(count);
+                    }
+                    if let Some(note) = section_note.clone() {
+                        section.note = Some(note);
                     }
 
                     let measures = if content.is_empty() {
@@ -706,6 +846,7 @@ impl Chart {
                         section_type,
                         measure_count,
                         is_subsection,
+                        section_note,
                     )?;
                 }
             } else {
@@ -780,11 +921,15 @@ impl Chart {
         section_type: SectionType,
         measure_count: Option<usize>,
         is_subsection: bool,
+        note: Option<String>,
     ) -> Result<usize, String> {
         let mut idx = start_idx + 1; // Skip section marker line
         let mut section = Section::new(section_type.clone()).with_subsection(is_subsection);
         if let Some(count) = measure_count {
             section.measure_count = Some(count);
+        }
+        if let Some(n) = note {
+            section.note = Some(n);
         }
 
         // Collect content lines for this section
@@ -969,7 +1114,7 @@ impl Chart {
             None
         };
 
-        self.parse_section_content(lines, start_idx, section_type, measure_count, false)
+        self.parse_section_content(lines, start_idx, section_type, measure_count, false, None)
     }
 
     /// Parse "post" section (post-chorus, post-verse, etc.)
@@ -985,7 +1130,7 @@ impl Chart {
             None
         };
 
-        self.parse_section_content(lines, start_idx, section_type, measure_count, false)
+        self.parse_section_content(lines, start_idx, section_type, measure_count, false, None)
     }
 
     /// Parse section content lines into measures
@@ -1476,11 +1621,11 @@ impl Chart {
         };
         let token_clean = token_no_accent.as_str();
 
-        // Check for push notation (leading apostrophes: 'C, ''Em, etc.)
-        let (push_count, token_after_push) = Self::extract_leading_apostrophes(token_clean);
+        // Check for push notation (leading apostrophes with optional triplet/tuplet: 'C, ''Em, 'tC, ':5C)
+        let (push_modifier, token_after_push) = Self::extract_leading_push_modifiers(token_clean);
 
-        // Check for pull notation (trailing apostrophes: C', Em'', etc.)
-        let (token_after_pull, pull_count) = Self::extract_trailing_apostrophes(token_after_push);
+        // Check for pull notation (trailing apostrophes with optional triplet/tuplet: C', Em'', C't, C':5)
+        let (token_after_pull, pull_modifier) = Self::extract_trailing_pull_modifiers(token_after_push);
 
         // Check for slash chord (e.g., "1/3", "Cmaj7/E", "g/b")
         // But NOT rhythm slashes (e.g., "g//", "C///")
@@ -1526,13 +1671,13 @@ impl Chart {
         let rhythm = chord.duration.clone().unwrap_or(ChordRhythm::Default);
         let duration = rhythm.to_duration(time_sig);
 
-        // Store push/pull counts for later adjustment
-        let push_pull_info = if push_count > 0 {
-            use crate::chord::PushPullAmount;
-            PushPullAmount::from_count(push_count as u8).map(|amt| (true, amt))
-        } else if pull_count > 0 {
-            use crate::chord::PushPullAmount;
-            PushPullAmount::from_count(pull_count as u8).map(|amt| (false, amt))
+        // Store push/pull info for later adjustment
+        // Use settings.push_mode as the default base, but explicit 't' or ':N' modifiers override it
+        let default_push_mode = self.settings.push_mode;
+        let push_pull_info = if push_modifier.is_present() {
+            push_modifier.to_amount(default_push_mode).map(|amt| (true, amt))
+        } else if pull_modifier.is_present() {
+            pull_modifier.to_amount(default_push_mode).map(|amt| (false, amt))
         } else {
             None
         };
@@ -1714,12 +1859,8 @@ impl Chart {
 
     /// Convert push/pull amount to beat adjustment
     fn push_pull_to_duration(amount: PushPullAmount) -> f64 {
-        use crate::chord::PushPullAmount;
-        match amount {
-            PushPullAmount::Eighth => 0.5,         // eighth note
-            PushPullAmount::Sixteenth => 0.25,     // sixteenth note
-            PushPullAmount::ThirtySecond => 0.125, // 32nd note
-        }
+        // Use the new to_beats method which handles triplets and tuplets
+        amount.to_beats()
     }
 
     /// Calculate absolute positions for all elements in the chart

@@ -833,19 +833,31 @@ impl Chart {
         name
     }
 
+    /// Format a push/pull amount for syntax output
+    pub(crate) fn format_push_pull_amount(amount: &crate::chord::PushPullAmount) -> String {
+        use crate::chord::PushPullBase;
+
+        // Generate apostrophes based on level
+        let apostrophes: String = "'".repeat(amount.level as usize);
+
+        // Add base modifier if not standard
+        let modifier = match &amount.base {
+            PushPullBase::Standard => String::new(),
+            PushPullBase::Triplet => "t".to_string(),
+            PushPullBase::Tuplet(n) => format!(":{}", n),
+        };
+
+        format!("{}{}", apostrophes, modifier)
+    }
+
     /// Format a chord for syntax output
     fn format_chord_for_syntax(&self, chord: &ChordInstance, _time_sig: &(u8, u8)) -> String {
         let mut output = String::new();
 
-        // Push notation (leading apostrophes)
+        // Push notation (leading apostrophes with optional triplet/tuplet)
         if let Some((is_push, amount)) = &chord.push_pull {
             if *is_push {
-                let apostrophes = match amount {
-                    crate::chord::PushPullAmount::Eighth => "'",
-                    crate::chord::PushPullAmount::Sixteenth => "''",
-                    crate::chord::PushPullAmount::ThirtySecond => "'''",
-                };
-                output.push_str(apostrophes);
+                output.push_str(&Self::format_push_pull_amount(amount));
             }
         }
 
@@ -855,15 +867,10 @@ impl Chart {
         // Rhythm notation
         output.push_str(&self.format_rhythm_for_syntax(&chord.rhythm));
 
-        // Pull notation (trailing apostrophes)
+        // Pull notation (trailing apostrophes with optional triplet/tuplet)
         if let Some((is_push, amount)) = &chord.push_pull {
             if !is_push {
-                let apostrophes = match amount {
-                    crate::chord::PushPullAmount::Eighth => "'",
-                    crate::chord::PushPullAmount::Sixteenth => "''",
-                    crate::chord::PushPullAmount::ThirtySecond => "'''",
-                };
-                output.push_str(apostrophes);
+                output.push_str(&Self::format_push_pull_amount(amount));
             }
         }
 

@@ -390,9 +390,9 @@ impl std::fmt::Display for Chart {
                     let mut chord_text = String::new();
 
                     // Push/pull notation
-                    if let Some((is_push, _amount)) = chord.push_pull {
-                        if is_push {
-                            chord_text.push('\'');
+                    if let Some((is_push, amount)) = &chord.push_pull {
+                        if *is_push {
+                            chord_text.push_str(&Self::format_push_pull_amount(amount));
                         }
                     }
 
@@ -404,9 +404,9 @@ impl std::fmt::Display for Chart {
                     }
 
                     // Pull notation
-                    if let Some((is_push, _amount)) = chord.push_pull {
-                        if !is_push {
-                            chord_text.push('\'');
+                    if let Some((is_push, amount)) = &chord.push_pull {
+                        if !*is_push {
+                            chord_text.push_str(&Self::format_push_pull_amount(amount));
                         }
                     }
 

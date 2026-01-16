@@ -49,7 +49,7 @@ vs
     match chord_c.push_pull {
         Some((true, amount)) => {
             use keyflow::chord::PushPullAmount;
-            assert_eq!(amount, PushPullAmount::Eighth);
+            assert_eq!(amount, PushPullAmount::eighth());
         }
         _ => panic!("Expected Push for 'C, got {:?}", chord_c.push_pull),
     }
@@ -65,7 +65,7 @@ vs
     match chord_em.push_pull {
         Some((true, amount)) => {
             use keyflow::chord::PushPullAmount;
-            assert_eq!(amount, PushPullAmount::Eighth);
+            assert_eq!(amount, PushPullAmount::eighth());
         }
         _ => panic!("Expected Push for 'Em, got {:?}", chord_em.push_pull),
     }
@@ -100,7 +100,7 @@ C' D Em' F
     match chord1.push_pull {
         Some((false, amount)) => {
             use keyflow::chord::PushPullAmount;
-            assert_eq!(amount, PushPullAmount::Eighth);
+            assert_eq!(amount, PushPullAmount::eighth());
         }
         _ => panic!("Expected Pull for C', got {:?}", chord1.push_pull),
     }
@@ -116,7 +116,7 @@ C' D Em' F
     match chord3.push_pull {
         Some((false, amount)) => {
             use keyflow::chord::PushPullAmount;
-            assert_eq!(amount, PushPullAmount::Eighth);
+            assert_eq!(amount, PushPullAmount::eighth());
         }
         _ => panic!("Expected Pull for Em', got {:?}", chord3.push_pull),
     }
@@ -150,7 +150,7 @@ vs
     match chord_c.push_pull {
         Some((true, amount)) => {
             use keyflow::chord::PushPullAmount;
-            assert_eq!(amount, PushPullAmount::Sixteenth);
+            assert_eq!(amount, PushPullAmount::sixteenth());
         }
         _ => panic!(
             "Expected Push(Sixteenth) for ''C, got {:?}",
@@ -164,7 +164,7 @@ vs
     match chord_em.push_pull {
         Some((true, amount)) => {
             use keyflow::chord::PushPullAmount;
-            assert_eq!(amount, PushPullAmount::Sixteenth);
+            assert_eq!(amount, PushPullAmount::sixteenth());
         }
         _ => panic!(
             "Expected Push(Sixteenth) for ''Em, got {:?}",
@@ -196,7 +196,7 @@ C''' D Em''' F
     match chord1.push_pull {
         Some((false, amount)) => {
             use keyflow::chord::PushPullAmount;
-            assert_eq!(amount, PushPullAmount::ThirtySecond);
+            assert_eq!(amount, PushPullAmount::thirty_second());
         }
         _ => panic!(
             "Expected Pull(ThirtySecond) for C''', got {:?}",
@@ -210,7 +210,7 @@ C''' D Em''' F
     match chord3.push_pull {
         Some((false, amount)) => {
             use keyflow::chord::PushPullAmount;
-            assert_eq!(amount, PushPullAmount::ThirtySecond);
+            assert_eq!(amount, PushPullAmount::thirty_second());
         }
         _ => panic!(
             "Expected Pull(ThirtySecond) for Em''', got {:?}",
@@ -242,7 +242,7 @@ vs
     match chord_c.push_pull {
         Some((true, amount)) => {
             use keyflow::chord::PushPullAmount;
-            assert_eq!(amount, PushPullAmount::Eighth);
+            assert_eq!(amount, PushPullAmount::eighth());
         }
         _ => panic!("Expected Push(Eighth) for 'C"),
     }
@@ -253,7 +253,7 @@ vs
     match chord_dm.push_pull {
         Some((false, amount)) => {
             use keyflow::chord::PushPullAmount;
-            assert_eq!(amount, PushPullAmount::Eighth);
+            assert_eq!(amount, PushPullAmount::eighth());
         }
         _ => panic!("Expected Pull(Eighth) for D'"),
     }
@@ -264,7 +264,7 @@ vs
     match chord_em.push_pull {
         Some((true, amount)) => {
             use keyflow::chord::PushPullAmount;
-            assert_eq!(amount, PushPullAmount::Sixteenth);
+            assert_eq!(amount, PushPullAmount::sixteenth());
         }
         _ => panic!("Expected Push(Sixteenth) for ''Em"),
     }
@@ -275,7 +275,7 @@ vs
     match chord_f.push_pull {
         Some((false, amount)) => {
             use keyflow::chord::PushPullAmount;
-            assert_eq!(amount, PushPullAmount::ThirtySecond);
+            assert_eq!(amount, PushPullAmount::thirty_second());
         }
         _ => panic!("Expected Pull(ThirtySecond) for F'''"),
     }
