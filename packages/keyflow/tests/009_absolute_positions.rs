@@ -19,33 +19,33 @@ Cmaj7/// Dm7///
     // Section declared as 8 measures, but only has 2 measures of chords
     // Should be padded with 6 space measures
     assert_eq!(
-        section.measures.len(),
+        section.measures().len(),
         8,
         "Section should have exactly 8 measures"
     );
 
     // First two measures have actual chords
-    assert!(!section.measures[0].chords.is_empty());
-    assert_eq!(section.measures[0].chords[0].full_symbol, "Cmaj7");
-    assert!(!section.measures[1].chords.is_empty());
-    assert_eq!(section.measures[1].chords[0].full_symbol, "Dm7");
+    assert!(!section.measures()[0].chords.is_empty());
+    assert_eq!(section.measures()[0].chords[0].full_symbol, "Cmaj7");
+    assert!(!section.measures()[1].chords.is_empty());
+    assert_eq!(section.measures()[1].chords[0].full_symbol, "Dm7");
 
     // Remaining measures should contain space chords "s"
     for i in 2..8 {
         assert!(
-            !section.measures[i].chords.is_empty(),
+            !section.measures()[i].chords.is_empty(),
             "Measure {} should have a space chord",
             i
         );
         assert_eq!(
-            section.measures[i].chords[0].full_symbol, "s",
+            section.measures()[i].chords[0].full_symbol, "s",
             "Measure {} should be a space chord",
             i
         );
     }
 
     // Check absolute positions
-    let all_chords: Vec<_> = section.measures.iter().flat_map(|m| &m.chords).collect();
+    let all_chords: Vec<_> = section.measures().iter().flat_map(|m| &m.chords).collect();
 
     // Should have 8 chords total (2 actual + 6 space)
     assert_eq!(all_chords.len(), 8);
@@ -81,11 +81,11 @@ Em7/// Fmaj7///
     assert_eq!(chart.sections.len(), 2);
 
     // Verse: 8 measures (2 with chords, 6 empty)
-    assert_eq!(chart.sections[0].measures.len(), 8);
+    assert_eq!(chart.sections[0].measures().len(), 8);
 
     // Chorus should start at measure 8 (after the padded verse)
     let chorus_first_chord = chart.sections[1]
-        .measures
+        .measures()
         .iter()
         .flat_map(|m| &m.chords)
         .next()
@@ -112,11 +112,11 @@ Cmaj7/// Dm7/// Em7/// Fmaj7///
     println!("{}", chart);
 
     let section = &chart.sections[0];
-    assert_eq!(section.measures.len(), 4);
+    assert_eq!(section.measures().len(), 4);
 
     // Each chord is 3 beats (///) in 4/4 time
     // Positions should be: 0.0.0, 0.3.0, 1.2.0, 2.1.0
-    let chords: Vec<_> = section.measures.iter().flat_map(|m| &m.chords).collect();
+    let chords: Vec<_> = section.measures().iter().flat_map(|m| &m.chords).collect();
 
     assert_eq!(chords.len(), 4);
 
@@ -152,7 +152,7 @@ Cmaj7/// Dm7/// 6/8 Em7/. Fmaj7/.
     println!("{}", chart);
 
     let section = &chart.sections[0];
-    let chords: Vec<_> = section.measures.iter().flat_map(|m| &m.chords).collect();
+    let chords: Vec<_> = section.measures().iter().flat_map(|m| &m.chords).collect();
 
     assert_eq!(chords.len(), 4);
 
@@ -195,7 +195,7 @@ Cmaj7/// @keys "here" Dm7/// Em7///
 
     // Find the measure with the cue
     let cue_measure = section
-        .measures
+        .measures()
         .iter()
         .find(|m| !m.text_cues.is_empty())
         .expect("Should have a measure with cues");
@@ -230,7 +230,7 @@ Em7/// Fmaj7///
 
     // Verse chords
     let verse_chords: Vec<_> = chart.sections[0]
-        .measures
+        .measures()
         .iter()
         .flat_map(|m| &m.chords)
         .collect();
@@ -243,7 +243,7 @@ Em7/// Fmaj7///
     // Verse has 4 measures declared, with 2 chords + 2 spaces
     // Verse ends at 3.2.0, so chorus starts at 3.2.0
     let chorus_chords: Vec<_> = chart.sections[1]
-        .measures
+        .measures()
         .iter()
         .flat_map(|m| &m.chords)
         .collect();
@@ -271,7 +271,7 @@ Cmaj7//// 'Dm7////
     println!("{}", chart);
 
     let section = &chart.sections[0];
-    let chords: Vec<_> = section.measures.iter().flat_map(|m| &m.chords).collect();
+    let chords: Vec<_> = section.measures().iter().flat_map(|m| &m.chords).collect();
 
     // With push, there might be a space inserted, but positions should still be sequential
     // The pushed chord should still have a position

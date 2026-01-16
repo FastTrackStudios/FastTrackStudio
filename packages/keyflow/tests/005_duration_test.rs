@@ -33,10 +33,10 @@ Gmaj7_4 Cmaj7_2 Dm7_8 Em7_8
     // Gmaj7_4 (1) + Cmaj7_2 (2) + Dm7_8 (0.5) + Em7_8 (0.5) = 4 beats = 1 measure
     let verse_section = &chart.sections[0];
     assert_eq!(verse_section.section.section_type, SectionType::Verse);
-    assert_eq!(verse_section.measures.len(), 1);
+    assert_eq!(verse_section.measures().len(), 1);
 
     // Single measure with all 4 chords
-    let measure1 = &verse_section.measures[0];
+    let measure1 = &verse_section.measures()[0];
     assert_eq!(measure1.chords.len(), 4);
 
     // Test first chord: Gmaj7_4 (quarter note, 1 beat)
@@ -114,10 +114,10 @@ Gmaj7//// Cmaj7// Dm7/ Em7/
     // Gmaj7//// (4 beats) = 1 measure, Cmaj7// (2) + Dm7/ (1) = 3 beats (partial measure)
     let verse_section = &chart.sections[0];
     assert_eq!(verse_section.section.section_type, SectionType::Verse);
-    assert_eq!(verse_section.measures.len(), 2);
+    assert_eq!(verse_section.measures().len(), 2);
 
     // Measure 1: Gmaj7//// (4 beats fills the measure)
-    let measure1 = &verse_section.measures[0];
+    let measure1 = &verse_section.measures()[0];
     assert_eq!(measure1.chords.len(), 1);
     let chord1 = &measure1.chords[0];
     assert_eq!(format!("{}", chord1.root), "G");
@@ -131,7 +131,7 @@ Gmaj7//// Cmaj7// Dm7/ Em7/
     }
 
     // Measure 2: Cmaj7// (2) + Dm7/ (1) + Em7/ (1) = 4 beats
-    let measure2 = &verse_section.measures[1];
+    let measure2 = &verse_section.measures()[1];
     assert_eq!(measure2.chords.len(), 3);
 
     let chord2 = &measure2.chords[0]; // Cmaj7//
@@ -198,10 +198,10 @@ Gmaj7_4 C//// Dm7_2 Em7/
     // Gmaj7_4 (1) = partial, C//// (4) would exceed so m1=Gmaj7_4, m2=C////, Dm7_2(2)+Em7/(1)=m3
     let verse_section = &chart.sections[0];
     assert_eq!(verse_section.section.section_type, SectionType::Verse);
-    assert_eq!(verse_section.measures.len(), 3);
+    assert_eq!(verse_section.measures().len(), 3);
 
     // Measure 1: Gmaj7_4 (1 beat, partial measure)
-    let measure1 = &verse_section.measures[0];
+    let measure1 = &verse_section.measures()[0];
     assert_eq!(measure1.chords.len(), 1);
     let chord1 = &measure1.chords[0];
     assert_eq!(format!("{}", chord1.root), "G");
@@ -210,7 +210,7 @@ Gmaj7_4 C//// Dm7_2 Em7/
     assert_eq!(chord1.duration.to_beats(chart.time_signature.unwrap()), 1.0);
 
     // Measure 2: C//// (4 beats fills the measure)
-    let measure2 = &verse_section.measures[1];
+    let measure2 = &verse_section.measures()[1];
     assert_eq!(measure2.chords.len(), 1);
     let chord2 = &measure2.chords[0];
     assert_eq!(format!("{}", chord2.root), "C");
@@ -219,7 +219,7 @@ Gmaj7_4 C//// Dm7_2 Em7/
     assert_eq!(chord2.duration.to_beats(chart.time_signature.unwrap()), 4.0);
 
     // Measure 3: Dm7_2 (2 beats) + Em7/ (1 beat) = 3 beats (partial measure)
-    let measure3 = &verse_section.measures[2];
+    let measure3 = &verse_section.measures()[2];
     assert_eq!(measure3.chords.len(), 2);
 
     let chord3 = &measure3.chords[0]; // Dm7_2
@@ -262,10 +262,10 @@ Gmaj7_4. Cmaj7_2. Dm7_8.
     // Test Verse section
     // Gmaj7_4. (1.5) alone, then Cmaj7_2. (3) + Dm7_8. (0.75) = 3.75
     let verse_section = &chart.sections[0];
-    assert_eq!(verse_section.measures.len(), 2);
+    assert_eq!(verse_section.measures().len(), 2);
 
     // Measure 1: Gmaj7_4. (dotted quarter = 1.5 beats, partial measure)
-    let measure1 = &verse_section.measures[0];
+    let measure1 = &verse_section.measures()[0];
     assert_eq!(measure1.chords.len(), 1);
     let chord1 = &measure1.chords[0];
     assert_eq!(chord1.full_symbol, "Gmaj7");
@@ -278,7 +278,7 @@ Gmaj7_4. Cmaj7_2. Dm7_8.
     }
 
     // Measure 2: Cmaj7_2. (3 beats) + Dm7_8. (0.75 beats) = 3.75 beats (partial measure)
-    let measure2 = &verse_section.measures[1];
+    let measure2 = &verse_section.measures()[1];
     assert_eq!(measure2.chords.len(), 2);
 
     let chord2 = &measure2.chords[0]; // Cmaj7_2.
@@ -331,10 +331,10 @@ Gmaj7 Cmaj7 Dm7 Em7
 
     // Test Verse section
     let verse_section = &chart.sections[0];
-    assert_eq!(verse_section.measures.len(), 4);
+    assert_eq!(verse_section.measures().len(), 4);
 
     // All chords should have default duration (full measure in 4/4 = 4 beats)
-    for (i, measure) in verse_section.measures.iter().enumerate() {
+    for (i, measure) in verse_section.measures().iter().enumerate() {
         let chord = &measure.chords[0];
         assert!(
             matches!(chord.rhythm, ChordRhythm::Default),
@@ -368,10 +368,10 @@ Gmaj13_4 C9_2 Gmaj13// C9/
     assert_eq!(chart.sections.len(), 1);
 
     let verse_section = &chart.sections[0];
-    assert_eq!(verse_section.measures.len(), 2);
+    assert_eq!(verse_section.measures().len(), 2);
 
     // Measure 1: Gmaj13_4 (1) + C9_2 (2) = 3 beats (partial)
-    let measure1 = &verse_section.measures[0];
+    let measure1 = &verse_section.measures()[0];
     assert_eq!(measure1.chords.len(), 2);
 
     let chord1 = &measure1.chords[0]; // Gmaj13_4
@@ -385,7 +385,7 @@ Gmaj13_4 C9_2 Gmaj13// C9/
     assert_eq!(chord2.duration.to_beats(chart.time_signature.unwrap()), 2.0);
 
     // Measure 2: Gmaj13// (2) + C9/ (1) = 3 beats (partial)
-    let measure2 = &verse_section.measures[1];
+    let measure2 = &verse_section.measures()[1];
     assert_eq!(measure2.chords.len(), 2);
 
     let chord3 = &measure2.chords[0]; // Gmaj13//
@@ -425,7 +425,7 @@ Gmaj7
 
     // Test 4/4
     let chart_4_4 = Chart::parse(input_4_4).unwrap();
-    let chord_4_4 = &chart_4_4.sections[0].measures[0].chords[0];
+    let chord_4_4 = &chart_4_4.sections[0].measures()[0].chords[0];
     assert_eq!(
         chord_4_4
             .duration
@@ -435,7 +435,7 @@ Gmaj7
 
     // Test 3/4
     let chart_3_4 = Chart::parse(input_3_4).unwrap();
-    let chord_3_4 = &chart_3_4.sections[0].measures[0].chords[0];
+    let chord_3_4 = &chart_3_4.sections[0].measures()[0].chords[0];
     assert_eq!(
         chord_3_4
             .duration
@@ -445,7 +445,7 @@ Gmaj7
 
     // Test 6/8
     let chart_6_8 = Chart::parse(input_6_8).unwrap();
-    let chord_6_8 = &chart_6_8.sections[0].measures[0].chords[0];
+    let chord_6_8 = &chart_6_8.sections[0].measures()[0].chords[0];
     assert_eq!(
         chord_6_8
             .duration
@@ -478,13 +478,13 @@ G// C// D/ Em7/
     // Intro: slash notation (4 beats each)
     let intro = &chart.sections[0];
     assert_eq!(
-        intro.measures[0].chords[0]
+        intro.measures()[0].chords[0]
             .duration
             .to_beats(chart.time_signature.unwrap()),
         4.0
     );
     assert_eq!(
-        intro.measures[1].chords[0]
+        intro.measures()[1].chords[0]
             .duration
             .to_beats(chart.time_signature.unwrap()),
         4.0
@@ -492,10 +492,10 @@ G// C// D/ Em7/
 
     // Verse: 1 measure with 4 quarter notes (1 beat each)
     let verse = &chart.sections[1];
-    assert_eq!(verse.measures.len(), 1);
-    assert_eq!(verse.measures[0].chords.len(), 4);
+    assert_eq!(verse.measures().len(), 1);
+    assert_eq!(verse.measures()[0].chords.len(), 4);
     assert_eq!(
-        verse.measures[0].chords[0]
+        verse.measures()[0].chords[0]
             .duration
             .to_beats(chart.time_signature.unwrap()),
         1.0
@@ -503,10 +503,10 @@ G// C// D/ Em7/
 
     // Chorus: 2 measures, each with 2 half notes (2 beats each)
     let chorus = &chart.sections[2];
-    assert_eq!(chorus.measures.len(), 2);
-    assert_eq!(chorus.measures[0].chords.len(), 2);
+    assert_eq!(chorus.measures().len(), 2);
+    assert_eq!(chorus.measures()[0].chords.len(), 2);
     assert_eq!(
-        chorus.measures[0].chords[0]
+        chorus.measures()[0].chords[0]
             .duration
             .to_beats(chart.time_signature.unwrap()),
         2.0
@@ -514,29 +514,29 @@ G// C// D/ Em7/
 
     // Bridge: 2 measures (G//+C//=4 beats, D/+Em7/=2 beats partial)
     let bridge = &chart.sections[3];
-    assert_eq!(bridge.measures.len(), 2);
-    assert_eq!(bridge.measures[0].chords.len(), 2); // G// + C//
+    assert_eq!(bridge.measures().len(), 2);
+    assert_eq!(bridge.measures()[0].chords.len(), 2); // G// + C//
     assert_eq!(
-        bridge.measures[0].chords[0]
+        bridge.measures()[0].chords[0]
             .duration
             .to_beats(chart.time_signature.unwrap()),
         2.0
     ); // G//
     assert_eq!(
-        bridge.measures[0].chords[1]
+        bridge.measures()[0].chords[1]
             .duration
             .to_beats(chart.time_signature.unwrap()),
         2.0
     ); // C//
-    assert_eq!(bridge.measures[1].chords.len(), 2); // D/ + Em7/
+    assert_eq!(bridge.measures()[1].chords.len(), 2); // D/ + Em7/
     assert_eq!(
-        bridge.measures[1].chords[0]
+        bridge.measures()[1].chords[0]
             .duration
             .to_beats(chart.time_signature.unwrap()),
         1.0
     ); // D/
     assert_eq!(
-        bridge.measures[1].chords[1]
+        bridge.measures()[1].chords[1]
             .duration
             .to_beats(chart.time_signature.unwrap()),
         1.0

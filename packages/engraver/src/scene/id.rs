@@ -78,6 +78,8 @@ pub enum ElementType {
     Dynamic,
     /// An articulation (staccato, accent, etc.)
     Articulation,
+    /// A fermata (pause/hold sign)
+    Fermata,
     /// A slur
     Slur,
     /// A tie
@@ -128,6 +130,7 @@ impl ElementType {
             Self::Tempo => "tempo",
             Self::Dynamic => "dynamic",
             Self::Articulation => "articulation",
+            Self::Fermata => "fermata",
             Self::Slur => "slur",
             Self::Tie => "tie",
             Self::Hairpin => "hairpin",

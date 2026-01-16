@@ -39,10 +39,11 @@ pub mod shape;
 pub mod skyline;
 pub mod spacing;
 pub mod springs;
+pub mod text_metrics;
 pub mod tlayout;
 
 pub use autoplace::{Autoplace, AutoplaceConfig, AutoplaceResult, AutoplaceState};
-pub use context::{LayoutConfiguration, LayoutContext, LayoutMode, LayoutState};
+pub use context::{LayoutConfiguration, LayoutContext, LayoutContextOwned, LayoutMode, LayoutState};
 pub use kerning::{KerningType, SpacingPadding, SpacingPaddingPixels};
 pub use orchestrator::{
     layout_score, layout_score_with_config, LayoutEngine, LayoutEngineBuilder,
@@ -54,6 +55,7 @@ pub use shape::{Shape, ShapeElement};
 pub use skyline::{Skyline, SkylineElement, SkylineLine};
 pub use spacing::{HorizontalSpacing, MinimumDistance, SpacingResult, SqueezeIterator};
 pub use springs::{HorizontalSpacingContext, SpacingConfig, Spring, SpringRow};
+pub use text_metrics::TextFontMetrics;
 pub use tlayout::{Layout, LayoutData};
 
 /// Unit conversions and newtype wrappers for dimensional safety.

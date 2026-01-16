@@ -52,11 +52,11 @@ pub enum StyleValue {
 pub fn default_value(sid: Sid) -> StyleValue {
     match sid {
         // ====================================================================
-        // Page Layout - A4 default with 15mm margins
+        // Page Layout - US Letter default with 15mm margins
         // ====================================================================
-        Sid::PageWidth => StyleValue::Real(8.27),           // A4 width in inches
-        Sid::PageHeight => StyleValue::Real(11.69),         // A4 height in inches
-        Sid::PagePrintableWidth => StyleValue::Real(7.09),  // Width minus margins
+        Sid::PageWidth => StyleValue::Real(8.5),            // US Letter width in inches
+        Sid::PageHeight => StyleValue::Real(11.0),          // US Letter height in inches
+        Sid::PagePrintableWidth => StyleValue::Real(7.32),  // Width minus margins
         Sid::PageEvenLeftMargin => StyleValue::Real(0.59),  // 15mm in inches
         Sid::PageEvenTopMargin => StyleValue::Real(0.59),
         Sid::PageEvenBottomMargin => StyleValue::Real(0.59),
@@ -185,9 +185,9 @@ mod tests {
 
     #[test]
     fn test_page_defaults() {
-        // A4 page size
+        // US Letter page size
         if let StyleValue::Real(w) = default_value(Sid::PageWidth) {
-            assert!((w - 8.27).abs() < 0.01);
+            assert!((w - 8.5).abs() < 0.01);
         } else {
             panic!("PageWidth should be Real");
         }

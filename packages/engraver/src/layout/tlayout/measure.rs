@@ -3,7 +3,7 @@
 //! Orchestrates layout of all elements within a measure.
 
 use kurbo::{Point, Rect};
-use peniko::Color;
+use vello::peniko::Color;
 
 use crate::layout::context::LayoutContext;
 use crate::layout::segment::{Segment, SegmentType};

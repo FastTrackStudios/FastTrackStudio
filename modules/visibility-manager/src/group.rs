@@ -160,43 +160,12 @@ impl VisibilityGroup {
     }
 }
 
-/// Colors for different instrument categories (RGB values)
-pub mod group_colors {
-    pub const DRUMS: u32 = 0xFF6B6B;       // Red
-    pub const PERCUSSION: u32 = 0xFFA07A;  // Light Salmon
-    pub const BASS: u32 = 0x4ECDC4;        // Teal
-    pub const GUITARS: u32 = 0x95E1D3;     // Mint
-    pub const KEYS: u32 = 0xF7DC6F;        // Yellow
-    pub const SYNTHS: u32 = 0xBB8FCE;      // Purple
-    pub const HORNS: u32 = 0xF8B500;       // Orange
-    pub const HARMONICA: u32 = 0xE59866;   // Tan
-    pub const VOCALS: u32 = 0x85C1E9;      // Light Blue
-    pub const CHOIR: u32 = 0x7FB3D5;       // Blue
-    pub const ORCHESTRA: u32 = 0xAB47BC;   // Deep Purple
-    pub const SFX: u32 = 0x82E0AA;         // Green
-    pub const GUIDE: u32 = 0xAAAAAA;       // Gray
-    pub const REFERENCE: u32 = 0x888888;   // Dark Gray
-}
-
 /// Get the default color for a category
+///
+/// Delegates to `dynamic_template::colors::color_for_group` for consistent
+/// color definitions across the codebase.
 pub fn color_for_category(category: &str) -> Option<u32> {
-    match category.to_lowercase().as_str() {
-        "drums" => Some(group_colors::DRUMS),
-        "percussion" => Some(group_colors::PERCUSSION),
-        "bass" => Some(group_colors::BASS),
-        "guitars" => Some(group_colors::GUITARS),
-        "keys" => Some(group_colors::KEYS),
-        "synths" => Some(group_colors::SYNTHS),
-        "horns" => Some(group_colors::HORNS),
-        "harmonica" => Some(group_colors::HARMONICA),
-        "vocals" => Some(group_colors::VOCALS),
-        "choir" => Some(group_colors::CHOIR),
-        "orchestra" => Some(group_colors::ORCHESTRA),
-        "sfx" => Some(group_colors::SFX),
-        "guide" => Some(group_colors::GUIDE),
-        "reference" => Some(group_colors::REFERENCE),
-        _ => None,
-    }
+    dynamic_template::colors::color_for_group(category)
 }
 
 #[cfg(test)]

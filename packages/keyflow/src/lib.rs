@@ -13,7 +13,10 @@ pub mod sections;
 pub mod time;
 
 // Re-exports for convenience
-pub use chart::{Chart, ChartSection, ChordInstance, KeyChange, Measure};
+pub use chart::{
+    Chart, ChartIndex, ChartPosition, ChartSection, ChordInstance, DynamicMarking, ElementId,
+    KeyChange, Measure, NavigationType, SemanticRole, SourceLink, TempoChange,
+};
 pub use chord::{
     Alteration, Chord, ChordDegree, ChordFamily, ChordParseError, ChordParseErrors, ChordQuality,
     ChordRhythm, ExtensionQuality, Extensions, LilySyntax, PushPullAmount, RootParseResult,
@@ -21,7 +24,7 @@ pub use chord::{
 };
 pub use key::{Key, ScaleMode, ScaleType};
 pub use metadata::SongMetadata;
-pub use parsing::{Lexer, ParseError, Token, TokenType};
+pub use parsing::{Lexer, ParseError, TextSpan, Token, TokenType};
 pub use primitives::{
     Interval, MusicalNote, MusicalNoteToken, Note, RomanCase, RomanNumeralToken, RootFormat,
     RootNotation, ScaleDegreeToken,

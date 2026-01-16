@@ -6,6 +6,7 @@
 
 use kurbo::{Point, Rect};
 
+use crate::error::Result;
 use crate::layout::context::LayoutContext;
 use crate::layout::shape::Shape;
 use crate::model::ElementId;
@@ -83,6 +84,12 @@ impl LayoutData {
 /// layout logic. This replaces MuseScore's TLayout static factory class
 /// with a more idiomatic Rust approach using trait dispatch.
 ///
+/// # Error Handling
+///
+/// All methods return `Result` to allow proper error propagation instead
+/// of panicking. Common errors include empty collections, missing fonts,
+/// and invalid element indices.
+///
 /// # Implementation Strategy
 ///
 /// - Implement directly for concrete types (Note, Harmony, Rest, etc.)
@@ -93,12 +100,12 @@ impl LayoutData {
 ///
 /// ```ignore
 /// impl Layout for Harmony {
-///     fn layout(&self, ctx: &LayoutContext) -> LayoutData {
+///     fn layout(&self, ctx: &LayoutContext) -> Result<LayoutData> {
 ///         // Chord symbol-specific layout logic
 ///         harmony::layout_harmony(self, ctx)
 ///     }
 ///
-///     fn shape(&self, ctx: &LayoutContext) -> Shape {
+///     fn shape(&self, ctx: &LayoutContext) -> Result<Shape> {
 ///         harmony::harmony_shape(self, ctx)
 ///     }
 /// }
@@ -108,29 +115,44 @@ pub trait Layout {
     ///
     /// Returns a `LayoutData` containing position, bounding box,
     /// and collision shape for the element.
-    fn layout(&self, ctx: &LayoutContext) -> LayoutData;
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the element cannot be laid out (e.g., empty chord).
+    fn layout(&self, ctx: &LayoutContext) -> Result<LayoutData>;
 
     /// Get bounding shape for collision detection.
     ///
     /// Returns a `Shape` representing the collision boundary
     /// of this element. Used for horizontal spacing and autoplace.
-    fn shape(&self, ctx: &LayoutContext) -> Shape;
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the shape cannot be computed.
+    fn shape(&self, ctx: &LayoutContext) -> Result<Shape>;
 
     /// Get natural width of this element (before stretching).
     ///
     /// Default implementation uses the shape's bounding box width.
-    fn natural_width(&self, ctx: &LayoutContext) -> f64 {
-        self.shape(ctx).bbox().width()
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the width cannot be computed.
+    fn natural_width(&self, ctx: &LayoutContext) -> Result<f64> {
+        Ok(self.shape(ctx)?.bbox().width())
     }
 }
 
 // Element-specific layout modules
 pub mod accidentals_layout;
+pub mod articulation;
 pub mod barline;
 pub mod beam_layout;
 pub mod chord;
 pub mod clef;
 pub mod dynamics;
+pub mod fermata;
+pub mod harmony;
 pub mod keysig;
 pub mod lyrics;
 pub mod measure;
@@ -140,6 +162,9 @@ pub mod rest;
 pub mod timesig;
 pub mod slur_tie;
 pub mod tuplet;
+pub mod repeat_signs;
+pub mod brackets;
+pub mod system_dividers;
 
 // Re-exports for convenient access
 pub use accidentals_layout::{
@@ -159,7 +184,9 @@ pub use note::{layout_note, note_shape, Accidental, NoteDuration, NoteHeadType, 
 pub use rest::{layout_multi_measure_rest, layout_rest, RestDuration, RestParams};
 pub use timesig::{layout_timesig, TimeSigParams, TimeSigType};
 pub use slur_tie::{
-    layout_slur, layout_tie, SlurDirection, SlurEndpoint, SlurStyle, SlurTieConfig, SlurTieLayout,
+    layout_slur, layout_slur_with_obstacles, layout_tie, layout_tie_with_obstacles,
+    ObstacleType, SlurControlPoints, SlurDirection, SlurEndpoint, SlurObstacle, SlurStyle,
+    SlurTieConfig, SlurTieLayout,
 };
 pub use tuplet::{
     layout_tuplet, TupletBracketType, TupletConfig, TupletLayout, TupletNote, TupletNumberType,
@@ -168,6 +195,34 @@ pub use tuplet::{
 pub use rehearsal_mark::{
     layout_margin_label, layout_rehearsal_mark, layout_section_label, MarginLabelParams,
     RehearsalMarkLayoutData, RehearsalMarkParams, RehearsalMarkStyle, themes as rehearsal_themes,
+};
+pub use harmony::{
+    layout_harmony, parse_chord, ChordNotation, HarmonyLayoutData, HarmonyParams, HarmonyStyle,
+    SymbolSet, musejazz, smufl,
+};
+pub use fermata::{
+    layout_fermata, layout_fermatas, FermataConfig, FermataInput, FermataLayout,
+    FermataPlacement, FermataType,
+};
+pub use articulation::{
+    layout_articulation, layout_articulations, ArticulationAlign, ArticulationAnchor,
+    ArticulationConfig, ArticulationContext, ArticulationInput, ArticulationLayout,
+    ArticulationType,
+};
+pub use repeat_signs::{
+    layout_jump, layout_jumps, layout_marker, layout_markers, JumpInput, JumpLayout, JumpType,
+    MarkerInput, MarkerLayout, MarkerType, RepeatPlacement, RepeatSignConfig,
+    smufl as repeat_smufl,
+};
+pub use brackets::{
+    layout_bracket, layout_brackets, total_brackets_width, BracketConfig, BracketInput,
+    BracketLayout, BracketType, create_brace_path, create_square_bracket_path,
+    select_brace_glyph, brace_magnification, smufl as bracket_smufl,
+};
+pub use system_dividers::{
+    layout_system_divider, layout_system_dividers, system_divider_width, DividerSide,
+    SystemDividerConfig, SystemDividerInput, SystemDividerLayout, SystemDividerStyle,
+    smufl as divider_smufl,
 };
 
 #[cfg(test)]

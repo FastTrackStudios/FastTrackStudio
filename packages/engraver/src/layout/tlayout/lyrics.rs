@@ -7,7 +7,7 @@
 //! - Melisma lines (extended notes)
 
 use kurbo::{Point, Rect};
-use peniko::Color;
+use vello::peniko::Color;
 
 use crate::layout::context::LayoutContext;
 use crate::layout::shape::Shape;

@@ -3,6 +3,7 @@ members = [
     "apps/reaper_extension",
     "apps/plugins/wgpu_reaper_demo",
     "apps/plugins/gain",
+    "apps/plugins/guide",
     "apps/native-testing",
     "apps/fts-native",
     # "apps/native-test",  # Excluded - old test app
@@ -192,9 +193,6 @@ stylo_taffy = { path = "libs/vendor/blitz/packages/stylo_taffy" }
 
 # Also patch crates-io versions for other crates that use these
 [patch.crates-io]
-# Stylo crate - use git version with recursion_limit fix
-# Note: This patches to a local fork where we've added #![recursion_limit = "512"]
-# stylo = { git = "https://github.com/servo/stylo", tag = "v0.10.0" }
 # Blitz crates - local submodule
 dioxus-native = { path = "libs/vendor/blitz/packages/dioxus-native" }
 dioxus-native-dom = { path = "libs/vendor/blitz/packages/dioxus-native-dom" }

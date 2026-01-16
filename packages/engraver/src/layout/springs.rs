@@ -139,7 +139,7 @@ impl SpringRow {
 
         // Sort by pre-tension (springs with lower pre-tension stretch first)
         self.springs
-            .sort_by(|a, b| a.pre_tension.partial_cmp(&b.pre_tension).unwrap());
+            .sort_by(|a, b| a.pre_tension.total_cmp(&b.pre_tension));
 
         let mut inverse_spring_const = 0.0;
         let mut accumulated_width = extra_width;
@@ -419,8 +419,12 @@ mod tests {
         // Both springs should be engaged
         assert_eq!(results.len(), 2);
 
-        let width_0 = results.iter().find(|(i, _)| *i == 0).unwrap().1;
-        let width_1 = results.iter().find(|(i, _)| *i == 1).unwrap().1;
+        let Some((_, width_0)) = results.iter().find(|(i, _)| *i == 0) else {
+            panic!("Expected to find spring 0 in results");
+        };
+        let Some((_, width_1)) = results.iter().find(|(i, _)| *i == 1) else {
+            panic!("Expected to find spring 1 in results");
+        };
 
         // Higher stretch = lower spring constant = more extension
         // Spring 1 (stretch=2, k=0.5) should be wider than Spring 0 (stretch=1, k=1.0)

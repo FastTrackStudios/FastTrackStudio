@@ -3,7 +3,7 @@
 //! Handles layout of barlines including single, double, repeat, and end barlines.
 
 use kurbo::{Point, Rect};
-use peniko::Color;
+use vello::peniko::Color;
 
 use crate::layout::context::LayoutContext;
 use crate::layout::shape::Shape;

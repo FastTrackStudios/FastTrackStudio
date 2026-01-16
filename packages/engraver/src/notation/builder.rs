@@ -1,7 +1,7 @@
 //! Builders for automatic music notation layout.
 
 use kurbo::{Affine, Point, Rect};
-use peniko::Color;
+use vello::peniko::Color;
 
 use crate::layout::context::LayoutContext;
 use crate::layout::segment::{Segment, SegmentType};
@@ -30,6 +30,9 @@ pub struct MeasureBuilder {
     mode: NotationMode,
     /// Rhythm pattern (list of durations)
     rhythm: Vec<Duration>,
+    /// Per-note head type overrides (index -> head type).
+    /// When set, overrides the mode's default head type for specific notes.
+    head_type_overrides: Vec<Option<NoteHeadType>>,
     /// Starting barline type
     start_barline: Option<BarlineType>,
     /// Ending barline type
@@ -59,6 +62,7 @@ impl MeasureBuilder {
             time_signature: None,
             mode: NotationMode::Standard,
             rhythm: Vec::new(),
+            head_type_overrides: Vec::new(),
             start_barline: None,
             end_barline: Some(BarlineType::Single),
             width: None,
@@ -234,6 +238,19 @@ impl MeasureBuilder {
         self
     }
 
+    /// Set per-note head type overrides.
+    ///
+    /// Each entry corresponds to a note in the rhythm array by index.
+    /// `Some(head_type)` overrides the mode's default, `None` uses the mode's default.
+    ///
+    /// This allows mixing standard noteheads with slash noteheads in the same measure,
+    /// useful for showing melody notes alongside rhythm slashes.
+    #[must_use]
+    pub fn head_type_overrides(mut self, overrides: Vec<Option<NoteHeadType>>) -> Self {
+        self.head_type_overrides = overrides;
+        self
+    }
+
     /// Set the starting barline.
     #[must_use]
     pub fn start_barline(mut self, barline: BarlineType) -> Self {
@@ -245,6 +262,14 @@ impl MeasureBuilder {
     #[must_use]
     pub fn end_barline(mut self, barline: BarlineType) -> Self {
         self.end_barline = Some(barline);
+        self
+    }
+
+    /// Disable all barlines (for when barlines are handled externally).
+    #[must_use]
+    pub fn no_barlines(mut self) -> Self {
+        self.start_barline = None;
+        self.end_barline = None;
         self
     }
 
@@ -283,9 +308,17 @@ impl MeasureBuilder {
         let mut rhythm_index: usize = 0;
 
         // Get mode-specific settings
-        let head_type = self.mode.notehead_type();
+        let default_head_type = self.mode.notehead_type();
         let stem_dir = self.mode.default_stem_direction();
         let note_line = self.mode.default_line();
+
+        // Helper to get head type for a specific note index, using override if available
+        let get_head_type = |idx: usize| -> NoteHeadType {
+            self.head_type_overrides
+                .get(idx)
+                .and_then(|opt| *opt)
+                .unwrap_or(default_head_type)
+        };
 
         // 1. Add clef segment
         if let Some(clef_type) = self.clef {
@@ -363,11 +396,12 @@ impl MeasureBuilder {
                     .copied()
                     .unwrap_or(false);
 
+                let note_head_type = get_head_type(rhythm_index);
                 let (_, chord_node) = layout_chord(
                     &ChordParams {
                         id,
                         duration: dur.to_note_duration(),
-                        head_type,
+                        head_type: note_head_type,
                         notes: vec![ChordNote {
                             line: note_line,
                             accidental: Accidental::None,
@@ -394,6 +428,8 @@ impl MeasureBuilder {
                 // Beamed group (2+ notes with at least one flagged) - create beam notes
                 let group_start_tick = current_tick;
                 let mut beam_notes: Vec<BeamNoteInfo> = Vec::new();
+                // Use first note's head type for the whole beam group
+                let beam_head_type = get_head_type(rhythm_index);
 
                 for dur in &group.notes {
                     let mut seg = Segment::chord_rest(current_tick, dur.ticks());
@@ -415,7 +451,7 @@ impl MeasureBuilder {
                 scene_elements.push(SceneElement::BeamGroup {
                     start_tick: group_start_tick,
                     notes: beam_notes,
-                    head_type,
+                    head_type: beam_head_type,
                     stem_dir,
                     note_line,
                 });
@@ -432,11 +468,12 @@ impl MeasureBuilder {
                         .copied()
                         .unwrap_or(false);
 
+                    let note_head_type = get_head_type(rhythm_index);
                     let (_, chord_node) = layout_chord(
                         &ChordParams {
                             id,
                             duration: dur.to_note_duration(),
-                            head_type,
+                            head_type: note_head_type,
                             notes: vec![ChordNote {
                                 line: note_line,
                                 accidental: Accidental::None,
@@ -484,9 +521,28 @@ impl MeasureBuilder {
         segment_vec.sort();
         let mut segments = SegmentList::from_sorted(segment_vec);
 
-        // 8. Apply horizontal spacing
+        // 8. Apply bar-note distance (leading space) to first chord/rest segment
+        // and note-bar distance (trailing space) to target width
+        let bar_note_distance = ctx.style_distance(crate::style::Sid::BarNoteDistance);
+        let note_bar_distance = ctx.style_distance(crate::style::Sid::NoteBarDistance);
+
+        // Find first ChordRest segment and add leading space
+        if let Some(first_chord) = segments.iter_mut().find(|s| s.seg_type.is_chord_rest()) {
+            first_chord.extra_leading_space = bar_note_distance;
+        }
+
+        // 9. Apply horizontal spacing
+        // Account for bar margins when justifying
         let spacing = HorizontalSpacing::new(spatium);
-        let target_width = self.width.map(|w| w * spatium).unwrap_or(f64::MAX);
+        let target_width = self.width.map(|w| {
+            let full_width = w * spatium;
+            // When justifying, the available space is reduced by the trailing margin
+            if self.justify {
+                full_width - note_bar_distance
+            } else {
+                full_width
+            }
+        }).unwrap_or(f64::MAX);
         let spacing_result = spacing.compute_spacing(&mut segments, target_width, self.justify);
 
         // 9. Build final scene with computed positions

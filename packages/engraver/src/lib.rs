@@ -19,8 +19,13 @@
 //! └──────────┘  └──────────┘  └──────────┘  └─────────────┘
 //! ```
 
+// region:    --- Modules
+
+pub mod derive_aliases;
+pub mod error;
 pub mod export;
 pub mod fonts;
+#[cfg(feature = "keyflow-import")]
 pub mod import;
 pub mod interaction;
 pub mod layout;
@@ -31,6 +36,17 @@ pub mod scene;
 pub mod style;
 pub mod ui;
 
-// Re-export main types
+// endregion: --- Modules
+
+// region:    --- Re-exports
+
+// Error types
+pub use error::{Error, Result};
+
+// Model types
 pub use model::{Measure, MusicElement, Part, Score, Voice};
+
+// Style types
 pub use style::{MStyle, Sid, StyleValue};
+
+// endregion: --- Re-exports

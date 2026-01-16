@@ -8,7 +8,7 @@ use std::ffi::CString;
 use tracing::{info, warn};
 use visibility_manager::{ViewMode, VisibilityGroupId, VisibilityTarget};
 
-use super::state::{apply_changes, get_manager, get_or_init_manager, refresh_from_project};
+use super::state::{apply_changes, get_folder_children, get_manager, get_or_init_manager, is_folder_track, refresh_from_project};
 
 /// Analyze project and show current visibility groups
 fn analyze_project_handler() {
@@ -284,7 +284,7 @@ fn stateless_toggle_group(group_id: &str, group_name: &str) {
         let undo_name = CString::new(format!("Toggle {} visibility", group_name)).unwrap();
         low.Undo_BeginBlock();
 
-        // Refresh to get current classification
+        // Refresh to get current classification and folder hierarchy
         refresh_from_project();
 
         let guard = get_manager();
@@ -300,9 +300,20 @@ fn stateless_toggle_group(group_id: &str, group_name: &str) {
                     return;
                 }
 
+                // Build the full set of track indices including folder children
+                let mut all_indices: std::collections::HashSet<usize> = group.track_indices.clone();
+
+                // For each track in the group, if it's a folder, also include its children
+                for &track_idx in &group.track_indices {
+                    if is_folder_track(track_idx) {
+                        let children = get_folder_children(track_idx);
+                        all_indices.extend(children);
+                    }
+                }
+
                 // Check actual REAPER visibility - if ANY track is hidden, we'll show all
                 let mut any_hidden = false;
-                for &track_idx in &group.track_indices {
+                for &track_idx in &all_indices {
                     let track = low.GetTrack(std::ptr::null_mut(), track_idx as i32);
                     if !track.is_null() {
                         let visible = low.GetMediaTrackInfo_Value(track, c"B_SHOWINTCP".as_ptr()) != 0.0;
@@ -317,7 +328,7 @@ fn stateless_toggle_group(group_id: &str, group_name: &str) {
                 let show = any_hidden; // If any hidden, show all; if all visible, hide all
                 let mut count = 0;
 
-                for &track_idx in &group.track_indices {
+                for &track_idx in &all_indices {
                     let track = low.GetTrack(std::ptr::null_mut(), track_idx as i32);
                     if !track.is_null() {
                         let value = if show { 1.0 } else { 0.0 };
@@ -332,7 +343,7 @@ fn stateless_toggle_group(group_id: &str, group_name: &str) {
 
                 let action = if show { "Showed" } else { "Hid" };
                 reaper.show_console_msg(
-                    format!("{} {} {} tracks\n", action, count, group_name).as_str()
+                    format!("{} {} {} tracks (including folder children)\n", action, count, group_name).as_str()
                 );
             } else {
                 reaper.show_console_msg(
@@ -356,7 +367,7 @@ fn show_only_group(group_id: &str, group_name: &str) {
         let undo_name = CString::new(format!("Show only {}", group_name)).unwrap();
         low.Undo_BeginBlock();
 
-        // Refresh to get current classification
+        // Refresh to get current classification and folder hierarchy
         refresh_from_project();
 
         let guard = get_manager();
@@ -364,12 +375,12 @@ fn show_only_group(group_id: &str, group_name: &str) {
             let id = VisibilityGroupId::new(group_id);
 
             // Get the track indices for this group
-            let target_indices: std::collections::HashSet<usize> = manager
+            let base_indices: std::collections::HashSet<usize> = manager
                 .get_group(&id)
                 .map(|g| g.track_indices.clone())
                 .unwrap_or_default();
 
-            if target_indices.is_empty() {
+            if base_indices.is_empty() {
                 reaper.show_console_msg(
                     format!("No {} tracks in project\n", group_name).as_str()
                 );
@@ -377,7 +388,16 @@ fn show_only_group(group_id: &str, group_name: &str) {
                 return;
             }
 
-            // Hide all tracks, then show only the target group
+            // Build the full set of track indices including folder children
+            let mut target_indices = base_indices.clone();
+            for &track_idx in &base_indices {
+                if is_folder_track(track_idx) {
+                    let children = get_folder_children(track_idx);
+                    target_indices.extend(children);
+                }
+            }
+
+            // Hide all tracks, then show only the target group (including children)
             let num_tracks = low.CountTracks(std::ptr::null_mut());
             let mut shown = 0;
             let mut hidden = 0;
@@ -403,7 +423,7 @@ fn show_only_group(group_id: &str, group_name: &str) {
             low.UpdateArrange();
 
             reaper.show_console_msg(
-                format!("Showing {} {} tracks, hid {} others\n", shown, group_name, hidden).as_str()
+                format!("Showing {} {} tracks (including folder children), hid {} others\n", shown, group_name, hidden).as_str()
             );
         }
 

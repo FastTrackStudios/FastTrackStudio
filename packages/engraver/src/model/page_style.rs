@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub enum PaperSize {
     /// A4: 210mm × 297mm (common in Europe)
-    #[default]
     A4,
-    /// Letter: 8.5" × 11" (common in US)
+    /// Letter: 8.5" × 11" (common in US, default)
+    #[default]
     Letter,
     /// Legal: 8.5" × 14"
     Legal,
@@ -281,7 +281,7 @@ impl PageStyle {
     #[must_use]
     pub fn lead_sheet() -> Self {
         Self {
-            paper_size: PaperSize::A4,
+            paper_size: PaperSize::Letter,
             margins: Margins::default(),         // 15mm - MuseScore default
             staff: StaffConfig::default(),       // 5pt spatium - MuseScore default
             system_spacing: SystemSpacing::default(), // 8.5 spatium - MuseScore default
@@ -302,7 +302,7 @@ impl PageStyle {
     #[must_use]
     pub fn full_score() -> Self {
         Self {
-            paper_size: PaperSize::A4,
+            paper_size: PaperSize::Letter,
             margins: Margins::default(),         // 15mm - MuseScore default
             staff: StaffConfig::default(),       // 5pt spatium - MuseScore default
             system_spacing: SystemSpacing::default(), // 8.5 spatium - MuseScore default
@@ -417,11 +417,11 @@ mod tests {
         let content_width = style.content_width_pt();
         let content_height = style.content_height_pt();
 
-        // A4 is ~595pt wide, margins are ~45pt each side
-        assert!(content_width > 500.0 && content_width < 520.0);
+        // Letter is 612pt wide, margins are ~42.5pt each side = ~527pt content
+        assert!(content_width > 520.0 && content_width < 540.0);
 
-        // A4 is ~842pt tall, margins + footer
-        assert!(content_height > 700.0 && content_height < 800.0);
+        // Letter is 792pt tall, margins ~85pt = ~707pt content
+        assert!(content_height > 690.0 && content_height < 720.0);
     }
 
     #[test]

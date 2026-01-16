@@ -6,12 +6,14 @@ edition.workspace = true
 [dependencies]
 # Use dioxus-native from local blitz submodule with post-processing support
 dioxus-native = { path = "../../libs/vendor/blitz/packages/dioxus-native", features = ["prelude"] }
+dioxus-html = "0.7"
 
 # Blitz crates from local submodule
 blitz-dom = { path = "../../libs/vendor/blitz/packages/blitz-dom" }
 blitz-traits = { path = "../../libs/vendor/blitz/packages/blitz-traits" }
 
-# Anyrender for CustomPaintSource
+# Anyrender for CustomPaintSource and ImageRenderer
+anyrender = { path = "../../libs/vendor/anyrender/crates/anyrender" }
 anyrender_vello = { path = "../../libs/vendor/anyrender/crates/anyrender_vello" }
 wgpu_context = { path = "../../libs/vendor/anyrender/crates/wgpu_context" }
 
@@ -24,21 +26,23 @@ lucide-dioxus = "2"
 # Keyflow for chart parsing
 keyflow = { path = "../../packages/keyflow" }
 
-# Engraver for layout system
-engraver = { path = "../../packages/engraver" }
+# Engraver for layout system (with example features for Vello rendering)
+engraver = { path = "../../packages/engraver", features = ["example"] }
 
-# WGPU integration (use same version as blitz)
+# Vello for vector graphics rendering (match anyrender/engraver versions)
+# NOTE: peniko re-exported from vello to avoid version conflicts
+vello = "0.6"
+kurbo = "0.12"
+
+# WGPU integration (match blitz/anyrender)
 wgpu = "26"
 bytemuck = { version = "1", features = ["derive"] }
-glam = "0.30"
 
-# Text rendering (use wgpu 26 compatible commit)
-glyphon = { git = "https://github.com/grovesNL/glyphon", rev = "d4ded1d1309f867b7b613ca91ebd0d1fb1a8b280" }
+# Font parsing for text rendering
+skrifa = "0.26"
 
-# Font parsing and tessellation for SMuFL music symbols
-skrifa = "0.28"
-smufl = "0.2"
-lyon = "1.0"
+# Async runtime for wgpu device creation
+pollster = "0.4"
 
 # Logging
 log = "0.4"

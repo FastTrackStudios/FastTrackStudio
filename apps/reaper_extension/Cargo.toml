@@ -26,6 +26,8 @@ keyflow = ["core"]
 dynamic_template = ["core", "dep:dynamic-template"]
 # Enable Visibility Manager for dynamic track visibility groups
 visibility_manager = ["core", "dep:visibility-manager"]
+# Enable Auto Color for automatic track coloring based on classification
+auto_color = ["core", "dep:dynamic-template"]
 
 [dependencies]
 dynamic-template = { path = "../../modules/dynamic-template", optional = true }

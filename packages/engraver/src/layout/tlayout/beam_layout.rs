@@ -7,7 +7,7 @@
 //! - Stem length adjustment
 
 use kurbo::{BezPath, Point, Rect};
-use peniko::Color;
+use vello::peniko::Color;
 
 use crate::scene::paint::PaintCommand;
 
@@ -114,7 +114,8 @@ fn get_slope_constraint(notes: &[BeamNote], stem_up: bool) -> SlopeConstraint {
     }
 
     let start_line = notes[0].line;
-    let end_line = notes.last().unwrap().line;
+    // Safe: we checked notes.len() >= 2 above
+    let end_line = notes.last().map_or(start_line, |n| n.line);
 
     // If start and end are the same, beam should be flat
     if start_line == end_line {
@@ -196,12 +197,16 @@ fn get_max_slope(beam_width_spatiums: f64) -> i32 {
 /// - Beam width (wider beams have shallower slopes)
 /// - Slope constraints (flat, small, or unconstrained)
 fn compute_desired_slant(notes: &[BeamNote], stem_up: bool, spatium: f64) -> i32 {
+    // Need at least 2 notes for a beam with slope
+    let (Some(first), Some(last)) = (notes.first(), notes.last()) else {
+        return 0;
+    };
     if notes.len() < 2 {
         return 0;
     }
 
-    let start_line = notes[0].line;
-    let end_line = notes.last().unwrap().line;
+    let start_line = first.line;
+    let end_line = last.line;
 
     // Same line = flat beam
     if start_line == end_line {
@@ -220,7 +225,7 @@ fn compute_desired_slant(notes: &[BeamNote], stem_up: bool, spatium: f64) -> i32
     }
 
     // Calculate beam width in spatiums
-    let beam_width = (notes.last().unwrap().x - notes[0].x) / spatium;
+    let beam_width = (last.x - first.x) / spatium;
 
     // Get max slope based on beam width
     let max_slope = get_max_slope(beam_width);
@@ -270,8 +275,9 @@ pub fn layout_beam(
 
     // Calculate beam anchor positions (matching MuseScore's approach)
     // The beam line is defined between start and end anchor points
+    // Safe: we checked notes.len() >= 2 above
     let first_note = &notes[0];
-    let last_note = notes.last().unwrap();
+    let last_note = &notes[notes.len() - 1];
 
     // Anchor X positions use Start/End anchor types
     let start_anchor_x = chord_beam_anchor_x(first_note, stem_dir, ChordBeamAnchorType::Start, spatium);
@@ -414,8 +420,9 @@ fn calculate_beam_position(
     spatium: f64,
     config: &BeamLayoutConfig,
 ) -> (f64, f64) {
+    // Safe: caller ensures notes is non-empty
     let first = &notes[0];
-    let last = notes.last().unwrap();
+    let last = &notes[notes.len() - 1];
 
     let first_y = first.y_center(spatium);
     let last_y = last.y_center(spatium);
@@ -539,8 +546,9 @@ fn calculate_stem_tips(
 
     // Use beam anchor X positions (Start/End) for the beam line definition
     // This matches calculate_beam_position and draw_beam_level
+    // Safe: we checked notes is non-empty above
     let first_anchor_x = chord_beam_anchor_x(&notes[0], stem_dir, ChordBeamAnchorType::Start, spatium);
-    let last_anchor_x = chord_beam_anchor_x(notes.last().unwrap(), stem_dir, ChordBeamAnchorType::End, spatium);
+    let last_anchor_x = chord_beam_anchor_x(&notes[notes.len() - 1], stem_dir, ChordBeamAnchorType::End, spatium);
     let run = last_anchor_x - first_anchor_x;
 
     notes
@@ -760,8 +768,9 @@ fn draw_beam_level(
     // Calculate beam anchor X positions for first and last notes of the entire beam group
     // These define the beam line that all segments interpolate along
     // Following MuseScore: Start anchor for first note, End anchor for last note
+    // Safe: caller ensures notes is non-empty
     let first_stem_x = chord_beam_anchor_x(&notes[0], stem_dir, ChordBeamAnchorType::Start, spatium);
-    let last_stem_x = chord_beam_anchor_x(notes.last().unwrap(), stem_dir, ChordBeamAnchorType::End, spatium);
+    let last_stem_x = chord_beam_anchor_x(&notes[notes.len() - 1], stem_dir, ChordBeamAnchorType::End, spatium);
     let beam_run = last_stem_x - first_stem_x;
 
     for (start_idx, end_idx) in segments {

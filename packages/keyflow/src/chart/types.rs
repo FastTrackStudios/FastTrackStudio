@@ -4,7 +4,11 @@
 
 use super::commands::Command;
 use super::cues::TextCue;
+use super::dynamics::DynamicMarking;
+use super::melody::Melody;
+use super::track::{Track, TrackType};
 use crate::chord::{Chord, ChordRhythm, PushPullAmount};
+use crate::parsing::TextSpan;
 use crate::primitives::RootNotation;
 use crate::sections::Section;
 use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition};
@@ -41,6 +45,11 @@ pub struct ChordInstance {
 
     /// Commands applied to this chord (fermata, accent, etc.)
     pub commands: Vec<Command>,
+
+    /// Source text span for click-to-highlight and editing
+    /// Links this chord back to the original input text that generated it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_span: Option<TextSpan>,
 }
 
 impl ChordInstance {
@@ -63,6 +72,7 @@ impl ChordInstance {
             position,
             push_pull: None,
             commands: Vec::new(),
+            source_span: None,
         }
     }
 
@@ -78,6 +88,12 @@ impl ChordInstance {
 
     pub fn add_command(mut self, command: Command) -> Self {
         self.commands.push(command);
+        self
+    }
+
+    /// Set the source text span for this chord
+    pub fn with_source_span(mut self, span: TextSpan) -> Self {
+        self.source_span = Some(span);
         self
     }
 
@@ -172,6 +188,17 @@ pub struct Measure {
 
     /// Text cues for instrument directions
     pub text_cues: Vec<TextCue>,
+
+    /// Dynamic/intensity markings ([Build], [Down], [Go Crazy], etc.)
+    pub dynamics: Vec<DynamicMarking>,
+
+    /// Melodies in this measure (inline m{} blocks)
+    pub melodies: Vec<Melody>,
+
+    /// Source text span for this measure
+    /// Links this measure back to the original input text that generated it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_span: Option<TextSpan>,
 }
 
 impl Measure {
@@ -182,6 +209,9 @@ impl Measure {
             time_signature: (4, 4), // Default to 4/4
             repeat_count: 1,        // Default to no repeat
             text_cues: Vec::new(),
+            dynamics: Vec::new(),
+            melodies: Vec::new(),
+            source_span: None,
         }
     }
 
@@ -192,6 +222,12 @@ impl Measure {
 
     pub fn with_time_signature(mut self, time_signature: (u8, u8)) -> Self {
         self.time_signature = time_signature;
+        self
+    }
+
+    /// Set the source text span for this measure
+    pub fn with_source_span(mut self, span: TextSpan) -> Self {
+        self.source_span = Some(span);
         self
     }
 
@@ -271,39 +307,154 @@ impl Default for Measure {
     }
 }
 
-/// Represents a section with its measures
+/// Represents a section with its tracks
+///
+/// A section can have multiple tracks running in parallel (chords, melody, rhythm, etc.)
+/// The default track type is Chords, which maintains backward compatibility.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChartSection {
     /// Section information (type, number, etc.)
     pub section: Section,
 
-    /// All measures in this section
-    pub measures: Vec<Measure>,
+    /// All tracks in this section (chords, melody, rhythm, etc.)
+    pub tracks: Vec<Track>,
 
     /// True if this section was recalled from a template
     pub from_template: bool,
+
+    /// Source text span for this section header
+    /// Links this section back to the original input text that generated it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_span: Option<TextSpan>,
+
+    /// If from template, the span of the original template definition
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template_span: Option<TextSpan>,
 }
 
 impl ChartSection {
     pub fn new(section: Section) -> Self {
         Self {
             section,
-            measures: Vec::new(),
+            tracks: Vec::new(),
             from_template: false,
+            source_span: None,
+            template_span: None,
         }
     }
 
+    /// Create a section with a default chord track containing the given measures
     pub fn with_measures(mut self, measures: Vec<Measure>) -> Self {
-        self.measures = measures;
+        // Create or update the chord track
+        if let Some(chord_track) = self.chord_track_mut() {
+            chord_track.measures = measures;
+        } else {
+            self.tracks.push(Track::chords(measures));
+        }
         self
     }
 
+    /// Add a track to this section
+    pub fn with_track(mut self, track: Track) -> Self {
+        self.tracks.push(track);
+        self
+    }
+
+    /// Set the source text span for this section
+    pub fn with_source_span(mut self, span: TextSpan) -> Self {
+        self.source_span = Some(span);
+        self
+    }
+
+    /// Set the template span (for sections recalled from templates)
+    pub fn with_template_span(mut self, span: TextSpan) -> Self {
+        self.template_span = Some(span);
+        self
+    }
+
+    /// Create a section from a template recall
     pub fn from_template(section: Section, measures: Vec<Measure>) -> Self {
         Self {
             section,
-            measures,
+            tracks: vec![Track::chords(measures)],
             from_template: true,
+            source_span: None,
+            template_span: None,
         }
+    }
+
+    /// Create a section from a template with full span information
+    pub fn from_template_with_spans(
+        section: Section,
+        measures: Vec<Measure>,
+        source_span: TextSpan,
+        template_span: TextSpan,
+    ) -> Self {
+        Self {
+            section,
+            tracks: vec![Track::chords(measures)],
+            from_template: true,
+            source_span: Some(source_span),
+            template_span: Some(template_span),
+        }
+    }
+
+    // ==================== Backward Compatibility Methods ====================
+
+    /// Get the primary chord track (for backward compatibility)
+    pub fn chord_track(&self) -> Option<&Track> {
+        self.tracks
+            .iter()
+            .find(|t| t.track_type == TrackType::Chords)
+    }
+
+    /// Get mutable reference to the primary chord track
+    pub fn chord_track_mut(&mut self) -> Option<&mut Track> {
+        self.tracks
+            .iter_mut()
+            .find(|t| t.track_type == TrackType::Chords)
+    }
+
+    /// Get all measures from the chord track (backward compatibility)
+    ///
+    /// Most existing code accesses `section.measures` - this provides
+    /// the same interface via method call.
+    pub fn measures(&self) -> &[Measure] {
+        self.chord_track()
+            .map(|t| t.measures.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Get mutable reference to measures in the chord track
+    pub fn measures_mut(&mut self) -> &mut Vec<Measure> {
+        // Ensure we have a chord track
+        if self.chord_track().is_none() {
+            self.tracks.push(Track::chords(Vec::new()));
+        }
+        &mut self.chord_track_mut().unwrap().measures
+    }
+
+    /// Get melody tracks
+    pub fn melody_tracks(&self) -> impl Iterator<Item = &Track> {
+        self.tracks
+            .iter()
+            .filter(|t| t.track_type == TrackType::Melody)
+    }
+
+    /// Get rhythm tracks
+    pub fn rhythm_tracks(&self) -> impl Iterator<Item = &Track> {
+        self.tracks
+            .iter()
+            .filter(|t| t.track_type == TrackType::Rhythm)
+    }
+
+    /// Add a melody track to this section
+    pub fn add_melody_track(&mut self, melody: Melody, name: Option<String>) {
+        let mut track = Track::melody(melody);
+        if let Some(n) = name {
+            track = track.with_name(n);
+        }
+        self.tracks.push(track);
     }
 }
 
@@ -363,5 +514,67 @@ impl TimeSignatureChange {
             time_signature,
             section_index,
         }
+    }
+}
+
+/// Represents a tempo change at a specific position
+///
+/// Tempo changes are indicated with arrow notation: `->140bpm` or `->120`
+/// They can be placed inline with chords or on their own line.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TempoChange {
+    /// Position where the tempo change occurs
+    pub position: AbsolutePosition,
+
+    /// The tempo before the change (None if this is at the very start)
+    pub from_tempo: Option<crate::time::Tempo>,
+
+    /// The new tempo after the change
+    pub to_tempo: crate::time::Tempo,
+
+    /// Section index where this occurs
+    pub section_index: usize,
+}
+
+impl TempoChange {
+    pub fn new(
+        position: AbsolutePosition,
+        from_tempo: Option<crate::time::Tempo>,
+        to_tempo: crate::time::Tempo,
+        section_index: usize,
+    ) -> Self {
+        Self {
+            position,
+            from_tempo,
+            to_tempo,
+            section_index,
+        }
+    }
+
+    /// Parse a tempo change from a string
+    ///
+    /// Format: `->NNNbpm` or `->NNN`
+    /// Examples:
+    /// - `->140bpm` - change to 140 BPM
+    /// - `->120` - change to 120 BPM
+    pub fn parse_syntax(s: &str) -> Option<crate::time::Tempo> {
+        let s = s.trim();
+
+        if !s.starts_with("->") {
+            return None;
+        }
+
+        let tempo_part = s[2..].trim();
+
+        // Remove optional "bpm" suffix
+        let bpm_str = tempo_part
+            .strip_suffix("bpm")
+            .or_else(|| tempo_part.strip_suffix("BPM"))
+            .unwrap_or(tempo_part);
+
+        bpm_str
+            .parse::<u16>()
+            .ok()
+            .map(|bpm| crate::time::Tempo::new(f64::from(bpm)))
     }
 }

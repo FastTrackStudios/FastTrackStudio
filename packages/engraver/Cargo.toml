@@ -13,23 +13,21 @@ path = "src/lib.rs"
 [features]
 default = []
 example = ["dep:winit", "dep:pollster", "dep:env_logger", "dep:log"]
+keyflow-import = ["dep:keyflow"]
 
 [dependencies]
-# Internal dependencies
-keyflow = { path = "../keyflow" }
+# Internal dependencies (optional - keyflow import is being reworked)
+keyflow = { path = "../keyflow", optional = true }
 
-# GPU rendering (use wgpu 27 to match vello 0.7)
-wgpu = { version = "27", features = ["wgsl"] }
+# GPU rendering (use wgpu 26 to match anyrender/blitz)
+wgpu = { version = "26", features = ["wgsl"] }
 
-# Text rendering (wgpu 27 compatible)
-glyphon = "0.10"
-
-# Linebender stack for 2D vector graphics (versions matched to vello 0.7)
-vello = "0.7"
-peniko = "0.6"
-kurbo = "0.13"
-parley = "0.3"
-skrifa = "0.40"
+# Linebender stack for 2D vector graphics (versions matched to vello 0.6)
+# NOTE: peniko re-exported from vello to avoid version conflicts
+vello = "0.6"
+kurbo = "0.12"
+parley = "0.2"
+skrifa = "0.26"
 
 # SMuFL music font metadata
 smufl = "0.2"
@@ -44,6 +42,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+# Error handling and derive macros (architectural rewrite)
+derive_more = { version = "1.0", features = ["debug", "display", "error", "from"] }
+macro_rules_attribute = "0.2"
 
 # Example dependencies (optional)
 winit = { version = "0.30", optional = true }

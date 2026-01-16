@@ -3,7 +3,7 @@
 //! Handles layout of clef symbols at the beginning of staves and mid-measure.
 
 use kurbo::{Point, Rect};
-use peniko::Color;
+use vello::peniko::Color;
 
 use crate::layout::context::LayoutContext;
 use crate::layout::shape::Shape;

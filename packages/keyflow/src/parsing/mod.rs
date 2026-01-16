@@ -3,9 +3,11 @@
 //! Token-based parsing with specialized mini-parsers
 
 pub mod lexer;
+pub mod span;
 pub mod token;
 
 pub use lexer::Lexer;
+pub use span::TextSpan;
 pub use token::{Token, TokenType};
 
 /// Simple base parse error for generic parsing failures

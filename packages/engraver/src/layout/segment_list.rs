@@ -247,17 +247,22 @@ impl SegmentList {
         Some((first.tick, last.tick + last.ticks))
     }
 
-    /// Get the total width of all segments.
+    /// Get the total width of all segments including leading space.
     #[must_use]
     pub fn total_width(&self) -> f64 {
-        self.segments.iter().map(|s| s.width).sum()
+        self.segments
+            .iter()
+            .map(|s| s.width + s.extra_leading_space + s.spacing + s.width_offset)
+            .sum()
     }
 
     /// Compute x positions for all segments based on their widths.
-    /// Starts from x = 0.
+    /// Starts from x = 0, accounting for extra_leading_space on each segment.
     pub fn compute_x_positions(&mut self) {
         let mut x = 0.0;
         for segment in &mut self.segments {
+            // Add extra leading space before this segment
+            x += segment.extra_leading_space;
             segment.x = x;
             x += segment.width + segment.spacing + segment.width_offset;
         }
@@ -267,6 +272,8 @@ impl SegmentList {
     pub fn compute_x_positions_from(&mut self, start_x: f64) {
         let mut x = start_x;
         for segment in &mut self.segments {
+            // Add extra leading space before this segment
+            x += segment.extra_leading_space;
             segment.x = x;
             x += segment.width + segment.spacing + segment.width_offset;
         }

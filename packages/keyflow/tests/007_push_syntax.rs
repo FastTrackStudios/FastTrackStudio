@@ -8,7 +8,7 @@ fn find_chord_by_symbol<'a>(
     section: &'a keyflow::chart::ChartSection,
     symbol: &str,
 ) -> Option<&'a ChordInstance> {
-    for measure in &section.measures {
+    for measure in section.measures() {
         for chord in &measure.chords {
             if chord.full_symbol == symbol && chord.full_symbol != "s" {
                 return Some(chord);
@@ -92,10 +92,10 @@ C' D Em' F
 
     // Test Verse section
     let verse_section = &chart.sections[0];
-    assert_eq!(verse_section.measures.len(), 4);
+    assert_eq!(verse_section.measures().len(), 4);
 
     // Check pull notation on C'
-    let chord1 = &verse_section.measures[0].chords[0];
+    let chord1 = &verse_section.measures()[0].chords[0];
     assert_eq!(chord1.full_symbol, "C");
     match chord1.push_pull {
         Some((false, amount)) => {
@@ -106,12 +106,12 @@ C' D Em' F
     }
 
     // Check normal D (no pull) - infers Dm from C major
-    let chord2 = &verse_section.measures[1].chords[0];
+    let chord2 = &verse_section.measures()[1].chords[0];
     assert_eq!(chord2.full_symbol, "Dm");
     assert_eq!(chord2.rhythm, ChordRhythm::Default);
 
     // Check pull notation on Em'
-    let chord3 = &verse_section.measures[2].chords[0];
+    let chord3 = &verse_section.measures()[2].chords[0];
     assert_eq!(chord3.full_symbol, "Em");
     match chord3.push_pull {
         Some((false, amount)) => {
@@ -122,7 +122,7 @@ C' D Em' F
     }
 
     // Check normal F (no pull)
-    let chord4 = &verse_section.measures[3].chords[0];
+    let chord4 = &verse_section.measures()[3].chords[0];
     assert_eq!(chord4.full_symbol, "F");
     assert_eq!(chord4.rhythm, ChordRhythm::Default);
 }
@@ -191,7 +191,7 @@ C''' D Em''' F
     let verse_section = &chart.sections[0];
 
     // Check triple pull on C''' (32nd note delay)
-    let chord1 = &verse_section.measures[0].chords[0];
+    let chord1 = &verse_section.measures()[0].chords[0];
     assert_eq!(chord1.full_symbol, "C");
     match chord1.push_pull {
         Some((false, amount)) => {
@@ -205,7 +205,7 @@ C''' D Em''' F
     }
 
     // Check triple pull on Em'''
-    let chord3 = &verse_section.measures[2].chords[0];
+    let chord3 = &verse_section.measures()[2].chords[0];
     assert_eq!(chord3.full_symbol, "Em");
     match chord3.push_pull {
         Some((false, amount)) => {
@@ -302,7 +302,7 @@ vs
     // Note: push/pull is separate from rhythm notation
     // Find the first chord
     let mut found_c = false;
-    for measure in &verse_section.measures {
+    for measure in verse_section.measures() {
         for chord in &measure.chords {
             if chord.full_symbol == "C" {
                 // Should have push notation

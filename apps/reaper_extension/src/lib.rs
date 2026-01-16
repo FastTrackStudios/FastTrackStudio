@@ -18,6 +18,8 @@ mod live;
 mod lyrics;
 #[cfg(feature = "visibility_manager")]
 mod visibility_manager;
+#[cfg(feature = "auto_color")]
+mod auto_color;
 
 /// Polling state management for continuous updates
 pub mod polling_state {

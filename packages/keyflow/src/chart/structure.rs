@@ -2,16 +2,19 @@
 //!
 //! The complete parsed chart with all sections and metadata
 
+use super::melody::MelodyVariables;
 use super::memory::ChordMemory;
 use super::settings::ChartSettings;
 use super::templates::TemplateManager;
-use super::types::{ChartSection, ChordInstance, KeyChange, TimeSignatureChange};
+use super::track::TrackType;
+use super::types::{ChartSection, ChordInstance, KeyChange, TempoChange, TimeSignatureChange};
 use crate::key::Key;
 use crate::metadata::SongMetadata;
 use crate::primitives::Note;
-use crate::sections::Section;
+use crate::sections::{Section, SectionType};
 use crate::time::{AbsolutePosition, MusicalPosition, Tempo, TimeSignature};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// The complete parsed chart structure
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,6 +49,9 @@ pub struct Chart {
     /// All time signature changes throughout the song
     pub time_signature_changes: Vec<TimeSignatureChange>,
 
+    /// All tempo changes throughout the song
+    pub tempo_changes: Vec<TempoChange>,
+
     /// Chord memory manager (internal)
     pub(crate) chord_memory: ChordMemory,
 
@@ -54,6 +60,14 @@ pub struct Chart {
 
     /// Chart configuration settings
     pub settings: ChartSettings,
+
+    /// Melody variables (named melody patterns)
+    pub melody_variables: MelodyVariables,
+
+    /// Section measure memory (internal, for expression evaluation)
+    /// Tracks the last used measure count for each section type
+    #[serde(skip)]
+    pub(crate) section_measure_memory: HashMap<SectionType, usize>,
 }
 
 impl Chart {
@@ -70,9 +84,12 @@ impl Chart {
             time_signature: None,
             initial_time_signature: None,
             time_signature_changes: Vec::new(),
+            tempo_changes: Vec::new(),
             chord_memory: ChordMemory::new(),
             templates: TemplateManager::new(),
             settings: ChartSettings::new(),
+            melody_variables: MelodyVariables::new(),
+            section_measure_memory: HashMap::new(),
         }
     }
 
@@ -159,7 +176,7 @@ impl Chart {
             }
 
             // Sum all measures in this section (each measure is always 1.0.0)
-            for _measure in &section.measures {
+            for _measure in section.measures() {
                 // Each measure adds exactly 1.0.0 to the total duration
                 total_duration = MusicalPosition::try_new(
                     total_duration.measure + 1,
@@ -172,7 +189,7 @@ impl Chart {
 
         // Add measures in current section up to measure_index (each is 1.0.0)
         if let Some(section) = self.sections.get(section_index) {
-            for _idx in 0..measure_index.min(section.measures.len()) {
+            for _idx in 0..measure_index.min(section.measures().len()) {
                 // Each measure adds exactly 1.0.0 to the total duration
                 total_duration = MusicalPosition::try_new(
                     total_duration.measure + 1,
@@ -194,7 +211,7 @@ impl Chart {
         let mut current_measure: i32 = 0;
 
         for (section_idx, section) in self.sections.iter_mut().enumerate() {
-            for measure in &mut section.measures {
+            for measure in section.measures_mut() {
                 measure.generate_rhythm_slashes(current_measure, section_idx);
                 current_measure += 1;
             }
@@ -250,7 +267,8 @@ impl Chart {
             output.push_str("/SMART_REPEATS=true\n");
         }
 
-        // 4. Sections
+        // 4. Sections (melody variables are output at the start of the first section)
+        let mut melody_vars_output = false;
         for (section_idx, section) in self.sections.iter().enumerate() {
             // Empty line before section (except first)
             if section_idx > 0 {
@@ -262,81 +280,499 @@ impl Chart {
             output.push_str(&section_name);
             output.push('\n');
 
-            // Process measures
-            let mut measure_idx = 0;
-            while measure_idx < section.measures.len() {
-                let measure = &section.measures[measure_idx];
-
-                // Check for repeats
-                let repeat_count = measure.repeat_count;
-
-                // Text cues before this measure
-                for cue in &measure.text_cues {
-                    output.push_str(&format!("{}\n", cue));
+            // Output melody variable definitions at the start of the first section
+            if !melody_vars_output {
+                for (name, melody) in self.melody_variables.iter() {
+                    // Output just the notes part, since the name is stored separately
+                    let notes_str: Vec<String> =
+                        melody.notes.iter().map(|n| n.to_string()).collect();
+                    output.push_str(&format!("{} = m{{ {} }}\n", name, notes_str.join(" ")));
                 }
+                melody_vars_output = true;
+            }
 
-                // Check for key change at this position
-                let position = self.calculate_position(section_idx, measure_idx);
-                for key_change in &self.key_changes {
-                    if key_change.position.total_duration.measure == position.total_duration.measure
-                        && key_change.section_index == section_idx
-                    {
-                        let key_str = self.format_key_for_syntax(&key_change.to_key);
-                        output.push_str(&key_str);
-                        output.push(' ');
-                    }
-                }
+            // Output tracks
+            let has_multiple_tracks = section.tracks.len() > 1;
 
-                // Check for time signature change at this position
-                for ts_change in &self.time_signature_changes {
-                    if ts_change.position.total_duration.measure == position.total_duration.measure
-                        && ts_change.section_index == section_idx
-                    {
-                        output.push_str(&format!(
-                            "{}/{} ",
-                            ts_change.time_signature.numerator,
-                            ts_change.time_signature.denominator
-                        ));
+            for track in &section.tracks {
+                // Output track marker if this section has multiple tracks or track has a name
+                let needs_marker = has_multiple_tracks
+                    || track.name.is_some()
+                    || !track.is_default_chord_track();
+
+                if needs_marker {
+                    let marker = track.track_type.marker();
+                    if let Some(name) = &track.name {
+                        output.push_str(&format!("[{} {}] ", marker, name));
+                    } else {
+                        output.push_str(&format!("[{}] ", marker));
                     }
                 }
 
-                // Chords in this measure
-                let mut chord_parts = Vec::new();
-                for chord in &measure.chords {
-                    let chord_str = self.format_chord_for_syntax(chord, &measure.time_signature);
-                    if !chord_str.is_empty() {
-                        chord_parts.push(chord_str);
+                match track.track_type {
+                    TrackType::Melody => {
+                        // Output melody content
+                        if let Some(melody) = &track.melody {
+                            let notes_str: Vec<String> =
+                                melody.notes.iter().map(|n| n.to_string()).collect();
+                            output.push_str(&format!("m{{ {} }}\n", notes_str.join(" ")));
+                        }
+                    }
+                    TrackType::Chords | TrackType::Rhythm => {
+                        // Output chord/rhythm measures
+                        if needs_marker {
+                            output.push('\n');
+                        }
+
+                        let mut measure_idx = 0;
+                        while measure_idx < track.measures.len() {
+                            // Look ahead to find if there's a repeat pattern starting here
+                            let pattern_end =
+                                self.find_repeat_pattern_end_in_track(&track.measures, measure_idx);
+
+                            if let Some((pattern_end_idx, repeat_count)) = pattern_end {
+                                // Output the entire pattern on one line
+                                self.output_measure_group_from_track(
+                                    &mut output,
+                                    &track.measures,
+                                    section_idx,
+                                    measure_idx,
+                                    pattern_end_idx,
+                                    repeat_count,
+                                );
+
+                                // Skip past the pattern and its duplicates
+                                let pattern_len = pattern_end_idx - measure_idx + 1;
+                                let total_measures = pattern_len * repeat_count;
+                                measure_idx += total_measures;
+                            } else {
+                                // Single measure, no repeat
+                                self.output_single_measure_from_track(
+                                    &mut output,
+                                    &track.measures,
+                                    section_idx,
+                                    measure_idx,
+                                );
+                                measure_idx += 1;
+                            }
+                        }
+                    }
+                    TrackType::Lyrics => {
+                        // TODO: implement lyrics serialization
                     }
                 }
-
-                if !chord_parts.is_empty() {
-                    output.push_str(&chord_parts.join(" "));
-
-                    // Add measure separator at end of measure (except last in section)
-                    // Only add if there are multiple measures or if explicitly needed
-                    if measure_idx < section.measures.len() - 1 {
-                        output.push_str(" |");
-                    }
-
-                    // Add repeat count if > 1
-                    if repeat_count > 1 {
-                        // Check if this is a smart repeat (would need to check section length)
-                        // For now, just output xN
-                        output.push_str(&format!(" x{}", repeat_count));
-                    }
-                } else {
-                    // Empty measure - just add separator if not last
-                    if measure_idx < section.measures.len() - 1 {
-                        output.push('|');
-                    }
-                }
-
-                output.push('\n');
-                measure_idx += 1;
             }
         }
 
         output
+    }
+
+    /// Find if there's a repeat pattern starting at the given index
+    /// Returns Some((end_index, repeat_count)) if a pattern is found, None otherwise
+    fn find_repeat_pattern_end(
+        &self,
+        section: &ChartSection,
+        start_idx: usize,
+    ) -> Option<(usize, usize)> {
+        // Scan forward to find a measure with repeat_count > 1
+        let measures = section.measures();
+        for idx in start_idx..measures.len() {
+            let measure = &measures[idx];
+            if measure.repeat_count > 1 {
+                return Some((idx, measure.repeat_count));
+            }
+            // If we hit a measure that's clearly a duplicate (same chords as pattern start),
+            // stop looking - we're past the pattern marker
+            if idx > start_idx {
+                // Check if this might be a duplicate by comparing chord roots
+                let start_chords: Vec<_> = measures[start_idx]
+                    .chords
+                    .iter()
+                    .map(|c| c.root.clone())
+                    .collect();
+                let current_chords: Vec<_> = measure
+                    .chords
+                    .iter()
+                    .map(|c| c.root.clone())
+                    .collect();
+                if start_chords == current_chords && idx > start_idx {
+                    // This looks like a duplicate, stop looking for pattern marker
+                    break;
+                }
+            }
+        }
+        None
+    }
+
+    /// Output a group of measures on a single line with repeat syntax
+    fn output_measure_group(
+        &self,
+        output: &mut String,
+        section: &ChartSection,
+        section_idx: usize,
+        start_idx: usize,
+        end_idx: usize,
+        repeat_count: usize,
+    ) {
+        // Collect text cues and dynamics from all measures in the pattern
+        let measures = section.measures();
+        for idx in start_idx..=end_idx {
+            let measure = &measures[idx];
+            for cue in &measure.text_cues {
+                output.push_str(&format!("{}\n", cue));
+            }
+            for dynamic in &measure.dynamics {
+                output.push_str(&format!("{}\n", dynamic));
+            }
+        }
+
+        // Output chords from each measure in the pattern
+        let mut all_chords = Vec::new();
+        for idx in start_idx..=end_idx {
+            let measure = &measures[idx];
+
+            // Check for key/time sig changes
+            let position = self.calculate_position(section_idx, idx);
+            for key_change in &self.key_changes {
+                if key_change.position.total_duration.measure == position.total_duration.measure
+                    && key_change.section_index == section_idx
+                {
+                    let key_str = self.format_key_for_syntax(&key_change.to_key);
+                    all_chords.push(key_str);
+                }
+            }
+            for ts_change in &self.time_signature_changes {
+                if ts_change.position.total_duration.measure == position.total_duration.measure
+                    && ts_change.section_index == section_idx
+                {
+                    all_chords.push(format!(
+                        "{}/{}",
+                        ts_change.time_signature.numerator, ts_change.time_signature.denominator
+                    ));
+                }
+            }
+
+            // Chords in this measure
+            for chord in &measure.chords {
+                let chord_str = self.format_chord_for_syntax(chord, &measure.time_signature);
+                if !chord_str.is_empty() {
+                    all_chords.push(chord_str);
+                }
+            }
+
+            // Melodies in this measure
+            for melody in &measure.melodies {
+                if let Some(name) = &melody.name {
+                    if self.melody_variables.get(name).is_some() {
+                        all_chords.push(format!("${}", name));
+                    } else {
+                        all_chords.push(format!("{}", melody));
+                    }
+                } else {
+                    all_chords.push(format!("{}", melody));
+                }
+            }
+        }
+
+        if !all_chords.is_empty() {
+            output.push_str(&all_chords.join(" "));
+            // Add repeat count
+            output.push_str(&format!(" x{}", repeat_count));
+        }
+        output.push('\n');
+    }
+
+    /// Output a single measure (no repeat pattern)
+    fn output_single_measure(
+        &self,
+        output: &mut String,
+        section: &ChartSection,
+        section_idx: usize,
+        measure_idx: usize,
+    ) {
+        let measure = &section.measures()[measure_idx];
+
+        // Text cues before this measure
+        for cue in &measure.text_cues {
+            output.push_str(&format!("{}\n", cue));
+        }
+
+        // Dynamic markings before this measure
+        for dynamic in &measure.dynamics {
+            output.push_str(&format!("{}\n", dynamic));
+        }
+
+        // Check for key change at this position
+        let position = self.calculate_position(section_idx, measure_idx);
+        for key_change in &self.key_changes {
+            if key_change.position.total_duration.measure == position.total_duration.measure
+                && key_change.section_index == section_idx
+            {
+                let key_str = self.format_key_for_syntax(&key_change.to_key);
+                output.push_str(&key_str);
+                output.push(' ');
+            }
+        }
+
+        // Check for time signature change at this position
+        for ts_change in &self.time_signature_changes {
+            if ts_change.position.total_duration.measure == position.total_duration.measure
+                && ts_change.section_index == section_idx
+            {
+                output.push_str(&format!(
+                    "{}/{} ",
+                    ts_change.time_signature.numerator, ts_change.time_signature.denominator
+                ));
+            }
+        }
+
+        // Check for tempo change at this position
+        for tempo_change in &self.tempo_changes {
+            if tempo_change.position.total_duration.measure == position.total_duration.measure
+                && tempo_change.section_index == section_idx
+            {
+                output.push_str(&format!("->{}bpm ", tempo_change.to_tempo.bpm as u32));
+            }
+        }
+
+        // Chords in this measure
+        let mut chord_parts = Vec::new();
+        for chord in &measure.chords {
+            let chord_str = self.format_chord_for_syntax(chord, &measure.time_signature);
+            if !chord_str.is_empty() {
+                chord_parts.push(chord_str);
+            }
+        }
+
+        // Add melodies inline (check if they're variable references or inline blocks)
+        for melody in &measure.melodies {
+            if let Some(name) = &melody.name {
+                // This is a named melody - check if it's in our variables
+                if self.melody_variables.get(name).is_some() {
+                    chord_parts.push(format!("${}", name));
+                } else {
+                    // Output as inline block
+                    chord_parts.push(format!("{}", melody));
+                }
+            } else {
+                // Anonymous melody - output as inline block
+                chord_parts.push(format!("{}", melody));
+            }
+        }
+
+        if !chord_parts.is_empty() {
+            output.push_str(&chord_parts.join(" "));
+
+            // Add measure separator at end of measure (except last in section)
+            if measure_idx < section.measures().len() - 1 {
+                output.push_str(" |");
+            }
+        } else {
+            // Empty measure - just add separator if not last
+            if measure_idx < section.measures().len() - 1 {
+                output.push('|');
+            }
+        }
+
+        output.push('\n');
+    }
+
+    /// Find if there's a repeat pattern starting at the given index in a track's measures
+    fn find_repeat_pattern_end_in_track(
+        &self,
+        measures: &[super::types::Measure],
+        start_idx: usize,
+    ) -> Option<(usize, usize)> {
+        for idx in start_idx..measures.len() {
+            let measure = &measures[idx];
+            if measure.repeat_count > 1 {
+                return Some((idx, measure.repeat_count));
+            }
+            if idx > start_idx {
+                let start_chords: Vec<_> = measures[start_idx]
+                    .chords
+                    .iter()
+                    .map(|c| c.root.clone())
+                    .collect();
+                let current_chords: Vec<_> = measure
+                    .chords
+                    .iter()
+                    .map(|c| c.root.clone())
+                    .collect();
+                if start_chords == current_chords && idx > start_idx {
+                    break;
+                }
+            }
+        }
+        None
+    }
+
+    /// Output a group of measures from a track on a single line with repeat syntax
+    fn output_measure_group_from_track(
+        &self,
+        output: &mut String,
+        measures: &[super::types::Measure],
+        section_idx: usize,
+        start_idx: usize,
+        end_idx: usize,
+        repeat_count: usize,
+    ) {
+        // Collect text cues and dynamics from all measures in the pattern
+        for idx in start_idx..=end_idx {
+            let measure = &measures[idx];
+            for cue in &measure.text_cues {
+                output.push_str(&format!("{}\n", cue));
+            }
+            for dynamic in &measure.dynamics {
+                output.push_str(&format!("{}\n", dynamic));
+            }
+        }
+
+        // Output chords from each measure in the pattern
+        let mut all_chords = Vec::new();
+        for idx in start_idx..=end_idx {
+            let measure = &measures[idx];
+
+            // Check for key/time sig changes
+            let position = self.calculate_position(section_idx, idx);
+            for key_change in &self.key_changes {
+                if key_change.position.total_duration.measure == position.total_duration.measure
+                    && key_change.section_index == section_idx
+                {
+                    let key_str = self.format_key_for_syntax(&key_change.to_key);
+                    all_chords.push(key_str);
+                }
+            }
+            for ts_change in &self.time_signature_changes {
+                if ts_change.position.total_duration.measure == position.total_duration.measure
+                    && ts_change.section_index == section_idx
+                {
+                    all_chords.push(format!(
+                        "{}/{}",
+                        ts_change.time_signature.numerator, ts_change.time_signature.denominator
+                    ));
+                }
+            }
+
+            // Chords in this measure
+            for chord in &measure.chords {
+                let chord_str = self.format_chord_for_syntax(chord, &measure.time_signature);
+                if !chord_str.is_empty() {
+                    all_chords.push(chord_str);
+                }
+            }
+
+            // Melodies in this measure
+            for melody in &measure.melodies {
+                if let Some(name) = &melody.name {
+                    if self.melody_variables.get(name).is_some() {
+                        all_chords.push(format!("${}", name));
+                    } else {
+                        all_chords.push(format!("{}", melody));
+                    }
+                } else {
+                    all_chords.push(format!("{}", melody));
+                }
+            }
+        }
+
+        if !all_chords.is_empty() {
+            output.push_str(&all_chords.join(" "));
+            output.push_str(&format!(" x{}", repeat_count));
+        }
+        output.push('\n');
+    }
+
+    /// Output a single measure from a track (no repeat pattern)
+    fn output_single_measure_from_track(
+        &self,
+        output: &mut String,
+        measures: &[super::types::Measure],
+        section_idx: usize,
+        measure_idx: usize,
+    ) {
+        let measure = &measures[measure_idx];
+
+        // Text cues before this measure
+        for cue in &measure.text_cues {
+            output.push_str(&format!("{}\n", cue));
+        }
+
+        // Dynamic markings before this measure
+        for dynamic in &measure.dynamics {
+            output.push_str(&format!("{}\n", dynamic));
+        }
+
+        // Check for key change at this position
+        let position = self.calculate_position(section_idx, measure_idx);
+        for key_change in &self.key_changes {
+            if key_change.position.total_duration.measure == position.total_duration.measure
+                && key_change.section_index == section_idx
+            {
+                let key_str = self.format_key_for_syntax(&key_change.to_key);
+                output.push_str(&key_str);
+                output.push(' ');
+            }
+        }
+
+        // Check for time signature change at this position
+        for ts_change in &self.time_signature_changes {
+            if ts_change.position.total_duration.measure == position.total_duration.measure
+                && ts_change.section_index == section_idx
+            {
+                output.push_str(&format!(
+                    "{}/{} ",
+                    ts_change.time_signature.numerator, ts_change.time_signature.denominator
+                ));
+            }
+        }
+
+        // Check for tempo change at this position
+        for tempo_change in &self.tempo_changes {
+            if tempo_change.position.total_duration.measure == position.total_duration.measure
+                && tempo_change.section_index == section_idx
+            {
+                output.push_str(&format!("->{}bpm ", tempo_change.to_tempo.bpm as u32));
+            }
+        }
+
+        // Chords in this measure
+        let mut chord_parts = Vec::new();
+        for chord in &measure.chords {
+            let chord_str = self.format_chord_for_syntax(chord, &measure.time_signature);
+            if !chord_str.is_empty() {
+                chord_parts.push(chord_str);
+            }
+        }
+
+        // Add melodies inline
+        for melody in &measure.melodies {
+            if let Some(name) = &melody.name {
+                if self.melody_variables.get(name).is_some() {
+                    chord_parts.push(format!("${}", name));
+                } else {
+                    chord_parts.push(format!("{}", melody));
+                }
+            } else {
+                chord_parts.push(format!("{}", melody));
+            }
+        }
+
+        if !chord_parts.is_empty() {
+            output.push_str(&chord_parts.join(" "));
+
+            // Add measure separator at end of measure (except last in track)
+            if measure_idx < measures.len() - 1 {
+                output.push_str(" |");
+            }
+        } else {
+            // Empty measure - just add separator if not last
+            if measure_idx < measures.len() - 1 {
+                output.push('|');
+            }
+        }
+
+        output.push('\n');
     }
 
     /// Format a key for syntax output (#G, bBb, or #C)
@@ -379,13 +815,9 @@ impl Chart {
             }
         }
 
-        // Number (only if section type should be numbered)
-        if section.section_type.should_number() {
-            if let Some(num) = section.number {
-                name.push(' ');
-                name.push_str(&num.to_string());
-            }
-        }
+        // Note: Section numbers are NOT serialized - they are auto-generated during parsing
+        // based on section order. Outputting them would cause the parser to fail since it
+        // doesn't expect section numbers in the syntax (e.g., "VS 1 8" would fail, only "VS 8" works)
 
         // Split letter
         if let Some(letter) = section.split_letter {
@@ -787,7 +1219,7 @@ F C G Am
 
         // Verify sections have same measure counts
         for (s1, s2) in chart1.sections.iter().zip(chart2.sections.iter()) {
-            assert_eq!(s1.measures.len(), s2.measures.len());
+            assert_eq!(s1.measures().len(), s2.measures().len());
         }
     }
 }

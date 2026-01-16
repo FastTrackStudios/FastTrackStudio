@@ -49,17 +49,16 @@ impl<'a> SMuFLFont<'a> {
         Ok(Self { font, metadata })
     }
 
-    /// Create an empty SMuFL font for minimal contexts.
+    /// Try to create an empty SMuFL font for minimal contexts.
     ///
     /// This font has no glyphs and minimal metadata. Use for layout operations
     /// that don't need actual font data, such as positioning calculations.
     ///
-    /// # Panics
-    /// Panics if the empty font data is invalid.
-    #[must_use]
-    pub fn empty() -> Self {
-        let font = FontRef::new(EMPTY_FONT_DATA)
-            .expect("Built-in empty font should be valid");
+    /// # Errors
+    /// Returns an error if the embedded font data or metadata is invalid.
+    /// This should never happen with valid builds.
+    pub fn try_empty() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let font = FontRef::new(EMPTY_FONT_DATA)?;
 
         // Minimal valid SMuFL metadata JSON
         let metadata_json = r#"{
@@ -70,10 +69,21 @@ impl<'a> SMuFLFont<'a> {
             "glyphBBoxes": {}
         }"#;
 
-        let metadata = SMuFLMetadata::from_reader(metadata_json.as_bytes())
-            .expect("Built-in empty metadata should be valid");
+        let metadata = SMuFLMetadata::from_reader(metadata_json.as_bytes())?;
 
-        Self { font, metadata }
+        Ok(Self { font, metadata })
+    }
+
+    /// Create an empty SMuFL font for minimal contexts.
+    ///
+    /// This font has no glyphs and minimal metadata. Use for layout operations
+    /// that don't need actual font data, such as positioning calculations.
+    ///
+    /// # Panics
+    /// Panics if the embedded font data is invalid (should never happen).
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::try_empty().expect("Built-in empty font and metadata should be valid")
     }
 
     /// Load a SMuFL font from font data and metadata JSON reader.

@@ -70,9 +70,9 @@ impl Default for LayoutSettings {
     fn default() -> Self {
         Self {
             staff_size_mm: 7.0,
-            // A4 paper
-            page_width_mm: 210.0,
-            page_height_mm: 297.0,
+            // US Letter paper (8.5" × 11")
+            page_width_mm: 215.9,
+            page_height_mm: 279.4,
             margin_left_mm: 15.0,
             margin_right_mm: 15.0,
             margin_top_mm: 20.0,
@@ -84,14 +84,20 @@ impl Default for LayoutSettings {
 }
 
 impl LayoutSettings {
-    /// Letter paper size.
+    /// A4 paper size (210mm × 297mm).
     #[must_use]
-    pub fn letter() -> Self {
+    pub fn a4() -> Self {
         Self {
-            page_width_mm: 215.9,
-            page_height_mm: 279.4,
+            page_width_mm: 210.0,
+            page_height_mm: 297.0,
             ..Self::default()
         }
+    }
+
+    /// US Letter paper size (8.5" × 11") - same as default.
+    #[must_use]
+    pub fn letter() -> Self {
+        Self::default()
     }
 
     /// Get the space unit (1/4 of staff size).

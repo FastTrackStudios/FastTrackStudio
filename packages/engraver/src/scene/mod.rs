@@ -39,7 +39,7 @@ pub mod traverse;
 
 // Re-export main types for convenience
 pub use id::{ElementType, SemanticId};
-pub use node::SceneNode;
+pub use node::{metadata_keys, GlyphInfo, GlyphType, SceneNode};
 pub use paint::{
     color_to_svg, path_to_svg_d, FillRule, FontStyle, FontWeight, LineCap, LineJoin, PaintCommand,
     TextAnchor,

@@ -1,39 +1,67 @@
-//! FTS-Native - FastTrackStudio Native Chart Editor
+//! FTS-Native - Chart Editor with Vello-based rendering
 //!
-//! A split pane editor with keyflow chart text input on the left
-//! and a live WGPU chart preview on the right.
+//! Uses engraver's layout system and Vello for GPU-accelerated chart rendering.
 
+use dioxus_html::input_data::MouseButton;
 use dioxus_native::prelude::*;
 use dioxus_native::use_wgpu;
 use keyflow::Chart;
-use lumen_blocks::components::button::{Button, ButtonVariant};
 use winit::dpi::LogicalSize;
 use winit::window::WindowAttributes;
 
-mod chart_renderer;
-use chart_renderer::{ChartMessage, ChartPaintSource};
+mod chart_layout;
+mod chart_vello_renderer;
+use chart_vello_renderer::{ChartMessage, ChartVelloPaintSource};
 
 /// Default chart text to start with
-/// Uses keyflow chart syntax: Title - Artist, tempo/time/key, then sections
-/// Chords are written as note names with qualities (Gmaj7, Am7, D7)
-/// Each space-separated chord is one measure by default
-const DEFAULT_CHART_TEXT: &str = r#"Autumn Leaves - Joseph Kosma
+const DEFAULT_CHART_TEXT: &str = r#"Autumn Leaves (Extended) - Joseph Kosma
 120bpm 4/4 #G
 
-intro 4
-Gmaj7 Cmaj7 F#m7b5 B7
+intro 8
+mainTheme = m{ E_4 F#_4 G_4. A_8 B_2 }
+Gmaj7 m{ E_4 F#_4 G_4. A_8 } Cmaj7 m{ B_2 r_2 } F#m7b5 B7
+Em7 $mainTheme A7 m{ r_1 } Dmaj7 G7
 
-vs 8
-Em7 Am7 D7 Gmaj7 Cmaj7 F#m7b5 B7 Em
-
-ch 8
-Am7 D7 Gmaj7 Cmaj7 F#m7b5 B7 Em7 E7
-
-br 4
-Am7 D7 Gmaj7 B7
-
-outro 4
+vs 16
 Em7 Am7 D7 Gmaj7
+Cmaj7 F#m7b5 B7 Em
+Em7 Am7 D7 Gmaj7
+Cmaj7 F#m7b5 B7 Em7
+
+pre 4
+Am7 m{ A_8 B_8 C_4 D_4 E_4 } D7 Bm7 E7
+
+ch 16
+Am7 D7 Gmaj7 Cmaj7
+F#m7b5 B7 Em7 E7
+Am7 D7 Gmaj7 Cmaj7
+F#m7b5 B7 Em7 m{ r_1 }
+
+vs 16
+Em7 Am7 D7 Gmaj7
+Cmaj7 F#m7b5 B7 Em
+Em7 Am7 D7 Gmaj7
+Cmaj7 F#m7b5 B7 Em7
+
+pre 4
+
+ch 16
+
+br 8
+Cmaj7 m{ G_4 F#_4 E_4 D_4 } Bm7 Am7 Gmaj7
+F#m7b5 B7 Em7 A7
+
+inst 16
+Gmaj7 Cmaj7 F#m7b5 B7
+Em7 Am7 D7 Gmaj7
+Cmaj7 F#m7b5 B7 Em
+Em7 Am7 D7 G7
+
+ch 16
+
+outro 8
+Gmaj7 m{ E_2 r_4 D_4 } Cmaj7 m{ C_2. r_4 } F#m7b5 B7
+Em7 Am7 D7 Gmaj7 m{ G_1 }
 "#;
 
 fn main() {
@@ -59,92 +87,67 @@ fn app() -> Element {
 
     rsx! {
         style { {TAILWIND_CSS} }
-        div { class: "h-screen w-screen bg-background text-foreground flex flex-col",
-            // Header
-            div { class: "flex-shrink-0 border-b border-border p-4 flex items-center justify-between",
-                h1 { class: "text-xl font-bold", "FTS-Native Chart Editor" }
-                div { class: "flex gap-2",
-                    Button {
-                        variant: ButtonVariant::Secondary,
-                        on_click: move |_| chart_text.set(DEFAULT_CHART_TEXT.to_string()),
-                        "Reset"
+        div { class: "h-screen w-screen bg-background text-foreground flex",
+            // Left pane - Chart text editor
+            div { class: "w-1/2 border-r border-border flex flex-col",
+                // Editor header with title info
+                div { class: "flex-shrink-0 p-4 border-b border-border",
+                    div { class: "flex items-center justify-between mb-2",
+                        h2 { class: "text-lg font-semibold", "Chart Editor" }
+                        button {
+                            class: "px-3 py-1 text-xs bg-secondary text-secondary-foreground rounded hover:bg-secondary/80",
+                            onclick: move |_| chart_text.set(DEFAULT_CHART_TEXT.to_string()),
+                            "Reset"
+                        }
                     }
+                    if let Some(error) = parse_error() {
+                        div { class: "text-sm text-destructive bg-destructive/10 p-2 rounded",
+                            "Parse Error: {error}"
+                        }
+                    } else {
+                        div { class: "text-sm text-muted-foreground",
+                            if let Some(chart) = chart_for_preview() {
+                                {format!("Parsed: {} sections, {} measures",
+                                    chart.sections.len(),
+                                    chart.sections.iter().map(|s| s.measures().len()).sum::<usize>()
+                                )}
+                            } else {
+                                "No chart data"
+                            }
+                        }
+                    }
+                    // Syntax help
+                    details { class: "mt-2",
+                        summary { class: "text-xs text-muted-foreground cursor-pointer", "Syntax Help" }
+                        div { class: "text-xs text-muted-foreground mt-1 space-y-1",
+                            p { "Line 1: Title - Artist" }
+                            p { "Line 2: 120bpm 4/4 #C (tempo, time sig, key)" }
+                            p { "Sections: intro, vs, ch, br, pre, post, inst, outro + measure count" }
+                            p { "Chords: Cmaj7, Am7, D7, F#m7b5, etc." }
+                        }
+                    }
+                }
+                // Text editor
+                textarea {
+                    class: "flex-1 p-4 font-mono text-sm bg-card border-0 resize-none focus:outline-none",
+                    value: "{chart_text()}",
+                    oninput: move |evt| chart_text.set(evt.value()),
+                    placeholder: "Enter chart text here...",
                 }
             }
 
-            // Split pane content
-            div { class: "flex-1 flex overflow-hidden",
-                // Left pane - Chart text editor
-                div { class: "w-1/2 border-r border-border flex flex-col",
-                    // Editor header
-                    div { class: "flex-shrink-0 p-4 border-b border-border",
-                        h2 { class: "text-lg font-semibold mb-2", "Chart Text" }
-                        if let Some(error) = parse_error() {
-                            div { class: "text-sm text-destructive bg-destructive/10 p-2 rounded",
-                                "Parse Error: {error}"
-                            }
-                        } else {
-                            div { class: "text-sm text-muted-foreground",
-                                if let Some(chart) = chart_for_preview() {
-                                    {format!("✓ Parsed: {} sections, {} total measures",
-                                        chart.sections.len(),
-                                        chart.sections.iter().map(|s| s.measures.len()).sum::<usize>()
-                                    )}
-                                } else {
-                                    "No chart data"
-                                }
-                            }
-                        }
-                        // Syntax help
-                        details { class: "mt-2",
-                            summary { class: "text-xs text-muted-foreground cursor-pointer", "Syntax Help" }
-                            div { class: "text-xs text-muted-foreground mt-1 space-y-1",
-                                p { "Line 1: Title - Artist" }
-                                p { "Line 2: 120bpm 4/4 #C (tempo, time sig, key)" }
-                                p { "Sections: intro, vs, ch, br, pre, post, inst, outro + measure count" }
-                            }
-                        }
-                    }
-                    // Text editor
-                    textarea {
-                        class: "flex-1 p-4 font-mono text-sm bg-card border-0 resize-none focus:outline-none",
-                        value: "{chart_text()}",
-                        oninput: move |evt| chart_text.set(evt.value()),
-                        placeholder: "Enter chart text here...",
-                    }
-                }
-
-                // Right pane - WGPU Chart Preview
-                div { class: "w-1/2 flex flex-col",
-                    // Preview header
-                    div { class: "flex-shrink-0 p-4 border-b border-border",
-                        h2 { class: "text-lg font-semibold", "Chart Preview" }
-                        if let Some(ref chart) = chart_for_preview() {
-                            if let Some(ref title) = chart.metadata.title {
-                                p { class: "text-sm text-muted-foreground",
-                                    {format!("{}{}", title, chart.metadata.artist.as_ref().map(|a| format!(" - {}", a)).unwrap_or_default())}
-                                }
-                            } else {
-                                p { class: "text-sm text-muted-foreground", "WGPU-rendered chart visualization" }
-                            }
-                        } else {
-                            p { class: "text-sm text-muted-foreground", "WGPU-rendered chart visualization" }
-                        }
-                    }
-                    // WGPU canvas
-                    div { class: "flex-1 overflow-hidden",
-                        ChartPreviewCanvas { chart: chart_for_preview() }
-                    }
-                }
+            // Right pane - Chart Preview (full height for proper aspect ratio)
+            div { class: "w-1/2 flex flex-col",
+                ChartPreviewCanvas { chart: chart_for_preview() }
             }
         }
     }
 }
 
-/// WGPU Chart Preview Canvas component
+/// Vello-based Chart Preview component with page navigation controls
 #[component]
 fn ChartPreviewCanvas(chart: Option<Chart>) -> Element {
-    // Create paint source for the chart (only once)
+    // Create paint source and store sender
     let sender = use_hook(|| {
         std::rc::Rc::new(std::cell::RefCell::new(None::<std::sync::mpsc::Sender<ChartMessage>>))
     });
@@ -152,7 +155,7 @@ fn ChartPreviewCanvas(chart: Option<Chart>) -> Element {
     let paint_source_id = {
         let sender_cell = sender.clone();
         use_wgpu(move || {
-            let paint_source = ChartPaintSource::new();
+            let paint_source = ChartVelloPaintSource::new();
             *sender_cell.borrow_mut() = Some(paint_source.sender());
             paint_source
         })
@@ -160,42 +163,126 @@ fn ChartPreviewCanvas(chart: Option<Chart>) -> Element {
 
     // Clone sender for event handlers
     let wheel_sender = sender.clone();
+    let mouse_move_sender = sender.clone();
+    let mouse_down_sender = sender.clone();
+    let mouse_up_sender = sender.clone();
+    let mouse_leave_sender = sender.clone();
+    let prev_page_sender = sender.clone();
+    let next_page_sender = sender.clone();
+    let fit_page_sender = sender.clone();
+    let reset_view_sender = sender.clone();
 
     // Send chart updates on every render (component re-renders when prop changes)
-    // This ensures the renderer always has the latest chart data
     if let Some(ref sender_ref) = *sender.borrow() {
         let _ = sender_ref.send(ChartMessage::UpdateChart(chart.clone()));
     }
 
     rsx! {
+        // Toolbar with page controls
+        div { class: "flex-shrink-0 p-2 border-b border-border flex items-center justify-between bg-card",
+            // Page navigation buttons
+            div { class: "flex items-center gap-2",
+                button {
+                    class: "px-2 py-1 text-xs bg-secondary text-secondary-foreground rounded hover:bg-secondary/80",
+                    onclick: move |_| {
+                        if let Some(ref sender) = *prev_page_sender.borrow() {
+                            let _ = sender.send(ChartMessage::PrevPage);
+                        }
+                    },
+                    "Prev"
+                }
+                button {
+                    class: "px-2 py-1 text-xs bg-secondary text-secondary-foreground rounded hover:bg-secondary/80",
+                    onclick: move |_| {
+                        if let Some(ref sender) = *next_page_sender.borrow() {
+                            let _ = sender.send(ChartMessage::NextPage);
+                        }
+                    },
+                    "Next"
+                }
+            }
+            // View controls
+            div { class: "flex items-center gap-2",
+                button {
+                    class: "px-2 py-1 text-xs bg-secondary text-secondary-foreground rounded hover:bg-secondary/80",
+                    onclick: move |_| {
+                        if let Some(ref sender) = *fit_page_sender.borrow() {
+                            // Use approximate viewport size (will be overwritten by actual size)
+                            let _ = sender.send(ChartMessage::FitPage {
+                                viewport_width: 700.0,
+                                viewport_height: 850.0,
+                            });
+                        }
+                    },
+                    "Fit Page"
+                }
+                button {
+                    class: "px-2 py-1 text-xs bg-secondary text-secondary-foreground rounded hover:bg-secondary/80",
+                    onclick: move |_| {
+                        if let Some(ref sender) = *reset_view_sender.borrow() {
+                            let _ = sender.send(ChartMessage::ResetView);
+                        }
+                    },
+                    "Reset"
+                }
+            }
+            // Help text
+            span { class: "text-xs text-muted-foreground", "Scroll=Zoom | Drag=Pan" }
+        }
+        // Canvas container (takes remaining space)
         div {
-            class: "w-full h-full",
-            style: "display: grid;",
-            // Handle mouse wheel for zoom/pan
-            // Option/Alt + scroll = zoom, regular scroll = pan
+            class: "flex-1 overflow-hidden",
+            style: "display: grid; cursor: grab;",
+
+            // Mouse wheel = zoom about cursor (Vello example style)
             onwheel: move |evt| {
                 if let Some(ref sender) = *wheel_sender.borrow() {
-                    let delta_y = evt.delta().strip_units().y as f32;
+                    let delta_y = evt.delta().strip_units().y;
+                    let coords = evt.element_coordinates();
+                    let _ = sender.send(ChartMessage::MouseWheel {
+                        delta_y,
+                        cursor_x: coords.x,
+                        cursor_y: coords.y,
+                    });
+                }
+            },
 
-                    // Check if Option/Alt key is held for zoom
-                    if evt.modifiers().alt() {
-                        // Zoom - use element coordinates for cursor position
-                        let coords = evt.element_coordinates();
-                        let _ = sender.send(ChartMessage::Zoom {
-                            delta: -delta_y * 0.01,
-                            cursor_x: coords.x as f32,
-                            cursor_y: coords.y as f32,
-                        });
-                    } else {
-                        // Pan
-                        let delta_x = evt.delta().strip_units().x as f32;
-                        let _ = sender.send(ChartMessage::Pan {
-                            dx: delta_x,
-                            dy: delta_y,
-                        });
+            // Track mouse movement for drag-to-pan
+            onmousemove: move |evt| {
+                if let Some(ref sender) = *mouse_move_sender.borrow() {
+                    let coords = evt.element_coordinates();
+                    let _ = sender.send(ChartMessage::MouseMove {
+                        x: coords.x,
+                        y: coords.y,
+                    });
+                }
+            },
+
+            // Mouse down = start drag
+            onmousedown: move |evt| {
+                if evt.trigger_button() == Some(MouseButton::Primary) {
+                    if let Some(ref sender) = *mouse_down_sender.borrow() {
+                        let _ = sender.send(ChartMessage::MouseButton { pressed: true });
                     }
                 }
             },
+
+            // Mouse up = end drag
+            onmouseup: move |evt| {
+                if evt.trigger_button() == Some(MouseButton::Primary) {
+                    if let Some(ref sender) = *mouse_up_sender.borrow() {
+                        let _ = sender.send(ChartMessage::MouseButton { pressed: false });
+                    }
+                }
+            },
+
+            // Mouse leave = cancel drag (prevents stuck drag when cursor exits)
+            onmouseleave: move |_| {
+                if let Some(ref sender) = *mouse_leave_sender.borrow() {
+                    let _ = sender.send(ChartMessage::MouseButton { pressed: false });
+                }
+            },
+
             canvas {
                 id: "chart-preview",
                 "src": "{paint_source_id}"
@@ -302,6 +389,14 @@ textarea:focus {
 .resize-none { resize: none; }
 .focus\:outline-none:focus { outline: none; }
 .cursor-pointer { cursor: pointer; }
+
+/* Button styles */
+.px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+.py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.bg-secondary { background-color: var(--secondary); }
+.text-secondary-foreground { color: var(--secondary-foreground); }
+.hover\:bg-secondary\/80:hover { background-color: rgba(39, 39, 42, 0.8); }
+button { border: none; cursor: pointer; }
 
 /* Details/summary styling */
 details summary { list-style: none; }

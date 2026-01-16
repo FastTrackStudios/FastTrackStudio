@@ -2,6 +2,7 @@
 //!
 //! Defines different types of song sections
 
+use super::measure_expr::MeasureExpression;
 use serde::{Deserialize, Serialize};
 
 /// Represents different types of song sections
@@ -182,7 +183,8 @@ impl SectionType {
     /// Supports:
     /// - Standard sections: "VS 16", "Intro 4", etc.
     /// - Custom sections with brackets: "[Hits]", "[SOLO Keys] 8", etc.
-    pub fn parse_with_measure_count(input: &str) -> Option<(Self, Option<usize>)> {
+    /// - Expressions: "VS 8+1", "VS 4x4", "VS +1", "VS -1"
+    pub fn parse_with_measure_count(input: &str) -> Option<(Self, Option<MeasureExpression>)> {
         let input = input.trim();
 
         // Check for custom section with brackets: [Hits] or [SOLO Keys] 8
@@ -190,16 +192,25 @@ impl SectionType {
             // Find the closing bracket
             if let Some(close_bracket_idx) = input[1..].find(']') {
                 let name = &input[1..close_bracket_idx + 1]; // Extract name between brackets
+
+                // Exclude track markers - these are not sections
+                let name_lower = name.to_lowercase();
+                let first_word = name_lower.split_whitespace().next().unwrap_or("");
+                if ["chords", "melody", "rhythm", "lyrics"].contains(&first_word) {
+                    return None; // This is a track marker, not a section
+                }
+
                 let remaining = input[close_bracket_idx + 2..].trim();
 
-                // Parse measure count if present
-                let measure_count = if remaining.is_empty() {
+                // Parse measure expression if present
+                let measure_expr = if remaining.is_empty() {
                     None
                 } else {
-                    remaining.parse::<usize>().ok()
+                    // Must be a valid expression, otherwise it's not a section marker
+                    Some(MeasureExpression::parse(remaining)?)
                 };
 
-                return Some((SectionType::Custom(name.to_string()), measure_count));
+                return Some((SectionType::Custom(name.to_string()), measure_expr));
             }
         }
 
@@ -213,19 +224,16 @@ impl SectionType {
 
         let section_str = parts[0];
 
-        // Section markers should be alone or followed by only a measure count (number)
+        // Section markers should be alone or followed by only a measure count/expression
         // This prevents "c d g" from being parsed as a section marker
         if parts.len() > 2 {
             return None; // Too many tokens, not a section marker
         }
 
-        let measure_count = if parts.len() > 1 {
-            // If there's a second token, it must be a number (measure count)
+        let measure_expr = if parts.len() > 1 {
+            // If there's a second token, it must be a valid expression
             // Otherwise, this isn't a valid section marker
-            match parts[1].parse::<usize>() {
-                Ok(count) => Some(count),
-                Err(_) => return None, // Second token is not a number, so not a valid section marker
-            }
+            Some(MeasureExpression::parse(parts[1])?)
         } else {
             None
         };
@@ -240,7 +248,7 @@ impl SectionType {
             _ => None,
         };
 
-        section_type.map(|st| (st, measure_count))
+        section_type.map(|st| (st, measure_expr))
     }
 }
 
@@ -295,15 +303,15 @@ mod tests {
     fn test_parse_section_markers() {
         assert_eq!(
             SectionType::parse_with_measure_count("vs 4"),
-            Some((SectionType::Verse, Some(4)))
+            Some((SectionType::Verse, Some(MeasureExpression::Absolute(4))))
         );
         assert_eq!(
             SectionType::parse_with_measure_count("ch 8"),
-            Some((SectionType::Chorus, Some(8)))
+            Some((SectionType::Chorus, Some(MeasureExpression::Absolute(8))))
         );
         assert_eq!(
             SectionType::parse_with_measure_count("intro 2"),
-            Some((SectionType::Intro, Some(2)))
+            Some((SectionType::Intro, Some(MeasureExpression::Absolute(2))))
         );
         assert_eq!(
             SectionType::parse_with_measure_count("br"),
@@ -312,9 +320,44 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_expressions() {
+        // Addition expression
+        assert_eq!(
+            SectionType::parse_with_measure_count("vs 8+1"),
+            Some((SectionType::Verse, Some(MeasureExpression::Absolute(9))))
+        );
+
+        // Subtraction expression
+        assert_eq!(
+            SectionType::parse_with_measure_count("vs 8-1"),
+            Some((SectionType::Verse, Some(MeasureExpression::Absolute(7))))
+        );
+
+        // Multiplication expression
+        assert_eq!(
+            SectionType::parse_with_measure_count("vs 4x4"),
+            Some((SectionType::Verse, Some(MeasureExpression::Absolute(16))))
+        );
+
+        // Relative add
+        assert_eq!(
+            SectionType::parse_with_measure_count("vs +1"),
+            Some((SectionType::Verse, Some(MeasureExpression::Add(1))))
+        );
+
+        // Relative subtract
+        assert_eq!(
+            SectionType::parse_with_measure_count("vs -1"),
+            Some((SectionType::Verse, Some(MeasureExpression::Subtract(1))))
+        );
+    }
+
+    #[test]
     fn test_parse_invalid() {
         assert_eq!(SectionType::parse_with_measure_count("invalid"), None);
         assert_eq!(SectionType::parse_with_measure_count(""), None);
+        // Invalid expression should cause parse to fail
+        assert_eq!(SectionType::parse_with_measure_count("vs abc"), None);
     }
 
     #[test]
@@ -328,13 +371,19 @@ mod tests {
         // Custom section with brackets and measure count
         assert_eq!(
             SectionType::parse_with_measure_count("[SOLO Keys] 8"),
-            Some((SectionType::Custom("SOLO Keys".to_string()), Some(8)))
+            Some((SectionType::Custom("SOLO Keys".to_string()), Some(MeasureExpression::Absolute(8))))
         );
 
         // Custom section with brackets, no measure count
         assert_eq!(
             SectionType::parse_with_measure_count("[Bridge Out]"),
             Some((SectionType::Custom("Bridge Out".to_string()), None))
+        );
+
+        // Custom section with expression
+        assert_eq!(
+            SectionType::parse_with_measure_count("[SOLO Keys] 4x2"),
+            Some((SectionType::Custom("SOLO Keys".to_string()), Some(MeasureExpression::Absolute(8))))
         );
     }
 

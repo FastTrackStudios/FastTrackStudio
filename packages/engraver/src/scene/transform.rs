@@ -182,22 +182,20 @@ impl TransformStack {
     }
 
     /// Pop the top transform from the stack.
-    /// Returns the popped transform.
-    ///
-    /// # Panics
-    /// Panics if attempting to pop the base identity transform.
-    pub fn pop(&mut self) -> Affine {
-        assert!(
-            self.stack.len() > 1,
-            "Cannot pop base transform from stack"
-        );
-        self.stack.pop().unwrap()
+    /// Returns the popped transform, or `None` if only the base transform remains.
+    pub fn pop(&mut self) -> Option<Affine> {
+        if self.stack.len() > 1 {
+            self.stack.pop()
+        } else {
+            None
+        }
     }
 
     /// Get the current (composed) transform.
+    /// Returns identity if the stack is somehow empty (should never happen).
     #[must_use]
     pub fn current(&self) -> Affine {
-        *self.stack.last().unwrap()
+        self.stack.last().copied().unwrap_or(Affine::IDENTITY)
     }
 
     /// Get the depth of the stack (number of pushed transforms).
@@ -242,8 +240,10 @@ mod tests {
     fn test_rotation_angle() {
         let rot90 = Affine::rotate(PI / 2.0);
         let angle = rotation_angle(&rot90);
-        assert!(angle.is_some());
-        assert!((angle.unwrap() - PI / 2.0).abs() < 1e-10);
+        let Some(angle_value) = angle else {
+            panic!("Expected rotation angle to be Some");
+        };
+        assert!((angle_value - PI / 2.0).abs() < 1e-10);
     }
 
     #[test]
@@ -285,11 +285,16 @@ mod tests {
         let pt = stack.transform_point(Point::new(0.0, 0.0));
         assert!((pt.x - 15.0).abs() < 1e-10);
 
-        stack.pop();
+        assert!(stack.pop().is_some());
         assert_eq!(stack.depth(), 1);
 
         let pt = stack.transform_point(Point::new(0.0, 0.0));
         assert!((pt.x - 10.0).abs() < 1e-10);
+
+        // Pop should return None when only base remains
+        assert!(stack.pop().is_some());
+        assert!(stack.pop().is_none());
+        assert_eq!(stack.depth(), 0);
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //! and proper notehead stacking for seconds.
 
 use kurbo::{Point, Rect};
-use peniko::Color;
+use vello::peniko::Color;
 
 use crate::layout::context::LayoutContext;
 use crate::layout::shape::Shape;
@@ -346,11 +346,13 @@ fn draw_stem(
     duration: NoteDuration,
     spatium: f64,
 ) -> Vec<PaintCommand> {
+    // Early return if no notes (shouldn't happen but guard against panic)
+    let (Some(top_note), Some(bottom_note)) = (notes.last(), notes.first()) else {
+        return Vec::new();
+    };
+
     let stem_width = STEM_WIDTH * spatium;
     let stem_length = spatium * 3.5;
-
-    let top_note = notes.last().unwrap();
-    let bottom_note = notes.first().unwrap();
 
     let top_y = -top_note.line as f64 * spatium / 2.0;
     let bottom_y = -bottom_note.line as f64 * spatium / 2.0;
@@ -418,11 +420,13 @@ fn draw_flags(
         return Vec::new();
     }
 
+    // Early return if no notes (shouldn't happen but guard against panic)
+    let (Some(top_note), Some(bottom_note)) = (notes.last(), notes.first()) else {
+        return Vec::new();
+    };
+
     let stem_length = spatium * 3.5;
     let stem_width = STEM_WIDTH * spatium;
-
-    let top_note = notes.last().unwrap();
-    let bottom_note = notes.first().unwrap();
 
     // Use same anchor calculations as draw_stem for consistent flag positioning
     let (flag_x, flag_y, glyph) = match stem_dir {

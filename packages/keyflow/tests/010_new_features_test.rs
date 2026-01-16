@@ -53,7 +53,7 @@ intro, 1/ 4->/ 5/ 1/
     let chart = Chart::parse(input).unwrap();
 
     assert_eq!(chart.sections.len(), 1);
-    let measure = &chart.sections[0].measures[0];
+    let measure = &chart.sections[0].measures()[0];
 
     // Should have 4 chords
     assert!(
@@ -83,7 +83,7 @@ intro, 1/ 4/ 5/ 1/ /fermata
     let chart = Chart::parse(input).unwrap();
 
     assert_eq!(chart.sections.len(), 1);
-    let measure = &chart.sections[0].measures[0];
+    let measure = &chart.sections[0].measures()[0];
 
     // Should have 4 chords
     assert!(
@@ -113,7 +113,7 @@ intro, 1/ 4/ /accent 5/ 1/
     let chart = Chart::parse(input).unwrap();
 
     assert_eq!(chart.sections.len(), 1);
-    let measure = &chart.sections[0].measures[0];
+    let measure = &chart.sections[0].measures()[0];
 
     // Should have 4 chords
     assert!(

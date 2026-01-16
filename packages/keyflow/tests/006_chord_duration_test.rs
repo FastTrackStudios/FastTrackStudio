@@ -41,10 +41,10 @@ I/// IV/ vi////
     // g//// (4 beats = 1 measure), e// (2 beats) + d// (2 beats) = 1 measure
     let intro_section = &chart.sections[0];
     assert_eq!(intro_section.section.section_type, SectionType::Intro);
-    assert_eq!(intro_section.measures.len(), 2);
+    assert_eq!(intro_section.measures().len(), 2);
 
     // Measure 1: g//// (4 beats fills the measure)
-    let measure1 = &intro_section.measures[0];
+    let measure1 = &intro_section.measures()[0];
     assert_eq!(measure1.chords.len(), 1);
     let chord1 = &measure1.chords[0];
     assert_eq!(format!("{}", chord1.root), "G");
@@ -58,7 +58,7 @@ I/// IV/ vi////
     }
 
     // Measure 2: e// (2 beats) + d// (2 beats) = 4 beats
-    let measure2 = &intro_section.measures[1];
+    let measure2 = &intro_section.measures()[1];
     assert_eq!(measure2.chords.len(), 2);
 
     let chord2 = &measure2.chords[0]; // e//
@@ -87,10 +87,10 @@ I/// IV/ vi////
     // 1// (2) + 4// (2) = 1 measure, 6// (2) + 5// (2) = 1 measure
     let verse_section = &chart.sections[1];
     assert_eq!(verse_section.section.section_type, SectionType::Verse);
-    assert_eq!(verse_section.measures.len(), 2);
+    assert_eq!(verse_section.measures().len(), 2);
 
     // Measure 1: 1// (2 beats) + 4// (2 beats) = 4 beats
-    let verse_measure1 = &verse_section.measures[0];
+    let verse_measure1 = &verse_section.measures()[0];
     assert_eq!(verse_measure1.chords.len(), 2);
 
     let chord4 = &verse_measure1.chords[0]; // 1//
@@ -116,7 +116,7 @@ I/// IV/ vi////
     }
 
     // Measure 2: 6// (2 beats) + 5// (2 beats) = 4 beats
-    let verse_measure2 = &verse_section.measures[1];
+    let verse_measure2 = &verse_section.measures()[1];
     assert_eq!(verse_measure2.chords.len(), 2);
 
     let chord6 = &verse_measure2.chords[0]; // 6//
@@ -145,10 +145,10 @@ I/// IV/ vi////
     // I/// (3) + IV/ (1) = 1 measure, vi//// (4) = 1 measure
     let chorus_section = &chart.sections[2];
     assert_eq!(chorus_section.section.section_type, SectionType::Chorus);
-    assert_eq!(chorus_section.measures.len(), 2);
+    assert_eq!(chorus_section.measures().len(), 2);
 
     // Measure 1: I/// (3 beats) + IV/ (1 beat) = 4 beats
-    let chorus_measure1 = &chorus_section.measures[0];
+    let chorus_measure1 = &chorus_section.measures()[0];
     assert_eq!(chorus_measure1.chords.len(), 2);
 
     let chord8 = &chorus_measure1.chords[0]; // I///
@@ -174,7 +174,7 @@ I/// IV/ vi////
     }
 
     // Measure 2: vi//// (4 beats fills the measure)
-    let chorus_measure2 = &chorus_section.measures[1];
+    let chorus_measure2 = &chorus_section.measures()[1];
     assert_eq!(chorus_measure2.chords.len(), 1);
 
     let chord10 = &chorus_measure2.chords[0]; // vi////
@@ -217,24 +217,24 @@ I_2 IV_2 vi_2 V_2
     // g_4 (1 beat) + e_2 (2 beats) + d_4 (1 beat) = 4 beats = measure 0
     // c//// (4 beats) = measure 1
     let intro = &chart.sections[0];
-    assert_eq!(intro.measures.len(), 2);
+    assert_eq!(intro.measures().len(), 2);
 
-    let chord1 = &intro.measures[0].chords[0];
+    let chord1 = &intro.measures()[0].chords[0];
     assert_eq!(chord1.full_symbol, "G");
     assert!(matches!(chord1.rhythm, ChordRhythm::Lily { .. }));
     assert_eq!(chord1.duration.to_beats(chart.time_signature.unwrap()), 1.0); // _4 = quarter note
 
-    let chord2 = &intro.measures[0].chords[1];
+    let chord2 = &intro.measures()[0].chords[1];
     assert_eq!(chord2.full_symbol, "Em");
     assert!(matches!(chord2.rhythm, ChordRhythm::Lily { .. }));
     assert_eq!(chord2.duration.to_beats(chart.time_signature.unwrap()), 2.0); // _2 = half note
 
-    let chord3 = &intro.measures[0].chords[2];
+    let chord3 = &intro.measures()[0].chords[2];
     assert_eq!(chord3.full_symbol, "D");
     assert!(matches!(chord3.rhythm, ChordRhythm::Lily { .. }));
     assert_eq!(chord3.duration.to_beats(chart.time_signature.unwrap()), 1.0); // _4 = quarter note
 
-    let chord4 = &intro.measures[1].chords[0];
+    let chord4 = &intro.measures()[1].chords[0];
     assert_eq!(chord4.full_symbol, "C");
     assert!(matches!(chord4.rhythm, ChordRhythm::Slashes(4)));
 
@@ -242,19 +242,19 @@ I_2 IV_2 vi_2 V_2
     // 1_4 (1) + 4_2 (2) + 6_4 (1) = 4 beats = measure 0
     // 5//// = measure 1
     let verse = &chart.sections[1];
-    assert_eq!(verse.measures.len(), 2);
+    assert_eq!(verse.measures().len(), 2);
 
-    let chord5 = &verse.measures[0].chords[0];
+    let chord5 = &verse.measures()[0].chords[0];
     assert_eq!(chord5.full_symbol, "1");
     assert!(matches!(chord5.rhythm, ChordRhythm::Lily { .. }));
     assert_eq!(chord5.duration.to_beats(chart.time_signature.unwrap()), 1.0);
 
-    let chord6 = &verse.measures[0].chords[1];
+    let chord6 = &verse.measures()[0].chords[1];
     assert_eq!(chord6.full_symbol, "4");
     assert!(matches!(chord6.rhythm, ChordRhythm::Lily { .. }));
     assert_eq!(chord6.duration.to_beats(chart.time_signature.unwrap()), 2.0);
 
-    let chord7 = &verse.measures[0].chords[2];
+    let chord7 = &verse.measures()[0].chords[2];
     assert_eq!(chord7.full_symbol, "6"); // Scale degrees shouldn't have quality suffix
     assert_eq!(chord7.duration.to_beats(chart.time_signature.unwrap()), 1.0);
 
@@ -262,26 +262,26 @@ I_2 IV_2 vi_2 V_2
     // I_2 (2) + IV_2 (2) = 4 beats = measure 0
     // vi_2 (2) + V_2 (2) = 4 beats = measure 1
     let chorus = &chart.sections[2];
-    assert_eq!(chorus.measures.len(), 2);
+    assert_eq!(chorus.measures().len(), 2);
 
-    let chord8 = &chorus.measures[0].chords[0];
+    let chord8 = &chorus.measures()[0].chords[0];
     assert_eq!(chord8.full_symbol, "I");
     assert!(matches!(chord8.rhythm, ChordRhythm::Lily { .. }));
     assert_eq!(chord8.duration.to_beats(chart.time_signature.unwrap()), 2.0);
 
-    let chord9 = &chorus.measures[0].chords[1];
+    let chord9 = &chorus.measures()[0].chords[1];
     assert_eq!(chord9.full_symbol, "IV");
     assert!(matches!(chord9.rhythm, ChordRhythm::Lily { .. }));
     assert_eq!(chord9.duration.to_beats(chart.time_signature.unwrap()), 2.0);
 
-    let chord10 = &chorus.measures[1].chords[0];
+    let chord10 = &chorus.measures()[1].chords[0];
     assert_eq!(chord10.full_symbol, "vi"); // Roman numerals shouldn't have quality suffix
     assert_eq!(
         chord10.duration.to_beats(chart.time_signature.unwrap()),
         2.0
     );
 
-    let chord11 = &chorus.measures[1].chords[1];
+    let chord11 = &chorus.measures()[1].chords[1];
     assert_eq!(chord11.full_symbol, "V");
     assert_eq!(
         chord11.duration.to_beats(chart.time_signature.unwrap()),
@@ -312,113 +312,113 @@ I//// IV_4 vi/// V_2 I_2 IV////
 
     // Test Intro - note names with mixed notation (4 measures)
     let intro = &chart.sections[0];
-    assert_eq!(intro.measures.len(), 4);
+    assert_eq!(intro.measures().len(), 4);
 
     // Measure 0: g//// (4 beats)
-    assert_eq!(intro.measures[0].chords.len(), 1);
+    assert_eq!(intro.measures()[0].chords.len(), 1);
     assert!(matches!(
-        intro.measures[0].chords[0].rhythm,
+        intro.measures()[0].chords[0].rhythm,
         ChordRhythm::Slashes(4)
     ));
 
     // Measure 1: e_4 (1 beat) + d/// (3 beats)
-    assert_eq!(intro.measures[1].chords.len(), 2);
+    assert_eq!(intro.measures()[1].chords.len(), 2);
     assert!(matches!(
-        intro.measures[1].chords[0].rhythm,
+        intro.measures()[1].chords[0].rhythm,
         ChordRhythm::Lily { .. }
     ));
     assert!(matches!(
-        intro.measures[1].chords[1].rhythm,
+        intro.measures()[1].chords[1].rhythm,
         ChordRhythm::Slashes(3)
     ));
 
     // Measure 2: c_2 (2 beats) + d_2 (2 beats)
-    assert_eq!(intro.measures[2].chords.len(), 2);
+    assert_eq!(intro.measures()[2].chords.len(), 2);
     assert!(matches!(
-        intro.measures[2].chords[0].rhythm,
+        intro.measures()[2].chords[0].rhythm,
         ChordRhythm::Lily { .. }
     ));
     assert!(matches!(
-        intro.measures[2].chords[1].rhythm,
+        intro.measures()[2].chords[1].rhythm,
         ChordRhythm::Lily { .. }
     ));
 
     // Measure 3: f//// (4 beats)
-    assert_eq!(intro.measures[3].chords.len(), 1);
+    assert_eq!(intro.measures()[3].chords.len(), 1);
     assert!(matches!(
-        intro.measures[3].chords[0].rhythm,
+        intro.measures()[3].chords[0].rhythm,
         ChordRhythm::Slashes(4)
     ));
 
     // Test Verse - scale degrees with mixed notation (4 measures)
     let verse = &chart.sections[1];
-    assert_eq!(verse.measures.len(), 4);
+    assert_eq!(verse.measures().len(), 4);
 
-    assert_eq!(verse.measures[0].chords.len(), 1);
+    assert_eq!(verse.measures()[0].chords.len(), 1);
     assert!(matches!(
-        verse.measures[0].chords[0].rhythm,
+        verse.measures()[0].chords[0].rhythm,
         ChordRhythm::Slashes(4)
     ));
 
-    assert_eq!(verse.measures[1].chords.len(), 2);
+    assert_eq!(verse.measures()[1].chords.len(), 2);
     assert!(matches!(
-        verse.measures[1].chords[0].rhythm,
+        verse.measures()[1].chords[0].rhythm,
         ChordRhythm::Lily { .. }
     ));
     assert!(matches!(
-        verse.measures[1].chords[1].rhythm,
+        verse.measures()[1].chords[1].rhythm,
         ChordRhythm::Slashes(3)
     ));
 
-    assert_eq!(verse.measures[2].chords.len(), 2);
+    assert_eq!(verse.measures()[2].chords.len(), 2);
     assert!(matches!(
-        verse.measures[2].chords[0].rhythm,
+        verse.measures()[2].chords[0].rhythm,
         ChordRhythm::Lily { .. }
     ));
     assert!(matches!(
-        verse.measures[2].chords[1].rhythm,
+        verse.measures()[2].chords[1].rhythm,
         ChordRhythm::Lily { .. }
     ));
 
-    assert_eq!(verse.measures[3].chords.len(), 1);
+    assert_eq!(verse.measures()[3].chords.len(), 1);
     assert!(matches!(
-        verse.measures[3].chords[0].rhythm,
+        verse.measures()[3].chords[0].rhythm,
         ChordRhythm::Slashes(4)
     ));
 
     // Test Chorus - Roman numerals with mixed notation (4 measures)
     let chorus = &chart.sections[2];
-    assert_eq!(chorus.measures.len(), 4);
+    assert_eq!(chorus.measures().len(), 4);
 
-    assert_eq!(chorus.measures[0].chords.len(), 1);
+    assert_eq!(chorus.measures()[0].chords.len(), 1);
     assert!(matches!(
-        chorus.measures[0].chords[0].rhythm,
+        chorus.measures()[0].chords[0].rhythm,
         ChordRhythm::Slashes(4)
     ));
 
-    assert_eq!(chorus.measures[1].chords.len(), 2);
+    assert_eq!(chorus.measures()[1].chords.len(), 2);
     assert!(matches!(
-        chorus.measures[1].chords[0].rhythm,
+        chorus.measures()[1].chords[0].rhythm,
         ChordRhythm::Lily { .. }
     ));
     assert!(matches!(
-        chorus.measures[1].chords[1].rhythm,
+        chorus.measures()[1].chords[1].rhythm,
         ChordRhythm::Slashes(3)
     ));
 
-    assert_eq!(chorus.measures[2].chords.len(), 2);
+    assert_eq!(chorus.measures()[2].chords.len(), 2);
     assert!(matches!(
-        chorus.measures[2].chords[0].rhythm,
+        chorus.measures()[2].chords[0].rhythm,
         ChordRhythm::Lily { .. }
     ));
     assert!(matches!(
-        chorus.measures[2].chords[1].rhythm,
+        chorus.measures()[2].chords[1].rhythm,
         ChordRhythm::Lily { .. }
     ));
 
-    assert_eq!(chorus.measures[3].chords.len(), 1);
+    assert_eq!(chorus.measures()[3].chords.len(), 1);
     assert!(matches!(
-        chorus.measures[3].chords[0].rhythm,
+        chorus.measures()[3].chords[0].rhythm,
         ChordRhythm::Slashes(4)
     ));
 }
@@ -444,28 +444,28 @@ Gmaj7//// Em7_2 D7_2 Cmaj7////
     // Gmaj7//// (4 beats) = measure 0
     // Em7_2 (2 beats) + D7_2 (2 beats) = measure 1
     // Cmaj7//// (4 beats) = measure 2
-    assert_eq!(intro.measures.len(), 3);
+    assert_eq!(intro.measures().len(), 3);
 
     // Gmaj7//// (explicit quality with slash notation)
-    let chord1 = &intro.measures[0].chords[0];
+    let chord1 = &intro.measures()[0].chords[0];
     assert_eq!(chord1.full_symbol, "Gmaj7");
     assert!(matches!(chord1.rhythm, ChordRhythm::Slashes(4)));
     assert_eq!(chord1.duration.to_beats(chart.time_signature.unwrap()), 4.0);
 
     // Em7_2 (explicit quality with underscore notation)
-    let chord2 = &intro.measures[1].chords[0];
+    let chord2 = &intro.measures()[1].chords[0];
     assert_eq!(chord2.full_symbol, "Em7");
     assert!(matches!(chord2.rhythm, ChordRhythm::Lily { .. }));
     assert_eq!(chord2.duration.to_beats(chart.time_signature.unwrap()), 2.0);
 
     // D7_2 (explicit quality with underscore notation)
-    let chord3 = &intro.measures[1].chords[1];
+    let chord3 = &intro.measures()[1].chords[1];
     assert_eq!(chord3.full_symbol, "D7");
     assert!(matches!(chord3.rhythm, ChordRhythm::Lily { .. }));
     assert_eq!(chord3.duration.to_beats(chart.time_signature.unwrap()), 2.0);
 
     // Cmaj7//// (explicit quality with slash notation)
-    let chord4 = &intro.measures[2].chords[0];
+    let chord4 = &intro.measures()[2].chords[0];
     assert_eq!(chord4.full_symbol, "Cmaj7");
     assert!(matches!(chord4.rhythm, ChordRhythm::Slashes(4)));
     assert_eq!(chord4.duration.to_beats(chart.time_signature.unwrap()), 4.0);
@@ -496,46 +496,46 @@ G_2 C_2 D////
     // Gmaj13//// (4 beats) = measure 0
     // C9_2 (2) + D_2 (2) = measure 1
     let intro = &chart.sections[0];
-    assert_eq!(intro.measures.len(), 2);
-    assert_eq!(intro.measures[0].chords[0].full_symbol, "Gmaj13");
-    assert_eq!(intro.measures[1].chords[0].full_symbol, "C9");
-    assert_eq!(intro.measures[1].chords[1].full_symbol, "D");
+    assert_eq!(intro.measures().len(), 2);
+    assert_eq!(intro.measures()[0].chords[0].full_symbol, "Gmaj13");
+    assert_eq!(intro.measures()[1].chords[0].full_symbol, "C9");
+    assert_eq!(intro.measures()[1].chords[1].full_symbol, "D");
 
     // Verse recalls qualities with underscore notation
     // g_4 (1) + c_4 (1) + d_4 (1) + g_4 (1) = measure 0
     let verse = &chart.sections[1];
-    assert_eq!(verse.measures.len(), 1);
-    assert_eq!(verse.measures[0].chords[0].full_symbol, "Gmaj13");
+    assert_eq!(verse.measures().len(), 1);
+    assert_eq!(verse.measures()[0].chords[0].full_symbol, "Gmaj13");
     assert!(matches!(
-        verse.measures[0].chords[0].rhythm,
+        verse.measures()[0].chords[0].rhythm,
         ChordRhythm::Lily { .. }
     ));
-    assert_eq!(verse.measures[0].chords[1].full_symbol, "C9");
+    assert_eq!(verse.measures()[0].chords[1].full_symbol, "C9");
     assert!(matches!(
-        verse.measures[0].chords[1].rhythm,
+        verse.measures()[0].chords[1].rhythm,
         ChordRhythm::Lily { .. }
     ));
-    assert_eq!(verse.measures[0].chords[2].full_symbol, "D");
-    assert_eq!(verse.measures[0].chords[3].full_symbol, "Gmaj13");
+    assert_eq!(verse.measures()[0].chords[2].full_symbol, "D");
+    assert_eq!(verse.measures()[0].chords[3].full_symbol, "Gmaj13");
 
     // Chorus recalls qualities with different notation
     // G_2 (2) + C_2 (2) = measure 0
     // D//// (4) = measure 1
     let chorus = &chart.sections[2];
-    assert_eq!(chorus.measures.len(), 2);
-    assert_eq!(chorus.measures[0].chords[0].full_symbol, "Gmaj13");
+    assert_eq!(chorus.measures().len(), 2);
+    assert_eq!(chorus.measures()[0].chords[0].full_symbol, "Gmaj13");
     assert!(matches!(
-        chorus.measures[0].chords[0].rhythm,
+        chorus.measures()[0].chords[0].rhythm,
         ChordRhythm::Lily { .. }
     ));
-    assert_eq!(chorus.measures[0].chords[1].full_symbol, "C9");
+    assert_eq!(chorus.measures()[0].chords[1].full_symbol, "C9");
     assert!(matches!(
-        chorus.measures[0].chords[1].rhythm,
+        chorus.measures()[0].chords[1].rhythm,
         ChordRhythm::Lily { .. }
     ));
-    assert_eq!(chorus.measures[1].chords[0].full_symbol, "D");
+    assert_eq!(chorus.measures()[1].chords[0].full_symbol, "D");
     assert!(matches!(
-        chorus.measures[1].chords[0].rhythm,
+        chorus.measures()[1].chords[0].rhythm,
         ChordRhythm::Slashes(4)
     ));
 }
@@ -566,10 +566,10 @@ I_2. IV_2. vi_2. V_2.
 
     // Intro: explicit qualities with slash notation
     let intro = &chart.sections[0];
-    assert_eq!(intro.measures.len(), 2);
+    assert_eq!(intro.measures().len(), 2);
     assert!(
         intro
-            .measures
+            .measures()
             .iter()
             .all(|m| matches!(m.chords[0].rhythm, ChordRhythm::Slashes(4)))
     );
@@ -577,10 +577,10 @@ I_2. IV_2. vi_2. V_2.
     // Verse: note names with underscore notation (recalls memory)
     // g_4 (1) + c_4 (1) + d_4 (1) + g_4 (1) = 4 beats = 1 measure
     let verse = &chart.sections[1];
-    assert_eq!(verse.measures.len(), 1);
-    assert_eq!(verse.measures[0].chords.len(), 4);
+    assert_eq!(verse.measures().len(), 1);
+    assert_eq!(verse.measures()[0].chords.len(), 4);
     assert!(
-        verse.measures[0]
+        verse.measures()[0]
             .chords
             .iter()
             .all(|c| matches!(c.rhythm, ChordRhythm::Lily { .. }))
@@ -590,10 +590,10 @@ I_2. IV_2. vi_2. V_2.
     // 1// (2) + 4// (2) = 4 beats = measure 0
     // 6// (2) + 5// (2) = 4 beats = measure 1
     let pre = &chart.sections[2];
-    assert_eq!(pre.measures.len(), 2);
-    assert_eq!(pre.measures[0].chords.len(), 2);
-    assert_eq!(pre.measures[1].chords.len(), 2);
-    assert!(pre.measures.iter().all(|m| {
+    assert_eq!(pre.measures().len(), 2);
+    assert_eq!(pre.measures()[0].chords.len(), 2);
+    assert_eq!(pre.measures()[1].chords.len(), 2);
+    assert!(pre.measures().iter().all(|m| {
         m.chords
             .iter()
             .all(|c| matches!(c.rhythm, ChordRhythm::Slashes(2)))
@@ -608,10 +608,10 @@ I_2. IV_2. vi_2. V_2.
     // measure 2: vi_2. (remaining 1 beat) + V_2. (3 beats)
     // Actually this is complex - let's just check it parses and has dotted notes
     let chorus = &chart.sections[3];
-    assert!(chorus.measures.len() >= 1);
+    assert!(chorus.measures().len() >= 1);
 
     // Check first chord has dotted notation
-    let first_chord = &chorus.measures[0].chords[0];
+    let first_chord = &chorus.measures()[0].chords[0];
     match &first_chord.rhythm {
         ChordRhythm::Lily { dotted, .. } => {
             assert!(*dotted);

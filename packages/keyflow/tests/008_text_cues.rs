@@ -20,11 +20,11 @@ Cmaj7/// Dm7/// Em7/// Fmaj7///
 
     // First section should have measures with a text cue
     let section = &chart.sections[0];
-    assert!(!section.measures.is_empty());
+    assert!(!section.measures().is_empty());
 
     // Find the measure with the cue
     let cue_measure = section
-        .measures
+        .measures()
         .iter()
         .find(|m| !m.text_cues.is_empty())
         .expect("Should have a measure with text cues");
@@ -51,7 +51,7 @@ Cmaj7/// Dm7/// Em7/// Fmaj7///
 
     let section = &chart.sections[0];
     let cue_measure = section
-        .measures
+        .measures()
         .iter()
         .find(|m| !m.text_cues.is_empty())
         .expect("Should have a measure with text cues");
@@ -82,7 +82,7 @@ Em7/// Fmaj7///
 
     // Cue should be attached to the first measure after it (Em7)
     let cue_measure = section
-        .measures
+        .measures()
         .iter()
         .find(|m| !m.text_cues.is_empty())
         .expect("Should have a measure with text cues");
@@ -117,7 +117,7 @@ Cmaj7/// Dm7/// Em7/// Fmaj7///
 
     let section = &chart.sections[0];
     let cue_measure = section
-        .measures
+        .measures()
         .iter()
         .find(|m| !m.text_cues.is_empty())
         .expect("Should have a measure with text cues");
@@ -150,7 +150,7 @@ Cmaj7/// Dm7/// Em7/// Fmaj7///
 
     let section = &chart.sections[0];
     let cue_measure = section
-        .measures
+        .measures()
         .iter()
         .find(|m| !m.text_cues.is_empty())
         .expect("Should have a measure with text cues");
@@ -192,7 +192,7 @@ Cmaj7/// Dm7/// Em7/// Fmaj7///
     // Verse cue
     let verse = &chart.sections[0];
     let verse_cue_measure = verse
-        .measures
+        .measures()
         .iter()
         .find(|m| !m.text_cues.is_empty())
         .expect("Verse should have text cues");
@@ -201,7 +201,7 @@ Cmaj7/// Dm7/// Em7/// Fmaj7///
     // Chorus cue
     let chorus = &chart.sections[1];
     let chorus_cue_measure = chorus
-        .measures
+        .measures()
         .iter()
         .find(|m| !m.text_cues.is_empty())
         .expect("Chorus should have text cues");
@@ -225,8 +225,8 @@ Cmaj7/// Dm7/// Em7/// Fmaj7///
     let section = &chart.sections[0];
 
     // Cue should be attached to the first measure (pending attachment)
-    assert!(!section.measures.is_empty());
-    let first_measure = &section.measures[0];
+    assert!(!section.measures().is_empty());
+    let first_measure = &section.measures()[0];
     assert!(!first_measure.text_cues.is_empty());
     assert_eq!(first_measure.text_cues[0].group, InstrumentGroup::Drums);
     assert_eq!(first_measure.text_cues[0].text, "fill into section");
@@ -246,10 +246,10 @@ Cmaj7/// Dm7/// @keys "synth here" Em7/// Fmaj7///
     println!("{}", chart);
 
     let section = &chart.sections[0];
-    assert_eq!(section.measures.len(), 8); // VS 8 = 8 measures total
+    assert_eq!(section.measures().len(), 8); // VS 8 = 8 measures total
 
     // The cue should be attached to the measure with Em7 (the chord after the cue)
-    let em_measure = &section.measures[2]; // Third measure
+    let em_measure = &section.measures()[2]; // Third measure
     assert!(!em_measure.text_cues.is_empty());
     assert_eq!(em_measure.text_cues[0].group, InstrumentGroup::Keys);
     assert_eq!(em_measure.text_cues[0].text, "synth here");
@@ -274,14 +274,144 @@ Cmaj7/// @drums "kick" Dm7/// @keys "pad" Em7/// Fmaj7///
     let section = &chart.sections[0];
 
     // Drums cue on Dm7 (measure 1)
-    let dm_measure = &section.measures[1];
+    let dm_measure = &section.measures()[1];
     assert!(!dm_measure.text_cues.is_empty());
     assert_eq!(dm_measure.text_cues[0].group, InstrumentGroup::Drums);
     assert_eq!(dm_measure.text_cues[0].text, "kick");
 
     // Keys cue on Em7 (measure 2)
-    let em_measure = &section.measures[2];
+    let em_measure = &section.measures()[2];
     assert!(!em_measure.text_cues.is_empty());
     assert_eq!(em_measure.text_cues[0].group, InstrumentGroup::Keys);
     assert_eq!(em_measure.text_cues[0].text, "pad");
+}
+
+#[test]
+fn test_beat_specific_text_cue() {
+    let input = r#"
+Test Song - Artist
+120bpm 4/4 #C
+
+VS 8
+@keys:2 "synth stab"
+Cmaj7/// Dm7/// Em7/// Fmaj7///
+"#;
+
+    let chart = Chart::parse(input).unwrap();
+    println!("{}", chart);
+
+    let section = &chart.sections[0];
+    let cue_measure = section
+        .measures()
+        .iter()
+        .find(|m| !m.text_cues.is_empty())
+        .expect("Should have a measure with text cues");
+
+    assert_eq!(cue_measure.text_cues.len(), 1);
+    assert_eq!(cue_measure.text_cues[0].group, InstrumentGroup::Keys);
+    assert_eq!(cue_measure.text_cues[0].text, "synth stab");
+    assert_eq!(cue_measure.text_cues[0].beat, Some(2));
+}
+
+#[test]
+fn test_multiple_beat_specific_cues() {
+    let input = r#"
+Test Song - Artist
+120bpm 4/4 #C
+
+VS 8
+@drums:1 "kick"
+@drums:3 "snare"
+@keys:4 "hit"
+Cmaj7/// Dm7/// Em7/// Fmaj7///
+"#;
+
+    let chart = Chart::parse(input).unwrap();
+    println!("{}", chart);
+
+    let section = &chart.sections[0];
+    let cue_measure = section
+        .measures()
+        .iter()
+        .find(|m| !m.text_cues.is_empty())
+        .expect("Should have a measure with text cues");
+
+    assert_eq!(cue_measure.text_cues.len(), 3);
+
+    assert_eq!(cue_measure.text_cues[0].group, InstrumentGroup::Drums);
+    assert_eq!(cue_measure.text_cues[0].text, "kick");
+    assert_eq!(cue_measure.text_cues[0].beat, Some(1));
+
+    assert_eq!(cue_measure.text_cues[1].group, InstrumentGroup::Drums);
+    assert_eq!(cue_measure.text_cues[1].text, "snare");
+    assert_eq!(cue_measure.text_cues[1].beat, Some(3));
+
+    assert_eq!(cue_measure.text_cues[2].group, InstrumentGroup::Keys);
+    assert_eq!(cue_measure.text_cues[2].text, "hit");
+    assert_eq!(cue_measure.text_cues[2].beat, Some(4));
+}
+
+#[test]
+fn test_mixed_beat_and_non_beat_cues() {
+    let input = r#"
+Test Song - Artist
+120bpm 4/4 #C
+
+VS 8
+@keys "throughout"
+@drums:3 "crash"
+Cmaj7/// Dm7/// Em7/// Fmaj7///
+"#;
+
+    let chart = Chart::parse(input).unwrap();
+    println!("{}", chart);
+
+    let section = &chart.sections[0];
+    let cue_measure = section
+        .measures()
+        .iter()
+        .find(|m| !m.text_cues.is_empty())
+        .expect("Should have a measure with text cues");
+
+    assert_eq!(cue_measure.text_cues.len(), 2);
+
+    // First cue has no beat
+    assert_eq!(cue_measure.text_cues[0].text, "throughout");
+    assert_eq!(cue_measure.text_cues[0].beat, None);
+
+    // Second cue has beat 3
+    assert_eq!(cue_measure.text_cues[1].text, "crash");
+    assert_eq!(cue_measure.text_cues[1].beat, Some(3));
+}
+
+#[test]
+fn test_beat_cue_round_trip() {
+    let input = r#"Test Song - Artist
+120bpm 4/4 #C
+
+VS 8
+@keys:2 "stab"
+Cmaj7/// Dm7/// Em7/// Fmaj7///
+"#;
+
+    let chart1 = Chart::parse(input).unwrap();
+    let syntax = chart1.to_syntax();
+    println!("Serialized:\n{}", syntax);
+
+    let chart2 = Chart::parse(&syntax).unwrap();
+
+    // Find measure with cue in both charts
+    let m1 = chart1.sections[0]
+        .measures()
+        .iter()
+        .find(|m| !m.text_cues.is_empty())
+        .unwrap();
+    let m2 = chart2.sections[0]
+        .measures()
+        .iter()
+        .find(|m| !m.text_cues.is_empty())
+        .unwrap();
+
+    assert_eq!(m1.text_cues[0].text, m2.text_cues[0].text);
+    assert_eq!(m1.text_cues[0].beat, m2.text_cues[0].beat);
 }

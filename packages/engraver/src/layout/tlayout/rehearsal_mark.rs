@@ -13,7 +13,7 @@
 //! Vello efficiently renders these using GPU-accelerated vector graphics.
 
 use kurbo::{Point, Rect};
-use peniko::Color;
+use vello::peniko::Color;
 
 use crate::layout::context::LayoutContext;
 use crate::scene::node::SceneNode;
@@ -255,7 +255,8 @@ impl Default for MarginLabelParams {
 /// Layout a section label that fits within the left margin of a staff.
 ///
 /// The label will be sized to fit within the available margin space,
-/// scaling the text down if necessary.
+/// with multiline support for long text. The font is maximized to fill
+/// the available space. Section letters (A, B, C, D) are placed on a new line.
 ///
 /// # Arguments
 ///
@@ -270,32 +271,49 @@ pub fn layout_margin_label(
     params: &MarginLabelParams,
     _ctx: &LayoutContext<'_>,
 ) -> (RehearsalMarkLayoutData, SceneNode) {
-    let text = format_rehearsal_label(&params.section_type, &params.abbreviation, params.number);
+    let raw_text = format_rehearsal_label(&params.section_type, &params.abbreviation, params.number);
     let style = &params.style;
 
     // Calculate available space in the margin
     let capsule_x = params.page_x + params.padding_h;
     let available_width = params.margin_width - (params.padding_h * 2.0);
-    let available_height = params.staff_height - (params.padding_v * 2.0);
-    let capsule_y = params.staff_y + params.padding_v;
+    // Align top of capsule with top of staff
+    let capsule_y = params.staff_y;
 
-    // Use fixed dimensions for the capsule
-    let capsule_width = available_width;
-    let capsule_height = available_height;
-    let corner_radius = capsule_height / 4.0;
-
-    // Estimate text width and scale if needed
-    let estimated_text_width = text.len() as f64 * style.font_size * style.char_width_ratio;
     let internal_padding = 4.0;
-    let text_available_width = capsule_width - internal_padding * 2.0;
+    let text_available_width = available_width - internal_padding * 2.0;
+    let line_height_ratio = 1.3; // Line height relative to font size
 
-    // Calculate text scale to fit
-    let text_scale = if estimated_text_width > text_available_width {
-        text_available_width / estimated_text_width
+    // Split text into lines for multiline layout
+    let lines = split_into_lines(&raw_text, text_available_width, style.char_width_ratio);
+    let num_lines = lines.len().max(1);
+
+    // Calculate optimal font size that fits all lines
+    let max_single_line_font_size = params.staff_height * 0.7; // Max for single line
+    let max_multiline_font_size = params.staff_height / (num_lines as f64 * line_height_ratio) * 1.2;
+
+    // For each line, calculate the max font size that fits width
+    let mut optimal_font_size = if num_lines == 1 {
+        max_single_line_font_size
     } else {
-        1.0
+        max_multiline_font_size
     };
-    let scaled_font_size = style.font_size * text_scale;
+
+    for line in &lines {
+        if !line.is_empty() {
+            let line_width = line.len() as f64 * optimal_font_size * style.char_width_ratio;
+            if line_width > text_available_width {
+                let scale = text_available_width / (line.len() as f64 * style.char_width_ratio);
+                optimal_font_size = optimal_font_size.min(scale);
+            }
+        }
+    }
+
+    // Calculate capsule height - default to staff height, expand if needed for multiline
+    let total_text_height = num_lines as f64 * optimal_font_size * line_height_ratio;
+    let capsule_height = (total_text_height + params.padding_v * 2.0).max(params.staff_height);
+    let capsule_width = available_width;
+    let corner_radius = (capsule_height / (num_lines as f64 + 2.0)).min(capsule_height / 4.0);
 
     // Create the capsule rectangle
     let capsule_rect = Rect::new(
@@ -317,17 +335,36 @@ pub fn layout_margin_label(
         corner_radius: Some(corner_radius),
     });
 
-    // 2. Text (centered in capsule)
-    let scaled_text_width = text.len() as f64 * scaled_font_size * style.char_width_ratio;
-    let text_x = capsule_x + (capsule_width - scaled_text_width) / 2.0;
-    let text_y = capsule_y + (capsule_height + scaled_font_size * 0.7) / 2.0; // Vertically center
-    commands.push(PaintCommand::text(
-        text,
-        "sans-serif",
-        scaled_font_size,
-        Point::new(text_x, text_y),
-        style.text_color,
-    ));
+    // 2. Text lines (centered in capsule)
+    // Use a more accurate line height calculation
+    let line_spacing = optimal_font_size * 0.2; // Spacing between lines
+    let total_text_block_height = if num_lines == 1 {
+        optimal_font_size
+    } else {
+        (num_lines as f64 * optimal_font_size) + ((num_lines - 1) as f64 * line_spacing)
+    };
+
+    // Calculate the starting Y position to vertically center all lines
+    // The text baseline is at the bottom of the text, so we offset by 0.75 * font_size
+    let block_top_y = capsule_y + (capsule_height - total_text_block_height) / 2.0;
+
+    // Capsule center X for horizontal text centering
+    let capsule_center_x = capsule_x + capsule_width / 2.0;
+
+    for (i, line) in lines.iter().enumerate() {
+        // Position vertically - baseline is at 0.75 of font size from top
+        let line_top = block_top_y + (i as f64 * (optimal_font_size + line_spacing));
+        let text_y = line_top + optimal_font_size * 0.75;
+
+        // Use centered text - renderer will handle actual font metrics for centering
+        commands.push(PaintCommand::text_centered(
+            line.clone(),
+            "sans-serif",
+            optimal_font_size,
+            Point::new(capsule_center_x, text_y),
+            style.text_color,
+        ));
+    }
 
     // Create layout data
     let layout_data = RehearsalMarkLayoutData {
@@ -342,9 +379,54 @@ pub fn layout_margin_label(
     (layout_data, node)
 }
 
+/// Split text into lines for multiline layout.
+///
+/// Rules:
+/// - Section letters (single A-D at end) go on their own line
+/// - Words are broken at spaces
+/// - Long words that don't fit are kept together (will be scaled down)
+fn split_into_lines(text: &str, available_width: f64, char_width_ratio: f64) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    // Check for section letter at end (e.g., "CH 1 B" -> ["CH 1", "B"])
+    let parts: Vec<&str> = text.split_whitespace().collect();
+    if let (Some(last), true) = (parts.last(), parts.len() >= 2) {
+        // Check if last part is a single letter A-Z (section identifier)
+        if last.len() == 1 && last.chars().next().map_or(false, |c| c.is_ascii_uppercase()) {
+            // Put section letter on its own line
+            let main_text: String = parts[..parts.len() - 1].join(" ");
+            lines.push(main_text);
+            lines.push((*last).to_string());
+            return lines;
+        }
+    }
+
+    // Check if text fits on one line
+    let estimated_width = text.len() as f64 * 12.0 * char_width_ratio; // Use base font size for estimation
+    if estimated_width <= available_width {
+        lines.push(text.to_string());
+        return lines;
+    }
+
+    // Split at spaces for multi-word text
+    if parts.len() >= 2 {
+        // Try splitting into two lines at the middle
+        let mid = parts.len() / 2;
+        let line1: String = parts[..mid].join(" ");
+        let line2: String = parts[mid..].join(" ");
+        lines.push(line1);
+        lines.push(line2);
+    } else {
+        // Single word - keep as is (will be scaled down)
+        lines.push(text.to_string());
+    }
+
+    lines
+}
+
 /// Pre-defined color themes for rehearsal marks.
 pub mod themes {
-    use peniko::Color;
+    use vello::peniko::Color;
     use super::RehearsalMarkStyle;
 
     /// Dark theme with white text on dark background (default).
@@ -418,10 +500,12 @@ pub mod themes {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::context::LayoutConfiguration;
 
-    fn make_ctx<'a>() -> LayoutContext<'a> {
+    fn make_ctx() -> LayoutContext<'static> {
         use crate::style::MStyle;
-        LayoutContext::new(5.0, &MStyle::default(), None)
+        let style = Box::leak(Box::new(MStyle::default()));
+        LayoutContext::new_for_test(LayoutConfiguration::default(), style)
     }
 
     #[test]

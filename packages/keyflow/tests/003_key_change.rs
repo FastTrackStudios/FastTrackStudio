@@ -66,12 +66,12 @@ gmaj7 cmaj7 #C# c#maj7 g#m7
     );
 
     // Verify chords before key change (in G major)
-    let intro_chords = &chart.sections[0].measures;
+    let intro_chords = &chart.sections[0].measures();
     assert_eq!(intro_chords[0].chords[0].full_symbol, "Gmaj7");
     assert_eq!(intro_chords[1].chords[0].full_symbol, "Em7");
 
     // Verify chords after key change (in C# major)
-    let post_chords = &chart.sections[3].measures;
+    let post_chords = &chart.sections[3].measures();
     assert_eq!(post_chords[2].chords[0].full_symbol, "C#maj7"); // First chord in C# major
     assert_eq!(post_chords[3].chords[0].full_symbol, "G#m7"); // vi in C# major
 
@@ -120,21 +120,21 @@ I IV vi V
     // === G Major Section Tests ===
 
     // Intro: Note names (lowercase) in G major
-    let intro_measures = &chart.sections[0].measures;
+    let intro_measures = &chart.sections[0].measures();
     assert_eq!(intro_measures[0].chords[0].full_symbol, "G"); // g -> G (major, no suffix)
     assert_eq!(intro_measures[1].chords[0].full_symbol, "C"); // c -> C (major, no suffix)
     assert_eq!(intro_measures[2].chords[0].full_symbol, "Em"); // e -> Em (vi is minor)
     assert_eq!(intro_measures[3].chords[0].full_symbol, "D"); // d -> D (V is major)
 
     // Verse: Scale degrees (1-7) in G major
-    let verse_measures = &chart.sections[1].measures;
+    let verse_measures = &chart.sections[1].measures();
     assert_eq!(verse_measures[0].chords[0].full_symbol, "1"); // 1 -> 1 (quality implied by key)
     assert_eq!(verse_measures[1].chords[0].full_symbol, "4"); // 4 -> 4 (quality implied by key)
     assert_eq!(verse_measures[2].chords[0].full_symbol, "6"); // 6 -> 6 (quality implied by key)
     assert_eq!(verse_measures[3].chords[0].full_symbol, "5"); // 5 -> 5 (quality implied by key)
 
     // Pre: Roman numerals in G major
-    let pre_measures = &chart.sections[2].measures;
+    let pre_measures = &chart.sections[2].measures();
     assert_eq!(pre_measures[0].chords[0].full_symbol, "I"); // I -> I (quality implied by key)
     assert_eq!(pre_measures[1].chords[0].full_symbol, "IV"); // IV -> IV (quality implied by key)
     assert_eq!(pre_measures[2].chords[0].full_symbol, "vi"); // vi -> vi (quality implied by key)
@@ -143,21 +143,21 @@ I IV vi V
     // === C# Major Section Tests ===
 
     // Chorus: Note names (lowercase) in C# major
-    let chorus_measures = &chart.sections[3].measures;
+    let chorus_measures = &chart.sections[3].measures();
     assert_eq!(chorus_measures[0].chords[0].full_symbol, "C#"); // c# -> C# (I is major, no suffix)
     assert_eq!(chorus_measures[1].chords[0].full_symbol, "G#"); // g# -> G# (V is major)
     assert_eq!(chorus_measures[2].chords[0].full_symbol, "A#m"); // a# -> A#m (vi is minor)
     assert_eq!(chorus_measures[3].chords[0].full_symbol, "F#"); // f# -> F# (IV is major)
 
     // Post: Scale degrees (1-7) in C# major
-    let post_measures = &chart.sections[4].measures;
+    let post_measures = &chart.sections[4].measures();
     assert_eq!(post_measures[0].chords[0].full_symbol, "1"); // 1 -> 1 (quality implied by key)
     assert_eq!(post_measures[1].chords[0].full_symbol, "4"); // 4 -> 4 (quality implied by key)
     assert_eq!(post_measures[2].chords[0].full_symbol, "6"); // 6 -> 6 (quality implied by key)
     assert_eq!(post_measures[3].chords[0].full_symbol, "5"); // 5 -> 5 (quality implied by key)
 
     // Bridge: Roman numerals in C# major
-    let bridge_measures = &chart.sections[5].measures;
+    let bridge_measures = &chart.sections[5].measures();
     assert_eq!(bridge_measures[0].chords[0].full_symbol, "I"); // I -> I (quality implied by key)
     assert_eq!(bridge_measures[1].chords[0].full_symbol, "IV"); // IV -> IV (quality implied by key)
     assert_eq!(bridge_measures[2].chords[0].full_symbol, "vi"); // vi -> vi (quality implied by key)

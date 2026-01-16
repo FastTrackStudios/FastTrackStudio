@@ -25,6 +25,83 @@ pub struct Rest {
     pub duration: Duration,
 }
 
+/// A chord symbol (harmony) attached to a beat position.
+///
+/// Used for lead sheets and chord charts where chord symbols appear
+/// above the staff independent of the notes being played.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChordSymbol {
+    /// Full chord symbol text (e.g., "Cmaj7", "Dm7b5", "G7/B")
+    pub symbol: String,
+    /// Root note name (e.g., "C", "D", "G")
+    pub root: String,
+    /// Root accidental (empty, "#", "b")
+    pub root_accidental: String,
+    /// Quality (empty for major, "m" for minor, "dim", "aug", etc.)
+    pub quality: String,
+    /// Extension ("7", "maj7", "9", "11", "13", etc.)
+    pub extension: String,
+    /// Alterations (e.g., ["b5", "#9"])
+    pub alterations: Vec<String>,
+    /// Bass note for slash chords (e.g., "B" in "G7/B")
+    pub bass: Option<String>,
+    /// Bass accidental
+    pub bass_accidental: String,
+}
+
+impl ChordSymbol {
+    /// Create a chord symbol from its full text representation.
+    #[must_use]
+    pub fn new(symbol: impl Into<String>) -> Self {
+        let symbol = symbol.into();
+        Self {
+            symbol: symbol.clone(),
+            root: String::new(),
+            root_accidental: String::new(),
+            quality: String::new(),
+            extension: String::new(),
+            alterations: Vec::new(),
+            bass: None,
+            bass_accidental: String::new(),
+        }
+    }
+
+    /// Create a chord symbol with parsed components.
+    #[must_use]
+    pub fn parsed(
+        symbol: impl Into<String>,
+        root: impl Into<String>,
+        root_accidental: impl Into<String>,
+        quality: impl Into<String>,
+        extension: impl Into<String>,
+    ) -> Self {
+        Self {
+            symbol: symbol.into(),
+            root: root.into(),
+            root_accidental: root_accidental.into(),
+            quality: quality.into(),
+            extension: extension.into(),
+            alterations: Vec::new(),
+            bass: None,
+            bass_accidental: String::new(),
+        }
+    }
+
+    /// Add a bass note (for slash chords like "C/G").
+    #[must_use]
+    pub fn with_bass(mut self, bass: impl Into<String>) -> Self {
+        self.bass = Some(bass.into());
+        self
+    }
+
+    /// Add alterations (e.g., "b5", "#9").
+    #[must_use]
+    pub fn with_alterations(mut self, alts: Vec<String>) -> Self {
+        self.alterations = alts;
+        self
+    }
+}
+
 impl Rest {
     /// Create a new rest with the given duration.
     #[must_use]
@@ -275,6 +352,8 @@ pub enum MusicElement {
     Rest(Rest),
     /// A chord (multiple simultaneous notes)
     Chord(NoteChord),
+    /// A chord symbol (harmony) above the staff
+    ChordSymbol(ChordSymbol),
     /// Clef change
     Clef(Clef),
     /// Key signature change

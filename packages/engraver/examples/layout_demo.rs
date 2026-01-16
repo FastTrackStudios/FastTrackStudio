@@ -49,9 +49,11 @@ use winit::{
 use engraver::fonts::SMuFLFont;
 use engraver::layout::context::LayoutContext;
 use engraver::model::{PageStyle, PaperSize};
+use engraver::layout::text_metrics::TextFontMetrics;
 use engraver::layout::tlayout::{
     BarlineType, ClefType,
     layout_margin_label, MarginLabelParams, rehearsal_themes,
+    layout_harmony, parse_chord, ChordNotation, HarmonyParams, HarmonyStyle,
 };
 use engraver::notation::{Duration, MeasureBuilder};
 use engraver::renderer::SceneRenderBuilder;
@@ -79,9 +81,15 @@ const DPI_SCALE: f64 = SCREEN_DPI / POINTS_PER_INCH;
 const SMUFL_FONT_PATH: &str = "packages/charts/resources/fonts/musescore/fonts/bravura/Bravura.otf";
 const SMUFL_METADATA_PATH: &str =
     "packages/charts/resources/fonts/musescore/fonts/bravura/bravura_metadata.json";
-// Use FreeSans for general text (titles, labels, lyrics)
+// Use FreeSans for general text (titles, labels, lyrics, rehearsal marks)
 const TEXT_FONT_PATH: &str =
     "packages/charts/resources/fonts/musescore/fonts/FreeSans.ttf";
+// Use MuseJazzText for chord symbol text (root notes, quality, extensions)
+const CHORD_TEXT_FONT_PATH: &str =
+    "libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf";
+// Use MuseJazz for chord SMuFL symbols (triangle, circle, flat, sharp)
+const CHORD_SYMBOL_FONT_PATH: &str =
+    "libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazz.otf";
 
 fn main() {
     env_logger::init();
@@ -117,8 +125,12 @@ struct AppState {
     // Font data (must outlive font)
     font_data: &'static [u8],
     font: &'static SMuFLFont<'static>,
-    // Text font for lyrics, titles, etc.
+    // Text font for general text (titles, labels, rehearsal marks)
     text_font_data: Arc<Vec<u8>>,
+    // Chord text font (MuseJazzText for chord root notes, quality, extensions)
+    chord_text_font_data: Arc<Vec<u8>>,
+    // Chord SMuFL symbol font (MuseJazz for triangle, circle, flat, sharp)
+    chord_symbol_font_data: Arc<Vec<u8>>,
     // FPS tracking
     last_frame_time: Instant,
     frame_times: VecDeque<f64>,
@@ -253,15 +265,29 @@ impl ApplicationHandler for App {
 
         log::info!("Loaded Bravura SMuFL font successfully");
 
-        // Load text font (FreeSans for general text)
+        // Load text font (FreeSans for general text like labels, rehearsal marks)
         let text_font_data = Arc::new(
             std::fs::read(TEXT_FONT_PATH)
                 .expect("Failed to read FreeSans.ttf"),
         );
         log::info!("Loaded FreeSans text font successfully");
 
+        // Load chord text font (MuseJazzText for chord root notes, quality, extensions)
+        let chord_text_font_data = Arc::new(
+            std::fs::read(CHORD_TEXT_FONT_PATH)
+                .expect("Failed to read MuseJazzText.otf (chord text)"),
+        );
+        log::info!("Loaded MuseJazzText chord text font successfully");
+
+        // Load chord SMuFL symbol font (MuseJazz for triangle, circle, flat, sharp)
+        let chord_symbol_font_data = Arc::new(
+            std::fs::read(CHORD_SYMBOL_FONT_PATH)
+                .expect("Failed to read MuseJazz.otf (chord symbols)"),
+        );
+        log::info!("Loaded MuseJazz chord symbol font successfully");
+
         // Build the demo scene with all layout features
-        let demo_scene = build_demo_scene(style);
+        let demo_scene = build_demo_scene(style, chord_text_font_data.clone(), chord_symbol_font_data.clone());
 
         // Initial transform: translate to show content, then apply DPI scale
         let initial_transform = Affine::translate((50.0, 100.0)) * Affine::scale(DPI_SCALE);
@@ -283,6 +309,8 @@ impl ApplicationHandler for App {
             font_data,
             font,
             text_font_data,
+            chord_text_font_data,
+            chord_symbol_font_data,
             last_frame_time: Instant::now(),
             frame_times: VecDeque::with_capacity(100),
             show_fps: true, // Show FPS by default
@@ -455,7 +483,11 @@ impl ApplicationHandler for App {
                     .show_debug_boxes(false)
                     .build()
                     .with_font(state.font)
-                    .with_text_font_arc(state.text_font_data.clone());
+                    .with_text_font_arc(state.text_font_data.clone())
+                    // Register MuseJazzText for chord text (root notes, quality, extensions)
+                    .with_named_font_arc("MuseJazzText", state.chord_text_font_data.clone())
+                    // Register MuseJazz for SMuFL chord symbols (flat, sharp, triangle, circle)
+                    .with_named_font_arc("MuseJazz", state.chord_symbol_font_data.clone());
 
                 // Transform the scene (all coordinates are in points)
                 let mut transformed_scene = state.demo_scene.clone();
@@ -654,7 +686,14 @@ fn draw_fps_overlay(
 ///
 /// All coordinates are in POINTS (72pt/inch). The DPI scaling is applied
 /// at render time, keeping the layout logic simple and resolution-independent.
-fn build_demo_scene(style: &'static MStyle) -> SceneNode {
+fn build_demo_scene(
+    style: &'static MStyle,
+    text_font_data: Arc<Vec<u8>>,
+    symbol_font_data: Arc<Vec<u8>>,
+) -> SceneNode {
+    // Create font metrics for accurate text measurement
+    let text_metrics = TextFontMetrics::new(text_font_data);
+    let symbol_metrics = TextFontMetrics::new(symbol_font_data);
     // Use PageStyle for proper page dimensions (Letter = 8.5" x 11")
     let page_style = PageStyle {
         paper_size: PaperSize::Letter,
@@ -726,12 +765,12 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         content_x, staff1_y, content_width, spatium,
     )));
 
-    // Section label: "INTRO" in left margin of staff 1
-    // For lead sheet mode, labels fit perfectly within the margin area
+    // Section label: "OUTRO" in left margin of staff 1
+    // Tests single long word that fills the width
     let (_, intro_label) = layout_margin_label(
         &MarginLabelParams {
-            section_type: "Intro".to_string(),
-            abbreviation: "IN".to_string(),
+            section_type: "Outro".to_string(),
+            abbreviation: "OUT".to_string(),
             number: None,
             page_x,
             margin_width: content_left,
@@ -834,12 +873,13 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         content_x, staff2_y, content_width, spatium,
     )));
 
-    // Section label: "VS 1" (Verse 1) in left margin of staff 2
+    // Section label: "Guitar Solo" in left margin of staff 2
+    // This tests multiline word wrapping ("Guitar" + "Solo" on separate lines)
     let (_, vs1_label) = layout_margin_label(
         &MarginLabelParams {
-            section_type: "Verse".to_string(),
-            abbreviation: "VS".to_string(),
-            number: Some(1),
+            section_type: "Guitar Solo".to_string(),  // Will wrap to two lines
+            abbreviation: "GTR SOLO".to_string(),
+            number: None,
             page_x,
             margin_width: content_left,
             staff_y: staff2_y,
@@ -935,12 +975,13 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         content_x, staff3_y, content_width, spatium,
     )));
 
-    // Section label: "CH 1" (Chorus 1) in left margin of staff 3
+    // Section label: "CH 1 B" (Chorus 1 section B) in left margin of staff 3
+    // This tests multiline with section letter
     let (_, ch1_label) = layout_margin_label(
         &MarginLabelParams {
             section_type: "Chorus".to_string(),
-            abbreviation: "CH".to_string(),
-            number: Some(1),
+            abbreviation: "CH 1 B".to_string(),  // Section B will be on its own line
+            number: None,
             page_x,
             margin_width: content_left,
             staff_y: staff3_y,
@@ -1009,6 +1050,168 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
     root.add_child(m11_container);
 
     // =========================================================================
+    // SYSTEM 4: Chord Symbols - Standard Notation
+    // =========================================================================
+    let staff4_y = staff3_y + staff_height + 80.0;
+    let staff4_middle = staff4_y + 2.0 * spatium;
+
+    // Draw staff lines
+    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
+        content_x, staff4_y, content_width, spatium,
+    )));
+
+    // Standard chord symbols above staff (using MuseJazz font for handwritten style)
+    let chord_y = staff4_y - 8.0; // Position above staff
+    let chord_spacing = 70.0;
+    let standard_style = HarmonyStyle::musejazz()
+        .with_text_font_metrics(text_metrics.clone())
+        .with_symbol_font_metrics(symbol_metrics.clone());
+
+    let standard_chords = [
+        "C", "Cm", "Cdim", "Caug", "C5", "Csus4", "Csus2",
+    ];
+
+    for (i, chord_str) in standard_chords.iter().enumerate() {
+        let mut params = parse_chord(chord_str)
+            .at(content_x + 20.0 + i as f64 * chord_spacing, chord_y)
+            .with_style(standard_style.clone());
+        params.id = 800 + i as u64;
+
+        let (_, chord_node) = layout_harmony(&params, &ctx);
+        root.add_child(chord_node);
+    }
+
+    // =========================================================================
+    // SYSTEM 5: Seventh Chords - Standard Notation
+    // =========================================================================
+    let staff5_y = staff4_y + staff_height + 60.0;
+
+    // Draw staff lines
+    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
+        content_x, staff5_y, content_width, spatium,
+    )));
+
+    let chord5_y = staff5_y - 8.0;
+    let seventh_chords = [
+        "CMaj7", "C7", "Cm7", "CmMaj7", "Cdim7", "Cm7b5",
+    ];
+
+    for (i, chord_str) in seventh_chords.iter().enumerate() {
+        let mut params = parse_chord(chord_str)
+            .at(content_x + 20.0 + i as f64 * chord_spacing, chord5_y)
+            .with_style(standard_style.clone());
+        params.id = 850 + i as u64;
+
+        let (_, chord_node) = layout_harmony(&params, &ctx);
+        root.add_child(chord_node);
+    }
+
+    // =========================================================================
+    // SYSTEM 6: Extended/Altered - Standard Notation
+    // =========================================================================
+    let staff6_y = staff5_y + staff_height + 60.0;
+
+    // Draw staff lines
+    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
+        content_x, staff6_y, content_width, spatium,
+    )));
+
+    let chord6_y = staff6_y - 8.0;
+    let extended_chords = [
+        "C9", "C11", "C13", "C7b9", "C7#9", "C7alt",
+    ];
+
+    for (i, chord_str) in extended_chords.iter().enumerate() {
+        let mut params = parse_chord(chord_str)
+            .at(content_x + 20.0 + i as f64 * chord_spacing, chord6_y)
+            .with_style(standard_style.clone());
+        params.id = 900 + i as u64;
+
+        let (_, chord_node) = layout_harmony(&params, &ctx);
+        root.add_child(chord_node);
+    }
+
+    // =========================================================================
+    // SYSTEM 7: Chord Symbols - Jazz Notation
+    // =========================================================================
+    let staff7_y = staff6_y + staff_height + 80.0;
+
+    // Draw staff lines
+    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
+        content_x, staff7_y, content_width, spatium,
+    )));
+
+    let chord7_y = staff7_y - 8.0;
+    let jazz_style = HarmonyStyle::musejazz_jazz()
+        .with_text_font_metrics(text_metrics.clone())
+        .with_symbol_font_metrics(symbol_metrics.clone());
+
+    // Jazz triads with special symbols
+    let jazz_triads = [
+        "C", "Cm", "Cdim", "Caug", "C5", "Csus4", "Csus2",
+    ];
+
+    for (i, chord_str) in jazz_triads.iter().enumerate() {
+        let mut params = parse_chord(chord_str)
+            .at(content_x + 20.0 + i as f64 * chord_spacing, chord7_y)
+            .with_style(jazz_style.clone());
+        params.id = 950 + i as u64;
+
+        let (_, chord_node) = layout_harmony(&params, &ctx);
+        root.add_child(chord_node);
+    }
+
+    // =========================================================================
+    // SYSTEM 8: Seventh Chords - Jazz Notation
+    // =========================================================================
+    let staff8_y = staff7_y + staff_height + 60.0;
+
+    // Draw staff lines
+    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
+        content_x, staff8_y, content_width, spatium,
+    )));
+
+    let chord8_y = staff8_y - 8.0;
+    let jazz_sevenths = [
+        "CMaj7", "C7", "Cm7", "CmMaj7", "Cdim7", "Cm7b5",
+    ];
+
+    for (i, chord_str) in jazz_sevenths.iter().enumerate() {
+        let mut params = parse_chord(chord_str)
+            .at(content_x + 20.0 + i as f64 * chord_spacing, chord8_y)
+            .with_style(jazz_style.clone());
+        params.id = 1000 + i as u64;
+
+        let (_, chord_node) = layout_harmony(&params, &ctx);
+        root.add_child(chord_node);
+    }
+
+    // =========================================================================
+    // SYSTEM 9: Slash Chords - Jazz Notation
+    // =========================================================================
+    let staff9_y = staff8_y + staff_height + 60.0;
+
+    // Draw staff lines
+    root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
+        content_x, staff9_y, content_width, spatium,
+    )));
+
+    let chord9_y = staff9_y - 8.0;
+    let slash_chords = [
+        "C/E", "Cm/G", "C7/Bb", "CMaj7/B", "F#m7/C#", "Bb/D",
+    ];
+
+    for (i, chord_str) in slash_chords.iter().enumerate() {
+        let mut params = parse_chord(chord_str)
+            .at(content_x + 20.0 + i as f64 * chord_spacing, chord9_y)
+            .with_style(jazz_style.clone());
+        params.id = 1050 + i as u64;
+
+        let (_, chord_node) = layout_harmony(&params, &ctx);
+        root.add_child(chord_node);
+    }
+
+    // =========================================================================
     // Labels and Title
     // =========================================================================
     let title_x = page_x + page_width / 2.0 - 100.0;
@@ -1023,6 +1226,12 @@ fn build_demo_scene(style: &'static MStyle) -> SceneNode {
         (content_x, staff1_y - 12.0, "System 1: Rhythmic slash notation (quarters, 8ths, 16ths, syncopation)"),
         (content_x, staff2_y - 12.0, "System 2: Auto-stemless rhythmic notation (2+ consecutive quarters = stemless)"),
         (content_x, staff3_y - 12.0, "System 3: Complex rhythms (32nds, syncopation, dotted patterns)"),
+        (content_x, staff4_y - 20.0, "System 4: Basic Triads - Standard Notation"),
+        (content_x, staff5_y - 20.0, "System 5: Seventh Chords - Standard Notation"),
+        (content_x, staff6_y - 20.0, "System 6: Extended/Altered - Standard Notation"),
+        (content_x, staff7_y - 20.0, "System 7: Basic Triads - Jazz Notation"),
+        (content_x, staff8_y - 20.0, "System 8: Seventh Chords - Jazz Notation"),
+        (content_x, staff9_y - 20.0, "System 9: Slash Chords - Jazz Notation"),
     ];
 
     for (x, y, text) in labels {

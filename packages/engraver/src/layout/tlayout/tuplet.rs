@@ -4,7 +4,7 @@
 //! MuseScore's tuplet layout algorithm.
 
 use kurbo::{BezPath, Point, Rect};
-use peniko::Color;
+use vello::peniko::Color;
 
 use crate::scene::{PaintCommand, SceneNode};
 use crate::scene::id::{ElementType, SemanticId};
@@ -168,9 +168,14 @@ pub fn layout_tuplet(
     // Determine bracket direction (up or down)
     let is_up = determine_tuplet_direction(notes);
 
-    // Get first and last notes
-    let first = &notes[0];
-    let last = notes.last().unwrap();
+    // Get first and last notes (safe due to len >= 2 check above)
+    let (Some(first), Some(last)) = (notes.first(), notes.last()) else {
+        return TupletLayout {
+            commands: Vec::new(),
+            bbox: Rect::ZERO,
+            scene: SceneNode::group(SemanticId::new(ElementType::Tuplet, id)),
+        };
+    };
 
     // Calculate bracket endpoints
     let (p1, p2) = calculate_bracket_endpoints(notes, is_up, spatium, config);
@@ -314,8 +319,9 @@ fn calculate_bracket_endpoints(
     spatium: f64,
     config: &TupletConfig,
 ) -> (Point, Point) {
-    let first = &notes[0];
-    let last = notes.last().unwrap();
+    let (Some(first), Some(last)) = (notes.first(), notes.last()) else {
+        return (Point::ZERO, Point::ZERO);
+    };
 
     // Calculate vertical offset based on stem/head
     let head_offset = config.head_distance * spatium;

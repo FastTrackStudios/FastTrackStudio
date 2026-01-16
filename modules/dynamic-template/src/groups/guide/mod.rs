@@ -4,11 +4,13 @@
 //! - Click tracks (metronome)
 //! - Count-ins
 //! - Cue tracks for performers' in-ears
+//! - Song section markers (Verse, Chorus, Bridge, etc.)
+//! - Dynamic cues (Build, Softly, All In, etc.)
 
 use crate::item_metadata::ItemMetadata;
 use monarchy::Group;
 
-/// Top-level Guide group containing timing and cue tracks
+/// Top-level Guide group containing timing, cue, and section tracks
 pub struct Guide;
 
 impl From<Guide> for Group<ItemMetadata> {
@@ -26,6 +28,8 @@ impl From<Guide> for Group<ItemMetadata> {
             .group(Click)
             .group(Count)
             .group(Cues)
+            .group(Sections)
+            .group(DynamicCues)
             .build()
     }
 }
@@ -98,6 +102,107 @@ impl From<Cues> for Group<ItemMetadata> {
                 "in-ear",
                 "monitor cue",
                 "ear cue",
+            ])
+            .build()
+    }
+}
+
+/// Song section markers (Verse, Chorus, Bridge, etc.)
+///
+/// These patterns match common song structure terms used in
+/// markers, regions, and cue tracks.
+pub struct Sections;
+
+impl From<Sections> for Group<ItemMetadata> {
+    fn from(_val: Sections) -> Self {
+        Group::builder("Sections")
+            .patterns(vec![
+                // Main sections
+                "intro",
+                "verse",
+                "verse 1", "verse 2", "verse 3", "verse 4", "verse 5", "verse 6",
+                "pre chorus", "pre-chorus", "prechorus",
+                "pre chorus 1", "pre chorus 2", "pre chorus 3", "pre chorus 4",
+                "chorus",
+                "chorus 1", "chorus 2", "chorus 3", "chorus 4",
+                "post chorus", "post-chorus", "postchorus",
+                "bridge",
+                "bridge 1", "bridge 2", "bridge 3", "bridge 4",
+                "breakdown",
+                "interlude",
+                "instrumental",
+                "solo",
+                "outro",
+                "ending",
+                "tag",
+                "vamp",
+                "turnaround",
+                "refrain",
+                "acapella", "a capella",
+                "rap",
+                "exhortation",
+                // Numbered sections (common in arrangements)
+                "section 1", "section 2", "section 3", "section 4",
+                "section 5", "section 6", "section 7",
+            ])
+            .build()
+    }
+}
+
+/// Dynamic cues for performers (Build, Softly, All In, etc.)
+///
+/// These patterns match performance direction terms used in
+/// cue tracks and markers to guide dynamics and energy.
+pub struct DynamicCues;
+
+impl From<DynamicCues> for Group<ItemMetadata> {
+    fn from(_val: DynamicCues) -> Self {
+        Group::builder("Dynamic Cues")
+            .patterns(vec![
+                // Energy/intensity cues
+                "build",
+                "slowly build",
+                "swell",
+                "all in", "all-in", "allin",
+                "softly",
+                "soft",
+                "hold",
+                "break",
+                "hits",
+                "hit",
+                // Instrument entry cues
+                "drums in",
+                "bass in",
+                "keys in",
+                "guitars in",
+                "band in",
+                // Endings
+                "big ending",
+                "big end",
+                "last time",
+                "final",
+                // Key changes
+                "key change up",
+                "key change down",
+                "modulation",
+                "mod up",
+                "mod down",
+                // Improvisation
+                "ad lib", "ad-lib", "adlib",
+                "worship freely",
+                "free worship",
+                "spontaneous",
+                // Other dynamic directions
+                "crescendo",
+                "decrescendo",
+                "fade",
+                "fade out",
+                "fade in",
+                "stop",
+                "tacet",
+                "rest",
+                "wait",
+                "cue",
             ])
             .build()
     }

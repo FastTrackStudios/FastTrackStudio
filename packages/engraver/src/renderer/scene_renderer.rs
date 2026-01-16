@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use kurbo::{Affine, BezPath, Circle, Ellipse, Line, Point, Rect, RoundedRect, RoundedRectRadii};
-use peniko::{Blob, Brush, Color, Fill, FontData};
+use vello::peniko::{Blob, Brush, Color, Fill, FontData};
 use skrifa::{
     instance::Size,
     outline::{DrawSettings, OutlinePen},
@@ -19,7 +19,7 @@ use vello::{Glyph, Scene};
 
 use crate::fonts::SMuFLFont;
 use crate::scene::node::SceneNode;
-use crate::scene::paint::{FillRule, LineCap, LineJoin, PaintCommand};
+use crate::scene::paint::{FillRule, LineCap, LineJoin, PaintCommand, TextAnchor};
 
 /// A pen that builds a kurbo BezPath from font glyph outlines.
 ///
@@ -109,6 +109,8 @@ pub struct VelloSceneRenderer<'a> {
     font: Option<&'a SMuFLFont<'a>>,
     /// Text font for regular text (lyrics, dynamics text, etc.)
     text_font: Option<FontData>,
+    /// Additional fonts by family name for specialized rendering (e.g., chord symbols)
+    font_registry: std::collections::HashMap<String, FontData>,
     /// Transform stack for hierarchical transforms
     transform_stack: Vec<Affine>,
 }
@@ -121,6 +123,7 @@ impl<'a> VelloSceneRenderer<'a> {
             config: SceneRenderConfig::default(),
             font: None,
             text_font: None,
+            font_registry: std::collections::HashMap::new(),
             transform_stack: vec![Affine::IDENTITY],
         }
     }
@@ -132,6 +135,7 @@ impl<'a> VelloSceneRenderer<'a> {
             config,
             font: None,
             text_font: None,
+            font_registry: std::collections::HashMap::new(),
             transform_stack: vec![Affine::IDENTITY],
         }
     }
@@ -156,6 +160,25 @@ impl<'a> VelloSceneRenderer<'a> {
     #[must_use]
     pub fn with_text_font_arc(mut self, font_data: Arc<Vec<u8>>) -> Self {
         self.text_font = Some(FontData::new(Blob::new(font_data), 0));
+        self
+    }
+
+    /// Register an additional font by family name.
+    ///
+    /// Fonts registered here can be selected using the `font_family` field in PaintCommands.
+    /// This is useful for specialized fonts like chord symbol fonts (e.g., Leland).
+    #[must_use]
+    pub fn with_named_font(mut self, family: &str, font_data: &[u8]) -> Self {
+        let font = FontData::new(Blob::new(Arc::new(font_data.to_vec())), 0);
+        self.font_registry.insert(family.to_string(), font);
+        self
+    }
+
+    /// Register an additional font by family name from an Arc'd slice.
+    #[must_use]
+    pub fn with_named_font_arc(mut self, family: &str, font_data: Arc<Vec<u8>>) -> Self {
+        let font = FontData::new(Blob::new(font_data), 0);
+        self.font_registry.insert(family.to_string(), font);
         self
     }
 
@@ -350,8 +373,8 @@ impl<'a> VelloSceneRenderer<'a> {
                 position,
                 color,
                 anchor,
-                weight,
-                style,
+                weight: _,
+                style: _,
             } => {
                 self.render_text(
                     scene,
@@ -360,6 +383,7 @@ impl<'a> VelloSceneRenderer<'a> {
                     *font_size,
                     *position,
                     *color,
+                    *anchor,
                     transform,
                 );
             }
@@ -433,10 +457,15 @@ impl<'a> VelloSceneRenderer<'a> {
 
     /// Render text using Vello's draw_glyphs API.
     ///
-    /// Uses the text font set via `with_text_font()`. Falls back to
-    /// placeholder rectangles if no font is available.
+    /// Uses fonts in this priority order:
+    /// 1. Font registered by family name in the font registry
+    /// 2. Default text font set via `with_text_font()`
+    /// 3. Fallback to placeholder rectangles
     ///
-    /// The position specifies the baseline origin of the text (left edge of first character).
+    /// The position specifies the anchor point of the text, which depends on the anchor type:
+    /// - `Start`: left edge of first character (baseline origin)
+    /// - `Middle`: horizontal center of text
+    /// - `End`: right edge of last character
     ///
     /// Note: Vello's draw_glyphs uses font_size in pixels and glyph positions relative
     /// to the transform origin. Since we work in a transformed coordinate system (points),
@@ -448,10 +477,11 @@ impl<'a> VelloSceneRenderer<'a> {
         &self,
         scene: &mut Scene,
         text: &str,
-        _font_family: &str,
+        font_family: &str,
         font_size: f64,
         position: Point,
         color: Color,
+        anchor: TextAnchor,
         transform: Affine,
     ) {
         // Extract scale factor from the transform matrix
@@ -465,8 +495,11 @@ impl<'a> VelloSceneRenderer<'a> {
         // Scale the font size from scene units (points) to screen units (pixels)
         let screen_font_size = font_size * scale_x;
 
-        // Try to render with the text font
-        if let Some(font_data) = &self.text_font {
+        // Try to find the font: first check registry by family name, then fall back to default text font
+        let font_data = self.font_registry.get(font_family).or(self.text_font.as_ref());
+
+        // Try to render with the resolved font
+        if let Some(font_data) = font_data {
             if let Some(font_ref) = to_font_ref(font_data) {
                 // Use screen font size for glyph metrics so advances match the rendered size
                 let size = skrifa::instance::Size::new(screen_font_size as f32);
@@ -493,9 +526,19 @@ impl<'a> VelloSceneRenderer<'a> {
                     pen_x += advance;
                 }
 
-                // Use translation-only transform at the screen position
+                // Calculate anchor offset based on total text width
+                let total_width = pen_x as f64;
+                let anchor_offset = match anchor {
+                    TextAnchor::Start => 0.0,
+                    TextAnchor::Middle => -total_width / 2.0,
+                    TextAnchor::End => -total_width,
+                };
+
+                // Use translation-only transform at the screen position with anchor offset
                 // This avoids double-scaling the glyph positions
-                let text_transform = Affine::translate(screen_position.to_vec2());
+                let text_transform = Affine::translate(
+                    (screen_position + kurbo::Vec2::new(anchor_offset, 0.0)).to_vec2()
+                );
 
                 scene
                     .draw_glyphs(font_data)
@@ -511,16 +554,22 @@ impl<'a> VelloSceneRenderer<'a> {
         // Fallback: draw placeholder rectangles
         let char_width = font_size * 0.6;
         let char_height = font_size * 0.8;
+        let total_width = text.chars().count() as f64 * char_width;
+        let anchor_offset = match anchor {
+            TextAnchor::Start => 0.0,
+            TextAnchor::Middle => -total_width / 2.0,
+            TextAnchor::End => -total_width,
+        };
 
         for (i, _ch) in text.chars().enumerate() {
-            let x = position.x + i as f64 * char_width;
+            let x = position.x + anchor_offset + i as f64 * char_width;
             let rect = Rect::new(x, position.y - char_height, x + char_width * 0.8, position.y);
             scene.fill(Fill::NonZero, transform, color, None, &rect);
         }
     }
 }
 
-/// Convert FontData to FontRef for skrifa operations.
+/// Convert Font to FontRef for skrifa operations.
 fn to_font_ref(font: &FontData) -> Option<FontRef<'_>> {
     let file_ref = FileRef::new(font.data.as_ref()).ok()?;
     match file_ref {

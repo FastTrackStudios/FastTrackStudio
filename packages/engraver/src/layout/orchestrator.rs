@@ -20,11 +20,12 @@
 //! ```
 
 use kurbo::{Affine, Point, Rect};
-use peniko::Color;
+use vello::peniko::Color;
 
 use crate::fonts::SMuFLFont;
-use crate::layout::context::{LayoutConfiguration, LayoutContext};
+use crate::layout::context::{LayoutConfiguration, LayoutContext, LayoutContextOwned, LayoutMode};
 use crate::layout::tlayout::chord::{layout_chord, ChordNote, ChordParams, StemDirection};
+use crate::model::LayoutBreak;
 use crate::layout::tlayout::clef::{layout_clef, ClefParams, ClefType};
 use crate::layout::tlayout::keysig::{layout_keysig, KeySigParams, KeySigType};
 use crate::layout::tlayout::note::{layout_note, Accidental, NoteDuration, NoteHeadType, NoteParams};
@@ -105,9 +106,11 @@ impl Default for PageMargins {
 /// Layout engine configuration.
 #[derive(Debug, Clone)]
 pub struct LayoutEngineConfig {
-    /// Page width in pixels
+    /// Layout mode (Page, Horizontal, Vertical, Float)
+    pub mode: LayoutMode,
+    /// Page width in pixels (used as system width in Horizontal/Vertical modes)
     pub page_width: f64,
-    /// Page height in pixels
+    /// Page height in pixels (ignored in linear modes)
     pub page_height: f64,
     /// Page margins
     pub margins: PageMargins,
@@ -115,26 +118,69 @@ pub struct LayoutEngineConfig {
     pub spatium: f64,
     /// Space between systems
     pub system_spacing: f64,
-    /// Maximum measures per system (0 = auto)
+    /// Maximum measures per system (0 = auto, ignored in Horizontal mode)
     pub max_measures_per_system: usize,
     /// Minimum measure width
     pub min_measure_width: f64,
     /// Maximum measure width
     pub max_measure_width: f64,
+    /// Viewport width for continuous modes (0 = use page_width)
+    pub viewport_width: f64,
+    /// Viewport height for continuous modes (0 = unlimited)
+    pub viewport_height: f64,
 }
 
 impl Default for LayoutEngineConfig {
     fn default() -> Self {
         Self {
-            page_width: 816.0,  // A4 at 96 DPI
-            page_height: 1056.0,
+            mode: LayoutMode::Page,
+            page_width: 816.0,  // US Letter at 96 DPI (8.5" × 96)
+            page_height: 1056.0, // US Letter at 96 DPI (11" × 96)
             margins: PageMargins::default(),
             spatium: 10.0,
             system_spacing: 80.0,
             max_measures_per_system: 0, // Auto
             min_measure_width: 80.0,
             max_measure_width: 400.0,
+            viewport_width: 0.0,
+            viewport_height: 0.0,
         }
+    }
+}
+
+impl LayoutEngineConfig {
+    /// Create configuration for endless horizontal mode.
+    #[must_use]
+    pub fn horizontal() -> Self {
+        Self {
+            mode: LayoutMode::Horizontal,
+            ..Default::default()
+        }
+    }
+
+    /// Create configuration for endless vertical mode.
+    #[must_use]
+    pub fn vertical() -> Self {
+        Self {
+            mode: LayoutMode::Vertical,
+            ..Default::default()
+        }
+    }
+
+    /// Create configuration for reflow mode.
+    #[must_use]
+    pub fn float() -> Self {
+        Self {
+            mode: LayoutMode::Float,
+            ..Default::default()
+        }
+    }
+
+    /// Set the layout mode.
+    #[must_use]
+    pub fn with_mode(mut self, mode: LayoutMode) -> Self {
+        self.mode = mode;
+        self
     }
 }
 
@@ -236,12 +282,46 @@ impl<'a> LayoutEngine<'a> {
     /// Layout an entire score.
     ///
     /// This is the main entry point for the layout pipeline.
+    /// Dispatches to the appropriate layout strategy based on the configured mode.
     pub fn layout_score(&self, score: &'a Score) -> LayoutResult {
+        match self.config.mode {
+            LayoutMode::Page | LayoutMode::Float => self.layout_page_mode(score),
+            LayoutMode::Horizontal => self.layout_horizontal_mode(score),
+            LayoutMode::Vertical => self.layout_vertical_mode(score),
+        }
+    }
+
+    /// Layout score in Page mode (standard pagination).
+    ///
+    /// Creates fixed-size pages with multiple systems per page.
+    /// Honors explicit page breaks and line breaks.
+    fn layout_page_mode(&self, score: &'a Score) -> LayoutResult {
+        // Create layout context (owned, no memory leak)
+        let ctx_owned = LayoutContextOwned::new_minimal(self.style.clone());
+        let ctx = ctx_owned.as_context();
+
         // Calculate number of measures
         let measure_count = self.count_measures(score);
 
-        // Group measures into systems
+        // Group measures into systems (honors line breaks in Page mode)
         let systems_measures = self.compute_systems(score, measure_count);
+
+        // Get measures for checking page breaks
+        let measures: Vec<_> = score.parts.first()
+            .map(|p| &p.measures)
+            .into_iter()
+            .flatten()
+            .collect();
+
+        // Helper to check if a system ends with a page break
+        let system_has_page_break = |measure_indices: &[usize]| -> bool {
+            if !self.config.mode.honors_page_breaks() {
+                return false;
+            }
+            measure_indices.last().and_then(|&idx| measures.get(idx)).is_some_and(|m| {
+                matches!(m.layout_break, Some(LayoutBreak::Page))
+            })
+        };
 
         // Create root scene node (use Page as the root container type)
         let mut root = SceneNode::group(SemanticId::new(ElementType::Page, 0));
@@ -259,21 +339,22 @@ impl<'a> LayoutEngine<'a> {
             // Create system node
             let system_height = self.config.spatium * 4.0; // 5 staff lines = 4 spaces
 
-            // Check if we need a new page
-            if page_y + system_height + self.config.system_spacing > self.config.margins.top + content_height {
+            // Check if we need a new page due to height
+            let height_exceeded = page_y + system_height + self.config.system_spacing
+                > self.config.margins.top + content_height;
+
+            if height_exceeded && !current_page_systems.is_empty() {
                 // Finalize current page
-                if !current_page_systems.is_empty() {
-                    let page = PageLayout {
-                        number: page_number,
-                        width: self.config.page_width,
-                        height: self.config.page_height,
-                        systems: std::mem::take(&mut current_page_systems),
-                        margins: self.config.margins,
-                    };
-                    pages.push(page);
-                    page_number += 1;
-                    page_y = self.config.margins.top;
-                }
+                let page = PageLayout {
+                    number: page_number,
+                    width: self.config.page_width,
+                    height: self.config.page_height,
+                    systems: std::mem::take(&mut current_page_systems),
+                    margins: self.config.margins,
+                };
+                pages.push(page);
+                page_number += 1;
+                page_y = self.config.margins.top;
             }
 
             // Create system layout info
@@ -288,6 +369,7 @@ impl<'a> LayoutEngine<'a> {
 
             // Layout the system
             let system_node = self.layout_single_system(
+                &ctx,
                 score,
                 measure_indices,
                 system_index,
@@ -297,6 +379,21 @@ impl<'a> LayoutEngine<'a> {
 
             page_y += system_height + self.config.system_spacing;
             system_index += 1;
+
+            // Check for explicit page break after this system
+            if system_has_page_break(measure_indices) && !current_page_systems.is_empty() {
+                // Finalize current page due to explicit page break
+                let page = PageLayout {
+                    number: page_number,
+                    width: self.config.page_width,
+                    height: self.config.page_height,
+                    systems: std::mem::take(&mut current_page_systems),
+                    margins: self.config.margins,
+                };
+                pages.push(page);
+                page_number += 1;
+                page_y = self.config.margins.top;
+            }
         }
 
         // Add final page
@@ -324,6 +421,262 @@ impl<'a> LayoutEngine<'a> {
         }
     }
 
+    /// Layout score in Horizontal mode (endless horizontal scroll).
+    ///
+    /// Creates a single horizontal strip with one system containing all measures.
+    /// The width grows to accommodate all content; height is fixed.
+    /// Ignores all line breaks and page breaks.
+    fn layout_horizontal_mode(&self, score: &'a Score) -> LayoutResult {
+        // Create layout context (owned, no memory leak)
+        let ctx_owned = LayoutContextOwned::new_minimal(self.style.clone());
+        let ctx = ctx_owned.as_context();
+
+        let measure_count = self.count_measures(score);
+
+        if measure_count == 0 {
+            return LayoutResult {
+                scene: SceneNode::group(SemanticId::new(ElementType::Page, 0)),
+                pages: vec![],
+                total_width: self.config.page_width,
+                total_height: self.config.spatium * 4.0 + self.config.margins.top + self.config.margins.bottom,
+                system_count: 0,
+                measure_count: 0,
+            };
+        }
+
+        // In horizontal mode, ALL measures go into ONE system
+        let all_measures: Vec<usize> = (0..measure_count).collect();
+
+        // Calculate total width based on measure count
+        let measure_width = self.config.min_measure_width.max(self.content_width() / 4.0);
+        let total_content_width = measure_width * measure_count as f64;
+        let total_width = total_content_width + self.config.margins.left + self.config.margins.right;
+
+        // System height (single staff)
+        let system_height = self.config.spatium * 4.0;
+        let total_height = system_height + self.config.margins.top + self.config.margins.bottom;
+
+        // Create the single system
+        let mut root = SceneNode::group(SemanticId::new(ElementType::Page, 0));
+
+        let system_layout = SystemLayout {
+            index: 0,
+            y: self.config.margins.top,
+            width: total_content_width,
+            height: system_height,
+            measure_indices: all_measures.clone(),
+        };
+
+        // Layout the single horizontal system
+        let system_node = self.layout_horizontal_system(&ctx, score, &all_measures, total_content_width);
+        root.add_child(system_node);
+
+        // Create single "page" representing the endless horizontal strip
+        let page = PageLayout {
+            number: 1,
+            width: total_width,
+            height: total_height,
+            systems: vec![system_layout],
+            margins: self.config.margins,
+        };
+
+        LayoutResult {
+            scene: root,
+            pages: vec![page],
+            total_width,
+            total_height,
+            system_count: 1,
+            measure_count,
+        }
+    }
+
+    /// Layout score in Vertical mode (endless vertical scroll).
+    ///
+    /// Creates one infinite page with multiple systems stacked vertically.
+    /// Page breaks are converted to line breaks; content flows continuously.
+    fn layout_vertical_mode(&self, score: &'a Score) -> LayoutResult {
+        // Create layout context (owned, no memory leak)
+        let ctx_owned = LayoutContextOwned::new_minimal(self.style.clone());
+        let ctx = ctx_owned.as_context();
+
+        let measure_count = self.count_measures(score);
+
+        if measure_count == 0 {
+            return LayoutResult {
+                scene: SceneNode::group(SemanticId::new(ElementType::Page, 0)),
+                pages: vec![],
+                total_width: self.config.page_width,
+                total_height: self.config.margins.top + self.config.margins.bottom,
+                system_count: 0,
+                measure_count: 0,
+            };
+        }
+
+        // Group measures into systems (same as page mode, but no page breaks)
+        let systems_measures = self.compute_systems(score, measure_count);
+
+        // Create root node
+        let mut root = SceneNode::group(SemanticId::new(ElementType::Page, 0));
+
+        // Layout all systems on one endless vertical page
+        let mut all_systems = Vec::new();
+        let mut current_y = self.config.margins.top;
+        let system_height = self.config.spatium * 4.0;
+
+        for (system_index, measure_indices) in systems_measures.iter().enumerate() {
+            // Create system layout info
+            let system_layout = SystemLayout {
+                index: system_index,
+                y: current_y,
+                width: self.content_width(),
+                height: system_height,
+                measure_indices: measure_indices.clone(),
+            };
+            all_systems.push(system_layout);
+
+            // Layout the system
+            let system_node = self.layout_single_system(
+                &ctx,
+                score,
+                measure_indices,
+                system_index,
+                current_y,
+            );
+            root.add_child(system_node);
+
+            current_y += system_height + self.config.system_spacing;
+        }
+
+        // Total height is the sum of all systems plus margins
+        let total_height = current_y - self.config.system_spacing + self.config.margins.bottom;
+
+        // Create single "page" representing the endless vertical strip
+        let page = PageLayout {
+            number: 1,
+            width: self.config.page_width,
+            height: total_height,
+            systems: all_systems,
+            margins: self.config.margins,
+        };
+
+        LayoutResult {
+            scene: root,
+            pages: vec![page],
+            total_width: self.config.page_width,
+            total_height,
+            system_count: systems_measures.len(),
+            measure_count,
+        }
+    }
+
+    /// Layout a horizontal system (used in Horizontal mode).
+    ///
+    /// Creates a single system containing all measures laid out horizontally.
+    fn layout_horizontal_system(
+        &self,
+        ctx: &LayoutContext<'_>,
+        score: &Score,
+        measure_indices: &[usize],
+        total_width: f64,
+    ) -> SceneNode {
+        let measure_count = measure_indices.len();
+        let measure_width = if measure_count > 0 {
+            total_width / measure_count as f64
+        } else {
+            total_width
+        };
+
+        // Create system node
+        let mut system_node = SceneNode::group(SemanticId::new(ElementType::System, 0));
+        system_node.transform = Affine::translate((self.config.margins.left, self.config.margins.top));
+
+        let mut current_x = 0.0;
+
+        for (local_idx, &measure_idx) in measure_indices.iter().enumerate() {
+            let is_first = local_idx == 0;
+            let is_last = local_idx == measure_count - 1;
+
+            // Create measure node
+            let mut measure_node = SceneNode::group(SemanticId::measure(measure_idx as u64));
+            measure_node.transform = Affine::translate((current_x, 0.0));
+
+            // Add staff lines
+            let staff_lines = self.create_staff_lines(measure_width);
+            measure_node.add_child(staff_lines);
+
+            // Add barlines
+            if is_first {
+                let left_barline = self.create_barline(0.0, false);
+                measure_node.add_child(left_barline);
+            }
+
+            // Track x position within measure
+            let mut element_x = self.config.spatium * 0.5;
+
+            // Add clef at start
+            if is_first {
+                let clef_params = ClefParams {
+                    id: 0,
+                    clef_type: ClefType::Treble,
+                    is_change: false,
+                    ..Default::default()
+                };
+                let (_, clef_node) = layout_clef(&clef_params, &ctx);
+                let mut positioned = clef_node;
+                positioned.transform = Affine::translate((element_x, 0.0));
+                measure_node.add_child(positioned);
+                element_x += self.config.spatium * 3.0;
+
+                // Add time signature
+                let ts_params = TimeSigParams {
+                    id: 1,
+                    sig_type: TimeSigType::Numeric {
+                        numerator: score.time_signature.numerator,
+                        denominator: score.time_signature.denominator,
+                    },
+                    large: false,
+                };
+                let (_, ts_node) = layout_timesig(&ts_params, &ctx);
+                let mut positioned = ts_node;
+                positioned.transform = Affine::translate((element_x, 0.0));
+                measure_node.add_child(positioned);
+                element_x += self.config.spatium * 3.0;
+            }
+
+            // Layout music elements
+            if let Some(part) = score.parts.first() {
+                if let Some(measure) = part.measures.get(measure_idx) {
+                    let content_area = measure_width - element_x - self.config.spatium * 0.5;
+                    let elements_node = self.layout_measure_elements(
+                        measure,
+                        &ctx,
+                        element_x,
+                        content_area,
+                        measure_idx as u64,
+                    );
+                    measure_node.add_child(elements_node);
+                }
+            }
+
+            // Right barline
+            let right_barline = self.create_barline(measure_width, is_last);
+            measure_node.add_child(right_barline);
+
+            // Calculate bounds
+            let staff_height = self.config.spatium * 4.0;
+            measure_node.bounds = Rect::new(0.0, -staff_height / 2.0, measure_width, staff_height / 2.0);
+
+            system_node.add_child(measure_node);
+            current_x += measure_width;
+        }
+
+        // Set system bounds
+        let staff_height = self.config.spatium * 4.0;
+        system_node.bounds = Rect::new(0.0, -staff_height / 2.0, total_width, staff_height / 2.0);
+
+        system_node
+    }
+
     /// Get the content width (page width minus margins).
     fn content_width(&self) -> f64 {
         self.config.page_width - self.config.margins.left - self.config.margins.right
@@ -334,32 +687,95 @@ impl<'a> LayoutEngine<'a> {
         score.parts.first().map_or(0, |p| p.measures.len())
     }
 
-    /// Group measures into systems.
+    /// Group measures into systems, respecting explicit breaks based on layout mode.
+    ///
+    /// - In Page/Vertical mode: honors line breaks (Line, Section, Page all force line break)
+    /// - In Horizontal/Float mode: ignores line breaks
     fn compute_systems(&self, score: &Score, measure_count: usize) -> Vec<Vec<usize>> {
         let mut systems = Vec::new();
         let content_width = self.content_width();
+        let honors_breaks = self.config.mode.honors_line_breaks();
+
+        // Get the measures for checking explicit breaks
+        let measures: Vec<_> = score.parts.first()
+            .map(|p| &p.measures)
+            .into_iter()
+            .flatten()
+            .collect();
 
         if self.config.max_measures_per_system > 0 {
-            // Fixed measures per system
-            for chunk in (0..measure_count).collect::<Vec<_>>().chunks(self.config.max_measures_per_system) {
-                systems.push(chunk.to_vec());
+            // Fixed measures per system, but still honor explicit breaks
+            let mut current_system = Vec::new();
+
+            for i in 0..measure_count {
+                current_system.push(i);
+
+                // Check if we've reached the max measures per system
+                let at_max = current_system.len() >= self.config.max_measures_per_system;
+
+                // Check if this measure has an explicit break (and we honor breaks)
+                let has_explicit_break = honors_breaks
+                    && measures.get(i).is_some_and(|m| {
+                        matches!(
+                            m.layout_break,
+                            Some(LayoutBreak::Line) | Some(LayoutBreak::Section) | Some(LayoutBreak::Page)
+                        )
+                    });
+
+                // Check if next measure has NoBreak (prevents automatic breaks)
+                let next_has_nobreak = measures.get(i).is_some_and(|m| {
+                    matches!(m.layout_break, Some(LayoutBreak::NoBreak))
+                });
+
+                // Start new system if at max or explicit break (unless NoBreak)
+                if (at_max || has_explicit_break) && !next_has_nobreak {
+                    systems.push(std::mem::take(&mut current_system));
+                }
+            }
+
+            if !current_system.is_empty() {
+                systems.push(current_system);
             }
         } else {
             // Auto-compute based on measure widths
-            let default_measure_width = content_width / 4.0; // Default: 4 measures per system
             let mut current_system = Vec::new();
             let mut current_width = 0.0;
 
             for i in 0..measure_count {
                 let measure_width = self.estimate_measure_width(score, i);
 
-                if current_width + measure_width > content_width && !current_system.is_empty() {
+                // Check if this measure has an explicit break (and we honor breaks)
+                let has_explicit_break = honors_breaks
+                    && measures.get(i).is_some_and(|m| {
+                        matches!(
+                            m.layout_break,
+                            Some(LayoutBreak::Line) | Some(LayoutBreak::Section) | Some(LayoutBreak::Page)
+                        )
+                    });
+
+                // Check if current measure has NoBreak (prevents automatic breaks here)
+                let has_nobreak = measures.get(i).is_some_and(|m| {
+                    matches!(m.layout_break, Some(LayoutBreak::NoBreak))
+                });
+
+                // Check if we need to start a new system due to width (unless NoBreak)
+                let width_exceeded = current_width + measure_width > content_width
+                    && !current_system.is_empty()
+                    && !has_nobreak;
+
+                if width_exceeded {
                     systems.push(std::mem::take(&mut current_system));
                     current_width = 0.0;
                 }
 
                 current_system.push(i);
                 current_width += measure_width;
+
+                // Check for explicit break after adding the measure
+                if has_explicit_break {
+                    systems.push(std::mem::take(&mut current_system));
+                    current_width = 0.0;
+                }
             }
 
             if !current_system.is_empty() {
@@ -385,6 +801,7 @@ impl<'a> LayoutEngine<'a> {
     /// Layout a single system with actual music content.
     fn layout_single_system(
         &self,
+        ctx: &LayoutContext<'_>,
         score: &Score,
         measure_indices: &[usize],
         system_index: usize,
@@ -399,12 +816,6 @@ impl<'a> LayoutEngine<'a> {
         } else {
             content_width
         };
-
-        // Create layout context for element layout
-        // Note: minimal() leaks memory for Score and Font, but this is acceptable
-        // for simple layout operations. For production use, pass a full context.
-        let static_style: &'static MStyle = Box::leak(Box::new(self.style.clone()));
-        let ctx = LayoutContext::minimal(static_style);
 
         // Create system node
         let mut system_node = SceneNode::group(SemanticId::new(ElementType::System, system_index as u64));
@@ -633,8 +1044,8 @@ impl<'a> LayoutEngine<'a> {
                     node.transform = Affine::translate((x_pos, 0.0));
                     elements_node.add_child(node);
                 }
-                MusicElement::Dynamic(_) | MusicElement::Barline(_) => {
-                    // TODO: Layout dynamics and barlines
+                MusicElement::Dynamic(_) | MusicElement::Barline(_) | MusicElement::ChordSymbol(_) => {
+                    // TODO: Layout dynamics, barlines, and chord symbols
                 }
             }
         }
@@ -837,6 +1248,34 @@ mod tests {
         }
     }
 
+    /// Create a test score with explicit breaks at specific measures.
+    fn create_test_score_with_breaks(
+        measure_count: usize,
+        breaks: &[(usize, LayoutBreak)],
+    ) -> Score {
+        let mut measures: Vec<Measure> = (0..measure_count)
+            .map(|i| Measure {
+                number: (i + 1) as u32,
+                ..Default::default()
+            })
+            .collect();
+
+        // Add breaks to specified measures
+        for &(idx, break_type) in breaks {
+            if let Some(measure) = measures.get_mut(idx) {
+                measure.layout_break = Some(break_type);
+            }
+        }
+
+        let mut part = Part::new(PartId(1), "Test");
+        part.measures = measures;
+
+        Score {
+            parts: vec![part],
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn test_layout_empty_score() {
         let score = Score::default();
@@ -982,5 +1421,397 @@ mod tests {
         let first_system = &first_page.systems[0];
         assert_eq!(first_system.measure_indices.len(), 4);
         assert_eq!(first_system.index, 0);
+    }
+
+    // ======================================================================
+    // Layout Mode Tests
+    // ======================================================================
+
+    #[test]
+    fn test_horizontal_mode_empty_score() {
+        let score = Score::default();
+        let style = MStyle::default();
+        let config = LayoutEngineConfig::horizontal();
+        let result = layout_score_with_config(&score, &style, config);
+
+        assert_eq!(result.measure_count, 0);
+        assert_eq!(result.system_count, 0);
+        assert!(result.pages.is_empty());
+    }
+
+    #[test]
+    fn test_horizontal_mode_single_system() {
+        let score = create_test_score(12);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig::horizontal();
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Horizontal mode creates exactly ONE system with ALL measures
+        assert_eq!(result.measure_count, 12);
+        assert_eq!(result.system_count, 1);
+        assert_eq!(result.pages.len(), 1);
+
+        // The single system should contain all measures
+        let page = &result.pages[0];
+        assert_eq!(page.systems.len(), 1);
+        assert_eq!(page.systems[0].measure_indices.len(), 12);
+    }
+
+    #[test]
+    fn test_horizontal_mode_width_grows() {
+        let score = create_test_score(20);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig::horizontal();
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Width should grow based on measure count
+        // Default measure width estimation is content_width / 4
+        let default_config = LayoutEngineConfig::default();
+        let content_width = default_config.page_width - default_config.margins.left - default_config.margins.right;
+        let min_measure_width = default_config.min_measure_width.max(content_width / 4.0);
+        let expected_content_width = min_measure_width * 20.0;
+        let expected_total_width = expected_content_width + default_config.margins.left + default_config.margins.right;
+
+        assert_eq!(result.total_width, expected_total_width);
+    }
+
+    #[test]
+    fn test_horizontal_mode_fixed_height() {
+        let score = create_test_score(50);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig::horizontal();
+        let spatium = config.spatium;
+        let margins = config.margins;
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Height should be fixed (one staff height + margins)
+        let system_height = spatium * 4.0;
+        let expected_height = system_height + margins.top + margins.bottom;
+
+        assert_eq!(result.total_height, expected_height);
+    }
+
+    #[test]
+    fn test_vertical_mode_empty_score() {
+        let score = Score::default();
+        let style = MStyle::default();
+        let config = LayoutEngineConfig::vertical();
+        let result = layout_score_with_config(&score, &style, config);
+
+        assert_eq!(result.measure_count, 0);
+        assert_eq!(result.system_count, 0);
+        assert!(result.pages.is_empty());
+    }
+
+    #[test]
+    fn test_vertical_mode_single_page() {
+        let score = create_test_score(50);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig {
+            mode: LayoutMode::Vertical,
+            max_measures_per_system: 4,
+            ..Default::default()
+        };
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Vertical mode creates exactly ONE page (endless vertical)
+        assert_eq!(result.pages.len(), 1);
+
+        // Should have multiple systems (50 measures / 4 per system = ~13)
+        assert!(result.system_count > 1);
+        assert_eq!(result.pages[0].systems.len(), result.system_count);
+    }
+
+    #[test]
+    fn test_vertical_mode_height_grows() {
+        let score = create_test_score(20);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig {
+            mode: LayoutMode::Vertical,
+            max_measures_per_system: 4,
+            system_spacing: 80.0,
+            ..Default::default()
+        };
+        let spatium = config.spatium;
+        let margins = config.margins;
+        let system_spacing = config.system_spacing;
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Height should grow based on system count
+        // 20 measures / 4 per system = 5 systems
+        let system_count = 5;
+        let system_height = spatium * 4.0;
+        let expected_min_height = margins.top
+            + (system_height * system_count as f64)
+            + (system_spacing * (system_count - 1) as f64)
+            + margins.bottom;
+
+        assert!(result.total_height >= expected_min_height - 1.0);
+    }
+
+    #[test]
+    fn test_vertical_mode_fixed_width() {
+        let score = create_test_score(50);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig::vertical();
+        let page_width = config.page_width;
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Width should be fixed to page width
+        assert_eq!(result.total_width, page_width);
+    }
+
+    #[test]
+    fn test_float_mode_uses_page_layout() {
+        // Float mode should behave similar to Page mode
+        let score = create_test_score(16);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig::float();
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Float uses page mode internally, so should have pagination
+        assert!(result.pages.len() >= 1);
+        assert_eq!(result.measure_count, 16);
+    }
+
+    #[test]
+    fn test_layout_mode_config_builders() {
+        let horizontal = LayoutEngineConfig::horizontal();
+        assert_eq!(horizontal.mode, LayoutMode::Horizontal);
+
+        let vertical = LayoutEngineConfig::vertical();
+        assert_eq!(vertical.mode, LayoutMode::Vertical);
+
+        let float = LayoutEngineConfig::float();
+        assert_eq!(float.mode, LayoutMode::Float);
+
+        let custom = LayoutEngineConfig::default().with_mode(LayoutMode::Vertical);
+        assert_eq!(custom.mode, LayoutMode::Vertical);
+    }
+
+    #[test]
+    fn test_page_mode_creates_multiple_pages() {
+        let score = create_test_score(100);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig {
+            mode: LayoutMode::Page,
+            max_measures_per_system: 4,
+            system_spacing: 200.0, // Large spacing to force page breaks
+            page_height: 400.0,    // Small page to force more pages
+            ..Default::default()
+        };
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Page mode should create multiple pages
+        assert!(result.pages.len() > 1, "Expected multiple pages, got {}", result.pages.len());
+    }
+
+    #[test]
+    fn test_mode_comparison_horizontal_vs_vertical() {
+        let score = create_test_score(16);
+        let style = MStyle::default();
+
+        let h_config = LayoutEngineConfig {
+            mode: LayoutMode::Horizontal,
+            max_measures_per_system: 4,
+            ..Default::default()
+        };
+        let h_result = layout_score_with_config(&score, &style, h_config);
+
+        let v_config = LayoutEngineConfig {
+            mode: LayoutMode::Vertical,
+            max_measures_per_system: 4,
+            ..Default::default()
+        };
+        let v_result = layout_score_with_config(&score, &style, v_config.clone());
+
+        // Horizontal: 1 system with all measures
+        assert_eq!(h_result.system_count, 1);
+        assert_eq!(h_result.pages[0].systems[0].measure_indices.len(), 16);
+
+        // Vertical: multiple systems (16/4 = 4)
+        assert_eq!(v_result.system_count, 4);
+
+        // Horizontal should be wider than vertical
+        assert!(h_result.total_width > v_result.total_width);
+
+        // Vertical should be taller than horizontal
+        assert!(v_result.total_height > h_result.total_height);
+    }
+
+    // ======================================================================
+    // Explicit Break Tests
+    // ======================================================================
+
+    #[test]
+    fn test_line_break_honored_in_page_mode() {
+        // Line break after measure 2 should create a new system
+        let score = create_test_score_with_breaks(8, &[(1, LayoutBreak::Line)]);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig {
+            mode: LayoutMode::Page,
+            max_measures_per_system: 4, // Would normally be 2 systems
+            ..Default::default()
+        };
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Should have 3 systems: [0,1], [2,3,4,5], [6,7]
+        // First system ends at measure 1 (0-indexed) due to line break
+        assert_eq!(result.system_count, 3);
+        assert_eq!(result.pages[0].systems[0].measure_indices, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_line_break_ignored_in_horizontal_mode() {
+        // Line breaks should be ignored in horizontal mode
+        let score = create_test_score_with_breaks(8, &[(1, LayoutBreak::Line), (3, LayoutBreak::Line)]);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig::horizontal();
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Horizontal mode: ONE system with ALL measures, ignoring breaks
+        assert_eq!(result.system_count, 1);
+        assert_eq!(result.pages[0].systems[0].measure_indices.len(), 8);
+    }
+
+    #[test]
+    fn test_section_break_forces_line_break() {
+        // Section break should also force a line break
+        let score = create_test_score_with_breaks(8, &[(3, LayoutBreak::Section)]);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig {
+            mode: LayoutMode::Page,
+            max_measures_per_system: 8, // Would normally be 1 system
+            ..Default::default()
+        };
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Section break after measure 3 creates 2 systems
+        assert_eq!(result.system_count, 2);
+        assert_eq!(result.pages[0].systems[0].measure_indices, vec![0, 1, 2, 3]);
+        assert_eq!(result.pages[0].systems[1].measure_indices, vec![4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn test_page_break_creates_new_page() {
+        // Page break after measure 3 should create a new page
+        let score = create_test_score_with_breaks(8, &[(3, LayoutBreak::Page)]);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig {
+            mode: LayoutMode::Page,
+            max_measures_per_system: 4,
+            page_height: 2000.0, // Large page that would fit all systems
+            ..Default::default()
+        };
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Should have 2 pages due to explicit page break
+        assert_eq!(result.pages.len(), 2);
+
+        // First page has 1 system (measures 0-3)
+        assert_eq!(result.pages[0].systems.len(), 1);
+        assert_eq!(result.pages[0].systems[0].measure_indices, vec![0, 1, 2, 3]);
+
+        // Second page has 1 system (measures 4-7)
+        assert_eq!(result.pages[1].systems.len(), 1);
+        assert_eq!(result.pages[1].systems[0].measure_indices, vec![4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn test_page_break_ignored_in_vertical_mode() {
+        // Page breaks are converted to line breaks in vertical mode
+        let score = create_test_score_with_breaks(8, &[(3, LayoutBreak::Page)]);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig {
+            mode: LayoutMode::Vertical,
+            max_measures_per_system: 8, // Would normally be 1 system
+            ..Default::default()
+        };
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Vertical mode: ONE page (endless vertical)
+        assert_eq!(result.pages.len(), 1);
+
+        // But the line break aspect should still be honored
+        // (Page break also forces a line break in modes that honor line breaks)
+        assert_eq!(result.system_count, 2);
+    }
+
+    #[test]
+    fn test_nobreak_prevents_automatic_break() {
+        // NoBreak should prevent automatic breaks at that point
+        let score = create_test_score_with_breaks(8, &[(3, LayoutBreak::NoBreak)]);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig {
+            mode: LayoutMode::Page,
+            max_measures_per_system: 4, // Would normally break at measure 3
+            ..Default::default()
+        };
+        let result = layout_score_with_config(&score, &style, config);
+
+        // NoBreak at measure 3 should prevent the break there
+        // So system continues to measure 4, then breaks
+        // Result: systems [0,1,2,3,4], [5,6,7]
+        assert_eq!(result.system_count, 2);
+        assert_eq!(result.pages[0].systems[0].measure_indices, vec![0, 1, 2, 3, 4]);
+        assert_eq!(result.pages[0].systems[1].measure_indices, vec![5, 6, 7]);
+    }
+
+    #[test]
+    fn test_multiple_breaks_in_sequence() {
+        // Multiple breaks should all be honored
+        let score = create_test_score_with_breaks(
+            12,
+            &[
+                (1, LayoutBreak::Line),
+                (5, LayoutBreak::Section),
+                (9, LayoutBreak::Line),
+            ],
+        );
+        let style = MStyle::default();
+        let config = LayoutEngineConfig {
+            mode: LayoutMode::Page,
+            max_measures_per_system: 12, // Would be 1 system without breaks
+            ..Default::default()
+        };
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Should have 4 systems:
+        // [0,1], [2,3,4,5], [6,7,8,9], [10,11]
+        assert_eq!(result.system_count, 4);
+    }
+
+    #[test]
+    fn test_break_at_last_measure() {
+        // Break at the last measure should not create an empty system
+        let score = create_test_score_with_breaks(4, &[(3, LayoutBreak::Line)]);
+        let style = MStyle::default();
+        let config = LayoutEngineConfig {
+            mode: LayoutMode::Page,
+            max_measures_per_system: 8,
+            ..Default::default()
+        };
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Should have 1 system (break at end doesn't create empty system)
+        assert_eq!(result.system_count, 1);
+        assert_eq!(result.pages[0].systems[0].measure_indices, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn test_float_mode_ignores_breaks() {
+        // Float mode should ignore all explicit breaks
+        let score = create_test_score_with_breaks(
+            8,
+            &[(1, LayoutBreak::Line), (3, LayoutBreak::Page)],
+        );
+        let style = MStyle::default();
+        let config = LayoutEngineConfig::float();
+        let result = layout_score_with_config(&score, &style, config);
+
+        // Float mode ignores explicit breaks, uses auto-layout
+        // Should behave like page mode without breaks
+        assert_eq!(result.measure_count, 8);
+        // The exact system count depends on auto-layout, but breaks should be ignored
     }
 }

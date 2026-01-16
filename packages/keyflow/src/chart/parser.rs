@@ -9,15 +9,61 @@
 
 use super::Chart;
 use super::cues::TextCue;
-use super::types::{ChartSection, ChordInstance, KeyChange, Measure};
+use super::dynamics::DynamicMarking;
+use super::melody::Melody;
+use super::track::{Track, TrackType};
+use super::types::{ChartSection, ChordInstance, KeyChange, Measure, TempoChange};
 use crate::chord::{Chord, ChordRhythm, PushPullAmount};
 use crate::key::Key;
 use crate::metadata::SongMetadata;
-use crate::parsing::Lexer;
-use crate::sections::{Section, SectionNumberer, SectionType};
+use crate::parsing::{Lexer, TextSpan};
+use crate::sections::{MeasureExpression, Section, SectionNumberer, SectionType};
 // DurationTrait removed - unused
 use crate::RootNotation;
 use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition, Tempo, TimeSignature};
+
+/// Helper to compute byte offsets from line/column positions
+///
+/// Builds a mapping from line number (1-indexed) to byte offset,
+/// enabling reconstruction of TextSpan from line-based parsing.
+#[derive(Debug, Clone)]
+struct LineOffsetMap {
+    /// Byte offset of the start of each line (0-indexed array, 1-indexed line numbers)
+    /// line_offsets[0] is always 0 (line 1 starts at byte 0)
+    line_offsets: Vec<usize>,
+}
+
+impl LineOffsetMap {
+    /// Build a line offset map from input text
+    fn new(input: &str) -> Self {
+        let mut line_offsets = vec![0]; // Line 1 starts at offset 0
+        for (i, ch) in input.char_indices() {
+            if ch == '\n' {
+                // Next line starts at the byte after the newline
+                line_offsets.push(i + 1);
+            }
+        }
+        Self { line_offsets }
+    }
+
+    /// Get the byte offset for a given line and column (both 1-indexed)
+    fn offset_at(&self, line: u32, column: u32) -> usize {
+        let line_idx = (line.saturating_sub(1)) as usize;
+        let line_start = self.line_offsets.get(line_idx).copied().unwrap_or(0);
+        line_start + (column.saturating_sub(1)) as usize
+    }
+
+    /// Create a TextSpan for a token at the given line, column, and length
+    fn span_at(&self, line: u32, column: u32, len: usize) -> TextSpan {
+        let start = self.offset_at(line, column);
+        TextSpan::with_location(start, len, line, column)
+    }
+
+    /// Get the number of lines tracked
+    fn line_count(&self) -> usize {
+        self.line_offsets.len()
+    }
+}
 
 /// Repeat count specification
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -36,6 +82,27 @@ impl Chart {
         } else {
             line
         }
+    }
+
+    /// Resolve a measure expression and update section memory
+    ///
+    /// Returns the resolved measure count, or None if the expression can't be resolved.
+    /// Always updates section memory with the resolved value for subsequent expressions.
+    fn resolve_measure_expression(
+        &mut self,
+        section_type: &SectionType,
+        expr: &MeasureExpression,
+    ) -> Option<usize> {
+        let memory = self.section_measure_memory.get(section_type).copied();
+        let resolved = expr.resolve(memory);
+
+        // Always update memory with resolved value for subsequent expressions
+        if let Some(count) = resolved {
+            self.section_measure_memory
+                .insert(section_type.clone(), count);
+        }
+
+        resolved
     }
 
     /// Parse a chart from input string
@@ -576,9 +643,17 @@ impl Chart {
             };
 
             // Check if this is a section marker (based on marker part only)
-            if let Some((section_type, measure_count)) =
+            if let Some((section_type, measure_expr)) =
                 SectionType::parse_with_measure_count(section_marker)
             {
+                // Resolve the measure expression using section memory
+                let measure_count = if let Some(expr) = measure_expr.as_ref() {
+                    self.resolve_measure_expression(&section_type, expr)
+                } else {
+                    // No expression provided - use section memory if available
+                    self.section_measure_memory.get(&section_type).copied()
+                };
+
                 if let Some(content) = inline_content {
                     // Handle inline content separated by comma
                     let mut section =
@@ -642,6 +717,61 @@ impl Chart {
         Ok(idx)
     }
 
+    /// Parse a track marker line like "[melody]" or "[melody lead]"
+    /// Returns (track_type, optional_name, remaining_content)
+    fn parse_track_marker(line: &str) -> Option<(TrackType, Option<String>, &str)> {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('[') {
+            return None;
+        }
+
+        let close_bracket = trimmed.find(']')?;
+        let marker_content = &trimmed[1..close_bracket];
+        let remaining = trimmed[close_bracket + 1..].trim();
+
+        let (track_type, name) = TrackType::parse(marker_content)?;
+        Some((track_type, name, remaining))
+    }
+
+    /// Group content lines by track type
+    /// Returns a Vec of (TrackType, Option<name>, Vec<lines>)
+    fn group_lines_by_track<'a>(
+        &self,
+        lines: &[&'a str],
+    ) -> Vec<(TrackType, Option<String>, Vec<&'a str>)> {
+        let mut groups: Vec<(TrackType, Option<String>, Vec<&'a str>)> = Vec::new();
+        let mut current_type = TrackType::Chords;
+        let mut current_name: Option<String> = None;
+        let mut current_lines: Vec<&'a str> = Vec::new();
+
+        for line in lines {
+            if let Some((track_type, name, remaining)) = Self::parse_track_marker(line) {
+                // Save current group if it has content
+                if !current_lines.is_empty() {
+                    groups.push((current_type, current_name.take(), std::mem::take(&mut current_lines)));
+                }
+
+                // Start new track
+                current_type = track_type;
+                current_name = name;
+
+                // If there's content after the marker on the same line, add it
+                if !remaining.is_empty() {
+                    current_lines.push(remaining);
+                }
+            } else {
+                current_lines.push(line);
+            }
+        }
+
+        // Don't forget the last group
+        if !current_lines.is_empty() {
+            groups.push((current_type, current_name, current_lines));
+        }
+
+        groups
+    }
+
     /// Parse a section and its content
     fn parse_section_content(
         &mut self,
@@ -695,86 +825,132 @@ impl Chart {
             idx += 1;
         }
 
-        // Parse the content lines into measures
-        let mut measures = if content_lines.is_empty() {
-            // No explicit content - recall from template
-            if let Some(count) = measure_count {
-                // Has measure count - create empty measures
+        // Group content lines by track type
+        let track_groups = self.group_lines_by_track(&content_lines);
+
+        // Parse each track group into tracks
+        let mut tracks: Vec<Track> = Vec::new();
+
+        if track_groups.is_empty() {
+            // No explicit content - prefer template recall over empty measures
+            let template_measures = self
+                .templates
+                .recall_transposed(&section_type, self.current_key.as_ref());
+
+            let measures = if let Some(mut template) = template_measures {
+                // Have a template - optionally adjust to measure_count
+                if let Some(count) = measure_count {
+                    if template.len() > count {
+                        template.truncate(count);
+                    }
+                    // Note: if template is shorter, padding is handled below like for explicit content
+                }
+                template
+            } else if let Some(count) = measure_count {
+                // No template, but have measure count - create empty measures
                 vec![Measure::new(); count]
             } else {
-                // No measure count - recall template if available
-                self.templates
-                    .recall_transposed(&section_type, self.current_key.as_ref())
-                    .unwrap_or_default()
+                Vec::new()
+            };
+            if !measures.is_empty() {
+                tracks.push(Track::chords(measures));
             }
         } else {
-            // Has explicit content - clear section memory for this section type
-            // This allows the section to build its own memory from scratch or inherit from global
+            // Has explicit content - clear section memory
             self.chord_memory.clear_section(&section_type);
 
-            let parsed_measures =
-                self.parse_section_measures(&content_lines, &section_type, measure_count)?;
+            for (track_type, track_name, track_lines) in track_groups {
+                match track_type {
+                    TrackType::Chords | TrackType::Rhythm => {
+                        // Parse as chord/rhythm content
+                        let mut parsed_measures =
+                            self.parse_section_measures(&track_lines, &section_type, measure_count)?;
 
-            // Save as template if not Intro/Outro/Pre/Post
-            if !matches!(
-                section_type,
-                SectionType::Intro
-                    | SectionType::Outro
-                    | SectionType::Pre(_)
-                    | SectionType::Post(_)
-            ) {
-                self.templates
-                    .store(&section_type, &parsed_measures, self.current_key.as_ref());
-            }
+                        // Apply padding if this is the chord track and measure count is specified
+                        if track_type == TrackType::Chords {
+                            if let Some(count) = measure_count {
+                                let actual_measures = parsed_measures.len();
+                                if actual_measures < count {
+                                    let padding_needed = count - actual_measures;
+                                    let time_sig = self.time_signature.unwrap_or(TimeSignature::common_time());
 
-            parsed_measures
-        };
+                                    for _ in 0..padding_needed {
+                                        let space_duration = MusicalDuration::new(1, 0, 0);
+                                        let note = crate::primitives::MusicalNote::from_string("C").unwrap();
+                                        let root_notation = RootNotation::from_note_name(note);
+                                        let space_chord = ChordInstance::new(
+                                            root_notation.clone(),
+                                            "s".to_string(),
+                                            crate::chord::Chord::new(root_notation, crate::chord::ChordQuality::Major),
+                                            ChordRhythm::Space {
+                                                duration: crate::chord::LilySyntax::Whole,
+                                                dotted: false,
+                                                multiplier: None,
+                                            },
+                                            "s".to_string(),
+                                            space_duration,
+                                            AbsolutePosition::at_beginning(),
+                                        );
 
-        // If a measure count was specified, ensure the section is exactly that long
-        if let Some(count) = measure_count {
-            let actual_measures = measures.len();
-            if actual_measures < count {
-                // Pad with space (rest) chord instances to reach the specified count
-                let padding_needed = count - actual_measures;
-                let time_sig = self.time_signature.unwrap_or(TimeSignature::common_time());
+                                        let mut space_measure = Measure::new();
+                                        space_measure.time_signature =
+                                            (time_sig.numerator as u8, time_sig.denominator as u8);
+                                        space_measure.chords.push(space_chord);
+                                        parsed_measures.push(space_measure);
+                                    }
+                                } else if actual_measures > count {
+                                    eprintln!(
+                                        "Warning: Section {:?} has {} measures but specified {} - using actual content",
+                                        section_type, actual_measures, count
+                                    );
+                                }
+                            }
 
-                for _ in 0..padding_needed {
-                    // Create a space chord that fills one full measure
-                    let space_duration = MusicalDuration::new(1, 0, 0); // One full measure (DAW uses i32)
-                    let note = crate::primitives::MusicalNote::from_string("C").unwrap();
-                    let root_notation = RootNotation::from_note_name(note);
-                    let space_chord = ChordInstance::new(
-                        root_notation.clone(),
-                        "s".to_string(), // Space symbol
-                        crate::chord::Chord::new(root_notation, crate::chord::ChordQuality::Major),
-                        ChordRhythm::Space {
-                            duration: crate::chord::LilySyntax::Whole,
-                            dotted: false,
-                            multiplier: None,
-                        },
-                        "s".to_string(),
-                        space_duration,
-                        AbsolutePosition::at_beginning(), // Will be calculated in post-processing
-                    );
+                            // Save as template if not Intro/Outro/Pre/Post
+                            if !matches!(
+                                section_type,
+                                SectionType::Intro
+                                    | SectionType::Outro
+                                    | SectionType::Pre(_)
+                                    | SectionType::Post(_)
+                            ) {
+                                self.templates
+                                    .store(&section_type, &parsed_measures, self.current_key.as_ref());
+                            }
+                        }
 
-                    let mut space_measure = Measure::new();
-                    space_measure.time_signature =
-                        (time_sig.numerator as u8, time_sig.denominator as u8);
-                    space_measure.chords.push(space_chord);
-                    measures.push(space_measure);
+                        let mut track = if track_type == TrackType::Chords {
+                            Track::chords(parsed_measures)
+                        } else {
+                            Track::rhythm(parsed_measures)
+                        };
+
+                        if let Some(name) = track_name {
+                            track = track.with_name(name);
+                        }
+                        tracks.push(track);
+                    }
+                    TrackType::Melody => {
+                        // Parse melody content - join all lines and parse as melody
+                        let combined = track_lines.join(" ");
+                        if let Ok((_, melody)) = Melody::parse_block(&combined) {
+                            let mut track = Track::melody(melody);
+                            if let Some(name) = track_name {
+                                track = track.with_name(name);
+                            }
+                            tracks.push(track);
+                        }
+                    }
+                    TrackType::Lyrics => {
+                        // TODO: implement lyrics tracks
+                    }
                 }
-            } else if actual_measures > count {
-                // Warn or truncate if content exceeds specified count
-                // For now, we'll allow it but could add a warning
-                eprintln!(
-                    "Warning: Section {:?} has {} measures but specified {} - using actual content",
-                    section_type, actual_measures, count
-                );
             }
         }
 
-        // Create chart section
-        let chart_section = ChartSection::new(section).with_measures(measures);
+        // Create chart section with tracks
+        let mut chart_section = ChartSection::new(section);
+        chart_section.tracks = tracks;
         self.sections.push(chart_section);
 
         Ok(idx)
@@ -821,10 +997,33 @@ impl Chart {
     ) -> Result<Vec<Measure>, String> {
         let mut measures: Vec<Measure> = Vec::new();
         let mut pending_cues: Vec<TextCue> = Vec::new();
+        let mut pending_dynamics: Vec<DynamicMarking> = Vec::new();
 
         for line in lines {
+            let trimmed = line.trim();
+
+            // Check for melody variable definition (e.g., "mainRiff = m{ C_8 D_8 E_4 }")
+            if trimmed.contains("= m{") || trimmed.starts_with("m{") {
+                match Melody::parse_block(trimmed) {
+                    Ok((name, melody)) => {
+                        if let Some(var_name) = name {
+                            // Store as a variable
+                            self.melody_variables.set(var_name, melody);
+                        }
+                        // Note: Inline melodies without variable names on their own line
+                        // are currently not attached to any measure - they're just stored
+                        // as a definition. Use inline syntax within chord lines to attach
+                        // melodies to specific measures.
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to parse melody block '{}': {}", trimmed, e);
+                    }
+                }
+                continue;
+            }
+
             // Check if this is a text cue line
-            if line.trim().starts_with('@') {
+            if trimmed.starts_with('@') {
                 // Parse text cue - always keep it pending for the next chord line
                 match TextCue::parse(line) {
                     Ok(cue) => {
@@ -832,6 +1031,17 @@ impl Chart {
                     }
                     Err(e) => {
                         eprintln!("Warning: Failed to parse text cue '{}': {}", line, e);
+                    }
+                }
+            } else if trimmed.starts_with('<') && trimmed.contains('>') {
+                // Check if this is a standalone dynamic marking line
+                // Could be just "<Build>" or "<Build>:3" on its own line
+                match DynamicMarking::parse(trimmed) {
+                    Ok(dynamic) => {
+                        pending_dynamics.push(dynamic);
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to parse dynamic marking '{}': {}", line, e);
                     }
                 }
             } else {
@@ -843,6 +1053,11 @@ impl Chart {
                 // If we have pending cues, attach them to the first new measure
                 if !pending_cues.is_empty() && !line_measures.is_empty() {
                     line_measures[0].text_cues.append(&mut pending_cues);
+                }
+
+                // If we have pending dynamics, attach them to the first new measure
+                if !pending_dynamics.is_empty() && !line_measures.is_empty() {
+                    line_measures[0].dynamics.append(&mut pending_dynamics);
                 }
 
                 measures.extend(line_measures);
@@ -876,8 +1091,10 @@ impl Chart {
         let mut current_measure = Measure::new();
         let mut current_measure_beats = 0.0;
         let mut pending_cue: Option<TextCue> = None;
+        let mut pending_dynamic: Option<DynamicMarking> = None;
         let mut just_processed_separator = false; // Track if we just processed a | separator
         let mut measure_was_created_by_separator = false; // Track if current measure was created by |
+        let mut in_melody_block = false; // Track if we're inside a m{...} block
 
         use super::commands::Command;
 
@@ -899,6 +1116,58 @@ impl Chart {
                     }
                     continue;
                 }
+            }
+
+            // Check for melody variable reference (e.g., "$mainRiff")
+            if token_str.starts_with('$') {
+                let var_name = &token_str[1..];
+                if let Some(melody) = self.melody_variables.get(var_name).cloned() {
+                    // Attach the melody to the current measure
+                    current_measure.melodies.push(melody);
+                } else {
+                    eprintln!("Warning: Unknown melody variable '{}'", var_name);
+                }
+                continue;
+            }
+
+            // Check for inline melody block (e.g., "m{ C_8 D_8 E_4 }")
+            if token_str.starts_with("m{") {
+                in_melody_block = true;
+                // Find the full melody block in the original line
+                if let Some(m_pos) = line_to_parse.find("m{") {
+                    let melody_start = &line_to_parse[m_pos..];
+                    // Find the closing brace
+                    if let Some(close_pos) = melody_start.find('}') {
+                        let melody_str = &melody_start[..close_pos + 1];
+                        match Melody::parse_block(melody_str) {
+                            Ok((name, melody)) => {
+                                if let Some(var_name) = name {
+                                    // Store as a variable
+                                    self.melody_variables.set(var_name, melody.clone());
+                                }
+                                // Attach melody to current measure
+                                current_measure.melodies.push(melody);
+                            }
+                            Err(e) => {
+                                eprintln!("Warning: Failed to parse inline melody '{}': {}", melody_str, e);
+                            }
+                        }
+                    }
+                }
+                // Check if this token contains the closing brace (e.g., "m{C_4}")
+                if token_str.contains('}') {
+                    in_melody_block = false;
+                }
+                continue;
+            }
+
+            // Skip tokens that are inside a melody block
+            if in_melody_block {
+                // Check if this token ends the melody block
+                if token_str.contains('}') {
+                    in_melody_block = false;
+                }
+                continue;
             }
 
             // Check for inline text cue (e.g., "@keys", "synth", "here" followed by closing quote logic)
@@ -926,6 +1195,39 @@ impl Chart {
 
             // Skip tokens that are part of the cue text (between quotes)
             if pending_cue.is_some() && (token_str.starts_with('"') || token_str.ends_with('"')) {
+                continue;
+            }
+
+            // Check for inline dynamic marking (e.g., "<Build>", "<Down>", "<Hit>:3")
+            if token_str.starts_with('<') && token_str.contains('>') {
+                if let Ok(dynamic) = DynamicMarking::parse(token_str) {
+                    pending_dynamic = Some(dynamic);
+                }
+                continue;
+            }
+
+            // Check for tempo change (e.g., "->140bpm", "->120")
+            if token_str.starts_with("->") {
+                if let Some(new_tempo) = TempoChange::parse_syntax(token_str) {
+                    // Record the tempo change
+                    let position = AbsolutePosition::new(
+                        MusicalPosition::try_new(
+                            measures.len() as i32,
+                            current_measure_beats as i32,
+                            0,
+                        )
+                        .unwrap_or_else(|_| MusicalPosition::start()),
+                        self.sections.len(),
+                    );
+                    let tempo_change = TempoChange::new(
+                        position,
+                        self.tempo,
+                        new_tempo,
+                        self.sections.len(),
+                    );
+                    self.tempo_changes.push(tempo_change);
+                    self.tempo = Some(new_tempo);
+                }
                 continue;
             }
 
@@ -992,7 +1294,8 @@ impl Chart {
             }
 
             // Parse chord
-            match self.parse_chord_token(token_str, section_type, time_sig) {
+            // TODO: Compute source_span from line offset map and token position
+            match self.parse_chord_token(token_str, section_type, time_sig, None) {
                 Ok(chord) => {
                     let chord_beats = chord.duration.to_beats(time_sig);
 
@@ -1023,6 +1326,11 @@ impl Chart {
                     // Attach pending cue to this measure if present
                     if let Some(cue) = pending_cue.take() {
                         current_measure.text_cues.push(cue);
+                    }
+
+                    // Attach pending dynamic to this measure if present
+                    if let Some(dynamic) = pending_dynamic.take() {
+                        current_measure.dynamics.push(dynamic);
                     }
 
                     // If we've completed exactly one measure, start a new one
@@ -1138,11 +1446,18 @@ impl Chart {
     }
 
     /// Parse a single chord token
+    ///
+    /// # Arguments
+    /// * `token` - The chord token string (e.g., "Cmaj7", "Am7/G")
+    /// * `section_type` - Current section type for chord memory
+    /// * `time_sig` - Current time signature for duration calculation
+    /// * `source_span` - Optional source text span for linking back to input
     fn parse_chord_token(
         &mut self,
         token: &str,
         section_type: &SectionType,
         time_sig: TimeSignature,
+        source_span: Option<TextSpan>,
     ) -> Result<ChordInstance, String> {
         use super::commands::Command;
 
@@ -1240,6 +1555,11 @@ impl Chart {
         )
         .with_push_pull(push_pull_info);
 
+        // Add source span for click-to-highlight and editing
+        if let Some(span) = source_span {
+            instance = instance.with_source_span(span);
+        }
+
         // Add accent command if present
         if has_accent {
             instance = instance.add_command(Command::Accent);
@@ -1291,10 +1611,10 @@ impl Chart {
 
         for section in &mut self.sections {
             // Get time signature from first measure or default (before we borrow mutably)
-            let time_sig = if !section.measures.is_empty() {
+            let time_sig = if !section.measures().is_empty() {
                 TimeSignature::new(
-                    section.measures[0].time_signature.0 as i32,
-                    section.measures[0].time_signature.1 as i32,
+                    section.measures()[0].time_signature.0 as i32,
+                    section.measures()[0].time_signature.1 as i32,
                 )
             } else {
                 TimeSignature::new(4, 4)
@@ -1305,7 +1625,7 @@ impl Chart {
             let mut insertions: Vec<(usize, usize, ChordInstance)> = Vec::new(); // (measure_idx, chord_idx, space_chord)
 
             let mut measure_idx = 0;
-            for measure in &section.measures {
+            for measure in section.measures() {
                 let mut chord_idx = 0;
                 for chord in &measure.chords {
                     if let Some((is_push, amount)) = chord.push_pull {
@@ -1343,14 +1663,14 @@ impl Chart {
 
             // Apply insertions (in reverse order to maintain indices)
             for (measure_idx, chord_idx, space_chord) in insertions.into_iter().rev() {
-                section.measures[measure_idx]
+                section.measures_mut()[measure_idx]
                     .chords
                     .insert(chord_idx, space_chord);
             }
 
             // Second pass: flatten all chords and apply duration adjustments
             let mut all_chords: Vec<&mut ChordInstance> = Vec::new();
-            for measure in &mut section.measures {
+            for measure in section.measures_mut() {
                 for chord in &mut measure.chords {
                     all_chords.push(chord);
                 }
@@ -1410,7 +1730,7 @@ impl Chart {
         let mut current_time_sig = self.time_signature.unwrap_or(TimeSignature::common_time());
 
         for (section_idx, section) in self.sections.iter_mut().enumerate() {
-            for measure in &mut section.measures {
+            for measure in section.measures_mut() {
                 // Update time signature if this measure has one
                 if measure.time_signature
                     != (
@@ -1547,7 +1867,7 @@ cmaj7 Dm7 g7 Cmaj7
         assert_eq!(chart.sections[0].section.section_type, SectionType::Verse);
 
         // Verify chords parsed (lowercase and uppercase work)
-        let measures = &chart.sections[0].measures;
+        let measures = &chart.sections[0].measures();
         assert_eq!(measures.len(), 4); // Each chord creates a measure for now
 
         // Check first chord (lowercase input)
@@ -1582,7 +1902,7 @@ cmaj7 dm7 #G gmaj7 am7
         assert_eq!(chart.key_changes[0].to_key.root.name(), "G");
 
         // Verify chords - should have 4 chords (key change token is skipped)
-        let measures = &chart.sections[0].measures;
+        let measures = &chart.sections[0].measures();
         assert_eq!(measures.len(), 4);
     }
 
@@ -1639,11 +1959,11 @@ c d g
         let chart = Chart::parse(input).expect("Failed to parse chart");
 
         // Verify verse has full chord symbols
-        let verse_measures = &chart.sections[0].measures;
+        let verse_measures = &chart.sections[0].measures();
         assert_eq!(verse_measures.len(), 3);
 
         // Verify chorus chords recall memory
-        let chorus_measures = &chart.sections[1].measures;
+        let chorus_measures = &chart.sections[1].measures();
         assert_eq!(chorus_measures.len(), 3);
 
         // The chord memory should have remembered qualities from verse
@@ -1727,10 +2047,10 @@ ch 4
         assert_eq!(chart.sections.len(), 2);
 
         // Verse should have 4 measures with chords
-        assert_eq!(chart.sections[0].measures.len(), 4);
+        assert_eq!(chart.sections[0].measures().len(), 4);
 
         // Chorus should have 4 empty measures (template recall placeholder)
-        assert_eq!(chart.sections[1].measures.len(), 4);
+        assert_eq!(chart.sections[1].measures().len(), 4);
         assert_eq!(chart.sections[1].section.measure_count, Some(4));
     }
 
@@ -1749,8 +2069,8 @@ vs 4, cmaj7 dm7 g7 cmaj7
         let section = &chart.sections[0];
         assert_eq!(section.section.section_type, SectionType::Verse);
         assert_eq!(section.section.measure_count, Some(4));
-        assert_eq!(section.measures.len(), 4);
-        assert_eq!(section.measures[0].chords[0].full_symbol, "Cmaj7");
+        assert_eq!(section.measures().len(), 4);
+        assert_eq!(section.measures()[0].chords[0].full_symbol, "Cmaj7");
     }
 
     #[test]
@@ -1769,8 +2089,8 @@ cmaj7 dm7 g7 cmaj7
         let section = &chart.sections[0];
         assert_eq!(section.section.section_type, SectionType::Verse);
         assert_eq!(section.section.measure_count, Some(4));
-        assert_eq!(section.measures.len(), 4);
-        assert_eq!(section.measures[0].chords[0].full_symbol, "Cmaj7");
+        assert_eq!(section.measures().len(), 4);
+        assert_eq!(section.measures()[0].chords[0].full_symbol, "Cmaj7");
     }
 
     #[test]
@@ -1790,12 +2110,12 @@ ch 8
         let verse = &chart.sections[0];
         assert_eq!(verse.section.section_type, SectionType::Verse);
         assert_eq!(verse.section.measure_count, Some(4));
-        assert_eq!(verse.measures.len(), 4); // 4 empty measures
+        assert_eq!(verse.measures().len(), 4); // 4 empty measures
 
         let chorus = &chart.sections[1];
         assert_eq!(chorus.section.section_type, SectionType::Chorus);
         assert_eq!(chorus.section.measure_count, Some(8));
-        assert_eq!(chorus.measures.len(), 8); // 8 empty measures
+        assert_eq!(chorus.measures().len(), 8); // 8 empty measures
     }
 
     #[test]
@@ -1840,7 +2160,7 @@ bbmaj7 cm7 dm7
         assert_eq!(chart.initial_key.as_ref().unwrap().root.name(), "Bb");
 
         // Should have 3 chords (lowercase flats work)
-        assert_eq!(chart.sections[0].measures.len(), 3);
+        assert_eq!(chart.sections[0].measures().len(), 3);
     }
 
     #[test]
@@ -1895,7 +2215,7 @@ cmaj7 dm7 EM7 fmaj7
         let chart = Chart::parse(input).expect("Failed to parse chart");
 
         // Each chord should have a duration calculated (mix of cases works)
-        let measures = &chart.sections[0].measures;
+        let measures = chart.sections[0].measures();
         for measure in measures {
             for chord in &measure.chords {
                 // Duration should be set (even if default)
@@ -1919,7 +2239,7 @@ cmaj7 dm7 x^
 
         // Should have 16 measures total (2-bar phrase repeated 8 times)
         assert_eq!(chart.sections.len(), 1);
-        let measures = &chart.sections[0].measures;
+        let measures = &chart.sections[0].measures();
 
         // The phrase is 2 bars (cmaj7 = 1 bar, dm7 = 1 bar in 4/4)
         // Section is 16 bars, so we need 8 repeats
@@ -1952,7 +2272,7 @@ cmaj7 dm7 x^
 
         // Should have 8 measures total (2-bar phrase repeated 4 times)
         assert_eq!(chart.sections.len(), 1);
-        let measures = &chart.sections[0].measures;
+        let measures = &chart.sections[0].measures();
 
         // The phrase is 2 bars (cmaj7 = 1 bar, dm7 = 1 bar)
         // Section is 8 bars, so we need 4 repeats
@@ -2015,7 +2335,7 @@ cmaj7_2 dm7_2 | em7_2 fmaj7_2
         // Should have 2 measures (separated by |)
         // Each chord is 2 beats (half note), so 2 chords per measure
         assert_eq!(chart.sections.len(), 1);
-        let measures = &chart.sections[0].measures;
+        let measures = &chart.sections[0].measures();
         assert_eq!(measures.len(), 2);
 
         // First measure should have cmaj7 and dm7
@@ -2045,7 +2365,7 @@ cmaj7_2 | dm7_2 em7_2 | fmaj7_2
         // Should have 3 measures (separated by |)
         // Each chord is 2 beats (half note)
         assert_eq!(chart.sections.len(), 1);
-        let measures = &chart.sections[0].measures;
+        let measures = &chart.sections[0].measures();
         assert_eq!(measures.len(), 3);
 
         // First measure should have just cmaj7
@@ -2078,7 +2398,7 @@ cmaj7_2 | | dm7_2
         // Should have 3 measures (cmaj7, empty, dm7)
         // Each chord is 2 beats (half note)
         assert_eq!(chart.sections.len(), 1);
-        let measures = &chart.sections[0].measures;
+        let measures = &chart.sections[0].measures();
         assert_eq!(measures.len(), 3);
 
         // First measure should have cmaj7
@@ -2108,7 +2428,7 @@ vs
 
         // Should have 1 measure with 2 chords, each 2 beats (half notes)
         assert_eq!(chart.sections.len(), 1);
-        let measures = &chart.sections[0].measures;
+        let measures = &chart.sections[0].measures();
         assert_eq!(measures.len(), 1);
         assert_eq!(measures[0].chords.len(), 2);
 
@@ -2135,7 +2455,7 @@ G C E D | A
         // First: G C E D (each 1 beat = quarter note)
         // Second: A (4 beats = whole note)
         assert_eq!(chart.sections.len(), 1);
-        let measures = &chart.sections[0].measures;
+        let measures = &chart.sections[0].measures();
         assert_eq!(measures.len(), 2);
 
         // First measure should have 4 chords
@@ -2168,7 +2488,7 @@ G_2 C | D
         // C should get auto duration (2 beats, since it's 1 of 2 chords before |)
         // D should get auto duration (4 beats, since it's 1 chord after |)
         assert_eq!(chart.sections.len(), 1);
-        let measures = &chart.sections[0].measures;
+        let measures = &chart.sections[0].measures();
         let time_sig = chart.time_signature.unwrap();
 
         // First measure: G_2 (2 beats) and C (2 beats)
@@ -2179,5 +2499,62 @@ G_2 C | D
         // Second measure: D (4 beats)
         assert_eq!(measures[1].chords.len(), 1);
         assert!((measures[1].chords[0].duration.to_beats(time_sig) - 4.0).abs() < 0.001); // D
+    }
+
+    #[test]
+    fn test_line_offset_map() {
+        let input = "line1\nline2\nline3";
+        let map = LineOffsetMap::new(input);
+
+        // Check number of lines
+        assert_eq!(map.line_count(), 3);
+
+        // Line 1 starts at offset 0
+        assert_eq!(map.offset_at(1, 1), 0);
+        assert_eq!(map.offset_at(1, 3), 2); // 'n' in "line1"
+
+        // Line 2 starts at offset 6 (after "line1\n")
+        assert_eq!(map.offset_at(2, 1), 6);
+        assert_eq!(map.offset_at(2, 5), 10); // '2' in "line2"
+
+        // Line 3 starts at offset 12 (after "line1\nline2\n")
+        assert_eq!(map.offset_at(3, 1), 12);
+
+        // Test span_at helper
+        let span = map.span_at(2, 1, 5);
+        assert_eq!(span.start, 6);
+        assert_eq!(span.len, 5);
+        assert_eq!(span.line, 2);
+        assert_eq!(span.column, 1);
+    }
+
+    #[test]
+    fn test_chord_instance_with_source_span() {
+        // Verify ChordInstance can store source_span
+        use crate::chord::{Chord, ChordQuality};
+        use crate::primitives::MusicalNote;
+
+        let root = RootNotation::from_note_name(MusicalNote::c());
+        let chord = Chord::new(root.clone(), ChordQuality::Major);
+        let span = TextSpan::with_location(10, 5, 3, 8);
+
+        let instance = ChordInstance::new(
+            root,
+            "Cmaj7".to_string(),
+            chord,
+            ChordRhythm::Default,
+            "Cmaj7".to_string(),
+            MusicalDuration::new(0, 4, 0),
+            AbsolutePosition::at_beginning(),
+        )
+        .with_source_span(span);
+
+        // Verify span is stored
+        assert!(instance.source_span.is_some());
+        let stored_span = instance.source_span.unwrap();
+        assert_eq!(stored_span.start, 10);
+        assert_eq!(stored_span.len, 5);
+        assert_eq!(stored_span.line, 3);
+        assert_eq!(stored_span.column, 8);
     }
 }

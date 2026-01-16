@@ -29,7 +29,7 @@ pub struct SvgExportConfig {
     /// Whether to pretty-print the SVG with indentation
     pub pretty_print: bool,
     /// Background color (None for transparent)
-    pub background: Option<peniko::Color>,
+    pub background: Option<vello::peniko::Color>,
     /// Default stroke width
     pub default_stroke_width: f64,
 }
@@ -37,8 +37,8 @@ pub struct SvgExportConfig {
 impl Default for SvgExportConfig {
     fn default() -> Self {
         Self {
-            width: 595.0,  // A4 width in points
-            height: 842.0, // A4 height in points
+            width: 612.0,  // US Letter width in points (8.5" × 72)
+            height: 792.0, // US Letter height in points (11" × 72)
             include_semantic_ids: true,
             embed_glyphs: false,
             precision: 2,
@@ -140,7 +140,7 @@ impl SvgSerializer {
     }
 
     /// Write background rectangle.
-    fn write_background(&mut self, color: peniko::Color) {
+    fn write_background(&mut self, color: vello::peniko::Color) {
         self.write_indent();
         let width = self.format_coord(self.config.width);
         let height = self.format_coord(self.config.height);
@@ -453,7 +453,7 @@ impl SvgSerializer {
 }
 
 /// Convert a Color to SVG color string.
-fn color_to_svg(color: peniko::Color) -> String {
+fn color_to_svg(color: vello::peniko::Color) -> String {
     let rgba = color.to_rgba8();
     if rgba.a == 255 {
         format!("#{:02x}{:02x}{:02x}", rgba.r, rgba.g, rgba.b)
@@ -579,7 +579,7 @@ mod tests {
     use super::*;
     use crate::scene::id::ElementType;
     use kurbo::{Point, Rect};
-    use peniko::Color;
+    use vello::peniko::Color;
 
     #[test]
     fn test_empty_scene() {

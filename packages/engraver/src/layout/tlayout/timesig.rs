@@ -3,7 +3,7 @@
 //! Handles layout of time signatures including common time, cut time, and numeric.
 
 use kurbo::{Point, Rect};
-use peniko::Color;
+use vello::peniko::Color;
 
 use crate::layout::context::LayoutContext;
 use crate::layout::shape::Shape;

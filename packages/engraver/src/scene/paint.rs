@@ -7,7 +7,7 @@
 //! Based on patterns from anyrender's `PaintScene` trait.
 
 use kurbo::{BezPath, Point, Rect, Shape};
-use peniko::Color;
+use vello::peniko::Color;
 use serde::{Deserialize, Serialize};
 
 /// A paint command representing a single drawing operation.
@@ -426,6 +426,30 @@ impl PaintCommand {
             position,
             color,
             anchor: TextAnchor::Start,
+            weight: FontWeight::Normal,
+            style: FontStyle::Normal,
+        }
+    }
+
+    /// Create a centered text command.
+    ///
+    /// The position is the center point of the text. The renderer will
+    /// use actual font metrics to calculate the correct offset.
+    #[must_use]
+    pub fn text_centered(
+        text: impl Into<String>,
+        font_family: impl Into<String>,
+        font_size: f64,
+        position: Point,
+        color: Color,
+    ) -> Self {
+        Self::Text {
+            text: text.into(),
+            font_family: font_family.into(),
+            font_size,
+            position,
+            color,
+            anchor: TextAnchor::Middle,
             weight: FontWeight::Normal,
             style: FontStyle::Normal,
         }

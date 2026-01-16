@@ -1050,6 +1050,12 @@ pub fn register_all_actions() {
         all_actions.extend(crate::visibility_manager::actions());
     }
 
+    // Add Auto Color actions to the batch (if auto_color feature is enabled)
+    #[cfg(feature = "auto_color")]
+    {
+        all_actions.extend(crate::auto_color::actions());
+    }
+
     // Register all actions in a single batch
     register_actions(&all_actions, "FastTrackStudio");
 

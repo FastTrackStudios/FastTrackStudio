@@ -23,7 +23,7 @@ pub use primitives::{
 pub use scene_renderer::{SceneRenderBuilder, SceneRenderConfig, VelloSceneRenderer};
 
 use kurbo::{Affine, Point, Rect};
-use peniko::Color;
+use vello::peniko::Color;
 use vello::Scene;
 
 /// Renderer configuration.

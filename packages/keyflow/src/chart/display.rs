@@ -379,7 +379,7 @@ impl std::fmt::Display for Chart {
 
             // Collect all chords from all measures in this section
             let mut all_chords = Vec::new();
-            for measure in &section.measures {
+            for measure in section.measures() {
                 if measure.chords.is_empty() {
                     continue;
                 }

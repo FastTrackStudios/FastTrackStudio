@@ -21,9 +21,9 @@ pub enum Sid {
     // ========================================================================
     // Page Layout (10 properties)
     // ========================================================================
-    /// Page width in inches (A4 default: 8.27")
+    /// Page width in inches (US Letter default: 8.5")
     PageWidth = 0,
-    /// Page height in inches (A4 default: 11.69")
+    /// Page height in inches (US Letter default: 11.0")
     PageHeight,
     /// Printable width in inches (page width minus margins)
     PagePrintableWidth,
@@ -701,8 +701,8 @@ mod tests {
     fn test_default_style() {
         let style = MStyle::new();
 
-        // Check some default values
-        assert!((style.real(Sid::PageWidth) - 8.27).abs() < 0.01);
+        // Check some default values (US Letter: 8.5")
+        assert!((style.real(Sid::PageWidth) - 8.5).abs() < 0.01);
         assert!((style.spatium(Sid::BarNoteDistance) - 1.5).abs() < 0.01);
         assert!(style.bool(Sid::PageTwosided));
     }

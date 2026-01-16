@@ -5,10 +5,13 @@ use monarchy::*;
 
 // region: --- Modules
 
+pub mod colors;
 pub mod equipment;
 mod error;
 mod groups;
+pub mod icons;
 mod item_metadata;
+pub mod layouts;
 mod metadata_patterns;
 pub mod protools;
 pub mod song_name;
@@ -20,6 +23,9 @@ pub use groups::{
     SFX, Synths, Vocals,
 };
 pub use item_metadata::ItemMetadata;
+
+// Re-export monarchy types needed for direct classification
+pub use monarchy::{monarchy_sort, Structure};
 pub use protools::{extract_protools_metadata, strip_protools_markers, ProToolsMetadata};
 pub use song_name::{detect_song_names, detect_song_names_with_config, strip_song_names, SongNameConfig};
 pub use tempo::{extract_tempo, strip_tempo};

@@ -30,7 +30,7 @@
 mod builder;
 mod mode;
 
-pub use builder::{MeasureBuilder, SystemBuilder};
+pub use builder::{MeasureBuilder, MeasureScene, SystemBuilder};
 pub use mode::NotationMode;
 
 /// Duration values in ticks (480 ticks = quarter note, standard MIDI resolution).

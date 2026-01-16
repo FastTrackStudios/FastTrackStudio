@@ -85,17 +85,48 @@ impl Display for TokenType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub token_type: TokenType,
+    /// Byte offset from start of input
     pub pos: usize,
+    /// Byte length of token
     pub len: usize,
+    /// Line number (1-indexed)
+    pub line: u32,
+    /// Column number (1-indexed)
+    pub column: u32,
 }
 
 impl Token {
+    /// Create a new token with position information
     pub fn new(token_type: TokenType, pos: usize, len: usize) -> Self {
         Token {
             token_type,
             pos,
             len,
+            line: 1,
+            column: 1,
         }
+    }
+
+    /// Create a new token with full position information including line and column
+    pub fn with_location(
+        token_type: TokenType,
+        pos: usize,
+        len: usize,
+        line: u32,
+        column: u32,
+    ) -> Self {
+        Token {
+            token_type,
+            pos,
+            len,
+            line,
+            column,
+        }
+    }
+
+    /// Convert this token's position to a TextSpan
+    pub fn to_span(&self) -> super::span::TextSpan {
+        super::span::TextSpan::with_location(self.pos, self.len, self.line, self.column)
     }
 }
 
