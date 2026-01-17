@@ -1062,6 +1062,36 @@ pub fn register_all_actions() {
         all_actions.extend(crate::embed_test::actions());
     }
 
+    // Add Trackname Overlay actions (if trackname_overlay feature is enabled)
+    #[cfg(feature = "trackname_overlay")]
+    {
+        all_actions.extend(crate::trackname_overlay::actions());
+    }
+
+    // Add Measure Overlay actions (if measure_overlay feature is enabled)
+    #[cfg(feature = "measure_overlay")]
+    {
+        all_actions.extend(crate::measure_overlay::actions());
+    }
+
+    // Add Chord Overlay actions (if chord_overlay feature is enabled)
+    #[cfg(feature = "chord_overlay")]
+    {
+        all_actions.extend(crate::chord_overlay::actions());
+    }
+
+    // Add Key Overlay actions (if key_overlay feature is enabled)
+    #[cfg(feature = "key_overlay")]
+    {
+        all_actions.extend(crate::key_overlay::actions());
+    }
+
+    // Add Chart Window actions (if chart_window feature is enabled)
+    #[cfg(feature = "chart_window")]
+    {
+        all_actions.extend(crate::chart_window::actions());
+    }
+
     // Register all actions in a single batch
     register_actions(&all_actions, "FastTrackStudio");
 

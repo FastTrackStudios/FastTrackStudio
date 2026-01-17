@@ -41,3 +41,7 @@
 [submodule "libs/reference/reaper/reaimgui"]
 	path = libs/reference/reaper/reaimgui
 	url = https://github.com/cfillion/reaimgui.git
+[submodule "libs/vendor/baseview"]
+	path = libs/vendor/baseview
+	url = https://github.com/Codys-Wright/baseview.git
+	branch = upgrade_rwh

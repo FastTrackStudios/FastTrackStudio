@@ -24,6 +24,14 @@ mod auto_color;
 mod embed_test;
 #[cfg(feature = "trackname_overlay")]
 mod trackname_overlay;
+#[cfg(feature = "measure_overlay")]
+mod measure_overlay;
+#[cfg(feature = "chord_overlay")]
+mod chord_overlay;
+#[cfg(feature = "key_overlay")]
+mod key_overlay;
+#[cfg(feature = "chart_window")]
+mod chart_window;
 
 /// Polling state management for continuous updates
 pub mod polling_state {
@@ -122,11 +130,17 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Register REAPER timer callback (only when core feature is enabled)
     #[cfg(feature = "core")]
     {
-        // Register REAPER timer callback for 30Hz polling (~33.33ms intervals)
+        // Register REAPER timer callback (upgraded to 60Hz on first tick)
         // This runs on REAPER's main thread automatically, so we can safely call REAPER APIs
         extern "C" fn polling_timer_callback() {
             use crate::infrastructure::timer::{increment_tick_count, log_first_timer_call};
-            use std::sync::atomic::{AtomicU64, Ordering};
+            use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+            // Upgrade to 60fps on first timer tick (after REAPER's timer is initialized)
+            static UPGRADED_60FPS: AtomicBool = AtomicBool::new(false);
+            if !UPGRADED_60FPS.swap(true, Ordering::SeqCst) {
+                crate::infrastructure::timer::upgrade_to_60fps();
+            }
 
             // Check for and hook MIDI editor and arrange view windows (if input feature is enabled)
             #[cfg(feature = "input")]
@@ -277,6 +291,24 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
                 #[cfg(feature = "trackname_overlay")]
                 {
                     crate::trackname_overlay::refresh_overlay();
+                }
+
+                // Refresh measure overlay (if enabled and open)
+                #[cfg(feature = "measure_overlay")]
+                {
+                    crate::measure_overlay::refresh_overlay();
+                }
+
+                // Refresh chord overlay (if enabled and open)
+                #[cfg(feature = "chord_overlay")]
+                {
+                    crate::chord_overlay::refresh_overlay();
+                }
+
+                // Refresh key overlay (if enabled and open)
+                #[cfg(feature = "key_overlay")]
+                {
+                    crate::key_overlay::refresh_overlay();
                 }
             } else {
                 warn!("⚠️ App instance not available in timer callback");

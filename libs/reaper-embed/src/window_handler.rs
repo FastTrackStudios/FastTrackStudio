@@ -82,6 +82,16 @@ impl<S: EmbedSource> WindowHandler for ReaperWindowHandler<S> {
             return;
         };
 
+        // Check actual window size and resize if needed
+        // (REAPER's docker may resize the window without sending resize events)
+        let (actual_width, actual_height) = window.size();
+        if actual_width != self.width || actual_height != self.height {
+            self.width = actual_width;
+            self.height = actual_height;
+            gpu.resize(actual_width, actual_height);
+            log::debug!("Window resized to {}x{}", actual_width, actual_height);
+        }
+
         // Build scene from source
         self.scene.reset();
         self.source.render(&mut self.scene, self.width, self.height);

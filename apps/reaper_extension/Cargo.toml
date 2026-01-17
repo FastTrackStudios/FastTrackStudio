@@ -33,6 +33,19 @@ embed_test = ["dep:reaper-embed", "dep:vello", "dep:raw-window-handle"]
 # Enable trackname overlay (TK_Trackname-style track labels in arrange)
 # Requires input feature for reaper_windows::get_arrange_wnd
 trackname_overlay = ["input", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
+# Enable measure overlay (measure number indicator in arrange)
+# Requires input feature for reaper_windows::get_arrange_wnd
+measure_overlay = ["input", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
+# Enable chord overlay (chord symbol display from MIDI CHORDS track)
+# Requires input feature for reaper_windows::get_arrange_wnd
+# Uses engraver for SMuFL chord symbol rendering with MuseJazz font
+chord_overlay = ["input", "keyflow", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle", "dep:engraver", "dep:kurbo"]
+# Enable key overlay (key display from KEY track item notes)
+# Requires input feature for reaper_windows::get_arrange_wnd
+key_overlay = ["input", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
+# Enable chart window (docked chart display from keyflow parsing)
+# Note: input feature required due to unconditional imports in infrastructure modules
+chart_window = ["input", "keyflow", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle", "dep:engraver"]
 
 [dependencies]
 dynamic-template = { path = "../../modules/dynamic-template", optional = true }
@@ -41,6 +54,8 @@ reaper-embed = { path = "../../libs/reaper-embed", optional = true }
 vello = { version = "0.6", features = ["wgpu"], optional = true }
 skrifa = { version = "0.26", optional = true }
 raw-window-handle = { version = "0.6", optional = true }
+engraver = { path = "../../packages/engraver", optional = true, features = ["keyflow-import"] }
+kurbo = { version = "0.12", optional = true }
 reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-macros = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }

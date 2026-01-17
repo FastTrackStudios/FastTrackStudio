@@ -46,10 +46,13 @@ pub use embed_source::EmbedSource;
 pub use gpu::{GpuError, GpuState};
 pub use reaper::docker::{DockController, ScreensetAction, ScreensetCallback};
 pub use reaper::hwnd::{extract_hwnd, to_reaper_hwnd, RawHwnd};
-pub use sources::vello::VelloEmbedSource;
+pub use sources::vello::{VelloEmbedSource, VelloEmbedSourceWithEvents};
 pub use platform::{OverlayConfig, WindowRect};
 pub use window::{DockedWindow, OverlayTarget, OverlayWindow, ReaperWindow, TransparentWindow, WindowConfig, WindowMode};
 pub use window_handler::ReaperWindowHandler;
+
+// Re-export baseview event types for event handling
+pub use baseview::{Event, EventStatus, MouseButton, MouseEvent, ScrollDelta};
 
 #[cfg(feature = "dioxus")]
 pub use sources::dioxus::DioxusEmbedSource;
