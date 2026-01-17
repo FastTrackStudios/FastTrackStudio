@@ -9,8 +9,9 @@ use crate::layout::segment_list::SegmentList;
 use crate::layout::spacing::HorizontalSpacing;
 use crate::layout::tlayout::{
     layout_barline, layout_beam, layout_chord, layout_clef, layout_note, layout_timesig,
-    Accidental, BarlineParams, BarlineType, BeamLayoutConfig, BeamNote, ChordNote, ChordParams,
-    ClefParams, ClefType, NoteHeadType, NoteParams, StemDirection, TimeSigParams, TimeSigType,
+    layout_tuplet, Accidental, BarlineParams, BarlineType, BeamLayoutConfig, BeamNote, ChordNote,
+    ChordParams, ClefParams, ClefType, NoteHeadType, NoteParams, StemDirection, TimeSigParams,
+    TimeSigType, TupletConfig, TupletNote, TupletRatio,
 };
 use crate::scene::id::{ElementType, SemanticId};
 use crate::scene::node::SceneNode;
@@ -18,6 +19,33 @@ use crate::scene::paint::PaintCommand;
 
 use super::mode::NotationMode;
 use super::{Duration, TimeSignature};
+
+/// Specification for a tuplet group within a measure.
+#[derive(Debug, Clone)]
+pub struct TupletSpec {
+    /// Start index in the rhythm array (inclusive)
+    pub start_idx: usize,
+    /// End index in the rhythm array (exclusive)
+    pub end_idx: usize,
+    /// The tuplet ratio (e.g., 3:2 for triplet)
+    pub ratio: TupletRatio,
+}
+
+impl TupletSpec {
+    /// Create a new tuplet specification.
+    pub fn new(start_idx: usize, end_idx: usize, ratio: TupletRatio) -> Self {
+        Self {
+            start_idx,
+            end_idx,
+            ratio,
+        }
+    }
+
+    /// Create a triplet (3:2) specification.
+    pub fn triplet(start_idx: usize, end_idx: usize) -> Self {
+        Self::new(start_idx, end_idx, TupletRatio::triplet())
+    }
+}
 
 /// Builder for creating a single measure of music with automatic spacing.
 #[derive(Debug, Clone)]
@@ -45,6 +73,10 @@ pub struct MeasureBuilder {
     id_base: u64,
     /// Whether notes should be stemless
     stemless: bool,
+    /// Tuplet group specifications
+    tuplet_groups: Vec<TupletSpec>,
+    /// Compact mode: use minimal left margin for tight spaces (count-in, etc.)
+    compact: bool,
 }
 
 impl Default for MeasureBuilder {
@@ -69,7 +101,16 @@ impl MeasureBuilder {
             justify: false,
             id_base: 1,
             stemless: false,
+            tuplet_groups: Vec::new(),
+            compact: false,
         }
+    }
+
+    /// Set compact mode for minimal left margin (useful for count-in measures).
+    #[must_use]
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
+        self
     }
 
     /// Set the clef.
@@ -126,6 +167,35 @@ impl MeasureBuilder {
         if matches!(self.mode, NotationMode::Rhythmic) {
             self.stemless = false; // Will be computed per-note
         }
+        self
+    }
+
+    /// Add a tuplet group specification.
+    ///
+    /// Tuplet groups define which notes form a tuplet (triplet, quintuplet, etc.)
+    /// and how they should be rendered with a bracket and number.
+    ///
+    /// # Arguments
+    /// * `start_idx` - Start index in rhythm array (inclusive)
+    /// * `end_idx` - End index in rhythm array (exclusive)
+    /// * `ratio` - The tuplet ratio (e.g., 3:2 for triplet)
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Create a measure with a triplet on notes 1-3
+    /// builder.rhythm(vec![Quarter, Eighth, Eighth, Eighth, Quarter])
+    ///        .tuplet_group(1, 4, TupletRatio::triplet())
+    /// ```
+    #[must_use]
+    pub fn tuplet_group(mut self, start_idx: usize, end_idx: usize, ratio: TupletRatio) -> Self {
+        self.tuplet_groups.push(TupletSpec::new(start_idx, end_idx, ratio));
+        self
+    }
+
+    /// Add a triplet group (3:2 ratio) for the specified note range.
+    #[must_use]
+    pub fn triplet(mut self, start_idx: usize, end_idx: usize) -> Self {
+        self.tuplet_groups.push(TupletSpec::triplet(start_idx, end_idx));
         self
     }
 
@@ -419,6 +489,9 @@ impl MeasureBuilder {
                     id,
                     node: chord_node,
                     tick: current_tick,
+                    rhythm_index,
+                    stem_direction: stem_dir,
+                    stemless: note_stemless,
                 });
 
                 current_tick += dur.ticks();
@@ -491,6 +564,9 @@ impl MeasureBuilder {
                         id,
                         node: chord_node,
                         tick: current_tick,
+                        rhythm_index,
+                        stem_direction: stem_dir,
+                        stemless: note_stemless,
                     });
 
                     current_tick += dur.ticks();
@@ -523,8 +599,17 @@ impl MeasureBuilder {
 
         // 8. Apply bar-note distance (leading space) to first chord/rest segment
         // and note-bar distance (trailing space) to target width
-        let bar_note_distance = ctx.style_distance(crate::style::Sid::BarNoteDistance);
-        let note_bar_distance = ctx.style_distance(crate::style::Sid::NoteBarDistance);
+        // In compact mode, use minimal spacing (just enough to clear the barline)
+        let bar_note_distance = if self.compact {
+            spatium * 0.3 // Minimal spacing for compact measures
+        } else {
+            ctx.style_distance(crate::style::Sid::BarNoteDistance)
+        };
+        let note_bar_distance = if self.compact {
+            spatium * 0.3 // Minimal spacing for compact measures
+        } else {
+            ctx.style_distance(crate::style::Sid::NoteBarDistance)
+        };
 
         // Find first ChordRest segment and add leading space
         if let Some(first_chord) = segments.iter_mut().find(|s| s.seg_type.is_chord_rest()) {
@@ -709,7 +794,14 @@ impl MeasureBuilder {
                     container.add_child(node.clone());
                     root.add_child(container);
                 }
-                SceneElement::Chord { id, node, tick } => {
+                SceneElement::Chord {
+                    id,
+                    node,
+                    tick,
+                    rhythm_index: _,
+                    stem_direction: _,
+                    stemless: _,
+                } => {
                     let x = find_chord_x(*tick);
                     let mut container = SceneNode::group(SemanticId::chord(*id));
                     container.transform = Affine::translate((x, 0.0));
@@ -769,7 +861,96 @@ impl MeasureBuilder {
             }
         }
 
+        // Render tuplet brackets for any tuplet groups
+        if !self.tuplet_groups.is_empty() {
+            self.render_tuplet_brackets(ctx, segments, elements, &mut root);
+        }
+
         root
+    }
+
+    /// Render tuplet brackets for all tuplet groups.
+    fn render_tuplet_brackets(
+        &self,
+        ctx: &LayoutContext,
+        segments: &SegmentList,
+        elements: &[SceneElement],
+        root: &mut SceneNode,
+    ) {
+        let spatium = ctx.spatium();
+        let note_line = self.mode.default_line();
+
+        // Helper to find chord X position by tick
+        let find_chord_x = |tick: i32| -> f64 {
+            for seg in segments.iter() {
+                if seg.tick == tick && seg.seg_type.is_chord_rest() {
+                    return seg.x;
+                }
+            }
+            0.0
+        };
+
+        // Collect chord info by rhythm_index for tuplet layout
+        let mut chord_info: std::collections::HashMap<usize, (f64, StemDirection, bool)> =
+            std::collections::HashMap::new();
+        for element in elements {
+            if let SceneElement::Chord {
+                tick,
+                rhythm_index,
+                stem_direction,
+                stemless,
+                ..
+            } = element
+            {
+                let x = find_chord_x(*tick);
+                chord_info.insert(*rhythm_index, (x, *stem_direction, *stemless));
+            }
+        }
+
+        // Render each tuplet group
+        let mut tuplet_id = self.id_base + 10000; // Use high ID range for tuplets
+        for tuplet_spec in &self.tuplet_groups {
+            let tuplet_notes: Vec<TupletNote> = (tuplet_spec.start_idx..tuplet_spec.end_idx)
+                .filter_map(|idx| {
+                    chord_info.get(&idx).map(|(x, stem_dir, stemless)| {
+                        // Calculate Y positions based on staff line and stem direction
+                        let y_head = -(note_line as f64 * spatium / 2.0);
+                        let stem_length = spatium * 3.5; // Standard stem length
+
+                        let (y_stem_tip, resolved_dir) = if *stemless {
+                            (None, StemDirection::Up) // Default for stemless
+                        } else {
+                            match stem_dir {
+                                StemDirection::Up => (Some(y_head - stem_length), StemDirection::Up),
+                                StemDirection::Down => {
+                                    (Some(y_head + stem_length), StemDirection::Down)
+                                }
+                                StemDirection::Auto => {
+                                    // Auto defaults to up for slash notation
+                                    (Some(y_head - stem_length), StemDirection::Up)
+                                }
+                            }
+                        };
+
+                        TupletNote {
+                            x: *x,
+                            y_head,
+                            y_stem_tip,
+                            stem_direction: resolved_dir,
+                            is_rest: false,
+                        }
+                    })
+                })
+                .collect();
+
+            if tuplet_notes.len() >= 2 {
+                let config = TupletConfig::default();
+                let tuplet_layout =
+                    layout_tuplet(&tuplet_notes, tuplet_spec.ratio, tuplet_id, spatium, &config);
+                root.add_child(tuplet_layout.scene);
+                tuplet_id += 1;
+            }
+        }
     }
 }
 
@@ -806,6 +987,12 @@ enum SceneElement {
         id: u64,
         node: SceneNode,
         tick: i32,
+        /// Index in the rhythm array (for tuplet grouping)
+        rhythm_index: usize,
+        /// Stem direction for tuplet bracket positioning
+        stem_direction: StemDirection,
+        /// Whether this note is stemless
+        stemless: bool,
     },
     BeamGroup {
         start_tick: i32,

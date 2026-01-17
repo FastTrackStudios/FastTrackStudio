@@ -13,6 +13,7 @@ pub mod midi;
 pub mod quality;
 pub mod root;
 pub mod semitone_sequence;
+pub mod timing;
 
 pub use alteration::Alteration;
 pub use definition::Chord;
@@ -27,3 +28,7 @@ pub use midi::{
 pub use quality::{ChordQuality, SuspendedType};
 pub use root::{RootParseResult, parse_root};
 pub use semitone_sequence::{SemitoneSequenceError, from_semitones, quality_from_semitones};
+pub use timing::{
+    ChordTimingAnalysis, TimingAnalysisConfig, analyze_chord_timing, has_rhythmic_complexity,
+    reaper_ppq_to_layout_ticks,
+};

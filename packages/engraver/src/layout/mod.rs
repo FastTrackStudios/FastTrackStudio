@@ -30,6 +30,8 @@
 //! ```
 
 pub mod autoplace;
+#[cfg(feature = "keyflow-import")]
+pub mod chart;
 pub mod context;
 pub mod kerning;
 pub mod orchestrator;
@@ -57,6 +59,12 @@ pub use spacing::{HorizontalSpacing, MinimumDistance, SpacingResult, SqueezeIter
 pub use springs::{HorizontalSpacingContext, SpacingConfig, Spring, SpringRow};
 pub use text_metrics::TextFontMetrics;
 pub use tlayout::{Layout, LayoutData};
+
+#[cfg(feature = "keyflow-import")]
+pub use chart::{
+    ChartLayoutEngine, ChartLayoutResult, LayoutMode as ChartLayoutMode, PageLayoutMetrics,
+    MeasureMelodyData, MelodyNoteSegment, expand_melodies_across_measures,
+};
 
 /// Unit conversions and newtype wrappers for dimensional safety.
 ///
