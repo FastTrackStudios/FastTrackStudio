@@ -21,10 +21,6 @@ use std::sync::Arc;
 use kurbo::{Affine, Point, Rect};
 use vello::peniko::Color;
 use vello::Scene;
-use wgpu::{
-    DeviceDescriptor, Features, Instance, InstanceDescriptor, RequestAdapterOptions,
-    TextureDescriptor, TextureDimension, TextureUsages, TextureViewDescriptor,
-};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -36,7 +32,7 @@ use winit::{
 
 use engraver::fonts::SMuFLFont;
 use engraver::layout::chart::{ChartLayoutEngine, ChartLayoutResult, LayoutMode};
-use engraver::renderer::SceneRenderBuilder;
+use engraver::renderer::{SceneRenderBuilder, VelloRenderContext};
 use engraver::style::MStyle;
 use keyflow::Chart;
 
@@ -70,6 +66,9 @@ r8t Ab9_8t r8t r8t r8t F9_8t r2 | s1
 
 VS
 'F/C . | Cm . | 'F/C . | Cm . | 'F/C . | Cm . | 'F/C . | Cm Cm9
+
+CH
+Cm/Eb / Eb ///
 "#;
 
 fn main() {
@@ -86,15 +85,8 @@ struct App {
 }
 
 struct AppState {
-    window: Arc<Window>,
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-    // Vello rendering
-    vello_renderer: vello::Renderer,
-    render_texture: wgpu::Texture,
-    blitter: wgpu::util::TextureBlitter,
+    // GPU infrastructure (reusable)
+    render_ctx: VelloRenderContext,
     // View transform (combined pan/zoom)
     transform: Affine,
     // Mouse state for drag-to-pan
@@ -124,51 +116,8 @@ impl ApplicationHandler for App {
                 .expect("Failed to create window"),
         );
 
-        let instance = Instance::new(&InstanceDescriptor::default());
-        let surface = instance
-            .create_surface(window.clone())
-            .expect("Failed to create surface");
-
-        let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .expect("Failed to find adapter");
-
-        let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor {
-            required_features: Features::empty(),
-            ..Default::default()
-        }))
-        .expect("Failed to create device");
-
-        let size = window.inner_size();
-        let config = surface
-            .get_default_config(&adapter, size.width, size.height)
-            .unwrap();
-        surface.configure(&device, &config);
-
-        // Create render texture (Vello needs Rgba8Unorm)
-        let render_texture = device.create_texture(&TextureDescriptor {
-            label: Some("Render Texture"),
-            size: wgpu::Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-
-        // Texture blitter for copying from intermediate texture to surface
-        let blitter = wgpu::util::TextureBlitter::new(&device, config.format);
-
-        // Create Vello renderer
-        let vello_renderer = vello::Renderer::new(&device, vello::RendererOptions::default())
-            .expect("Failed to create Vello renderer");
+        // Create reusable GPU render context
+        let render_ctx = VelloRenderContext::new(window);
 
         // Load fonts
         let font_data: &'static [u8] = Box::leak(
@@ -215,14 +164,7 @@ impl ApplicationHandler for App {
         let transform = Affine::translate((50.0, 50.0)) * Affine::scale(DPI_SCALE);
 
         self.state = Some(AppState {
-            window,
-            surface,
-            device,
-            queue,
-            config,
-            vello_renderer,
-            render_texture,
-            blitter,
+            render_ctx,
             transform,
             mouse_down: false,
             prior_position: None,
@@ -233,7 +175,7 @@ impl ApplicationHandler for App {
         });
 
         if let Some(state) = &self.state {
-            state.window.request_redraw();
+            state.render_ctx.request_redraw();
         }
     }
 
@@ -255,7 +197,7 @@ impl ApplicationHandler for App {
                             // Reset view
                             state.transform =
                                 Affine::translate((50.0, 50.0)) * Affine::scale(DPI_SCALE);
-                            state.window.request_redraw();
+                            state.render_ctx.request_redraw();
                         }
                         _ => {}
                     }
@@ -274,7 +216,7 @@ impl ApplicationHandler for App {
                     state.transform = state
                         .transform
                         .then_scale_about(BASE.powf(exponent), prior_position);
-                    state.window.request_redraw();
+                    state.render_ctx.request_redraw();
                 }
             }
 
@@ -285,7 +227,7 @@ impl ApplicationHandler for App {
                     if let Some(prior) = state.prior_position {
                         let delta = pos - prior;
                         state.transform = state.transform.then_translate(delta);
-                        state.window.request_redraw();
+                        state.render_ctx.request_redraw();
                     }
                 }
                 state.prior_position = Some(pos);
@@ -303,34 +245,11 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::Resized(new_size) => {
-                if new_size.width > 0 && new_size.height > 0 {
-                    state.config.width = new_size.width;
-                    state.config.height = new_size.height;
-                    state.surface.configure(&state.device, &state.config);
-
-                    // Recreate render texture
-                    state.render_texture = state.device.create_texture(&TextureDescriptor {
-                        label: Some("Render Texture"),
-                        size: wgpu::Extent3d {
-                            width: state.config.width,
-                            height: state.config.height,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-                        view_formats: &[],
-                    });
-                }
+                state.render_ctx.resize(new_size.width, new_size.height);
             }
 
             WindowEvent::RedrawRequested => {
-                let output = state
-                    .surface
-                    .get_current_texture()
-                    .expect("Failed to get surface texture");
+                let (width, height) = state.render_ctx.viewport_size();
 
                 // Build Vello scene
                 let mut vello_scene = Scene::new();
@@ -341,12 +260,7 @@ impl ApplicationHandler for App {
                     Affine::IDENTITY,
                     Color::from_rgb8(64, 64, 64),
                     None,
-                    &Rect::new(
-                        0.0,
-                        0.0,
-                        state.config.width as f64,
-                        state.config.height as f64,
-                    ),
+                    &Rect::new(0.0, 0.0, width as f64, height as f64),
                 );
 
                 // Create scene renderer with fonts
@@ -365,41 +279,8 @@ impl ApplicationHandler for App {
                 // Render scene nodes to Vello scene
                 renderer.render(&mut vello_scene, &transformed_scene);
 
-                // Create texture views and render
-                let render_view = state
-                    .render_texture
-                    .create_view(&TextureViewDescriptor::default());
-                let surface_view = output
-                    .texture
-                    .create_view(&TextureViewDescriptor::default());
-
-                state
-                    .vello_renderer
-                    .render_to_texture(
-                        &state.device,
-                        &state.queue,
-                        &vello_scene,
-                        &render_view,
-                        &vello::RenderParams {
-                            base_color: vello::peniko::Color::WHITE,
-                            width: state.config.width,
-                            height: state.config.height,
-                            antialiasing_method: vello::AaConfig::Msaa16,
-                        },
-                    )
-                    .expect("Vello render failed");
-
-                let mut encoder = state
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Blit Encoder"),
-                    });
-                state
-                    .blitter
-                    .copy(&state.device, &mut encoder, &render_view, &surface_view);
-                state.queue.submit(std::iter::once(encoder.finish()));
-
-                output.present();
+                // Render to surface
+                state.render_ctx.render(&vello_scene);
             }
 
             _ => {}

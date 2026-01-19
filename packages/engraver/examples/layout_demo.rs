@@ -25,18 +25,13 @@
 //!
 //! Run with: cargo run -p engraver --example layout_demo --features example
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
-use std::collections::VecDeque;
 
 use kurbo::{Affine, Point, Rect};
 use peniko::Color;
 use vello::Scene;
-use wgpu::{
-    CommandEncoderDescriptor, DeviceDescriptor, Features, Instance, InstanceDescriptor,
-    RequestAdapterOptions, TextureDescriptor, TextureDimension, TextureUsages,
-    TextureViewDescriptor,
-};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -48,15 +43,14 @@ use winit::{
 
 use engraver::fonts::SMuFLFont;
 use engraver::layout::context::LayoutContext;
-use engraver::model::{PageStyle, PaperSize};
 use engraver::layout::text_metrics::TextFontMetrics;
 use engraver::layout::tlayout::{
-    BarlineType, ClefType,
-    layout_margin_label, MarginLabelParams, rehearsal_themes,
-    layout_harmony, parse_chord, ChordNotation, HarmonyParams, HarmonyStyle,
+    BarlineType, ChordNotation, ClefType, HarmonyParams, HarmonyStyle, MarginLabelParams,
+    layout_harmony, layout_margin_label, parse_chord, rehearsal_themes,
 };
+use engraver::model::{PageStyle, PaperSize};
 use engraver::notation::{Duration, MeasureBuilder};
-use engraver::renderer::SceneRenderBuilder;
+use engraver::renderer::{SceneRenderBuilder, VelloRenderContext};
 use engraver::scene::id::{ElementType, SemanticId};
 use engraver::scene::node::SceneNode;
 use engraver::scene::paint::PaintCommand;
@@ -82,8 +76,7 @@ const SMUFL_FONT_PATH: &str = "packages/charts/resources/fonts/musescore/fonts/b
 const SMUFL_METADATA_PATH: &str =
     "packages/charts/resources/fonts/musescore/fonts/bravura/bravura_metadata.json";
 // Use FreeSans for general text (titles, labels, lyrics, rehearsal marks)
-const TEXT_FONT_PATH: &str =
-    "packages/charts/resources/fonts/musescore/fonts/FreeSans.ttf";
+const TEXT_FONT_PATH: &str = "packages/charts/resources/fonts/musescore/fonts/FreeSans.ttf";
 // Use MuseJazzText for chord symbol text (root notes, quality, extensions)
 const CHORD_TEXT_FONT_PATH: &str =
     "libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf";
@@ -105,15 +98,8 @@ struct App {
 }
 
 struct AppState {
-    window: Arc<Window>,
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-    // Vello rendering
-    vello_renderer: vello::Renderer,
-    render_texture: wgpu::Texture,
-    blitter: wgpu::util::TextureBlitter,
+    // GPU infrastructure (reusable)
+    render_ctx: VelloRenderContext,
     // View transform (combined pan/zoom) - Vello example style
     transform: Affine,
     // Mouse state for zoom-about-cursor and drag-to-pan
@@ -184,68 +170,8 @@ impl ApplicationHandler for App {
                 .expect("Failed to create window"),
         );
 
-        let instance = Instance::new(&InstanceDescriptor::default());
-        let surface = instance
-            .create_surface(window.clone())
-            .expect("Failed to create surface");
-
-        let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .expect("Failed to find adapter");
-
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &DeviceDescriptor {
-                required_features: Features::empty(),
-                ..Default::default()
-            },
-        ))
-        .expect("Failed to create device");
-
-        let size = window.inner_size();
-
-        // Get the preferred surface format
-        let surface_caps = surface.get_capabilities(&adapter);
-        let surface_format = surface_caps.formats.iter()
-            .find(|f| !f.is_srgb())
-            .copied()
-            .unwrap_or(surface_caps.formats[0]);
-
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
-            width: size.width,
-            height: size.height,
-            present_mode: wgpu::PresentMode::AutoVsync,
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
-        surface.configure(&device, &config);
-
-        // Create Vello renderer
-        let vello_renderer = vello::Renderer::new(&device, vello::RendererOptions::default())
-            .expect("Failed to create Vello renderer");
-
-        // Create intermediate render texture (Rgba8Unorm for Vello's compute shaders)
-        let render_texture = device.create_texture(&TextureDescriptor {
-            label: Some("Vello Render Texture"),
-            size: wgpu::Extent3d {
-                width: size.width.max(1),
-                height: size.height.max(1),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-
-        // Create TextureBlitter for copying from intermediate texture to surface
-        let blitter = wgpu::util::TextureBlitter::new(&device, surface_format);
+        // Create reusable GPU render context
+        let render_ctx = VelloRenderContext::new(window);
 
         // Create style (leaked for 'static lifetime in demo)
         let style = Box::leak(Box::new(MStyle::default()));
@@ -259,17 +185,14 @@ impl ApplicationHandler for App {
         let metadata_file =
             std::fs::File::open(SMUFL_METADATA_PATH).expect("Failed to open metadata file");
         let font: &'static SMuFLFont<'static> = Box::leak(Box::new(
-            SMuFLFont::from_reader(font_data, metadata_file)
-                .expect("Failed to load SMuFL font"),
+            SMuFLFont::from_reader(font_data, metadata_file).expect("Failed to load SMuFL font"),
         ));
 
         log::info!("Loaded Bravura SMuFL font successfully");
 
         // Load text font (FreeSans for general text like labels, rehearsal marks)
-        let text_font_data = Arc::new(
-            std::fs::read(TEXT_FONT_PATH)
-                .expect("Failed to read FreeSans.ttf"),
-        );
+        let text_font_data =
+            Arc::new(std::fs::read(TEXT_FONT_PATH).expect("Failed to read FreeSans.ttf"));
         log::info!("Loaded FreeSans text font successfully");
 
         // Load chord text font (MuseJazzText for chord root notes, quality, extensions)
@@ -287,20 +210,17 @@ impl ApplicationHandler for App {
         log::info!("Loaded MuseJazz chord symbol font successfully");
 
         // Build the demo scene with all layout features
-        let demo_scene = build_demo_scene(style, chord_text_font_data.clone(), chord_symbol_font_data.clone());
+        let demo_scene = build_demo_scene(
+            style,
+            chord_text_font_data.clone(),
+            chord_symbol_font_data.clone(),
+        );
 
         // Initial transform: translate to show content, then apply DPI scale
         let initial_transform = Affine::translate((50.0, 100.0)) * Affine::scale(DPI_SCALE);
 
         self.state = Some(AppState {
-            window,
-            surface,
-            device,
-            queue,
-            config,
-            vello_renderer,
-            render_texture,
-            blitter,
+            render_ctx,
             transform: initial_transform,
             mouse_down: false,
             prior_position: None,
@@ -326,33 +246,16 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::Resized(new_size) => {
-                if new_size.width > 0 && new_size.height > 0 {
-                    state.config.width = new_size.width;
-                    state.config.height = new_size.height;
-                    state.surface.configure(&state.device, &state.config);
-
-                    // Recreate render texture with new size
-                    state.render_texture = state.device.create_texture(&TextureDescriptor {
-                        label: Some("Vello Render Texture"),
-                        size: wgpu::Extent3d {
-                            width: new_size.width,
-                            height: new_size.height,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-                        view_formats: &[],
-                    });
-
-                    state.window.request_redraw();
-                }
+                state.render_ctx.resize(new_size.width, new_size.height);
+                state.render_ctx.request_redraw();
             }
 
             // Mouse button tracking for drag-to-pan
-            WindowEvent::MouseInput { state: button_state, button, .. } => {
+            WindowEvent::MouseInput {
+                state: button_state,
+                button,
+                ..
+            } => {
                 if button == winit::event::MouseButton::Left {
                     state.mouse_down = button_state == ElementState::Pressed;
                 }
@@ -369,8 +272,10 @@ impl ApplicationHandler for App {
                         MouseScrollDelta::LineDelta(_, y) => y as f64,
                     };
                     // Scale about the cursor position
-                    state.transform = state.transform.then_scale_about(BASE.powf(exponent), prior_position);
-                    state.window.request_redraw();
+                    state.transform = state
+                        .transform
+                        .then_scale_about(BASE.powf(exponent), prior_position);
+                    state.render_ctx.request_redraw();
                 }
             }
 
@@ -382,7 +287,7 @@ impl ApplicationHandler for App {
                     if let Some(prior) = state.prior_position {
                         let delta = position - prior;
                         state.transform = state.transform.then_translate(delta);
-                        state.window.request_redraw();
+                        state.render_ctx.request_redraw();
                     }
                 }
                 state.prior_position = Some(position);
@@ -395,12 +300,10 @@ impl ApplicationHandler for App {
 
             // Pinch-to-zoom on macOS trackpad (zoom about center of window)
             WindowEvent::PinchGesture { delta, .. } => {
-                let center = Point::new(
-                    state.config.width as f64 / 2.0,
-                    state.config.height as f64 / 2.0,
-                );
+                let (width, height) = state.render_ctx.viewport_size();
+                let center = Point::new(width as f64 / 2.0, height as f64 / 2.0);
                 state.transform = state.transform.then_scale_about(1.0 + delta, center);
-                state.window.request_redraw();
+                state.render_ctx.request_redraw();
             }
 
             WindowEvent::KeyboardInput { event, .. } => {
@@ -408,31 +311,28 @@ impl ApplicationHandler for App {
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::KeyR) | PhysicalKey::Code(KeyCode::Space) => {
                             // Reset view to initial transform
-                            state.transform = Affine::translate((50.0, 100.0)) * Affine::scale(DPI_SCALE);
-                            state.window.request_redraw();
+                            state.transform =
+                                Affine::translate((50.0, 100.0)) * Affine::scale(DPI_SCALE);
+                            state.render_ctx.request_redraw();
                         }
                         PhysicalKey::Code(KeyCode::KeyF) => {
                             // Toggle FPS display
                             state.show_fps = !state.show_fps;
-                            state.window.request_redraw();
+                            state.render_ctx.request_redraw();
                         }
                         PhysicalKey::Code(KeyCode::Equal) => {
                             // Zoom in (about center)
-                            let center = Point::new(
-                                state.config.width as f64 / 2.0,
-                                state.config.height as f64 / 2.0,
-                            );
+                            let (width, height) = state.render_ctx.viewport_size();
+                            let center = Point::new(width as f64 / 2.0, height as f64 / 2.0);
                             state.transform = state.transform.then_scale_about(1.1, center);
-                            state.window.request_redraw();
+                            state.render_ctx.request_redraw();
                         }
                         PhysicalKey::Code(KeyCode::Minus) => {
                             // Zoom out (about center)
-                            let center = Point::new(
-                                state.config.width as f64 / 2.0,
-                                state.config.height as f64 / 2.0,
-                            );
+                            let (width, height) = state.render_ctx.viewport_size();
+                            let center = Point::new(width as f64 / 2.0, height as f64 / 2.0);
                             state.transform = state.transform.then_scale_about(1.0 / 1.1, center);
-                            state.window.request_redraw();
+                            state.render_ctx.request_redraw();
                         }
                         _ => {}
                     }
@@ -442,7 +342,8 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 // Track frame time
                 let now = Instant::now();
-                let frame_time_ms = now.duration_since(state.last_frame_time).as_secs_f64() * 1000.0;
+                let frame_time_ms =
+                    now.duration_since(state.last_frame_time).as_secs_f64() * 1000.0;
                 state.last_frame_time = now;
 
                 // Add to sliding window (max 100 samples)
@@ -451,10 +352,7 @@ impl ApplicationHandler for App {
                 }
                 state.frame_times.push_back(frame_time_ms);
 
-                let output = state
-                    .surface
-                    .get_current_texture()
-                    .expect("Failed to get surface texture");
+                let (width, height) = state.render_ctx.viewport_size();
 
                 // Build Vello scene from our demo scene
                 let mut vello_scene = Scene::new();
@@ -465,12 +363,7 @@ impl ApplicationHandler for App {
                     Affine::IDENTITY,
                     Color::from_rgb8(245, 245, 245), // Light gray canvas background
                     None,
-                    &Rect::new(
-                        0.0,
-                        0.0,
-                        state.config.width as f64,
-                        state.config.height as f64,
-                    ),
+                    &Rect::new(0.0, 0.0, width as f64, height as f64),
                 );
 
                 // The transform is managed by mouse/keyboard events (Vello example style)
@@ -501,45 +394,18 @@ impl ApplicationHandler for App {
                     draw_fps_overlay(
                         &mut vello_scene,
                         &state.text_font_data,
-                        state.config.width as f64,
-                        state.config.height as f64,
+                        width as f64,
+                        height as f64,
                         &stats,
                         &state.frame_times,
                     );
                 }
 
-                // Create texture views
-                let render_view = state.render_texture.create_view(&TextureViewDescriptor::default());
-                let surface_view = output.texture.create_view(&TextureViewDescriptor::default());
-
-                // Render Vello to intermediate Rgba8Unorm texture
-                state
-                    .vello_renderer
-                    .render_to_texture(
-                        &state.device,
-                        &state.queue,
-                        &vello_scene,
-                        &render_view,
-                        &vello::RenderParams {
-                            base_color: vello::peniko::Color::WHITE,
-                            width: state.config.width,
-                            height: state.config.height,
-                            antialiasing_method: vello::AaConfig::Msaa16,
-                        },
-                    )
-                    .expect("Vello render failed");
-
-                // Blit from intermediate texture to surface (handles format conversion)
-                let mut encoder = state.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Blit Encoder"),
-                });
-                state.blitter.copy(&state.device, &mut encoder, &render_view, &surface_view);
-                state.queue.submit(std::iter::once(encoder.finish()));
-
-                output.present();
+                // Render to surface
+                state.render_ctx.render(&vello_scene);
 
                 // Request continuous redraw for FPS measurement
-                state.window.request_redraw();
+                state.render_ctx.request_redraw();
             }
 
             _ => {}
@@ -559,7 +425,11 @@ fn draw_fps_overlay(
     samples: &VecDeque<f64>,
 ) {
     use peniko::{Blob, FontData};
-    use skrifa::{raw::{FileRef, FontRef}, MetadataProvider, prelude::LocationRef};
+    use skrifa::{
+        MetadataProvider,
+        prelude::LocationRef,
+        raw::{FileRef, FontRef},
+    };
     use vello::{Glyph, peniko::Fill};
 
     let width = 340.0;
@@ -626,10 +496,38 @@ fn draw_fps_overlay(
         Color::from_rgb8(255, 80, 80)
     };
 
-    draw_text(scene, &format!("FPS: {:.1}", stats.fps), 15.0, 32.0, 28.0, fps_color);
-    draw_text(scene, &format!("Frame: {:.2}ms", stats.frame_time_ms), 15.0, 56.0, 18.0, Color::WHITE);
-    draw_text(scene, &format!("Min: {:.2}ms  Max: {:.2}ms", stats.min_ms, stats.max_ms), 15.0, 78.0, 14.0, Color::from_rgb8(180, 180, 180));
-    draw_text(scene, "Press F to toggle", 15.0, 96.0, 12.0, Color::from_rgb8(120, 120, 120));
+    draw_text(
+        scene,
+        &format!("FPS: {:.1}", stats.fps),
+        15.0,
+        32.0,
+        28.0,
+        fps_color,
+    );
+    draw_text(
+        scene,
+        &format!("Frame: {:.2}ms", stats.frame_time_ms),
+        15.0,
+        56.0,
+        18.0,
+        Color::WHITE,
+    );
+    draw_text(
+        scene,
+        &format!("Min: {:.2}ms  Max: {:.2}ms", stats.min_ms, stats.max_ms),
+        15.0,
+        78.0,
+        14.0,
+        Color::from_rgb8(180, 180, 180),
+    );
+    draw_text(
+        scene,
+        "Press F to toggle",
+        15.0,
+        96.0,
+        12.0,
+        Color::from_rgb8(120, 120, 120),
+    );
 
     // Draw frame time bar graph
     let graph_y = 110.0;
@@ -643,13 +541,13 @@ fn draw_fps_overlay(
         let x = 15.0 + i as f64 * bar_width;
 
         let bar_color = if time_ms <= 8.33 {
-            Color::from_rgb8(100, 143, 255)  // 120fps - blue
+            Color::from_rgb8(100, 143, 255) // 120fps - blue
         } else if time_ms <= 16.67 {
-            Color::from_rgb8(100, 200, 100)  // 60fps - green
+            Color::from_rgb8(100, 200, 100) // 60fps - green
         } else if time_ms <= 33.33 {
-            Color::from_rgb8(255, 176, 0)    // 30fps - orange
+            Color::from_rgb8(255, 176, 0) // 30fps - orange
         } else {
-            Color::from_rgb8(220, 38, 127)   // <30fps - red
+            Color::from_rgb8(220, 38, 127) // <30fps - red
         };
 
         scene.fill(
@@ -733,25 +631,21 @@ fn build_demo_scene(
     let shadow_offset = 4.0;
 
     // Paper shadow
-    root.add_child(SceneNode::anonymous_leaf(vec![
-        PaintCommand::filled_rect(
-            Rect::new(
-                page_x + shadow_offset,
-                page_y + shadow_offset,
-                page_x + shadow_offset + page_width,
-                page_y + shadow_offset + page_height,
-            ),
-            Color::from_rgb8(180, 180, 180),
+    root.add_child(SceneNode::anonymous_leaf(vec![PaintCommand::filled_rect(
+        Rect::new(
+            page_x + shadow_offset,
+            page_y + shadow_offset,
+            page_x + shadow_offset + page_width,
+            page_y + shadow_offset + page_height,
         ),
-    ]));
+        Color::from_rgb8(180, 180, 180),
+    )]));
 
     // White paper
-    root.add_child(SceneNode::anonymous_leaf(vec![
-        PaintCommand::filled_rect(
-            Rect::new(page_x, page_y, page_x + page_width, page_y + page_height),
-            Color::WHITE,
-        ),
-    ]));
+    root.add_child(SceneNode::anonymous_leaf(vec![PaintCommand::filled_rect(
+        Rect::new(page_x, page_y, page_x + page_width, page_y + page_height),
+        Color::WHITE,
+    )]));
 
     // =========================================================================
     // SYSTEM 1: Rhythmic Slash Notation (using high-level MeasureBuilder API)
@@ -762,7 +656,10 @@ fn build_demo_scene(
 
     // Draw staff lines
     root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff1_y, content_width, spatium,
+        content_x,
+        staff1_y,
+        content_width,
+        spatium,
     )));
 
     // Section label: "OUTRO" in left margin of staff 1
@@ -841,7 +738,8 @@ fn build_demo_scene(
         .build(&ctx);
 
     let mut m3_container = SceneNode::group(SemanticId::new(ElementType::Measure, 540));
-    m3_container.transform = Affine::translate((content_x + measure1.width + measure2.width, staff1_middle));
+    m3_container.transform =
+        Affine::translate((content_x + measure1.width + measure2.width, staff1_middle));
     m3_container.add_child(measure3.scene);
     root.add_child(m3_container);
 
@@ -858,7 +756,10 @@ fn build_demo_scene(
         .build(&ctx);
 
     let mut m4_container = SceneNode::group(SemanticId::new(ElementType::Measure, 560));
-    m4_container.transform = Affine::translate((content_x + measure1.width + measure2.width + measure3.width, staff1_middle));
+    m4_container.transform = Affine::translate((
+        content_x + measure1.width + measure2.width + measure3.width,
+        staff1_middle,
+    ));
     m4_container.add_child(measure4.scene);
     root.add_child(m4_container);
 
@@ -870,14 +771,17 @@ fn build_demo_scene(
 
     // Draw staff lines
     root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff2_y, content_width, spatium,
+        content_x,
+        staff2_y,
+        content_width,
+        spatium,
     )));
 
     // Section label: "Guitar Solo" in left margin of staff 2
     // This tests multiline word wrapping ("Guitar" + "Solo" on separate lines)
     let (_, vs1_label) = layout_margin_label(
         &MarginLabelParams {
-            section_type: "Guitar Solo".to_string(),  // Will wrap to two lines
+            section_type: "Guitar Solo".to_string(), // Will wrap to two lines
             abbreviation: "GTR SOLO".to_string(),
             number: None,
             page_x,
@@ -935,32 +839,29 @@ fn build_demo_scene(
     // Pattern: Q + dotted half → quarter has stem (single), half has stem
     let measure7 = MeasureBuilder::new()
         .rhythmic()
-        .rhythm(vec![
-            Duration::Quarter,
-            Duration::DottedHalf,
-        ])
+        .rhythm(vec![Duration::Quarter, Duration::DottedHalf])
         .id_base(640)
         .build(&ctx);
 
     let mut m7_container = SceneNode::group(SemanticId::new(ElementType::Measure, 640));
-    m7_container.transform = Affine::translate((content_x + measure5.width + measure6.width, staff2_middle));
+    m7_container.transform =
+        Affine::translate((content_x + measure5.width + measure6.width, staff2_middle));
     m7_container.add_child(measure7.scene);
     root.add_child(m7_container);
 
     // Measure 4: Half + two quarters → half has stem, 2 quarters = stemless
     let measure8 = MeasureBuilder::new()
         .rhythmic()
-        .rhythm(vec![
-            Duration::Half,
-            Duration::Quarter,
-            Duration::Quarter,
-        ])
+        .rhythm(vec![Duration::Half, Duration::Quarter, Duration::Quarter])
         .end_barline(BarlineType::End)
         .id_base(660)
         .build(&ctx);
 
     let mut m8_container = SceneNode::group(SemanticId::new(ElementType::Measure, 660));
-    m8_container.transform = Affine::translate((content_x + measure5.width + measure6.width + measure7.width, staff2_middle));
+    m8_container.transform = Affine::translate((
+        content_x + measure5.width + measure6.width + measure7.width,
+        staff2_middle,
+    ));
     m8_container.add_child(measure8.scene);
     root.add_child(m8_container);
 
@@ -972,7 +873,10 @@ fn build_demo_scene(
 
     // Draw staff lines
     root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff3_y, content_width, spatium,
+        content_x,
+        staff3_y,
+        content_width,
+        spatium,
     )));
 
     // Section label: "CH 1 B" (Chorus 1 section B) in left margin of staff 3
@@ -980,7 +884,7 @@ fn build_demo_scene(
     let (_, ch1_label) = layout_margin_label(
         &MarginLabelParams {
             section_type: "Chorus".to_string(),
-            abbreviation: "CH 1 B".to_string(),  // Section B will be on its own line
+            abbreviation: "CH 1 B".to_string(), // Section B will be on its own line
             number: None,
             page_x,
             margin_width: content_left,
@@ -1001,8 +905,14 @@ fn build_demo_scene(
         .time_signature(4, 4)
         .rhythmic()
         .rhythm(vec![
-            Duration::ThirtySecond, Duration::ThirtySecond, Duration::ThirtySecond, Duration::ThirtySecond,
-            Duration::ThirtySecond, Duration::ThirtySecond, Duration::ThirtySecond, Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
             Duration::Quarter,
             Duration::Half,
         ])
@@ -1035,9 +945,12 @@ fn build_demo_scene(
     let measure11 = MeasureBuilder::new()
         .rhythmic()
         .rhythm(vec![
-            Duration::DottedEighth, Duration::Sixteenth,
-            Duration::DottedEighth, Duration::Sixteenth,
-            Duration::DottedEighth, Duration::Sixteenth,
+            Duration::DottedEighth,
+            Duration::Sixteenth,
+            Duration::DottedEighth,
+            Duration::Sixteenth,
+            Duration::DottedEighth,
+            Duration::Sixteenth,
             Duration::Eighth,
         ])
         .end_barline(BarlineType::End)
@@ -1045,7 +958,8 @@ fn build_demo_scene(
         .build(&ctx);
 
     let mut m11_container = SceneNode::group(SemanticId::new(ElementType::Measure, 740));
-    m11_container.transform = Affine::translate((content_x + measure9.width + measure10.width, staff3_middle));
+    m11_container.transform =
+        Affine::translate((content_x + measure9.width + measure10.width, staff3_middle));
     m11_container.add_child(measure11.scene);
     root.add_child(m11_container);
 
@@ -1057,7 +971,10 @@ fn build_demo_scene(
 
     // Draw staff lines
     root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff4_y, content_width, spatium,
+        content_x,
+        staff4_y,
+        content_width,
+        spatium,
     )));
 
     // Standard chord symbols above staff (using MuseJazz font for handwritten style)
@@ -1067,9 +984,7 @@ fn build_demo_scene(
         .with_text_font_metrics(text_metrics.clone())
         .with_symbol_font_metrics(symbol_metrics.clone());
 
-    let standard_chords = [
-        "C", "Cm", "Cdim", "Caug", "C5", "Csus4", "Csus2",
-    ];
+    let standard_chords = ["C", "Cm", "Cdim", "Caug", "C5", "Csus4", "Csus2"];
 
     for (i, chord_str) in standard_chords.iter().enumerate() {
         let mut params = parse_chord(chord_str)
@@ -1088,13 +1003,14 @@ fn build_demo_scene(
 
     // Draw staff lines
     root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff5_y, content_width, spatium,
+        content_x,
+        staff5_y,
+        content_width,
+        spatium,
     )));
 
     let chord5_y = staff5_y - 8.0;
-    let seventh_chords = [
-        "CMaj7", "C7", "Cm7", "CmMaj7", "Cdim7", "Cm7b5",
-    ];
+    let seventh_chords = ["CMaj7", "C7", "Cm7", "CmMaj7", "Cdim7", "Cm7b5"];
 
     for (i, chord_str) in seventh_chords.iter().enumerate() {
         let mut params = parse_chord(chord_str)
@@ -1113,13 +1029,14 @@ fn build_demo_scene(
 
     // Draw staff lines
     root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff6_y, content_width, spatium,
+        content_x,
+        staff6_y,
+        content_width,
+        spatium,
     )));
 
     let chord6_y = staff6_y - 8.0;
-    let extended_chords = [
-        "C9", "C11", "C13", "C7b9", "C7#9", "C7alt",
-    ];
+    let extended_chords = ["C9", "C11", "C13", "C7b9", "C7#9", "C7alt"];
 
     for (i, chord_str) in extended_chords.iter().enumerate() {
         let mut params = parse_chord(chord_str)
@@ -1138,7 +1055,10 @@ fn build_demo_scene(
 
     // Draw staff lines
     root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff7_y, content_width, spatium,
+        content_x,
+        staff7_y,
+        content_width,
+        spatium,
     )));
 
     let chord7_y = staff7_y - 8.0;
@@ -1147,9 +1067,7 @@ fn build_demo_scene(
         .with_symbol_font_metrics(symbol_metrics.clone());
 
     // Jazz triads with special symbols
-    let jazz_triads = [
-        "C", "Cm", "Cdim", "Caug", "C5", "Csus4", "Csus2",
-    ];
+    let jazz_triads = ["C", "Cm", "Cdim", "Caug", "C5", "Csus4", "Csus2"];
 
     for (i, chord_str) in jazz_triads.iter().enumerate() {
         let mut params = parse_chord(chord_str)
@@ -1168,13 +1086,14 @@ fn build_demo_scene(
 
     // Draw staff lines
     root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff8_y, content_width, spatium,
+        content_x,
+        staff8_y,
+        content_width,
+        spatium,
     )));
 
     let chord8_y = staff8_y - 8.0;
-    let jazz_sevenths = [
-        "CMaj7", "C7", "Cm7", "CmMaj7", "Cdim7", "Cm7b5",
-    ];
+    let jazz_sevenths = ["CMaj7", "C7", "Cm7", "CmMaj7", "Cdim7", "Cm7b5"];
 
     for (i, chord_str) in jazz_sevenths.iter().enumerate() {
         let mut params = parse_chord(chord_str)
@@ -1193,13 +1112,14 @@ fn build_demo_scene(
 
     // Draw staff lines
     root.add_child(SceneNode::anonymous_leaf(draw_staff_lines(
-        content_x, staff9_y, content_width, spatium,
+        content_x,
+        staff9_y,
+        content_width,
+        spatium,
     )));
 
     let chord9_y = staff9_y - 8.0;
-    let slash_chords = [
-        "C/E", "Cm/G", "C7/Bb", "CMaj7/B", "F#m7/C#", "Bb/D",
-    ];
+    let slash_chords = ["C/E", "Cm/G", "C7/Bb", "CMaj7/B", "F#m7/C#", "Bb/D"];
 
     for (i, chord_str) in slash_chords.iter().enumerate() {
         let mut params = parse_chord(chord_str)
@@ -1217,37 +1137,83 @@ fn build_demo_scene(
     let title_x = page_x + page_width / 2.0 - 100.0;
     let title_y = page_y + margin_top / 2.0;
 
-    root.add_child(SceneNode::anonymous_leaf(vec![
-        PaintCommand::text("Engraver Layout Demo".to_string(), "sans-serif", 22.0, Point::new(title_x, title_y), Color::BLACK),
-    ]));
+    root.add_child(SceneNode::anonymous_leaf(vec![PaintCommand::text(
+        "Engraver Layout Demo".to_string(),
+        "sans-serif",
+        22.0,
+        Point::new(title_x, title_y),
+        Color::BLACK,
+    )]));
 
     // Section labels
     let labels = [
-        (content_x, staff1_y - 12.0, "System 1: Rhythmic slash notation (quarters, 8ths, 16ths, syncopation)"),
-        (content_x, staff2_y - 12.0, "System 2: Auto-stemless rhythmic notation (2+ consecutive quarters = stemless)"),
-        (content_x, staff3_y - 12.0, "System 3: Complex rhythms (32nds, syncopation, dotted patterns)"),
-        (content_x, staff4_y - 20.0, "System 4: Basic Triads - Standard Notation"),
-        (content_x, staff5_y - 20.0, "System 5: Seventh Chords - Standard Notation"),
-        (content_x, staff6_y - 20.0, "System 6: Extended/Altered - Standard Notation"),
-        (content_x, staff7_y - 20.0, "System 7: Basic Triads - Jazz Notation"),
-        (content_x, staff8_y - 20.0, "System 8: Seventh Chords - Jazz Notation"),
-        (content_x, staff9_y - 20.0, "System 9: Slash Chords - Jazz Notation"),
+        (
+            content_x,
+            staff1_y - 12.0,
+            "System 1: Rhythmic slash notation (quarters, 8ths, 16ths, syncopation)",
+        ),
+        (
+            content_x,
+            staff2_y - 12.0,
+            "System 2: Auto-stemless rhythmic notation (2+ consecutive quarters = stemless)",
+        ),
+        (
+            content_x,
+            staff3_y - 12.0,
+            "System 3: Complex rhythms (32nds, syncopation, dotted patterns)",
+        ),
+        (
+            content_x,
+            staff4_y - 20.0,
+            "System 4: Basic Triads - Standard Notation",
+        ),
+        (
+            content_x,
+            staff5_y - 20.0,
+            "System 5: Seventh Chords - Standard Notation",
+        ),
+        (
+            content_x,
+            staff6_y - 20.0,
+            "System 6: Extended/Altered - Standard Notation",
+        ),
+        (
+            content_x,
+            staff7_y - 20.0,
+            "System 7: Basic Triads - Jazz Notation",
+        ),
+        (
+            content_x,
+            staff8_y - 20.0,
+            "System 8: Seventh Chords - Jazz Notation",
+        ),
+        (
+            content_x,
+            staff9_y - 20.0,
+            "System 9: Slash Chords - Jazz Notation",
+        ),
     ];
 
     for (x, y, text) in labels {
-        root.add_child(SceneNode::anonymous_leaf(vec![
-            PaintCommand::text(text.to_string(), "sans-serif", 9.0, Point::new(x, y), Color::from_rgb8(80, 80, 80)),
-        ]));
+        root.add_child(SceneNode::anonymous_leaf(vec![PaintCommand::text(
+            text.to_string(),
+            "sans-serif",
+            9.0,
+            Point::new(x, y),
+            Color::from_rgb8(80, 80, 80),
+        )]));
     }
 
     // Controls at bottom
     let controls_y = page_y + page_height - 15.0;
-    root.add_child(SceneNode::anonymous_leaf(vec![
-        PaintCommand::text(
-            "Controls: Scroll=Zoom (on cursor) | Drag=Pan | +/-=Zoom | Space/R=Reset | F=FPS".to_string(),
-            "sans-serif", 8.0, Point::new(page_x + margin_left, controls_y), Color::from_rgb8(140, 140, 140)
-        ),
-    ]));
+    root.add_child(SceneNode::anonymous_leaf(vec![PaintCommand::text(
+        "Controls: Scroll=Zoom (on cursor) | Drag=Pan | +/-=Zoom | Space/R=Reset | F=FPS"
+            .to_string(),
+        "sans-serif",
+        8.0,
+        Point::new(page_x + margin_left, controls_y),
+        Color::from_rgb8(140, 140, 140),
+    )]));
 
     root
 }
