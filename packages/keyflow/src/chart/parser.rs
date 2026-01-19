@@ -12,7 +12,7 @@ use super::cues::TextCue;
 use super::dynamics::DynamicMarking;
 use super::melody::Melody;
 use super::track::{Track, TrackType};
-use super::types::{ChartSection, ChordInstance, KeyChange, Measure, TempoChange};
+use super::types::{ChartSection, ChordInstance, KeyChange, Measure, RestInstance, RhythmElement, SpaceInstance, TempoChange};
 use crate::chord::{Chord, ChordRhythm, PushPullAmount, PushPullBase};
 use crate::key::Key;
 use crate::metadata::SongMetadata;
@@ -226,6 +226,29 @@ impl Chart {
             break;
         }
 
+        // Check for "Transcribed By X" line (before metadata line)
+        // This becomes the subtitle if not already set from parentheses
+        if idx < lines.len() {
+            let line = lines[idx].trim();
+            let line_lower = line.to_lowercase();
+            if line_lower.starts_with("transcribed by") {
+                // Extract the name after "Transcribed By"
+                let name = line[14..].trim(); // Skip "Transcribed By"
+                if !name.is_empty() {
+                    // Override subtitle with transcriber info
+                    self.metadata.subtitle = Some(format!("Transcribed By {}", name));
+                }
+                idx += 1;
+            } else if !Self::looks_like_metadata_line(line) && !line.is_empty() {
+                // If the line doesn't look like metadata (no bpm, time sig, key),
+                // treat it as a subtitle/transcriber line
+                if self.metadata.subtitle.is_none() {
+                    self.metadata.subtitle = Some(line.to_string());
+                    idx += 1;
+                }
+            }
+        }
+
         // Next line might be "120bpm 4/4 #G" (tempo, time sig, key)
         if idx < lines.len() {
             let line = lines[idx];
@@ -252,12 +275,56 @@ impl Chart {
             break;
         }
 
+        // Check for version (V1, V2, etc.) or part name on the next line
+        if idx < lines.len() {
+            let line = lines[idx].trim();
+            let line_upper = line.to_uppercase();
+
+            // Check for version pattern: V1, V2, V3, etc.
+            if let Some(version) = Self::parse_version_string(&line_upper) {
+                self.metadata.version = Some(version);
+                idx += 1;
+            } else if !line.is_empty() && !Self::looks_like_section_marker(line) {
+                // If it's not a section marker, treat it as part name
+                self.metadata.part_name = Some(line.to_string());
+                idx += 1;
+
+                // Check if next line is a version
+                if idx < lines.len() {
+                    let next_line = lines[idx].trim().to_uppercase();
+                    if let Some(version) = Self::parse_version_string(&next_line) {
+                        self.metadata.version = Some(version);
+                        idx += 1;
+                    }
+                }
+            }
+        }
+
         Ok(idx)
     }
 
     /// Check if a line looks like metadata (contains tempo, time sig, or key)
     fn looks_like_metadata_line(line: &str) -> bool {
         line.contains("bpm") || line.contains('/') || line.contains('#') || line.contains('b')
+    }
+
+    /// Parse a version string like "V1", "V2", etc.
+    /// Returns the version number if valid, None otherwise.
+    fn parse_version_string(s: &str) -> Option<u8> {
+        let s = s.trim();
+        if s.starts_with('V') && s.len() >= 2 {
+            s[1..].parse::<u8>().ok()
+        } else {
+            None
+        }
+    }
+
+    /// Check if a line looks like a section marker (e.g., "VS 16", "CH", "Intro 4")
+    fn looks_like_section_marker(line: &str) -> bool {
+        use crate::sections::SectionType;
+        let line_lower = line.to_lowercase();
+        let first_word = line_lower.split_whitespace().next().unwrap_or("");
+        SectionType::parse(first_word).is_ok()
     }
 
     /// Parse a metadata line (e.g., "120bpm 4/4 #G")
@@ -550,14 +617,17 @@ impl Chart {
                 continue;
             }
 
-            // Count chords in this segment (exclude commands, cues, etc.)
+            // Count chords in this segment (exclude commands, cues, dot repeats, etc.)
             // Count ALL chords, even those with explicit durations, to calculate segment duration
             let tokens: Vec<&str> = segment.split_whitespace().collect();
             let chord_count = tokens
                 .iter()
                 .filter(|t| {
-                    // Count as chord if it's not a command, cue, or other special token
-                    !t.starts_with('/') && !t.starts_with('@') && !t.starts_with('"')
+                    // Count as chord if it's not a command, cue, dot repeat, or other special token
+                    !t.starts_with('/')
+                        && !t.starts_with('@')
+                        && !t.starts_with('"')
+                        && **t != "."  // Don't count dot repeats
                 })
                 .count();
 
@@ -569,6 +639,7 @@ impl Chart {
                         && !t.starts_with('@')
                         && !t.starts_with('"')
                         && !t.contains('_')
+                        && **t != "."  // Dot repeats handle their own duration
                 })
                 .count();
 
@@ -612,8 +683,9 @@ impl Chart {
                     segment_result.push(' ');
                 }
 
-                // Check if this is a chord (not a command, cue, etc.)
-                if !token.starts_with('/') && !token.starts_with('@') && !token.starts_with('"') {
+                // Check if this is a chord (not a command, cue, dot repeat, etc.)
+                let is_dot_repeat = *token == ".";
+                if !token.starts_with('/') && !token.starts_with('@') && !token.starts_with('"') && !is_dot_repeat {
                     // Check if token already has a duration
                     if token.contains('_') {
                         // Already has duration, keep as is
@@ -628,7 +700,7 @@ impl Chart {
                         segment_result.push_str(token);
                     }
                 } else {
-                    // Keep non-chord tokens as is
+                    // Keep non-chord tokens (commands, cues, dot repeats) as is
                     segment_result.push_str(token);
                 }
             }
@@ -683,6 +755,22 @@ impl Chart {
         }
 
         (line, RepeatCount::Fixed(1))
+    }
+
+    /// Strip auto-assigned duration suffix from a token.
+    ///
+    /// The auto-duration system adds suffixes like `_1`, `_2`, `_4`, `_8`, `_16`
+    /// to tokens. This function removes those suffixes so we can tell if the
+    /// user explicitly specified a duration or if it was auto-assigned.
+    fn strip_auto_duration_suffix(token: &str) -> String {
+        // Auto-duration patterns: _1, _2, _4, _8, _16
+        // These are whole, half, quarter, eighth, sixteenth notes
+        for suffix in &["_16", "_8", "_4", "_2", "_1"] {
+            if token.ends_with(suffix) {
+                return token[..token.len() - suffix.len()].to_string();
+            }
+        }
+        token.to_string()
     }
 
     /// Extract the root portion from the original token (before quality info and rhythm notation)
@@ -781,7 +869,7 @@ impl Chart {
             if let Some(parsed) = SectionType::parse_with_measure_count(section_marker) {
                 let section_type = parsed.section_type;
                 let measure_expr = parsed.measure_expr;
-                let section_note = parsed.note;
+                let section_comment = parsed.comment;
 
                 // Resolve the measure expression using section memory
                 let measure_count = if let Some(expr) = measure_expr.as_ref() {
@@ -798,8 +886,8 @@ impl Chart {
                     if let Some(count) = measure_count {
                         section.measure_count = Some(count);
                     }
-                    if let Some(note) = section_note.clone() {
-                        section.note = Some(note);
+                    if let Some(comment) = section_comment.clone() {
+                        section.comment = Some(comment);
                     }
 
                     let measures = if content.is_empty() {
@@ -846,7 +934,7 @@ impl Chart {
                         section_type,
                         measure_count,
                         is_subsection,
-                        section_note,
+                        section_comment,
                     )?;
                 }
             } else {
@@ -889,7 +977,11 @@ impl Chart {
             if let Some((track_type, name, remaining)) = Self::parse_track_marker(line) {
                 // Save current group if it has content
                 if !current_lines.is_empty() {
-                    groups.push((current_type, current_name.take(), std::mem::take(&mut current_lines)));
+                    groups.push((
+                        current_type,
+                        current_name.take(),
+                        std::mem::take(&mut current_lines),
+                    ));
                 }
 
                 // Start new track
@@ -921,15 +1013,15 @@ impl Chart {
         section_type: SectionType,
         measure_count: Option<usize>,
         is_subsection: bool,
-        note: Option<String>,
+        comment: Option<String>,
     ) -> Result<usize, String> {
         let mut idx = start_idx + 1; // Skip section marker line
         let mut section = Section::new(section_type.clone()).with_subsection(is_subsection);
         if let Some(count) = measure_count {
             section.measure_count = Some(count);
         }
-        if let Some(n) = note {
-            section.note = Some(n);
+        if let Some(c) = comment {
+            section.comment = Some(c);
         }
 
         // Collect content lines for this section
@@ -1008,8 +1100,11 @@ impl Chart {
                 match track_type {
                     TrackType::Chords | TrackType::Rhythm => {
                         // Parse as chord/rhythm content
-                        let mut parsed_measures =
-                            self.parse_section_measures(&track_lines, &section_type, measure_count)?;
+                        let mut parsed_measures = self.parse_section_measures(
+                            &track_lines,
+                            &section_type,
+                            measure_count,
+                        )?;
 
                         // Apply padding if this is the chord track and measure count is specified
                         if track_type == TrackType::Chords {
@@ -1017,20 +1112,26 @@ impl Chart {
                                 let actual_measures = parsed_measures.len();
                                 if actual_measures < count {
                                     let padding_needed = count - actual_measures;
-                                    let time_sig = self.time_signature.unwrap_or(TimeSignature::common_time());
+                                    let time_sig =
+                                        self.time_signature.unwrap_or(TimeSignature::common_time());
 
                                     for _ in 0..padding_needed {
                                         let space_duration = MusicalDuration::new(1, 0, 0);
-                                        let note = crate::primitives::MusicalNote::from_string("C").unwrap();
+                                        let note = crate::primitives::MusicalNote::from_string("C")
+                                            .unwrap();
                                         let root_notation = RootNotation::from_note_name(note);
                                         let space_chord = ChordInstance::new(
                                             root_notation.clone(),
                                             "s".to_string(),
-                                            crate::chord::Chord::new(root_notation, crate::chord::ChordQuality::Major),
+                                            crate::chord::Chord::new(
+                                                root_notation,
+                                                crate::chord::ChordQuality::Major,
+                                            ),
                                             ChordRhythm::Space {
                                                 duration: crate::chord::LilySyntax::Whole,
                                                 dotted: false,
                                                 multiplier: None,
+                                                triplet: false,
                                             },
                                             "s".to_string(),
                                             space_duration,
@@ -1059,8 +1160,11 @@ impl Chart {
                                     | SectionType::Pre(_)
                                     | SectionType::Post(_)
                             ) {
-                                self.templates
-                                    .store(&section_type, &parsed_measures, self.current_key.as_ref());
+                                self.templates.store(
+                                    &section_type,
+                                    &parsed_measures,
+                                    self.current_key.as_ref(),
+                                );
                             }
                         }
 
@@ -1240,6 +1344,7 @@ impl Chart {
         let mut just_processed_separator = false; // Track if we just processed a | separator
         let mut measure_was_created_by_separator = false; // Track if current measure was created by |
         let mut in_melody_block = false; // Track if we're inside a m{...} block
+        let mut last_chord: Option<ChordInstance> = None; // Track last chord for dot repeat
 
         use super::commands::Command;
 
@@ -1260,6 +1365,51 @@ impl Chart {
                         }
                     }
                     continue;
+                }
+
+                // Check for standalone slash duration notation (e.g., "//", "///", "////")
+                // This allows syntax like "Ab9' //" where the slashes are separated by a space
+                if token_str.chars().all(|c| c == '/') {
+                    let slash_count = token_str.len() as u8;
+                    if slash_count > 0 {
+                        // Apply slash rhythm to the last chord
+                        let applied = if let Some(last_chord) = current_measure.chords.last_mut() {
+                            // Update the chord's rhythm to use slashes
+                            last_chord.rhythm = ChordRhythm::Slashes(slash_count);
+                            // Update the duration based on slash count (1 slash = 1 beat)
+                            last_chord.duration =
+                                MusicalDuration::from_beats(f64::from(slash_count), time_sig);
+                            true
+                        } else if !measures.is_empty() {
+                            // If current measure is empty, apply to last chord of previous measure
+                            if let Some(last_measure) = measures.last_mut() {
+                                if let Some(last_chord) = last_measure.chords.last_mut() {
+                                    last_chord.rhythm = ChordRhythm::Slashes(slash_count);
+                                    last_chord.duration =
+                                        MusicalDuration::from_beats(f64::from(slash_count), time_sig);
+                                    true
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+
+                        if applied {
+                            // Recalculate total beats for current measure since the duration changed
+                            if !current_measure.chords.is_empty() {
+                                current_measure_beats = current_measure
+                                    .chords
+                                    .iter()
+                                    .map(|c| c.duration.to_beats(time_sig))
+                                    .sum();
+                            }
+                            continue;
+                        }
+                    }
                 }
             }
 
@@ -1294,7 +1444,10 @@ impl Chart {
                                 current_measure.melodies.push(melody);
                             }
                             Err(e) => {
-                                eprintln!("Warning: Failed to parse inline melody '{}': {}", melody_str, e);
+                                eprintln!(
+                                    "Warning: Failed to parse inline melody '{}': {}",
+                                    melody_str, e
+                                );
                             }
                         }
                     }
@@ -1364,12 +1517,8 @@ impl Chart {
                         .unwrap_or_else(|_| MusicalPosition::start()),
                         self.sections.len(),
                     );
-                    let tempo_change = TempoChange::new(
-                        position,
-                        self.tempo,
-                        new_tempo,
-                        self.sections.len(),
-                    );
+                    let tempo_change =
+                        TempoChange::new(position, self.tempo, new_tempo, self.sections.len());
                     self.tempo_changes.push(tempo_change);
                     self.tempo = Some(new_tempo);
                 }
@@ -1438,6 +1587,172 @@ impl Chart {
                 }
             }
 
+            // Check for standalone rest token (r4, r8, r8t, r4t, r2, etc.)
+            // These don't have a chord symbol but should be stored as rhythm elements
+            if token_str.starts_with('r') && token_str.len() >= 2 {
+                // Try to parse as a rest
+                let mut lexer = Lexer::new(token_str.to_string());
+                let tokens = lexer.tokenize();
+                if let Ok((rhythm, _)) = ChordRhythm::parse(&tokens) {
+                    if matches!(rhythm, ChordRhythm::Rest { .. }) {
+                        let duration = rhythm.to_duration(time_sig);
+                        let chord_beats = duration.to_beats(time_sig);
+
+                        // Check if we need to start a new measure
+                        if !just_processed_separator
+                            && current_measure_beats + chord_beats > beats_per_measure + 0.001
+                        {
+                            if !current_measure.chords.is_empty() || !current_measure.rhythm_elements.is_empty() {
+                                measures.push(current_measure.clone());
+                            }
+                            current_measure = Measure::new();
+                            current_measure.time_signature =
+                                (time_sig.numerator as u8, time_sig.denominator as u8);
+                            current_measure_beats = 0.0;
+                        }
+                        just_processed_separator = false;
+                        measure_was_created_by_separator = false;
+
+                        // Create a RestInstance and add it to rhythm_elements
+                        let rest_instance = RestInstance::new(
+                            rhythm,
+                            duration,
+                            AbsolutePosition::new(
+                                MusicalPosition::try_new(
+                                    measures.len() as i32,
+                                    current_measure_beats as i32,
+                                    0,
+                                )
+                                .unwrap_or_else(|_| MusicalPosition::start()),
+                                self.sections.len(),
+                            ),
+                            token_str.to_string(),
+                        );
+
+                        current_measure.rhythm_elements.push(RhythmElement::Rest(rest_instance));
+                        current_measure_beats += chord_beats;
+
+                        // Check if measure is complete
+                        if (current_measure_beats - beats_per_measure).abs() < 0.001 {
+                            measures.push(current_measure.clone());
+                            current_measure = Measure::new();
+                            current_measure.time_signature =
+                                (time_sig.numerator as u8, time_sig.denominator as u8);
+                            current_measure_beats = 0.0;
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            // Check for standalone space token (s1, s2, s4, s8, etc.)
+            // These represent "invisible" duration - the measure will be filled with automatic slashes
+            if token_str.starts_with('s') && token_str.len() >= 2 {
+                // Try to parse as a space
+                let mut lexer = Lexer::new(token_str.to_string());
+                let tokens = lexer.tokenize();
+                if let Ok((rhythm, _)) = ChordRhythm::parse(&tokens) {
+                    if matches!(rhythm, ChordRhythm::Space { .. }) {
+                        let duration = rhythm.to_duration(time_sig);
+                        let chord_beats = duration.to_beats(time_sig);
+
+                        // Check if we need to start a new measure
+                        if !just_processed_separator
+                            && current_measure_beats + chord_beats > beats_per_measure + 0.001
+                        {
+                            if !current_measure.chords.is_empty() || !current_measure.rhythm_elements.is_empty() {
+                                measures.push(current_measure.clone());
+                            }
+                            current_measure = Measure::new();
+                            current_measure.time_signature =
+                                (time_sig.numerator as u8, time_sig.denominator as u8);
+                            current_measure_beats = 0.0;
+                        }
+                        just_processed_separator = false;
+                        measure_was_created_by_separator = false;
+
+                        // Create a SpaceInstance (not a chord - just a placeholder for auto-fill)
+                        let space_instance = SpaceInstance::new(
+                            rhythm,
+                            duration,
+                            AbsolutePosition::new(
+                                MusicalPosition::try_new(
+                                    measures.len() as i32,
+                                    current_measure_beats as i32,
+                                    0,
+                                )
+                                .unwrap_or_else(|_| MusicalPosition::start()),
+                                self.sections.len(),
+                            ),
+                            token_str.to_string(),
+                        );
+
+                        // Add to rhythm_elements only (not chords - space is not a chord)
+                        current_measure.rhythm_elements.push(RhythmElement::Space(space_instance));
+                        current_measure_beats += chord_beats;
+
+                        // Check if measure is complete
+                        if (current_measure_beats - beats_per_measure).abs() < 0.001 {
+                            measures.push(current_measure.clone());
+                            current_measure = Measure::new();
+                            current_measure.time_signature =
+                                (time_sig.numerator as u8, time_sig.denominator as u8);
+                            current_measure_beats = 0.0;
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            // Check for dot repeat token (. repeats the last chord)
+            // Note: apply_auto_durations may add _N suffix, so check for "." or "._N" pattern
+            if *token_str == "." || token_str.starts_with("._") {
+                if let Some(ref prev_chord) = last_chord {
+                    // Clone the last chord with a fresh position
+                    let mut repeat_chord = prev_chord.clone();
+                    repeat_chord.original_token = ".".to_string();
+                    repeat_chord.position = AbsolutePosition::at_beginning(); // Will be recalculated
+                    // Clear push/pull - the dot repeat doesn't inherit the timing modifier
+                    repeat_chord.push_pull = None;
+                    // Inherit the source chord's rhythm and duration
+                    // "F/C ." = two measures (F/C for 4 beats, then F/C repeated for 4 beats)
+                    // The rhythm and duration are already set from the clone
+
+                    let chord_beats = repeat_chord.duration.to_beats(time_sig);
+
+                    // Handle measure boundaries (same logic as regular chord)
+                    if !just_processed_separator {
+                        if current_measure_beats + chord_beats > beats_per_measure + 0.001 {
+                            if !current_measure.chords.is_empty() || !current_measure.rhythm_elements.is_empty() {
+                                measures.push(current_measure.clone());
+                            }
+                            current_measure = Measure::new();
+                            current_measure.time_signature =
+                                (time_sig.numerator as u8, time_sig.denominator as u8);
+                            current_measure_beats = 0.0;
+                        }
+                    }
+                    just_processed_separator = false;
+                    measure_was_created_by_separator = false;
+
+                    current_measure.rhythm_elements.push(RhythmElement::Chord(repeat_chord.clone()));
+                    current_measure.chords.push(repeat_chord);
+                    current_measure_beats += chord_beats;
+
+                    // Auto-advance measure if full
+                    if !just_processed_separator
+                        && (current_measure_beats - beats_per_measure).abs() < 0.001
+                    {
+                        measures.push(current_measure.clone());
+                        current_measure = Measure::new();
+                        current_measure.time_signature =
+                            (time_sig.numerator as u8, time_sig.denominator as u8);
+                        current_measure_beats = 0.0;
+                    }
+                }
+                continue;
+            }
+
             // Parse chord
             // TODO: Compute source_span from line offset map and token position
             match self.parse_chord_token(token_str, section_type, time_sig, None) {
@@ -1451,7 +1766,7 @@ impl Chart {
                         if current_measure_beats + chord_beats > beats_per_measure + 0.001 {
                             // small epsilon for float comparison
                             // Current measure is full, start a new one
-                            if !current_measure.chords.is_empty() {
+                            if !current_measure.chords.is_empty() || !current_measure.rhythm_elements.is_empty() {
                                 measures.push(current_measure.clone());
                             }
                             current_measure = Measure::new();
@@ -1464,7 +1779,11 @@ impl Chart {
                     just_processed_separator = false; // Reset flag after processing chord
                     measure_was_created_by_separator = false; // Reset flag - measure now has content
 
-                    // Add chord to current measure
+                    // Store as last chord for dot repeat
+                    last_chord = Some(chord.clone());
+
+                    // Add chord to both chords (for backward compat) and rhythm_elements
+                    current_measure.rhythm_elements.push(RhythmElement::Chord(chord.clone()));
                     current_measure.chords.push(chord);
                     current_measure_beats += chord_beats;
 
@@ -1501,9 +1820,9 @@ impl Chart {
             }
         }
 
-        // Add last measure if it has chords
+        // Add last measure if it has content
         // (If we just processed a separator, the empty measure was already pushed)
-        if !current_measure.chords.is_empty() {
+        if !current_measure.chords.is_empty() || !current_measure.rhythm_elements.is_empty() {
             measures.push(current_measure);
         }
 
@@ -1625,7 +1944,8 @@ impl Chart {
         let (push_modifier, token_after_push) = Self::extract_leading_push_modifiers(token_clean);
 
         // Check for pull notation (trailing apostrophes with optional triplet/tuplet: C', Em'', C't, C':5)
-        let (token_after_pull, pull_modifier) = Self::extract_trailing_pull_modifiers(token_after_push);
+        let (token_after_pull, pull_modifier) =
+            Self::extract_trailing_pull_modifiers(token_after_push);
 
         // Check for slash chord (e.g., "1/3", "Cmaj7/E", "g/b")
         // But NOT rhythm slashes (e.g., "g//", "C///")
@@ -1656,16 +1976,31 @@ impl Chart {
         // But we pass the full chord_part to process_chord so it can detect explicit quality
         let root_from_token = Self::extract_root_from_token(chord_part);
 
+        // For slash chords with just a root (no explicit quality), don't recall from memory.
+        // Writing "F/C" means "F major over C bass", not "whatever F I used before with C bass".
+        let is_slash_chord_with_just_root = chord.bass.is_some()
+            && chord_part.len() <= root_from_token.len() + 1; // +1 for possible accidental
+
         // Use ChordMemory to process this chord and get the appropriate full symbol
         // Pass chord_part (which includes quality like "2maj") so it can detect explicit quality
-        let full_symbol = self.chord_memory.process_chord(
-            &root_from_token,
-            chord_part, // Use chord_part (after apostrophes stripped) - includes "2maj" not just "2"
-            &chord.normalized,
-            section_type,
-            is_override,
-            self.current_key.as_ref(),
-        );
+        let mut full_symbol = if is_slash_chord_with_just_root {
+            // Slash chord with just root - use the normalized symbol, don't recall from memory
+            chord.normalized.clone()
+        } else {
+            self.chord_memory.process_chord(
+                &root_from_token,
+                chord_part, // Use chord_part (after apostrophes stripped) - includes "2maj" not just "2"
+                &chord.normalized,
+                section_type,
+                is_override,
+                self.current_key.as_ref(),
+            )
+        };
+
+        // Append bass note to full_symbol for slash chords (e.g., "F" + "/C" -> "F/C")
+        if let Some(bass) = &chord.bass {
+            full_symbol = format!("{}/{}", full_symbol, bass);
+        }
 
         // Get rhythm and duration (push/pull will be applied later)
         let rhythm = chord.duration.clone().unwrap_or(ChordRhythm::Default);
@@ -1675,9 +2010,13 @@ impl Chart {
         // Use settings.push_mode as the default base, but explicit 't' or ':N' modifiers override it
         let default_push_mode = self.settings.push_mode;
         let push_pull_info = if push_modifier.is_present() {
-            push_modifier.to_amount(default_push_mode).map(|amt| (true, amt))
+            push_modifier
+                .to_amount(default_push_mode)
+                .map(|amt| (true, amt))
         } else if pull_modifier.is_present() {
-            pull_modifier.to_amount(default_push_mode).map(|amt| (false, amt))
+            pull_modifier
+                .to_amount(default_push_mode)
+                .map(|amt| (false, amt))
         } else {
             None
         };
@@ -1688,13 +2027,18 @@ impl Chart {
         let root_notation =
             RootNotation::from_string(&root_from_token).unwrap_or_else(|| chord.root.clone());
 
+        // Store original token without auto-assigned duration suffix
+        // Auto-duration adds _1, _2, _4, _8, _16 to tokens, but we want to preserve
+        // whether the USER explicitly specified a duration
+        let original_token = Self::strip_auto_duration_suffix(token);
+
         // Create chord instance
         let mut instance = ChordInstance::new(
             root_notation,
             full_symbol,
             chord,
             rhythm,
-            token.to_string(),
+            original_token,
             duration,
             AbsolutePosition::at_beginning(), // Will be calculated in post-processing
         )
@@ -1793,6 +2137,7 @@ impl Chart {
                                     duration: crate::chord::LilySyntax::Whole,
                                     dotted: false,
                                     multiplier: None,
+                                    triplet: false,
                                 },
                                 "s".to_string(),
                                 space_duration,
@@ -2697,5 +3042,81 @@ G_2 C | D
         assert_eq!(stored_span.len, 5);
         assert_eq!(stored_span.line, 3);
         assert_eq!(stored_span.column, 8);
+    }
+
+    #[test]
+    fn test_dot_repeat_inherits_duration() {
+        // Dot repeat (.) should inherit the source chord's duration
+        // "F/C ." should be 2 full measures, not 2 beats in one measure
+        let input = r#"
+Dot Repeat Test
+120bpm 4/4 #C
+
+VS
+F/C . | Cm .
+"#;
+
+        let chart = Chart::parse(input).expect("Failed to parse chart");
+
+        let section = &chart.sections[0];
+        let measures = section.measures();
+        let time_sig = chart.time_signature.unwrap();
+
+        // Should have 4 measures: F/C, F/C repeat, Cm, Cm repeat
+        assert_eq!(
+            measures.len(), 4,
+            "Expected 4 measures (F/C, ., Cm, .), got {}. Chords per measure: {:?}",
+            measures.len(),
+            measures.iter().map(|m| m.chords.len()).collect::<Vec<_>>()
+        );
+
+        // Each measure should have 1 chord of 4 beats
+        for (i, measure) in measures.iter().enumerate() {
+            assert_eq!(
+                measure.chords.len(), 1,
+                "Measure {} should have 1 chord, got {}",
+                i, measure.chords.len()
+            );
+            let beats = measure.chords[0].duration.to_beats(time_sig);
+            assert!(
+                (beats - 4.0).abs() < 0.001,
+                "Measure {} chord should be 4 beats, got {}",
+                i, beats
+            );
+        }
+
+        // Verify chord symbols
+        assert_eq!(measures[0].chords[0].full_symbol, "F/C");
+        assert_eq!(measures[1].chords[0].full_symbol, "F/C"); // repeat
+        assert_eq!(measures[2].chords[0].full_symbol, "Cm");
+        assert_eq!(measures[3].chords[0].full_symbol, "Cm"); // repeat
+    }
+
+    #[test]
+    fn test_dot_repeat_does_not_inherit_push() {
+        // Dot repeat should NOT inherit push/pull from source chord
+        let input = r#"
+Dot Repeat Push Test
+120bpm 4/4 #C
+
+VS
+'F/C . | Cm
+"#;
+
+        let chart = Chart::parse(input).expect("Failed to parse chart");
+
+        let section = &chart.sections[0];
+        let measures = section.measures();
+
+        // Find the F/C chords
+        let f_c_push = measures.iter()
+            .flat_map(|m| &m.chords)
+            .find(|c| c.full_symbol == "F/C" && c.push_pull.is_some());
+        let f_c_repeat = measures.iter()
+            .flat_map(|m| &m.chords)
+            .find(|c| c.full_symbol == "F/C" && c.push_pull.is_none());
+
+        assert!(f_c_push.is_some(), "Should have pushed F/C");
+        assert!(f_c_repeat.is_some(), "Should have F/C repeat without push");
     }
 }

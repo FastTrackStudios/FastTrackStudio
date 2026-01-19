@@ -45,3 +45,9 @@
 	path = libs/vendor/baseview
 	url = https://github.com/Codys-Wright/baseview.git
 	branch = upgrade_rwh
+[submodule "libs/reference/iroh"]
+	path = libs/reference/iroh
+	url = https://github.com/n0-computer/iroh.git
+[submodule "libs/reference/iroh-examples"]
+	path = libs/reference/iroh-examples
+	url = https://github.com/n0-computer/iroh-examples.git

@@ -11,20 +11,20 @@ use crate::layout::segment::SegmentType;
 use crate::layout::segment_list::SegmentList;
 use crate::layout::text_metrics::TextFontMetrics;
 use crate::layout::tlayout::{
-    layout_clef, layout_harmony, layout_margin_label, layout_rest, layout_tie, layout_timesig,
-    parse_chord, rehearsal_themes, BarlineType, ClefParams, ClefType, HarmonyParams, HarmonyStyle,
-    MarginLabelParams, NoteHeadType, RestDuration, RestParams, SlurDirection, SlurEndpoint,
-    SlurTieConfig, TimeSigParams, TimeSigType,
+    BarlineType, ClefParams, ClefType, HarmonyParams, HarmonyStyle, MarginLabelParams,
+    NoteHeadType, RestDuration, RestParams, SlurDirection, SlurEndpoint, SlurTieConfig,
+    TimeSigParams, TimeSigType, layout_clef, layout_harmony, layout_margin_label, layout_rest,
+    layout_tie, layout_timesig, parse_chord, rehearsal_themes,
 };
 use crate::model::{DurationKind, NoteHead};
-use crate::notation::{Duration, MeasureBuilder, MeasureScene, TupletRatio, TupletSpec};
+use crate::notation::{Duration, MeasureBuilder, MeasureScene, RhythmEntry, TupletRatio, TupletSpec};
 use crate::scene::id::{ElementType, SemanticId};
-use crate::scene::node::{metadata_keys, SceneNode};
+use crate::scene::node::{SceneNode, metadata_keys};
 use crate::scene::paint::{FontStyle, FontWeight, PaintCommand, TextAnchor};
 use crate::style::MStyle;
-use keyflow::chord::PushPullBase;
+use keyflow::chart::types::{Measure, RhythmElement};
+use keyflow::chord::{ChordRhythm, LilySyntax, PushPullBase};
 use keyflow::sections::SectionType;
-use keyflow::chart::types::Measure;
 use keyflow::{Chart, ChartPosition, SourceLink};
 use kurbo::{Affine, Rect};
 use vello::peniko::Color;
@@ -33,14 +33,9 @@ use vello::peniko::Color;
 #[derive(Debug, Clone)]
 pub enum LayoutMode {
     /// Paginated layout with discrete pages and page breaks.
-    Paginated {
-        page_width: f64,
-        page_height: f64,
-    },
+    Paginated { page_width: f64, page_height: f64 },
     /// Continuous scroll with unbounded vertical layout.
-    ContinuousScroll {
-        width: f64,
-    },
+    ContinuousScroll { width: f64 },
 }
 
 impl Default for LayoutMode {
@@ -111,7 +106,8 @@ impl BeatPosition {
         if self.time_end <= self.time_start {
             return self.x;
         }
-        let progress = ((time - self.time_start) / (self.time_end - self.time_start)).clamp(0.0, 1.0);
+        let progress =
+            ((time - self.time_start) / (self.time_end - self.time_start)).clamp(0.0, 1.0);
         self.x + self.width * progress
     }
 
@@ -122,7 +118,8 @@ impl BeatPosition {
         if self.duration_ticks <= 0 {
             return self.x;
         }
-        let progress = ((tick - self.absolute_tick) as f64 / self.duration_ticks as f64).clamp(0.0, 1.0);
+        let progress =
+            ((tick - self.absolute_tick) as f64 / self.duration_ticks as f64).clamp(0.0, 1.0);
         self.x + self.width * progress
     }
 }
@@ -172,7 +169,10 @@ impl ChartLayoutResult {
 
     /// Get layout metrics for all pages.
     pub fn all_page_metrics(&self) -> Vec<PageLayoutMetrics> {
-        self.pages.iter().map(PageLayoutMetrics::from_page).collect()
+        self.pages
+            .iter()
+            .map(PageLayoutMetrics::from_page)
+            .collect()
     }
 
     /// Find the beat position at a given time.
@@ -182,7 +182,9 @@ impl ChartLayoutResult {
     pub fn beat_at_time(&self, time: f64) -> Option<&BeatPosition> {
         // Binary search for the beat containing this time
         let idx = self.beat_positions.partition_point(|b| b.time_end <= time);
-        self.beat_positions.get(idx).filter(|b| b.contains_time(time))
+        self.beat_positions
+            .get(idx)
+            .filter(|b| b.contains_time(time))
     }
 
     /// Get the interpolated X position and page for a given time.
@@ -210,8 +212,12 @@ impl ChartLayoutResult {
     #[must_use]
     pub fn beat_at_tick(&self, tick: i64) -> Option<&BeatPosition> {
         // Binary search for the beat containing this tick
-        let idx = self.beat_positions.partition_point(|b| b.absolute_tick + b.duration_ticks as i64 <= tick);
-        self.beat_positions.get(idx).filter(|b| b.contains_tick(tick))
+        let idx = self
+            .beat_positions
+            .partition_point(|b| b.absolute_tick + b.duration_ticks as i64 <= tick);
+        self.beat_positions
+            .get(idx)
+            .filter(|b| b.contains_tick(tick))
     }
 
     /// Get the interpolated X position and page for a given absolute tick.
@@ -280,7 +286,8 @@ impl PageLayoutMetrics {
 
         // Calculate inter-system spacing
         let inter_system_spacing: Vec<f64> = if system_count > 1 {
-            page.systems.windows(2)
+            page.systems
+                .windows(2)
                 .map(|pair| {
                     let first_bottom = pair[0].y + pair[0].height;
                     let second_top = pair[1].y;
@@ -305,11 +312,12 @@ impl PageLayoutMetrics {
             page.height - page.margins.top - page.margins.bottom
         };
 
-        let content_height = if let (Some(first), Some(last)) = (page.systems.first(), page.systems.last()) {
-            (last.y + last.height) - first.y
-        } else {
-            0.0
-        };
+        let content_height =
+            if let (Some(first), Some(last)) = (page.systems.first(), page.systems.last()) {
+                (last.y + last.height) - first.y
+            } else {
+                0.0
+            };
 
         let available_height = page.height - page.margins.top - page.margins.bottom;
 
@@ -331,9 +339,14 @@ impl PageLayoutMetrics {
     /// Print a debug summary of the page layout (similar to LilyPond debug mode).
     pub fn print_debug(&self) {
         println!("=== Page {} Layout Metrics ===", self.page_number);
-        println!("Page size: {:.1} × {:.1} points", self.page_width, self.page_height);
-        println!("Margins: top={:.1}, bottom={:.1}, left={:.1}, right={:.1}",
-            self.margins.top, self.margins.bottom, self.margins.left, self.margins.right);
+        println!(
+            "Page size: {:.1} × {:.1} points",
+            self.page_width, self.page_height
+        );
+        println!(
+            "Margins: top={:.1}, bottom={:.1}, left={:.1}, right={:.1}",
+            self.margins.top, self.margins.bottom, self.margins.left, self.margins.right
+        );
         println!("Available height: {:.1} points", self.available_height);
         println!("Systems: {}", self.system_count);
         println!();
@@ -354,10 +367,19 @@ impl PageLayoutMetrics {
             println!();
         }
 
-        println!("Top margin to first system: {:.1} points", self.top_margin_to_first_system);
-        println!("Last system to bottom: {:.1} points", self.last_system_to_bottom);
+        println!(
+            "Top margin to first system: {:.1} points",
+            self.top_margin_to_first_system
+        );
+        println!(
+            "Last system to bottom: {:.1} points",
+            self.last_system_to_bottom
+        );
         println!("Total content height: {:.1} points", self.content_height);
-        println!("Remaining space: {:.1} points", self.available_height - self.content_height);
+        println!(
+            "Remaining space: {:.1} points",
+            self.available_height - self.content_height
+        );
         println!();
     }
 
@@ -372,13 +394,19 @@ impl PageLayoutMetrics {
             if spacing < min_system_spacing {
                 warnings.push(format!(
                     "Systems {} and {} are too close: {:.1} points (min: {:.1})",
-                    i + 1, i + 2, spacing, min_system_spacing
+                    i + 1,
+                    i + 2,
+                    spacing,
+                    min_system_spacing
                 ));
             }
             if spacing > max_system_spacing {
                 warnings.push(format!(
                     "Systems {} and {} are too far apart: {:.1} points (max: {:.1})",
-                    i + 1, i + 2, spacing, max_system_spacing
+                    i + 1,
+                    i + 2,
+                    spacing,
+                    max_system_spacing
                 ));
             }
         }
@@ -433,7 +461,11 @@ impl MelodyNoteSegment {
     pub fn to_duration(&self) -> Duration {
         // Map beats to duration (approximating to nearest standard duration)
         // For dotted notes, divide by 1.5 to get the base duration
-        let base_beats = if self.dotted { self.beats / 1.5 } else { self.beats };
+        let base_beats = if self.dotted {
+            self.beats / 1.5
+        } else {
+            self.beats
+        };
 
         let base_duration = match base_beats {
             b if b >= 3.5 => Duration::Whole,
@@ -592,6 +624,125 @@ pub fn expand_melodies_across_measures(
 
 // endregion: --- Melody Spillover Types
 
+// region: --- Push Spillback Types
+
+/// Represents a chord that pushes back from a measure into the previous measure.
+///
+/// When a chord has push notation (e.g., `'F/C` with triplet push), it anticipates
+/// the beat and starts before its nominal position. If the push crosses a barline,
+/// the chord "spills back" into the previous measure.
+#[derive(Debug, Clone)]
+pub struct PushSpillback {
+    /// The chord symbol that spills back
+    pub chord_symbol: String,
+    /// The beat position within the affected measure (typically last beat)
+    pub beat_position: usize,
+    /// The push amount (how much earlier the chord starts)
+    pub push_base: PushPullBase,
+    /// Push level (1 = eighth, 2 = sixteenth triplet, etc.)
+    pub push_level: u8,
+}
+
+/// Detects if a section starts with a pushed chord that spills back.
+///
+/// Returns the spillback info if the first chord of the section is pushed,
+/// or None if there's no cross-section spillback.
+pub fn detect_section_start_spillback(
+    section_measures: &[keyflow::chart::types::Measure],
+) -> Option<PushSpillback> {
+    if let Some(first_measure) = section_measures.first() {
+        // Find the first chord that has push_pull set (skip space/rest placeholders)
+        // The parser may insert space placeholders at beat 1 for pushed chords
+        for chord in &first_measure.chords {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[detect-section-spillback] Checking chord: '{}', push_pull: {:?}",
+                chord.full_symbol, chord.push_pull
+            );
+
+            // Skip space/rest placeholders
+            if chord.full_symbol == "s" || chord.full_symbol == "r" || chord.full_symbol.is_empty()
+            {
+                continue;
+            }
+
+            if let Some((is_push, amount)) = &chord.push_pull {
+                if *is_push {
+                    // This chord is pushed - spills back to previous section
+                    #[cfg(debug_assertions)]
+                    eprintln!(
+                        "[detect-section-spillback] Found pushed chord: '{}'",
+                        chord.full_symbol
+                    );
+
+                    return Some(PushSpillback {
+                        chord_symbol: chord.full_symbol.clone(),
+                        beat_position: 3, // Last beat of 4/4, will be adjusted based on time sig
+                        push_base: amount.base.clone(),
+                        push_level: amount.level,
+                    });
+                }
+            }
+
+            // If we found a non-space chord without push_pull, no spillback
+            break;
+        }
+    }
+    None
+}
+
+/// Detects push spillbacks across measure boundaries in a section.
+///
+/// Scans all measures for chords with push notation that cross barlines,
+/// and returns a map from measure index to the spillback chords that affect it.
+pub fn detect_push_spillbacks(
+    section_measures: &[keyflow::chart::types::Measure],
+) -> std::collections::HashMap<usize, Vec<PushSpillback>> {
+    use std::collections::HashMap;
+
+    let mut result: HashMap<usize, Vec<PushSpillback>> = HashMap::new();
+
+    for (measure_idx, measure) in section_measures.iter().enumerate() {
+        // Check if this measure starts with a pushed chord
+        if let Some(first_chord) = measure.chords.first() {
+            if let Some((is_push, amount)) = &first_chord.push_pull {
+                if *is_push {
+                    // This chord pushes back - affects the PREVIOUS measure
+                    if measure_idx > 0 {
+                        let prev_measure_idx = measure_idx - 1;
+
+                        // Get the time signature of the previous measure to find last beat
+                        let prev_time_sig = section_measures
+                            .get(prev_measure_idx)
+                            .map(|m| m.time_signature)
+                            .unwrap_or((4, 4));
+                        let last_beat = (prev_time_sig.0 as usize).saturating_sub(1);
+
+                        let spillback = PushSpillback {
+                            chord_symbol: first_chord.full_symbol.clone(),
+                            beat_position: last_beat,
+                            push_base: amount.base.clone(),
+                            push_level: amount.level,
+                        };
+
+                        result.entry(prev_measure_idx).or_default().push(spillback);
+
+                        #[cfg(debug_assertions)]
+                        eprintln!(
+                            "[push-spillback] Measure {} chord '{}' spills back to measure {} beat {}",
+                            measure_idx, first_chord.full_symbol, prev_measure_idx, last_beat
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
+// endregion: --- Push Spillback Types
+
 /// Chart layout engine configuration.
 #[derive(Debug, Clone)]
 pub struct ChartLayoutConfig {
@@ -644,10 +795,10 @@ impl Default for ChartLayoutConfig {
             min_measure_width: 100.0,
             harmony_style: HarmonyStyle::musejazz(),
             hide_repeated_chords: true, // Default to hiding repeated chords
-            use_stems: false, // Default to stemless slash notation
+            use_stems: false,           // Default to stemless slash notation
             show_measure_numbers: true, // Default to showing measure numbers
-            measure_number_offset: 0, // Default to no offset (measure 1 = 1)
-            count_in_measures: 0, // Default to no count-in
+            measure_number_offset: 0,   // Default to no offset (measure 1 = 1)
+            count_in_measures: 0,       // Default to no count-in
         }
     }
 }
@@ -701,12 +852,11 @@ impl ChartLayoutEngine {
     /// Layout a chart in the specified mode.
     pub fn layout_chart(&self, chart: &Chart, mode: &LayoutMode) -> ChartLayoutResult {
         match mode {
-            LayoutMode::Paginated { page_width, page_height } => {
-                self.layout_paginated(chart, *page_width, *page_height)
-            }
-            LayoutMode::ContinuousScroll { width } => {
-                self.layout_continuous(chart, *width)
-            }
+            LayoutMode::Paginated {
+                page_width,
+                page_height,
+            } => self.layout_paginated(chart, *page_width, *page_height),
+            LayoutMode::ContinuousScroll { width } => self.layout_continuous(chart, *width),
         }
     }
 
@@ -742,7 +892,10 @@ impl ChartLayoutEngine {
         let text_metrics = TextFontMetrics::new(self.text_font_data.clone());
         let symbol_metrics = TextFontMetrics::new(self.symbol_font_data.clone());
 
-        let harmony_style = self.config.harmony_style.clone()
+        let harmony_style = self
+            .config
+            .harmony_style
+            .clone()
             .with_text_font_metrics(text_metrics.clone())
             .with_symbol_font_metrics(symbol_metrics.clone());
 
@@ -770,9 +923,24 @@ impl ChartLayoutEngine {
         let seconds_per_quarter = 60.0 / tempo_bpm;
         let seconds_per_tick = seconds_per_quarter / 480.0;
 
+        // Get time signature for count-in duration calculation
+        let time_signature = chart
+            .time_signature
+            .map(|ts| (ts.numerator as u8, ts.denominator as u8))
+            .unwrap_or((4u8, 4u8));
+
+        // Calculate count-in duration in ticks and seconds
+        // Count-in should have NEGATIVE time values so that:
+        // - Count-in measures have negative time (before SONGSTART)
+        // - Real measures start at time 0 (at SONGSTART)
+        let ticks_per_measure = time_signature.0 as i64 * (1920i64 / time_signature.1 as i64);
+        let count_in_ticks = self.config.count_in_measures as i64 * ticks_per_measure;
+        let count_in_seconds = count_in_ticks as f64 * seconds_per_tick;
+
         // Track cumulative time and ticks through the song
-        let mut cumulative_time: f64 = 0.0;
-        let mut cumulative_ticks: i64 = 0;
+        // Start at negative offset for count-in so real measures begin at 0
+        let mut cumulative_time: f64 = -count_in_seconds;
+        let mut cumulative_ticks: i64 = -count_in_ticks;
 
         // Calculate page offset for multi-page rendering
         let page_offset_x = 20.0;
@@ -805,14 +973,49 @@ impl ChartLayoutEngine {
             previous_chord_symbol = None;
 
             // Preprocess melodies to handle cross-measure spillover
-            let time_signature = chart.time_signature
-                .map(|ts| (ts.numerator as u8, ts.denominator as u8))
-                .unwrap_or((4u8, 4u8));
             let beats_per_measure = time_signature.0 as f64;
-            let melody_data_map = expand_melodies_across_measures(
-                chart_section.measures(),
-                beats_per_measure,
-            );
+            let melody_data_map =
+                expand_melodies_across_measures(chart_section.measures(), beats_per_measure);
+
+            // Detect push spillbacks (chords from next measure that push back)
+            let mut push_spillback_map = detect_push_spillbacks(chart_section.measures());
+
+            // Check for cross-section spillback: if the NEXT section starts with a pushed chord,
+            // it spills back to THIS section's last measure
+            let next_non_compact_section = chart
+                .sections
+                .iter()
+                .skip(section_idx + 1)
+                .find(|s| {
+                    !s.section.section_type.is_compact()
+                        && !matches!(s.section.section_type, SectionType::End)
+                });
+            if let Some(next_section) = next_non_compact_section {
+                if let Some(mut spillback) = detect_section_start_spillback(next_section.measures())
+                {
+                    // Adjust beat position based on this section's last measure time signature
+                    if let Some(last_measure) = chart_section.measures().last() {
+                        let ts = last_measure.time_signature;
+                        spillback.beat_position = (ts.0 as usize).saturating_sub(1);
+                    }
+                    let last_measure_idx = chart_section.measures().len().saturating_sub(1);
+
+                    #[cfg(debug_assertions)]
+                    eprintln!(
+                        "[cross-section-spillback] Section {} -> {} spillback: '{}' at measure {} beat {}",
+                        chart_section.section.section_type.full_name(),
+                        next_section.section.section_type.full_name(),
+                        spillback.chord_symbol,
+                        last_measure_idx,
+                        spillback.beat_position
+                    );
+
+                    push_spillback_map
+                        .entry(last_measure_idx)
+                        .or_default()
+                        .push(spillback);
+                }
+            }
 
             // Group measures into systems
             let systems = self.group_measures_into_systems(chart_section.measures(), content_width);
@@ -842,7 +1045,13 @@ impl ChartLayoutEngine {
 
                 // Add page background if this is first system on page
                 if current_page_systems.is_empty() {
-                    self.add_page_background(&mut root, page_x, page_offset_y, page_width, page_height);
+                    self.add_page_background(
+                        &mut root,
+                        page_x,
+                        page_offset_y,
+                        page_width,
+                        page_height,
+                    );
                     self.add_page_footer(&mut root, page_x, page_offset_y, page_width, page_height);
 
                     // Add title header on first page only
@@ -878,7 +1087,7 @@ impl ChartLayoutEngine {
                 };
                 let prefix_width = clef_width + time_sig_width;
 
-                // Calculate measure width - use natural width for short systems
+                // Calculate measure width using spring-based distribution
                 let measures_area_width = content_width - prefix_width;
                 let num_measures = measure_indices.len();
                 let max_measures = self.config.max_measures_per_system;
@@ -896,25 +1105,56 @@ impl ChartLayoutEngine {
                 let base_measure_width = measures_area_width / max_measures as f64;
 
                 // For width calculation, count-in measures count as fractional
-                let effective_measure_count = num_count_in as f64 * compact_scale + num_measures as f64;
+                let effective_measure_count =
+                    num_count_in as f64 * compact_scale + num_measures as f64;
                 let is_short_system = effective_measure_count < max_measures as f64;
 
-                // Regular measure width
-                let measure_width = base_measure_width;
-                // Count-in measure width (compact)
-                let count_in_width = base_measure_width * compact_scale;
+                // Calculate content weights for spring-based distribution
+                let measure_weights: Vec<f64> = measure_indices
+                    .iter()
+                    .filter_map(|&idx| chart_section.measures().get(idx))
+                    .map(|m| self.estimate_measure_content_weight(m, &text_metrics))
+                    .collect();
+
+                // Distribute width proportionally using spring physics
+                // For full systems, distribute the entire measures_area_width
+                // For short systems, distribute only the proportional amount
+                let total_width_to_distribute = if is_short_system {
+                    // Short system: only use width proportional to measure count
+                    num_count_in as f64 * base_measure_width * compact_scale
+                        + num_measures as f64 * base_measure_width
+                } else {
+                    measures_area_width
+                };
+
+                let distributed_widths = self.distribute_measure_widths(
+                    &measure_weights,
+                    num_count_in,
+                    total_width_to_distribute,
+                    compact_scale,
+                    base_measure_width,
+                );
+
+                // Count-in measure width (compact) - from distribution
+                let count_in_width = if num_count_in > 0 {
+                    distributed_widths.first().copied().unwrap_or(base_measure_width * compact_scale)
+                } else {
+                    base_measure_width * compact_scale
+                };
 
                 // Calculate actual system width
                 let actual_system_width = if is_short_system {
-                    prefix_width + (num_count_in as f64 * count_in_width) + (num_measures as f64 * measure_width)
+                    prefix_width + total_width_to_distribute
                 } else {
                     content_width
                 };
 
                 // Draw staff lines (shortened for short systems)
-                root.add_child(SceneNode::anonymous_leaf(
-                    self.draw_staff_lines(content_x, staff_y, actual_system_width),
-                ));
+                root.add_child(SceneNode::anonymous_leaf(self.draw_staff_lines(
+                    content_x,
+                    staff_y,
+                    actual_system_width,
+                )));
 
                 let chord_y = staff_y - 8.0; // Above staff
 
@@ -932,7 +1172,9 @@ impl ChartLayoutEngine {
                         id_counter,
                     );
                     id_counter += 1;
-                    section_label.metadata.insert("page".to_string(), page_number.to_string());
+                    section_label
+                        .metadata
+                        .insert("page".to_string(), page_number.to_string());
                     root.add_child(section_label);
                 }
 
@@ -947,39 +1189,44 @@ impl ChartLayoutEngine {
                     id_counter += 1;
                     let (_, mut clef_node) = layout_clef(&clef_params, &ctx);
                     // Position clef on staff (middle line = 2 spatiums from top)
-                    clef_node.transform = Affine::translate((
-                        prefix_x,
-                        staff_y + 2.0 * self.config.spatium,
-                    ));
-                    clef_node.metadata.insert("page".to_string(), page_number.to_string());
+                    clef_node.transform =
+                        Affine::translate((prefix_x, staff_y + 2.0 * self.config.spatium));
+                    clef_node
+                        .metadata
+                        .insert("page".to_string(), page_number.to_string());
                     root.add_child(clef_node);
                     prefix_x += clef_width;
                 }
 
                 // Render time signature on first system
                 if include_time_sig {
-                    let ts = chart.time_signature
+                    let ts = chart
+                        .time_signature
                         .map(|ts| (ts.numerator as u8, ts.denominator as u8))
                         .unwrap_or((4u8, 4u8));
                     let ts_params = TimeSigParams {
                         id: id_counter,
-                        sig_type: TimeSigType::Numeric { numerator: ts.0, denominator: ts.1 },
+                        sig_type: TimeSigType::Numeric {
+                            numerator: ts.0,
+                            denominator: ts.1,
+                        },
                         ..Default::default()
                     };
                     id_counter += 1;
                     let (_, mut ts_node) = layout_timesig(&ts_params, &ctx);
-                    ts_node.transform = Affine::translate((
-                        prefix_x,
-                        staff_y + 2.0 * self.config.spatium,
-                    ));
-                    ts_node.metadata.insert("page".to_string(), page_number.to_string());
+                    ts_node.transform =
+                        Affine::translate((prefix_x, staff_y + 2.0 * self.config.spatium));
+                    ts_node
+                        .metadata
+                        .insert("page".to_string(), page_number.to_string());
                     root.add_child(ts_node);
                     prefix_x += time_sig_width;
                 }
 
                 // Start measures after prefix
                 let mut measure_x = content_x + prefix_width;
-                let time_signature = chart.time_signature
+                let time_signature = chart
+                    .time_signature
                     .map(|ts| (ts.numerator as u8, ts.denominator as u8))
                     .unwrap_or((4u8, 4u8));
 
@@ -990,6 +1237,7 @@ impl ChartLayoutEngine {
                     let count_in_result = self.layout_measure_compact(
                         &count_in_measure,
                         None, // no melody
+                        None, // no spillbacks for count-in
                         count_in_width,
                         false, // clef rendered separately
                         false, // time sig rendered separately
@@ -999,16 +1247,17 @@ impl ChartLayoutEngine {
                     );
                     id_counter += 10;
 
-                    let mut count_in_container = SceneNode::group(
-                        SemanticId::new(ElementType::Measure, id_counter),
-                    );
+                    let mut count_in_container =
+                        SceneNode::group(SemanticId::new(ElementType::Measure, id_counter));
                     id_counter += 1;
-                    count_in_container.transform = Affine::translate((
-                        measure_x,
-                        staff_y + 2.0 * self.config.spatium,
-                    ));
-                    count_in_container.metadata.insert("page".to_string(), page_number.to_string());
-                    count_in_container.metadata.insert("count_in".to_string(), "true".to_string());
+                    count_in_container.transform =
+                        Affine::translate((measure_x, staff_y + 2.0 * self.config.spatium));
+                    count_in_container
+                        .metadata
+                        .insert("page".to_string(), page_number.to_string());
+                    count_in_container
+                        .metadata
+                        .insert("count_in".to_string(), "true".to_string());
                     count_in_container.add_child(count_in_result.scene);
                     root.add_child(count_in_container);
 
@@ -1030,12 +1279,15 @@ impl ChartLayoutEngine {
                     let count_in_measure_time_start = cumulative_time;
                     let count_in_measure_tick_start = cumulative_ticks;
 
-                    for (beat_idx, segment) in count_in_result.segments
+                    for (beat_idx, segment) in count_in_result
+                        .segments
                         .iter_type(SegmentType::CHORD_REST)
                         .enumerate()
                     {
-                        let time_start = count_in_measure_time_start + (segment.tick as f64 * seconds_per_tick);
-                        let time_end = count_in_measure_time_start + ((segment.tick + segment.ticks) as f64 * seconds_per_tick);
+                        let time_start =
+                            count_in_measure_time_start + (segment.tick as f64 * seconds_per_tick);
+                        let time_end = count_in_measure_time_start
+                            + ((segment.tick + segment.ticks) as f64 * seconds_per_tick);
                         let absolute_tick = count_in_measure_tick_start + segment.tick as i64;
 
                         beat_positions.push(BeatPosition {
@@ -1057,7 +1309,9 @@ impl ChartLayoutEngine {
                         });
 
                         // Render count text below slashes
-                        if let Some(count_text) = self.get_count_in_text(count_in_display_num, beat_idx, num_beats) {
+                        if let Some(count_text) =
+                            self.get_count_in_text(count_in_display_num, beat_idx, num_beats)
+                        {
                             let count_node = self.create_count_text(
                                 &count_text,
                                 measure_x + segment.x,
@@ -1071,7 +1325,8 @@ impl ChartLayoutEngine {
                     }
 
                     // Update cumulative time/ticks for count-in measures
-                    let measure_duration_ticks = time_signature.0 as i32 * (1920 / time_signature.1 as i32);
+                    let measure_duration_ticks =
+                        time_signature.0 as i32 * (1920 / time_signature.1 as i32);
                     cumulative_time += measure_duration_ticks as f64 * seconds_per_tick;
                     cumulative_ticks += measure_duration_ticks as i64;
                     global_measure_index += 1;
@@ -1079,13 +1334,11 @@ impl ChartLayoutEngine {
                     measure_x += count_in_width;
 
                     // Barline after count-in measure
-                    let mut barline = self.draw_barline(
-                        measure_x,
-                        staff_y,
-                        staff_height,
-                        BarlineType::Single,
-                    );
-                    barline.metadata.insert("page".to_string(), page_number.to_string());
+                    let mut barline =
+                        self.draw_barline(measure_x, staff_y, staff_height, BarlineType::Single);
+                    barline
+                        .metadata
+                        .insert("page".to_string(), page_number.to_string());
                     root.add_child(barline);
                 }
 
@@ -1094,11 +1347,21 @@ impl ChartLayoutEngine {
                         // Get preprocessed melody data for this measure (handles spillover)
                         let melody_data = melody_data_map.get(&measure_idx);
 
+                        // Get distributed width for this measure (skip count-in widths)
+                        let this_measure_width = distributed_widths
+                            .get(num_count_in + local_measure_idx)
+                            .copied()
+                            .unwrap_or(base_measure_width);
+
+                        // Get spillback chords for this measure (from next measure pushing back)
+                        let spillbacks = push_spillback_map.get(&measure_idx).map(|v| v.as_slice());
+
                         // Layout measure content (rhythm slashes) - no clef/time sig inside measure
                         let measure_result = self.layout_measure(
                             measure,
                             melody_data,
-                            measure_width,
+                            spillbacks,
+                            this_measure_width,
                             false, // clef rendered separately
                             false, // time sig rendered separately
                             time_signature,
@@ -1108,24 +1371,34 @@ impl ChartLayoutEngine {
                         id_counter += 10;
 
                         // Get ChordRest segment x-positions (already in points after spacing)
-                        let segment_positions: Vec<f64> = self.get_chord_rest_positions(&measure_result);
+                        let segment_positions: Vec<f64> =
+                            self.get_chord_rest_positions(&measure_result);
 
-                        let mut measure_container = SceneNode::group(
-                            SemanticId::new(ElementType::Measure, id_counter),
+                        // Debug: log segment positions
+                        eprintln!(
+                            "[segment-positions] section={} measure={} positions={:?}",
+                            chart_section.section.section_type.full_name(),
+                            measure_idx,
+                            segment_positions
                         );
+
+                        let mut measure_container =
+                            SceneNode::group(SemanticId::new(ElementType::Measure, id_counter));
                         id_counter += 1;
-                        measure_container.transform = Affine::translate((
-                            measure_x,
-                            staff_y + 2.0 * self.config.spatium,
-                        ));
-                        measure_container.metadata.insert("page".to_string(), page_number.to_string());
+                        measure_container.transform =
+                            Affine::translate((measure_x, staff_y + 2.0 * self.config.spatium));
+                        measure_container
+                            .metadata
+                            .insert("page".to_string(), page_number.to_string());
                         measure_container.add_child(measure_result.scene);
                         root.add_child(measure_container);
 
                         // Add measure number on first measure of each system
                         // Real measures start at 1, after count-in measures
                         if self.config.show_measure_numbers && local_measure_idx == 0 {
-                            let display_measure_num = (global_measure_index as i32) - self.config.count_in_measures as i32 + 1;
+                            let display_measure_num = (global_measure_index as i32)
+                                - self.config.count_in_measures as i32
+                                + 1;
                             let measure_num_node = self.create_measure_number(
                                 display_measure_num,
                                 measure_x,
@@ -1140,12 +1413,15 @@ impl ChartLayoutEngine {
                         let measure_time_start = cumulative_time;
                         let measure_tick_start = cumulative_ticks;
 
-                        for (beat_idx, segment) in measure_result.segments
+                        for (beat_idx, segment) in measure_result
+                            .segments
                             .iter_type(SegmentType::CHORD_REST)
                             .enumerate()
                         {
-                            let time_start = measure_time_start + (segment.tick as f64 * seconds_per_tick);
-                            let time_end = measure_time_start + ((segment.tick + segment.ticks) as f64 * seconds_per_tick);
+                            let time_start =
+                                measure_time_start + (segment.tick as f64 * seconds_per_tick);
+                            let time_end = measure_time_start
+                                + ((segment.tick + segment.ticks) as f64 * seconds_per_tick);
                             let absolute_tick = measure_tick_start + segment.tick as i64;
 
                             beat_positions.push(BeatPosition {
@@ -1168,22 +1444,55 @@ impl ChartLayoutEngine {
                         }
 
                         // Calculate measure duration in ticks and update cumulative time/ticks
-                        let measure_duration_ticks = time_signature.0 as i32 * (1920 / time_signature.1 as i32);
+                        let measure_duration_ticks =
+                            time_signature.0 as i32 * (1920 / time_signature.1 as i32);
                         cumulative_time += measure_duration_ticks as f64 * seconds_per_tick;
                         cumulative_ticks += measure_duration_ticks as i64;
                         global_measure_index += 1;
 
-                        // Layout chord symbols - align with actual rhythm slash positions
+                        // Layout chord symbols - align with actual rhythm element positions
+                        // When using rhythm_elements, find the correct segment index for each chord
                         for (chord_idx, chord) in measure.chords.iter().enumerate() {
                             // Skip space/rest placeholders (keyflow: "s" = empty space, "r" = explicit rest)
                             let current_symbol = &chord.full_symbol;
-                            if current_symbol == "s" || current_symbol == "r" || current_symbol.is_empty() {
+                            if current_symbol == "s"
+                                || current_symbol == "r"
+                                || current_symbol.is_empty()
+                            {
                                 continue;
                             }
 
+                            // Skip pushed chords that have spilled back to the previous measure
+                            // These are rendered as spillback chords in the previous measure
+                            // EXCEPTION: For the first measure of a section OR system/line, we SHOW
+                            // the pushed chord at beat 1 for clarity (rendered at both spillback AND beat 1)
+                            let is_first_measure_of_section = measure_idx == 0;
+                            let is_first_measure_of_system = local_measure_idx == 0;
+                            let is_at_boundary = is_first_measure_of_section || is_first_measure_of_system;
+
+                            // Check if this is the first real chord (non-space/rest) in the measure
+                            let is_first_real_chord = measure.chords.iter()
+                                .take(chord_idx)
+                                .all(|c| c.full_symbol == "s" || c.full_symbol == "r" || c.full_symbol.is_empty());
+
+                            if let Some((is_push, _)) = &chord.push_pull {
+                                if *is_push && is_first_real_chord && !is_at_boundary {
+                                    // First chord in measure that is pushed = spilled back
+                                    // It was already rendered in the previous measure/line
+                                    continue;
+                                }
+                            }
+
                             // Check if we should hide this chord (duplicate of previous)
+                            // EXCEPTION: Pushed chords at boundaries should show even if they match spillback
+                            let is_pushed_at_boundary = chord.push_pull.as_ref()
+                                .map_or(false, |(is_push, _)| *is_push)
+                                && is_first_real_chord
+                                && is_at_boundary;
+
                             let is_duplicate = self.config.hide_repeated_chords
-                                && previous_chord_symbol.as_ref() == Some(current_symbol);
+                                && previous_chord_symbol.as_ref() == Some(current_symbol)
+                                && !is_pushed_at_boundary;
 
                             // Update previous chord tracker
                             previous_chord_symbol = Some(current_symbol.clone());
@@ -1193,10 +1502,61 @@ impl ChartLayoutEngine {
                                 continue;
                             }
 
+                            // Find the correct segment position for this chord
+                            //
+                            // When the measure has explicit rhythm_elements (like triplet patterns),
+                            // find the chord's index in that list to align with the correct segment.
+                            // Otherwise fall back to chord_idx for simple measures.
+                            //
+                            // SPECIAL CASE: For pushed chords at the start of a section or system/line,
+                            // place them at segment 0 (beat 1) for visual clarity.
+                            // Note: is_first_real_chord and is_pushed_at_boundary were computed above
+
+                            let segment_idx = if is_pushed_at_boundary {
+                                // Force pushed chord to segment 0 (beat 1) at section/line start
+                                0
+                            } else if !measure.rhythm_elements.is_empty() {
+                                // Find this chord's index in the rhythm_elements list
+                                // to align with explicit rhythm (triplets, etc.)
+                                // Count how many chords we've seen before this one in rhythm_elements
+                                let mut seen_chord_count = 0;
+                                let mut found_idx = None;
+                                for (idx, elem) in measure.rhythm_elements.iter().enumerate() {
+                                    if let keyflow::chart::types::RhythmElement::Chord(c) = elem {
+                                        if seen_chord_count == chord_idx {
+                                            found_idx = Some(idx);
+                                            break;
+                                        }
+                                        seen_chord_count += 1;
+                                    }
+                                }
+                                found_idx.unwrap_or(chord_idx)
+                                    .min(segment_positions.len().saturating_sub(1))
+                            } else {
+                                // Simple measure - use chord_idx directly
+                                chord_idx.min(segment_positions.len().saturating_sub(1))
+                            };
+
+                            // Debug: log chord positioning
+                            eprintln!(
+                                "[chord-layout] section={} measure={} local={} chord_idx={} '{}' segment_idx={} rhythm_elems={} pushed={} boundary={}",
+                                chart_section.section.section_type.full_name(),
+                                measure_idx,
+                                local_measure_idx,
+                                chord_idx,
+                                current_symbol,
+                                segment_idx,
+                                measure.rhythm_elements.len(),
+                                chord.push_pull.is_some(),
+                                is_pushed_at_boundary
+                            );
+
                             let segment_x = segment_positions
-                                .get(chord_idx)
+                                .get(segment_idx)
                                 .copied()
-                                .unwrap_or_else(|| segment_positions.first().copied().unwrap_or(0.0));
+                                .unwrap_or_else(|| {
+                                    segment_positions.first().copied().unwrap_or(0.0)
+                                });
 
                             let chord_x = measure_x + segment_x;
 
@@ -1211,9 +1571,10 @@ impl ChartLayoutEngine {
                             chord_node.set_page(page_number);
                             chord_node.set_system(global_system_index as u32);
                             chord_node.set_measure(measure_idx as u32);
-                            chord_node.set_beat(chord_idx as u32);
+                            chord_node.set_beat(segment_idx as u32); // Use segment_idx for actual beat position
                             chord_node.set_element_type("chord");
-                            chord_node.set_section_type(&chart_section.section.section_type.full_name());
+                            chord_node
+                                .set_section_type(&chart_section.section.section_type.full_name());
 
                             // Build ChartPosition for musical coordinates
                             let chart_pos = ChartPosition::new(
@@ -1229,13 +1590,70 @@ impl ChartLayoutEngine {
 
                                 // Build full SourceLink for bidirectional mapping
                                 let source_link = SourceLink::new(*span, chart_pos.clone());
-                                chord_node.set_json_metadata(metadata_keys::SOURCE_LINK, &source_link);
+                                chord_node
+                                    .set_json_metadata(metadata_keys::SOURCE_LINK, &source_link);
                             }
 
                             root.add_child(chord_node);
                         }
 
-                        measure_x += measure_width;
+                        // Render spillback chord symbols (from next measure pushing back)
+                        if let Some(spillback_list) = spillbacks {
+                            for spillback in spillback_list {
+                                // Calculate segment index for spillback chord
+                                // For triplet push, the rhythm becomes [TripletQuarter, TripletEighth]
+                                // The chord goes on the eighth note (second element of the triplet group)
+                                // Segment index = beat_position + 1 (the eighth note of that beat's triplet)
+                                let segment_idx = spillback.beat_position + 1;
+
+                                // Debug: log spillback rendering
+                                eprintln!(
+                                    "[spillback-render] section={} measure={} '{}' beat_pos={} segment_idx={} positions_len={}",
+                                    chart_section.section.section_type.full_name(),
+                                    measure_idx,
+                                    spillback.chord_symbol,
+                                    spillback.beat_position,
+                                    segment_idx,
+                                    segment_positions.len()
+                                );
+
+                                let segment_x = segment_positions
+                                    .get(segment_idx)
+                                    .copied()
+                                    .unwrap_or_else(|| {
+                                        // Fallback: use last segment position if index out of bounds
+                                        segment_positions.last().copied().unwrap_or(0.0)
+                                    });
+
+                                let chord_x = measure_x + segment_x;
+
+                                let mut params = parse_chord(&spillback.chord_symbol);
+                                params.style = harmony_style.clone();
+                                params.position = kurbo::Point::new(chord_x, chord_y);
+                                params.id = id_counter;
+                                id_counter += 1;
+
+                                let (_, mut spillback_node) = layout_harmony(&params, &ctx);
+
+                                // Add metadata for the spillback chord
+                                spillback_node.set_page(page_number);
+                                spillback_node.set_system(global_system_index as u32);
+                                spillback_node.set_measure(measure_idx as u32);
+                                spillback_node.set_element_type("chord");
+                                spillback_node.metadata.insert(
+                                    "spillback".to_string(),
+                                    "true".to_string(),
+                                );
+                                spillback_node.set_section_type(&chart_section.section.section_type.full_name());
+
+                                // Update previous chord tracker for duplicate detection
+                                previous_chord_symbol = Some(spillback.chord_symbol.clone());
+
+                                root.add_child(spillback_node);
+                            }
+                        }
+
+                        measure_x += this_measure_width;
 
                         // Barline after every measure
                         root.add_child(self.draw_barline(
@@ -1284,9 +1702,7 @@ impl ChartLayoutEngine {
             let current_x = beat_positions[i].x;
             // Only extend if next beat is on same system (same y position)
             // and to the right (not a system break)
-            if beat_positions[i + 1].staff_y == beat_positions[i].staff_y
-                && next_x > current_x
-            {
+            if beat_positions[i + 1].staff_y == beat_positions[i].staff_y && next_x > current_x {
                 beat_positions[i].width = next_x - current_x;
             }
         }
@@ -1306,7 +1722,10 @@ impl ChartLayoutEngine {
         let text_metrics = TextFontMetrics::new(self.text_font_data.clone());
         let symbol_metrics = TextFontMetrics::new(self.symbol_font_data.clone());
 
-        let harmony_style = self.config.harmony_style.clone()
+        let harmony_style = self
+            .config
+            .harmony_style
+            .clone()
             .with_text_font_metrics(text_metrics.clone())
             .with_symbol_font_metrics(symbol_metrics.clone());
 
@@ -1329,6 +1748,12 @@ impl ChartLayoutEngine {
         // Pre-compute section letters for consecutive repeats
         let section_letters = self.compute_section_letters(&chart.sections);
 
+        // Get time signature for beat calculations
+        let time_signature = chart
+            .time_signature
+            .map(|ts| (ts.numerator as u8, ts.denominator as u8))
+            .unwrap_or((4u8, 4u8));
+
         // Process each section
         for (section_idx, chart_section) in chart.sections.iter().enumerate() {
             // Skip count-in sections - we synthesize count-in from config.count_in_measures
@@ -1346,14 +1771,38 @@ impl ChartLayoutEngine {
             previous_chord_symbol = None;
 
             // Preprocess melodies to handle cross-measure spillover
-            let time_signature = chart.time_signature
-                .map(|ts| (ts.numerator as u8, ts.denominator as u8))
-                .unwrap_or((4u8, 4u8));
             let beats_per_measure = time_signature.0 as f64;
-            let melody_data_map = expand_melodies_across_measures(
-                chart_section.measures(),
-                beats_per_measure,
-            );
+            let melody_data_map =
+                expand_melodies_across_measures(chart_section.measures(), beats_per_measure);
+
+            // Detect push spillbacks (chords from next measure that push back)
+            let mut push_spillback_map = detect_push_spillbacks(chart_section.measures());
+
+            // Check for cross-section spillback: if the NEXT section starts with a pushed chord,
+            // it spills back to THIS section's last measure
+            let next_non_compact_section = chart
+                .sections
+                .iter()
+                .skip(section_idx + 1)
+                .find(|s| {
+                    !s.section.section_type.is_compact()
+                        && !matches!(s.section.section_type, SectionType::End)
+                });
+            if let Some(next_section) = next_non_compact_section {
+                if let Some(mut spillback) = detect_section_start_spillback(next_section.measures())
+                {
+                    // Adjust beat position based on this section's last measure time signature
+                    if let Some(last_measure) = chart_section.measures().last() {
+                        let ts = last_measure.time_signature;
+                        spillback.beat_position = (ts.0 as usize).saturating_sub(1);
+                    }
+                    let last_measure_idx = chart_section.measures().len().saturating_sub(1);
+                    push_spillback_map
+                        .entry(last_measure_idx)
+                        .or_default()
+                        .push(spillback);
+                }
+            }
 
             // Group measures into systems
             let systems = self.group_measures_into_systems(chart_section.measures(), content_width);
@@ -1377,7 +1826,7 @@ impl ChartLayoutEngine {
                 };
                 let prefix_width = clef_width + time_sig_width;
 
-                // Calculate measure width - use natural width for short systems
+                // Calculate measure width using spring-based distribution
                 let measures_area_width = content_width - prefix_width;
                 let num_measures = measure_indices.len();
                 let max_measures = self.config.max_measures_per_system;
@@ -1395,25 +1844,53 @@ impl ChartLayoutEngine {
                 let base_measure_width = measures_area_width / max_measures as f64;
 
                 // For width calculation, count-in measures count as fractional
-                let effective_measure_count = num_count_in as f64 * compact_scale + num_measures as f64;
+                let effective_measure_count =
+                    num_count_in as f64 * compact_scale + num_measures as f64;
                 let is_short_system = effective_measure_count < max_measures as f64;
 
-                // Regular measure width
-                let measure_width = base_measure_width;
-                // Count-in measure width (compact)
-                let count_in_width = base_measure_width * compact_scale;
+                // Calculate content weights for spring-based distribution
+                let measure_weights: Vec<f64> = measure_indices
+                    .iter()
+                    .filter_map(|&idx| chart_section.measures().get(idx))
+                    .map(|m| self.estimate_measure_content_weight(m, &text_metrics))
+                    .collect();
+
+                // Distribute width proportionally using spring physics
+                let total_width_to_distribute = if is_short_system {
+                    num_count_in as f64 * base_measure_width * compact_scale
+                        + num_measures as f64 * base_measure_width
+                } else {
+                    measures_area_width
+                };
+
+                let distributed_widths = self.distribute_measure_widths(
+                    &measure_weights,
+                    num_count_in,
+                    total_width_to_distribute,
+                    compact_scale,
+                    base_measure_width,
+                );
+
+                // Count-in measure width (compact) - from distribution
+                let count_in_width = if num_count_in > 0 {
+                    distributed_widths.first().copied().unwrap_or(base_measure_width * compact_scale)
+                } else {
+                    base_measure_width * compact_scale
+                };
 
                 // Calculate actual system width
                 let actual_system_width = if is_short_system {
-                    prefix_width + (num_count_in as f64 * count_in_width) + (num_measures as f64 * measure_width)
+                    prefix_width + total_width_to_distribute
                 } else {
                     content_width
                 };
 
                 // Draw staff lines (shortened for short systems)
-                root.add_child(SceneNode::anonymous_leaf(
-                    self.draw_staff_lines(content_x, staff_y, actual_system_width),
-                ));
+                root.add_child(SceneNode::anonymous_leaf(self.draw_staff_lines(
+                    content_x,
+                    staff_y,
+                    actual_system_width,
+                )));
 
                 let chord_y = staff_y - 8.0;
 
@@ -1444,36 +1921,37 @@ impl ChartLayoutEngine {
                     };
                     id_counter += 1;
                     let (_, mut clef_node) = layout_clef(&clef_params, &ctx);
-                    clef_node.transform = Affine::translate((
-                        prefix_x,
-                        staff_y + 2.0 * self.config.spatium,
-                    ));
+                    clef_node.transform =
+                        Affine::translate((prefix_x, staff_y + 2.0 * self.config.spatium));
                     root.add_child(clef_node);
                     prefix_x += clef_width;
                 }
 
                 // Render time signature on first system
                 if include_time_sig {
-                    let ts = chart.time_signature
+                    let ts = chart
+                        .time_signature
                         .map(|ts| (ts.numerator as u8, ts.denominator as u8))
                         .unwrap_or((4u8, 4u8));
                     let ts_params = TimeSigParams {
                         id: id_counter,
-                        sig_type: TimeSigType::Numeric { numerator: ts.0, denominator: ts.1 },
+                        sig_type: TimeSigType::Numeric {
+                            numerator: ts.0,
+                            denominator: ts.1,
+                        },
                         ..Default::default()
                     };
                     id_counter += 1;
                     let (_, mut ts_node) = layout_timesig(&ts_params, &ctx);
-                    ts_node.transform = Affine::translate((
-                        prefix_x,
-                        staff_y + 2.0 * self.config.spatium,
-                    ));
+                    ts_node.transform =
+                        Affine::translate((prefix_x, staff_y + 2.0 * self.config.spatium));
                     root.add_child(ts_node);
                 }
 
                 // Start measures after prefix
                 let mut measure_x = content_x + prefix_width;
-                let time_signature = chart.time_signature
+                let time_signature = chart
+                    .time_signature
                     .map(|ts| (ts.numerator as u8, ts.denominator as u8))
                     .unwrap_or((4u8, 4u8));
 
@@ -1484,6 +1962,7 @@ impl ChartLayoutEngine {
                     let count_in_result = self.layout_measure_compact(
                         &count_in_measure,
                         None, // no melody
+                        None, // no spillbacks for count-in
                         count_in_width,
                         false, // clef rendered separately
                         false, // time sig rendered separately
@@ -1493,15 +1972,14 @@ impl ChartLayoutEngine {
                     );
                     id_counter += 10;
 
-                    let mut count_in_container = SceneNode::group(
-                        SemanticId::new(ElementType::Measure, id_counter),
-                    );
+                    let mut count_in_container =
+                        SceneNode::group(SemanticId::new(ElementType::Measure, id_counter));
                     id_counter += 1;
-                    count_in_container.transform = Affine::translate((
-                        measure_x,
-                        staff_y + 2.0 * self.config.spatium,
-                    ));
-                    count_in_container.metadata.insert("count_in".to_string(), "true".to_string());
+                    count_in_container.transform =
+                        Affine::translate((measure_x, staff_y + 2.0 * self.config.spatium));
+                    count_in_container
+                        .metadata
+                        .insert("count_in".to_string(), "true".to_string());
                     count_in_container.add_child(count_in_result.scene);
                     root.add_child(count_in_container);
 
@@ -1520,11 +1998,14 @@ impl ChartLayoutEngine {
 
                     // Add count text for count-in measures
                     let num_beats = time_signature.0 as usize;
-                    for (beat_idx, segment) in count_in_result.segments
+                    for (beat_idx, segment) in count_in_result
+                        .segments
                         .iter_type(SegmentType::CHORD_REST)
                         .enumerate()
                     {
-                        if let Some(count_text) = self.get_count_in_text(count_in_display_num, beat_idx, num_beats) {
+                        if let Some(count_text) =
+                            self.get_count_in_text(count_in_display_num, beat_idx, num_beats)
+                        {
                             let count_node = self.create_count_text(
                                 &count_text,
                                 measure_x + segment.x,
@@ -1541,22 +2022,29 @@ impl ChartLayoutEngine {
                     measure_x += count_in_width;
 
                     // Barline after count-in measure
-                    let mut barline = self.draw_barline(
-                        measure_x,
-                        staff_y,
-                        staff_height,
-                        BarlineType::Single,
-                    );
+                    let mut barline =
+                        self.draw_barline(measure_x, staff_y, staff_height, BarlineType::Single);
                     root.add_child(barline);
                 }
 
                 for (local_measure_idx, &measure_idx) in measure_indices.iter().enumerate() {
                     if let Some(measure) = chart_section.measures().get(measure_idx) {
                         let melody_data = melody_data_map.get(&measure_idx);
+
+                        // Get distributed width for this measure (skip count-in widths)
+                        let this_measure_width = distributed_widths
+                            .get(num_count_in + local_measure_idx)
+                            .copied()
+                            .unwrap_or(base_measure_width);
+
+                        // Get spillback chords for this measure (from next measure pushing back)
+                        let spillbacks = push_spillback_map.get(&measure_idx).map(|v| v.as_slice());
+
                         let measure_result = self.layout_measure(
                             measure,
                             melody_data,
-                            measure_width,
+                            spillbacks,
+                            this_measure_width,
                             false,
                             false,
                             time_signature,
@@ -1565,22 +2053,22 @@ impl ChartLayoutEngine {
                         );
                         id_counter += 10;
 
-                        let segment_positions: Vec<f64> = self.get_chord_rest_positions(&measure_result);
+                        let segment_positions: Vec<f64> =
+                            self.get_chord_rest_positions(&measure_result);
 
-                        let mut measure_container = SceneNode::group(
-                            SemanticId::new(ElementType::Measure, id_counter),
-                        );
+                        let mut measure_container =
+                            SceneNode::group(SemanticId::new(ElementType::Measure, id_counter));
                         id_counter += 1;
-                        measure_container.transform = Affine::translate((
-                            measure_x,
-                            staff_y + 2.0 * self.config.spatium,
-                        ));
+                        measure_container.transform =
+                            Affine::translate((measure_x, staff_y + 2.0 * self.config.spatium));
                         measure_container.add_child(measure_result.scene);
                         root.add_child(measure_container);
 
                         // Add measure number on first measure of each system (real measures start at 1)
                         if self.config.show_measure_numbers && local_measure_idx == 0 {
-                            let display_measure_num = (global_measure_index as i32) - self.config.count_in_measures as i32 + 1;
+                            let display_measure_num = (global_measure_index as i32)
+                                - self.config.count_in_measures as i32
+                                + 1;
                             let measure_num_node = self.create_measure_number(
                                 display_measure_num,
                                 measure_x,
@@ -1591,17 +2079,48 @@ impl ChartLayoutEngine {
                             root.add_child(measure_num_node);
                         }
 
-                        // Layout chord symbols
+                        // Layout chord symbols - align with actual rhythm element positions
                         for (chord_idx, chord) in measure.chords.iter().enumerate() {
                             // Skip space/rest placeholders (keyflow: "s" = empty space, "r" = explicit rest)
                             let current_symbol = &chord.full_symbol;
-                            if current_symbol == "s" || current_symbol == "r" || current_symbol.is_empty() {
+                            if current_symbol == "s"
+                                || current_symbol == "r"
+                                || current_symbol.is_empty()
+                            {
                                 continue;
                             }
 
+                            // Skip pushed chords that have spilled back to the previous measure
+                            // These are rendered as spillback chords in the previous measure
+                            // EXCEPTION: For the first measure of a section OR system/line, we SHOW
+                            // the pushed chord at beat 1 for clarity (rendered at both spillback AND beat 1)
+                            let is_first_measure_of_section = measure_idx == 0;
+                            let is_first_measure_of_system = local_measure_idx == 0;
+                            let is_at_boundary = is_first_measure_of_section || is_first_measure_of_system;
+
+                            // Check if this is the first real chord (non-space/rest) in the measure
+                            let is_first_real_chord = measure.chords.iter()
+                                .take(chord_idx)
+                                .all(|c| c.full_symbol == "s" || c.full_symbol == "r" || c.full_symbol.is_empty());
+
+                            if let Some((is_push, _)) = &chord.push_pull {
+                                if *is_push && is_first_real_chord && !is_at_boundary {
+                                    // First chord in measure that is pushed = spilled back
+                                    // It was already rendered in the previous measure/line
+                                    continue;
+                                }
+                            }
+
                             // Check if we should hide this chord (duplicate of previous)
+                            // EXCEPTION: Pushed chords at boundaries should show even if they match spillback
+                            let is_pushed_at_boundary = chord.push_pull.as_ref()
+                                .map_or(false, |(is_push, _)| *is_push)
+                                && is_first_real_chord
+                                && is_at_boundary;
+
                             let is_duplicate = self.config.hide_repeated_chords
-                                && previous_chord_symbol.as_ref() == Some(current_symbol);
+                                && previous_chord_symbol.as_ref() == Some(current_symbol)
+                                && !is_pushed_at_boundary;
 
                             // Update previous chord tracker
                             previous_chord_symbol = Some(current_symbol.clone());
@@ -1611,10 +2130,47 @@ impl ChartLayoutEngine {
                                 continue;
                             }
 
+                            // Find the correct segment position for this chord
+                            //
+                            // When the measure has explicit rhythm_elements (like triplet patterns),
+                            // find the chord's index in that list to align with the correct segment.
+                            // Otherwise fall back to chord_idx for simple measures.
+                            //
+                            // SPECIAL CASE: For pushed chords at the start of a section or system/line,
+                            // place them at segment 0 (beat 1) for visual clarity.
+                            // Note: is_first_real_chord and is_pushed_at_boundary were computed above
+
+                            let segment_idx = if is_pushed_at_boundary {
+                                // Force pushed chord to segment 0 (beat 1) at section/line start
+                                0
+                            } else if !measure.rhythm_elements.is_empty() {
+                                // Find this chord's index in the rhythm_elements list
+                                // to align with explicit rhythm (triplets, etc.)
+                                // Count how many chords we've seen before this one in rhythm_elements
+                                let mut seen_chord_count = 0;
+                                let mut found_idx = None;
+                                for (idx, elem) in measure.rhythm_elements.iter().enumerate() {
+                                    if let keyflow::chart::types::RhythmElement::Chord(c) = elem {
+                                        if seen_chord_count == chord_idx {
+                                            found_idx = Some(idx);
+                                            break;
+                                        }
+                                        seen_chord_count += 1;
+                                    }
+                                }
+                                found_idx.unwrap_or(chord_idx)
+                                    .min(segment_positions.len().saturating_sub(1))
+                            } else {
+                                // Simple measure - use chord_idx directly
+                                chord_idx.min(segment_positions.len().saturating_sub(1))
+                            };
+
                             let segment_x = segment_positions
-                                .get(chord_idx)
+                                .get(segment_idx)
                                 .copied()
-                                .unwrap_or_else(|| segment_positions.first().copied().unwrap_or(0.0));
+                                .unwrap_or_else(|| {
+                                    segment_positions.first().copied().unwrap_or(0.0)
+                                });
 
                             let chord_x = measure_x + segment_x;
 
@@ -1628,9 +2184,10 @@ impl ChartLayoutEngine {
                             // Add comprehensive metadata for click-to-highlight and queries
                             chord_node.set_system(global_system_index as u32);
                             chord_node.set_measure(measure_idx as u32);
-                            chord_node.set_beat(chord_idx as u32);
+                            chord_node.set_beat(segment_idx as u32);
                             chord_node.set_element_type("chord");
-                            chord_node.set_section_type(&chart_section.section.section_type.full_name());
+                            chord_node
+                                .set_section_type(&chart_section.section.section_type.full_name());
 
                             // Build ChartPosition for musical coordinates
                             let chart_pos = ChartPosition::new(
@@ -1646,13 +2203,69 @@ impl ChartLayoutEngine {
 
                                 // Build full SourceLink for bidirectional mapping
                                 let source_link = SourceLink::new(*span, chart_pos.clone());
-                                chord_node.set_json_metadata(metadata_keys::SOURCE_LINK, &source_link);
+                                chord_node
+                                    .set_json_metadata(metadata_keys::SOURCE_LINK, &source_link);
                             }
 
                             root.add_child(chord_node);
                         }
 
-                        measure_x += measure_width;
+                        // Render spillback chord symbols (from next measure pushing back)
+                        if let Some(spillback_list) = spillbacks {
+                            for spillback in spillback_list {
+                                // Calculate segment index for spillback chord
+                                // For triplet push, the rhythm becomes [TripletQuarter, TripletEighth]
+                                // The chord goes on the eighth note (second element of the triplet group)
+                                // Segment index = beat_position + 1 (the eighth note of that beat's triplet)
+                                let segment_idx = spillback.beat_position + 1;
+
+                                // Debug: log spillback rendering
+                                eprintln!(
+                                    "[spillback-render] section={} measure={} '{}' beat_pos={} segment_idx={} positions_len={}",
+                                    chart_section.section.section_type.full_name(),
+                                    measure_idx,
+                                    spillback.chord_symbol,
+                                    spillback.beat_position,
+                                    segment_idx,
+                                    segment_positions.len()
+                                );
+
+                                let segment_x = segment_positions
+                                    .get(segment_idx)
+                                    .copied()
+                                    .unwrap_or_else(|| {
+                                        // Fallback: use last segment position if index out of bounds
+                                        segment_positions.last().copied().unwrap_or(0.0)
+                                    });
+
+                                let chord_x = measure_x + segment_x;
+
+                                let mut params = parse_chord(&spillback.chord_symbol);
+                                params.style = harmony_style.clone();
+                                params.position = kurbo::Point::new(chord_x, chord_y);
+                                params.id = id_counter;
+                                id_counter += 1;
+
+                                let (_, mut spillback_node) = layout_harmony(&params, &ctx);
+
+                                // Add metadata for the spillback chord
+                                spillback_node.set_system(global_system_index as u32);
+                                spillback_node.set_measure(measure_idx as u32);
+                                spillback_node.set_element_type("chord");
+                                spillback_node.metadata.insert(
+                                    "spillback".to_string(),
+                                    "true".to_string(),
+                                );
+                                spillback_node.set_section_type(&chart_section.section.section_type.full_name());
+
+                                // Update previous chord tracker for duplicate detection
+                                previous_chord_symbol = Some(spillback.chord_symbol.clone());
+
+                                root.add_child(spillback_node);
+                            }
+                        }
+
+                        measure_x += this_measure_width;
 
                         root.add_child(self.draw_barline(
                             measure_x,
@@ -1788,7 +2401,8 @@ impl ChartLayoutEngine {
             SemanticId::new(ElementType::MeasureNumber, id),
             vec![text_command],
         );
-        node.metadata.insert("measure_number".to_string(), measure_number.to_string());
+        node.metadata
+            .insert("measure_number".to_string(), measure_number.to_string());
         node
     }
 
@@ -1825,7 +2439,8 @@ impl ChartLayoutEngine {
             SemanticId::new(ElementType::Lyrics, id), // Use Lyrics element type for count text
             vec![text_command],
         );
-        node.metadata.insert("count_text".to_string(), count_text.to_string());
+        node.metadata
+            .insert("count_text".to_string(), count_text.to_string());
         node
     }
 
@@ -1835,7 +2450,12 @@ impl ChartLayoutEngine {
     /// which comes from the distance between Count-In marker and SONGSTART marker.
     /// - 1 measure count-in: measure 0 gets full count (1,2,3,4)
     /// - 2 measure count-in: measure -1 gets half-time (1,2), measure 0 gets full (1,2,3,4)
-    fn get_count_in_text(&self, display_measure_num: i32, beat_idx: usize, _num_beats: usize) -> Option<String> {
+    fn get_count_in_text(
+        &self,
+        display_measure_num: i32,
+        beat_idx: usize,
+        _num_beats: usize,
+    ) -> Option<String> {
         let count_in = self.config.count_in_measures;
 
         if count_in == 0 {
@@ -1976,12 +2596,18 @@ impl ChartLayoutEngine {
                 let (name, _) = self.section_type_to_strings(target);
                 (format!("Post-{}", name), "POST".to_string())
             }
-            SectionType::Custom(name) => (name.clone(), name.chars().take(3).collect::<String>().to_uppercase()),
+            SectionType::Custom(name) => (
+                name.clone(),
+                name.chars().take(3).collect::<String>().to_uppercase(),
+            ),
         }
     }
 
     /// Get theme for section type.
-    fn get_section_theme(&self, section_type: &SectionType) -> crate::layout::tlayout::rehearsal_mark::RehearsalMarkStyle {
+    fn get_section_theme(
+        &self,
+        section_type: &SectionType,
+    ) -> crate::layout::tlayout::rehearsal_mark::RehearsalMarkStyle {
         match section_type {
             SectionType::Intro | SectionType::Outro => rehearsal_themes::blue(),
             SectionType::Verse => rehearsal_themes::green(),
@@ -2083,25 +2709,21 @@ impl ChartLayoutEngine {
         let shadow_offset = 4.0;
 
         // Shadow
-        root.add_child(SceneNode::anonymous_leaf(vec![
-            PaintCommand::filled_rect(
-                Rect::new(
-                    page_x + shadow_offset,
-                    page_y + shadow_offset,
-                    page_x + shadow_offset + page_width,
-                    page_y + shadow_offset + page_height,
-                ),
-                Color::from_rgb8(180, 180, 180),
+        root.add_child(SceneNode::anonymous_leaf(vec![PaintCommand::filled_rect(
+            Rect::new(
+                page_x + shadow_offset,
+                page_y + shadow_offset,
+                page_x + shadow_offset + page_width,
+                page_y + shadow_offset + page_height,
             ),
-        ]));
+            Color::from_rgb8(180, 180, 180),
+        )]));
 
         // White paper
-        root.add_child(SceneNode::anonymous_leaf(vec![
-            PaintCommand::filled_rect(
-                Rect::new(page_x, page_y, page_x + page_width, page_y + page_height),
-                Color::WHITE,
-            ),
-        ]));
+        root.add_child(SceneNode::anonymous_leaf(vec![PaintCommand::filled_rect(
+            Rect::new(page_x, page_y, page_x + page_width, page_y + page_height),
+            Color::WHITE,
+        )]));
     }
 
     /// Add page footer with "Created with FastTrackStudio" text.
@@ -2118,18 +2740,16 @@ impl ChartLayoutEngine {
         let footer_y = page_y + page_height - 15.0; // 15 points from bottom
         let center_x = page_x + page_width / 2.0;
 
-        root.add_child(SceneNode::anonymous_leaf(vec![
-            PaintCommand::Text {
-                text: footer_text.to_string(),
-                font_family: "sans-serif".to_string(),
-                font_size,
-                position: kurbo::Point::new(center_x, footer_y),
-                color: Color::from_rgb8(160, 160, 160), // Light gray
-                anchor: TextAnchor::Middle,
-                weight: FontWeight::Normal,
-                style: FontStyle::Normal,
-            },
-        ]));
+        root.add_child(SceneNode::anonymous_leaf(vec![PaintCommand::Text {
+            text: footer_text.to_string(),
+            font_family: "sans-serif".to_string(),
+            font_size,
+            position: kurbo::Point::new(center_x, footer_y),
+            color: Color::from_rgb8(160, 160, 160), // Light gray
+            anchor: TextAnchor::Middle,
+            weight: FontWeight::Normal,
+            style: FontStyle::Normal,
+        }]));
     }
 
     /// Add title header section on first page (Title, Subtitle, Composer, etc.)
@@ -2286,12 +2906,15 @@ impl ChartLayoutEngine {
             current_y = part_start_y + ((max_lines - 1) as f64 * (small_font_size + 2.0));
         } else {
             // Just part name lines
-            current_y = part_start_y + ((part_name_lines.len() - 1) as f64 * (small_font_size + 2.0));
+            current_y =
+                part_start_y + ((part_name_lines.len() - 1) as f64 * (small_font_size + 2.0));
         }
 
         // Subtitle (medium, centered) - below the title with minimal spacing
         // Default to "Transcribed By: ______" if no subtitle provided
-        let subtitle_text = metadata.subtitle.clone()
+        let subtitle_text = metadata
+            .subtitle
+            .clone()
             .unwrap_or_else(|| "Transcribed By: ______".to_string());
         let subtitle_font_size = 12.0;
         // Position subtitle directly below the title baseline with small spacing
@@ -2331,10 +2954,14 @@ impl ChartLayoutEngine {
     /// If `melody_data` is provided, it contains preprocessed melody segments that account
     /// for spillover across measure boundaries. Otherwise, falls back to the measure's
     /// raw melody data (legacy behavior, doesn't handle cross-measure melodies).
+    ///
+    /// If `spillbacks` is provided, it contains chords from the next measure that push
+    /// back across the barline and need to be rendered in this measure.
     fn layout_measure(
         &self,
         measure: &keyflow::chart::types::Measure,
         melody_data: Option<&MeasureMelodyData>,
+        spillbacks: Option<&[PushSpillback]>,
         measure_width: f64,
         include_clef: bool,
         include_time_sig: bool,
@@ -2342,7 +2969,18 @@ impl ChartLayoutEngine {
         ctx: &LayoutContext<'_>,
         id_base: u64,
     ) -> MeasureScene {
-        self.layout_measure_inner(measure, melody_data, measure_width, include_clef, include_time_sig, time_signature, ctx, id_base, false)
+        self.layout_measure_inner(
+            measure,
+            melody_data,
+            spillbacks,
+            measure_width,
+            include_clef,
+            include_time_sig,
+            time_signature,
+            ctx,
+            id_base,
+            false,
+        )
     }
 
     /// Layout a measure with compact mode (minimal left margin).
@@ -2350,6 +2988,7 @@ impl ChartLayoutEngine {
         &self,
         measure: &keyflow::chart::types::Measure,
         melody_data: Option<&MeasureMelodyData>,
+        spillbacks: Option<&[PushSpillback]>,
         measure_width: f64,
         include_clef: bool,
         include_time_sig: bool,
@@ -2357,13 +2996,25 @@ impl ChartLayoutEngine {
         ctx: &LayoutContext<'_>,
         id_base: u64,
     ) -> MeasureScene {
-        self.layout_measure_inner(measure, melody_data, measure_width, include_clef, include_time_sig, time_signature, ctx, id_base, true)
+        self.layout_measure_inner(
+            measure,
+            melody_data,
+            spillbacks,
+            measure_width,
+            include_clef,
+            include_time_sig,
+            time_signature,
+            ctx,
+            id_base,
+            true,
+        )
     }
 
     fn layout_measure_inner(
         &self,
         measure: &keyflow::chart::types::Measure,
         melody_data: Option<&MeasureMelodyData>,
+        spillbacks: Option<&[PushSpillback]>,
         measure_width: f64,
         include_clef: bool,
         include_time_sig: bool,
@@ -2373,105 +3024,151 @@ impl ChartLayoutEngine {
         compact: bool,
     ) -> MeasureScene {
         // Check if this measure has melodies (from preprocessed data or raw measure)
-        let has_melodies = melody_data.map_or_else(
-            || !measure.melodies.is_empty(),
-            |data| data.has_content()
-        );
+        let has_melodies =
+            melody_data.map_or_else(|| !measure.melodies.is_empty(), |data| data.has_content());
 
         // Calculate measure duration in ticks based on time signature
         // Quarter note = 480 ticks, so beat duration depends on denominator
         let beat_ticks = match time_signature.1 {
-            2 => 960,  // Half note beat
-            4 => 480,  // Quarter note beat
-            8 => 240,  // Eighth note beat
-            _ => 480,  // Default to quarter
+            2 => 960, // Half note beat
+            4 => 480, // Quarter note beat
+            8 => 240, // Eighth note beat
+            _ => 480, // Default to quarter
         };
         let measure_ticks = beat_ticks * time_signature.0 as i32;
         let beats_per_measure = time_signature.0 as f64;
 
-        // Build rhythm array from preprocessed melody data or raw measure
-        // Returns (rhythm, ticks, tuplet_specs)
-        let (rhythm, melody_ticks, tuplet_specs) = if let Some(data) = melody_data {
-            // Use preprocessed melody segments
-            let melody_durations: Vec<Duration> = data.segments.iter()
-                .map(|seg| seg.to_duration())
-                .collect();
+        // Check if the measure has explicit chord rhythms (Lily, Rest, Space notation)
+        // These take precedence over melodies and slash fills
+        let has_explicit_chord_rhythm = self.measure_has_explicit_chord_rhythm(measure);
 
-            let melody_ticks: i32 = melody_durations.iter()
-                .map(|d| d.ticks())
-                .sum();
+        // When we have explicit chord rhythms, use entries directly (notes and rests)
+        // Otherwise, use the existing rhythm-based approach
+        let (rhythm_entries, full_rhythm, rhythm_ticks, tuplet_specs, head_type_overrides) =
+            if has_explicit_chord_rhythm {
+                // Build rhythm from explicit chord rhythms (r8t, Ab9_8t, etc.)
+                let (entries, ticks, specs) = self.build_rhythm_from_chord_rhythms(measure);
+                (Some(entries), Vec::new(), ticks, specs, Vec::new())
+            } else if let Some(data) = melody_data {
+                // Use preprocessed melody segments
+                let melody_durations: Vec<Duration> =
+                    data.segments.iter().map(|seg| seg.to_duration()).collect();
+                let melody_ticks: i32 = melody_durations.iter().map(|d| d.ticks()).sum();
 
-            (melody_durations, melody_ticks, Vec::new()) // No tuplet specs for melodies
-        } else if has_melodies {
-            // Legacy: Convert raw melody notes to durations (no spillover handling)
-            let melody_durations: Vec<Duration> = measure.melodies.iter()
-                .flat_map(|m| m.notes.iter())
-                .map(|note| self.melody_note_to_duration(note))
-                .collect();
+                // Fill remaining space with quarter note slashes
+                let remaining_ticks = measure_ticks - melody_ticks;
+                let num_melody_notes = melody_durations.len();
+                let fill_slashes = if remaining_ticks > 0 {
+                    let quarter_ticks = 480;
+                    let num_fill_quarters = remaining_ticks / quarter_ticks;
+                    (0..num_fill_quarters)
+                        .map(|_| Duration::Quarter)
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
+                let num_fill_notes = fill_slashes.len();
 
-            let melody_ticks: i32 = melody_durations.iter()
-                .map(|d| d.ticks())
-                .sum();
+                let full_rhythm: Vec<Duration> = melody_durations
+                    .into_iter()
+                    .chain(fill_slashes.into_iter())
+                    .collect();
 
-            (melody_durations, melody_ticks, Vec::new()) // No tuplet specs for melodies
-        } else {
-            // No melodies - will use pure slash notation
-            // When use_stems is true, check for triplet pushes and generate appropriate rhythm
-            let num_beats = measure.chords.len().max(time_signature.0 as usize);
+                let head_overrides: Vec<Option<NoteHeadType>> = if num_fill_notes > 0 {
+                    let mut overrides = Vec::with_capacity(num_melody_notes + num_fill_notes);
+                    for _ in 0..num_melody_notes {
+                        overrides.push(None);
+                    }
+                    for _ in 0..num_fill_notes {
+                        overrides.push(Some(NoteHeadType::Slash));
+                    }
+                    overrides
+                } else {
+                    Vec::new()
+                };
 
-            if self.config.use_stems {
-                // Build rhythm with triplet subdivisions for pushed chords
-                self.build_rhythm_with_triplets(measure, num_beats)
+                let ticks: i32 = full_rhythm.iter().map(|d| d.ticks()).sum();
+                (None, full_rhythm, ticks, Vec::new(), head_overrides)
+            } else if has_melodies {
+                // Legacy: Convert raw melody notes to durations (no spillover handling)
+                let melody_durations: Vec<Duration> = measure
+                    .melodies
+                    .iter()
+                    .flat_map(|m| m.notes.iter())
+                    .map(|note| self.melody_note_to_duration(note))
+                    .collect();
+                let melody_ticks: i32 = melody_durations.iter().map(|d| d.ticks()).sum();
+
+                // Fill remaining space with quarter note slashes
+                let remaining_ticks = measure_ticks - melody_ticks;
+                let num_melody_notes = melody_durations.len();
+                let fill_slashes = if remaining_ticks > 0 {
+                    let quarter_ticks = 480;
+                    let num_fill_quarters = remaining_ticks / quarter_ticks;
+                    (0..num_fill_quarters)
+                        .map(|_| Duration::Quarter)
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
+                let num_fill_notes = fill_slashes.len();
+
+                let full_rhythm: Vec<Duration> = melody_durations
+                    .into_iter()
+                    .chain(fill_slashes.into_iter())
+                    .collect();
+
+                let head_overrides: Vec<Option<NoteHeadType>> = if num_fill_notes > 0 {
+                    let mut overrides = Vec::with_capacity(num_melody_notes + num_fill_notes);
+                    for _ in 0..num_melody_notes {
+                        overrides.push(None);
+                    }
+                    for _ in 0..num_fill_notes {
+                        overrides.push(Some(NoteHeadType::Slash));
+                    }
+                    overrides
+                } else {
+                    Vec::new()
+                };
+
+                let ticks: i32 = full_rhythm.iter().map(|d| d.ticks()).sum();
+                (None, full_rhythm, ticks, Vec::new(), head_overrides)
             } else {
-                // Simple quarter note slashes
-                let rhythm: Vec<Duration> = (0..num_beats).map(|_| Duration::Quarter).collect();
-                let ticks: i32 = rhythm.iter().map(|d| d.ticks()).sum();
-                (rhythm, ticks, Vec::new()) // No tuplet specs
-            }
-        };
+                // No melodies or explicit rhythms - use slash notation
+                let num_beats = measure.chords.len().max(time_signature.0 as usize);
 
-        // Fill remaining space with quarter note slashes if melody doesn't cover full measure
-        let remaining_ticks = measure_ticks - melody_ticks;
-        let num_melody_notes = rhythm.len();
-        let fill_slashes = if has_melodies && remaining_ticks > 0 {
-            // Calculate how many quarter notes fit in remaining space
-            let quarter_ticks = 480;
-            let num_fill_quarters = remaining_ticks / quarter_ticks;
-            (0..num_fill_quarters).map(|_| Duration::Quarter).collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-        let num_fill_notes = fill_slashes.len();
-
-        // Combine melody durations with fill slashes
-        let full_rhythm: Vec<Duration> = rhythm.into_iter()
-            .chain(fill_slashes.into_iter())
-            .collect();
-
-        // Build head type overrides: melody notes use standard heads, fill notes use slashes
-        let head_type_overrides: Vec<Option<NoteHeadType>> = if has_melodies && num_fill_notes > 0 {
-            let mut overrides = Vec::with_capacity(num_melody_notes + num_fill_notes);
-            // Melody notes: None = use default (standard noteheads since mode is Standard)
-            for _ in 0..num_melody_notes {
-                overrides.push(None);
-            }
-            // Fill notes: explicitly use Slash noteheads
-            for _ in 0..num_fill_notes {
-                overrides.push(Some(NoteHeadType::Slash));
-            }
-            overrides
-        } else {
-            Vec::new()
-        };
+                // Check for spillback chords (from next measure pushing back)
+                // and build rhythm with triplet subdivisions if use_stems is enabled
+                let (rhythm, ticks, specs, spillback_chords) = if self.config.use_stems || spillbacks.is_some() {
+                    // Build rhythm with triplet subdivisions for pushed chords
+                    self.build_rhythm_with_triplets(measure, num_beats, spillbacks)
+                } else {
+                    // Simple quarter note slashes
+                    let rhythm: Vec<Duration> =
+                        (0..num_beats).map(|_| Duration::Quarter).collect();
+                    let ticks: i32 = rhythm.iter().map(|d| d.ticks()).sum();
+                    (rhythm, ticks, Vec::new(), Vec::new())
+                };
+                // TODO: Use spillback_chords to render chord symbols at the pushed positions
+                let _ = spillback_chords; // Suppress unused warning for now
+                (None, rhythm, ticks, specs, Vec::new())
+            };
 
         // Convert measure width from points to spatiums for justification
         let width_spatiums = measure_width / self.config.spatium;
 
+        // Build the measure based on whether we have explicit rhythm entries or not
         let mut builder = MeasureBuilder::new()
-            .rhythm(full_rhythm)
             .id_base(id_base as u64)
             .justify_to(width_spatiums)
             .no_barlines(); // Barlines handled by chart_layout
+
+        // Set the rhythm using either entries (for explicit rhythms) or rhythm (for slash fills)
+        if let Some(entries) = rhythm_entries {
+            builder = builder.entries(entries);
+        } else {
+            builder = builder.rhythm(full_rhythm);
+        }
 
         // Apply compact mode for minimal margins (e.g., count-in measures)
         if compact {
@@ -2483,15 +3180,18 @@ impl ChartLayoutEngine {
             builder = builder.head_type_overrides(head_type_overrides);
         }
 
-        // Use rhythmic (slash) notation only when no melodies
-        // With melodies, use standard notation as base (overrides handle the slash fills)
-        if !has_melodies {
+        // Use rhythmic (slash) notation when:
+        // - We have explicit chord rhythms (these should render as slashes with stems)
+        // - We don't have melodies (pure slash notation)
+        if has_explicit_chord_rhythm || !has_melodies {
             builder = builder.rhythmic();
 
             // When use_stems is false (default), use pure stemless slash notation
             // When use_stems is true (push/pull charts), keep stems for rhythmic visibility
+            // EXCEPT: if there are tuplet specs (triplets), we need stems to show the rhythm
             // The auto-stemless behavior will still remove stems from 2+ consecutive quarters
-            if !self.config.use_stems {
+            let has_triplets = !tuplet_specs.is_empty();
+            if !self.config.use_stems && !has_explicit_chord_rhythm && !has_triplets {
                 builder = builder.stemless();
             }
         }
@@ -2525,18 +3225,32 @@ impl ChartLayoutEngine {
     /// that beat as [TripletQuarter, TripletEighth] with a triplet bracket,
     /// where the chord symbol appears above the eighth.
     ///
-    /// Returns (rhythm, total_ticks, tuplet_specs)
+    /// Also handles spillback chords - chords from the next measure that push
+    /// back across the barline into this measure's last beat.
+    ///
+    /// Returns (rhythm, total_ticks, tuplet_specs, spillback_chord_indices)
+    /// where spillback_chord_indices maps beat position to the rhythm index
+    /// where the spillback chord should be placed.
     fn build_rhythm_with_triplets(
         &self,
         measure: &keyflow::chart::types::Measure,
         num_beats: usize,
-    ) -> (Vec<Duration>, i32, Vec<TupletSpec>) {
+        spillbacks: Option<&[PushSpillback]>,
+    ) -> (Vec<Duration>, i32, Vec<TupletSpec>, Vec<(usize, String)>) {
         let mut rhythm = Vec::new();
         let mut tuplet_specs = Vec::new();
         let mut rhythm_index = 0;
+        let mut spillback_chord_positions: Vec<(usize, String)> = Vec::new();
 
         for beat_idx in 0..num_beats {
+            // Check if there's a spillback chord affecting this beat
+            let spillback_on_beat = spillbacks.and_then(|spills| {
+                spills.iter().find(|s| s.beat_position == beat_idx)
+            });
+
             // Check if there's a chord on this beat with a triplet push
+            // BUT: if the chord is on beat 0 and pushed, it spilled back to the previous measure
+            // so we shouldn't create a triplet rhythm for it here
             let chord_on_beat = measure.chords.iter().find(|c| {
                 // Match chord to beat by position (beats field is the beat within the measure)
                 c.position.total_duration.beat == beat_idx as i32
@@ -2545,18 +3259,31 @@ impl ChartLayoutEngine {
             let has_triplet_push = chord_on_beat.map_or(false, |c| {
                 if let Some((is_push, amount)) = &c.push_pull {
                     // Check for triplet push (level 1 = 8th triplet)
-                    *is_push && amount.base == PushPullBase::Triplet && amount.level == 1
+                    // Skip if it's beat 0 and pushed - that chord spilled back to previous measure
+                    let is_spillback = *is_push && beat_idx == 0;
+                    !is_spillback && *is_push && amount.base == PushPullBase::Triplet && amount.level == 1
                 } else {
                     false
                 }
             });
 
-            if has_triplet_push {
+            // Check for triplet spillback (chord from next measure pushing back)
+            let has_triplet_spillback = spillback_on_beat.map_or(false, |s| {
+                s.push_base == PushPullBase::Triplet && s.push_level == 1
+            });
+
+            if has_triplet_push || has_triplet_spillback {
                 // Beat with triplet push: render as [TripletQuarter, TripletEighth]
                 // The chord symbol will appear above the TripletEighth (pushed position)
                 let start_idx = rhythm_index;
                 rhythm.push(Duration::TripletQuarter);
                 rhythm.push(Duration::TripletEighth);
+
+                // Record spillback chord position (the eighth note is where the chord goes)
+                if let Some(spillback) = spillback_on_beat {
+                    spillback_chord_positions.push((rhythm_index + 1, spillback.chord_symbol.clone()));
+                }
+
                 rhythm_index += 2;
                 let end_idx = rhythm_index;
 
@@ -2570,7 +3297,244 @@ impl ChartLayoutEngine {
         }
 
         let total_ticks: i32 = rhythm.iter().map(|d| d.ticks()).sum();
-        (rhythm, total_ticks, tuplet_specs)
+        (rhythm, total_ticks, tuplet_specs, spillback_chord_positions)
+    }
+
+    /// Check if a measure has explicit chord rhythms (Lily or Rest notation).
+    ///
+    /// When chords have explicit rhythms like `r8t Ab9_8t r8t r4t F9_8t r2`,
+    /// we should render those rhythms instead of using slash notation.
+    ///
+    /// Note: `Space` (s1, s2, etc.) does NOT count as explicit rhythm - it means
+    /// "fill this measure with automatic slashes".
+    fn measure_has_explicit_chord_rhythm(&self, measure: &Measure) -> bool {
+        // Helper to check if a chord has USER-specified explicit duration
+        // (not auto-assigned by the parser's apply_auto_durations)
+        let has_user_explicit_duration = |chord: &keyflow::ChordInstance| -> bool {
+            // Check if the original token contains '_' which indicates user-specified duration
+            // Auto-assigned durations add '_N' suffix, but only if the user didn't write one
+            // If the original token has '_', it was explicitly written by the user
+            chord.original_token.contains('_')
+        };
+
+        // Check rhythm_elements first (preferred - contains both chords and rests)
+        // Only count elements with EXPLICIT rhythm notation (Lily/Rest with duration)
+        // Default rhythm chords should be auto-filled with slashes
+        if !measure.rhythm_elements.is_empty() {
+            let has_real_rhythm = measure.rhythm_elements.iter().any(|elem| {
+                match elem {
+                    RhythmElement::Chord(chord) => {
+                        // Only Lily (explicit note duration) counts as explicit rhythm
+                        // But only if the user actually wrote the duration (not auto-assigned)
+                        // Default rhythm = auto-fill with slashes
+                        // Space rhythm = auto-fill with slashes
+                        // Also skip pushed first chords (they spill back to previous measure)
+                        let is_pushed_first = chord.push_pull.as_ref().map_or(false, |(is_push, _)| *is_push);
+                        let is_user_explicit = has_user_explicit_duration(chord);
+                        !is_pushed_first && is_user_explicit && matches!(chord.rhythm, ChordRhythm::Lily { .. })
+                    }
+                    RhythmElement::Rest(_) => true, // Rests count as real rhythm
+                    RhythmElement::Space(_) => false, // Space triggers auto-fill, not explicit rhythm
+                }
+            });
+            if has_real_rhythm {
+                return true;
+            }
+        }
+        // Fallback: check chords for explicit rhythms (Lily or Rest, NOT Space or Default)
+        // Also skip pushed first chords and auto-assigned durations
+        measure.chords.iter().enumerate().any(|(idx, chord)| {
+            let is_pushed_first = idx == 0 && chord.push_pull.as_ref().map_or(false, |(is_push, _)| *is_push);
+            let is_user_explicit = has_user_explicit_duration(chord);
+            !is_pushed_first && is_user_explicit && matches!(
+                chord.rhythm,
+                ChordRhythm::Lily { .. } | ChordRhythm::Rest { .. }
+            )
+        })
+    }
+
+    /// Build rhythm entries from explicit chord rhythms.
+    ///
+    /// Converts chord rhythms (Lily, Rest, Space) to RhythmEntry values
+    /// and detects triplet groups for bracketing.
+    ///
+    /// Returns (entries, total_ticks, tuplet_specs)
+    fn build_rhythm_from_chord_rhythms(
+        &self,
+        measure: &Measure,
+    ) -> (Vec<RhythmEntry>, i32, Vec<TupletSpec>) {
+        let mut entries = Vec::new();
+        let mut tuplet_specs = Vec::new();
+        let mut rhythm_index = 0;
+        let mut triplet_group_start: Option<usize> = None;
+        let mut triplet_group_ticks: i32 = 0;
+
+        // Triplets are grouped by beat: 3 triplet eighths = 480 ticks (one quarter note)
+        const TRIPLET_BEAT_TICKS: i32 = 480;
+
+        // Use rhythm_elements if available (contains both chords and rests in order)
+        // Otherwise fall back to chords only (backward compatibility)
+        if !measure.rhythm_elements.is_empty() {
+            for element in &measure.rhythm_elements {
+                // Skip Space elements - they trigger auto-fill, not explicit rhythm
+                if element.is_space() {
+                    continue;
+                }
+
+                let (duration, is_rest, is_triplet) = match element {
+                    RhythmElement::Chord(chord) => {
+                        match &chord.rhythm {
+                            ChordRhythm::Lily { duration, dotted, triplet, .. } => {
+                                let dur = self.lily_syntax_to_duration(*duration, *dotted, *triplet);
+                                (dur, false, *triplet)
+                            }
+                            // For non-explicit rhythms, use quarter note
+                            _ => (Duration::Quarter, false, false),
+                        }
+                    }
+                    RhythmElement::Rest(rest) => {
+                        match &rest.rhythm {
+                            ChordRhythm::Rest { duration, dotted, triplet, .. } => {
+                                let dur = self.lily_syntax_to_duration(*duration, *dotted, *triplet);
+                                (dur, true, *triplet)
+                            }
+                            ChordRhythm::Space { duration, dotted, triplet, .. } => {
+                                let dur = self.lily_syntax_to_duration(*duration, *dotted, *triplet);
+                                (dur, true, *triplet)
+                            }
+                            _ => (Duration::Quarter, true, false),
+                        }
+                    }
+                    RhythmElement::Space(_) => {
+                        // Should be unreachable due to continue above, but satisfy exhaustive match
+                        continue;
+                    }
+                };
+
+                // Track triplet groups - end group when we've accumulated a full beat
+                if is_triplet {
+                    if triplet_group_start.is_none() {
+                        triplet_group_start = Some(rhythm_index);
+                        triplet_group_ticks = 0;
+                    }
+                    triplet_group_ticks += duration.ticks();
+
+                    // Check if we've completed a beat worth of triplets
+                    if triplet_group_ticks >= TRIPLET_BEAT_TICKS {
+                        // End this triplet group after adding the current entry
+                        // (we need to add the entry first, then close the group)
+                    }
+                } else if let Some(start) = triplet_group_start {
+                    // End of triplet group (non-triplet note encountered)
+                    tuplet_specs.push(TupletSpec::triplet(start, rhythm_index));
+                    triplet_group_start = None;
+                    triplet_group_ticks = 0;
+                }
+
+                // Create RhythmEntry based on whether this is a rest
+                if is_rest {
+                    entries.push(RhythmEntry::Rest(duration));
+                } else {
+                    entries.push(RhythmEntry::Note(duration));
+                }
+                rhythm_index += 1;
+
+                // Close triplet group after adding entry if we've hit a beat boundary
+                if is_triplet && triplet_group_ticks >= TRIPLET_BEAT_TICKS {
+                    if let Some(start) = triplet_group_start {
+                        tuplet_specs.push(TupletSpec::triplet(start, rhythm_index));
+                        triplet_group_start = None;
+                        triplet_group_ticks = 0;
+                    }
+                }
+            }
+        } else {
+            // Fallback: use chords only (no rests)
+            for chord in &measure.chords {
+                let (duration, is_rest, is_triplet) = match &chord.rhythm {
+                    ChordRhythm::Lily { duration, dotted, triplet, .. } => {
+                        let dur = self.lily_syntax_to_duration(*duration, *dotted, *triplet);
+                        (dur, false, *triplet)
+                    }
+                    ChordRhythm::Rest { duration, dotted, triplet, .. } => {
+                        let dur = self.lily_syntax_to_duration(*duration, *dotted, *triplet);
+                        (dur, true, *triplet)
+                    }
+                    ChordRhythm::Space { duration, dotted, triplet, .. } => {
+                        let dur = self.lily_syntax_to_duration(*duration, *dotted, *triplet);
+                        (dur, true, *triplet) // Spaces are rendered as rests
+                    }
+                    // For non-explicit rhythms, use quarter note
+                    _ => (Duration::Quarter, false, false),
+                };
+
+                // Track triplet groups - end group when we've accumulated a full beat
+                if is_triplet {
+                    if triplet_group_start.is_none() {
+                        triplet_group_start = Some(rhythm_index);
+                        triplet_group_ticks = 0;
+                    }
+                    triplet_group_ticks += duration.ticks();
+                } else if let Some(start) = triplet_group_start {
+                    tuplet_specs.push(TupletSpec::triplet(start, rhythm_index));
+                    triplet_group_start = None;
+                    triplet_group_ticks = 0;
+                }
+
+                if is_rest {
+                    entries.push(RhythmEntry::Rest(duration));
+                } else {
+                    entries.push(RhythmEntry::Note(duration));
+                }
+                rhythm_index += 1;
+
+                // Close triplet group after adding entry if we've hit a beat boundary
+                if is_triplet && triplet_group_ticks >= TRIPLET_BEAT_TICKS {
+                    if let Some(start) = triplet_group_start {
+                        tuplet_specs.push(TupletSpec::triplet(start, rhythm_index));
+                        triplet_group_start = None;
+                        triplet_group_ticks = 0;
+                    }
+                }
+            }
+        }
+
+        // Close any pending triplet group
+        if let Some(start) = triplet_group_start {
+            tuplet_specs.push(TupletSpec::triplet(start, rhythm_index));
+        }
+
+        let total_ticks: i32 = entries.iter().map(|e| e.duration().ticks()).sum();
+        (entries, total_ticks, tuplet_specs)
+    }
+
+    /// Convert keyflow LilySyntax to engraver Duration.
+    fn lily_syntax_to_duration(&self, lily: LilySyntax, dotted: bool, triplet: bool) -> Duration {
+        let kind = match lily {
+            LilySyntax::Whole => DurationKind::Whole,
+            LilySyntax::Half => DurationKind::Half,
+            LilySyntax::Quarter => DurationKind::Quarter,
+            LilySyntax::Eighth => DurationKind::Eighth,
+            LilySyntax::Sixteenth => DurationKind::Sixteenth,
+            LilySyntax::ThirtySecond => DurationKind::ThirtySecond,
+        };
+
+        if triplet {
+            if dotted {
+                // Dotted triplet: create with dots
+                Duration {
+                    kind,
+                    dots: 1,
+                    tuplet: Some(TupletRatio::triplet()),
+                }
+            } else {
+                Duration::triplet(kind)
+            }
+        } else if dotted {
+            Duration::dotted(kind)
+        } else {
+            Duration::new(kind)
+        }
     }
 
     /// Layout a count-in measure with a whole rest.
@@ -2759,10 +3723,238 @@ impl ChartLayoutEngine {
 
     /// Extract ChordRest segment x-positions from a MeasureScene (in spatiums).
     fn get_chord_rest_positions(&self, measure_scene: &MeasureScene) -> Vec<f64> {
-        measure_scene.segments.iter()
+        measure_scene
+            .segments
+            .iter()
             .filter(|seg| seg.seg_type.contains(SegmentType::CHORD_REST))
             .map(|seg| seg.x)
             .collect()
+    }
+
+    /// Estimate the "content weight" of a measure for spring-based layout.
+    ///
+    /// Content weight determines how much space a measure should receive relative
+    /// to other measures in the same system. Measures with more content (more chords,
+    /// longer chord names, more complex rhythms) get higher weights.
+    ///
+    /// # Arguments
+    /// * `measure` - The measure to estimate
+    /// * `text_metrics` - Text metrics for measuring chord name widths
+    ///
+    /// # Returns
+    /// A weight value (typically 1.0-3.0) where higher = more space needed
+    fn estimate_measure_content_weight(
+        &self,
+        measure: &keyflow::chart::types::Measure,
+        text_metrics: &TextFontMetrics,
+    ) -> f64 {
+        // Base weight for any measure
+        let mut weight = 1.0;
+
+        // Count unique chord symbols (not counting spaces/rests)
+        let unique_chords: Vec<_> = measure
+            .chords
+            .iter()
+            .filter(|c| !c.full_symbol.is_empty() && c.full_symbol != "s" && c.full_symbol != "r")
+            .collect();
+
+        let chord_count = unique_chords.len();
+
+        // More chords = more weight (but diminishing returns)
+        // 1 chord = +0.0, 2 chords = +0.3, 4 chords = +0.6, etc.
+        weight += (chord_count as f64 - 1.0).max(0.0) * 0.3;
+
+        // Factor in chord name complexity (longer names need more space)
+        let total_chord_width: f64 = unique_chords
+            .iter()
+            .map(|c| {
+                // Estimate text width based on character count
+                // Use actual font metrics if available
+                let base_size = self.config.harmony_style.root_size;
+                let estimated_width = text_metrics.horizontal_advance(&c.full_symbol, base_size);
+                estimated_width.max(base_size * 2.0) // Minimum width for short chords
+            })
+            .sum();
+
+        // Average chord width factor (normalized to typical chord width)
+        let avg_chord_width = if chord_count > 0 {
+            total_chord_width / chord_count as f64
+        } else {
+            0.0
+        };
+        let typical_chord_width = self.config.harmony_style.root_size * 2.5;
+
+        // Add weight for wider-than-average chords
+        if avg_chord_width > typical_chord_width {
+            weight += (avg_chord_width / typical_chord_width - 1.0) * 0.5;
+        }
+
+        // Factor in rhythm complexity (triplets, pushed chords)
+        let has_complex_rhythm = measure.chords.iter().any(|c| c.push_pull.is_some());
+        if has_complex_rhythm {
+            weight += 0.2;
+        }
+
+        // Factor in melodies (more notes = more space needed)
+        let melody_note_count: usize = measure
+            .melodies
+            .iter()
+            .flat_map(|m| m.notes.iter())
+            .count();
+        if melody_note_count > 4 {
+            weight += (melody_note_count as f64 - 4.0) * 0.1;
+        }
+
+        // Clamp to reasonable range
+        weight.clamp(0.5, 4.0)
+    }
+
+    /// Distribute available width among measures using spring physics.
+    ///
+    /// This implements MuseScore-style proportional spacing where measures with
+    /// more content receive proportionally more width.
+    ///
+    /// # Arguments
+    /// * `weights` - Content weights for each measure
+    /// * `count_in_measures` - Number of count-in measures (fixed width)
+    /// * `total_width` - Total available width for all measures
+    /// * `compact_scale` - Scale factor for count-in measures
+    ///
+    /// # Returns
+    /// Vector of widths for each measure (count-in measures first, then regular)
+    fn distribute_measure_widths(
+        &self,
+        weights: &[f64],
+        count_in_measures: usize,
+        total_width: f64,
+        compact_scale: f64,
+        base_measure_width: f64,
+    ) -> Vec<f64> {
+        if weights.is_empty() {
+            return Vec::new();
+        }
+
+        // Calculate count-in width (fixed, compact)
+        let count_in_width = base_measure_width * compact_scale;
+        let count_in_total = count_in_measures as f64 * count_in_width;
+
+        // Remaining width for regular measures
+        let regular_width = total_width - count_in_total;
+
+        // Sum of weights for spring calculation
+        let weight_sum: f64 = weights.iter().sum();
+
+        // Distribute width proportionally to weights
+        let mut widths = Vec::with_capacity(count_in_measures + weights.len());
+
+        // Add count-in widths
+        for _ in 0..count_in_measures {
+            widths.push(count_in_width);
+        }
+
+        // Add regular measure widths (proportional to weight)
+        if weight_sum > 0.0 {
+            for &weight in weights {
+                let proportion = weight / weight_sum;
+                let measure_width = regular_width * proportion;
+                widths.push(measure_width);
+            }
+        } else {
+            // Fallback: equal distribution
+            let equal_width = regular_width / weights.len() as f64;
+            for _ in weights {
+                widths.push(equal_width);
+            }
+        }
+
+        widths
+    }
+
+    /// Compute chord symbol widths for a measure and check for collisions.
+    ///
+    /// Returns the optimal font scale factor (1.0 = no scaling needed, < 1.0 = reduce size).
+    /// This implements dynamic font sizing to prevent chord symbol collisions.
+    ///
+    /// # Arguments
+    /// * `chords` - The chord symbols in the measure
+    /// * `segment_positions` - X positions of each segment (from rhythm layout)
+    /// * `measure_width` - Total width of the measure
+    /// * `style` - Current harmony style (for font size reference)
+    /// * `text_metrics` - Text metrics for width calculation
+    ///
+    /// # Returns
+    /// A scale factor to apply to the harmony style (1.0 if no scaling needed)
+    fn compute_chord_font_scale(
+        &self,
+        chords: &[keyflow::chart::types::ChordInstance],
+        segment_positions: &[f64],
+        measure_width: f64,
+        style: &HarmonyStyle,
+        text_metrics: &TextFontMetrics,
+    ) -> f64 {
+        // Filter to only visible chords (not spaces/rests)
+        let visible_chords: Vec<_> = chords
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| !c.full_symbol.is_empty() && c.full_symbol != "s" && c.full_symbol != "r")
+            .collect();
+
+        if visible_chords.len() <= 1 {
+            return 1.0; // No collision possible with 0 or 1 chord
+        }
+
+        // Compute widths of all visible chord symbols at current font size
+        let base_font_size = style.root_size;
+        let min_spacing = base_font_size * 0.3; // Minimum space between chords
+
+        let chord_widths: Vec<(usize, f64)> = visible_chords
+            .iter()
+            .map(|(idx, c)| {
+                let width = text_metrics.horizontal_advance(&c.full_symbol, base_font_size);
+                (*idx, width.max(base_font_size * 1.5)) // Minimum width
+            })
+            .collect();
+
+        // Check for collisions between consecutive chords
+        let mut max_scale: f64 = 1.0;
+
+        for i in 0..chord_widths.len() - 1 {
+            let (idx1, width1) = chord_widths[i];
+            let (idx2, _width2) = chord_widths[i + 1];
+
+            // Get segment positions for these chords
+            let pos1 = segment_positions.get(idx1).copied().unwrap_or(0.0);
+            let pos2 = segment_positions.get(idx2).copied().unwrap_or(measure_width);
+
+            // Available space between chord positions
+            let available_space = pos2 - pos1;
+
+            // Required space = chord width + minimum spacing
+            let required_space = width1 + min_spacing;
+
+            // If chord extends beyond available space, compute scale factor
+            if required_space > available_space && available_space > 0.0 {
+                let scale: f64 = available_space / required_space;
+                max_scale = max_scale.min(scale);
+            }
+        }
+
+        // Clamp to reasonable range (don't scale below 50% or above 100%)
+        max_scale.clamp(0.5, 1.0)
+    }
+
+    /// Create a scaled harmony style for collision avoidance.
+    ///
+    /// # Arguments
+    /// * `base_style` - The original harmony style
+    /// * `scale` - Scale factor (0.5 to 1.0)
+    ///
+    /// # Returns
+    /// A new harmony style with scaled font sizes
+    fn scaled_harmony_style(&self, base_style: &HarmonyStyle, scale: f64) -> HarmonyStyle {
+        let mut scaled = base_style.clone();
+        scaled.root_size *= scale;
+        scaled
     }
 }
 
@@ -2811,7 +4003,9 @@ pub mod test_utils {
                 let world_origin = transform * Point::ORIGIN;
 
                 // Extract page metadata if present
-                let page = node.metadata.get("page")
+                let page = node
+                    .metadata
+                    .get("page")
                     .and_then(|s| s.parse::<u32>().ok());
 
                 Some(ElementPosition {
@@ -2819,7 +4013,11 @@ pub mod test_utils {
                     id: id.id,
                     world_x: world_origin.x,
                     world_y: world_origin.y,
-                    bounds: if node.bounds.is_zero_area() { None } else { Some(node.bounds) },
+                    bounds: if node.bounds.is_zero_area() {
+                        None
+                    } else {
+                        Some(node.bounds)
+                    },
                     page,
                 })
             })
@@ -2831,7 +4029,9 @@ pub mod test_utils {
         scene
             .iter_with_transforms()
             .filter(|(node, _)| {
-                node.id.as_ref().map_or(false, |id| id.element_type == element_type)
+                node.id
+                    .as_ref()
+                    .map_or(false, |id| id.element_type == element_type)
             })
             .count()
     }
@@ -2885,14 +4085,14 @@ pub mod test_utils {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::test_utils::*;
+    use super::*;
     use crate::scene::id::ElementType;
     use crate::style::MStyle;
     use keyflow::{
-        AbsolutePosition, Chart, ChartSection, Chord, ChordInstance, ChordQuality,
-        ChordRhythm, Measure, MusicalDuration, MusicalNote, MusicalPosition, RootNotation,
-        Section, SectionType, TimeSignature,
+        AbsolutePosition, Chart, ChartSection, Chord, ChordInstance, ChordQuality, ChordRhythm,
+        Measure, MusicalDuration, MusicalNote, MusicalPosition, RootNotation, Section, SectionType,
+        TimeSignature,
     };
     use std::sync::Arc;
 
@@ -2914,20 +4114,18 @@ mod tests {
 
         // Measure 1: Chord on beat 0
         let measure1 = Measure {
-            chords: vec![
-                ChordInstance::new(
-                    root("C"),
-                    "C".to_string(),
-                    Chord::new(root("C"), ChordQuality::Major),
-                    ChordRhythm::Default,
-                    "C".to_string(),
-                    MusicalDuration::new(0, 4, 0), // whole note
-                    AbsolutePosition::new(
-                        MusicalPosition::try_new(0, 0, 0).unwrap(), // beat 0
-                        0, // section index
-                    ),
+            chords: vec![ChordInstance::new(
+                root("C"),
+                "C".to_string(),
+                Chord::new(root("C"), ChordQuality::Major),
+                ChordRhythm::Default,
+                "C".to_string(),
+                MusicalDuration::new(0, 4, 0), // whole note
+                AbsolutePosition::new(
+                    MusicalPosition::try_new(0, 0, 0).unwrap(), // beat 0
+                    0,                                          // section index
                 ),
-            ],
+            )],
             ..Default::default()
         };
 
@@ -2943,7 +4141,7 @@ mod tests {
                     MusicalDuration::new(0, 2, 0), // half note
                     AbsolutePosition::new(
                         MusicalPosition::try_new(1, 0, 0).unwrap(), // measure 1, beat 0
-                        0, // section index
+                        0,                                          // section index
                     ),
                 ),
                 ChordInstance::new(
@@ -2955,7 +4153,7 @@ mod tests {
                     MusicalDuration::new(0, 2, 0), // half note
                     AbsolutePosition::new(
                         MusicalPosition::try_new(1, 2, 0).unwrap(), // measure 1, beat 2
-                        0, // section index
+                        0,                                          // section index
                     ),
                 ),
             ],
@@ -2966,8 +4164,7 @@ mod tests {
         section_info.number = Some(1);
         section_info.measure_count = Some(2);
 
-        let section = ChartSection::new(section_info)
-            .with_measures(vec![measure1, measure2]);
+        let section = ChartSection::new(section_info).with_measures(vec![measure1, measure2]);
 
         chart.sections.push(section);
         chart
@@ -2989,7 +4186,11 @@ mod tests {
         let chord_count = count_elements_by_type(&result.scene, ElementType::ChordSymbol);
 
         // Should have 3 chord symbols total (1 in measure 1, 2 in measure 2)
-        assert_eq!(chord_count, 3, "Expected 3 chord symbols, found {}", chord_count);
+        assert_eq!(
+            chord_count, 3,
+            "Expected 3 chord symbols, found {}",
+            chord_count
+        );
     }
 
     /// Test that measures are present in the scene.
@@ -3011,7 +4212,11 @@ mod tests {
         // With 2 chart measures on 1 system, we get 2 measure containers
         // But the MeasureBuilder also creates internal measure structure
         // So we just verify we have at least 2 measures
-        assert!(measure_count >= 2, "Expected at least 2 measures, found {}", measure_count);
+        assert!(
+            measure_count >= 2,
+            "Expected at least 2 measures, found {}",
+            measure_count
+        );
     }
 
     /// Test that chart layout produces valid result structure.
@@ -3045,7 +4250,9 @@ mod tests {
         let chart = create_test_chart();
 
         // Count total chords in the chart
-        let chart_chord_count: usize = chart.sections.iter()
+        let chart_chord_count: usize = chart
+            .sections
+            .iter()
             .flat_map(|s| s.measures())
             .map(|m| m.chords.len())
             .sum();
@@ -3079,21 +4286,26 @@ mod tests {
             assert!(
                 cs.world_x > 0.0,
                 "Chord symbol {} should have positive world x position, got {}",
-                i, cs.world_x
+                i,
+                cs.world_x
             );
-            println!("Chord symbol {}: world_x={:.1}, world_y={:.1}", i, cs.world_x, cs.world_y);
+            println!(
+                "Chord symbol {}: world_x={:.1}, world_y={:.1}",
+                i, cs.world_x, cs.world_y
+            );
         }
 
         // Chord symbols should be in increasing x order within each measure
         // The last two chords (G and Dm in measure 2) should have G.x < Dm.x
         if chord_symbols.len() >= 2 {
             let dm_chord = &chord_symbols[chord_symbols.len() - 1]; // Dm is last
-            let g_chord = &chord_symbols[chord_symbols.len() - 2];  // G is second-to-last
+            let g_chord = &chord_symbols[chord_symbols.len() - 2]; // G is second-to-last
 
             assert!(
                 dm_chord.world_x > g_chord.world_x,
                 "Dm chord (beat 2) should be to the right of G chord (beat 0): Dm.x={:.1} should be > G.x={:.1}",
-                dm_chord.world_x, g_chord.world_x
+                dm_chord.world_x,
+                g_chord.world_x
             );
         }
     }
@@ -3114,22 +4326,24 @@ mod tests {
         // We have 3 chords: C (measure 1), G (measure 2, beat 0), Dm (measure 2, beat 2)
         assert_eq!(chord_symbols.len(), 3);
 
-        let c_chord = &chord_symbols[0];  // C in measure 1
-        let g_chord = &chord_symbols[1];  // G in measure 2
+        let c_chord = &chord_symbols[0]; // C in measure 1
+        let g_chord = &chord_symbols[1]; // G in measure 2
         let dm_chord = &chord_symbols[2]; // Dm in measure 2
 
         // G should be to the right of C (different measure)
         assert!(
             g_chord.world_x > c_chord.world_x,
             "G (measure 2) should be right of C (measure 1): G.x={:.1} > C.x={:.1}",
-            g_chord.world_x, c_chord.world_x
+            g_chord.world_x,
+            c_chord.world_x
         );
 
         // Dm should be to the right of G (same measure, later beat)
         assert!(
             dm_chord.world_x > g_chord.world_x,
             "Dm (beat 2) should be right of G (beat 0): Dm.x={:.1} > G.x={:.1}",
-            dm_chord.world_x, g_chord.world_x
+            dm_chord.world_x,
+            g_chord.world_x
         );
 
         // Print positions for verification
@@ -3178,7 +4392,8 @@ Em7 Am7 D7 Gmaj7
         // Keep only unique (x, y, page) positions with page metadata
         use std::collections::{HashMap, HashSet};
         let mut seen_positions: HashSet<(i64, i64, u32)> = HashSet::new();
-        let unique_measures: Vec<_> = measures.iter()
+        let unique_measures: Vec<_> = measures
+            .iter()
             .filter(|m| {
                 if let Some(page) = m.page {
                     let key = (m.world_x.round() as i64, m.world_y.round() as i64, page);
@@ -3189,9 +4404,15 @@ Em7 Am7 D7 Gmaj7
             })
             .collect();
 
-        println!("Found {} unique measure positions with page tags:", unique_measures.len());
+        println!(
+            "Found {} unique measure positions with page tags:",
+            unique_measures.len()
+        );
         for (i, m) in unique_measures.iter().enumerate() {
-            println!("  Measure {}: x={:.1}, y={:.1}, page={:?}", i, m.world_x, m.world_y, m.page);
+            println!(
+                "  Measure {}: x={:.1}, y={:.1}, page={:?}",
+                i, m.world_x, m.world_y, m.page
+            );
         }
 
         // Group measures by (page, y_position) - same page + same y = same system
@@ -3232,26 +4453,33 @@ Em7 Am7 D7 Gmaj7
                 assert!(
                     diff <= tolerance,
                     "Page {}, system y={}: Measure {} width ({:.1}) differs from measure 0 width ({:.1}) by {:.3}",
-                    page, system_y, i + 1, width, first_width, diff
+                    page,
+                    system_y,
+                    i + 1,
+                    width,
+                    first_width,
+                    diff
                 );
             }
 
             println!(
                 "Page {}, system y={}: {} measures, all widths equal ({:.1} points)",
-                page, system_y, sorted.len(), first_width
+                page,
+                system_y,
+                sorted.len(),
+                first_width
             );
         }
 
         // Also verify total measure count matches chart
-        let expected_measures: usize = chart.sections.iter()
-            .map(|s| s.measures().len())
-            .sum();
+        let expected_measures: usize = chart.sections.iter().map(|s| s.measures().len()).sum();
 
         // Account for MeasureBuilder creating internal structure
         assert!(
             measures.len() >= expected_measures,
             "Expected at least {} measures, found {}",
-            expected_measures, measures.len()
+            expected_measures,
+            measures.len()
         );
     }
 
@@ -3281,7 +4509,11 @@ Em7 Am7 D7 Gmaj7 Cmaj7 F#m7b5 B7 Em
         let measures = find_elements_by_type(&result.scene, ElementType::Measure);
         let measures_with_page: Vec<_> = measures.iter().filter(|m| m.page.is_some()).collect();
 
-        println!("Total measures: {}, with page metadata: {}", measures.len(), measures_with_page.len());
+        println!(
+            "Total measures: {}, with page metadata: {}",
+            measures.len(),
+            measures_with_page.len()
+        );
 
         // At least the outer measure containers should have page metadata
         assert!(
@@ -3293,7 +4525,11 @@ Em7 Am7 D7 Gmaj7 Cmaj7 F#m7b5 B7 Em
         let chords = find_elements_by_type(&result.scene, ElementType::ChordSymbol);
         let chords_with_page: Vec<_> = chords.iter().filter(|c| c.page.is_some()).collect();
 
-        println!("Total chord symbols: {}, with page metadata: {}", chords.len(), chords_with_page.len());
+        println!(
+            "Total chord symbols: {}, with page metadata: {}",
+            chords.len(),
+            chords_with_page.len()
+        );
 
         assert!(
             !chords_with_page.is_empty(),
@@ -3303,7 +4539,10 @@ Em7 Am7 D7 Gmaj7 Cmaj7 F#m7b5 B7 Em
         // Group by page and verify distribution
         let measures_cloned: Vec<_> = measures_with_page.iter().map(|m| (*m).clone()).collect();
         let measures_by_page = group_elements_by_page(&measures_cloned);
-        println!("Measures distributed across {} page(s)", measures_by_page.len());
+        println!(
+            "Measures distributed across {} page(s)",
+            measures_by_page.len()
+        );
         for (page, page_measures) in &measures_by_page {
             println!("  Page {}: {} measures", page, page_measures.len());
         }
@@ -3365,7 +4604,9 @@ C G Am F
             metrics.system_count >= 9,
             "Expected at least 9 systems on page 1, got {}. \
             Available height: {:.1}, content height: {:.1}",
-            metrics.system_count, metrics.available_height, metrics.content_height
+            metrics.system_count,
+            metrics.available_height,
+            metrics.content_height
         );
 
         // Should not exceed 10 systems
@@ -3407,10 +4648,16 @@ C G Am F x8
                 assert!(
                     diff <= 0.1,
                     "Inter-system spacing {} ({:.1}) differs from first ({:.1}) by {:.2}",
-                    i + 1, spacing, first_spacing, diff
+                    i + 1,
+                    spacing,
+                    first_spacing,
+                    diff
                 );
             }
-            println!("All inter-system spacings are consistent: {:.1} points", first_spacing);
+            println!(
+                "All inter-system spacings are consistent: {:.1} points",
+                first_spacing
+            );
         }
     }
 
@@ -3433,14 +4680,18 @@ C G Am F x8
         let result = engine.layout_chart(&chart, &LayoutMode::default());
 
         for page_metrics in result.all_page_metrics() {
-            println!("\n=== Page {} Bottom Margin Test ===", page_metrics.page_number);
+            println!(
+                "\n=== Page {} Bottom Margin Test ===",
+                page_metrics.page_number
+            );
             page_metrics.print_debug();
 
             // Last system should not overflow the bottom margin
             assert!(
                 page_metrics.last_system_to_bottom >= 0.0,
                 "Page {}: Last system overflows bottom margin by {:.1} points",
-                page_metrics.page_number, -page_metrics.last_system_to_bottom
+                page_metrics.page_number,
+                -page_metrics.last_system_to_bottom
             );
 
             // Should have reasonable bottom space (not too much empty space)
@@ -3491,7 +4742,8 @@ C G Am F x4
 
         // With default config, we shouldn't have critical warnings
         // (systems too close or content overflow)
-        let critical_warnings: Vec<_> = warnings.iter()
+        let critical_warnings: Vec<_> = warnings
+            .iter()
             .filter(|w| w.contains("too close") || w.contains("extends past"))
             .collect();
 
@@ -3535,7 +4787,10 @@ Em7 Am7 D7 Gmaj7
 
         println!("\n=== Autumn Leaves Layout Debug ===");
         println!("Total pages: {}", result.pages.len());
-        println!("Total dimensions: {:.1} × {:.1}", result.total_width, result.total_height);
+        println!(
+            "Total dimensions: {:.1} × {:.1}",
+            result.total_width, result.total_height
+        );
         println!();
 
         for metrics in result.all_page_metrics() {
@@ -3554,7 +4809,10 @@ Em7 Am7 D7 Gmaj7
 
         // Verify the layout is reasonable
         let page1 = result.page_metrics(1).unwrap();
-        assert!(page1.system_count >= 5, "Should have at least 5 systems on page 1");
+        assert!(
+            page1.system_count >= 5,
+            "Should have at least 5 systems on page 1"
+        );
     }
 
     /// Test that header space is accounted for on first page.
@@ -3582,7 +4840,9 @@ C G Am F x8
         for m in &all_metrics {
             println!(
                 "Page {}: {} systems, first system at y={:.1}",
-                m.page_number, m.system_count, m.system_y_positions.first().unwrap_or(&0.0)
+                m.page_number,
+                m.system_count,
+                m.system_y_positions.first().unwrap_or(&0.0)
             );
         }
 
@@ -3593,7 +4853,8 @@ C G Am F x8
             assert!(
                 first_system_y >= page1.margins.top - 1.0, // Allow 1pt tolerance
                 "First system should start at or below top margin: y={:.1}, margin={:.1}",
-                first_system_y, page1.margins.top
+                first_system_y,
+                page1.margins.top
             );
         }
     }
@@ -3662,7 +4923,14 @@ Em7 Am7 D7 Gmaj7
 
         println!("\n=== Extended Chart Multi-Page Layout Test ===");
         println!("Sections: {}", chart.sections.len());
-        println!("Total measures: {}", chart.sections.iter().map(|s| s.measures().len()).sum::<usize>());
+        println!(
+            "Total measures: {}",
+            chart
+                .sections
+                .iter()
+                .map(|s| s.measures().len())
+                .sum::<usize>()
+        );
         println!("Total pages: {}", result.pages.len());
         println!();
 
@@ -3694,14 +4962,16 @@ Em7 Am7 D7 Gmaj7
             assert!(
                 metrics.system_count <= 10,
                 "Page {} should have at most 10 systems, got {}",
-                metrics.page_number, metrics.system_count
+                metrics.page_number,
+                metrics.system_count
             );
 
             // No overflow
             assert!(
                 metrics.last_system_to_bottom >= -1.0, // 1pt tolerance for rounding
                 "Page {}: Content overflows bottom margin by {:.1}pt",
-                metrics.page_number, -metrics.last_system_to_bottom
+                metrics.page_number,
+                -metrics.last_system_to_bottom
             );
         }
 
@@ -3714,7 +4984,10 @@ Em7 Am7 D7 Gmaj7
         );
 
         println!("\nTotal systems across all pages: {}", total_systems);
-        println!("Systems per page average: {:.1}", total_systems as f64 / result.pages.len() as f64);
+        println!(
+            "Systems per page average: {:.1}",
+            total_systems as f64 / result.pages.len() as f64
+        );
     }
 
     /// Test that duplicate consecutive chords are hidden when setting is enabled.
@@ -3739,7 +5012,10 @@ C C C G G C
         let result = engine.layout_chart(&chart, &LayoutMode::default());
 
         let chord_count_hidden = count_elements_by_type(&result.scene, ElementType::ChordSymbol);
-        println!("With hide_repeated_chords=true: {} chord symbols rendered", chord_count_hidden);
+        println!(
+            "With hide_repeated_chords=true: {} chord symbols rendered",
+            chord_count_hidden
+        );
 
         // With hiding, we should see: C, G, C = 3 unique chord changes
         assert_eq!(
@@ -3751,13 +5027,15 @@ C C C G G C
         // Test with hide_repeated_chords = false
         let mut config = ChartLayoutConfig::default();
         config.hide_repeated_chords = false;
-        let engine_no_hide = ChartLayoutEngine::with_config(
-            config, style, text_font, symbol_font
-        );
+        let engine_no_hide = ChartLayoutEngine::with_config(config, style, text_font, symbol_font);
         let result_no_hide = engine_no_hide.layout_chart(&chart, &LayoutMode::default());
 
-        let chord_count_all = count_elements_by_type(&result_no_hide.scene, ElementType::ChordSymbol);
-        println!("With hide_repeated_chords=false: {} chord symbols rendered", chord_count_all);
+        let chord_count_all =
+            count_elements_by_type(&result_no_hide.scene, ElementType::ChordSymbol);
+        println!(
+            "With hide_repeated_chords=false: {} chord symbols rendered",
+            chord_count_all
+        );
 
         // Without hiding, we should see all 6 chords
         assert_eq!(
@@ -3901,7 +5179,8 @@ F#m7b5 B7 Em7 Em7
         println!("Total sections: {}", chart.sections.len());
 
         for (section_idx, section) in chart.sections.iter().enumerate() {
-            println!("\nSection {}: {:?} ({} measures)",
+            println!(
+                "\nSection {}: {:?} ({} measures)",
                 section_idx,
                 section.section.section_type,
                 section.measures().len()
@@ -3954,15 +5233,22 @@ Em7 Am7 D7 Gmaj7
         println!("\n=== KEYFLOW LEVEL: Verse Section Analysis ===");
 
         // Find the verse section
-        let verse_section = chart.sections.iter()
+        let verse_section = chart
+            .sections
+            .iter()
             .find(|s| matches!(s.section.section_type, SectionType::Verse))
             .expect("Should have a verse section");
 
-        println!("Verse section: {} measures declared", verse_section.measures().len());
+        println!(
+            "Verse section: {} measures declared",
+            verse_section.measures().len()
+        );
 
         // Print all measures with their chords
         for (i, measure) in verse_section.measures().iter().enumerate() {
-            let chords: Vec<&str> = measure.chords.iter()
+            let chords: Vec<&str> = measure
+                .chords
+                .iter()
                 .map(|c| c.full_symbol.as_str())
                 .collect();
             println!("  Bar {}: {:?}", i + 1, chords);
@@ -3996,18 +5282,17 @@ Em7 Am7 D7 Gmaj7
         let chart = Chart::parse(chart_text).expect("Failed to parse chart");
 
         let style = Box::leak(Box::new(MStyle::default()));
-        let engine = ChartLayoutEngine::new(
-            style,
-            Arc::new(Vec::new()),
-            Arc::new(Vec::new()),
-        );
+        let engine = ChartLayoutEngine::new(style, Arc::new(Vec::new()), Arc::new(Vec::new()));
 
         let result = engine.layout_chart(&chart, &LayoutMode::default());
 
         println!("\n=== SCENE GRAPH LEVEL: Chord Nodes with Measure Metadata ===");
 
         // Find all chord nodes and group by section/measure
-        fn find_chords_with_measure(node: &SceneNode, chords: &mut Vec<(String, Option<u32>, Option<String>)>) {
+        fn find_chords_with_measure(
+            node: &SceneNode,
+            chords: &mut Vec<(String, Option<u32>, Option<String>)>,
+        ) {
             // Check if this is a chord node
             if node.metadata.get("element_type") == Some(&"chord".to_string()) {
                 // Extract the text content
@@ -4018,7 +5303,9 @@ Em7 Am7 D7 Gmaj7
                     }
                 }
 
-                let measure = node.metadata.get("measure")
+                let measure = node
+                    .metadata
+                    .get("measure")
                     .and_then(|m| m.parse::<u32>().ok());
                 let section_type = node.metadata.get("section_type").cloned();
 
@@ -4047,7 +5334,8 @@ Em7 Am7 D7 Gmaj7
 
         // Specifically check bar 5 of verse (measure index 4)
         println!("\n=== BAR 5 OF VERSE (measure index 4) ===");
-        let verse_bar5_chords: Vec<_> = chords.iter()
+        let verse_bar5_chords: Vec<_> = chords
+            .iter()
             .filter(|(_, measure, section)| {
                 section.as_deref() == Some("Verse") && *measure == Some(4)
             })
@@ -4119,7 +5407,10 @@ Am7 D7 Bm7 E7
                         }
                     }
                     PaintCommand::Glyph { codepoint, .. } => {
-                        println!("{}  Glyph: U+{:04X} ('{}')", indent, *codepoint as u32, codepoint);
+                        println!(
+                            "{}  Glyph: U+{:04X} ('{}')",
+                            indent, *codepoint as u32, codepoint
+                        );
                     }
                     _ => {}
                 }
