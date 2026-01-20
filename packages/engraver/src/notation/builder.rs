@@ -8,17 +8,70 @@ use crate::layout::segment::{Segment, SegmentType};
 use crate::layout::segment_list::SegmentList;
 use crate::layout::spacing::HorizontalSpacing;
 use crate::layout::tlayout::{
-    layout_barline, layout_beam, layout_chord, layout_clef, layout_note, layout_timesig,
-    layout_tuplet, Accidental, BarlineParams, BarlineType, BeamLayoutConfig, BeamNote, ChordNote,
-    ChordParams, ClefParams, ClefType, NoteHeadType, NoteParams, StemDirection, TimeSigParams,
-    TimeSigType, TupletConfig, TupletNote, TupletRatio,
+    Accidental, BarlineParams, BarlineType, BeamLayoutConfig, BeamNote, ChordNote, ChordParams,
+    ClefParams, ClefType, NoteHeadType, NoteParams, RestDuration, RestParams, StemDirection,
+    TimeSigParams, TimeSigType, TupletConfig, TupletNote, TupletRatio, layout_barline, layout_beam,
+    layout_chord, layout_clef, layout_note, layout_rest, layout_timesig, layout_tuplet,
 };
+use crate::quantize::{detect_tuplet_groups, QuantizeConfig, QuantizedDuration};
 use crate::scene::id::{ElementType, SemanticId};
 use crate::scene::node::SceneNode;
 use crate::scene::paint::PaintCommand;
 
 use super::mode::NotationMode;
 use super::{Duration, TimeSignature};
+
+/// A rhythm entry representing either a note/chord or a rest.
+///
+/// This follows MuseScore's ChordRest pattern where both chords and rests
+/// share common properties like duration, tuplet membership, etc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RhythmEntry {
+    /// A note or chord with the given duration
+    Note(Duration),
+    /// A rest with the given duration
+    Rest(Duration),
+}
+
+impl RhythmEntry {
+    /// Create a note entry.
+    #[must_use]
+    pub const fn note(duration: Duration) -> Self {
+        Self::Note(duration)
+    }
+
+    /// Create a rest entry.
+    #[must_use]
+    pub const fn rest(duration: Duration) -> Self {
+        Self::Rest(duration)
+    }
+
+    /// Get the duration of this entry.
+    #[must_use]
+    pub const fn duration(&self) -> Duration {
+        match self {
+            Self::Note(d) | Self::Rest(d) => *d,
+        }
+    }
+
+    /// Check if this entry is a rest.
+    #[must_use]
+    pub const fn is_rest(&self) -> bool {
+        matches!(self, Self::Rest(_))
+    }
+
+    /// Check if this entry is a note.
+    #[must_use]
+    pub const fn is_note(&self) -> bool {
+        matches!(self, Self::Note(_))
+    }
+
+    /// Get ticks for this entry (delegates to duration).
+    #[must_use]
+    pub const fn ticks(&self) -> i32 {
+        self.duration().ticks()
+    }
+}
 
 /// Specification for a tuplet group within a measure.
 #[derive(Debug, Clone)]
@@ -58,6 +111,8 @@ pub struct MeasureBuilder {
     mode: NotationMode,
     /// Rhythm pattern (list of durations)
     rhythm: Vec<Duration>,
+    /// Positions that are rests (indices into rhythm array)
+    rest_positions: Vec<bool>,
     /// Per-note head type overrides (index -> head type).
     /// When set, overrides the mode's default head type for specific notes.
     head_type_overrides: Vec<Option<NoteHeadType>>,
@@ -77,6 +132,9 @@ pub struct MeasureBuilder {
     tuplet_groups: Vec<TupletSpec>,
     /// Compact mode: use minimal left margin for tight spaces (count-in, etc.)
     compact: bool,
+    /// Minimum widths for chord/rest segments (e.g., from chord symbol widths).
+    /// If provided, these are applied as minimum widths per segment index.
+    segment_min_widths: Vec<f64>,
 }
 
 impl Default for MeasureBuilder {
@@ -94,6 +152,7 @@ impl MeasureBuilder {
             time_signature: None,
             mode: NotationMode::Standard,
             rhythm: Vec::new(),
+            rest_positions: Vec::new(),
             head_type_overrides: Vec::new(),
             start_barline: None,
             end_barline: Some(BarlineType::Single),
@@ -103,6 +162,7 @@ impl MeasureBuilder {
             stemless: false,
             tuplet_groups: Vec::new(),
             compact: false,
+            segment_min_widths: Vec::new(),
         }
     }
 
@@ -110,6 +170,17 @@ impl MeasureBuilder {
     #[must_use]
     pub fn compact(mut self) -> Self {
         self.compact = true;
+        self
+    }
+
+    /// Set minimum widths for chord/rest segments.
+    ///
+    /// This allows passing chord symbol widths as minimum width constraints,
+    /// ensuring the spacing system gives enough room for each chord symbol.
+    /// The widths are indexed by chord/rest segment index (not tick position).
+    #[must_use]
+    pub fn segment_min_widths(mut self, widths: Vec<f64>) -> Self {
+        self.segment_min_widths = widths;
         self
     }
 
@@ -188,14 +259,16 @@ impl MeasureBuilder {
     /// ```
     #[must_use]
     pub fn tuplet_group(mut self, start_idx: usize, end_idx: usize, ratio: TupletRatio) -> Self {
-        self.tuplet_groups.push(TupletSpec::new(start_idx, end_idx, ratio));
+        self.tuplet_groups
+            .push(TupletSpec::new(start_idx, end_idx, ratio));
         self
     }
 
     /// Add a triplet group (3:2 ratio) for the specified note range.
     #[must_use]
     pub fn triplet(mut self, start_idx: usize, end_idx: usize) -> Self {
-        self.tuplet_groups.push(TupletSpec::triplet(start_idx, end_idx));
+        self.tuplet_groups
+            .push(TupletSpec::triplet(start_idx, end_idx));
         self
     }
 
@@ -224,9 +297,9 @@ impl MeasureBuilder {
         let ts = self.time_signature.unwrap_or(TimeSignature::COMMON);
         let (beats_per_measure, beat_unit) = (ts.numerator, ts.denominator);
         let ticks_per_beat = match beat_unit {
-            4 => 480,  // Quarter note = 480 ticks
-            8 => 240,  // Eighth note = 240 ticks
-            2 => 960,  // Half note = 960 ticks
+            4 => 480, // Quarter note = 480 ticks
+            8 => 240, // Eighth note = 240 ticks
+            2 => 960, // Half note = 960 ticks
             _ => 480,
         };
 
@@ -259,12 +332,12 @@ impl MeasureBuilder {
 
         for (i, dur) in self.rhythm.iter().enumerate() {
             let note_tick = current_tick;
-            let is_quarter = matches!(dur, Duration::Quarter) && dur.dots() == 0;
+            let is_quarter = *dur == Duration::Quarter;
 
             // Check if we've crossed a strong beat since the last quarter
-            let crossed_strong_beat = strong_beat_ticks.iter().any(|&sb| {
-                sb > 0 && sb > last_strong_beat_crossed && sb <= note_tick
-            });
+            let crossed_strong_beat = strong_beat_ticks
+                .iter()
+                .any(|&sb| sb > 0 && sb > last_strong_beat_crossed && sb <= note_tick);
 
             if is_quarter {
                 // If we crossed a strong beat, finalize the previous group
@@ -294,17 +367,99 @@ impl MeasureBuilder {
         result
     }
 
-    /// Set the rhythm pattern.
+    /// Set the rhythm pattern (all entries are notes).
     #[must_use]
     pub fn rhythm(mut self, rhythm: Vec<Duration>) -> Self {
+        self.rest_positions = vec![false; rhythm.len()];
         self.rhythm = rhythm;
         self
     }
 
-    /// Add a single duration to the rhythm.
+    /// Set the rhythm pattern using RhythmEntry (notes and rests).
+    ///
+    /// This allows mixing notes and rests in the rhythm pattern.
+    /// Based on MuseScore's ChordRest pattern.
+    ///
+    /// # Example
+    /// ```ignore
+    /// use engraver::notation::{MeasureBuilder, RhythmEntry, Duration};
+    ///
+    /// // Triplet with rest, note, rest pattern
+    /// let measure = MeasureBuilder::new()
+    ///     .entries(vec![
+    ///         RhythmEntry::Rest(Duration::TripletEighth),
+    ///         RhythmEntry::Note(Duration::TripletEighth),
+    ///         RhythmEntry::Rest(Duration::TripletEighth),
+    ///     ])
+    ///     .triplet(0, 3)
+    ///     .build(&ctx);
+    /// ```
+    #[must_use]
+    pub fn entries(mut self, entries: Vec<RhythmEntry>) -> Self {
+        self.rhythm = entries.iter().map(|e| e.duration()).collect();
+        self.rest_positions = entries.iter().map(|e| e.is_rest()).collect();
+        self
+    }
+
+    /// Add a single duration to the rhythm (as a note).
     #[must_use]
     pub fn add(mut self, duration: Duration) -> Self {
         self.rhythm.push(duration);
+        self.rest_positions.push(false);
+        self
+    }
+
+    /// Add a single entry (note or rest) to the rhythm.
+    #[must_use]
+    pub fn add_entry(mut self, entry: RhythmEntry) -> Self {
+        self.rhythm.push(entry.duration());
+        self.rest_positions.push(entry.is_rest());
+        self
+    }
+
+    /// Build rhythm and tuplet groups from quantized MIDI durations.
+    ///
+    /// This method integrates with the quantization system to automatically:
+    /// 1. Convert quantized durations to notation durations
+    /// 2. Detect and configure tuplet groups (triplets, quintuplets, etc.)
+    ///
+    /// # Arguments
+    /// * `quantized` - Pre-quantized durations from `quantize_duration_batch()`
+    /// * `start_positions` - Start positions of each note in ticks
+    /// * `config` - The quantization configuration used
+    ///
+    /// # Example
+    /// ```ignore
+    /// use engraver::quantize::{QuantizeConfig, quantize_duration_batch};
+    ///
+    /// let config = QuantizeConfig::reaper();
+    /// let durations = vec![320, 320, 320]; // Three triplet quarters at 960 PPQ
+    /// let positions = vec![0, 320, 640];
+    ///
+    /// let quantized = quantize_duration_batch(&durations, &positions, &config);
+    ///
+    /// let measure = MeasureBuilder::new()
+    ///     .time_signature(4, 4)
+    ///     .from_quantized(&quantized, &positions, &config)
+    ///     .build(&ctx);
+    /// ```
+    #[must_use]
+    pub fn from_quantized(
+        mut self,
+        quantized: &[QuantizedDuration],
+        start_positions: &[i32],
+        config: &QuantizeConfig,
+    ) -> Self {
+        // Convert quantized durations to notation durations
+        self.rhythm = quantized.iter().map(|q| q.to_duration()).collect();
+
+        // Detect tuplet groups and convert to TupletSpec
+        let groups = detect_tuplet_groups(quantized, start_positions, config);
+        self.tuplet_groups = groups
+            .into_iter()
+            .map(|g| TupletSpec::new(g.start_idx, g.end_idx, g.ratio))
+            .collect();
+
         self
     }
 
@@ -404,7 +559,10 @@ impl MeasureBuilder {
                 },
                 ctx,
             );
-            scene_elements.push(SceneElement::Clef { id, node: clef_node });
+            scene_elements.push(SceneElement::Clef {
+                id,
+                node: clef_node,
+            });
             id += 1;
         }
 
@@ -451,48 +609,81 @@ impl MeasureBuilder {
         let beam_groups = self.compute_beam_groups();
 
         // 5. Add chord/rest segments for each note
+        // Track chord/rest segment index separately for min_widths
+        let mut chord_rest_seg_idx: usize = 0;
         for group in &beam_groups {
             if group.notes.len() == 1 {
-                // Single note - use chord layout (handles both flagged and non-flagged)
-                // Note: layout_beam returns empty for single notes, so we must use chord layout
+                // Single note/rest - use chord/rest layout
                 let dur = group.notes[0];
                 let mut seg = Segment::chord_rest(current_tick, dur.ticks());
                 seg.ticks = dur.ticks();
+                // Apply min width from chord symbol if provided
+                if let Some(&min_w) = self.segment_min_widths.get(chord_rest_seg_idx) {
+                    seg.min_width = seg.min_width.max(min_w);
+                }
+                chord_rest_seg_idx += 1;
                 segment_vec.push(seg);
 
-                // Get stemless flag for this note from auto-computed or explicit stemless
-                let note_stemless = auto_stemless_flags
+                // Check if this is a rest
+                let is_rest = self
+                    .rest_positions
                     .get(rhythm_index)
                     .copied()
                     .unwrap_or(false);
 
-                let note_head_type = get_head_type(rhythm_index);
-                let (_, chord_node) = layout_chord(
-                    &ChordParams {
-                        id,
-                        duration: dur.to_note_duration(),
-                        head_type: note_head_type,
-                        notes: vec![ChordNote {
-                            line: note_line,
-                            accidental: Accidental::None,
-                            tie: false,
-                        }],
-                        stem_direction: stem_dir,
-                        dots: dur.dots(),
-                        beamed: false,
-                        stemless: note_stemless,
-                    },
-                    ctx,
-                );
+                if is_rest {
+                    // Create rest node
+                    let (_, rest_node) = layout_rest(
+                        &RestParams {
+                            id,
+                            duration: duration_to_rest_duration(dur),
+                            dots: dur.dots(),
+                            line: 0, // Center line for rests
+                        },
+                        ctx,
+                    );
 
-                scene_elements.push(SceneElement::Chord {
-                    id,
-                    node: chord_node,
-                    tick: current_tick,
-                    rhythm_index,
-                    stem_direction: stem_dir,
-                    stemless: note_stemless,
-                });
+                    scene_elements.push(SceneElement::Rest {
+                        id,
+                        node: rest_node,
+                        tick: current_tick,
+                        rhythm_index,
+                    });
+                } else {
+                    // Get stemless flag for this note from auto-computed or explicit stemless
+                    let note_stemless = auto_stemless_flags
+                        .get(rhythm_index)
+                        .copied()
+                        .unwrap_or(false);
+
+                    let note_head_type = get_head_type(rhythm_index);
+                    let (_, chord_node) = layout_chord(
+                        &ChordParams {
+                            id,
+                            duration: dur.to_note_duration(),
+                            head_type: note_head_type,
+                            notes: vec![ChordNote {
+                                line: note_line,
+                                accidental: Accidental::None,
+                                tie: false,
+                            }],
+                            stem_direction: stem_dir,
+                            dots: dur.dots(),
+                            beamed: false,
+                            stemless: note_stemless,
+                        },
+                        ctx,
+                    );
+
+                    scene_elements.push(SceneElement::Chord {
+                        id,
+                        node: chord_node,
+                        tick: current_tick,
+                        rhythm_index,
+                        stem_direction: stem_dir,
+                        stemless: note_stemless,
+                    });
+                }
 
                 current_tick += dur.ticks();
                 rhythm_index += 1;
@@ -507,6 +698,11 @@ impl MeasureBuilder {
                 for dur in &group.notes {
                     let mut seg = Segment::chord_rest(current_tick, dur.ticks());
                     seg.ticks = dur.ticks();
+                    // Apply min width from chord symbol if provided
+                    if let Some(&min_w) = self.segment_min_widths.get(chord_rest_seg_idx) {
+                        seg.min_width = seg.min_width.max(min_w);
+                    }
+                    chord_rest_seg_idx += 1;
                     segment_vec.push(seg);
 
                     // Store info for beam layout (x position will be set after spacing)
@@ -533,6 +729,11 @@ impl MeasureBuilder {
                 for dur in &group.notes {
                     let mut seg = Segment::chord_rest(current_tick, dur.ticks());
                     seg.ticks = dur.ticks();
+                    // Apply min width from chord symbol if provided
+                    if let Some(&min_w) = self.segment_min_widths.get(chord_rest_seg_idx) {
+                        seg.min_width = seg.min_width.max(min_w);
+                    }
+                    chord_rest_seg_idx += 1;
                     segment_vec.push(seg);
 
                     // Get stemless flag for this note from auto-computed or explicit stemless
@@ -619,15 +820,18 @@ impl MeasureBuilder {
         // 9. Apply horizontal spacing
         // Account for bar margins when justifying
         let spacing = HorizontalSpacing::new(spatium);
-        let target_width = self.width.map(|w| {
-            let full_width = w * spatium;
-            // When justifying, the available space is reduced by the trailing margin
-            if self.justify {
-                full_width - note_bar_distance
-            } else {
-                full_width
-            }
-        }).unwrap_or(f64::MAX);
+        let target_width = self
+            .width
+            .map(|w| {
+                let full_width = w * spatium;
+                // When justifying, the available space is reduced by the trailing margin
+                if self.justify {
+                    full_width - note_bar_distance
+                } else {
+                    full_width
+                }
+            })
+            .unwrap_or(f64::MAX);
         let spacing_result = spacing.compute_spacing(&mut segments, target_width, self.justify);
 
         // 9. Build final scene with computed positions
@@ -637,6 +841,7 @@ impl MeasureBuilder {
             scene,
             width: spacing_result.total_width,
             segments,
+            internal_push_positions: Vec::new(), // Set by chart layout when needed
         }
     }
 
@@ -647,6 +852,7 @@ impl MeasureBuilder {
     /// 2. Flagged notes (8ths, 16ths, 32nds) are grouped within beats
     /// 3. Beam groups never cross beat boundaries
     /// 4. Within a beat, all consecutive flagged notes are beamed together
+    /// 5. Rests break beam groups (rests are never beamed)
     fn compute_beam_groups(&self) -> Vec<BeamGroup> {
         if self.rhythm.is_empty() {
             return Vec::new();
@@ -659,14 +865,29 @@ impl MeasureBuilder {
         let mut current_group: Vec<Duration> = Vec::new();
         let mut current_tick: i32 = 0;
 
-        for &dur in &self.rhythm {
+        for (idx, &dur) in self.rhythm.iter().enumerate() {
             let dur_ticks = dur.ticks();
             let needs_flag = dur.needs_flag();
+            let is_rest = self.rest_positions.get(idx).copied().unwrap_or(false);
 
             // Calculate which beat we're starting in
             let start_beat = current_tick / beat_ticks;
             let end_tick = current_tick + dur_ticks;
             let end_beat = (end_tick - 1) / beat_ticks; // -1 because note ending exactly on beat boundary belongs to previous beat
+
+            // Rests break beam groups - rests are never beamed
+            if is_rest {
+                // Finish any pending beam group
+                if !current_group.is_empty() {
+                    groups.push(BeamGroup {
+                        notes: std::mem::take(&mut current_group),
+                    });
+                }
+                // Add rest as its own group
+                groups.push(BeamGroup { notes: vec![dur] });
+                current_tick = end_tick;
+                continue;
+            }
 
             // Non-flagged notes (quarters, halves, etc.) break any current beam group
             if !needs_flag {
@@ -808,6 +1029,18 @@ impl MeasureBuilder {
                     container.add_child(node.clone());
                     root.add_child(container);
                 }
+                SceneElement::Rest {
+                    id,
+                    node,
+                    tick,
+                    rhythm_index: _,
+                } => {
+                    let x = find_chord_x(*tick);
+                    let mut container = SceneNode::group(SemanticId::new(ElementType::Rest, *id));
+                    container.transform = Affine::translate((x, 0.0));
+                    container.add_child(node.clone());
+                    root.add_child(container);
+                }
                 SceneElement::BeamGroup {
                     start_tick: _,
                     notes,
@@ -890,20 +1123,30 @@ impl MeasureBuilder {
             0.0
         };
 
-        // Collect chord info by rhythm_index for tuplet layout
-        let mut chord_info: std::collections::HashMap<usize, (f64, StemDirection, bool)> =
-            std::collections::HashMap::new();
+        // Collect chord/rest info by rhythm_index for tuplet layout
+        // For rests, we use default stem direction and mark them as rests
+        let mut entry_info: std::collections::HashMap<usize, (f64, StemDirection, bool, bool)> =
+            std::collections::HashMap::new(); // (x, stem_dir, stemless, is_rest)
         for element in elements {
-            if let SceneElement::Chord {
-                tick,
-                rhythm_index,
-                stem_direction,
-                stemless,
-                ..
-            } = element
-            {
-                let x = find_chord_x(*tick);
-                chord_info.insert(*rhythm_index, (x, *stem_direction, *stemless));
+            match element {
+                SceneElement::Chord {
+                    tick,
+                    rhythm_index,
+                    stem_direction,
+                    stemless,
+                    ..
+                } => {
+                    let x = find_chord_x(*tick);
+                    entry_info.insert(*rhythm_index, (x, *stem_direction, *stemless, false));
+                }
+                SceneElement::Rest {
+                    tick, rhythm_index, ..
+                } => {
+                    let x = find_chord_x(*tick);
+                    // Rests use Up stem direction for bracket positioning and are marked as rests
+                    entry_info.insert(*rhythm_index, (x, StemDirection::Up, true, true));
+                }
+                _ => {}
             }
         }
 
@@ -912,41 +1155,56 @@ impl MeasureBuilder {
         for tuplet_spec in &self.tuplet_groups {
             let tuplet_notes: Vec<TupletNote> = (tuplet_spec.start_idx..tuplet_spec.end_idx)
                 .filter_map(|idx| {
-                    chord_info.get(&idx).map(|(x, stem_dir, stemless)| {
-                        // Calculate Y positions based on staff line and stem direction
-                        let y_head = -(note_line as f64 * spatium / 2.0);
-                        let stem_length = spatium * 3.5; // Standard stem length
+                    entry_info
+                        .get(&idx)
+                        .map(|(x, stem_dir, stemless, is_rest)| {
+                            // Calculate Y positions based on staff line and stem direction
+                            let y_head = -(note_line as f64 * spatium / 2.0);
+                            let stem_length = spatium * 3.5; // Standard stem length
 
-                        let (y_stem_tip, resolved_dir) = if *stemless {
-                            (None, StemDirection::Up) // Default for stemless
-                        } else {
-                            match stem_dir {
-                                StemDirection::Up => (Some(y_head - stem_length), StemDirection::Up),
-                                StemDirection::Down => {
-                                    (Some(y_head + stem_length), StemDirection::Down)
+                            // For rests in tuplets, use a virtual stem tip so the bracket
+                            // stays horizontal. This matches MuseScore behavior.
+                            let (y_stem_tip, resolved_dir) = if *is_rest {
+                                // Rests use a virtual stem tip at the same position as Up stems
+                                // This keeps the tuplet bracket horizontal
+                                (Some(y_head - stem_length), StemDirection::Up)
+                            } else if *stemless {
+                                (None, StemDirection::Up) // Default for stemless
+                            } else {
+                                match stem_dir {
+                                    StemDirection::Up => {
+                                        (Some(y_head - stem_length), StemDirection::Up)
+                                    }
+                                    StemDirection::Down => {
+                                        (Some(y_head + stem_length), StemDirection::Down)
+                                    }
+                                    StemDirection::Auto => {
+                                        // Auto defaults to up for slash notation
+                                        (Some(y_head - stem_length), StemDirection::Up)
+                                    }
                                 }
-                                StemDirection::Auto => {
-                                    // Auto defaults to up for slash notation
-                                    (Some(y_head - stem_length), StemDirection::Up)
-                                }
+                            };
+
+                            TupletNote {
+                                x: *x,
+                                y_head,
+                                y_stem_tip,
+                                stem_direction: resolved_dir,
+                                is_rest: *is_rest,
                             }
-                        };
-
-                        TupletNote {
-                            x: *x,
-                            y_head,
-                            y_stem_tip,
-                            stem_direction: resolved_dir,
-                            is_rest: false,
-                        }
-                    })
+                        })
                 })
                 .collect();
 
             if tuplet_notes.len() >= 2 {
                 let config = TupletConfig::default();
-                let tuplet_layout =
-                    layout_tuplet(&tuplet_notes, tuplet_spec.ratio, tuplet_id, spatium, &config);
+                let tuplet_layout = layout_tuplet(
+                    &tuplet_notes,
+                    tuplet_spec.ratio,
+                    tuplet_id,
+                    spatium,
+                    &config,
+                );
                 root.add_child(tuplet_layout.scene);
                 tuplet_id += 1;
             }
@@ -994,6 +1252,14 @@ enum SceneElement {
         /// Whether this note is stemless
         stemless: bool,
     },
+    /// A rest (following MuseScore's ChordRest pattern)
+    Rest {
+        id: u64,
+        node: SceneNode,
+        tick: i32,
+        /// Index in the rhythm array (for tuplet grouping)
+        rhythm_index: usize,
+    },
     BeamGroup {
         start_tick: i32,
         notes: Vec<BeamNoteInfo>,
@@ -1001,6 +1267,20 @@ enum SceneElement {
         stem_dir: StemDirection,
         note_line: i32,
     },
+}
+
+/// Convert a Duration to a RestDuration for rest layout.
+fn duration_to_rest_duration(dur: Duration) -> RestDuration {
+    use crate::model::DurationKind;
+    match dur.kind {
+        DurationKind::Whole => RestDuration::Whole,
+        DurationKind::Half => RestDuration::Half,
+        DurationKind::Quarter => RestDuration::Quarter,
+        DurationKind::Eighth => RestDuration::Eighth,
+        DurationKind::Sixteenth => RestDuration::Sixteenth,
+        DurationKind::ThirtySecond => RestDuration::ThirtySecond,
+        DurationKind::SixtyFourth => RestDuration::SixtyFourth,
+    }
 }
 
 /// Result of building a measure.
@@ -1012,6 +1292,9 @@ pub struct MeasureScene {
     pub width: f64,
     /// The segment list (for debugging/inspection)
     pub segments: SegmentList,
+    /// Internal push positions: maps chord_idx to segment_idx for pushed chords
+    /// (for chords that push back within the same measure, not spillbacks)
+    pub internal_push_positions: Vec<(usize, usize)>,
 }
 
 /// Builder for creating a system (line) of multiple measures.
@@ -1347,18 +1630,16 @@ mod tests {
     #[test]
     fn test_beam_groups_sixteenths_by_beat() {
         // 8 sixteenth notes in 4/4 should create 2 beam groups (4 per beat)
-        let builder = MeasureBuilder::new()
-            .time_signature(4, 4)
-            .rhythm(vec![
-                Duration::Sixteenth,
-                Duration::Sixteenth,
-                Duration::Sixteenth,
-                Duration::Sixteenth, // End of beat 1
-                Duration::Sixteenth,
-                Duration::Sixteenth,
-                Duration::Sixteenth,
-                Duration::Sixteenth, // End of beat 2
-            ]);
+        let builder = MeasureBuilder::new().time_signature(4, 4).rhythm(vec![
+            Duration::Sixteenth,
+            Duration::Sixteenth,
+            Duration::Sixteenth,
+            Duration::Sixteenth, // End of beat 1
+            Duration::Sixteenth,
+            Duration::Sixteenth,
+            Duration::Sixteenth,
+            Duration::Sixteenth, // End of beat 2
+        ]);
 
         let groups = builder.compute_beam_groups();
         // Should be 2 groups of 4 sixteenths each
@@ -1370,14 +1651,12 @@ mod tests {
     #[test]
     fn test_beam_groups_eighths_by_beat() {
         // 4 eighth notes in 4/4 should create 2 beam groups (2 per beat)
-        let builder = MeasureBuilder::new()
-            .time_signature(4, 4)
-            .rhythm(vec![
-                Duration::Eighth,
-                Duration::Eighth, // End of beat 1
-                Duration::Eighth,
-                Duration::Eighth, // End of beat 2
-            ]);
+        let builder = MeasureBuilder::new().time_signature(4, 4).rhythm(vec![
+            Duration::Eighth,
+            Duration::Eighth, // End of beat 1
+            Duration::Eighth,
+            Duration::Eighth, // End of beat 2
+        ]);
 
         let groups = builder.compute_beam_groups();
         // Should be 2 groups of 2 eighths each
@@ -1389,14 +1668,12 @@ mod tests {
     #[test]
     fn test_beam_groups_mixed_rhythms() {
         // Quarter + 2 eighths + quarter in 4/4
-        let builder = MeasureBuilder::new()
-            .time_signature(4, 4)
-            .rhythm(vec![
-                Duration::Quarter,  // Beat 1 (not beamed)
-                Duration::Eighth,   // Beat 2
-                Duration::Eighth,   // Beat 2
-                Duration::Quarter,  // Beat 3 (not beamed)
-            ]);
+        let builder = MeasureBuilder::new().time_signature(4, 4).rhythm(vec![
+            Duration::Quarter, // Beat 1 (not beamed)
+            Duration::Eighth,  // Beat 2
+            Duration::Eighth,  // Beat 2
+            Duration::Quarter, // Beat 3 (not beamed)
+        ]);
 
         let groups = builder.compute_beam_groups();
         // Should be: [Quarter], [Eighth, Eighth], [Quarter]
@@ -1409,18 +1686,16 @@ mod tests {
     #[test]
     fn test_beam_groups_32nds_by_beat() {
         // 8 thirty-second notes in 4/4 (covers half a beat)
-        let builder = MeasureBuilder::new()
-            .time_signature(4, 4)
-            .rhythm(vec![
-                Duration::ThirtySecond,
-                Duration::ThirtySecond,
-                Duration::ThirtySecond,
-                Duration::ThirtySecond,
-                Duration::ThirtySecond,
-                Duration::ThirtySecond,
-                Duration::ThirtySecond,
-                Duration::ThirtySecond, // Half of beat 1
-            ]);
+        let builder = MeasureBuilder::new().time_signature(4, 4).rhythm(vec![
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond,
+            Duration::ThirtySecond, // Half of beat 1
+        ]);
 
         let groups = builder.compute_beam_groups();
         // All 8 should be in one group (within beat 1)
@@ -1432,18 +1707,115 @@ mod tests {
     fn test_beam_groups_cross_beat_boundary() {
         // 3 eighths starting on beat 1.5 should break at beat 2
         // (This is beat 1: eighth, then 2 eighths that cross into beat 2)
-        let builder = MeasureBuilder::new()
-            .time_signature(4, 4)
-            .rhythm(vec![
-                Duration::Eighth,   // Beat 1 first half
-                Duration::Eighth,   // Beat 1 second half - completes beat 1
-                Duration::Eighth,   // Beat 2 first half
-            ]);
+        let builder = MeasureBuilder::new().time_signature(4, 4).rhythm(vec![
+            Duration::Eighth, // Beat 1 first half
+            Duration::Eighth, // Beat 1 second half - completes beat 1
+            Duration::Eighth, // Beat 2 first half
+        ]);
 
         let groups = builder.compute_beam_groups();
         // Should be: [Eighth, Eighth] (beat 1), [Eighth] (beat 2)
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].notes.len(), 2);
         assert_eq!(groups[1].notes.len(), 1);
+    }
+
+    // Integration tests for from_quantized()
+    #[test]
+    fn test_from_quantized_triplet_eighths() {
+        use crate::quantize::{quantize_duration_batch, QuantizeConfig};
+
+        let config = QuantizeConfig::default();
+        // Three triplet eighths (160 ticks each at 480 PPQ)
+        let durations = vec![160, 160, 160];
+        let positions = vec![0, 160, 320];
+
+        let quantized = quantize_duration_batch(&durations, &positions, &config);
+
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .from_quantized(&quantized, &positions, &config);
+
+        // Should have 3 rhythm entries
+        assert_eq!(builder.rhythm.len(), 3);
+
+        // Should have 1 tuplet group (triplet)
+        assert_eq!(builder.tuplet_groups.len(), 1);
+        assert_eq!(builder.tuplet_groups[0].start_idx, 0);
+        assert_eq!(builder.tuplet_groups[0].end_idx, 3);
+        assert_eq!(builder.tuplet_groups[0].ratio, TupletRatio::triplet());
+    }
+
+    #[test]
+    fn test_from_quantized_mixed_rhythms() {
+        use crate::quantize::{quantize_duration_batch, QuantizeConfig};
+
+        let config = QuantizeConfig::default();
+        // Quarter + 3 triplet eighths + quarter
+        // Quarter = 480, triplet eighth = 160
+        let durations = vec![480, 160, 160, 160, 480];
+        let positions = vec![0, 480, 640, 800, 960];
+
+        let quantized = quantize_duration_batch(&durations, &positions, &config);
+
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .from_quantized(&quantized, &positions, &config);
+
+        // Should have 5 rhythm entries
+        assert_eq!(builder.rhythm.len(), 5);
+
+        // Should have 1 tuplet group (the triplet in the middle)
+        assert_eq!(builder.tuplet_groups.len(), 1);
+        assert_eq!(builder.tuplet_groups[0].start_idx, 1);
+        assert_eq!(builder.tuplet_groups[0].end_idx, 4);
+    }
+
+    #[test]
+    fn test_from_quantized_no_tuplets() {
+        use crate::quantize::{quantize_duration_batch, QuantizeConfig};
+
+        let config = QuantizeConfig::default();
+        // Four regular quarter notes
+        let durations = vec![480, 480, 480, 480];
+        let positions = vec![0, 480, 960, 1440];
+
+        let quantized = quantize_duration_batch(&durations, &positions, &config);
+
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .from_quantized(&quantized, &positions, &config);
+
+        // Should have 4 rhythm entries
+        assert_eq!(builder.rhythm.len(), 4);
+
+        // Should have no tuplet groups
+        assert!(builder.tuplet_groups.is_empty());
+
+        // All should be quarter notes
+        for dur in &builder.rhythm {
+            assert_eq!(*dur, Duration::Quarter);
+        }
+    }
+
+    #[test]
+    fn test_from_quantized_reaper_ppq() {
+        use crate::quantize::{quantize_duration_batch, QuantizeConfig};
+
+        // REAPER uses 960 PPQ
+        let config = QuantizeConfig::reaper();
+        // Three triplet eighths at 960 PPQ (320 ticks each)
+        let durations = vec![320, 320, 320];
+        let positions = vec![0, 320, 640];
+
+        let quantized = quantize_duration_batch(&durations, &positions, &config);
+
+        let builder = MeasureBuilder::new()
+            .time_signature(4, 4)
+            .from_quantized(&quantized, &positions, &config);
+
+        // Should detect triplet group
+        assert_eq!(builder.tuplet_groups.len(), 1);
+        assert_eq!(builder.tuplet_groups[0].ratio, TupletRatio::triplet());
     }
 }

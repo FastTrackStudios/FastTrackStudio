@@ -1262,11 +1262,12 @@ impl ChartLayoutEngine {
                     root.add_child(count_in_container);
 
                     // Only show measure number for the first count-in measure
+                    // Position above the clef (at content_x) rather than the measure start
                     let count_in_display_num = (1 - num_count_in as i32) + count_in_idx as i32;
                     if self.config.show_measure_numbers && count_in_idx == 0 {
                         let measure_num_node = self.create_measure_number(
                             count_in_display_num,
-                            measure_x,
+                            content_x, // Position above clef at start of line
                             staff_y,
                             id_counter,
                         );
@@ -1395,13 +1396,14 @@ impl ChartLayoutEngine {
 
                         // Add measure number on first measure of each system
                         // Real measures start at 1, after count-in measures
+                        // Position above the clef (at content_x) rather than the measure start
                         if self.config.show_measure_numbers && local_measure_idx == 0 {
                             let display_measure_num = (global_measure_index as i32)
                                 - self.config.count_in_measures as i32
                                 + 1;
                             let measure_num_node = self.create_measure_number(
                                 display_measure_num,
-                                measure_x,
+                                content_x, // Position above clef at start of line
                                 staff_y,
                                 id_counter,
                             );
@@ -1511,10 +1513,28 @@ impl ChartLayoutEngine {
                             // SPECIAL CASE: For pushed chords at the start of a section or system/line,
                             // place them at segment 0 (beat 1) for visual clarity.
                             // Note: is_first_real_chord and is_pushed_at_boundary were computed above
+                            //
+                            // SPECIAL CASE: For internal pushed chords (pushed but not first chord),
+                            // use the precomputed segment_idx from internal_push_positions.
+
+                            // Check if this is an internal pushed chord (pushed but not spillback)
+                            let is_internal_push = chord.push_pull.as_ref()
+                                .map_or(false, |(is_push, _)| *is_push)
+                                && !is_first_real_chord;
 
                             let segment_idx = if is_pushed_at_boundary {
                                 // Force pushed chord to segment 0 (beat 1) at section/line start
                                 0
+                            } else if is_internal_push {
+                                // Internal pushed chord - look up precomputed segment from build_rhythm_with_triplets
+                                measure_result.internal_push_positions
+                                    .iter()
+                                    .find(|(c_idx, _)| *c_idx == chord_idx)
+                                    .map(|(_, seg_idx)| *seg_idx)
+                                    .unwrap_or_else(|| {
+                                        // Fallback: use rhythm_elements lookup
+                                        chord_idx.min(segment_positions.len().saturating_sub(1))
+                                    })
                             } else if !measure.rhythm_elements.is_empty() {
                                 // Find this chord's index in the rhythm_elements list
                                 // to align with explicit rhythm (triplets, etc.)
@@ -1601,10 +1621,12 @@ impl ChartLayoutEngine {
                         if let Some(spillback_list) = spillbacks {
                             for spillback in spillback_list {
                                 // Calculate segment index for spillback chord
-                                // For triplet push, the rhythm becomes [TripletQuarter, TripletEighth]
-                                // The chord goes on the eighth note (second element of the triplet group)
-                                // Segment index = beat_position + 1 (the eighth note of that beat's triplet)
-                                let segment_idx = spillback.beat_position + 1;
+                                // Spillback chords always land at beat N.66 (triplet position) of the last beat.
+                                // The rhythm for this measure includes [TripletQuarter, TripletEighth] for the
+                                // spillback beat, and the TripletEighth (where the chord sounds) is always
+                                // the last segment. Using segment_positions.len() - 1 correctly handles cases
+                                // where earlier beats also have triplets (from internal pushes).
+                                let segment_idx = segment_positions.len().saturating_sub(1);
 
                                 // Debug: log spillback rendering
                                 eprintln!(
@@ -1984,11 +2006,12 @@ impl ChartLayoutEngine {
                     root.add_child(count_in_container);
 
                     // Only show measure number for the first count-in measure
+                    // Position above the clef (at content_x) rather than the measure start
                     let count_in_display_num = (1 - num_count_in as i32) + count_in_idx as i32;
                     if self.config.show_measure_numbers && count_in_idx == 0 {
                         let measure_num_node = self.create_measure_number(
                             count_in_display_num,
-                            measure_x,
+                            content_x, // Position above clef at start of line
                             staff_y,
                             id_counter,
                         );
@@ -2065,13 +2088,14 @@ impl ChartLayoutEngine {
                         root.add_child(measure_container);
 
                         // Add measure number on first measure of each system (real measures start at 1)
+                        // Position above the clef (at content_x) rather than the measure start
                         if self.config.show_measure_numbers && local_measure_idx == 0 {
                             let display_measure_num = (global_measure_index as i32)
                                 - self.config.count_in_measures as i32
                                 + 1;
                             let measure_num_node = self.create_measure_number(
                                 display_measure_num,
-                                measure_x,
+                                content_x, // Position above clef at start of line
                                 staff_y,
                                 id_counter,
                             );
@@ -2139,10 +2163,28 @@ impl ChartLayoutEngine {
                             // SPECIAL CASE: For pushed chords at the start of a section or system/line,
                             // place them at segment 0 (beat 1) for visual clarity.
                             // Note: is_first_real_chord and is_pushed_at_boundary were computed above
+                            //
+                            // SPECIAL CASE: For internal pushed chords (pushed but not first chord),
+                            // use the precomputed segment_idx from internal_push_positions.
+
+                            // Check if this is an internal pushed chord (pushed but not spillback)
+                            let is_internal_push = chord.push_pull.as_ref()
+                                .map_or(false, |(is_push, _)| *is_push)
+                                && !is_first_real_chord;
 
                             let segment_idx = if is_pushed_at_boundary {
                                 // Force pushed chord to segment 0 (beat 1) at section/line start
                                 0
+                            } else if is_internal_push {
+                                // Internal pushed chord - look up precomputed segment from build_rhythm_with_triplets
+                                measure_result.internal_push_positions
+                                    .iter()
+                                    .find(|(c_idx, _)| *c_idx == chord_idx)
+                                    .map(|(_, seg_idx)| *seg_idx)
+                                    .unwrap_or_else(|| {
+                                        // Fallback: use rhythm_elements lookup
+                                        chord_idx.min(segment_positions.len().saturating_sub(1))
+                                    })
                             } else if !measure.rhythm_elements.is_empty() {
                                 // Find this chord's index in the rhythm_elements list
                                 // to align with explicit rhythm (triplets, etc.)
@@ -2214,10 +2256,12 @@ impl ChartLayoutEngine {
                         if let Some(spillback_list) = spillbacks {
                             for spillback in spillback_list {
                                 // Calculate segment index for spillback chord
-                                // For triplet push, the rhythm becomes [TripletQuarter, TripletEighth]
-                                // The chord goes on the eighth note (second element of the triplet group)
-                                // Segment index = beat_position + 1 (the eighth note of that beat's triplet)
-                                let segment_idx = spillback.beat_position + 1;
+                                // Spillback chords always land at beat N.66 (triplet position) of the last beat.
+                                // The rhythm for this measure includes [TripletQuarter, TripletEighth] for the
+                                // spillback beat, and the TripletEighth (where the chord sounds) is always
+                                // the last segment. Using segment_positions.len() - 1 correctly handles cases
+                                // where earlier beats also have triplets (from internal pushes).
+                                let segment_idx = segment_positions.len().saturating_sub(1);
 
                                 // Debug: log spillback rendering
                                 eprintln!(
@@ -3044,11 +3088,11 @@ impl ChartLayoutEngine {
 
         // When we have explicit chord rhythms, use entries directly (notes and rests)
         // Otherwise, use the existing rhythm-based approach
-        let (rhythm_entries, full_rhythm, rhythm_ticks, tuplet_specs, head_type_overrides) =
+        let (rhythm_entries, full_rhythm, rhythm_ticks, tuplet_specs, head_type_overrides, internal_push_positions) =
             if has_explicit_chord_rhythm {
                 // Build rhythm from explicit chord rhythms (r8t, Ab9_8t, etc.)
                 let (entries, ticks, specs) = self.build_rhythm_from_chord_rhythms(measure);
-                (Some(entries), Vec::new(), ticks, specs, Vec::new())
+                (Some(entries), Vec::new(), ticks, specs, Vec::new(), Vec::new())
             } else if let Some(data) = melody_data {
                 // Use preprocessed melody segments
                 let melody_durations: Vec<Duration> =
@@ -3088,7 +3132,7 @@ impl ChartLayoutEngine {
                 };
 
                 let ticks: i32 = full_rhythm.iter().map(|d| d.ticks()).sum();
-                (None, full_rhythm, ticks, Vec::new(), head_overrides)
+                (None, full_rhythm, ticks, Vec::new(), head_overrides, Vec::new())
             } else if has_melodies {
                 // Legacy: Convert raw melody notes to durations (no spillover handling)
                 let melody_durations: Vec<Duration> = measure
@@ -3132,14 +3176,31 @@ impl ChartLayoutEngine {
                 };
 
                 let ticks: i32 = full_rhythm.iter().map(|d| d.ticks()).sum();
-                (None, full_rhythm, ticks, Vec::new(), head_overrides)
+                (None, full_rhythm, ticks, Vec::new(), head_overrides, Vec::new())
             } else {
                 // No melodies or explicit rhythms - use slash notation
-                let num_beats = measure.chords.len().max(time_signature.0 as usize);
+                // Count only non-pushed chords - pushed chords spill to the previous beat
+                // and don't consume their own beat position
+                let non_pushed_count = measure.chords.iter().filter(|c| {
+                    c.push_pull.as_ref().map_or(true, |(is_push, _)| !is_push)
+                }).count();
+                let num_beats = non_pushed_count.max(time_signature.0 as usize);
+
+                // Check if any chord in this measure has a triplet push
+                let has_triplet_push = measure.chords.iter().any(|c| {
+                    if let Some((is_push, amount)) = &c.push_pull {
+                        *is_push && amount.base == PushPullBase::Triplet && amount.level == 1
+                    } else {
+                        false
+                    }
+                });
 
                 // Check for spillback chords (from next measure pushing back)
-                // and build rhythm with triplet subdivisions if use_stems is enabled
-                let (rhythm, ticks, specs, spillback_chords) = if self.config.use_stems || spillbacks.is_some() {
+                // and build rhythm with triplet subdivisions if:
+                // - use_stems is enabled, OR
+                // - there are spillbacks, OR
+                // - any chord has a triplet push
+                let (rhythm, ticks, specs, _spillback_chords, internal_push_positions) = if self.config.use_stems || spillbacks.is_some() || has_triplet_push {
                     // Build rhythm with triplet subdivisions for pushed chords
                     self.build_rhythm_with_triplets(measure, num_beats, spillbacks)
                 } else {
@@ -3147,21 +3208,31 @@ impl ChartLayoutEngine {
                     let rhythm: Vec<Duration> =
                         (0..num_beats).map(|_| Duration::Quarter).collect();
                     let ticks: i32 = rhythm.iter().map(|d| d.ticks()).sum();
-                    (rhythm, ticks, Vec::new(), Vec::new())
+                    (rhythm, ticks, Vec::new(), Vec::new(), Vec::new())
                 };
-                // TODO: Use spillback_chords to render chord symbols at the pushed positions
-                let _ = spillback_chords; // Suppress unused warning for now
-                (None, rhythm, ticks, specs, Vec::new())
+                (None, rhythm, ticks, specs, Vec::new(), internal_push_positions)
             };
 
         // Convert measure width from points to spatiums for justification
         let width_spatiums = measure_width / self.config.spatium;
 
+        // Calculate number of rhythm segments (for chord min width calculation)
+        let num_segments = if let Some(ref entries) = rhythm_entries {
+            entries.len()
+        } else {
+            full_rhythm.len()
+        };
+
+        // Compute minimum segment widths based on chord symbol widths
+        let text_metrics = TextFontMetrics::new(self.text_font_data.clone());
+        let chord_min_widths = self.compute_chord_min_widths(measure, num_segments, &text_metrics);
+
         // Build the measure based on whether we have explicit rhythm entries or not
         let mut builder = MeasureBuilder::new()
             .id_base(id_base as u64)
             .justify_to(width_spatiums)
-            .no_barlines(); // Barlines handled by chart_layout
+            .no_barlines() // Barlines handled by chart_layout
+            .segment_min_widths(chord_min_widths);
 
         // Set the rhythm using either entries (for explicit rhythms) or rhythm (for slash fills)
         if let Some(entries) = rhythm_entries {
@@ -3211,6 +3282,9 @@ impl ChartLayoutEngine {
 
         let mut result = builder.build(ctx);
 
+        // Set internal push positions for chord rendering
+        result.internal_push_positions = internal_push_positions;
+
         // Add ties for cross-barline notes
         if let Some(data) = melody_data {
             self.add_melody_ties(&mut result, data, ctx);
@@ -3236,58 +3310,88 @@ impl ChartLayoutEngine {
         measure: &keyflow::chart::types::Measure,
         num_beats: usize,
         spillbacks: Option<&[PushSpillback]>,
-    ) -> (Vec<Duration>, i32, Vec<TupletSpec>, Vec<(usize, String)>) {
+    ) -> (Vec<Duration>, i32, Vec<TupletSpec>, Vec<(usize, String)>, Vec<(usize, usize)>) {
         let mut rhythm = Vec::new();
         let mut tuplet_specs = Vec::new();
         let mut rhythm_index = 0;
         let mut spillback_chord_positions: Vec<(usize, String)> = Vec::new();
+        // Track internal push positions: (chord_idx in measure.chords, segment_idx for TripletEighth)
+        let mut internal_push_positions: Vec<(usize, usize)> = Vec::new();
 
-        for beat_idx in 0..num_beats {
-            // Check if there's a spillback chord affecting this beat
-            let spillback_on_beat = spillbacks.and_then(|spills| {
-                spills.iter().find(|s| s.beat_position == beat_idx)
+        // Build a list of beats, tracking which ones have pushed chords.
+        // For each chord, calculate its natural beat position from cumulative durations.
+        // A pushed chord (not first) creates a triplet at the PREVIOUS beat.
+        // Store: (has_triplet_push, pushed_chord_idx)
+        let mut beats_with_triplets: Vec<(bool, Option<usize>)> = vec![(false, None); num_beats];
+
+        // Calculate natural beat positions for each chord based on cumulative durations
+        let mut cumulative_beats = 0usize;
+        for (chord_idx, chord) in measure.chords.iter().enumerate() {
+            let is_pushed = chord.push_pull.as_ref().map_or(false, |(is_push, _)| *is_push);
+            let is_triplet_push = chord.push_pull.as_ref().map_or(false, |(is_push, amount)| {
+                *is_push && amount.base == PushPullBase::Triplet && amount.level == 1
             });
 
-            // Check if there's a chord on this beat with a triplet push
-            // BUT: if the chord is on beat 0 and pushed, it spilled back to the previous measure
-            // so we shouldn't create a triplet rhythm for it here
-            let chord_on_beat = measure.chords.iter().find(|c| {
-                // Match chord to beat by position (beats field is the beat within the measure)
-                c.position.total_duration.beat == beat_idx as i32
-            });
+            // Get chord duration in beats from its rhythm field
+            let chord_duration_beats = match &chord.rhythm {
+                keyflow::chord::ChordRhythm::Slashes(n) => *n as usize,
+                keyflow::chord::ChordRhythm::Default => 1,
+                keyflow::chord::ChordRhythm::Lily { .. } => 1,
+                keyflow::chord::ChordRhythm::Rest { .. } => 1,
+                keyflow::chord::ChordRhythm::Space { .. } => 1,
+                keyflow::chord::ChordRhythm::Push(_) => 1,
+                keyflow::chord::ChordRhythm::Pull(_) => 1,
+            };
 
-            let has_triplet_push = chord_on_beat.map_or(false, |c| {
-                if let Some((is_push, amount)) = &c.push_pull {
-                    // Check for triplet push (level 1 = 8th triplet)
-                    // Skip if it's beat 0 and pushed - that chord spilled back to previous measure
-                    let is_spillback = *is_push && beat_idx == 0;
-                    !is_spillback && *is_push && amount.base == PushPullBase::Triplet && amount.level == 1
-                } else {
-                    false
+            if is_triplet_push && chord_idx > 0 {
+                // Internal pushed chord (not first) - creates triplet at the PREVIOUS beat
+                // Natural position is cumulative_beats, pushes to cumulative_beats - 1
+                let target_beat = cumulative_beats.saturating_sub(1);
+                if target_beat < num_beats {
+                    beats_with_triplets[target_beat] = (true, Some(chord_idx));
                 }
-            });
+            }
 
-            // Check for triplet spillback (chord from next measure pushing back)
-            let has_triplet_spillback = spillback_on_beat.map_or(false, |s| {
-                s.push_base == PushPullBase::Triplet && s.push_level == 1
-            });
+            cumulative_beats += chord_duration_beats;
+        }
 
-            if has_triplet_push || has_triplet_spillback {
-                // Beat with triplet push: render as [TripletQuarter, TripletEighth]
-                // The chord symbol will appear above the TripletEighth (pushed position)
+        // Now also check spillbacks from next measure
+        if let Some(spills) = spillbacks {
+            for spillback in spills {
+                if spillback.push_base == PushPullBase::Triplet && spillback.push_level == 1 {
+                    let target_beat = spillback.beat_position;
+                    if target_beat < num_beats {
+                        // Mark this beat as having a triplet (spillback), but don't overwrite existing
+                        if !beats_with_triplets[target_beat].0 {
+                            beats_with_triplets[target_beat] = (true, None);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Build the rhythm array based on beats_with_triplets
+        for (beat_idx, (has_triplet, pushed_chord_idx)) in beats_with_triplets.iter().enumerate().take(num_beats) {
+            if *has_triplet {
+                // This beat has a pushed chord creating a triplet
                 let start_idx = rhythm_index;
                 rhythm.push(Duration::TripletQuarter);
                 rhythm.push(Duration::TripletEighth);
 
-                // Record spillback chord position (the eighth note is where the chord goes)
-                if let Some(spillback) = spillback_on_beat {
-                    spillback_chord_positions.push((rhythm_index + 1, spillback.chord_symbol.clone()));
+                // Record pushed chord position for chord rendering
+                if let Some(chord_idx) = pushed_chord_idx {
+                    internal_push_positions.push((*chord_idx, rhythm_index + 1));
+                }
+
+                // Check if this beat also has a spillback
+                if let Some(spills) = spillbacks {
+                    if let Some(spillback) = spills.iter().find(|s| s.beat_position == beat_idx) {
+                        spillback_chord_positions.push((rhythm_index + 1, spillback.chord_symbol.clone()));
+                    }
                 }
 
                 rhythm_index += 2;
                 let end_idx = rhythm_index;
-
-                // Add tuplet specification for this triplet group
                 tuplet_specs.push(TupletSpec::triplet(start_idx, end_idx));
             } else {
                 // Normal beat: single quarter slash
@@ -3297,7 +3401,7 @@ impl ChartLayoutEngine {
         }
 
         let total_ticks: i32 = rhythm.iter().map(|d| d.ticks()).sum();
-        (rhythm, total_ticks, tuplet_specs, spillback_chord_positions)
+        (rhythm, total_ticks, tuplet_specs, spillback_chord_positions, internal_push_positions)
     }
 
     /// Check if a measure has explicit chord rhythms (Lily or Rest notation).
@@ -3606,6 +3710,7 @@ impl ChartLayoutEngine {
             scene: root,
             width: width_spatiums,
             segments: SegmentList::new(), // Empty segment list for count-in
+            internal_push_positions: Vec::new(),
         }
     }
 
@@ -3743,6 +3848,85 @@ impl ChartLayoutEngine {
     ///
     /// # Returns
     /// A weight value (typically 1.0-3.0) where higher = more space needed
+    /// Compute minimum segment widths based on chord symbol widths.
+    ///
+    /// This creates a Vec where each entry is the minimum width required for
+    /// that rhythm segment, based on the chord symbol(s) that will be rendered there.
+    /// The spacing system uses these to ensure chord symbols don't overlap.
+    ///
+    /// IMPORTANT: We only set minimum widths for segments where there's an adjacent
+    /// chord that could collide. If a chord is alone in the measure or has no neighbor
+    /// on the next segment, we don't need to enforce minimum width.
+    fn compute_chord_min_widths(
+        &self,
+        measure: &keyflow::chart::types::Measure,
+        num_segments: usize,
+        text_metrics: &TextFontMetrics,
+    ) -> Vec<f64> {
+        let mut min_widths: Vec<f64> = vec![0.0; num_segments];
+        let base_size = self.config.harmony_style.root_size;
+        // Add padding for spacing between adjacent chords
+        let chord_padding = base_size * 0.5;
+
+        // First pass: collect which segments have chords and their widths
+        let mut segment_chords: Vec<Option<f64>> = vec![None; num_segments];
+
+        for (chord_idx, chord) in measure.chords.iter().enumerate() {
+            // Skip spaces/rests
+            if chord.full_symbol.is_empty() || chord.full_symbol == "s" || chord.full_symbol == "r"
+            {
+                continue;
+            }
+
+            // Compute segment index (same logic as rendering)
+            let segment_idx = if !measure.rhythm_elements.is_empty() {
+                // Find this chord's index in the rhythm_elements list
+                let mut seen_chord_count = 0;
+                let mut found_idx = None;
+                for (idx, elem) in measure.rhythm_elements.iter().enumerate() {
+                    if let keyflow::chart::types::RhythmElement::Chord(_) = elem {
+                        if seen_chord_count == chord_idx {
+                            found_idx = Some(idx);
+                            break;
+                        }
+                        seen_chord_count += 1;
+                    }
+                }
+                found_idx.unwrap_or(chord_idx).min(num_segments.saturating_sub(1))
+            } else {
+                // Simple measure - use chord_idx directly or beat position
+                let beat = chord.position.total_duration.beat as usize;
+                beat.min(num_segments.saturating_sub(1))
+            };
+
+            // Estimate chord width using text metrics
+            let chord_width: f64 =
+                text_metrics.horizontal_advance(&chord.full_symbol, base_size) + chord_padding;
+
+            // Store the maximum chord width for this segment
+            if segment_idx < segment_chords.len() {
+                segment_chords[segment_idx] = Some(
+                    segment_chords[segment_idx]
+                        .map_or(chord_width, |w| w.max(chord_width)),
+                );
+            }
+        }
+
+        // Second pass: only set min width for segments that have a chord
+        // AND have another chord following (to prevent collision)
+        for i in 0..num_segments {
+            if let Some(width) = segment_chords[i] {
+                // Check if there's another chord following in any subsequent segment
+                let has_following_chord = segment_chords[i + 1..].iter().any(|c| c.is_some());
+                if has_following_chord {
+                    min_widths[i] = width;
+                }
+            }
+        }
+
+        min_widths
+    }
+
     fn estimate_measure_content_weight(
         &self,
         measure: &keyflow::chart::types::Measure,
