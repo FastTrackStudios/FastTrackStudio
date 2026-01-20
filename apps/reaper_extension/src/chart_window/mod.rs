@@ -14,17 +14,19 @@ use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, RwLock};
 
 use daw::primitives::TimeSignature;
-use engraver::fonts::SMuFLFont;
-use engraver::layout::chart::{BeatPosition, ChartLayoutConfig, ChartLayoutEngine, ChartLayoutResult, LayoutMode};
-use engraver::renderer::scene_renderer::{SceneRenderBuilder, VelloSceneRenderer};
-use engraver::style::MStyle;
+use keyflow::engraver::fonts::SMuFLFont;
+use keyflow::engraver::layout::chart::{
+    BeatPosition, ChartLayoutConfig, ChartLayoutEngine, ChartLayoutResult, LayoutMode,
+};
+use keyflow::engraver::renderer::scene_renderer::{SceneRenderBuilder, VelloSceneRenderer};
+use keyflow::engraver::style::MStyle;
 use fts::setlist::core::Song;
 use fts::setlist::infra::traits::SetlistBuilder;
-use keyflow::chord::{ChordRhythm, has_rhythmic_complexity, reaper_ppq_to_layout_ticks};
+use keyflow::Chart;
 use keyflow::chart::types::{ChartSection, ChordInstance, Measure};
+use keyflow::chord::{ChordRhythm, has_rhythmic_complexity, reaper_ppq_to_layout_ticks};
 use keyflow::sections::{Section, SectionType};
 use keyflow::time::{AbsolutePosition, MusicalDuration, MusicalPosition};
-use keyflow::Chart;
 use raw_window_handle::{
     AppKitDisplayHandle, AppKitWindowHandle, DisplayHandle, HandleError, HasDisplayHandle,
     HasWindowHandle, RawDisplayHandle, RawWindowHandle, WindowHandle,
@@ -33,13 +35,14 @@ use reaper_embed::{Event, EventStatus, MouseButton, MouseEvent, ScrollDelta};
 use reaper_high::Reaper;
 use reaper_low::raw::HWND;
 use tracing::{info, warn};
+use vello::Scene;
 use vello::kurbo::{Affine, BezPath, Point, Rect, RoundedRect, Stroke};
 use vello::peniko::{Color, Fill};
-use vello::Scene;
 
 use crate::infrastructure::action_registry::{ActionDef, ActionSection};
 use crate::services::{
-    AnalyzedChord, detect_chords_from_midi_track, get_project_time_signature,
+    AnalyzedChord, detect_chords_from_midi_track, find_track_by_name, get_first_midi_take,
+    get_project_time_signature, read_midi_notes_from_take,
 };
 use reaper_embed::{DockedWindow, ReaperWindow, VelloEmbedSourceWithEvents, WindowConfig};
 
@@ -90,7 +93,10 @@ static SHARED_PLAYBACK: RwLock<SharedPlaybackState> = RwLock::new(SharedPlayback
     song_progress: 0.0,
     section_progress: 0.0,
     tempo: 120.0,
-    time_signature: TimeSignature { numerator: 4, denominator: 4 },
+    time_signature: TimeSignature {
+        numerator: 4,
+        denominator: 4,
+    },
     song_start_seconds: 0.0,
     song_end_seconds: 0.0,
     frame: 0,
@@ -130,21 +136,23 @@ pub fn update_shared_playback_state(
 
 /// Get a snapshot of the shared playback state (called from chart window render)
 fn get_shared_playback_state() -> SharedPlaybackState {
-    SHARED_PLAYBACK.read().map(|s| s.clone()).unwrap_or_default()
+    SHARED_PLAYBACK
+        .read()
+        .map(|s| s.clone())
+        .unwrap_or_default()
 }
 
-// Embedded fonts from charts package
+// Embedded fonts from musescore reference library
 static BRAVURA_FONT: &[u8] = include_bytes!(
-    "../../../../packages/charts/resources/fonts/musescore/fonts/bravura/Bravura.otf"
+    "../../../../libs/reference/sheet-music/musescore/fonts/bravura/Bravura.otf"
 );
 static BRAVURA_METADATA: &[u8] = include_bytes!(
-    "../../../../packages/charts/resources/fonts/musescore/fonts/bravura/bravura_metadata.json"
+    "../../../../libs/reference/sheet-music/musescore/fonts/bravura/bravura_metadata.json"
 );
-static TEXT_FONT: &[u8] = include_bytes!(
-    "../../../../packages/charts/resources/fonts/musescore/fonts/FreeSans.ttf"
-);
+static TEXT_FONT: &[u8] =
+    include_bytes!("../../../../libs/reference/sheet-music/musescore/fonts/FreeSans.ttf");
 static MUSEJAZZ_TEXT_FONT: &[u8] = include_bytes!(
-    "../../../../packages/charts/resources/fonts/musescore/fonts/musejazz/MuseJazzText.otf"
+    "../../../../libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf"
 );
 
 /// Screen DPI for rendering
@@ -173,7 +181,7 @@ impl Default for CursorStyle {
     fn default() -> Self {
         CursorStyle::VerticalLine {
             color: Color::from_rgba8(255, 80, 80, 255), // Red
-            width: 6.0, // Thick for visibility from a distance
+            width: 6.0,                                 // Thick for visibility from a distance
         }
     }
 }
@@ -267,9 +275,8 @@ impl ReaperMainWindow {
 impl HasWindowHandle for ReaperMainWindow {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
         let ns_view = self.hwnd as *mut std::ffi::c_void;
-        let handle = AppKitWindowHandle::new(
-            NonNull::new(ns_view).ok_or(HandleError::Unavailable)?,
-        );
+        let handle =
+            AppKitWindowHandle::new(NonNull::new(ns_view).ok_or(HandleError::Unavailable)?);
         let raw = RawWindowHandle::AppKit(handle);
         Ok(unsafe { WindowHandle::borrow_raw(raw) })
     }
@@ -288,8 +295,7 @@ impl HasWindowHandle for ReaperMainWindow {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
         use raw_window_handle::Win32WindowHandle;
         let handle = Win32WindowHandle::new(
-            std::num::NonZeroIsize::new(self.hwnd as isize)
-                .ok_or(HandleError::Unavailable)?,
+            std::num::NonZeroIsize::new(self.hwnd as isize).ok_or(HandleError::Unavailable)?,
         );
         let raw = RawWindowHandle::Win32(handle);
         Ok(unsafe { WindowHandle::borrow_raw(raw) })
@@ -401,10 +407,17 @@ struct ChartRendererState {
 }
 
 impl ChartRendererState {
-    fn new(chart: Option<Chart>, song: Option<Song>, use_stems: bool, measure_offset: i32, count_in_measures: u8) -> Self {
+    fn new(
+        chart: Option<Chart>,
+        song: Option<Song>,
+        use_stems: bool,
+        measure_offset: i32,
+        count_in_measures: u8,
+    ) -> Self {
         // Load SMuFL font
-        let smufl_font = SMuFLFont::from_reader(BRAVURA_FONT, std::io::Cursor::new(BRAVURA_METADATA))
-            .expect("Failed to load Bravura font");
+        let smufl_font =
+            SMuFLFont::from_reader(BRAVURA_FONT, std::io::Cursor::new(BRAVURA_METADATA))
+                .expect("Failed to load Bravura font");
 
         // Create font data arcs
         let text_font_data = Arc::new(TEXT_FONT.to_vec());
@@ -412,11 +425,8 @@ impl ChartRendererState {
 
         // Create layout engine with static style
         let style: &'static MStyle = Box::leak(Box::new(MStyle::default()));
-        let layout_engine = ChartLayoutEngine::new(
-            style,
-            text_font_data.clone(),
-            musejazz_font_data.clone(),
-        );
+        let layout_engine =
+            ChartLayoutEngine::new(style, text_font_data.clone(), musejazz_font_data.clone());
 
         // Create layout config with stemmed notation, measure offset, and count-in
         let config = ChartLayoutConfig {
@@ -427,16 +437,18 @@ impl ChartRendererState {
         };
 
         // Layout chart if present
-        let layout_result = chart.as_ref().map(|c| {
-            layout_engine.layout_chart_with_config(c, &LayoutMode::default(), &config)
-        });
+        let layout_result = chart
+            .as_ref()
+            .map(|c| layout_engine.layout_chart_with_config(c, &LayoutMode::default(), &config));
 
         // Extract timing info from song
         let (song_start_offset, tempo, time_signature) = if let Some(ref s) = song {
             (
                 s.effective_start(),
                 s.starting_tempo.unwrap_or(120.0),
-                s.starting_time_signature.clone().unwrap_or_else(|| TimeSignature::new(4, 4)),
+                s.starting_time_signature
+                    .clone()
+                    .unwrap_or_else(|| TimeSignature::new(4, 4)),
             )
         } else {
             (0.0, 120.0, TimeSignature::new(4, 4))
@@ -564,7 +576,8 @@ impl ChartRendererState {
         // Check if we should show cursor
         let should_show = self.playback.is_playing
             || self.playback.is_paused
-            || (self.highlight_config.show_cursor_when_stopped && self.playback.current_measure.is_some());
+            || (self.highlight_config.show_cursor_when_stopped
+                && self.playback.current_measure.is_some());
 
         if !should_show {
             return;
@@ -573,7 +586,9 @@ impl ChartRendererState {
         // Get current beat from layout result for beat-based styles (tick-based lookup)
         let relative_time = self.playback.position_seconds - self.song_start_offset;
         let current_tick = (relative_time * self.tempo * 8.0) as i64;
-        let current_beat = self.layout_result.as_ref()
+        let current_beat = self
+            .layout_result
+            .as_ref()
             .and_then(|layout| layout.beat_at_tick(current_tick));
 
         match &self.cursor_style {
@@ -582,24 +597,21 @@ impl ChartRendererState {
                     // Extend cursor 25% above and below the staff for better visibility
                     let extension = self.playback.cursor_height * 0.25;
                     let extended_top = self.playback.cursor_y - extension;
-                    let extended_bottom = self.playback.cursor_y + self.playback.cursor_height + extension;
+                    let extended_bottom =
+                        self.playback.cursor_y + self.playback.cursor_height + extension;
 
                     // Transform cursor position to screen coordinates
-                    let cursor_top = self.transform * Point::new(self.playback.cursor_x, extended_top);
-                    let cursor_bottom = self.transform * Point::new(self.playback.cursor_x, extended_bottom);
+                    let cursor_top =
+                        self.transform * Point::new(self.playback.cursor_x, extended_top);
+                    let cursor_bottom =
+                        self.transform * Point::new(self.playback.cursor_x, extended_bottom);
 
                     // Draw vertical line
                     let mut path = BezPath::new();
                     path.move_to(cursor_top);
                     path.line_to(cursor_bottom);
 
-                    scene.stroke(
-                        &Stroke::new(*width),
-                        Affine::IDENTITY,
-                        *color,
-                        None,
-                        &path,
-                    );
+                    scene.stroke(&Stroke::new(*width), Affine::IDENTITY, *color, None, &path);
                 }
             }
             CursorStyle::MeasureHighlight { color, alpha } => {
@@ -608,8 +620,14 @@ impl ChartRendererState {
                     let measure_beats = layout.beats_in_measure(beat.measure);
                     if !measure_beats.is_empty() {
                         // Find bounds of all beats in this measure
-                        let min_x = measure_beats.iter().map(|b| b.x).fold(f64::INFINITY, f64::min);
-                        let max_x = measure_beats.iter().map(|b| b.x + b.width).fold(f64::NEG_INFINITY, f64::max);
+                        let min_x = measure_beats
+                            .iter()
+                            .map(|b| b.x)
+                            .fold(f64::INFINITY, f64::min);
+                        let max_x = measure_beats
+                            .iter()
+                            .map(|b| b.x + b.width)
+                            .fold(f64::NEG_INFINITY, f64::max);
                         let y = beat.staff_y;
                         let height = beat.staff_height;
 
@@ -617,10 +635,17 @@ impl ChartRendererState {
                         let top_left = self.transform * Point::new(min_x, y);
                         let bottom_right = self.transform * Point::new(max_x, y + height);
 
-                        let rect = Rect::new(top_left.x, top_left.y, bottom_right.x, bottom_right.y);
+                        let rect =
+                            Rect::new(top_left.x, top_left.y, bottom_right.x, bottom_right.y);
                         let highlight_color = color.multiply_alpha(*alpha);
 
-                        scene.fill(Fill::NonZero, Affine::IDENTITY, highlight_color, None, &rect);
+                        scene.fill(
+                            Fill::NonZero,
+                            Affine::IDENTITY,
+                            highlight_color,
+                            None,
+                            &rect,
+                        );
                     }
                 }
             }
@@ -629,13 +654,20 @@ impl ChartRendererState {
                 if let Some(beat) = current_beat {
                     // Transform beat box to screen coordinates using actual beat position
                     let top_left = self.transform * Point::new(beat.x, beat.staff_y);
-                    let bottom_right = self.transform * Point::new(beat.x + beat.width, beat.staff_y + beat.staff_height);
+                    let bottom_right = self.transform
+                        * Point::new(beat.x + beat.width, beat.staff_y + beat.staff_height);
 
                     let rect = Rect::new(top_left.x, top_left.y, bottom_right.x, bottom_right.y);
                     let rounded = RoundedRect::from_rect(rect, 3.0);
                     let highlight_color = color.multiply_alpha(*alpha);
 
-                    scene.fill(Fill::NonZero, Affine::IDENTITY, highlight_color, None, &rounded);
+                    scene.fill(
+                        Fill::NonZero,
+                        Affine::IDENTITY,
+                        highlight_color,
+                        None,
+                        &rounded,
+                    );
                 }
             }
         }
@@ -693,19 +725,23 @@ impl ChartRendererState {
         match self.follow_mode {
             FollowMode::PageTurn => {
                 // Jump when cursor changes page
-                if self.playback.current_page != self.last_followed_page && self.playback.current_page > 0 {
+                if self.playback.current_page != self.last_followed_page
+                    && self.playback.current_page > 0
+                {
                     self.jump_to_page(self.playback.current_page);
                     self.last_followed_page = self.playback.current_page;
                 } else {
                     // Check if cursor X is outside viewport
-                    let cursor_screen_x = (self.transform * Point::new(self.playback.cursor_x, 0.0)).x;
+                    let cursor_screen_x =
+                        (self.transform * Point::new(self.playback.cursor_x, 0.0)).x;
 
                     if cursor_screen_x < 0.0 || cursor_screen_x > viewport_width {
                         // Jump to put cursor at left side of viewport
                         let scale = self.current_scale();
                         let target_x = -self.playback.cursor_x * scale + 50.0; // 50px margin
                         let current_y = self.transform.translation().y;
-                        self.transform = Affine::translate((target_x, current_y)) * Affine::scale(scale);
+                        self.transform =
+                            Affine::translate((target_x, current_y)) * Affine::scale(scale);
                     }
                 }
             }
@@ -759,8 +795,8 @@ impl ChartRendererState {
     /// This is used to detect when the project has changed and the chart
     /// needs to be rebuilt.
     fn compute_project_hash(&self) -> u64 {
-        use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
 
         let reaper = Reaper::get();
         let project = reaper.current_project();
@@ -774,6 +810,24 @@ impl ChartRendererState {
         // Hash tempo marker count
         if let Some(ref song) = self.song {
             song.tempo_time_sig_changes.len().hash(&mut hasher);
+        }
+
+        // Hash MIDI CHORDS track state - hash ALL note data to detect any change
+        // (pitch changes, position changes, added/removed notes, etc.)
+        if let Some(track) = find_track_by_name(project, "MIDI CHORDS") {
+            true.hash(&mut hasher); // Track exists
+            if let Some(midi_info) = get_first_midi_take(&track) {
+                let notes = read_midi_notes_from_take(midi_info.take);
+                notes.len().hash(&mut hasher);
+                // Hash every note's pitch, start, and end to detect any change
+                for note in &notes {
+                    note.pitch.hash(&mut hasher);
+                    note.start_ppq.hash(&mut hasher);
+                    note.end_ppq.hash(&mut hasher);
+                }
+            }
+        } else {
+            false.hash(&mut hasher); // Track doesn't exist
         }
 
         hasher.finish()
@@ -800,14 +854,20 @@ impl ChartRendererState {
         }
 
         // Hash changed - rebuild chart
-        info!("Project changed (hash {} -> {}), rebuilding chart...",
-            self.last_project_hash, current_hash);
+        info!(
+            "Project changed (hash {} -> {}), rebuilding chart...",
+            self.last_project_hash, current_hash
+        );
 
-        if let Some((chart, song, use_stems, measure_offset, count_in_measures)) = build_chart_from_current_project() {
+        if let Some((chart, song, use_stems, measure_offset, count_in_measures)) =
+            build_chart_from_current_project()
+        {
             // Update timing info
             self.song_start_offset = song.effective_start();
             self.tempo = song.starting_tempo.unwrap_or(120.0);
-            self.time_signature = song.starting_time_signature.clone()
+            self.time_signature = song
+                .starting_time_signature
+                .clone()
                 .unwrap_or_else(|| TimeSignature::new(4, 4));
 
             // Update stem notation flag, measure offset, and count-in
@@ -822,7 +882,11 @@ impl ChartRendererState {
                 count_in_measures,
                 ..Default::default()
             };
-            let layout = self.layout_engine.layout_chart_with_config(&chart, &LayoutMode::default(), &config);
+            let layout = self.layout_engine.layout_chart_with_config(
+                &chart,
+                &LayoutMode::default(),
+                &config,
+            );
             let beat_count = layout.beat_positions.len();
             self.layout_result = Some(layout);
 
@@ -830,7 +894,10 @@ impl ChartRendererState {
             self.chart = Some(chart);
             self.song = Some(song);
 
-            info!("Chart rebuilt: {} beat positions, use_stems: {}, measure_offset: {}, count_in: {}", beat_count, use_stems, measure_offset, count_in_measures);
+            info!(
+                "Chart rebuilt: {} beat positions, use_stems: {}, measure_offset: {}, count_in: {}",
+                beat_count, use_stems, measure_offset, count_in_measures
+            );
         }
 
         // Update tracking state
@@ -869,11 +936,17 @@ impl ChartRendererState {
                 self.prior_position = Some(pos);
                 EventStatus::Captured
             }
-            Event::Mouse(MouseEvent::ButtonPressed { button: MouseButton::Left, .. }) => {
+            Event::Mouse(MouseEvent::ButtonPressed {
+                button: MouseButton::Left,
+                ..
+            }) => {
                 self.mouse_down = true;
                 EventStatus::Captured
             }
-            Event::Mouse(MouseEvent::ButtonReleased { button: MouseButton::Left, .. }) => {
+            Event::Mouse(MouseEvent::ButtonReleased {
+                button: MouseButton::Left,
+                ..
+            }) => {
                 self.mouse_down = false;
                 EventStatus::Captured
             }
@@ -943,10 +1016,12 @@ impl ChartRendererState {
 
         // === Dirty detection ===
         // Check if transform changed (pan/zoom)
-        let transform_changed = !transforms_approx_equal(self.transform, self.last_rendered_transform);
+        let transform_changed =
+            !transforms_approx_equal(self.transform, self.last_rendered_transform);
 
         // Check if playback position changed significantly (>1ms movement)
-        let playback_changed = (self.playback.position_seconds - self.last_playback_position).abs() > 0.001;
+        let playback_changed =
+            (self.playback.position_seconds - self.last_playback_position).abs() > 0.001;
 
         // Mark static as dirty if transform or viewport changed
         if transform_changed || viewport_changed {
@@ -1037,7 +1112,10 @@ fn transforms_approx_equal(a: Affine, b: Affine) -> bool {
     const EPSILON: f64 = 0.0001;
     let a_coeffs = a.as_coeffs();
     let b_coeffs = b.as_coeffs();
-    a_coeffs.iter().zip(b_coeffs.iter()).all(|(a, b)| (a - b).abs() < EPSILON)
+    a_coeffs
+        .iter()
+        .zip(b_coeffs.iter())
+        .all(|(a, b)| (a - b).abs() < EPSILON)
 }
 
 // Type alias for the docked window
@@ -1068,16 +1146,28 @@ fn build_chart_from_midi_chords(song: &Song) -> Option<(Chart, bool)> {
     }
 
     // Check if chart has rhythmic complexity (any push/pull)
-    let has_complexity = analyzed_chords.iter().any(|ac| ac.timing.push_pull.is_some());
+    let has_complexity = analyzed_chords
+        .iter()
+        .any(|ac| ac.timing.push_pull.is_some());
+
+    // Calculate count-in measures for MIDI chord offset
+    let count_in_measures = calculate_count_in_measures(song);
 
     info!(
-        "Detected {} MIDI chords, rhythmic complexity: {}",
+        "Detected {} MIDI chords, rhythmic complexity: {}, count_in: {}",
         analyzed_chords.len(),
-        has_complexity
+        has_complexity,
+        count_in_measures
     );
 
     // Build chart from analyzed chords
-    let chart = build_chart_from_analyzed_chords(&analyzed_chords, song, time_sig_num, time_sig_denom);
+    let chart = build_chart_from_analyzed_chords(
+        &analyzed_chords,
+        song,
+        time_sig_num,
+        time_sig_denom,
+        count_in_measures,
+    );
 
     Some((chart, has_complexity))
 }
@@ -1086,23 +1176,28 @@ fn build_chart_from_midi_chords(song: &Song) -> Option<(Chart, bool)> {
 ///
 /// This uses the song's marker-based sections and overlays the MIDI chord data
 /// onto the corresponding measures.
+///
+/// `count_in_measures` is used to offset chart measures to REAPER measures.
+/// The +1 accounts for REAPER's 0-indexed measures vs 1-indexed count-in calculation.
 fn build_chart_from_analyzed_chords(
     analyzed_chords: &[AnalyzedChord],
     song: &Song,
     time_sig_num: u8,
     time_sig_denom: u8,
+    count_in_measures: u8,
 ) -> Chart {
     // Start with the marker-based chart which has proper section structure
     let mut chart = song.to_chart();
 
     // Remove CountIn sections - we use REAPER's measure_offset for count-in rendering
     // instead of the FTS CountIn section (which is used for progress bar display)
-    chart.sections.retain(|section| {
-        section.section.section_type != SectionType::CountIn
-    });
+    chart
+        .sections
+        .retain(|section| section.section.section_type != SectionType::CountIn);
 
     // Group MIDI chords by measure index
-    let mut chords_by_measure: std::collections::BTreeMap<usize, Vec<&AnalyzedChord>> = std::collections::BTreeMap::new();
+    let mut chords_by_measure: std::collections::BTreeMap<usize, Vec<&AnalyzedChord>> =
+        std::collections::BTreeMap::new();
     for chord in analyzed_chords {
         chords_by_measure
             .entry(chord.timing.measure_index)
@@ -1123,15 +1218,23 @@ fn build_chart_from_analyzed_chords(
             measure.time_signature = (time_sig_num, time_sig_denom);
 
             // Add MIDI chords for this measure
-            if let Some(midi_chords) = chords_by_measure.get(&global_measure_idx) {
+            // MIDI chord measure_index is absolute REAPER measure (item_start + relative)
+            // Chart measures start at SONGSTART, so we need to add count_in offset
+            // to convert chart measure to REAPER measure
+            let reaper_measure_idx = global_measure_idx + count_in_measures as usize + 1;
+            if let Some(midi_chords) = chords_by_measure.get(&reaper_measure_idx) {
                 for analyzed in midi_chords {
                     let detected = &analyzed.chord;
                     let timing = &analyzed.timing;
 
                     // Create position for this chord
                     let position = AbsolutePosition::new(
-                        MusicalPosition::try_new(global_measure_idx as i32, timing.beat_index as i32, 0)
-                            .unwrap_or_else(|_| MusicalPosition::start()),
+                        MusicalPosition::try_new(
+                            global_measure_idx as i32,
+                            timing.beat_index as i32,
+                            0,
+                        )
+                        .unwrap_or_else(|_| MusicalPosition::start()),
                         section_idx,
                     );
 
@@ -1144,7 +1247,8 @@ fn build_chart_from_analyzed_chords(
                         detected.chord.to_string(),
                         MusicalDuration::new(0, 1, 0), // 1 beat duration
                         position,
-                    ).with_push_pull(timing.push_pull.clone());
+                    )
+                    .with_push_pull(timing.push_pull.clone());
 
                     measure.chords.push(chord_instance);
                 }
@@ -1185,28 +1289,42 @@ fn build_chart_from_current_project() -> Option<(Chart, Song, bool, i32, u8)> {
                     "Built chart from MIDI: {} - {} sections, {} total measures, use_stems: {}, measure_offset: {}, count_in: {}",
                     title,
                     midi_chart.sections.len(),
-                    midi_chart.sections.iter().map(|s| s.measures().len()).sum::<usize>(),
+                    midi_chart
+                        .sections
+                        .iter()
+                        .map(|s| s.measures().len())
+                        .sum::<usize>(),
                     has_complexity,
                     measure_offset,
                     count_in_measures
                 );
-                return Some((midi_chart, song, has_complexity, measure_offset, count_in_measures));
+                return Some((
+                    midi_chart,
+                    song,
+                    has_complexity,
+                    measure_offset,
+                    count_in_measures,
+                ));
             }
 
             // Fall back to marker-based chart parsing
             let mut chart = song.to_chart();
 
             // Remove CountIn sections - we use REAPER's measure_offset for count-in rendering
-            chart.sections.retain(|section| {
-                section.section.section_type != SectionType::CountIn
-            });
+            chart
+                .sections
+                .retain(|section| section.section.section_type != SectionType::CountIn);
 
             let title = chart.metadata.title.as_deref().unwrap_or("Untitled");
             info!(
                 "Built chart from markers: {} - {} sections, {} total measures, tempo: {:.1} BPM, measure_offset: {}, count_in: {}",
                 title,
                 chart.sections.len(),
-                chart.sections.iter().map(|s| s.measures().len()).sum::<usize>(),
+                chart
+                    .sections
+                    .iter()
+                    .map(|s| s.measures().len())
+                    .sum::<usize>(),
                 song.starting_tempo.unwrap_or(120.0),
                 measure_offset,
                 count_in_measures
@@ -1243,7 +1361,10 @@ fn calculate_count_in_measures(song: &Song) -> u8 {
 
     // Get tempo and time signature from song
     let tempo = song.starting_tempo.unwrap_or(120.0);
-    let time_sig = song.starting_time_signature.clone().unwrap_or_else(|| TimeSignature::new(4, 4));
+    let time_sig = song
+        .starting_time_signature
+        .clone()
+        .unwrap_or_else(|| TimeSignature::new(4, 4));
 
     // Calculate seconds per measure
     let beats_per_measure = time_sig.numerator as f64;
@@ -1270,13 +1391,20 @@ fn open_chart_window() {
     let low_reaper = reaper.medium_reaper().low();
 
     // Build chart and song from current project
-    let (chart, song, use_stems, measure_offset, count_in_measures) = match build_chart_from_current_project() {
-        Some((c, s, stems, offset, count_in)) => (Some(c), Some(s), stems, offset, count_in),
-        None => (None, None, false, 0, 0),
-    };
+    let (chart, song, use_stems, measure_offset, count_in_measures) =
+        match build_chart_from_current_project() {
+            Some((c, s, stems, offset, count_in)) => (Some(c), Some(s), stems, offset, count_in),
+            None => (None, None, false, 0, 0),
+        };
 
     // Create renderer state (shared between render and event handlers)
-    let state = Arc::new(Mutex::new(ChartRendererState::new(chart, song, use_stems, measure_offset, count_in_measures)));
+    let state = Arc::new(Mutex::new(ChartRendererState::new(
+        chart,
+        song,
+        use_stems,
+        measure_offset,
+        count_in_measures,
+    )));
     let render_state = state.clone();
     let event_state = state;
 
@@ -1342,13 +1470,20 @@ fn open_floating_chart_window() {
     };
 
     // Build chart and song from current project
-    let (chart, song, use_stems, measure_offset, count_in_measures) = match build_chart_from_current_project() {
-        Some((c, s, stems, offset, count_in)) => (Some(c), Some(s), stems, offset, count_in),
-        None => (None, None, false, 0, 0),
-    };
+    let (chart, song, use_stems, measure_offset, count_in_measures) =
+        match build_chart_from_current_project() {
+            Some((c, s, stems, offset, count_in)) => (Some(c), Some(s), stems, offset, count_in),
+            None => (None, None, false, 0, 0),
+        };
 
     // Create renderer state (shared between render and event handlers)
-    let state = Arc::new(Mutex::new(ChartRendererState::new(chart, song, use_stems, measure_offset, count_in_measures)));
+    let state = Arc::new(Mutex::new(ChartRendererState::new(
+        chart,
+        song,
+        use_stems,
+        measure_offset,
+        count_in_measures,
+    )));
     let render_state = state.clone();
     let event_state = state;
 

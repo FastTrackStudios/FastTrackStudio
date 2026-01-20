@@ -38,14 +38,14 @@ trackname_overlay = ["input", "dep:reaper-embed", "dep:vello", "dep:skrifa", "de
 measure_overlay = ["input", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
 # Enable chord overlay (chord symbol display from MIDI CHORDS track)
 # Requires input feature for reaper_windows::get_arrange_wnd
-# Uses engraver for SMuFL chord symbol rendering with MuseJazz font
-chord_overlay = ["input", "keyflow", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle", "dep:engraver", "dep:kurbo"]
+# Uses keyflow/engraver for SMuFL chord symbol rendering with MuseJazz font
+chord_overlay = ["input", "keyflow", "keyflow/engraver", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle", "dep:kurbo"]
 # Enable key overlay (key display from KEY track item notes)
 # Requires input feature for reaper_windows::get_arrange_wnd
 key_overlay = ["input", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
 # Enable chart window (docked chart display from keyflow parsing)
 # Note: input feature required due to unconditional imports in infrastructure modules
-chart_window = ["input", "keyflow", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle", "dep:engraver"]
+chart_window = ["input", "keyflow", "keyflow/engraver", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
 
 [dependencies]
 dynamic-template = { path = "../../modules/dynamic-template", optional = true }
@@ -54,7 +54,6 @@ reaper-embed = { path = "../../libs/reaper-embed", optional = true }
 vello = { version = "0.6", features = ["wgpu"], optional = true }
 skrifa = { version = "0.26", optional = true }
 raw-window-handle = { version = "0.6", optional = true }
-engraver = { path = "../../packages/engraver", optional = true, features = ["keyflow-import"] }
 kurbo = { version = "0.12", optional = true }
 reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
@@ -97,3 +96,9 @@ crate-type = ["cdylib", "rlib"]
 [lints.rust]
 unsafe_code = "allow"  # Required for low-level REAPER API calls
 unused = { level = "allow", priority = -1 }
+# Suppress warnings from vendored dependencies (reaper-rs, baseview, etc.)
+unpredictable_function_pointer_comparisons = "allow"
+mismatched_lifetime_syntaxes = "allow"
+unexpected_cfgs = { level = "allow", priority = -1 }
+unused_imports = "allow"
+dead_code = "allow"

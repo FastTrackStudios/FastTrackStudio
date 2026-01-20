@@ -23,11 +23,8 @@ lumen-blocks = { workspace = true }
 # Icons
 lucide-dioxus = "2"
 
-# Keyflow for chart parsing
-keyflow = { path = "../../packages/keyflow" }
-
-# Engraver for layout system (with example features for Vello rendering)
-engraver = { path = "../../packages/engraver", features = ["example"] }
+# Keyflow for chart parsing and engraving
+keyflow = { path = "../../packages/keyflow", features = ["engraver-example"] }
 
 # Vello for vector graphics rendering (match anyrender/engraver versions)
 # NOTE: peniko re-exported from vello to avoid version conflicts

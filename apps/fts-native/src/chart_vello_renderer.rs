@@ -11,32 +11,38 @@
 //! - F = toggle FPS overlay
 
 use std::collections::VecDeque;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 
 use anyrender_vello::{CustomPaintCtx, CustomPaintSource, TextureHandle};
-use engraver::fonts::SMuFLFont;
-use engraver::renderer::scene_renderer::{SceneRenderBuilder, VelloSceneRenderer};
-use engraver::style::MStyle;
+use keyflow::engraver::fonts::SMuFLFont;
+use keyflow::engraver::renderer::scene_renderer::{SceneRenderBuilder, VelloSceneRenderer};
+use keyflow::engraver::style::MStyle;
 use keyflow::Chart;
 use kurbo::{Affine, Point, Rect};
-use vello::peniko::{Blob, FontData};
+use skrifa::MetadataProvider;
 use skrifa::prelude::LocationRef;
 use skrifa::raw::FileRef;
-use skrifa::MetadataProvider;
+use vello::peniko::{Blob, FontData};
 use vello::peniko::{Color, Fill};
 use vello::{AaConfig, AaSupport, Glyph, RenderParams, Renderer as VelloRenderer, RendererOptions};
 use wgpu::{Device, Extent3d, Queue, TextureDescriptor, TextureDimension, TextureUsages};
 use wgpu_context::DeviceHandle;
 
-use crate::chart_layout::{ChartLayoutEngine, ChartLayoutResult, LayoutMode};
+use keyflow::engraver::layout::chart::{ChartLayoutEngine, ChartLayoutResult, LayoutMode};
 
-// Embedded fonts from charts package
-static BRAVURA_FONT: &[u8] = include_bytes!("../../../packages/charts/resources/fonts/musescore/fonts/bravura/Bravura.otf");
-static BRAVURA_METADATA: &[u8] = include_bytes!("../../../packages/charts/resources/fonts/musescore/fonts/bravura/bravura_metadata.json");
-static TEXT_FONT: &[u8] = include_bytes!("../../../packages/charts/resources/fonts/musescore/fonts/FreeSans.ttf");
-static MUSEJAZZ_TEXT_FONT: &[u8] = include_bytes!("../../../packages/charts/resources/fonts/musescore/fonts/musejazz/MuseJazzText.otf");
+// Embedded fonts from musescore reference library
+static BRAVURA_FONT: &[u8] =
+    include_bytes!("../../../libs/reference/sheet-music/musescore/fonts/bravura/Bravura.otf");
+static BRAVURA_METADATA: &[u8] = include_bytes!(
+    "../../../libs/reference/sheet-music/musescore/fonts/bravura/bravura_metadata.json"
+);
+static TEXT_FONT: &[u8] =
+    include_bytes!("../../../libs/reference/sheet-music/musescore/fonts/FreeSans.ttf");
+static MUSEJAZZ_TEXT_FONT: &[u8] = include_bytes!(
+    "../../../libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf"
+);
 
 /// Path to system Arial Bold font on macOS
 const ARIAL_BOLD_PATH: &str = "/System/Library/Fonts/Supplemental/Arial Bold.ttf";
@@ -54,9 +60,17 @@ pub enum ChartMessage {
     /// Update the chart to render
     UpdateChart(Option<Chart>),
     /// Mouse wheel zoom (scroll delta in pixels, cursor position)
-    MouseWheel { delta_y: f64, cursor_x: f64, cursor_y: f64 },
+    MouseWheel {
+        delta_y: f64,
+        cursor_x: f64,
+        cursor_y: f64,
+    },
     /// Pinch gesture zoom (delta, center position)
-    PinchZoom { delta: f64, center_x: f64, center_y: f64 },
+    PinchZoom {
+        delta: f64,
+        center_x: f64,
+        center_y: f64,
+    },
     /// Track mouse position for zoom-about-cursor and drag
     MouseMove { x: f64, y: f64 },
     /// Mouse button state (for drag-to-pan)
@@ -66,9 +80,16 @@ pub enum ChartMessage {
     /// Toggle FPS overlay
     ToggleFps,
     /// Keyboard zoom (+/- keys)
-    KeyboardZoom { zoom_in: bool, center_x: f64, center_y: f64 },
+    KeyboardZoom {
+        zoom_in: bool,
+        center_x: f64,
+        center_y: f64,
+    },
     /// Fit single page to viewport
-    FitPage { viewport_width: f64, viewport_height: f64 },
+    FitPage {
+        viewport_width: f64,
+        viewport_height: f64,
+    },
     /// Go to next page
     NextPage,
     /// Go to previous page
@@ -211,10 +232,15 @@ impl ChartVelloPaintSource {
                     if let Some(cursor) = self.prior_position {
                         // Negate delta: scroll up (negative delta) = zoom in
                         let exponent = -delta_y / PIXELS_PER_LINE;
-                        self.transform = self.transform.then_scale_about(BASE.powf(exponent), cursor);
+                        self.transform =
+                            self.transform.then_scale_about(BASE.powf(exponent), cursor);
                     }
                 }
-                ChartMessage::PinchZoom { delta, center_x, center_y } => {
+                ChartMessage::PinchZoom {
+                    delta,
+                    center_x,
+                    center_y,
+                } => {
                     // Pinch to zoom about center
                     let center = Point::new(center_x, center_y);
                     self.transform = self.transform.then_scale_about(1.0 + delta, center);
@@ -239,12 +265,19 @@ impl ChartVelloPaintSource {
                 ChartMessage::ToggleFps => {
                     self.show_fps = !self.show_fps;
                 }
-                ChartMessage::KeyboardZoom { zoom_in, center_x, center_y } => {
+                ChartMessage::KeyboardZoom {
+                    zoom_in,
+                    center_x,
+                    center_y,
+                } => {
                     let center = Point::new(center_x, center_y);
                     let scale = if zoom_in { 1.1 } else { 1.0 / 1.1 };
                     self.transform = self.transform.then_scale_about(scale, center);
                 }
-                ChartMessage::FitPage { viewport_width, viewport_height } => {
+                ChartMessage::FitPage {
+                    viewport_width,
+                    viewport_height,
+                } => {
                     self.last_viewport = (viewport_width as u32, viewport_height as u32);
                     // Calculate transform to fit page in viewport
                     if let Some(ref result) = self.layout_result {
@@ -255,7 +288,8 @@ impl ChartVelloPaintSource {
                             let scale = scale_x.min(scale_y) * 0.9; // 90% to add margins
                             let offset_x = (viewport_width - page.width * scale) / 2.0;
                             let offset_y = (viewport_height - page.height * scale) / 2.0;
-                            self.transform = Affine::translate((offset_x, offset_y)) * Affine::scale(scale);
+                            self.transform =
+                                Affine::translate((offset_x, offset_y)) * Affine::scale(scale);
                         }
                     }
                 }
@@ -304,29 +338,28 @@ impl CustomPaintSource for ChartVelloPaintSource {
         .expect("Failed to create VelloRenderer");
 
         // Load SMuFL font using from_reader with cursor for metadata
-        let smufl_font = SMuFLFont::from_reader(BRAVURA_FONT, std::io::Cursor::new(BRAVURA_METADATA))
-            .expect("Failed to load Bravura font");
+        let smufl_font =
+            SMuFLFont::from_reader(BRAVURA_FONT, std::io::Cursor::new(BRAVURA_METADATA))
+                .expect("Failed to load Bravura font");
 
         // Create font data arcs
         let text_font_data = Arc::new(TEXT_FONT.to_vec());
         let musejazz_font_data = Arc::new(MUSEJAZZ_TEXT_FONT.to_vec());
 
         // Load Arial Bold from system fonts (macOS)
-        let bold_font_data = Arc::new(
-            std::fs::read(ARIAL_BOLD_PATH)
-                .unwrap_or_else(|e| {
-                    log::warn!("Failed to load Arial Bold from {}: {}, falling back to text font", ARIAL_BOLD_PATH, e);
-                    TEXT_FONT.to_vec()
-                })
-        );
+        let bold_font_data = Arc::new(std::fs::read(ARIAL_BOLD_PATH).unwrap_or_else(|e| {
+            log::warn!(
+                "Failed to load Arial Bold from {}: {}, falling back to text font",
+                ARIAL_BOLD_PATH,
+                e
+            );
+            TEXT_FONT.to_vec()
+        }));
 
         // Create layout engine with static style
         let style: &'static MStyle = Box::leak(Box::new(MStyle::default()));
-        let layout_engine = ChartLayoutEngine::new(
-            style,
-            text_font_data.clone(),
-            musejazz_font_data.clone(),
-        );
+        let layout_engine =
+            ChartLayoutEngine::new(style, text_font_data.clone(), musejazz_font_data.clone());
 
         self.state = RendererState::Active(Box::new(ActiveRenderer {
             device,
@@ -633,45 +666,74 @@ fn draw_fps_overlay(
 
     // Helper to draw text in overlay
     let font_data = FontData::new(Blob::new(text_font.clone()), 0);
-    let draw_overlay_text = |scene: &mut vello::Scene, text: &str, x: f64, y: f64, size: f32, color: Color| {
-        if let Some(font_ref) = {
-            let file_ref = FileRef::new(font_data.data.as_ref()).ok();
-            file_ref.and_then(|f| match f {
-                FileRef::Font(font) => Some(font),
-                FileRef::Collection(c) => c.get(0).ok(),
-            })
-        } {
-            let skrifa_size = skrifa::instance::Size::new(size);
-            let charmap = font_ref.charmap();
-            let glyph_metrics = font_ref.glyph_metrics(skrifa_size, LocationRef::default());
+    let draw_overlay_text =
+        |scene: &mut vello::Scene, text: &str, x: f64, y: f64, size: f32, color: Color| {
+            if let Some(font_ref) = {
+                let file_ref = FileRef::new(font_data.data.as_ref()).ok();
+                file_ref.and_then(|f| match f {
+                    FileRef::Font(font) => Some(font),
+                    FileRef::Collection(c) => c.get(0).ok(),
+                })
+            } {
+                let skrifa_size = skrifa::instance::Size::new(size);
+                let charmap = font_ref.charmap();
+                let glyph_metrics = font_ref.glyph_metrics(skrifa_size, LocationRef::default());
 
-            let mut glyphs = Vec::new();
-            let mut pen_x = 0.0_f32;
+                let mut glyphs = Vec::new();
+                let mut pen_x = 0.0_f32;
 
-            for ch in text.chars() {
-                let gid = charmap.map(ch).unwrap_or_default();
-                let advance = glyph_metrics.advance_width(gid).unwrap_or(size * 0.5);
-                glyphs.push(Glyph {
-                    id: gid.to_u32(),
-                    x: pen_x,
-                    y: 0.0,
-                });
-                pen_x += advance;
+                for ch in text.chars() {
+                    let gid = charmap.map(ch).unwrap_or_default();
+                    let advance = glyph_metrics.advance_width(gid).unwrap_or(size * 0.5);
+                    glyphs.push(Glyph {
+                        id: gid.to_u32(),
+                        x: pen_x,
+                        y: 0.0,
+                    });
+                    pen_x += advance;
+                }
+
+                scene
+                    .draw_glyphs(&font_data)
+                    .font_size(size)
+                    .transform(offset * Affine::translate((x, y)))
+                    .brush(color)
+                    .draw(Fill::NonZero, glyphs.into_iter());
             }
+        };
 
-            scene
-                .draw_glyphs(&font_data)
-                .font_size(size)
-                .transform(offset * Affine::translate((x, y)))
-                .brush(color)
-                .draw(Fill::NonZero, glyphs.into_iter());
-        }
-    };
-
-    draw_overlay_text(scene, &format!("FPS: {:.1}", stats.fps), 15.0, 32.0, 28.0, fps_color);
-    draw_overlay_text(scene, &format!("Frame: {:.2}ms", stats.frame_time_ms), 15.0, 56.0, 18.0, Color::WHITE);
-    draw_overlay_text(scene, &format!("Min: {:.2}ms  Max: {:.2}ms", stats.min_ms, stats.max_ms), 15.0, 78.0, 14.0, Color::from_rgb8(180, 180, 180));
-    draw_overlay_text(scene, "Scroll=Zoom | Drag=Pan | R=Reset", 15.0, 96.0, 12.0, Color::from_rgb8(120, 120, 120));
+    draw_overlay_text(
+        scene,
+        &format!("FPS: {:.1}", stats.fps),
+        15.0,
+        32.0,
+        28.0,
+        fps_color,
+    );
+    draw_overlay_text(
+        scene,
+        &format!("Frame: {:.2}ms", stats.frame_time_ms),
+        15.0,
+        56.0,
+        18.0,
+        Color::WHITE,
+    );
+    draw_overlay_text(
+        scene,
+        &format!("Min: {:.2}ms  Max: {:.2}ms", stats.min_ms, stats.max_ms),
+        15.0,
+        78.0,
+        14.0,
+        Color::from_rgb8(180, 180, 180),
+    );
+    draw_overlay_text(
+        scene,
+        "Scroll=Zoom | Drag=Pan | R=Reset",
+        15.0,
+        96.0,
+        12.0,
+        Color::from_rgb8(120, 120, 120),
+    );
 
     // Draw frame time bar graph
     let graph_y = 110.0;
@@ -685,13 +747,13 @@ fn draw_fps_overlay(
         let x = 15.0 + i as f64 * bar_width;
 
         let bar_color = if time_ms <= 8.33 {
-            Color::from_rgb8(100, 143, 255)  // 120fps - blue
+            Color::from_rgb8(100, 143, 255) // 120fps - blue
         } else if time_ms <= 16.67 {
-            Color::from_rgb8(100, 200, 100)  // 60fps - green
+            Color::from_rgb8(100, 200, 100) // 60fps - green
         } else if time_ms <= 33.33 {
-            Color::from_rgb8(255, 176, 0)    // 30fps - orange
+            Color::from_rgb8(255, 176, 0) // 30fps - orange
         } else {
-            Color::from_rgb8(220, 38, 127)   // <30fps - red
+            Color::from_rgb8(220, 38, 127) // <30fps - red
         };
 
         scene.fill(

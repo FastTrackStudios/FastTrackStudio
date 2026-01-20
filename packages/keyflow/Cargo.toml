@@ -2,8 +2,32 @@
 name = "keyflow"
 version.workspace = true
 edition.workspace = true
+description = "Music theory, chord parsing, and optional GPU-based music notation rendering"
+
+[features]
+default = []
+# Engraver feature: GPU-accelerated music notation rendering
+engraver = [
+    "dep:wgpu",
+    "dep:vello",
+    "dep:kurbo",
+    "dep:parley",
+    "dep:skrifa",
+    "dep:smufl",
+    "dep:lyon",
+    "dep:bytemuck",
+    "dep:bitflags",
+    "dep:serde_json",
+    "dep:thiserror",
+    "dep:macro_rules_attribute",
+]
+# Example feature: adds windowing for running examples
+engraver-example = ["engraver", "dep:winit", "dep:pollster", "dep:env_logger", "dep:log"]
+# MIDI file import
+midi-import = ["engraver", "dep:midly"]
 
 [dependencies]
+# Core dependencies
 tracing = "0.1"
 color-eyre = "0.6"
 serde = { version = "1.0", features = ["derive"] }
@@ -12,9 +36,45 @@ regex = "1.11.3"
 daw = { path = "../../modules/daw" }
 uuid = { version = "1.0", features = ["serde", "v4"] }
 helgoboss-midi = "0.4.0"
+derive_more = { version = "1.0", features = ["debug", "display", "from", "error"] }
+
+# GPU rendering (optional, for engraver feature)
+# Use wgpu 26 to match anyrender/blitz
+wgpu = { version = "26", features = ["wgsl"], optional = true }
+
+# Linebender stack for 2D vector graphics (versions matched to vello 0.6)
+vello = { version = "0.6", optional = true }
+kurbo = { version = "0.12", optional = true }
+parley = { version = "0.2", optional = true }
+skrifa = { version = "0.26", optional = true }
+
+# SMuFL music font metadata
+smufl = { version = "0.2", optional = true }
+
+# 2D tessellation for Canvas2D
+lyon = { version = "1.0", optional = true }
+bytemuck = { version = "1.14", features = ["derive"], optional = true }
+bitflags = { version = "2.4", features = ["serde"], optional = true }
+
+# JSON serialization (for engraver styles)
+serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+
+# Derive macros for engraver
+macro_rules_attribute = { version = "0.2", optional = true }
+
+# MIDI file parsing (optional)
+midly = { version = "0.5", optional = true }
+
+# Example dependencies (optional)
+winit = { version = "0.30", optional = true }
+pollster = { version = "0.4", optional = true }
+env_logger = { version = "0.11", optional = true }
+log = { version = "0.4", optional = true }
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+pollster = "0.4"
 
 [[example]]
 name = "reckless_love"
@@ -31,6 +91,26 @@ path = "examples/intermediate/all_along_the_watchtower.rs"
 [[example]]
 name = "well_jacob_collier"
 path = "examples/intermediate/well_jacob_collier.rs"
+
+[[example]]
+name = "music_symbols"
+required-features = ["engraver-example"]
+
+[[example]]
+name = "canvas_shapes"
+required-features = ["engraver-example"]
+
+[[example]]
+name = "canvas_sdf"
+required-features = ["engraver-example"]
+
+[[example]]
+name = "layout_demo"
+required-features = ["engraver-example"]
+
+[[example]]
+name = "snippet_viewer"
+required-features = ["engraver-example"]
 
 [lints]
 workspace = true
