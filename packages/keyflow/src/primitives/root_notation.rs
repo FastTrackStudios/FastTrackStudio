@@ -24,6 +24,8 @@ pub enum RootFormat {
     RomanNumeral { degree: u8, case: RomanCase },
     /// Explicit note name (C, D#, Eb, etc.)
     NoteName(String),
+    /// Empty/rest - no root note (used for rhythm-only entries like rests)
+    Empty,
 }
 
 /// Unified root notation that works for all three input formats
@@ -40,6 +42,14 @@ pub struct RootNotation {
 }
 
 impl RootNotation {
+    /// Create an empty root notation (for rests and rhythm-only entries)
+    pub fn empty() -> Self {
+        Self {
+            resolved_note: None,
+            original_format: RootFormat::Empty,
+        }
+    }
+
     /// Create from a scale degree with optional accidental
     pub fn from_scale_degree(
         degree: u8,
@@ -184,6 +194,7 @@ impl RootNotation {
             RootFormat::ScaleDegree(d) => *d,
             RootFormat::RomanNumeral { degree, .. } => *degree,
             RootFormat::NoteName(_) => unreachable!(),
+            RootFormat::Empty => return None, // Empty root has no note
         };
 
         let resolved = key.get_scale_degree(degree)?;
@@ -202,6 +213,9 @@ impl RootNotation {
             RootFormat::RomanNumeral { degree, .. } => *degree,
             RootFormat::NoteName(_) => {
                 return Err("Note name should already be resolved".to_string());
+            }
+            RootFormat::Empty => {
+                return Err("Empty root notation has no note to resolve".to_string());
             }
         };
 
@@ -222,7 +236,7 @@ impl RootNotation {
         match &self.original_format {
             RootFormat::ScaleDegree(d) => Some(*d),
             RootFormat::RomanNumeral { degree, .. } => Some(*degree),
-            RootFormat::NoteName(_) => None,
+            RootFormat::NoteName(_) | RootFormat::Empty => None,
         }
     }
 
@@ -275,6 +289,7 @@ impl fmt::Display for RootNotation {
                 }
             }
             RootFormat::NoteName(name) => name.clone(),
+            RootFormat::Empty => String::new(), // Empty display for rests
         };
         write!(f, "{}", display_str)
     }

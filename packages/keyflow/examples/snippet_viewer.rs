@@ -51,12 +51,12 @@ const POINTS_PER_INCH: f64 = 72.0;
 const DPI_SCALE: f64 = SCREEN_DPI / POINTS_PER_INCH;
 
 // Font paths relative to workspace root
-const SMUFL_FONT_PATH: &str = "packages/charts/resources/fonts/musescore/fonts/bravura/Bravura.otf";
+const SMUFL_FONT_PATH: &str = "libs/reference/sheet-music/musescore/fonts/bravura/Bravura.otf";
 const SMUFL_METADATA_PATH: &str =
-    "packages/charts/resources/fonts/musescore/fonts/bravura/bravura_metadata.json";
-const TEXT_FONT_PATH: &str = "packages/charts/resources/fonts/musescore/fonts/FreeSans.ttf";
+    "libs/reference/sheet-music/musescore/fonts/bravura/bravura_metadata.json";
+const TEXT_FONT_PATH: &str = "libs/reference/sheet-music/musescore/fonts/FreeSans.ttf";
 const MUSEJAZZ_FONT_PATH: &str =
-    "packages/charts/resources/fonts/musescore/fonts/musejazz/MuseJazzText.otf";
+    "libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf";
 
 // ============================================================================
 // region: --- Public API for Testing

@@ -345,7 +345,9 @@ impl MelodyNote {
     }
 
     /// Parse octave modifier (`'` or `,`) from character iterator
-    fn parse_octave_modifier(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> OctaveModifier {
+    fn parse_octave_modifier(
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    ) -> OctaveModifier {
         match chars.peek() {
             Some('\'') => {
                 chars.next();
@@ -378,11 +380,7 @@ impl MelodyNote {
     /// Get duration in beats (assuming quarter note = 1 beat)
     pub fn duration_beats(&self) -> f64 {
         let base = 4.0 / self.duration as f64;
-        if self.dotted {
-            base * 1.5
-        } else {
-            base
-        }
+        if self.dotted { base * 1.5 } else { base }
     }
 }
 

@@ -25,9 +25,7 @@ pub enum SemanticRole {
 
     /// First chord/element after a section change.
     /// The section_type contains the name of the new section (e.g., "Verse", "Chorus").
-    SectionStart {
-        section_type: String,
-    },
+    SectionStart { section_type: String },
 
     /// Element belongs to a repeat structure (first/second ending, D.S., etc.).
     RepeatPass {
@@ -178,10 +176,12 @@ mod tests {
     fn test_boundary_roles() {
         assert!(SemanticRole::FirstInSystem.is_boundary());
         assert!(SemanticRole::LastInMeasure.is_boundary());
-        assert!(!SemanticRole::SectionStart {
-            section_type: "Verse".to_string()
-        }
-        .is_boundary());
+        assert!(
+            !SemanticRole::SectionStart {
+                section_type: "Verse".to_string()
+            }
+            .is_boundary()
+        );
     }
 
     #[test]

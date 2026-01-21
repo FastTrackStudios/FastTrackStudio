@@ -2496,9 +2496,13 @@ impl ChartLayoutEngine {
         //
         // This ensures measures with more segments (especially shorter notes)
         // get proportionally more space to fit all content.
+        //
+        // Additionally, triplets receive extra weight because they require bracket
+        // notation (└3┘) which needs horizontal space for visual clarity.
 
         const QUARTER_TICKS: f64 = 480.0;
         const MEASURE_SPACING: f64 = 1.3; // MuseScore default slope
+        const TRIPLET_BONUS: f64 = 0.15;  // Extra weight per triplet element
 
         /// Calculate duration stretch for a given tick count using MuseScore formula
         fn duration_stretch(ticks: i32) -> f64 {
@@ -2521,30 +2525,48 @@ impl ChartLayoutEngine {
             }
         }
 
-        // Sum the natural widths (stretch factors) for all rhythm elements
-        // and count the number of segments for minimum width calculation
-        let (total_stretch, segment_count): (f64, usize) = if !measure.rhythm_elements.is_empty() {
-            // Use rhythm_elements which includes both chords and rests
-            let stretch: f64 = measure.rhythm_elements.iter().map(|elem| {
-                let ticks = match elem {
-                    crate::chart::types::RhythmElement::Chord(chord) => {
-                        rhythm_ticks(&chord.rhythm)
+        /// Check if a ChordRhythm is a triplet
+        fn is_triplet(rhythm: &ChordRhythm) -> bool {
+            rhythm.lily_parts().map_or(false, |(_, _, triplet)| triplet)
+        }
+
+        // Sum the natural widths (stretch factors) for all rhythm elements,
+        // count segments, and count triplet elements
+        let (total_stretch, segment_count, triplet_count): (f64, usize, usize) =
+            if !measure.rhythm_elements.is_empty() {
+                // Use rhythm_elements which includes both chords and rests
+                let mut stretch = 0.0;
+                let mut triplets = 0;
+                for elem in &measure.rhythm_elements {
+                    let (ticks, is_trip) = match elem {
+                        crate::chart::types::RhythmElement::Chord(chord) => {
+                            (rhythm_ticks(&chord.rhythm), is_triplet(&chord.rhythm))
+                        }
+                        crate::chart::types::RhythmElement::Rest(rest) => {
+                            (rhythm_ticks(&rest.rhythm), is_triplet(&rest.rhythm))
+                        }
+                        crate::chart::types::RhythmElement::Space(space) => {
+                            (480, is_triplet(&space.rhythm)) // Quarter note equivalent
+                        }
+                    };
+                    stretch += duration_stretch(ticks);
+                    if is_trip {
+                        triplets += 1;
                     }
-                    crate::chart::types::RhythmElement::Rest(rest) => {
-                        rhythm_ticks(&rest.rhythm)
+                }
+                (stretch, measure.rhythm_elements.len(), triplets)
+            } else {
+                // Fallback: use chords only
+                let mut stretch = 0.0;
+                let mut triplets = 0;
+                for c in &measure.chords {
+                    stretch += duration_stretch(rhythm_ticks(&c.rhythm));
+                    if is_triplet(&c.rhythm) {
+                        triplets += 1;
                     }
-                    crate::chart::types::RhythmElement::Space(_) => 480, // Quarter note equivalent
-                };
-                duration_stretch(ticks)
-            }).sum();
-            (stretch, measure.rhythm_elements.len())
-        } else {
-            // Fallback: use chords only
-            let stretch: f64 = measure.chords.iter().map(|c| {
-                duration_stretch(rhythm_ticks(&c.rhythm))
-            }).sum();
-            (stretch, measure.chords.len().max(1))
-        };
+                }
+                (stretch, measure.chords.len().max(1), triplets)
+            };
 
         // Calculate weight from two factors:
         // 1. Stretch-based weight: sum of rhythmic stretches / 4 (so 4 quarter notes = 1.0)
@@ -2555,8 +2577,11 @@ impl ChartLayoutEngine {
         let stretch_weight = total_stretch / 4.0;
         let segment_weight = segment_count as f64 / 4.0;
 
-        // Use the larger of the two weights, ensuring minimum readable spacing
-        let weight = stretch_weight.max(segment_weight).max(1.0);
+        // Add triplet complexity bonus - brackets need extra horizontal space
+        let triplet_bonus = triplet_count as f64 * TRIPLET_BONUS;
+
+        // Use the larger of the two weights, plus triplet bonus
+        let weight = stretch_weight.max(segment_weight).max(1.0) + triplet_bonus;
 
         // Clamp to reasonable range
         weight.clamp(0.5, 4.0)

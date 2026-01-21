@@ -22,6 +22,9 @@ pub struct Section {
     pub measure_count: Option<usize>,
     /// True if prefixed with ^ (e.g., ^Band-In) - for chart parsing
     pub is_subsection: bool,
+    /// Optional comment/annotation for the section (e.g., "Down", "Build", "Horns", "Half-time")
+    /// Parsed from: CH 4 "Down", Interlude "Horns", or preset modifiers like "Down CH 4"
+    pub comment: Option<String>,
 
     // Optional DAW integration fields
     /// Unique identifier for this section (for DAW integration)
@@ -47,6 +50,7 @@ impl Section {
             split_letter: None,
             measure_count: None,
             is_subsection: false,
+            comment: None,
             id: None,
             start_position: None,
             end_position: None,
@@ -70,6 +74,7 @@ impl Section {
             split_letter: None,
             measure_count: None,
             is_subsection: false,
+            comment: None,
             id: None,
             start_position: Some(start_position),
             end_position: Some(end_position),
@@ -196,6 +201,12 @@ impl Section {
 
     pub fn with_measure_count(mut self, count: usize) -> Self {
         self.measure_count = Some(count);
+        self
+    }
+
+    /// Set the comment/annotation for this section (e.g., "Down", "Build", "Horns", "Half-time")
+    pub fn with_comment<S: Into<String>>(mut self, comment: S) -> Self {
+        self.comment = Some(comment.into());
         self
     }
 

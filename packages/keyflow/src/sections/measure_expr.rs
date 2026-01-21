@@ -173,46 +173,94 @@ mod tests {
 
     #[test]
     fn test_parse_absolute() {
-        assert_eq!(MeasureExpression::parse("8"), Some(MeasureExpression::Absolute(8)));
-        assert_eq!(MeasureExpression::parse("16"), Some(MeasureExpression::Absolute(16)));
-        assert_eq!(MeasureExpression::parse("4"), Some(MeasureExpression::Absolute(4)));
+        assert_eq!(
+            MeasureExpression::parse("8"),
+            Some(MeasureExpression::Absolute(8))
+        );
+        assert_eq!(
+            MeasureExpression::parse("16"),
+            Some(MeasureExpression::Absolute(16))
+        );
+        assert_eq!(
+            MeasureExpression::parse("4"),
+            Some(MeasureExpression::Absolute(4))
+        );
     }
 
     #[test]
     fn test_parse_empty() {
-        assert_eq!(MeasureExpression::parse(""), Some(MeasureExpression::UseMemory));
-        assert_eq!(MeasureExpression::parse("  "), Some(MeasureExpression::UseMemory));
+        assert_eq!(
+            MeasureExpression::parse(""),
+            Some(MeasureExpression::UseMemory)
+        );
+        assert_eq!(
+            MeasureExpression::parse("  "),
+            Some(MeasureExpression::UseMemory)
+        );
     }
 
     #[test]
     fn test_parse_relative_add() {
-        assert_eq!(MeasureExpression::parse("+1"), Some(MeasureExpression::Add(1)));
-        assert_eq!(MeasureExpression::parse("+4"), Some(MeasureExpression::Add(4)));
+        assert_eq!(
+            MeasureExpression::parse("+1"),
+            Some(MeasureExpression::Add(1))
+        );
+        assert_eq!(
+            MeasureExpression::parse("+4"),
+            Some(MeasureExpression::Add(4))
+        );
     }
 
     #[test]
     fn test_parse_relative_subtract() {
-        assert_eq!(MeasureExpression::parse("-1"), Some(MeasureExpression::Subtract(1)));
-        assert_eq!(MeasureExpression::parse("-2"), Some(MeasureExpression::Subtract(2)));
+        assert_eq!(
+            MeasureExpression::parse("-1"),
+            Some(MeasureExpression::Subtract(1))
+        );
+        assert_eq!(
+            MeasureExpression::parse("-2"),
+            Some(MeasureExpression::Subtract(2))
+        );
     }
 
     #[test]
     fn test_parse_addition_expression() {
-        assert_eq!(MeasureExpression::parse("8+1"), Some(MeasureExpression::Absolute(9)));
-        assert_eq!(MeasureExpression::parse("4+4"), Some(MeasureExpression::Absolute(8)));
+        assert_eq!(
+            MeasureExpression::parse("8+1"),
+            Some(MeasureExpression::Absolute(9))
+        );
+        assert_eq!(
+            MeasureExpression::parse("4+4"),
+            Some(MeasureExpression::Absolute(8))
+        );
     }
 
     #[test]
     fn test_parse_subtraction_expression() {
-        assert_eq!(MeasureExpression::parse("8-1"), Some(MeasureExpression::Absolute(7)));
-        assert_eq!(MeasureExpression::parse("10-2"), Some(MeasureExpression::Absolute(8)));
+        assert_eq!(
+            MeasureExpression::parse("8-1"),
+            Some(MeasureExpression::Absolute(7))
+        );
+        assert_eq!(
+            MeasureExpression::parse("10-2"),
+            Some(MeasureExpression::Absolute(8))
+        );
     }
 
     #[test]
     fn test_parse_multiplication() {
-        assert_eq!(MeasureExpression::parse("4x4"), Some(MeasureExpression::Absolute(16)));
-        assert_eq!(MeasureExpression::parse("4*4"), Some(MeasureExpression::Absolute(16)));
-        assert_eq!(MeasureExpression::parse("2x8"), Some(MeasureExpression::Absolute(16)));
+        assert_eq!(
+            MeasureExpression::parse("4x4"),
+            Some(MeasureExpression::Absolute(16))
+        );
+        assert_eq!(
+            MeasureExpression::parse("4*4"),
+            Some(MeasureExpression::Absolute(16))
+        );
+        assert_eq!(
+            MeasureExpression::parse("2x8"),
+            Some(MeasureExpression::Absolute(16))
+        );
     }
 
     #[test]
@@ -255,17 +303,35 @@ mod tests {
     #[test]
     fn test_parse_incomplete_expressions() {
         // Incomplete expressions should extract the leading number
-        assert_eq!(MeasureExpression::parse("16+"), Some(MeasureExpression::Absolute(16)));
-        assert_eq!(MeasureExpression::parse("8-"), Some(MeasureExpression::Absolute(8)));
-        assert_eq!(MeasureExpression::parse("4x"), Some(MeasureExpression::Absolute(4)));
-        assert_eq!(MeasureExpression::parse("4*"), Some(MeasureExpression::Absolute(4)));
+        assert_eq!(
+            MeasureExpression::parse("16+"),
+            Some(MeasureExpression::Absolute(16))
+        );
+        assert_eq!(
+            MeasureExpression::parse("8-"),
+            Some(MeasureExpression::Absolute(8))
+        );
+        assert_eq!(
+            MeasureExpression::parse("4x"),
+            Some(MeasureExpression::Absolute(4))
+        );
+        assert_eq!(
+            MeasureExpression::parse("4*"),
+            Some(MeasureExpression::Absolute(4))
+        );
     }
 
     #[test]
     fn test_parse_incomplete_relative() {
         // Incomplete relative expressions should use memory
-        assert_eq!(MeasureExpression::parse("+"), Some(MeasureExpression::UseMemory));
-        assert_eq!(MeasureExpression::parse("-"), Some(MeasureExpression::UseMemory));
+        assert_eq!(
+            MeasureExpression::parse("+"),
+            Some(MeasureExpression::UseMemory)
+        );
+        assert_eq!(
+            MeasureExpression::parse("-"),
+            Some(MeasureExpression::UseMemory)
+        );
     }
 
     #[test]

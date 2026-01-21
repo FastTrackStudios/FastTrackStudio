@@ -214,10 +214,7 @@ mod tests {
         let link = SourceLink::new(TextSpan::new(0, 5), ChartPosition::default())
             .with_role(SemanticRole::FirstInMeasure);
 
-        assert!(link.has_any_role(&[
-            SemanticRole::FirstInMeasure,
-            SemanticRole::FirstInSystem
-        ]));
+        assert!(link.has_any_role(&[SemanticRole::FirstInMeasure, SemanticRole::FirstInSystem]));
         assert!(!link.has_any_role(&[SemanticRole::LastInMeasure, SemanticRole::Pickup]));
     }
 

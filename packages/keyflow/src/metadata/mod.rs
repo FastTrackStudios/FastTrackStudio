@@ -23,6 +23,10 @@ pub struct SongMetadata {
     pub copyright: Option<String>,
     pub year: Option<u16>,
     pub tempo: Option<u32>,
+    /// Part name (e.g., "Master Rhythm", "Lead Sheet", "Piano")
+    pub part_name: Option<String>,
+    /// Chart version (1, 2, 3, etc.) - defaults to 1 in rendering
+    pub version: Option<u8>,
 }
 
 impl SongMetadata {

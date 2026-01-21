@@ -12,7 +12,9 @@ impl SongMetadata {
     ///         "Song Title"
     ///
     /// Returns: (title, artist, subtitle)
-    pub fn parse_title_artist_subtitle(input: &str) -> (Option<String>, Option<String>, Option<String>) {
+    pub fn parse_title_artist_subtitle(
+        input: &str,
+    ) -> (Option<String>, Option<String>, Option<String>) {
         let input = input.trim();
 
         if input.is_empty() {
@@ -25,7 +27,11 @@ impl SongMetadata {
             let artist = input[dash_pos + 3..].trim().to_string();
             (
                 title,
-                if artist.is_empty() { None } else { Some(artist) },
+                if artist.is_empty() {
+                    None
+                } else {
+                    Some(artist)
+                },
             )
         } else {
             (input.to_string(), None)

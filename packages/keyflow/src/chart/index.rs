@@ -74,10 +74,7 @@ impl ChartIndex {
     pub fn add_element(&mut self, id: ElementId, source_link: SourceLink) {
         // Index by source offset
         let start = source_link.span.start;
-        self.by_source_offset
-            .entry(start)
-            .or_default()
-            .push(id);
+        self.by_source_offset.entry(start).or_default().push(id);
 
         // Index by musical position
         let pos_key = (source_link.position.measure, source_link.position.beat);
@@ -279,10 +276,7 @@ impl ChartIndex {
     /// Merge another index into this one.
     pub fn merge(&mut self, other: ChartIndex) {
         for (offset, ids) in other.by_source_offset {
-            self.by_source_offset
-                .entry(offset)
-                .or_default()
-                .extend(ids);
+            self.by_source_offset.entry(offset).or_default().extend(ids);
         }
         for (pos, ids) in other.by_position {
             self.by_position.entry(pos).or_default().extend(ids);
@@ -497,8 +491,8 @@ mod tests {
 
         // Verse section - measure 0
         let g_chord = SourceLink::new(
-            TextSpan::with_location(5, 1, 2, 3),   // "G" at line 2, col 3
-            ChartPosition::new(0, 0, 0),           // System 0, measure 0, beat 0
+            TextSpan::with_location(5, 1, 2, 3), // "G" at line 2, col 3
+            ChartPosition::new(0, 0, 0),         // System 0, measure 0, beat 0
         );
         index.add_element(1001, g_chord);
 
@@ -510,8 +504,8 @@ mod tests {
 
         // Verse section - measure 1
         let am_chord = SourceLink::new(
-            TextSpan::with_location(27, 2, 3, 3),  // "Am" at line 3, col 3
-            ChartPosition::new(0, 2, 0),           // System 0, measure 2, beat 0
+            TextSpan::with_location(27, 2, 3, 3), // "Am" at line 3, col 3
+            ChartPosition::new(0, 2, 0),          // System 0, measure 2, beat 0
         );
         index.add_element(1003, am_chord);
 
@@ -523,8 +517,8 @@ mod tests {
 
         // Chorus section - system 1
         let em_chord = SourceLink::new(
-            TextSpan::with_location(55, 2, 6, 3),  // "Em" at line 6, col 3
-            ChartPosition::new(1, 4, 0),           // System 1, measure 4, beat 0
+            TextSpan::with_location(55, 2, 6, 3), // "Em" at line 6, col 3
+            ChartPosition::new(1, 4, 0),          // System 1, measure 4, beat 0
         );
         index.add_element(1005, em_chord);
 
@@ -572,7 +566,7 @@ mod tests {
         //               0     5         14  17
 
         let gmaj7 = SourceLink::new(
-            TextSpan::with_location(2, 5, 1, 3),  // "Gmaj7" at offset 2, length 5
+            TextSpan::with_location(2, 5, 1, 3), // "Gmaj7" at offset 2, length 5
             ChartPosition::at_beat(0, 0),
         );
         index.add_element(100, gmaj7);
@@ -596,7 +590,7 @@ mod tests {
         let highlight_line = source_link.span.line;
 
         assert_eq!(highlight_start, 2);
-        assert_eq!(highlight_end, 7);   // 2 + 5
+        assert_eq!(highlight_end, 7); // 2 + 5
         assert_eq!(highlight_line, 1);
 
         // The editor would now:
@@ -617,22 +611,34 @@ mod tests {
         //      ^3        ^13        ^23         ^34
         //      len=1     len=1      len=2       len=1
 
-        index.add_element(1, SourceLink::new(
-            TextSpan::with_location(5, 1, 2, 3),
-            ChartPosition::at_beat(0, 0),
-        ));
-        index.add_element(2, SourceLink::new(
-            TextSpan::with_location(15, 1, 2, 13),
-            ChartPosition::at_beat(1, 0),
-        ));
-        index.add_element(3, SourceLink::new(
-            TextSpan::with_location(25, 2, 2, 23),
-            ChartPosition::at_beat(2, 0),
-        ));
-        index.add_element(4, SourceLink::new(
-            TextSpan::with_location(36, 1, 2, 34),
-            ChartPosition::at_beat(3, 0),
-        ));
+        index.add_element(
+            1,
+            SourceLink::new(
+                TextSpan::with_location(5, 1, 2, 3),
+                ChartPosition::at_beat(0, 0),
+            ),
+        );
+        index.add_element(
+            2,
+            SourceLink::new(
+                TextSpan::with_location(15, 1, 2, 13),
+                ChartPosition::at_beat(1, 0),
+            ),
+        );
+        index.add_element(
+            3,
+            SourceLink::new(
+                TextSpan::with_location(25, 2, 2, 23),
+                ChartPosition::at_beat(2, 0),
+            ),
+        );
+        index.add_element(
+            4,
+            SourceLink::new(
+                TextSpan::with_location(36, 1, 2, 34),
+                ChartPosition::at_beat(3, 0),
+            ),
+        );
 
         // User selects bytes 10-30 (covers C and Am chords)
         let selection_start = 10;
@@ -658,19 +664,19 @@ mod tests {
 
         // Build index with chord and rhythm slash elements
         // Measure 0: G on beat 0, slashes on beats 1-3
-        index.add_element(100, SourceLink::new(
-            TextSpan::new(0, 1),
-            ChartPosition::at_beat(0, 0),
-        ));
+        index.add_element(
+            100,
+            SourceLink::new(TextSpan::new(0, 1), ChartPosition::at_beat(0, 0)),
+        );
         index.add_element_position(101, ChartPosition::at_beat(0, 1)); // slash
         index.add_element_position(102, ChartPosition::at_beat(0, 2)); // slash
         index.add_element_position(103, ChartPosition::at_beat(0, 3)); // slash
 
         // Measure 1: C on beat 0, slashes on beats 1-3
-        index.add_element(200, SourceLink::new(
-            TextSpan::new(10, 1),
-            ChartPosition::at_beat(1, 0),
-        ));
+        index.add_element(
+            200,
+            SourceLink::new(TextSpan::new(10, 1), ChartPosition::at_beat(1, 0)),
+        );
         index.add_element_position(201, ChartPosition::at_beat(1, 1));
         index.add_element_position(202, ChartPosition::at_beat(1, 2));
         index.add_element_position(203, ChartPosition::at_beat(1, 3));
@@ -753,7 +759,7 @@ mod tests {
         // Source: "| Cmaj7 | Am7 | Dm7 | G7 |"
         //           ^2      ^10   ^16   ^22
         let chords = [
-            (1, 2, 5, "Cmaj7", 0),   // element_id, offset, len, name, measure
+            (1, 2, 5, "Cmaj7", 0), // element_id, offset, len, name, measure
             (2, 10, 3, "Am7", 1),
             (3, 18, 3, "Dm7", 2),
             (4, 26, 2, "G7", 3),

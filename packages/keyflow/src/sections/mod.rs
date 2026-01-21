@@ -10,4 +10,4 @@ pub mod section_type;
 pub use measure_expr::MeasureExpression;
 pub use numbering::SectionNumberer;
 pub use section::Section;
-pub use section_type::SectionType;
+pub use section_type::{ParsedSection, SectionType};
