@@ -111,7 +111,11 @@ impl TextSpan {
     pub const fn extend_to(&self, end: usize) -> TextSpan {
         TextSpan {
             start: self.start,
-            len: if end > self.start { end - self.start } else { 0 },
+            len: if end > self.start {
+                end - self.start
+            } else {
+                0
+            },
             line: self.line,
             column: self.column,
         }
@@ -174,7 +178,7 @@ mod tests {
         let span1 = TextSpan::new(10, 5); // 10-15
         let span2 = TextSpan::new(12, 5); // 12-17
         let span3 = TextSpan::new(15, 5); // 15-20
-        let span4 = TextSpan::new(5, 5);  // 5-10
+        let span4 = TextSpan::new(5, 5); // 5-10
 
         assert!(span1.overlaps(&span2));
         assert!(!span1.overlaps(&span3)); // Adjacent, not overlapping
