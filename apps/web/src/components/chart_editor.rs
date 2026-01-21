@@ -3,46 +3,54 @@
 //! Interactive split-view editor with live chart preview.
 
 use dioxus::prelude::*;
+use dioxus::dioxus_core::Task;
+use keyflow::highlighting::{HighlightKind, Highlighter};
 
-/// Default chart content for new editors - demonstrates various keyflow features
-const DEFAULT_CHART: &str = r#"---
-title: "Example Song"
-artist: "Your Name"
-key: G
-time: 4/4
-tempo: 120
----
+// =============================================================================
+// Example Charts
+// =============================================================================
 
-[Intro]
-| G . . . | D . . . |
+/// Empty chart template
+const EMPTY_CHART: &str = r#"New Song
+120bpm 4/4 #C
 
-[Verse 1]
-| G . . . | Em . . . |
-| C . . . | D  . . . |
-| G . . . | Em . . . |
-| C . D . | G  . . . |
-
-[Chorus]
-| C . . . | G  . . . |
-| Am . . . | D . . . |
-| C . . . | G  . . . |
-| Am . D . | G . . . |
-
-[Verse 2]
-| G . . . | Em . . . |
-| C . . . | D  . . . |
-
-[Bridge]
-| Em . . . | C . . . |
-| G  . . . | D . . . |
-
-[Outro]
-| G . . . | C . G . |
+VS
+C | G | Am | F
 "#;
+
+/// Thriller - Dirty Loops, Cory Wong cover arrangement
+/// Demonstrates push/pull triplets and complex rhythm notation
+const EXAMPLE_THRILLER: &str = r#"Thriller
+Dirty Loops, Cory Wong
+120bpm 4/4 #Ab
+/push = triplet
+/PUSH_ALTERS_RHYTHM=false
+
+COUNT 2
+
+IN
+r8t Ab9_8t r8t r8t r8t F9_8t r2 | s1
+
+VS
+'F/C . | Cm . | 'F/C . | Cm . | 'F/C . | Cm . | 'F/C . | Cm Cm9
+
+CH
+Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A //// | 'Fm9  ////
+Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A | r8t Ab9_8t r8t r8t 'F9_8t r8t r4 Fm/Ab_4 | s1
+
+BR
+'_4F7 | . |  Abmaj9 //// | // r8t Abmaj9_8t r8t Bb_8t r8t Cm7_8t | Cm7 | Ebmaj7/Bb | Am7b5 | Abmaj7 | G7sus4 | 'G7
+
+VS
+'F/C . | Cm . | 'F/C . | Cm . | 'F/C . | Cm . | 'F/C . | Cm Cm9
+"#;
+
+/// Default chart content - start with an example
+const DEFAULT_CHART: &str = EXAMPLE_THRILLER;
 
 /// Preview mode - Snippet (content-sized) or Page (A4)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PreviewMode {
+pub enum PreviewMode {
     Snippet,
     Page,
 }
@@ -52,8 +60,8 @@ enum PreviewMode {
 pub fn ChartEditor() -> Element {
     // Source text state
     let mut source = use_signal(|| DEFAULT_CHART.to_string());
-    // Preview mode state
-    let mut preview_mode = use_signal(|| PreviewMode::Snippet);
+    // Preview mode state - default to Page (A4) mode
+    let mut preview_mode = use_signal(|| PreviewMode::Page);
 
     let is_snippet = *preview_mode.read() == PreviewMode::Snippet;
 
@@ -78,22 +86,40 @@ pub fn ChartEditor() -> Element {
                         }
                     }
 
-                    button {
-                        class: "text-xs text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md hover:bg-accent transition-colors border border-border",
-                        onclick: move |_| source.set(DEFAULT_CHART.to_string()),
-                        "Reset"
+                    div {
+                        class: "flex items-center gap-2",
+
+                        // Examples dropdown
+                        select {
+                            class: "text-xs text-muted-foreground bg-background px-3 py-1.5 rounded-md border border-border hover:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary transition-colors cursor-pointer",
+                            onchange: move |evt| {
+                                let value = evt.value();
+                                match value.as_str() {
+                                    "empty" => source.set(EMPTY_CHART.to_string()),
+                                    "thriller" => source.set(EXAMPLE_THRILLER.to_string()),
+                                    _ => {}
+                                }
+                            },
+                            option { value: "", disabled: true, selected: true, "Examples" }
+                            option { value: "empty", "New (Empty)" }
+                            option { value: "thriller", "Thriller - Dirty Loops, Cory Wong" }
+                        }
+
+                        button {
+                            class: "text-xs text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md hover:bg-accent transition-colors border border-border",
+                            onclick: move |_| source.set(DEFAULT_CHART.to_string()),
+                            "Reset"
+                        }
                     }
                 }
 
-                // Textarea container
+                // Code editor with syntax highlighting
                 div {
                     class: "flex-1 overflow-hidden",
 
-                    textarea {
-                        class: "w-full h-full bg-background text-foreground font-mono text-sm p-4 resize-none focus:outline-none border-none",
-                        value: "{source}",
-                        spellcheck: false,
-                        oninput: move |evt| source.set(evt.value()),
+                    HighlightedEditor {
+                        value: source(),
+                        on_change: move |new_value: String| source.set(new_value),
                         placeholder: "Enter keyflow chart notation..."
                     }
                 }
@@ -145,38 +171,14 @@ pub fn ChartEditor() -> Element {
                     }
                 }
 
-                // Chart preview - changes based on mode
-                if is_snippet {
-                    // Snippet mode - content-sized, centered
-                    div {
-                        class: "flex-1 p-4 overflow-auto flex items-start justify-center",
+                // Chart preview - canvas always fills panel, mode affects internal rendering
+                div {
+                    class: "flex-1 overflow-hidden",
 
-                        div {
-                            class: "bg-white rounded-lg shadow-xl overflow-hidden",
-                            // Let content determine size
-                            style: "min-width: 400px; max-width: 100%;",
-
-                            DynamicChartRenderer {
-                                source: source(),
-                                mode: PreviewMode::Snippet
-                            }
-                        }
-                    }
-                } else {
-                    // Page mode - A4 aspect ratio
-                    div {
-                        class: "flex-1 p-4 overflow-auto flex items-start justify-center",
-
-                        div {
-                            class: "bg-white rounded-lg shadow-xl overflow-hidden",
-                            // A4 proportions: 210mm x 297mm
-                            style: "width: min(100%, 595px); aspect-ratio: 210 / 297; min-height: 0;",
-
-                            DynamicChartRenderer {
-                                source: source(),
-                                mode: PreviewMode::Page
-                            }
-                        }
+                    // Pass signals directly so child effects can track them
+                    DynamicChartRenderer {
+                        source: source,
+                        mode: preview_mode
                     }
                 }
             }
@@ -184,85 +186,43 @@ pub fn ChartEditor() -> Element {
     }
 }
 
-/// Dynamic chart renderer that works with owned strings.
+/// Dynamic chart renderer that accepts signals for reactive updates.
+/// The canvas always fills the container; mode affects the paper rendering inside.
 #[component]
-fn DynamicChartRenderer(source: String, mode: PreviewMode) -> Element {
-    // Parse the chart to validate it
-    let parse_result = keyflow::Chart::parse(&source);
+pub fn DynamicChartRenderer(source: Signal<String>, mode: Signal<PreviewMode>, canvas_id: Option<String>) -> Element {
+    // Read source to trigger re-render on changes and for validation
+    let source_value = source.read();
+    let mode_value = *mode.read();
 
-    let is_snippet = mode == PreviewMode::Snippet;
+    // Debug: log when this component renders
+    let first_line = source_value.lines().next().unwrap_or("(empty)");
+    tracing::debug!(
+        "[ChartRenderer] Rendering with mode={:?}, source_first_line='{}'",
+        mode_value, first_line
+    );
+
+    // Parse the chart to validate it
+    let parse_result = keyflow::Chart::parse(&source_value);
+
+    // Use provided canvas_id or default
+    let canvas_id = canvas_id.unwrap_or_else(|| "editor-chart-canvas".to_string());
 
     match parse_result {
-        Ok(chart) => {
-            // Get chart metadata for display
-            let title = chart.metadata.title.clone().unwrap_or_else(|| "Untitled".to_string());
-            let artist = chart.metadata.artist.clone();
-            let tempo = chart.metadata.tempo;
-            let section_count = chart.sections.len();
-
-            // Container class changes based on mode
-            let container_class = if is_snippet {
-                "w-full flex flex-col relative"
-            } else {
-                "w-full h-full flex flex-col relative"
-            };
-
-            // Canvas style changes based on mode
-            let canvas_style = if is_snippet {
-                "touch-action: none; background: white; min-height: 300px;"
-            } else {
-                "touch-action: none; background: white;"
-            };
-
+        Ok(_chart) => {
             rsx! {
                 div {
-                    class: "{container_class}",
+                    class: "w-full h-full relative",
 
-                    // Canvas for WebGPU rendering - white background like paper
+                    // Canvas for WebGPU rendering - fills entire container
+                    // Gray background shows around the white "paper"
                     canvas {
-                        id: "editor-chart-canvas",
-                        class: if is_snippet {
-                            "w-full cursor-grab active:cursor-grabbing"
-                        } else {
-                            "w-full h-full cursor-grab active:cursor-grabbing"
-                        },
-                        style: "{canvas_style}",
+                        id: "{canvas_id}",
+                        class: "w-full h-full cursor-grab active:cursor-grabbing",
+                        style: "touch-action: none; background: #374151;",
                     }
 
-                    // Metadata overlay in top-left (only show in page mode to avoid clutter in snippet)
-                    if !is_snippet {
-                        div {
-                            class: "absolute top-3 left-4 pointer-events-none",
-
-                            div {
-                                class: "text-lg font-bold text-gray-800",
-                                "{title}"
-                            }
-
-                            if let Some(artist) = artist {
-                                div {
-                                    class: "text-sm text-gray-600",
-                                    "{artist}"
-                                }
-                            }
-
-                            if let Some(tempo) = tempo {
-                                div {
-                                    class: "text-xs text-gray-500 mt-1",
-                                    "{tempo} BPM"
-                                }
-                            }
-                        }
-                    }
-
-                    // Section count in bottom-left
-                    div {
-                        class: "absolute bottom-2 left-3 text-xs text-gray-400 pointer-events-none",
-                        "{section_count} section(s)"
-                    }
-
-                    // WebGPU rendering
-                    DynamicChartCanvas { source: source, mode: mode }
+                    // WebGPU rendering - pass signals for reactive tracking
+                    DynamicChartCanvas { source: source, mode: mode, canvas_id: canvas_id.clone() }
                 }
             }
         }
@@ -270,14 +230,11 @@ fn DynamicChartRenderer(source: String, mode: PreviewMode) -> Element {
             let error_msg = e.to_string();
             rsx! {
                 div {
-                    class: if is_snippet {
-                        "w-full min-h-[200px] flex items-center justify-center bg-red-50"
-                    } else {
-                        "w-full h-full flex items-center justify-center bg-red-50"
-                    },
+                    class: "w-full h-full flex items-center justify-center",
+                    style: "background: #374151;",
 
                     div {
-                        class: "text-center p-6 max-w-md",
+                        class: "text-center p-6 max-w-md bg-white rounded-lg shadow-xl",
 
                         lucide_dioxus::CircleAlert { class: "w-12 h-12 mx-auto mb-3 text-red-400" }
 
@@ -287,7 +244,7 @@ fn DynamicChartRenderer(source: String, mode: PreviewMode) -> Element {
                         }
 
                         div {
-                            class: "text-sm text-red-500 font-mono whitespace-pre-wrap text-left bg-red-100 p-3 rounded-lg",
+                            class: "text-sm text-red-500 font-mono whitespace-pre-wrap text-left bg-red-50 p-3 rounded-lg",
                             "{error_msg}"
                         }
                     }
@@ -298,9 +255,9 @@ fn DynamicChartRenderer(source: String, mode: PreviewMode) -> Element {
 }
 
 /// Canvas component with WebGPU rendering for dynamic content.
+/// Accepts signals directly to enable reactive effect tracking.
 #[component]
-fn DynamicChartCanvas(source: String, mode: PreviewMode) -> Element {
-    let _mode = mode; // Will be used for layout adjustments
+fn DynamicChartCanvas(source: Signal<String>, mode: Signal<PreviewMode>, canvas_id: String) -> Element {
     #[cfg(target_arch = "wasm32")]
     {
         use crate::renderer::ChartLayoutManager;
@@ -312,6 +269,13 @@ fn DynamicChartCanvas(source: String, mode: PreviewMode) -> Element {
         let mut error_state = use_signal(|| None::<String>);
         let mut is_initialized = use_signal(|| false);
 
+        // Track the current render task so we can cancel it when a new one starts
+        // Using RefCell instead of Signal to avoid triggering reactive updates when we store the task
+        let current_render_task = use_hook(|| std::cell::RefCell::new(None::<Task>));
+
+        // Trigger re-render for non-signal state changes (mouse, resize, etc.)
+        let mut render_trigger = use_signal(|| 0_u32);
+
         // Transform state for pan/zoom
         let mut transform_x = use_signal(|| 20.0_f64);
         let mut transform_y = use_signal(|| 20.0_f64);
@@ -322,17 +286,36 @@ fn DynamicChartCanvas(source: String, mode: PreviewMode) -> Element {
         let mut last_mouse_x = use_signal(|| 0.0_f64);
         let mut last_mouse_y = use_signal(|| 0.0_f64);
 
-        // Trigger re-render
-        let mut render_trigger = use_signal(|| 0_u32);
-
         // Initialize WebGPU on mount
+        // Using Dioxus's spawn() instead of wasm_bindgen_futures::spawn_local()
+        // for proper integration with Dioxus's runtime
         use_effect(move || {
-            wasm_bindgen_futures::spawn_local(async move {
+            let mut render_trigger_clone = render_trigger.clone();
+            spawn(async move {
                 match ChartLayoutManager::new() {
                     Ok(manager) => {
                         layout_manager.set(Some(manager));
                         is_initialized.set(true);
                         tracing::info!("Editor chart layout manager initialized");
+
+                        // Force initial render after a short delay to ensure canvas has proper size
+                        // This helps with the initial weird scaling issue
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+                                if let Some(window) = web_sys::window() {
+                                    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                                        &resolve,
+                                        50, // Small delay for DOM to stabilize
+                                    );
+                                }
+                            });
+                            let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+                        }
+
+                        // Trigger initial render
+                        let trigger = *render_trigger_clone.peek();
+                        render_trigger_clone.set(trigger.wrapping_add(1));
                     }
                     Err(e) => {
                         error_state.set(Some(e));
@@ -343,6 +326,7 @@ fn DynamicChartCanvas(source: String, mode: PreviewMode) -> Element {
         });
 
         // Setup mouse event listeners
+        let canvas_id_for_events = canvas_id.clone();
         use_effect(move || {
             let window = match web_sys::window() {
                 Some(w) => w,
@@ -352,7 +336,7 @@ fn DynamicChartCanvas(source: String, mode: PreviewMode) -> Element {
                 Some(d) => d,
                 None => return,
             };
-            let canvas = match document.get_element_by_id("editor-chart-canvas") {
+            let canvas = match document.get_element_by_id(&canvas_id_for_events) {
                 Some(c) => c,
                 None => return,
             };
@@ -454,60 +438,112 @@ fn DynamicChartCanvas(source: String, mode: PreviewMode) -> Element {
                 )
                 .ok();
             wheel_closure.forget();
+
+            // Setup ResizeObserver to detect when canvas gets its proper size
+            let mut render_trigger_clone = render_trigger.clone();
+            let resize_callback = Closure::wrap(Box::new(move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| {
+                // Trigger a re-render when size changes
+                let trigger = *render_trigger_clone.read();
+                render_trigger_clone.set(trigger.wrapping_add(1));
+            }) as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
+
+            if let Ok(observer) = web_sys::ResizeObserver::new(resize_callback.as_ref().unchecked_ref()) {
+                if let Some(canvas) = document.get_element_by_id(&canvas_id_for_events) {
+                    observer.observe(&canvas);
+                }
+            }
+            resize_callback.forget();
         });
 
-        // Clone source for use in effect
-        let source_for_effect = source.clone();
-
-        // Layout and render when source changes or transform changes
+        // Layout and render when source changes, mode changes, or transform changes
+        // IMPORTANT: We MUST read ALL signals BEFORE any early returns to establish
+        // reactive dependencies. If we return early without reading a signal,
+        // it won't be tracked as a dependency and changes to it won't trigger re-runs.
+        let canvas_id_for_render = canvas_id.clone();
         use_effect(move || {
-            if !*is_initialized.read() {
-                return;
-            }
+            // Clone canvas_id for async block
+            let canvas_id_inner = canvas_id_for_render.clone();
 
-            // Read transform values
+            // Read ALL reactive values FIRST - this establishes dependencies
+            let initialized = *is_initialized.read();
             let tx = *transform_x.read();
             let ty = *transform_y.read();
             let s = *scale.read();
-            let _trigger = *render_trigger.read();
+            let trigger = *render_trigger.read();
+            let source_text = source.read().clone();
+            let current_mode = *mode.read();
+            let is_snippet = current_mode == PreviewMode::Snippet;
 
-            let source = source_for_effect.clone();
+            // Debug: log what triggered the effect
+            let first_line = source_text.lines().next().unwrap_or("(empty)");
+            tracing::debug!(
+                "[ChartCanvas] Render effect: initialized={}, trigger={}, mode={:?}, first_line='{}'",
+                initialized, trigger, current_mode, first_line
+            );
 
-            wasm_bindgen_futures::spawn_local(async move {
-                if let Some(ref mut manager) = *layout_manager.write() {
-                    if let Ok(chart) = keyflow::Chart::parse(&source) {
-                        if let Some(window) = web_sys::window() {
-                            let dpr = window.device_pixel_ratio();
+            // NOW check if we should skip rendering
+            if !initialized {
+                tracing::debug!("[ChartCanvas] Skipping render - not initialized yet");
+                return;
+            }
 
-                            if let Some(document) = window.document() {
-                                if let Some(canvas) = document.get_element_by_id("editor-chart-canvas") {
-                                    if let Ok(html_canvas) = canvas.dyn_into::<web_sys::HtmlCanvasElement>() {
-                                        let rect = html_canvas.get_bounding_client_rect();
-                                        let css_width = rect.width();
-                                        let css_height = rect.height();
+            // Cancel any previous render task to avoid borrow conflicts
+            if let Some(previous_task) = current_render_task.borrow_mut().take() {
+                previous_task.cancel();
+            }
 
-                                        let buffer_width = (css_width * dpr) as u32;
-                                        let buffer_height = (css_height * dpr) as u32;
-                                        html_canvas.set_width(buffer_width);
-                                        html_canvas.set_height(buffer_height);
+            // Spawn the render task and store it so we can cancel it if needed
+            let task = spawn(async move {
+                // Get mutable access to the layout manager
+                let mut manager_guard = layout_manager.write();
 
-                                        manager.layout_chart(&chart, css_width, css_height);
+                let Some(ref mut manager) = *manager_guard else {
+                    tracing::debug!("[ChartCanvas] Skipping render - manager not initialized");
+                    return;
+                };
 
-                                        if let Err(e) = manager.render_to_canvas_with_transform(
-                                            &html_canvas,
-                                            tx * dpr,
-                                            ty * dpr,
-                                            s * dpr,
-                                        ).await {
-                                            tracing::error!("Failed to render chart: {}", e);
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                let Ok(chart) = keyflow::Chart::parse(&source_text) else {
+                    tracing::debug!("[ChartCanvas] Skipping render - parse failed");
+                    return;
+                };
+
+                tracing::debug!("[ChartCanvas] Chart parsed, rendering to canvas");
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    use wasm_bindgen::JsCast;
+
+                    let Some(window) = web_sys::window() else { return };
+                    let dpr = window.device_pixel_ratio();
+
+                    let Some(document) = window.document() else { return };
+                    let Some(canvas) = document.get_element_by_id(&canvas_id_inner) else { return };
+                    let Ok(html_canvas) = canvas.dyn_into::<web_sys::HtmlCanvasElement>() else { return };
+
+                    let rect = html_canvas.get_bounding_client_rect();
+                    let css_width = rect.width();
+
+                    let buffer_width = (css_width * dpr) as u32;
+                    let buffer_height = (rect.height() * dpr) as u32;
+                    html_canvas.set_width(buffer_width);
+                    html_canvas.set_height(buffer_height);
+
+                    // Use appropriate layout mode based on preview setting
+                    manager.layout_chart_with_mode(&chart, css_width, is_snippet);
+
+                    if let Err(e) = manager.render_to_canvas_with_transform(
+                        &html_canvas,
+                        tx * dpr,
+                        ty * dpr,
+                        s * dpr,
+                    ).await {
+                        tracing::error!("Failed to render chart: {}", e);
                     }
                 }
             });
+
+            // Store the task so we can cancel it on the next effect run (non-reactive storage)
+            *current_render_task.borrow_mut() = Some(task);
         });
 
         if let Some(error) = error_state.read().as_ref() {
@@ -539,5 +575,252 @@ fn DynamicChartCanvas(source: String, mode: PreviewMode) -> Element {
                 "Chart rendering requires WebGPU (browser only)"
             }
         }
+    }
+}
+
+/// Syntax-highlighted code editor for keyflow notation.
+///
+/// Uses a layered approach with a transparent textarea for input and
+/// a highlighted display layer behind it. Both layers must have
+/// identical text styling for proper alignment.
+#[component]
+pub fn HighlightedEditor(
+    value: String,
+    on_change: EventHandler<String>,
+    placeholder: &'static str,
+    /// Optional unique ID for the textarea element. Defaults to "keyflow-editor-textarea".
+    textarea_id: Option<String>,
+) -> Element {
+    // Track scroll position to sync layers
+    let mut scroll_top = use_signal(|| 0.0_f64);
+    let mut scroll_left = use_signal(|| 0.0_f64);
+
+    // Unique ID for the textarea to query scroll position
+    let textarea_id = textarea_id.unwrap_or_else(|| "keyflow-editor-textarea".to_string());
+
+    // Common text styling - MUST match exactly between textarea and highlight layer
+    // Using explicit line-height to ensure pixel-perfect alignment
+    let text_style = "font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 14px; line-height: 21px; white-space: pre; tab-size: 4;";
+
+    rsx! {
+        div {
+            class: "relative w-full h-full",
+
+            // Highlighted display layer (behind textarea)
+            div {
+                id: "keyflow-editor-highlight",
+                class: "absolute inset-0 p-4 overflow-hidden pointer-events-none bg-background",
+                style: "{text_style}",
+
+                // Inner container with scroll offset
+                div {
+                    style: "transform: translate(-{scroll_left}px, -{scroll_top}px);",
+
+                    HighlightedCode { source: value.clone() }
+                }
+            }
+
+            // Transparent textarea for actual input (on top)
+            textarea {
+                id: "{textarea_id}",
+                class: "absolute inset-0 w-full h-full p-4 resize-none focus:outline-none bg-transparent text-transparent caret-foreground z-10 overflow-auto",
+                style: "{text_style}",
+                value: "{value}",
+                spellcheck: false,
+                placeholder: "{placeholder}",
+                oninput: {
+                    let textarea_id = textarea_id.clone();
+                    move |evt| {
+                        on_change.call(evt.value());
+                        // Update scroll position after input
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            use wasm_bindgen::JsCast;
+                            if let Some(window) = web_sys::window() {
+                                if let Some(document) = window.document() {
+                                    if let Some(elem) = document.get_element_by_id(&textarea_id) {
+                                        if let Ok(html_elem) = elem.dyn_into::<web_sys::HtmlElement>() {
+                                            scroll_top.set(html_elem.scroll_top() as f64);
+                                            scroll_left.set(html_elem.scroll_left() as f64);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                onscroll: {
+                    let textarea_id = textarea_id.clone();
+                    move |_evt| {
+                        // Sync scroll with highlighted layer
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            use wasm_bindgen::JsCast;
+                            if let Some(window) = web_sys::window() {
+                                if let Some(document) = window.document() {
+                                    if let Some(elem) = document.get_element_by_id(&textarea_id) {
+                                        if let Ok(html_elem) = elem.dyn_into::<web_sys::HtmlElement>() {
+                                            scroll_top.set(html_elem.scroll_top() as f64);
+                                            scroll_left.set(html_elem.scroll_left() as f64);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Renders highlighted keyflow source code.
+///
+/// Renders each line as plain text with inline spans for highlighting.
+/// Uses newline characters to separate lines (matching textarea behavior).
+#[component]
+fn HighlightedCode(source: String) -> Element {
+    // Split into lines but preserve the structure
+    let lines: Vec<&str> = source.split('\n').collect();
+
+    rsx! {
+        // Use a single pre-like container to match textarea rendering
+        div {
+            class: "text-foreground",
+
+            for (idx, line) in lines.iter().enumerate() {
+                // Render each line
+                HighlightedLine { line: line.to_string() }
+                // Add newline between lines (except after last)
+                if idx < lines.len() - 1 {
+                    "\n"
+                }
+            }
+        }
+    }
+}
+
+/// Renders a single highlighted line of keyflow notation.
+#[component]
+fn HighlightedLine(line: String) -> Element {
+    let spans = Highlighter::highlight_line(&line);
+
+    // Empty line - render empty span to preserve height
+    if line.is_empty() {
+        return rsx! { span { "" } };
+    }
+
+    if spans.is_empty() {
+        // No highlighting - render as plain text
+        return rsx! { span { "{line}" } };
+    }
+
+    // Build the highlighted segments
+    let mut segments: Vec<Element> = Vec::new();
+    let mut last_end = 0;
+
+    for span in &spans {
+        let start = span.span.start;
+        let end = span.span.start + span.span.len;
+
+        // Add any unhighlighted text before this span
+        if start > last_end {
+            let text = &line[last_end..start];
+            segments.push(rsx! { span { "{text}" } });
+        }
+
+        // Add the highlighted span
+        let text = &line[start..end.min(line.len())];
+        let class = highlight_class(span.kind);
+        segments.push(rsx! {
+            span { class: "{class}", "{text}" }
+        });
+
+        last_end = end;
+    }
+
+    // Add any remaining text
+    if last_end < line.len() {
+        let text = &line[last_end..];
+        segments.push(rsx! { span { "{text}" } });
+    }
+
+    // Return inline spans (no block element wrapper)
+    rsx! {
+        for segment in segments {
+            {segment}
+        }
+    }
+}
+
+/// Map highlight kinds to Tailwind CSS classes.
+///
+/// Design decisions:
+/// - Root + Accidental use the same color (Ab = same color for A and b)
+/// - Quality + Extension use the same color (maj9 = same color for maj and 9)
+/// - Barlines (MeasureSeparator) are gray/muted
+/// - Unknown/unparsed text is muted, not red (avoids visual noise)
+fn highlight_class(kind: HighlightKind) -> &'static str {
+    match kind {
+        // Chord components - Root and Accidental same color
+        HighlightKind::Root => "text-sky-400 font-semibold",
+        HighlightKind::Accidental => "text-sky-400",  // Same as Root
+        HighlightKind::ScaleDegree => "text-purple-400 font-semibold",
+        HighlightKind::RomanNumeral => "text-purple-400 font-semibold",
+
+        // Quality and Extension same color
+        HighlightKind::Quality => "text-amber-400",
+        HighlightKind::Extension => "text-amber-400",  // Same as Quality
+        HighlightKind::Modifier => "text-yellow-300",
+
+        // Bass note - slightly different shade
+        HighlightKind::Bass => "text-sky-300",
+        HighlightKind::BassSlash => "text-gray-500",
+
+        // Rhythm notation
+        HighlightKind::Duration => "text-violet-400",
+        HighlightKind::SlashRhythm => "text-gray-400",
+        HighlightKind::Push => "text-rose-400",
+        HighlightKind::Pull => "text-rose-400",
+        HighlightKind::Triplet => "text-rose-300",
+        HighlightKind::Dot => "text-violet-400",
+
+        // Structure - Barlines are gray
+        HighlightKind::MeasureSeparator => "text-gray-500",
+        HighlightKind::Repeat => "text-indigo-400 font-bold",
+        HighlightKind::Section => "text-emerald-400 font-semibold",
+        HighlightKind::SectionBracket => "text-emerald-400",
+        HighlightKind::MeasureCount => "text-emerald-300",
+        HighlightKind::SectionComment => "text-emerald-200 italic",
+
+        // Special
+        HighlightKind::Rest => "text-gray-400 italic",
+        HighlightKind::Space => "text-gray-500",
+        HighlightKind::MemoryRecall => "text-gray-400",
+        HighlightKind::Dynamic => "text-red-400 italic",
+
+        // Metadata
+        HighlightKind::Title => "text-green-400 font-semibold",
+        HighlightKind::Artist => "text-green-300",
+        HighlightKind::Tempo => "text-orange-400",
+        HighlightKind::TempoArrow => "text-orange-300",
+        HighlightKind::Key => "text-violet-400",
+        HighlightKind::TimeSignature => "text-cyan-400",
+
+        // Comments - muted gray
+        HighlightKind::Comment => "text-gray-500 italic",
+        HighlightKind::CommentMarker => "text-gray-500",
+
+        // Melody and tracks
+        HighlightKind::MelodyBlock => "text-teal-400",
+        HighlightKind::TrackMarker => "text-fuchsia-400 font-semibold",
+
+        // Commands and cues - muted (these are config lines like /push = triplet)
+        HighlightKind::Command => "text-gray-500",
+        HighlightKind::TextCue => "text-gray-400 italic",
+
+        // Whitespace and unknown - muted, not distracting
+        HighlightKind::Whitespace => "",
+        HighlightKind::Unknown => "text-gray-500",  // Muted instead of red
     }
 }

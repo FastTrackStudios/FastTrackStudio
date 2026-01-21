@@ -252,6 +252,7 @@ impl ChartLayoutConfig {
                 use_stems: flat.use_stems,
                 auto_rhythm_slashes: true, // Default to true for legacy conversion
                 min_chord_symbol_gap: behavioral::DEFAULT_MIN_CHORD_SYMBOL_GAP,
+                push_alters_rhythm: true, // Default to true for legacy conversion
             },
         }
     }

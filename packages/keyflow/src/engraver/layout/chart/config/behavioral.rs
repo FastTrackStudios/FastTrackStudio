@@ -46,6 +46,23 @@ pub struct BehavioralFlags {
     /// Default is 4.0 points (approximately 0.5-1.0 spatiums), which provides
     /// enough separation for readability without excessive spacing.
     pub min_chord_symbol_gap: f64,
+
+    /// Whether push/pull notation alters the rhythm display.
+    ///
+    /// When true (default), pushed/pulled chords are shown with triplet or
+    /// syncopated rhythm notation, accurately reflecting when the chord is
+    /// played relative to the beat.
+    ///
+    /// When false, pushed/pulled chords are displayed on the beat with an
+    /// apostrophe marker before/after the chord symbol to indicate timing:
+    /// - `'C` = pushed (anticipate, play earlier)
+    /// - `C'` = pulled (delayed, play later)
+    ///
+    /// The apostrophe is rendered in a contrasting color (red) for visibility.
+    /// This mode is simpler to read but less rhythmically precise.
+    ///
+    /// Can be configured via `/PUSH_ALTERS_RHYTHM=false` in the chart.
+    pub push_alters_rhythm: bool,
 }
 
 /// Default minimum gap between chord symbols (in points).
@@ -62,6 +79,7 @@ impl Default for BehavioralFlags {
             use_stems: false,
             auto_rhythm_slashes: true, // ON by default for master rhythm charts
             min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
+            push_alters_rhythm: true, // ON by default for accurate rhythm notation
         }
     }
 }
@@ -83,6 +101,7 @@ impl BehavioralFlags {
             use_stems: false,
             auto_rhythm_slashes: true,
             min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
+            push_alters_rhythm: true,
         }
     }
 
@@ -96,6 +115,7 @@ impl BehavioralFlags {
             use_stems: true,
             auto_rhythm_slashes: true,
             min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
+            push_alters_rhythm: true,
         }
     }
 
@@ -107,6 +127,7 @@ impl BehavioralFlags {
             use_stems: false,
             auto_rhythm_slashes: true,
             min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
+            push_alters_rhythm: true,
         }
     }
 
@@ -139,6 +160,16 @@ impl BehavioralFlags {
     #[must_use]
     pub fn with_min_chord_symbol_gap(mut self, gap: f64) -> Self {
         self.min_chord_symbol_gap = gap;
+        self
+    }
+
+    /// Set whether push/pull notation alters rhythm display.
+    ///
+    /// When true (default), pushes create triplet/syncopated notation.
+    /// When false, pushes show apostrophe markers on chord symbols.
+    #[must_use]
+    pub const fn with_push_alters_rhythm(mut self, alters: bool) -> Self {
+        self.push_alters_rhythm = alters;
         self
     }
 

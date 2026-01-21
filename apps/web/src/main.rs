@@ -34,14 +34,38 @@ fn main() {
     // Initialize panic hook for better WASM debugging
     #[cfg(target_arch = "wasm32")]
     {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+
         console_error_panic_hook::set_once();
-        tracing_wasm::set_as_global_default();
+
+        // Configure tracing with filtering:
+        // - Our app (web) at debug level
+        // - keyflow at info level (filter out trace/debug spam from parsing)
+        // - dioxus at warn level (filter out signal tracing)
+        // - Everything else at warn level
+        let filter = tracing_subscriber::EnvFilter::new(
+            "warn,web=debug,keyflow=info,keyflow::engraver=debug"
+        );
+
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_wasm::WASMLayer::new(
+                tracing_wasm::WASMLayerConfig::default()
+            ))
+            .init();
     }
 
     // Initialize logging for non-WASM
     #[cfg(not(target_arch = "wasm32"))]
     {
-        tracing_subscriber::fmt::init();
+        use tracing_subscriber::EnvFilter;
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| EnvFilter::new("warn,web=debug,keyflow=info"))
+            )
+            .init();
     }
 
     tracing::info!("Starting FastTrackStudio Documentation Site");
@@ -336,12 +360,31 @@ fn ChartEditor() -> Element {
 /// Individual pattern view with chart rendering
 #[component]
 fn PatternView(id: String) -> Element {
-    use keyflow::patterns::find_pattern;
+    use keyflow::patterns::{find_pattern, PatternCategory};
+    use components::PreviewMode;
 
     let pattern = find_pattern(&id);
 
     match pattern {
         Some(pattern) => {
+            // Editable source state - initialized from the pattern
+            let mut source = use_signal(|| pattern.source.to_string());
+            // Track if source has been modified
+            let is_modified = source.read().as_str() != pattern.source;
+
+            // Preview mode - use Page for Examples, Snippet for others
+            let mut preview_mode = use_signal(|| {
+                if pattern.category == PatternCategory::Examples {
+                    PreviewMode::Page
+                } else {
+                    PreviewMode::Snippet
+                }
+            });
+
+            // Create unique IDs for this pattern to avoid conflicts
+            let canvas_id = format!("pattern-canvas-{}", pattern.id);
+            let textarea_id = format!("pattern-editor-{}", pattern.id);
+
             rsx! {
                 div {
                     class: "flex min-h-[calc(100vh-8rem)]",
@@ -396,30 +439,60 @@ fn PatternView(id: String) -> Element {
                         div {
                             class: "flex-1 flex",
 
-                            // Chart rendering area
+                            // Chart rendering area - fills entire pane
                             div {
-                                class: "flex-1 p-8",
+                                class: "flex-1 overflow-hidden",
 
-                                div {
-                                    class: "bg-card rounded-lg border border-border overflow-hidden",
-
-                                    components::ChartRenderer {
-                                        source: pattern.source
-                                    }
+                                // Use dynamic renderer for live updates
+                                components::DynamicChartRenderer {
+                                    source: source,
+                                    mode: preview_mode,
+                                    canvas_id: Some(canvas_id)
                                 }
                             }
 
-                            // Source code panel
+                            // Editable source code panel
                             div {
-                                class: "w-96 border-l border-border p-4 overflow-y-auto bg-card/50",
+                                class: "w-96 border-l border-border flex flex-col bg-card/50",
 
-                                h3 {
-                                    class: "text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4",
-                                    "Source Code"
+                                // Source panel header with controls
+                                div {
+                                    class: "px-4 py-3 border-b border-border flex items-center justify-between shrink-0",
+
+                                    div {
+                                        class: "flex items-center gap-2",
+                                        lucide_dioxus::Code { class: "w-4 h-4 text-primary" }
+                                        h3 {
+                                            class: "text-sm font-semibold text-foreground",
+                                            "Source Code"
+                                        }
+                                        if is_modified {
+                                            span {
+                                                class: "text-xs text-amber-500 ml-2",
+                                                "(modified)"
+                                            }
+                                        }
+                                    }
+
+                                    if is_modified {
+                                        button {
+                                            class: "text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-accent transition-colors",
+                                            onclick: move |_| source.set(pattern.source.to_string()),
+                                            "Reset"
+                                        }
+                                    }
                                 }
 
-                                components::SourceViewer {
-                                    source: pattern.source
+                                // Editable code area
+                                div {
+                                    class: "flex-1 overflow-hidden",
+
+                                    components::HighlightedEditor {
+                                        value: source(),
+                                        on_change: move |new_value: String| source.set(new_value),
+                                        placeholder: "Enter keyflow chart notation...",
+                                        textarea_id: Some(textarea_id)
+                                    }
                                 }
                             }
                         }

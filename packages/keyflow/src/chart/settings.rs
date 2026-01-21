@@ -27,6 +27,10 @@ pub enum ChartSetting {
     /// When enabled (default), a whole note chord becomes 4 quarter slashes,
     /// a half note becomes 2 quarter slashes. This is standard for master rhythm charts.
     AutoRhythmSlashes,
+    /// Whether push/pull notation alters the rhythm display
+    /// When enabled (default), pushed chords create triplet/syncopated notation.
+    /// When disabled, pushed chords show apostrophe markers on chord symbols instead.
+    PushAltersRhythm,
 }
 
 /// Setting value types
@@ -45,6 +49,7 @@ impl ChartSettings {
         // Set defaults
         settings.insert(ChartSetting::SmartRepeats, SettingValue::Bool(false));
         settings.insert(ChartSetting::AutoRhythmSlashes, SettingValue::Bool(true)); // ON by default
+        settings.insert(ChartSetting::PushAltersRhythm, SettingValue::Bool(true)); // ON by default
 
         Self {
             settings,
@@ -82,6 +87,11 @@ impl ChartSettings {
             "AUTO_RHYTHM_SLASHES" | "AUTORHYTHMSLASHES" | "AUTO_SLASHES" => {
                 let bool_value = Self::parse_bool(value)?;
                 self.set(ChartSetting::AutoRhythmSlashes, SettingValue::Bool(bool_value));
+                Ok(())
+            }
+            "PUSH_ALTERS_RHYTHM" | "PUSHALTERSRHYTHM" => {
+                let bool_value = Self::parse_bool(value)?;
+                self.set(ChartSetting::PushAltersRhythm, SettingValue::Bool(bool_value));
                 Ok(())
             }
             _ => Err(format!("Unknown setting: '{}'", key)),
@@ -181,6 +191,22 @@ impl ChartSettings {
             _ => true, // Default ON
         }
     }
+
+    /// Check if push alters rhythm is enabled (default: true)
+    ///
+    /// When enabled, pushed chords create triplet/syncopated rhythm notation
+    /// showing exactly when the chord should be played.
+    ///
+    /// When disabled, pushed chords show simple apostrophe markers on the
+    /// chord symbols (`'C` for push, `C'` for pull) in a contrasting color.
+    /// The rhythm notation remains on-beat for simpler reading.
+    pub fn push_alters_rhythm(&self) -> bool {
+        // Default to true if not explicitly set
+        match self.settings.get(&ChartSetting::PushAltersRhythm) {
+            Some(SettingValue::Bool(b)) => *b,
+            _ => true, // Default ON
+        }
+    }
 }
 
 impl Default for ChartSettings {
@@ -196,6 +222,7 @@ impl ChartSetting {
             ChartSetting::SmartRepeats => "SMART_REPEATS",
             ChartSetting::PushMode => "PUSH",
             ChartSetting::AutoRhythmSlashes => "AUTO_RHYTHM_SLASHES",
+            ChartSetting::PushAltersRhythm => "PUSH_ALTERS_RHYTHM",
         }
     }
 }

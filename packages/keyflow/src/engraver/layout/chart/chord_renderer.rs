@@ -17,16 +17,29 @@
 //! 3. It prevents pushing content past barlines
 
 use kurbo::{Affine, Rect, Vec2};
+use vello::peniko::Color;
 
 use crate::engraver::layout::context::LayoutContext;
 use crate::engraver::layout::tlayout::{layout_harmony, parse_chord, HarmonyParams, HarmonyStyle};
 use crate::engraver::scene::node::{metadata_keys, SceneNode};
+use crate::engraver::scene::paint::{PaintCommand, TextAnchor};
+use crate::engraver::scene::id::{ElementType, SemanticId};
 use crate::chart::types::{ChordInstance, Measure, RhythmElement};
 use crate::chord::ChordRhythm;
 use crate::time::TimeSignature;
 use crate::{ChartPosition, SourceLink};
 
 use super::types::PushSpillback;
+
+/// Create push marker color (red for visibility)
+fn push_marker_color() -> Color {
+    Color::from_rgba8(0xCC, 0x00, 0x00, 0xFF)
+}
+
+/// Create pull marker color (blue to distinguish from push)
+fn pull_marker_color() -> Color {
+    Color::from_rgba8(0x00, 0x00, 0xCC, 0xFF)
+}
 
 /// Context for rendering chord symbols in a measure.
 #[derive(Debug, Clone)]
@@ -60,6 +73,11 @@ pub struct ChordRenderContext<'a> {
     /// Minimum horizontal gap between adjacent chord symbols (in points).
     /// Set to 0.0 to disable collision detection.
     pub min_chord_symbol_gap: f64,
+    /// Whether push/pull notation alters the rhythm display.
+    /// When false, shows apostrophe markers on chord symbols instead.
+    pub push_alters_rhythm: bool,
+    /// Spatium (staff space) for sizing apostrophe markers.
+    pub spatium: f64,
 }
 
 /// Result of chord symbol rendering.
@@ -204,6 +222,54 @@ fn apply_collision_adjustments(nodes: &mut [SceneNode], adjustments: &[f64]) {
             node.transform = node.transform.then_translate(Vec2::new(adjustment, 0.0));
         }
     }
+}
+
+/// Create an apostrophe marker node for pushed/pulled chords.
+///
+/// When `push_alters_rhythm=false`, this creates a visual indicator showing
+/// the chord is pushed (') or pulled (') without altering the rhythm notation.
+///
+/// # Arguments
+/// * `is_push` - true for push (before chord), false for pull (after chord)
+/// * `chord_bounds` - The bounding box of the chord symbol for positioning
+/// * `chord_y` - Y position (same as chord symbol baseline)
+/// * `spatium` - Staff space for sizing
+/// * `id` - Unique ID for the node
+fn create_push_marker(
+    is_push: bool,
+    chord_bounds: Rect,
+    chord_y: f64,
+    spatium: f64,
+    id: u64,
+) -> SceneNode {
+    let marker_text = "'";
+    let color = if is_push { push_marker_color() } else { pull_marker_color() };
+
+    // Size the apostrophe relative to spatium (similar to chord symbol text)
+    let font_size = spatium * 2.5;
+
+    // Position: push markers go before (left of) the chord, pull markers after
+    // The chord_y is the baseline of the chord symbol
+    let marker_x = if is_push {
+        chord_bounds.x0 - spatium * 0.6 // Slightly left of chord
+    } else {
+        chord_bounds.x1 + spatium * 0.1 // Slightly right of chord
+    };
+
+    let paint = PaintCommand::text(
+        marker_text,
+        "MuseJazz Text",
+        font_size,
+        kurbo::Point::new(marker_x, chord_y),
+        color,
+    );
+
+    let mut node = SceneNode::leaf(
+        SemanticId::new(ElementType::Articulation, id),
+        vec![paint],
+    );
+    node.set_element_type("push_marker");
+    node
 }
 
 /// Determine if a chord should be skipped (is a space/rest placeholder).
@@ -519,6 +585,21 @@ pub fn render_chord_symbols(
         }
 
         nodes.push(chord_node);
+
+        // Add apostrophe marker for pushed/pulled chords when push_alters_rhythm=false
+        if !ctx.push_alters_rhythm {
+            if let Some((is_push, _amount)) = &chord.push_pull {
+                let marker_node = create_push_marker(
+                    *is_push,
+                    layout_data.bounds,
+                    ctx.chord_y,
+                    ctx.spatium,
+                    id_counter,
+                );
+                id_counter += 1;
+                nodes.push(marker_node);
+            }
+        }
     }
 
     // Perform collision detection and resolution if enabled

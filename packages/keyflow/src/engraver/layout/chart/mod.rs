@@ -105,6 +105,10 @@ pub struct ChartLayoutConfig {
     /// they are automatically pushed apart during rendering.
     /// Default is 4.0 points.
     pub min_chord_symbol_gap: f64,
+    /// Whether push/pull notation alters the rhythm display.
+    /// When true (default), pushed chords create triplet/syncopated notation.
+    /// When false, pushed chords show apostrophe markers on chord symbols.
+    pub push_alters_rhythm: bool,
 }
 
 impl Default for ChartLayoutConfig {
@@ -150,6 +154,7 @@ impl ChartLayoutConfig {
             count_in_measures: 0,        // No count-in by default
             snippet_mode: false,         // Full page mode with shadow
             min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
+            push_alters_rhythm: true,    // Show accurate rhythm notation for pushes
         }
     }
 
@@ -179,7 +184,20 @@ impl ChartLayoutConfig {
             count_in_measures: 0,
             snippet_mode: true, // Simple white background
             min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
+            push_alters_rhythm: true, // Show accurate rhythm notation for pushes
         }
+    }
+
+    /// Apply settings from a parsed chart.
+    ///
+    /// This updates the config based on chart directives like:
+    /// - `/AUTO_RHYTHM_SLASHES=false`
+    /// - `/PUSH_ALTERS_RHYTHM=false`
+    #[must_use]
+    pub fn with_chart_settings(mut self, settings: &crate::chart::ChartSettings) -> Self {
+        self.auto_rhythm_slashes = settings.auto_rhythm_slashes();
+        self.push_alters_rhythm = settings.push_alters_rhythm();
+        self
     }
 }
 
@@ -231,15 +249,24 @@ impl ChartLayoutEngine {
 
     /// Layout a chart in the specified mode.
     pub fn layout_chart(&self, chart: &Chart, mode: &LayoutMode) -> ChartLayoutResult {
+        // Apply chart settings to a temporary config
+        let config_with_settings = self.config.clone().with_chart_settings(&chart.settings);
+        let temp_engine = ChartLayoutEngine {
+            config: config_with_settings,
+            style: self.style,
+            text_font_data: self.text_font_data.clone(),
+            symbol_font_data: self.symbol_font_data.clone(),
+        };
+
         match mode {
             LayoutMode::Paginated {
                 page_width,
                 page_height,
-            } => self.layout_paginated(chart, *page_width, *page_height),
-            LayoutMode::ContinuousScroll { width } => self.layout_continuous(chart, *width),
+            } => temp_engine.layout_paginated(chart, *page_width, *page_height),
+            LayoutMode::ContinuousScroll { width } => temp_engine.layout_continuous(chart, *width),
             LayoutMode::Snippet { page_width } => {
                 // Use tighter margins for snippets
-                self.layout_snippet(chart, *page_width)
+                temp_engine.layout_snippet(chart, *page_width)
             }
         }
     }
@@ -987,6 +1014,8 @@ impl ChartLayoutEngine {
                             time_signature,
                             hide_repeated_chords: self.config.hide_repeated_chords,
                             min_chord_symbol_gap: self.config.min_chord_symbol_gap,
+                            push_alters_rhythm: self.config.push_alters_rhythm,
+                            spatium: self.config.spatium,
                         };
 
                         let chord_result = chord_renderer::render_chord_symbols(
@@ -1465,6 +1494,8 @@ impl ChartLayoutEngine {
                             time_signature,
                             hide_repeated_chords: self.config.hide_repeated_chords,
                             min_chord_symbol_gap: self.config.min_chord_symbol_gap,
+                            push_alters_rhythm: self.config.push_alters_rhythm,
+                            spatium: self.config.spatium,
                         };
 
                         let chord_result = chord_renderer::render_chord_symbols(

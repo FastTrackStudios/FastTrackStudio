@@ -208,6 +208,7 @@ pub fn layout_chart(keyflow_source: &str) -> SnippetResult {
 const DEFAULT_KEYFLOW_SOURCE: &str = r#"Push Pull Triplets - Test
 120bpm 4/4 #Ab
 /push = triplet
+/PUSH_ALTERS_RHYTHM=false
 
 COUNT 2
 
