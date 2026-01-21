@@ -90,6 +90,8 @@ pub struct ChartLayoutConfig {
     /// Determined by the distance between Count-In marker and SONGSTART marker.
     /// Count-in measures are the N measures immediately before measure 1.
     pub count_in_measures: u8,
+    /// Snippet mode: use simple white background without shadow.
+    pub snippet_mode: bool,
 }
 
 impl Default for ChartLayoutConfig {
@@ -113,6 +115,7 @@ impl Default for ChartLayoutConfig {
             show_measure_numbers: true, // Default to showing measure numbers
             measure_number_offset: 0,   // Default to no offset (measure 1 = 1)
             count_in_measures: 0,       // Default to no count-in
+            snippet_mode: false,        // Default to full page mode with shadow
         }
     }
 }
@@ -171,7 +174,108 @@ impl ChartLayoutEngine {
                 page_height,
             } => self.layout_paginated(chart, *page_width, *page_height),
             LayoutMode::ContinuousScroll { width } => self.layout_continuous(chart, *width),
+            LayoutMode::Snippet { page_width } => {
+                // Use tighter margins for snippets
+                self.layout_snippet(chart, *page_width)
+            }
         }
+    }
+
+    /// Layout a snippet with bounds-based sizing.
+    /// Renders content once, measures bounds, then adjusts page background to fit.
+    fn layout_snippet(&self, chart: &Chart, _page_width: f64) -> ChartLayoutResult {
+        // layout_paginated uses a fixed page_offset of 20.0 for positioning
+        let page_offset = 20.0;
+
+        // Step 1: Layout with snippet mode and small margins
+        let snippet_margins = PageMargins {
+            top: 5.0,
+            bottom: 5.0,
+            left: 50.0,
+            right: 5.0,
+        };
+
+        let measure_config = ChartLayoutConfig {
+            margins: snippet_margins.clone(),
+            snippet_mode: true, // Simple white background
+            ..self.config.clone()
+        };
+
+        let measure_engine = ChartLayoutEngine {
+            config: measure_config,
+            style: self.style,
+            text_font_data: self.text_font_data.clone(),
+            symbol_font_data: self.symbol_font_data.clone(),
+        };
+
+        // Layout with a large page - content will use natural widths
+        let mut result = measure_engine.layout_paginated(chart, 2000.0, 1000.0);
+
+        // Step 2: Compute actual content bounds by examining children
+        // Skip the first child which is page background (white rect in snippet mode)
+        let mut content_bounds = Rect::ZERO;
+        for (i, child) in result.scene.children.iter().enumerate() {
+            // Skip first child (page background)
+            if i < 1 {
+                continue;
+            }
+            let child_bounds = child.compute_bounds();
+            if !child_bounds.is_zero_area() {
+                let transformed = child.transform.transform_rect_bbox(child_bounds);
+                if content_bounds.is_zero_area() {
+                    content_bounds = transformed;
+                } else {
+                    content_bounds = content_bounds.union(transformed);
+                }
+            }
+        }
+
+        // Step 3: Calculate final page dimensions from content bounds
+        let padding = 5.0;
+        let clef_bottom_padding = 8.0;
+
+        // Content might extend above page_offset (chord symbols)
+        let content_above_page = (page_offset - content_bounds.y0).max(0.0);
+
+        // Final dimensions based on actual content
+        let final_width = content_bounds.x1 + padding;
+        let final_height = content_bounds.y1 + padding + clef_bottom_padding;
+
+        // Step 4: Replace the page background with correctly sized one
+        // The first child is the white background rect - replace it
+        if !result.scene.children.is_empty() {
+            let new_background = SceneNode::anonymous_leaf(vec![PaintCommand::filled_rect(
+                Rect::new(page_offset, page_offset, final_width, final_height),
+                vello::peniko::Color::WHITE,
+            )]);
+            result.scene.children[0] = new_background;
+        }
+
+        // If content extends above page_offset, shift all content down
+        if content_above_page > 0.0 {
+            let shift = Affine::translate((0.0, content_above_page));
+            for (i, child) in result.scene.children.iter_mut().enumerate() {
+                if i > 0 {
+                    // Skip background
+                    child.transform = shift * child.transform;
+                }
+            }
+            // Update background to account for shifted content
+            if !result.scene.children.is_empty() {
+                let new_background = SceneNode::anonymous_leaf(vec![PaintCommand::filled_rect(
+                    Rect::new(
+                        page_offset,
+                        page_offset,
+                        final_width,
+                        final_height + content_above_page,
+                    ),
+                    vello::peniko::Color::WHITE,
+                )]);
+                result.scene.children[0] = new_background;
+            }
+        }
+
+        result
     }
 
     /// Layout a chart with explicit configuration.
@@ -366,7 +470,7 @@ impl ChartLayoutEngine {
                         page_width,
                         page_height,
                     );
-                    self.add_page_footer(&mut root, page_x, page_offset_y, page_width, page_height);
+                    self.add_page_footer(&mut root, page_x, page_offset_y, page_width, page_height, &chart.metadata);
 
                     // Add title header on first page only
                     if !title_header_added {
@@ -415,14 +519,6 @@ impl ChartLayoutEngine {
                 };
                 let compact_scale = 0.4; // Count-in measures at 40% width
 
-                // Calculate base measure width (what a normal measure would be)
-                let base_measure_width = measures_area_width / max_measures as f64;
-
-                // For width calculation, count-in measures count as fractional
-                let effective_measure_count =
-                    num_count_in as f64 * compact_scale + num_measures as f64;
-                let is_short_system = effective_measure_count < max_measures as f64;
-
                 // Calculate content weights for spring-based distribution
                 let measure_weights: Vec<f64> = measure_indices
                     .iter()
@@ -430,10 +526,38 @@ impl ChartLayoutEngine {
                     .map(|m| self.estimate_measure_content_weight(m, &text_metrics))
                     .collect();
 
+                // Calculate base measure width based on mode
+                let base_measure_width = if self.config.snippet_mode {
+                    // Snippet mode: use minimum width based on content
+                    // 60pt per weight unit gives tight but readable spacing
+                    let min_width_per_weight = 60.0;
+                    let avg_weight = if measure_weights.is_empty() {
+                        1.0
+                    } else {
+                        measure_weights.iter().sum::<f64>() / measure_weights.len() as f64
+                    };
+                    min_width_per_weight * avg_weight.max(1.0)
+                } else {
+                    // Normal mode: distribute across available space
+                    measures_area_width / max_measures as f64
+                };
+
+                // For width calculation, count-in measures count as fractional
+                let effective_measure_count =
+                    num_count_in as f64 * compact_scale + num_measures as f64;
+                // Snippet mode always treated as short system (no stretching)
+                let is_short_system = self.config.snippet_mode || effective_measure_count < max_measures as f64;
+
                 // Distribute width proportionally using spring physics
                 // For full systems, distribute the entire measures_area_width
                 // For short systems, distribute only the proportional amount
-                let total_width_to_distribute = if is_short_system {
+                let total_width_to_distribute = if self.config.snippet_mode {
+                    // Snippet mode: use fixed widths based on content weight
+                    let weight_sum: f64 = measure_weights.iter().sum();
+                    let min_width_per_weight = 60.0;
+                    num_count_in as f64 * base_measure_width * compact_scale
+                        + weight_sum * min_width_per_weight
+                } else if is_short_system {
                     // Short system: only use width proportional to measure count
                     num_count_in as f64 * base_measure_width * compact_scale
                         + num_measures as f64 * base_measure_width
@@ -668,14 +792,6 @@ impl ChartLayoutEngine {
                         // Get ChordRest segment x-positions (already in points after spacing)
                         let segment_positions: Vec<f64> =
                             self.get_chord_rest_positions(&measure_result);
-
-                        // Debug: log segment positions
-                        eprintln!(
-                            "[segment-positions] section={} measure={} positions={:?}",
-                            chart_section.section.section_type.full_name(),
-                            measure_idx,
-                            segment_positions
-                        );
 
                         let mut measure_container =
                             SceneNode::group(SemanticId::new(ElementType::Measure, id_counter));
@@ -1524,10 +1640,19 @@ impl ChartLayoutEngine {
         page_width: f64,
         page_height: f64,
     ) {
-        page_rendering::add_page_background(root, page_x, page_y, page_width, page_height);
+        if self.config.snippet_mode {
+            // Simple white background for snippets (no shadow)
+            page_rendering::add_snippet_background(root, page_x, page_y, page_width, page_height);
+        } else {
+            // Full page background with shadow
+            page_rendering::add_page_background(root, page_x, page_y, page_width, page_height);
+        }
     }
 
     /// Add page footer with "Created with FastTrackStudio" text.
+    ///
+    /// Only renders footer when the chart has a title. Titleless charts (snippets)
+    /// don't need the footer branding.
     ///
     /// Delegates to [`page_rendering::add_page_footer`].
     fn add_page_footer(
@@ -1537,7 +1662,12 @@ impl ChartLayoutEngine {
         page_y: f64,
         page_width: f64,
         page_height: f64,
+        metadata: &crate::SongMetadata,
     ) {
+        // Skip footer for titleless charts (snippets)
+        if metadata.title.is_none() {
+            return;
+        }
         page_rendering::add_page_footer(root, page_x, page_y, page_width, page_height);
     }
 
@@ -2194,6 +2324,19 @@ impl ChartLayoutEngine {
         // Base weight for any measure
         let mut weight = 1.0;
 
+        // Count rhythm elements (the actual number of time slots that need spacing)
+        // This is the most important factor - more elements need more space
+        let rhythm_element_count = if !measure.rhythm_elements.is_empty() {
+            measure.rhythm_elements.len()
+        } else {
+            measure.chords.len()
+        };
+
+        // More rhythm elements = significantly more weight
+        // This is crucial for measures with many notes (e.g., G_2 D_4 Em_8 G_16 D_32 r32)
+        // 1 element = base, 2 = +0.5, 4 = +1.5, 6 = +2.5
+        weight += (rhythm_element_count as f64 - 1.0).max(0.0) * 0.5;
+
         // Count unique chord symbols (not counting spaces/rests)
         let unique_chords: Vec<_> = measure
             .chords
@@ -2202,10 +2345,6 @@ impl ChartLayoutEngine {
             .collect();
 
         let chord_count = unique_chords.len();
-
-        // More chords = more weight (but diminishing returns)
-        // 1 chord = +0.0, 2 chords = +0.3, 4 chords = +0.6, etc.
-        weight += (chord_count as f64 - 1.0).max(0.0) * 0.3;
 
         // Factor in chord name complexity (longer names need more space)
         let total_chord_width: f64 = unique_chords
@@ -2248,8 +2387,8 @@ impl ChartLayoutEngine {
             weight += (melody_note_count as f64 - 4.0) * 0.1;
         }
 
-        // Clamp to reasonable range
-        weight.clamp(0.5, 4.0)
+        // Clamp to reasonable range (higher max for complex measures)
+        weight.clamp(0.5, 6.0)
     }
 
     /// Distribute available width among measures using spring physics.
