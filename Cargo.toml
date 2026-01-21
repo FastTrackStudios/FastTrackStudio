@@ -215,6 +215,26 @@ anyrender_vello_hybrid = { path = "libs/vendor/anyrender/crates/anyrender_vello_
 anyrender_svg = { path = "libs/vendor/anyrender/crates/anyrender_svg" }
 wgpu_context = { path = "libs/vendor/anyrender/crates/wgpu_context" }
 
+# Profile settings for WASM builds
+# The "too many locals" error occurs when compiling large Rust projects to WASM in debug mode
+# We optimize web app in dev mode to reduce local variables
+
+[profile.dev.package.web]
+# Enable basic optimization to reduce WASM locals in dev builds
+opt-level = 1
+
+[profile.dev.package.keyflow]
+# Keyflow is a large dependency - optimize it to reduce locals
+opt-level = 1
+
+[profile.dev.package.vello]
+# Vello generates many locals - optimize it
+opt-level = 2
+
+[profile.dev.package.wgpu]
+# WGPU is another large dependency
+opt-level = 2
+
 [workspace.lints.clippy]
 # Core lints - treat as errors
 all = { level = "deny", priority = -1 }

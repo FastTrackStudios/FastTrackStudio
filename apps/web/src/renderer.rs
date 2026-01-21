@@ -1,15 +1,14 @@
 //! Vello Chart Renderer Module
 //!
-//! Renders charts using Vello with WebGPU backend, matching the native REAPER renderer.
-//! This provides high-quality vector graphics for music notation.
+//! Renders charts using Vello with WebGPU backend.
+//! Ported from apps/web/src/renderer.rs for the documentation site.
 
 use std::sync::Arc;
 
-use crate::chart_state::ViewTransform;
 use keyflow::engraver::fonts::SMuFLFont;
-use keyflow::engraver::layout::{ChartLayoutMode, PageMargins};
 use keyflow::engraver::layout::chart::{ChartLayoutConfig, ChartLayoutEngine, ChartLayoutResult};
 use keyflow::engraver::layout::tlayout::HarmonyStyle;
+use keyflow::engraver::layout::{ChartLayoutMode, PageMargins};
 use keyflow::engraver::renderer::scene_renderer::SceneRenderBuilder;
 use keyflow::engraver::style::MStyle;
 use keyflow::Chart;
@@ -53,6 +52,9 @@ pub struct ChartLayoutManager {
     layout_result: Option<ChartLayoutResult>,
     /// Last rendered chart hash (for cache invalidation)
     last_chart_hash: u64,
+    /// WebGPU renderer (WASM only)
+    #[cfg(target_arch = "wasm32")]
+    wgpu_renderer: Option<wasm::WebGpuRenderer>,
 }
 
 impl ChartLayoutManager {
@@ -80,12 +82,14 @@ impl ChartLayoutManager {
             layout_engine,
             layout_result: None,
             last_chart_hash: 0,
+            #[cfg(target_arch = "wasm32")]
+            wgpu_renderer: None,
         })
     }
 
     /// Layout a chart and cache the result.
     pub fn layout_chart(&mut self, chart: &Chart, viewport_width: f64, viewport_height: f64) {
-        // Simple hash based on chart data (could be improved)
+        // Simple hash based on chart data
         let chart_hash = self.compute_chart_hash(chart);
 
         // Skip if already laid out
@@ -93,30 +97,30 @@ impl ChartLayoutManager {
             return;
         }
 
-        // Configure layout for viewport
+        // Configure layout for snippet mode (documentation)
         let config = ChartLayoutConfig {
             margins: PageMargins {
-                top: 30.0,
-                bottom: 30.0,
-                left: 30.0,
-                right: 30.0,
+                top: 20.0,
+                bottom: 20.0,
+                left: 20.0,
+                right: 20.0,
             },
             spatium: 5.0,
-            system_spacing: 40.0,
+            system_spacing: 30.0,
             max_measures_per_system: 4,
-            min_measure_width: 100.0,
+            min_measure_width: 80.0,
             harmony_style: HarmonyStyle::musejazz(),
-            hide_repeated_chords: true,
+            hide_repeated_chords: false,
             use_stems: true,
             show_measure_numbers: true,
             measure_number_offset: 0,
             count_in_measures: 0,
+            snippet_mode: true,
         };
 
-        // Determine layout mode based on viewport
-        let mode = ChartLayoutMode::Paginated {
+        // Use snippet mode for documentation patterns
+        let mode = ChartLayoutMode::Snippet {
             page_width: viewport_width / DPI_SCALE,
-            page_height: viewport_height / DPI_SCALE,
         };
 
         // Perform layout
@@ -145,19 +149,12 @@ impl ChartLayoutManager {
     }
 
     /// Render the chart to a Vello scene.
-    pub fn render_to_scene(
-        &self,
-        scene: &mut Scene,
-        width: f64,
-        height: f64,
-        transform: Affine,
-        viewport_rect: Rect,
-    ) {
+    pub fn render_to_scene(&self, scene: &mut Scene, width: f64, height: f64, transform: Affine) {
         // Fill background
         scene.fill(
             vello::peniko::Fill::NonZero,
             Affine::IDENTITY,
-            Color::from_rgb8(64, 64, 64),
+            Color::from_rgb8(55, 65, 81), // gray-700
             None,
             &Rect::new(0.0, 0.0, width, height),
         );
@@ -176,7 +173,8 @@ impl ChartLayoutManager {
                 .with_named_font_arc("title-bold", self.text_font_data.clone())
                 .with_named_font_arc("part-name-bold", self.text_font_data.clone());
 
-            // Set viewport for culling optimization
+            // Set viewport for culling
+            let viewport_rect = Rect::new(0.0, 0.0, width, height);
             renderer.set_viewport(viewport_rect);
 
             // Render with user's view transform
@@ -184,44 +182,153 @@ impl ChartLayoutManager {
         }
     }
 
-    /// Render playback cursor to the scene.
-    pub fn render_cursor(
-        &self,
-        scene: &mut Scene,
-        cursor_x: f64,
-        cursor_y: f64,
-        cursor_height: f64,
-        transform: Affine,
-    ) {
-        use vello::kurbo::{Line, Stroke};
+    /// Render to a canvas element (WASM only).
+    #[cfg(target_arch = "wasm32")]
+    pub async fn render_to_canvas(
+        &mut self,
+        canvas: &web_sys::HtmlCanvasElement,
+    ) -> Result<(), String> {
+        use wasm::WebGpuRenderer;
 
-        // Cursor extends above and below staff
-        let extension = cursor_height * 0.25;
-        let top = cursor_y - extension;
-        let bottom = cursor_y + cursor_height + extension;
+        // Initialize renderer if needed
+        if self.wgpu_renderer.is_none() {
+            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
+            self.wgpu_renderer = Some(renderer);
+        }
 
-        let cursor_line = Line::new((cursor_x, top), (cursor_x, bottom));
+        // Get canvas dimensions first
+        let canvas_width = canvas.width();
+        let canvas_height = canvas.height();
 
-        // Apply transform to cursor
-        let transformed_line = transform * cursor_line;
+        // Resize if needed (access renderer mutably)
+        if let Some(renderer) = self.wgpu_renderer.as_mut() {
+            let (current_width, current_height) = renderer.dimensions();
+            if current_width != canvas_width || current_height != canvas_height {
+                renderer.resize(canvas_width, canvas_height);
+            }
+        }
 
-        // Draw cursor glow (wider, semi-transparent)
-        scene.stroke(
-            &Stroke::new(8.0),
+        // Create scene (borrow self immutably for rendering data)
+        let mut scene = Scene::new();
+        let transform = Affine::translate((20.0, 20.0)) * Affine::scale(DPI_SCALE);
+
+        // Fill background
+        scene.fill(
+            vello::peniko::Fill::NonZero,
             Affine::IDENTITY,
-            Color::from_rgba8(255, 80, 80, 102), // 40% opacity
+            Color::from_rgb8(55, 65, 81),
             None,
-            &transformed_line,
+            &Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64),
         );
 
-        // Draw cursor line (narrower, solid)
-        scene.stroke(
-            &Stroke::new(3.0),
+        // Render layout if available
+        if let Some(ref layout) = self.layout_result {
+            // Create scene renderer with fonts
+            let mut renderer = SceneRenderBuilder::new()
+                .spatium(5.0)
+                .build()
+                .with_font(&self.smufl_font)
+                .with_text_font_arc(self.text_font_data.clone())
+                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("section-note", self.text_font_data.clone())
+                .with_named_font_arc("title-bold", self.text_font_data.clone())
+                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+
+            // Set viewport for culling
+            let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
+            renderer.set_viewport(viewport_rect);
+
+            // Render with user's view transform
+            renderer.render_with_transform(&mut scene, &layout.scene, transform);
+        }
+
+        // Render to canvas (access wgpu_renderer mutably again)
+        if let Some(wgpu_renderer) = self.wgpu_renderer.as_mut() {
+            wgpu_renderer.render(&scene)
+        } else {
+            Err("WebGPU renderer not initialized".to_string())
+        }
+    }
+
+    /// Render to a canvas element with custom transform (WASM only).
+    ///
+    /// # Arguments
+    /// * `canvas` - The HTML canvas element to render to
+    /// * `translate_x` - X translation in pixels (already scaled by DPR)
+    /// * `translate_y` - Y translation in pixels (already scaled by DPR)
+    /// * `scale` - Scale factor (already includes DPR)
+    #[cfg(target_arch = "wasm32")]
+    pub async fn render_to_canvas_with_transform(
+        &mut self,
+        canvas: &web_sys::HtmlCanvasElement,
+        translate_x: f64,
+        translate_y: f64,
+        scale: f64,
+    ) -> Result<(), String> {
+        use wasm::WebGpuRenderer;
+
+        // Initialize renderer if needed
+        if self.wgpu_renderer.is_none() {
+            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
+            self.wgpu_renderer = Some(renderer);
+        }
+
+        // Get canvas dimensions first
+        let canvas_width = canvas.width();
+        let canvas_height = canvas.height();
+
+        // Resize if needed (access renderer mutably)
+        if let Some(renderer) = self.wgpu_renderer.as_mut() {
+            let (current_width, current_height) = renderer.dimensions();
+            if current_width != canvas_width || current_height != canvas_height {
+                renderer.resize(canvas_width, canvas_height);
+            }
+        }
+
+        // Create scene (borrow self immutably for rendering data)
+        let mut scene = Scene::new();
+
+        // Build transform: translate then scale
+        let transform = Affine::translate((translate_x, translate_y)) * Affine::scale(scale);
+
+        // Fill background
+        scene.fill(
+            vello::peniko::Fill::NonZero,
             Affine::IDENTITY,
-            Color::from_rgba8(255, 80, 80, 255),
+            Color::from_rgb8(55, 65, 81),
             None,
-            &transformed_line,
+            &Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64),
         );
+
+        // Render layout if available
+        if let Some(ref layout) = self.layout_result {
+            // Create scene renderer with fonts
+            let mut renderer = SceneRenderBuilder::new()
+                .spatium(5.0)
+                .build()
+                .with_font(&self.smufl_font)
+                .with_text_font_arc(self.text_font_data.clone())
+                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("section-note", self.text_font_data.clone())
+                .with_named_font_arc("title-bold", self.text_font_data.clone())
+                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+
+            // Set viewport for culling
+            let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
+            renderer.set_viewport(viewport_rect);
+
+            // Render with user's view transform
+            renderer.render_with_transform(&mut scene, &layout.scene, transform);
+        }
+
+        // Render to canvas (access wgpu_renderer mutably again)
+        if let Some(wgpu_renderer) = self.wgpu_renderer.as_mut() {
+            wgpu_renderer.render(&scene)
+        } else {
+            Err("WebGPU renderer not initialized".to_string())
+        }
     }
 }
 
@@ -231,52 +338,13 @@ impl Default for ChartLayoutManager {
     }
 }
 
-/// Convert ViewTransform to kurbo Affine.
-pub fn view_transform_to_affine(transform: &ViewTransform) -> Affine {
-    Affine::translate((transform.offset_x, transform.offset_y)) * Affine::scale(transform.scale)
-}
-
-/// Calculate initial fit transform for a chart.
-pub fn calculate_fit_transform(
-    layout_result: &ChartLayoutResult,
-    viewport_width: f64,
-    viewport_height: f64,
-) -> ViewTransform {
-    // Get first page dimensions
-    if let Some(first_page) = layout_result.pages.first() {
-        let page_width = first_page.width * DPI_SCALE;
-        let page_height = first_page.height * DPI_SCALE;
-
-        let margin = 20.0;
-        let available_width = viewport_width - margin * 2.0;
-        let available_height = viewport_height - margin * 2.0;
-
-        let scale_x = available_width / page_width;
-        let scale_y = available_height / page_height;
-        let scale = scale_x.min(scale_y).clamp(0.1, 5.0);
-
-        let scaled_width = page_width * scale;
-        let scaled_height = page_height * scale;
-        let offset_x = (viewport_width - scaled_width) / 2.0;
-        let offset_y = (viewport_height - scaled_height) / 2.0;
-
-        ViewTransform {
-            offset_x,
-            offset_y,
-            scale,
-        }
-    } else {
-        ViewTransform::default()
-    }
-}
-
 #[cfg(target_arch = "wasm32")]
 pub mod wasm {
     //! WASM-specific Vello/WebGPU rendering.
 
     use super::*;
-    use wasm_bindgen::prelude::*;
     use web_sys::HtmlCanvasElement;
+    use wgpu::{TextureDescriptor, TextureDimension, TextureUsages, TextureViewDescriptor};
 
     /// WebGPU renderer state for WASM.
     pub struct WebGpuRenderer {
@@ -285,6 +353,8 @@ pub mod wasm {
         surface: wgpu::Surface<'static>,
         surface_config: wgpu::SurfaceConfiguration,
         vello_renderer: vello::Renderer,
+        render_texture: wgpu::Texture,
+        blitter: wgpu::util::TextureBlitter,
         width: u32,
         height: u32,
     }
@@ -293,8 +363,8 @@ pub mod wasm {
         /// Create a new WebGPU renderer from a canvas element.
         pub async fn new(canvas: HtmlCanvasElement) -> Result<Self, String> {
             // Get canvas dimensions
-            let width = canvas.width();
-            let height = canvas.height();
+            let width = canvas.width().max(1);
+            let height = canvas.height().max(1);
 
             // Create wgpu instance
             let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -315,28 +385,25 @@ pub mod wasm {
                     force_fallback_adapter: false,
                 })
                 .await
-                .ok_or("Failed to find suitable GPU adapter")?;
+                .map_err(|e| format!("Failed to find suitable GPU adapter: {e}"))?;
 
             // Request device
             let (device, queue) = adapter
-                .request_device(
-                    &wgpu::DeviceDescriptor {
-                        label: Some("Chart Viewer Device"),
-                        required_features: wgpu::Features::empty(),
-                        required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
-                        memory_hints: wgpu::MemoryHints::Performance,
-                    },
-                    None,
-                )
+                .request_device(&wgpu::DeviceDescriptor {
+                    label: Some("Docsite Chart Renderer"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                    ..Default::default()
+                })
                 .await
                 .map_err(|e| format!("Failed to create device: {e}"))?;
 
-            // Configure surface
+            // Configure surface (prefer non-sRGB for Vello)
             let surface_caps = surface.get_capabilities(&adapter);
             let surface_format = surface_caps
                 .formats
                 .iter()
-                .find(|f| f.is_srgb())
+                .find(|f| !f.is_srgb())
                 .copied()
                 .unwrap_or(surface_caps.formats[0]);
 
@@ -346,23 +413,21 @@ pub mod wasm {
                 width,
                 height,
                 present_mode: wgpu::PresentMode::AutoVsync,
-                alpha_mode: surface_caps.alpha_modes[0],
+                alpha_mode: wgpu::CompositeAlphaMode::Auto,
                 view_formats: vec![],
                 desired_maximum_frame_latency: 2,
             };
             surface.configure(&device, &surface_config);
 
-            // Create Vello renderer
-            let vello_renderer = vello::Renderer::new(
-                &device,
-                vello::RendererOptions {
-                    surface_format: Some(surface_format),
-                    use_cpu: false,
-                    antialiasing_support: vello::AaSupport::all(),
-                    num_init_threads: None,
-                },
-            )
-            .map_err(|e| format!("Failed to create Vello renderer: {e}"))?;
+            // Create Vello renderer with default options
+            let vello_renderer = vello::Renderer::new(&device, vello::RendererOptions::default())
+                .map_err(|e| format!("Failed to create Vello renderer: {e}"))?;
+
+            // Create intermediate render texture (Rgba8Unorm for Vello's compute shaders)
+            let render_texture = Self::create_render_texture(&device, width, height);
+
+            // Create blitter for copying from intermediate texture to surface
+            let blitter = wgpu::util::TextureBlitter::new(&device, surface_format);
 
             Ok(Self {
                 device,
@@ -370,8 +435,28 @@ pub mod wasm {
                 surface,
                 surface_config,
                 vello_renderer,
+                render_texture,
+                blitter,
                 width,
                 height,
+            })
+        }
+
+        /// Create the intermediate render texture for Vello.
+        fn create_render_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
+            device.create_texture(&TextureDescriptor {
+                label: Some("Vello Render Texture"),
+                size: wgpu::Extent3d {
+                    width: width.max(1),
+                    height: height.max(1),
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             })
         }
 
@@ -385,6 +470,7 @@ pub mod wasm {
             self.surface_config.width = width;
             self.surface_config.height = height;
             self.surface.configure(&self.device, &self.surface_config);
+            self.render_texture = Self::create_render_texture(&self.device, width, height);
         }
 
         /// Render a Vello scene to the canvas.
@@ -394,22 +480,41 @@ pub mod wasm {
                 .get_current_texture()
                 .map_err(|e| format!("Failed to get surface texture: {e}"))?;
 
+            // Create views for rendering
+            let render_view = self
+                .render_texture
+                .create_view(&TextureViewDescriptor::default());
+            let surface_view = surface_texture
+                .texture
+                .create_view(&TextureViewDescriptor::default());
+
             let render_params = vello::RenderParams {
-                base_color: Color::from_rgb8(64, 64, 64),
+                base_color: Color::from_rgb8(55, 65, 81),
                 width: self.width,
                 height: self.height,
                 antialiasing_method: vello::AaConfig::Msaa16,
             };
 
+            // Render to intermediate texture
             self.vello_renderer
-                .render_to_surface(
+                .render_to_texture(
                     &self.device,
                     &self.queue,
                     scene,
-                    &surface_texture,
+                    &render_view,
                     &render_params,
                 )
                 .map_err(|e| format!("Failed to render: {e}"))?;
+
+            // Blit to surface
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Blit Encoder"),
+                });
+            self.blitter
+                .copy(&self.device, &mut encoder, &render_view, &surface_view);
+            self.queue.submit(std::iter::once(encoder.finish()));
 
             surface_texture.present();
             Ok(())
