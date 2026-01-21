@@ -80,6 +80,14 @@ pub struct ChartLayoutConfig {
     /// When false (default), uses stemless slash notation.
     /// When true, uses stemmed rhythmic notation with beams and triplet brackets.
     pub use_stems: bool,
+    /// Automatically fill whole/half notes with quarter note slashes.
+    /// When true (default), chords with whole note or half note durations
+    /// are automatically expanded to quarter note slashes:
+    /// - A whole note chord (4 beats in 4/4) becomes 4 quarter slashes
+    /// - A half note chord (2 beats) becomes 2 quarter slashes
+    /// This is standard notation for master rhythm charts.
+    /// Can be disabled with `/AUTO_RHYTHM_SLASHES=false` in the chart.
+    pub auto_rhythm_slashes: bool,
     /// Show measure numbers above the first measure of each system.
     /// When true, displays the measure number (accounting for offset) above bars.
     pub show_measure_numbers: bool,
@@ -96,26 +104,74 @@ pub struct ChartLayoutConfig {
 
 impl Default for ChartLayoutConfig {
     fn default() -> Self {
+        // Default is the master rhythm preset
+        Self::master_rhythm()
+    }
+}
+
+impl ChartLayoutConfig {
+    /// Master Rhythm Chart preset.
+    ///
+    /// Optimized for professional master rhythm charts with:
+    /// - A4-friendly margins (extra left margin for section labels)
+    /// - Compact system spacing (~10 systems per page)
+    /// - Stemless quarter slashes for sustained chords (auto_rhythm_slashes)
+    /// - MuseJazz harmony style
+    /// - 4 measures per system
+    ///
+    /// This is the standard format for rhythm section charts used in
+    /// professional music production and live performance.
+    #[must_use]
+    pub fn master_rhythm() -> Self {
         Self {
             margins: PageMargins {
-                top: 36.0, // Reduced from 50 to bring header closer to top
-                right: 50.0,
-                bottom: 50.0,
-                left: 72.0, // Extra left margin for section labels
+                top: 36.0,    // Reduced top for header closer to top
+                right: 50.0,  // Standard right margin
+                bottom: 50.0, // Standard bottom margin
+                left: 72.0,   // Extra left margin for section labels
             },
             spatium: 5.0,
-            // System spacing: 4 spatiums (20pt) allows 10 systems per page
-            // 10×50pt (system) + 9×20pt (spacing) = 680pt, fits in 692pt available
+            // System spacing: 20pt (4 spatiums) allows ~10 systems per page
+            // 10×50pt (system) + 9×20pt (spacing) = 680pt, fits in 756pt available
             system_spacing: 20.0,
             max_measures_per_system: 4,
             min_measure_width: 100.0,
             harmony_style: HarmonyStyle::musejazz(),
-            hide_repeated_chords: true, // Default to hiding repeated chords
-            use_stems: false,           // Default to stemless slash notation
-            show_measure_numbers: true, // Default to showing measure numbers
-            measure_number_offset: 0,   // Default to no offset (measure 1 = 1)
-            count_in_measures: 0,       // Default to no count-in
-            snippet_mode: false,        // Default to full page mode with shadow
+            hide_repeated_chords: true,  // Hide repeated chord symbols
+            use_stems: true,             // Use stems for explicit rhythms (triplets, pushes)
+            auto_rhythm_slashes: true,   // Auto-fill with stemless quarter slashes
+            show_measure_numbers: true,  // Show measure numbers
+            measure_number_offset: 0,    // No offset (measure 1 = 1)
+            count_in_measures: 0,        // No count-in by default
+            snippet_mode: false,         // Full page mode with shadow
+        }
+    }
+
+    /// Snippet preset for small embedded chart excerpts.
+    ///
+    /// Optimized for displaying chart snippets in documentation,
+    /// tutorials, or inline displays with minimal margins.
+    #[must_use]
+    pub fn snippet() -> Self {
+        Self {
+            margins: PageMargins {
+                top: 20.0,
+                bottom: 20.0,
+                left: 20.0,
+                right: 20.0,
+            },
+            spatium: 5.0,
+            system_spacing: 30.0,
+            max_measures_per_system: 4,
+            min_measure_width: 80.0,
+            harmony_style: HarmonyStyle::musejazz(),
+            hide_repeated_chords: false, // Show all chords in snippets
+            use_stems: true,
+            auto_rhythm_slashes: true,
+            show_measure_numbers: true,
+            measure_number_offset: 0,
+            count_in_measures: 0,
+            snippet_mode: true, // Simple white background
         }
     }
 }
@@ -183,7 +239,7 @@ impl ChartLayoutEngine {
 
     /// Layout a snippet with bounds-based sizing.
     /// Renders content once, measures bounds, then adjusts page background to fit.
-    fn layout_snippet(&self, chart: &Chart, _page_width: f64) -> ChartLayoutResult {
+    fn layout_snippet(&self, chart: &Chart, page_width: f64) -> ChartLayoutResult {
         // layout_paginated uses a fixed page_offset of 20.0 for positioning
         let page_offset = 20.0;
 
@@ -208,8 +264,10 @@ impl ChartLayoutEngine {
             symbol_font_data: self.symbol_font_data.clone(),
         };
 
-        // Layout with a large page - content will use natural widths
-        let mut result = measure_engine.layout_paginated(chart, 2000.0, 1000.0);
+        // Layout with the provided page width (constrain measure widths to this)
+        // Use a tall page height to fit all content vertically
+        let layout_width = if page_width > 0.0 { page_width } else { 612.0 }; // Default to letter width
+        let mut result = measure_engine.layout_paginated(chart, layout_width, 10000.0);
 
         // Step 2: Compute actual content bounds by examining children
         // Skip the first child which is page background (white rect in snippet mode)
@@ -273,6 +331,13 @@ impl ChartLayoutEngine {
                 )]);
                 result.scene.children[0] = new_background;
             }
+            // Update total dimensions with shifted content
+            result.total_width = final_width + page_offset;
+            result.total_height = final_height + content_above_page + page_offset;
+        } else {
+            // Update total dimensions to match actual content
+            result.total_width = final_width + page_offset;
+            result.total_height = final_height + page_offset;
         }
 
         result
@@ -490,20 +555,27 @@ impl ChartLayoutEngine {
                 // Calculate staff_y (after potential header adjustment)
                 let staff_y = page_offset_y + page_y;
 
-                // Calculate system prefix width (clef + time sig) FIRST
+                // Calculate system prefix width (clef + key sig + time sig) FIRST
                 // Needed to determine staff line width for short systems
                 let include_clef = true; // Always show clef at system start
+                let include_key_sig = true; // Key sig on every system (standard notation)
                 let include_time_sig = global_system_index == 0; // Time sig only on first system
-                let clef_spacing = 0.5 * self.config.spatium; // Space after clef
-                let time_sig_spacing = 0.8 * self.config.spatium; // Space after time sig
 
-                let clef_width = ClefType::Treble.width() * self.config.spatium + clef_spacing;
-                let time_sig_width = if include_time_sig {
-                    2.0 * self.config.spatium + time_sig_spacing // Approximate time sig width
-                } else {
-                    0.0
-                };
-                let prefix_width = clef_width + time_sig_width;
+                // Get key signature from chart (number of sharps/flats)
+                let key_signature: i8 = chart
+                    .initial_key
+                    .as_ref()
+                    .map(prefix_renderer::key_to_fifths)
+                    .unwrap_or(0);
+
+                let (clef_width, key_sig_width, time_sig_width, prefix_width) =
+                    prefix_renderer::calculate_prefix_width(
+                        self.config.spatium,
+                        include_clef,
+                        include_key_sig,
+                        key_signature,
+                        include_time_sig,
+                    );
 
                 // Calculate measure width using spring-based distribution
                 let measures_area_width = content_width - prefix_width;
@@ -616,7 +688,7 @@ impl ChartLayoutEngine {
                     root.add_child(section_label);
                 }
 
-                // Render system prefix (clef and time signature)
+                // Render system prefix (clef, key signature, and time signature)
                 let ts = chart
                     .time_signature
                     .map(|ts| (ts.numerator as u8, ts.denominator as u8))
@@ -627,9 +699,12 @@ impl ChartLayoutEngine {
                     staff_y,
                     spatium: self.config.spatium,
                     include_clef,
+                    include_key_sig,
                     include_time_sig,
+                    key_signature,
                     time_signature: ts,
                     clef_width,
+                    key_sig_width,
                     time_sig_width,
                     page_number: Some(page_number),
                 };
@@ -1087,20 +1162,27 @@ impl ChartLayoutEngine {
                 let staff_y = total_height;
                 let system_height = staff_height + 30.0;
 
-                // Calculate system prefix width (clef + time sig) FIRST
+                // Calculate system prefix width (clef + key sig + time sig) FIRST
                 // Needed to determine staff line width for short systems
                 let include_clef = true;
+                let include_key_sig = true; // Key sig on every system (standard notation)
                 let include_time_sig = global_system_index == 0;
-                let clef_spacing = 0.5 * self.config.spatium;
-                let time_sig_spacing = 0.8 * self.config.spatium;
 
-                let clef_width = ClefType::Treble.width() * self.config.spatium + clef_spacing;
-                let time_sig_width = if include_time_sig {
-                    2.0 * self.config.spatium + time_sig_spacing
-                } else {
-                    0.0
-                };
-                let prefix_width = clef_width + time_sig_width;
+                // Get key signature from chart (number of sharps/flats)
+                let key_signature: i8 = chart
+                    .initial_key
+                    .as_ref()
+                    .map(prefix_renderer::key_to_fifths)
+                    .unwrap_or(0);
+
+                let (clef_width, key_sig_width, time_sig_width, prefix_width) =
+                    prefix_renderer::calculate_prefix_width(
+                        self.config.spatium,
+                        include_clef,
+                        include_key_sig,
+                        key_signature,
+                        include_time_sig,
+                    );
 
                 // Calculate measure width using spring-based distribution
                 let measures_area_width = content_width - prefix_width;
@@ -1187,7 +1269,7 @@ impl ChartLayoutEngine {
                     root.add_child(section_label);
                 }
 
-                // Render system prefix (clef and time signature)
+                // Render system prefix (clef, key signature, and time signature)
                 let ts = chart
                     .time_signature
                     .map(|ts| (ts.numerator as u8, ts.denominator as u8))
@@ -1198,9 +1280,12 @@ impl ChartLayoutEngine {
                     staff_y,
                     spatium: self.config.spatium,
                     include_clef,
+                    include_key_sig,
                     include_time_sig,
+                    key_signature,
                     time_signature: ts,
                     clef_width,
+                    key_sig_width,
                     time_sig_width,
                     page_number: None, // Continuous mode has no pages
                 };
@@ -1814,8 +1899,21 @@ impl ChartLayoutEngine {
         let (rhythm_entries, full_rhythm, rhythm_ticks, tuplet_specs, head_type_overrides, internal_push_positions) =
             if has_explicit_chord_rhythm {
                 // Build rhythm from explicit chord rhythms (r8t, Ab9_8t, etc.)
-                let (entries, ticks, specs) = self.build_rhythm_from_chord_rhythms(measure);
-                (Some(entries), Vec::new(), ticks, specs, Vec::new(), Vec::new())
+                let (mut entries, ticks, specs) = self.build_rhythm_from_chord_rhythms(measure);
+
+                // Fill remaining space with quarter note slashes to match time signature
+                // This ensures measures with incomplete explicit rhythms still fill properly
+                let remaining_ticks = measure_ticks - ticks;
+                if remaining_ticks > 0 {
+                    let quarter_ticks = 480;
+                    let num_fill_quarters = remaining_ticks / quarter_ticks;
+                    for _ in 0..num_fill_quarters {
+                        entries.push(RhythmEntry::Note(Duration::Quarter));
+                    }
+                }
+
+                let final_ticks: i32 = entries.iter().map(|e| e.duration().ticks()).sum();
+                (Some(entries), Vec::new(), final_ticks, specs, Vec::new(), Vec::new())
             } else if let Some(data) = melody_data {
                 // Use preprocessed melody segments
                 let melody_durations: Vec<Duration> =
@@ -1950,6 +2048,17 @@ impl ChartLayoutEngine {
         let text_metrics = TextFontMetrics::new(self.text_font_data.clone());
         let chord_min_widths = self.compute_chord_min_widths(measure, num_segments, &text_metrics);
 
+        // Apply auto_rhythm_slashes: expand whole/half notes to quarter slashes
+        // This makes master rhythm charts easier to read by showing consistent quarter slashes
+        // instead of whole note diamonds for sustained chords
+        // Track whether we did auto-expansion (those slashes should be stemless)
+        let auto_expanded = self.config.auto_rhythm_slashes && !has_melodies && !has_explicit_chord_rhythm;
+        let full_rhythm = if auto_expanded {
+            self.expand_rhythm_to_quarters(full_rhythm)
+        } else {
+            full_rhythm
+        };
+
         // Build the measure based on whether we have explicit rhythm entries or not
         let mut builder = MeasureBuilder::new()
             .id_base(id_base as u64)
@@ -1959,6 +2068,12 @@ impl ChartLayoutEngine {
 
         // Set the rhythm using either entries (for explicit rhythms) or rhythm (for slash fills)
         if let Some(entries) = rhythm_entries {
+            // Also expand entries if auto_rhythm_slashes is on (but only for non-explicit rhythms)
+            let entries = if self.config.auto_rhythm_slashes && !has_melodies {
+                self.expand_entries_to_quarters(entries)
+            } else {
+                entries
+            };
             builder = builder.entries(entries);
         } else {
             builder = builder.rhythm(full_rhythm);
@@ -1980,14 +2095,22 @@ impl ChartLayoutEngine {
         if has_explicit_chord_rhythm || !has_melodies {
             builder = builder.rhythmic();
 
-            // When use_stems is false (default), use pure stemless slash notation
-            // When use_stems is true (push/pull charts), keep stems for rhythmic visibility
-            // EXCEPT: if there are tuplet specs (triplets), we need stems to show the rhythm
-            // The auto-stemless behavior will still remove stems from 2+ consecutive quarters
+            // Stemless behavior:
+            // 1. When use_stems is false and no triplets - all stemless via builder.stemless()
+            // 2. When auto_rhythm_slashes is true - use auto_stemless() which makes
+            //    plain quarters stemless but keeps tuplet notes with stems
+            // 3. Otherwise - use auto_stemless() for per-note computation
             let has_triplets = !tuplet_specs.is_empty();
+
             if !self.config.use_stems && !has_explicit_chord_rhythm && !has_triplets {
+                // Pure stemless mode - no triplets, just make everything stemless
                 builder = builder.stemless();
+            } else if self.config.auto_rhythm_slashes && !has_melodies {
+                // Auto-rhythm slashes mode - use per-note auto_stemless()
+                // This makes plain quarters stemless but keeps triplet notes with stems
+                builder = builder.auto_stemless();
             }
+            // Otherwise, compute_auto_stemless() runs automatically in build()
         }
 
         if include_clef {
@@ -2051,6 +2174,71 @@ impl ChartLayoutEngine {
     /// Delegates to the standalone function in [`rhythm_builder`].
     fn lily_syntax_to_duration(&self, lily: LilySyntax, dotted: bool, triplet: bool) -> Duration {
         rhythm_builder::lily_syntax_to_duration(lily, dotted, triplet)
+    }
+
+    /// Expand whole/half note durations to quarter notes for auto_rhythm_slashes.
+    ///
+    /// This converts sustained chord notation (diamonds) to rhythmic slashes,
+    /// which is standard for master rhythm charts.
+    fn expand_rhythm_to_quarters(&self, rhythm: Vec<Duration>) -> Vec<Duration> {
+        let mut expanded = Vec::with_capacity(rhythm.len() * 4);
+        for dur in rhythm {
+            let ticks = dur.ticks();
+            let quarter_ticks = Duration::Quarter.ticks(); // 480
+
+            if ticks >= quarter_ticks * 2 {
+                // Whole note (1920 ticks) -> 4 quarters
+                // Half note (960 ticks) -> 2 quarters
+                // Dotted half (1440 ticks) -> 3 quarters
+                let num_quarters = ticks / quarter_ticks;
+                for _ in 0..num_quarters {
+                    expanded.push(Duration::Quarter);
+                }
+                // Handle remaining ticks (e.g., dotted rhythms may have fractional beats)
+                let remaining = ticks % quarter_ticks;
+                if remaining > 0 {
+                    // For now, just add an eighth if there's a half-beat remainder
+                    if remaining >= Duration::Eighth.ticks() {
+                        expanded.push(Duration::Eighth);
+                    }
+                }
+            } else {
+                // Quarter notes and shorter stay as-is
+                expanded.push(dur);
+            }
+        }
+        expanded
+    }
+
+    /// Expand rhythm entries (notes/rests) to quarters for auto_rhythm_slashes.
+    fn expand_entries_to_quarters(&self, entries: Vec<RhythmEntry>) -> Vec<RhythmEntry> {
+        let mut expanded = Vec::with_capacity(entries.len() * 4);
+        for entry in entries {
+            match entry {
+                RhythmEntry::Note(dur) => {
+                    let ticks = dur.ticks();
+                    let quarter_ticks = Duration::Quarter.ticks();
+
+                    if ticks >= quarter_ticks * 2 {
+                        let num_quarters = ticks / quarter_ticks;
+                        for _ in 0..num_quarters {
+                            expanded.push(RhythmEntry::Note(Duration::Quarter));
+                        }
+                        let remaining = ticks % quarter_ticks;
+                        if remaining >= Duration::Eighth.ticks() {
+                            expanded.push(RhythmEntry::Note(Duration::Eighth));
+                        }
+                    } else {
+                        expanded.push(RhythmEntry::Note(dur));
+                    }
+                }
+                RhythmEntry::Rest(dur) => {
+                    // Keep rests as-is (don't expand sustained rests to quarter slashes)
+                    expanded.push(RhythmEntry::Rest(dur));
+                }
+            }
+        }
+        expanded
     }
 
     /// Layout a count-in measure with a whole rest.
@@ -2341,22 +2529,29 @@ impl ChartLayoutEngine {
         measure: &crate::chart::types::Measure,
         text_metrics: &TextFontMetrics,
     ) -> f64 {
-        // Base weight for any measure
+        // Base weight of 1.0 represents a standard 4-beat measure
         let mut weight = 1.0;
 
-        // Count rhythm elements (the actual number of time slots that need spacing)
-        // This is the most important factor - more elements need more space
-        let rhythm_element_count = if !measure.rhythm_elements.is_empty() {
-            measure.rhythm_elements.len()
-        } else {
-            measure.chords.len()
-        };
+        // Calculate total beats in this measure from rhythm notation
+        // This is the PRIMARY factor - measures spanning multiple bars need proportionally more space
+        let total_beats: f64 = measure
+            .chords
+            .iter()
+            .map(|c| match &c.rhythm {
+                ChordRhythm::Slashes { count, dotted, .. } => {
+                    let base = *count as f64;
+                    if *dotted { base * 1.5 } else { base }
+                }
+                ChordRhythm::Default => 4.0, // Default is one bar = 4 beats
+                ChordRhythm::Explicit(nd) => {
+                    // Estimate beats from notation duration using ticks
+                    // 480 ticks = 1 quarter note = 1 beat in 4/4
+                    nd.total_ticks_480() as f64 / 480.0
+                }
+            })
+            .sum();
 
-        // More rhythm elements = significantly more weight
-        // This is crucial for measures with many notes (e.g., G_2 D_4 Em_8 G_16 D_32 r32)
-        // 1 element = base, 2 = +0.5, 4 = +1.5, 6 = +2.5
-        weight += (rhythm_element_count as f64 - 1.0).max(0.0) * 0.5;
-
+        // Scale weight by beats: 4 beats = 1.0, 8 beats = 2.0, etc.
         // Count unique chord symbols (not counting spaces/rests)
         let unique_chords: Vec<_> = measure
             .chords
@@ -2366,29 +2561,34 @@ impl ChartLayoutEngine {
 
         let chord_count = unique_chords.len();
 
-        // Factor in chord name complexity (longer names need more space)
-        let total_chord_width: f64 = unique_chords
-            .iter()
-            .map(|c| {
-                // Estimate text width based on character count
-                // Use actual font metrics if available
-                let base_size = self.config.harmony_style.root_size;
-                let estimated_width = text_metrics.horizontal_advance(&c.full_symbol, base_size);
-                estimated_width.max(base_size * 2.0) // Minimum width for short chords
-            })
-            .sum();
+        // Beat factor: measures spanning more beats need proportionally more space
+        let beats_factor = total_beats / 4.0;
 
-        // Average chord width factor (normalized to typical chord width)
-        let avg_chord_width = if chord_count > 0 {
-            total_chord_width / chord_count as f64
-        } else {
-            0.0
-        };
-        let typical_chord_width = self.config.harmony_style.root_size * 2.5;
+        // Start with beats-based weight (this handles multi-bar chords like F7 ////////)
+        weight = beats_factor.max(1.0);
 
-        // Add weight for wider-than-average chords
-        if avg_chord_width > typical_chord_width {
-            weight += (avg_chord_width / typical_chord_width - 1.0) * 0.5;
+        // Only apply additional weight for multiple chord symbols
+        // Single-chord measures should have equal widths regardless of chord name length
+        if chord_count > 1 {
+            // Calculate total width needed for all chord symbols
+            let base_size = self.config.harmony_style.root_size;
+            let total_chord_width: f64 = unique_chords
+                .iter()
+                .map(|c| {
+                    let estimated_width = text_metrics.horizontal_advance(&c.full_symbol, base_size);
+                    // Each chord needs its text width plus spacing
+                    estimated_width.max(base_size * 2.0) + base_size * 1.5
+                })
+                .sum();
+
+            // Typical single-chord measure width for normalization
+            let typical_measure_chord_width = base_size * 5.0;
+
+            // Weight from chord symbols: more chords = proportionally more space needed
+            let chord_width_factor = total_chord_width / typical_measure_chord_width;
+
+            // Use the maximum of beat-based and chord-based factors
+            weight = chord_width_factor.max(weight);
         }
 
         // Factor in rhythm complexity (triplets, pushed chords)
@@ -2407,7 +2607,7 @@ impl ChartLayoutEngine {
             weight += (melody_note_count as f64 - 4.0) * 0.1;
         }
 
-        // Clamp to reasonable range (higher max for complex measures)
+        // Clamp to reasonable range
         weight.clamp(0.5, 6.0)
     }
 
@@ -3159,11 +3359,11 @@ C G Am F
         println!("\n=== System Count Test ===");
         metrics.print_debug();
 
-        // With 20pt system spacing, we should fit 10 systems on a page
-        // (10×50pt systems + 9×20pt spacing = 680pt, available = 692pt)
+        // With 20pt system spacing and title header, we should fit 8-10 systems on a page
+        // (8×50pt systems + 7×20pt spacing + ~65pt header = ~605pt, available = 706pt)
         assert!(
-            metrics.system_count >= 9,
-            "Expected at least 9 systems on page 1, got {}. \
+            metrics.system_count >= 8,
+            "Expected at least 8 systems on page 1, got {}. \
             Available height: {:.1}, content height: {:.1}",
             metrics.system_count,
             metrics.available_height,

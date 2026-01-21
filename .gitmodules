@@ -51,3 +51,6 @@
 [submodule "libs/reference/iroh-examples"]
 	path = libs/reference/iroh-examples
 	url = https://github.com/n0-computer/iroh-examples.git
+[submodule "libs/ref/dioxus/dioxus"]
+	path = libs/ref/dioxus/dioxus
+	url = https://github.com/DioxusLabs/dioxus.git
