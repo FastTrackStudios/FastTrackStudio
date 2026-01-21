@@ -9,7 +9,7 @@ mod routes;
 mod state;
 
 use dioxus::prelude::*;
-use lucide_dioxus::{BookOpen, Github, ArrowLeft};
+use lucide_dioxus::{BookOpen, Github, ArrowLeft, PenTool};
 
 // Static assets
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -22,6 +22,8 @@ pub enum Route {
     #[layout(Layout)]
     #[route("/")]
     Home {},
+    #[route("/keyflow/chart")]
+    ChartEditor {},
     #[route("/docs/keyflow/chart/tests")]
     PatternBrowser {},
     #[route("/docs/keyflow/chart/tests/:id")]
@@ -82,6 +84,13 @@ fn Layout() -> Element {
                     // Navigation links
                     div {
                         class: "flex items-center gap-4",
+
+                        Link {
+                            to: Route::ChartEditor {},
+                            class: "flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-md hover:bg-accent",
+                            PenTool { class: "w-4 h-4" }
+                            span { "Editor" }
+                        }
 
                         Link {
                             to: Route::PatternBrowser {},
@@ -313,6 +322,14 @@ fn PatternCard(pattern: &'static keyflow::patterns::Pattern) -> Element {
                 "{pattern.category.label()}"
             }
         }
+    }
+}
+
+/// Chart editor with live preview
+#[component]
+fn ChartEditor() -> Element {
+    rsx! {
+        components::ChartEditor {}
     }
 }
 
