@@ -6,6 +6,8 @@ description = "Music theory, chord parsing, and optional GPU-based music notatio
 
 [features]
 default = []
+# Syntax highlighting for Keyflow notation using the parser's AST spans
+highlighting = []
 # Engraver feature: GPU-accelerated music notation rendering
 engraver = [
     "dep:wgpu",
@@ -45,7 +47,8 @@ wgpu = { version = "26", features = ["wgsl"], optional = true }
 # Linebender stack for 2D vector graphics (versions matched to vello 0.6)
 vello = { version = "0.6", optional = true }
 kurbo = { version = "0.12", optional = true }
-parley = { version = "0.2", optional = true }
+# Use parley without default features to avoid fontique's system feature on WASM
+parley = { version = "0.2", optional = true, default-features = false, features = ["std"] }
 skrifa = { version = "0.26", optional = true }
 
 # SMuFL music font metadata
@@ -111,6 +114,18 @@ required-features = ["engraver-example"]
 [[example]]
 name = "snippet_viewer"
 required-features = ["engraver-example"]
+
+[[example]]
+name = "rhythm_equivalence_viewer"
+required-features = ["engraver-example"]
+
+[[example]]
+name = "rhythm_test_viewer"
+required-features = ["engraver-example"]
+
+[[example]]
+name = "highlighting_demo"
+required-features = ["highlighting"]
 
 [lints]
 workspace = true

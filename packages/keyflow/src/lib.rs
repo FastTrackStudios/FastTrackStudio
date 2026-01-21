@@ -4,6 +4,7 @@
 //!
 //! ## Features
 //!
+//! - `highlighting`: Syntax highlighting using the parser's AST spans
 //! - `engraver`: GPU-accelerated music notation rendering (requires wgpu, vello)
 //! - `engraver-example`: Example dependencies for running engraver examples
 //! - `midi-import`: MIDI file import support
@@ -18,9 +19,14 @@ pub mod core;
 pub mod key;
 pub mod metadata;
 pub mod parsing;
+pub mod patterns;
 pub mod primitives;
 pub mod sections;
 pub mod time;
+
+// Syntax highlighting module - parser-integrated highlighting
+#[cfg(feature = "highlighting")]
+pub mod highlighting;
 
 // Engraver module - GPU-accelerated music notation rendering
 #[cfg(feature = "engraver")]
