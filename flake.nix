@@ -33,6 +33,7 @@
           rustToolchain
           cargo-watch
           cargo-expand
+          # Note: dioxus-cli has linking issues on Darwin, install via: cargo install dioxus-cli
 
           # Build tools
           pkg-config
@@ -40,6 +41,7 @@
           gnumake
           clang
           llvmPackages.bintools
+          lld  # LLVM linker with WASM support
 
           # CSS tooling
           tailwindcss_4
@@ -170,6 +172,10 @@
               export DYLD_LIBRARY_PATH="${libPath}:$DYLD_LIBRARY_PATH"
               export PKG_CONFIG_PATH="${pkgs.fontconfig.dev}/lib/pkgconfig:${pkgs.freetype.dev}/lib/pkgconfig:${pkgs.openssl.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
             ''}
+
+            # WASM build support: Use LLVM clang for ring/rustls C compilation
+            export CC_wasm32_unknown_unknown="${pkgs.llvmPackages_18.clang}/bin/clang"
+            export AR_wasm32_unknown_unknown="${pkgs.llvmPackages_18.bintools}/bin/llvm-ar"
 
             echo "FastTrackStudio development environment loaded (${if isDarwin then "Darwin" else "Linux"})"
             echo "Rust version: $(rustc --version)"
