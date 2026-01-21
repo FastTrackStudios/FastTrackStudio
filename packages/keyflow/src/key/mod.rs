@@ -4,6 +4,7 @@
 
 pub mod definition;
 pub mod scale;
+pub mod spelling;
 
 // Backward compatibility module
 pub mod keys {
@@ -16,3 +17,4 @@ pub use scale::{
     DiatonicFamily, DiatonicMode, HarmonicMinorFamily, HarmonicMinorMode, MelodicMinorFamily,
     MelodicMinorMode, ScaleFamily, ScaleMode, ScaleType,
 };
+pub use spelling::{KeySpelling, NoteSpelling, SpellingMode};
