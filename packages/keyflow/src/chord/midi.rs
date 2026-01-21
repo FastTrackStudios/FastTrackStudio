@@ -2,7 +2,8 @@
 //!
 //! Provides utilities for converting MIDI events to chords and working with MIDI note data.
 
-use crate::chord::{Chord, ChordDegree, ChordQuality, from_semitones};
+use crate::chord::{from_semitones, Chord, ChordDegree, ChordQuality};
+use crate::primitives::note::Note;
 use crate::primitives::{MusicalNote, RootNotation};
 use helgoboss_midi::KeyNumber;
 
@@ -254,8 +255,8 @@ pub fn detect_chords_from_midi_notes(
 
 /// Build a chord from active notes (helper function)
 ///
-/// This function tries each note as a potential root to detect inversions,
-/// similar to Lil Chordbox's IdentifyChord function.
+/// Uses the unified from_semitones() function for chord detection,
+/// which handles inversion detection automatically.
 fn build_chord_from_notes(
     active_notes: &[ActiveNote],
     chord_start_ppq: i64,
@@ -271,7 +272,6 @@ fn build_chord_from_notes(
     pitches.sort();
 
     // Find the earliest start and earliest end of active notes (clamped to limit)
-    // We use the minimum end time to determine when the chord ends (when the first note releases)
     let chord_start = active_notes
         .iter()
         .map(|n| n.start_ppq)
@@ -285,174 +285,160 @@ fn build_chord_from_notes(
         .min(chord_end_limit);
 
     // Filter out very short chords (arpeggiated fragments)
-    // Lil Chordbox uses 180 ticks for arpeggiated, 240 for others
-    // Note: If notes have very different end times, the chord duration might be shorter than expected
-    // This is correct behavior - the chord ends when the first note releases
     let chord_duration = chord_end - chord_start;
-    // Allow chords that are exactly at the minimum duration (>= instead of >)
     if chord_duration < min_chord_duration_ppq {
         return None;
     }
 
-    // Try each pitch as a potential root (check inversions)
-    // Like Lil Chordbox, we check inversions by trying each note as root
-    // But prefer the simplest/most standard chord name
     let note_names = [
         "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
     ];
 
     let lowest_pitch = pitches[0];
-    let mut all_chords: Vec<(Chord, u8, u32)> = Vec::new(); // (chord, root_pitch, simplicity_score)
+    let lowest_pitch_class = lowest_pitch % 12;
 
-    // Try each note as a potential root
-    for &potential_root_pitch in &pitches {
-        let potential_root_class = potential_root_pitch % 12;
+    // Convert pitches to semitone sequence relative to lowest pitch
+    let semitones = midi_pitches_to_semitone_sequence(&pitches, lowest_pitch);
 
-        if let Some(chord) = try_build_chord_with_root(
-            &pitches,
-            potential_root_pitch,
-            potential_root_class,
-            &note_names,
-        ) {
-            // Score the chord for simplicity (lower is better)
-            let score = chord_simplicity_score(&chord);
-            all_chords.push((chord, potential_root_pitch, score));
-        }
-    }
+    // Get root note name from lowest pitch
+    let root_name = note_names[lowest_pitch_class as usize];
 
-    if all_chords.is_empty() {
-        return None;
-    }
+    if let Some(root_note) = MusicalNote::from_string(root_name) {
+        let root = RootNotation::from_note_name(root_note);
 
-    // Check if the lowest pitch forms a simple, standard chord (no alterations, standard quality)
-    // If it does, heavily prefer it over inversions
-    let lowest_pitch_forms_simple_chord = all_chords
-        .iter()
-        .find(|(chord, root_pitch, _)| {
-            *root_pitch == lowest_pitch 
-            && chord.alterations.is_empty() // No alterations
-            && (chord.quality == ChordQuality::Major || chord.quality == ChordQuality::Minor || chord.quality == ChordQuality::Power) // Standard quality
-        })
-        .is_some();
-
-    // Add penalty for inversions (root not at lowest pitch) to the score
-    // Also prefer the lowest pitch of the same pitch class when multiple roots are possible
-    let all_chords_with_penalty: Vec<(Chord, u8, u32)> = all_chords
-        .iter()
-        .map(|(chord, root_pitch, score)| {
-            let mut adjusted_score = *score;
-            let root_pitch_class = *root_pitch % 12;
-            let lowest_pitch_class = lowest_pitch % 12;
-
-            // If the lowest pitch forms a simple, standard chord, heavily penalize inversions
-            // This ensures we prefer Bm7 (root at B2) over D7/B or Asus2/B
-            // But if the lowest pitch forms a complex/altered chord, prefer simpler inversions
-            if lowest_pitch_forms_simple_chord && *root_pitch != lowest_pitch {
-                // Heavy penalty for inversions when lowest pitch forms a simple chord
-                adjusted_score += 20; // Very heavy penalty to prefer root position
-            } else if *root_pitch != lowest_pitch {
-                // Normal inversion penalty when lowest pitch doesn't form a simple chord
-                adjusted_score += 5;
-            }
-
-            // Also prefer the lowest pitch of the same pitch class
-            // If root pitch class matches lowest, but root pitch is higher, add penalty
-            if root_pitch_class == lowest_pitch_class && *root_pitch > lowest_pitch {
-                adjusted_score += 3; // Penalty for higher octave of same pitch class
-            }
-
-            // Also heavily penalize suspended chords when there's a better interpretation available
-            // (like a 7th chord)
-            if chord.quality.is_suspended() && chord.family.is_none() {
-                // Check if any other interpretation has a family (7th, etc.)
-                let has_better_interpretation =
-                    all_chords.iter().any(|(c, _, _)| c.family.is_some());
-                if has_better_interpretation {
-                    adjusted_score += 10; // Heavy penalty for suspended when 7th chord exists
+        // Use from_semitones which handles inversion detection
+        if let Ok(mut chord) = from_semitones(&semitones, root) {
+            // Determine actual root pitch after potential inversion detection
+            let actual_root_pitch = if chord.bass.is_some() {
+                // Inversion was detected - find the MIDI pitch for the actual root
+                if let Some(actual_root) = chord.root.resolved_note() {
+                    let actual_root_class = actual_root.semitone();
+                    // Find a MIDI pitch in our list that matches this pitch class
+                    pitches
+                        .iter()
+                        .find(|&&p| p % 12 == actual_root_class)
+                        .copied()
+                        .unwrap_or(lowest_pitch)
+                } else {
+                    lowest_pitch
                 }
-            }
-            (chord.clone(), *root_pitch, adjusted_score)
-        })
-        .collect();
+            } else {
+                lowest_pitch
+            };
 
-    // Sort by adjusted simplicity score (lower is better), then prefer root position (lowest pitch)
-    let mut sorted_chords = all_chords_with_penalty;
-    sorted_chords.sort_by(|a, b| {
-        a.2.cmp(&b.2) // Sort by adjusted simplicity score
-            .then_with(|| {
-                // If scores are equal, prefer root position (lowest pitch as root)
-                let a_is_root = a.1 == lowest_pitch;
-                let b_is_root = b.1 == lowest_pitch;
-                b_is_root.cmp(&a_is_root) // true < false, so root position comes first
-            })
-            .then_with(|| {
-                // If still equal, prefer lower pitch as root (even if same pitch class)
-                a.1.cmp(&b.1)
-            })
-    });
+            // Apply MIDI-specific adjustments for octave context
+            apply_midi_octave_adjustments(&mut chord, &pitches, lowest_pitch, &semitones);
 
-    // Use the simplest chord
-    let (mut chord, root_pitch, _score) = sorted_chords.remove(0);
-
-    // If the root is not the lowest pitch, it's an inversion - set bass note
-    // But only if the bass note is actually different from the root (pitch class)
-    if root_pitch != lowest_pitch {
-        let root_pitch_class = root_pitch % 12;
-        let bass_pitch_class = lowest_pitch % 12;
-
-        // Only set bass if it's a different pitch class (actual inversion)
-        if root_pitch_class != bass_pitch_class {
-            let bass_note_name = note_names[bass_pitch_class as usize];
-            if let Some(bass_note) = MusicalNote::from_string(bass_note_name) {
-                chord.bass = Some(RootNotation::from_note_name(bass_note));
-            }
+            return Some(DetectedChord {
+                chord,
+                start_ppq: chord_start,
+                end_ppq: chord_end,
+                root_pitch: actual_root_pitch,
+            });
         }
     }
 
-    Some(DetectedChord {
-        chord,
-        start_ppq: chord_start,
-        end_ppq: chord_end,
-        root_pitch,
-    })
+    None
 }
 
-/// Score a chord for simplicity (lower is better)
-/// Prefers standard triads, then simple extensions, over complex altered chords
-fn chord_simplicity_score(chord: &Chord) -> u32 {
-    let mut score = 0u32;
+/// Apply MIDI-specific adjustments based on octave context
+///
+/// These adjustments handle cases where the octave position of notes
+/// affects the chord interpretation (e.g., add4 vs add11).
+fn apply_midi_octave_adjustments(
+    chord: &mut Chord,
+    pitches: &[u8],
+    root_pitch: u8,
+    semitones: &[u8],
+) {
+    // Get pitch classes to check for specific intervals
+    let pitch_classes: std::collections::HashSet<u8> = semitones.iter().map(|&s| s % 12).collect();
+    let has_major_third = pitch_classes.contains(&4);
+    let has_fourth = pitch_classes.contains(&5);
 
-    // Base quality scores (lower is better)
-    match chord.quality {
-        ChordQuality::Major | ChordQuality::Minor => score += 0, // Simplest
-        ChordQuality::Power => score += 1,
-        ChordQuality::Suspended(_) => score += 3, // Penalize suspended chords more - they're often misinterpretations
-        ChordQuality::Diminished | ChordQuality::Augmented => score += 3,
+    // Check if 3rd and 4th are in the same octave by examining actual MIDI pitches
+    let third_pitches: Vec<u8> = pitches
+        .iter()
+        .filter(|&&p| (p % 12) == ((root_pitch % 12) + 4) % 12)
+        .copied()
+        .collect();
+    let fourth_pitches: Vec<u8> = pitches
+        .iter()
+        .filter(|&&p| (p % 12) == ((root_pitch % 12) + 5) % 12)
+        .copied()
+        .collect();
+
+    let third_and_fourth_same_octave = if !third_pitches.is_empty() && !fourth_pitches.is_empty() {
+        let third_octave = third_pitches[0] / 12;
+        let fourth_octave = fourth_pitches[0] / 12;
+        third_octave == fourth_octave
+    } else {
+        let has_third_simple = semitones.contains(&4);
+        let has_fourth_simple = semitones.contains(&5);
+        has_third_simple && has_fourth_simple
+    };
+
+    // Fix: If we have both a 3rd AND a 4th, it's "add4" not "sus4"
+    if has_major_third && has_fourth && chord.quality.is_suspended() {
+        chord.quality = ChordQuality::Major;
     }
 
-    // Family (7th) adds complexity
-    if chord.family.is_some() {
-        score += 5;
+    // Handle add4 vs add11 based on octave
+    if chord.family.is_none() {
+        if chord.extensions.eleventh.is_some() {
+            if third_and_fourth_same_octave {
+                // Both 3rd and 4th in same octave - convert to add4
+                chord.additions.push(ChordDegree::Fourth);
+                chord.extensions.eleventh = None;
+            } else {
+                // Different octaves - convert to add11
+                chord.additions.push(ChordDegree::Eleventh);
+                chord.extensions.eleventh = None;
+            }
+        }
+
+        // Also handle case where we have 3rd and 4th in same octave but no extension detected
+        if third_and_fourth_same_octave && chord.extensions.eleventh.is_none() {
+            if !chord.additions.contains(&ChordDegree::Fourth)
+                && !chord.additions.contains(&ChordDegree::Eleventh)
+                && has_fourth
+                && has_major_third
+            {
+                chord.additions.push(ChordDegree::Fourth);
+            }
+        }
     }
 
-    // Extensions add complexity
-    if chord.extensions.ninth.is_some() {
-        score += 3;
-    }
-    if chord.extensions.eleventh.is_some() {
-        score += 3;
-    }
-    if chord.extensions.thirteenth.is_some() {
-        score += 3;
+    // Handle "D2" style chords: power chord with 2nd
+    // When we have root, 5th, and 2nd/9th but no 3rd, use "2" naming
+    let has_root = semitones.contains(&0);
+    let has_fifth = pitch_classes.contains(&7);
+    let has_second = pitch_classes.contains(&2);
+    let has_third = pitch_classes.contains(&3) || pitch_classes.contains(&4);
+
+    // Handle power chord with second (sus2-like voicing)
+    // But NOT if there's a ninth extension - then it's a 9th chord, not add2
+    let has_ninth_extension = chord.extensions.ninth.is_some();
+
+    if has_root && has_fifth && has_second && !has_third && !has_ninth_extension {
+        if chord.quality.is_suspended() || chord.quality == ChordQuality::Power {
+            chord.quality = ChordQuality::Power;
+            chord.additions.retain(|&d| d != ChordDegree::Ninth);
+            if !chord.additions.contains(&ChordDegree::Second) {
+                chord.additions.push(ChordDegree::Second);
+            }
+        }
     }
 
-    // Additions are simpler than extensions
-    score += chord.additions.len() as u32;
-
-    // Alterations add significant complexity
-    score += chord.alterations.len() as u32 * 10;
-
-    score
+    // Consolidate Second and Ninth - keep only Second (if both are in additions)
+    // Also remove Second addition if there's a ninth extension
+    if has_ninth_extension {
+        chord.additions.retain(|&d| d != ChordDegree::Second);
+    } else if chord.additions.contains(&ChordDegree::Second)
+        && chord.additions.contains(&ChordDegree::Ninth)
+    {
+        chord.additions.retain(|&d| d != ChordDegree::Ninth);
+    }
 }
 
 /// Convert a vector of MIDI pitches to a semitone sequence relative to a root pitch
@@ -542,144 +528,6 @@ pub fn midi_pitches_to_semitone_sequence(pitches: &[u8], root_pitch: u8) -> Vec<
     }
 
     semitones
-}
-
-/// Try to build a chord using a specific pitch as the root
-fn try_build_chord_with_root(
-    pitches: &[u8],
-    root_pitch: u8,
-    root_pitch_class: u8,
-    note_names: &[&str; 12],
-) -> Option<Chord> {
-    // Convert pitches to semitone sequence relative to the root
-    let semitones = midi_pitches_to_semitone_sequence(pitches, root_pitch);
-
-    // Convert root pitch to MusicalNote and RootNotation
-    let note_name = note_names[root_pitch_class as usize];
-
-    if let Some(root_note) = MusicalNote::from_string(note_name) {
-        let root = RootNotation::from_note_name(root_note);
-
-        // Use keyflow's from_semitones to detect chord
-        if let Ok(mut chord) = from_semitones(&semitones, root.clone()) {
-            // Get pitch classes to check for specific intervals
-            let pitch_classes: std::collections::HashSet<u8> =
-                semitones.iter().map(|&s| s % 12).collect();
-            let has_major_third = pitch_classes.contains(&4);
-            let has_fourth = pitch_classes.contains(&5);
-
-            // Check if 3rd and 4th are in the same octave by examining actual MIDI pitches
-            // Find pitches that correspond to major 3rd (pitch class 4) and 4th (pitch class 5)
-            let third_pitches: Vec<u8> = pitches
-                .iter()
-                .filter(|&&p| (p % 12) == ((root_pitch % 12) + 4) % 12)
-                .copied()
-                .collect();
-            let fourth_pitches: Vec<u8> = pitches
-                .iter()
-                .filter(|&&p| (p % 12) == ((root_pitch % 12) + 5) % 12)
-                .copied()
-                .collect();
-
-            // Check if 3rd and 4th are in the same octave (within 12 semitones of each other)
-            let third_and_fourth_same_octave =
-                if !third_pitches.is_empty() && !fourth_pitches.is_empty() {
-                    // Get the octave of the 3rd and 4th pitches (divide by 12)
-                    let third_octave = third_pitches[0] / 12;
-                    let fourth_octave = fourth_pitches[0] / 12;
-                    third_octave == fourth_octave
-                } else {
-                    // Fallback: check if we have both simple intervals (same octave)
-                    let has_third_simple = semitones.contains(&4);
-                    let has_fourth_simple = semitones.contains(&5);
-                    has_third_simple && has_fourth_simple
-                };
-
-            // Fix: If we have both a 3rd AND a 4th, it's "add4" not "sus4"
-            // Sus4 means the 4th REPLACES the 3rd, but add4 means the 4th is ADDED to the 3rd
-            if has_major_third && has_fourth && chord.quality.is_suspended() {
-                // Convert sus4 to major with add4
-                chord.quality = crate::chord::ChordQuality::Major;
-            }
-
-            // Fix: If we have root (0), 5th (7), and 2nd (2) but no 3rd, it's "D2" not "Dsus2" or "D5add2"
-            // "D2" means root + 5th + 2nd (NOT a power chord, since power chord is ONLY root + 5th)
-            // Check if we have root (0), 5th (7), and 2nd (2 or 14) but no 3rd
-            let has_root = semitones.contains(&0);
-            let has_fifth = pitch_classes.contains(&7);
-            let has_second = pitch_classes.contains(&2);
-            let has_third = pitch_classes.contains(&3) || pitch_classes.contains(&4);
-
-            if has_root && has_fifth && has_second && !has_third && chord.quality.is_suspended() {
-                // This is a "2" chord (root + 5th + 2nd), not a suspended chord
-                // Use Power quality as base (root + 5th), but it's not a pure power chord since it has the 2nd
-                chord.quality = crate::chord::ChordQuality::Power;
-                // Remove the suspended quality and add the 2nd as an addition
-                // Remove Ninth if present (same note as Second, just different octave)
-                chord.additions.retain(|&d| d != ChordDegree::Ninth);
-                if !chord.additions.contains(&ChordDegree::Second) {
-                    chord.additions.push(ChordDegree::Second);
-                }
-            }
-
-            // Check if this should be an "add" chord instead of an extension
-            // If there's a 4th/6th/9th without a 7th, it's an "add" chord
-            if chord.family.is_none() {
-                // No 7th - check if we have extensions that should be additions
-                if chord.extensions.ninth.is_some() {
-                    chord.additions.push(ChordDegree::Ninth);
-                    chord.extensions.ninth = None;
-                }
-                if chord.extensions.eleventh.is_some() {
-                    // 11th extension: only if 4th is in a different octave from the 3rd
-                    // If 17 (11th) and 16 (3rd in next octave) are both present → add4 (same octave)
-                    // If 17 is present but 16 is NOT and 12 is NOT → 11th extension (keep it)
-                    if third_and_fourth_same_octave {
-                        // Both 3rd and 4th in same octave - convert to add4 (use Fourth, not Eleventh)
-                        chord.additions.push(ChordDegree::Fourth);
-                        chord.extensions.eleventh = None;
-                    } else {
-                        // Different octaves - convert to add11 (use Eleventh)
-                        chord.additions.push(ChordDegree::Eleventh);
-                        chord.extensions.eleventh = None;
-                    }
-                }
-                if chord.extensions.thirteenth.is_some() {
-                    // 13th without 7th is usually add13, but check if it's actually a 6th
-                    let has_sixth = pitch_classes.contains(&9);
-                    if has_sixth {
-                        chord.additions.push(ChordDegree::Thirteenth);
-                        chord.extensions.thirteenth = None;
-                    }
-                }
-            }
-
-            // Also handle case where we have a 4th pitch class but it wasn't detected as extension
-            // If we have both 3rd and 4th in same octave, it should be add4
-            if chord.family.is_none()
-                && third_and_fourth_same_octave
-                && chord.extensions.eleventh.is_none()
-            {
-                // We have 3rd and 4th in same octave, but no 11th extension detected
-                // This means it should be add4 (use Fourth, not Eleventh)
-                if !chord.additions.contains(&ChordDegree::Fourth) {
-                    chord.additions.push(ChordDegree::Fourth);
-                }
-            }
-
-            // Consolidate Second and Ninth - if both are present, keep only Second
-            // (They're the same note in different octaves)
-            if chord.additions.contains(&ChordDegree::Second)
-                && chord.additions.contains(&ChordDegree::Ninth)
-            {
-                chord.additions.retain(|&d| d != ChordDegree::Ninth);
-            }
-
-            return Some(chord);
-        }
-    }
-
-    None
 }
 
 #[cfg(test)]
@@ -1797,5 +1645,81 @@ mod tests {
             // E is root - no bass needed
             assert_eq!(chords[0].root_pitch, 52, "If E is root, should be 52");
         }
+    }
+
+    #[test]
+    fn test_tritone_sub_db7_sharp11_over_g() {
+        // Tritone substitution: Db7#11/G (or C#7#11/G)
+        // G is the bass (which is also the #11 of Db)
+        // G is a tritone (6 semitones) away from Db
+        // G2 = 43, Db3 = 49, F3 = 53, Ab3 = 56, B3 = 59
+        let notes = vec![
+            create_midi_note(43, 0, 4800), // G2 (bass, also #11)
+            create_midi_note(49, 0, 4800), // Db3/C#3 (root)
+            create_midi_note(53, 0, 4800), // F3 (major 3rd)
+            create_midi_note(56, 0, 4800), // Ab3/G#3 (perfect 5th)
+            create_midi_note(59, 0, 4800), // B3/Cb4 (minor 7th)
+        ];
+
+        let chords = detect_chords_from_midi_notes(&notes, 180);
+        assert!(!chords.is_empty(), "Should detect a chord");
+
+        let chord = &chords[0].chord;
+        let chord_name = chord.to_string();
+
+        // Debug output
+        println!("Tritone sub detected: {}", chord_name);
+        println!("Root pitch: {}", chords[0].root_pitch);
+        println!("Quality: {:?}", chord.quality);
+        println!("Family: {:?}", chord.family);
+        println!("Extensions: {:?}", chord.extensions);
+        println!("Bass: {:?}", chord.bass);
+
+        // The chord should be detected as either:
+        // 1. Db7#11/G (preferred tritone sub notation)
+        // 2. C#7#11/G (enharmonic equivalent)
+        // 3. Or possibly just detected as the slash chord
+
+        // We expect the chord to have:
+        // - Dominant 7th family
+        // - Major quality
+        // - #11 extension OR the G in bass
+        // - Bass note of G
+
+        // Accept either Db7 or C#7 as the root (they're enharmonic)
+        let root_str = chord.root.to_string();
+        assert!(
+            root_str == "Db" || root_str == "C#",
+            "Root should be Db or C#, got: {}. Full chord: {}",
+            root_str,
+            chord_name
+        );
+
+        assert_eq!(
+            chord.quality,
+            ChordQuality::Major,
+            "Should have Major quality for dominant 7. Got: {:?}",
+            chord.quality
+        );
+
+        assert_eq!(
+            chord.family,
+            Some(crate::chord::ChordFamily::Dominant7),
+            "Should have Dominant7 family. Got: {:?}",
+            chord.family
+        );
+
+        // Should have bass note of G
+        assert!(
+            chord.bass.is_some(),
+            "Should have G as bass note"
+        );
+
+        let bass_str = chord.bass.as_ref().map(|b| b.to_string()).unwrap_or_default();
+        assert_eq!(
+            bass_str, "G",
+            "Bass should be G, got: {}",
+            bass_str
+        );
     }
 }

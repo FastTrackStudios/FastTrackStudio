@@ -49,8 +49,8 @@ impl ChordFamily {
             ChordFamily::Major7 => "maj7",
             ChordFamily::Dominant7 => "7",
             ChordFamily::Minor7 => "7", // Combined with quality "m" -> "m7"
-            ChordFamily::MinorMajor7 => "maj7", // Combined with quality "m" -> "mM7" or "m(maj7)"
-            ChordFamily::HalfDiminished => "7", // Combined with dim quality and b5
+            ChordFamily::MinorMajor7 => "Maj7", // Capital M to distinguish: "mMaj7" or "CmMaj7"
+            ChordFamily::HalfDiminished => "m7b5", // Half-diminished: minor 7 flat 5
             ChordFamily::FullyDiminished => "dim7",
         }
     }

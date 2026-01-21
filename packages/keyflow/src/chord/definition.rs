@@ -1,6 +1,17 @@
 //! Chord definition and parsing
 //!
 //! Combines root notation with quality, family, and extensions to represent musical chords
+//!
+//! # Module Structure
+//!
+//! - **Chord Struct**: Core chord data structure with root, quality, family, extensions
+//! - **Construction**: `new`, `with_duration`, `with_family` methods
+//! - **Interval Computation**: `compute_intervals`, `intervals`, `semantic_degrees`
+//! - **Transposition**: `transpose_to`, `respell_root`
+//! - **Normalization**: `normalize` for chord symbol display
+//! - **Parsing**: `parse` and helper methods for token parsing
+//! - **Display**: `Display` impl for chord symbol output
+//! - **LilyPond**: `to_lilypond` for notation export
 
 use super::alteration::Alteration;
 use super::degree::ChordDegree;
@@ -9,12 +20,14 @@ use super::extensions::{ExtensionQuality, Extensions};
 use super::family::ChordFamily;
 use super::quality::{ChordQuality, SuspendedType};
 use super::root;
-use crate::key::Key;
+use crate::key::{Key, KeySpelling, SpellingMode};
 use crate::parsing::{ParseError, Token, TokenType};
 use crate::primitives::{Interval, MusicalNote, RootNotation};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{debug, instrument, trace};
+
+// region:    --- Chord Struct
 
 /// A complete chord with root, quality, family, extensions, and alterations
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,14 +70,18 @@ pub struct Chord {
 
     /// Computed intervals (real intervals from root)
     /// Key: ChordDegree, Value: Interval
-    intervals: HashMap<ChordDegree, Interval>,
+    pub(crate) intervals: HashMap<ChordDegree, Interval>,
 
     /// Semantic degrees present in the chord
-    semantic_degrees: Vec<ChordDegree>,
+    pub(crate) semantic_degrees: Vec<ChordDegree>,
 
     /// Number of tokens consumed during parsing
-    tokens_consumed: usize,
+    pub(crate) tokens_consumed: usize,
 }
+
+// endregion: --- Chord Struct
+
+// region:    --- Construction
 
 impl Chord {
     /// Create a new chord with just root and quality (triad, no extensions)
@@ -121,848 +138,23 @@ impl Chord {
         chord.normalize();
         chord
     }
+}
 
-    /// Compute intervals and semantic degrees from quality, family, extensions, and alterations
-    pub(crate) fn compute_intervals(&mut self) {
-        self.intervals.clear();
-        self.semantic_degrees.clear();
+// endregion: --- Construction
 
-        // Always include root
-        self.intervals.insert(ChordDegree::Root, Interval::Unison);
-        self.semantic_degrees.push(ChordDegree::Root);
+// NOTE: Interval computation methods have been extracted to intervals.rs
+// This includes: compute_intervals, intervals, semantic_degrees, interval_for_degree,
+// has_degree, exceeds_level, display_at_level, add_alteration, add_addition,
+// add_omission, set_extensions, set_bass, respell_root, root_note, semitone_sequence,
+// pitch_classes, notes
 
-        // Add intervals from quality (triad)
-        for interval in self.quality.intervals() {
-            let degree = ChordDegree::from_interval(interval);
-            self.intervals.insert(degree, interval);
-            if !self.semantic_degrees.contains(&degree) {
-                self.semantic_degrees.push(degree);
-            }
-        }
+// NOTE: Transposition methods have been extracted to transposition.rs
+// This includes: transpose_to, transpose_root_notation, calculate_quality_from_notes, scale_degrees
 
-        // Add seventh from family (if present)
-        if let Some(family) = &self.family {
-            let seventh_interval = family.seventh_interval();
-            self.intervals
-                .insert(ChordDegree::Seventh, seventh_interval);
-            if !self.semantic_degrees.contains(&ChordDegree::Seventh) {
-                self.semantic_degrees.push(ChordDegree::Seventh);
-            }
-        }
 
-        // Add extensions
-        for interval in self.extensions.intervals() {
-            let degree = ChordDegree::from_interval(interval);
-            self.intervals.insert(degree, interval);
-            if !self.semantic_degrees.contains(&degree) {
-                self.semantic_degrees.push(degree);
-            }
-        }
+// region:    --- Parsing
 
-        // Apply alterations (override expected intervals)
-        for alteration in &self.alterations {
-            self.intervals
-                .insert(alteration.degree, alteration.interval);
-            if !self.semantic_degrees.contains(&alteration.degree) {
-                self.semantic_degrees.push(alteration.degree);
-            }
-        }
-
-        // Add additions
-        for degree in &self.additions {
-            if !self.intervals.contains_key(degree) {
-                let interval = degree.to_expected_interval(self.quality);
-                self.intervals.insert(*degree, interval);
-            }
-            if !self.semantic_degrees.contains(degree) {
-                self.semantic_degrees.push(*degree);
-            }
-        }
-
-        // Remove omissions
-        for degree in &self.omissions {
-            self.intervals.remove(degree);
-            self.semantic_degrees.retain(|d| d != degree);
-        }
-
-        // Sort semantic degrees
-        self.semantic_degrees.sort();
-    }
-
-    /// Get all intervals in this chord
-    pub fn intervals(&self) -> Vec<Interval> {
-        let mut intervals: Vec<_> = self.intervals.values().copied().collect();
-        intervals.sort_by_key(|i| i.semitones());
-        intervals
-    }
-
-    /// Get all semantic degrees in this chord
-    pub fn semantic_degrees(&self) -> &[ChordDegree] {
-        &self.semantic_degrees
-    }
-
-    /// Get the interval for a specific degree (if present)
-    pub fn interval_for_degree(&self, degree: ChordDegree) -> Option<Interval> {
-        self.intervals.get(&degree).copied()
-    }
-
-    /// Check if a degree is present in the chord
-    pub fn has_degree(&self, degree: ChordDegree) -> bool {
-        self.intervals.contains_key(&degree)
-    }
-
-    /// Add an alteration to the chord
-    pub fn add_alteration(&mut self, alteration: Alteration) -> Result<(), String> {
-        // Check if the degree is already present or will be added
-        if !self.has_degree(alteration.degree) {
-            return Err(format!(
-                "Cannot alter degree {} which is not present in the chord",
-                alteration.degree
-            ));
-        }
-
-        // Check for conflicting alterations
-        if self
-            .alterations
-            .iter()
-            .any(|a| a.degree == alteration.degree)
-        {
-            return Err(format!("Degree {} is already altered", alteration.degree));
-        }
-
-        self.alterations.push(alteration);
-        self.compute_intervals();
-        Ok(())
-    }
-
-    /// Add an addition (e.g., add9, add11)
-    pub fn add_addition(&mut self, degree: ChordDegree) {
-        if !self.additions.contains(&degree) {
-            self.additions.push(degree);
-            self.compute_intervals();
-        }
-    }
-
-    /// Add an omission (e.g., no3, no5)
-    pub fn add_omission(&mut self, degree: ChordDegree) {
-        if !self.omissions.contains(&degree) {
-            self.omissions.push(degree);
-            self.compute_intervals();
-        }
-    }
-
-    /// Set extensions
-    pub fn set_extensions(&mut self, extensions: Extensions) {
-        self.extensions = extensions;
-        self.compute_intervals();
-    }
-
-    /// Set the bass note (for slash chords)
-    pub fn set_bass(&mut self, bass: RootNotation) {
-        self.bass = Some(bass);
-    }
-
-    /// Get the root note as a MusicalNote
-    ///
-    /// For note names, this returns the note directly.
-    /// For scale degrees and roman numerals, a Key is required to resolve them.
-    ///
-    /// # Arguments
-    /// * `key` - Optional key context for resolving scale degrees and roman numerals
-    ///
-    /// # Returns
-    /// * `Some(MusicalNote)` if the root can be resolved
-    /// * `None` if the root requires a key context that wasn't provided
-    pub fn root_note(&self, key: Option<&Key>) -> Option<MusicalNote> {
-        self.root.resolve(key)
-    }
-
-    /// Get the semitone sequence for this chord
-    ///
-    /// Returns a vector of semitones relative to the root, preserving octave information.
-    /// This is useful for voicings where intervals can span multiple octaves.
-    /// The root is always 0 (first element).
-    ///
-    /// For example:
-    /// - Cmaj7 = [0, 4, 7, 11] - all within first octave
-    /// - C9 = [0, 4, 7, 10, 14] - ninth is in second octave
-    /// - C13 = [0, 4, 7, 10, 14, 17, 21] - extends to second octave
-    ///
-    /// # Example
-    /// ```
-    /// use keyflow::chord::from_semitones;
-    /// use keyflow::primitives::{RootNotation, MusicalNote};
-    ///
-    /// // Build a C9 chord from semitones
-    /// let root = RootNotation::from_note_name(MusicalNote::c());
-    /// // C9 = C (0), E (4), G (7), Bb (10), D (14 - second octave)
-    /// let chord = from_semitones(&[0, 4, 7, 10, 14], root).unwrap();
-    /// assert_eq!(chord.semitone_sequence(), vec![0, 4, 7, 10, 14]);
-    /// ```
-    pub fn semitone_sequence(&self) -> Vec<u8> {
-        let mut semitones: Vec<u8> = self
-            .intervals
-            .values()
-            .map(|interval| interval.semitones())
-            .collect();
-
-        // Ensure root (0) is included and sort
-        if !semitones.contains(&0) {
-            semitones.push(0);
-        }
-        semitones.sort_unstable();
-        semitones
-    }
-
-    /// Get the pitch class set for this chord (semitones within one octave)
-    ///
-    /// Returns a vector of semitones (0-11) relative to the root, sorted in ascending order.
-    /// All intervals are reduced to the first octave. This is useful for analyzing
-    /// chord quality regardless of voicing.
-    ///
-    /// # Example
-    /// ```
-    /// use keyflow::chord::from_semitones;
-    /// use keyflow::primitives::{RootNotation, MusicalNote};
-    ///
-    /// // Build a C9 chord from semitones
-    /// let root = RootNotation::from_note_name(MusicalNote::c());
-    /// let chord = from_semitones(&[0, 4, 7, 10, 14], root).unwrap();
-    /// // C9 with ninth in second octave reduces to: C (0), D (2), E (4), G (7), Bb (10)
-    /// assert_eq!(chord.pitch_classes(), vec![0, 2, 4, 7, 10]);
-    /// ```
-    pub fn pitch_classes(&self) -> Vec<u8> {
-        let mut semitones: Vec<u8> = self
-            .intervals
-            .values()
-            .map(|interval| interval.semitones() % 12)
-            .collect();
-
-        // Ensure root (0) is included and sort
-        if !semitones.contains(&0) {
-            semitones.push(0);
-        }
-        semitones.sort_unstable();
-        semitones.dedup(); // Remove duplicates (e.g., if both 2 and 14 are present, we get only 2)
-        semitones
-    }
-
-    /// Get all notes in the chord as MusicalNote objects
-    ///
-    /// Returns a vector of MusicalNote objects representing each tone in the chord.
-    /// The notes are ordered from lowest to highest (root first).
-    ///
-    /// For correct enharmonic spelling, a Key context should be provided.
-    /// Without a key, notes will use sharp/flat based on the root note's preference.
-    ///
-    /// # Arguments
-    /// * `key` - Optional key context for proper enharmonic spelling and resolving scale degrees/roman numerals
-    ///
-    /// # Returns
-    /// * `Some(Vec<MusicalNote>)` if the root can be resolved
-    /// * `None` if the root requires a key context that wasn't provided
-    ///
-    /// # Example
-    /// ```
-    /// use keyflow::chord::from_semitones;
-    /// use keyflow::primitives::{RootNotation, MusicalNote};
-    ///
-    /// // Build a Cmaj7 chord from semitones
-    /// let root = RootNotation::from_note_name(MusicalNote::c());
-    /// // Cmaj7 = C (0), E (4), G (7), B (11)
-    /// let chord = from_semitones(&[0, 4, 7, 11], root).unwrap();
-    /// // Cmaj7 returns [C, E, G, B]
-    /// let notes = chord.notes(None).unwrap();
-    /// assert_eq!(notes.len(), 4);
-    /// ```
-    pub fn notes(&self, key: Option<&Key>) -> Option<Vec<MusicalNote>> {
-        // Get the root note
-        let root = self.root_note(key)?;
-
-        // Build a list of (semitones, chord_degree) pairs and sort by semitones
-        // Keep the full semitone value to preserve octave information for extensions
-        let mut degree_semitone_pairs: Vec<(u8, ChordDegree)> = self
-            .semantic_degrees
-            .iter()
-            .filter_map(|&degree| {
-                self.intervals
-                    .get(&degree)
-                    .map(|interval| (interval.semitones(), degree))
-            })
-            .collect();
-
-        // Sort by semitone (ascending) - this preserves octave ordering
-        degree_semitone_pairs.sort_by_key(|(semitones, _)| *semitones);
-
-        // Generate notes using enharmonically correct spelling based on chord degrees
-        let mut notes = Vec::with_capacity(degree_semitone_pairs.len());
-
-        for (semitones, chord_degree) in degree_semitone_pairs {
-            // Use semantic interval to determine correct letter name
-            let semantic_interval = chord_degree.semantic_interval();
-
-            // Generate enharmonically correct note
-            // The semitones value preserves octave (e.g., 14 for ninth, not 2)
-            // but enharmonic_from_root uses % 12 internally for pitch class
-            let note = MusicalNote::enharmonic_from_root(&root, semitones % 12, semantic_interval);
-            notes.push(note);
-        }
-
-        Some(notes)
-    }
-
-    /// Transpose this chord to a new key
-    ///
-    /// Unified algorithm that works for all transposition scenarios:
-    /// 1. **Root-only transposition** (C Major → G Major): Transposes by interval
-    /// 2. **Scale-type change** (C Major → C Minor): Applies enharmonic mapping
-    /// 3. **Both** (C Major → G Minor): Combines both
-    ///
-    /// The algorithm:
-    /// 1. Get all notes in the chord
-    /// 2. Transpose each note by the interval between source and target roots
-    /// 3. Apply enharmonic changes based on the target scale
-    ///    (e.g., E→Eb when going to C minor, A→Ab, B→Bb)
-    /// 4. Recalculate chord quality from the resulting notes
-    ///
-    /// # Arguments
-    /// * `target_key` - The key to transpose to (provides both root and scale type)
-    /// * `source_key` - Optional source key for resolving scale degrees/roman numerals
-    ///
-    /// # Returns
-    /// * `Some(Chord)` - The transposed chord
-    /// * `None` - If the root cannot be resolved
-    ///
-    /// # Examples
-    /// ```
-    /// use keyflow::chord::from_semitones;
-    /// use keyflow::primitives::{RootNotation, MusicalNote};
-    /// use keyflow::key::Key;
-    ///
-    /// // Root transposition: Cmaj7 → Gmaj7
-    /// let root = RootNotation::from_note_name(MusicalNote::c());
-    /// // Cmaj7 = C (0), E (4), G (7), B (11)
-    /// let c_maj7 = from_semitones(&[0, 4, 7, 11], root).unwrap();
-    /// let g_key = Key::major(MusicalNote::g());
-    /// let g_maj7 = c_maj7.transpose_to(&g_key, None).unwrap();
-    ///
-    /// // Scale type change: C → Cm (C Major → C Minor)
-    /// let c_root = RootNotation::from_note_name(MusicalNote::c());
-    /// let c_major = from_semitones(&[0, 4, 7], c_root).unwrap();
-    /// let c_key = Key::major(MusicalNote::c());
-    /// let c_minor_key = Key::minor(MusicalNote::c());
-    /// let c_minor_chord = c_major.transpose_to(&c_minor_key, Some(&c_key)).unwrap();
-    /// ```
-    pub fn transpose_to(&self, target_key: &Key, source_key: Option<&Key>) -> Option<Self> {
-        // Get the current root note
-        let current_root = self.root_note(source_key)?;
-        let target_root = target_key.root();
-
-        // Check if the scale mode changed - if so, we need to map scale degrees
-        let source_scale_mode = source_key.map(|k| k.mode);
-        let target_scale_mode = target_key.mode;
-        let scale_mode_changed =
-            source_scale_mode.is_some() && source_scale_mode.unwrap() != target_scale_mode;
-
-        // Calculate the transposition interval
-        // If scale mode changed and the chord root is a scale degree in the source key,
-        // we need to find what scale degree it is and map to that degree in target key
-        let interval_semitones = if scale_mode_changed && source_key.is_some() {
-            let src_key = source_key.unwrap();
-
-            // Check if current root is a scale degree in source key
-            let mut found_scale_degree = None;
-            for deg in 1..=7 {
-                if let Some(scale_note) = src_key.get_scale_degree(deg) {
-                    if scale_note.semitone == current_root.semitone {
-                        found_scale_degree = Some(deg);
-                        break;
-                    }
-                }
-            }
-
-            if let Some(degree) = found_scale_degree {
-                // Map to the same degree in target key
-                if let Some(target_scale_note) = target_key.get_scale_degree(degree) {
-                    (target_scale_note.semitone + 12 - current_root.semitone) % 12
-                } else {
-                    (target_root.semitone + 12 - current_root.semitone) % 12
-                }
-            } else {
-                (target_root.semitone + 12 - current_root.semitone) % 12
-            }
-        } else {
-            (target_root.semitone + 12 - current_root.semitone) % 12
-        };
-
-        // Step 1: Transpose all notes by the musical note interval
-        // This changes E → Eb, but doesn't change chord quality
-        let mut transposed_notes: Vec<MusicalNote> = Vec::new();
-
-        for &degree in &self.semantic_degrees {
-            if let Some(interval) = self.intervals.get(&degree) {
-                let semantic_interval = degree.semantic_interval();
-                let semitone_offset = interval.semitones();
-                let new_semitone =
-                    (current_root.semitone + semitone_offset + interval_semitones) % 12;
-
-                // For the root degree
-                if degree == ChordDegree::Root {
-                    // Calculate the transposed root semitone
-                    let transposed_root_semitone =
-                        (current_root.semitone + interval_semitones) % 12;
-
-                    // Try to find this in the target scale
-                    let mut found_root = false;
-                    for scale_deg in 1..=7 {
-                        if let Some(scale_note) = target_key.get_scale_degree(scale_deg) {
-                            if scale_note.semitone == transposed_root_semitone {
-                                transposed_notes.push(scale_note);
-                                found_root = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if !found_root {
-                        // Not in scale - use enharmonic spelling
-                        let note = MusicalNote::enharmonic_from_root(
-                            target_root,
-                            transposed_root_semitone,
-                            1,
-                        );
-                        transposed_notes.push(note);
-                    }
-                } else {
-                    // For other notes, try to find in target scale first
-                    let mut found_in_scale = false;
-                    for scale_deg in 1..=7 {
-                        if let Some(scale_note) = target_key.get_scale_degree(scale_deg) {
-                            if scale_note.semitone == new_semitone {
-                                transposed_notes.push(scale_note);
-                                found_in_scale = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if !found_in_scale {
-                        // Not in scale - use enharmonic spelling
-                        let note = MusicalNote::enharmonic_from_root(
-                            target_root,
-                            new_semitone,
-                            semantic_interval,
-                        );
-                        transposed_notes.push(note);
-                    }
-                }
-            }
-        }
-
-        // Step 2: If scale mode changed, apply scale transformations
-        // This changes chord quality (Major → Minor, etc.)
-        // We need to compare the actual ScaleMode, not just ScaleType,
-        // because Ionian and Aeolian are both Diatonic but different modes
-        let source_scale_mode = source_key.map(|k| k.mode);
-        let target_scale_mode = target_key.mode;
-        let scale_mode_changed =
-            source_scale_mode.is_some() && source_scale_mode.unwrap() != target_scale_mode;
-
-        if scale_mode_changed {
-            let mut scale_transformed_notes: Vec<MusicalNote> = Vec::new();
-
-            // Find where the chord root is in the target scale
-            let new_chord_root = &transposed_notes[0];
-            let mut chord_root_scale_degree = None;
-            for deg in 1..=7 {
-                if let Some(scale_note) = target_key.get_scale_degree(deg) {
-                    if scale_note.semitone == new_chord_root.semitone {
-                        chord_root_scale_degree = Some(deg);
-                        break;
-                    }
-                }
-            }
-
-            if let Some(root_deg) = chord_root_scale_degree {
-                // For each chord tone, count up from the chord root's position in the scale
-                // This includes extensions (9th, 11th, 13th) which we handle by:
-                // 1. Flattening to get the scale degree (9 → 2, 11 → 4, 13 → 6)
-                // 2. Transforming through the scale
-                // 3. Preserving the octave offset
-
-                for &degree in &self.semantic_degrees {
-                    if let Some(interval) = self.intervals.get(&degree) {
-                        let original_semitones = interval.semitones();
-                        let octave_offset = (original_semitones / 12) * 12;
-
-                        // Use semantic_interval which already flattens (9th→2, 11th→4, 13th→6)
-                        let semantic_interval = degree.semantic_interval();
-
-                        // Calculate which scale degree this chord tone should map to
-                        let target_scale_deg = ((root_deg - 1) + (semantic_interval - 1)) % 7 + 1;
-
-                        if let Some(scale_note) = target_key.get_scale_degree(target_scale_deg) {
-                            // Calculate the new semitone value with octave preserved
-                            let new_semitone_within_octave =
-                                (scale_note.semitone + 12 - new_chord_root.semitone) % 12;
-                            let new_total_semitones = new_semitone_within_octave + octave_offset;
-
-                            // Create a note with the transformed pitch but preserve the name from scale
-                            let mut transformed_note = scale_note;
-                            // The semitone is used for sorting and interval calculation
-                            // but the name (e.g., "Ab") comes from the scale
-                            transformed_note.semitone = new_total_semitones;
-
-                            scale_transformed_notes.push(transformed_note);
-                        }
-                    }
-                }
-
-                transposed_notes = scale_transformed_notes;
-            }
-            // If chord root not in scale, keep original transposed notes
-        }
-
-        // The first note is the new root
-        // If the root has semitone 0 (relative), we need to find its absolute semitone
-        // by looking up its name in the target key
-        let root_note_for_notation = if transposed_notes[0].semitone == 0 {
-            // Root is relative (semitone 0), find absolute semitone by looking up the name
-            let root_name = &transposed_notes[0].name;
-            let mut absolute_note = transposed_notes[0].clone();
-            // Search for this note name in the target scale
-            for deg in 1..=7 {
-                if let Some(scale_note) = target_key.get_scale_degree(deg) {
-                    if scale_note.name == *root_name {
-                        absolute_note.semitone = scale_note.semitone;
-                        break;
-                    }
-                }
-            }
-            absolute_note
-        } else {
-            transposed_notes[0].clone()
-        };
-        let new_root = RootNotation::from_note_name(root_note_for_notation);
-
-        // Recalculate quality from the transposed notes
-        let new_quality = self.calculate_quality_from_notes(&transposed_notes)?;
-
-        // Recalculate family if needed
-        let new_family = if scale_mode_changed && self.family.is_some() {
-            // If quality changed, we need to update the family
-            if new_quality != self.quality {
-                match (new_quality, self.family.unwrap()) {
-                    (ChordQuality::Major, ChordFamily::Minor7) => Some(ChordFamily::Dominant7),
-                    (ChordQuality::Major, ChordFamily::MinorMajor7) => Some(ChordFamily::Major7),
-                    (ChordQuality::Minor, ChordFamily::Major7) => Some(ChordFamily::MinorMajor7),
-                    (ChordQuality::Minor, ChordFamily::Dominant7) => Some(ChordFamily::Minor7),
-                    _ => self.family,
-                }
-            } else {
-                self.family
-            }
-        } else {
-            self.family
-        };
-
-        // After scale transformation, recalculate extensions to be all Natural
-        // because the transformed notes are now the natural scale degrees in the target scale
-        let new_extensions = if scale_mode_changed && self.extensions.has_any() {
-            let mut ext = Extensions::none();
-            if self.extensions.ninth.is_some() {
-                ext.ninth = Some(ExtensionQuality::Natural);
-            }
-            if self.extensions.eleventh.is_some() {
-                ext.eleventh = Some(ExtensionQuality::Natural);
-            }
-            if self.extensions.thirteenth.is_some() {
-                ext.thirteenth = Some(ExtensionQuality::Natural);
-            }
-            ext
-        } else {
-            self.extensions.clone()
-        };
-
-        // Create a new chord with transposed properties
-        let mut transposed = Self {
-            origin: String::new(),
-            descriptor: self.descriptor.clone(),
-            normalized: String::new(),
-            root: new_root,
-            quality: new_quality,
-            family: new_family,
-            extensions: new_extensions,
-            alterations: self.alterations.clone(),
-            additions: self.additions.clone(),
-            omissions: self.omissions.clone(),
-            bass: if let Some(ref bass) = self.bass {
-                self.transpose_root_notation(bass, interval_semitones)
-            } else {
-                None
-            },
-            duration: self.duration.clone(),
-            intervals: HashMap::new(),
-            semantic_degrees: Vec::new(),
-            tokens_consumed: 0,
-        };
-
-        // If scale was transformed, build intervals from the transformed notes
-        // Otherwise, compute intervals normally
-        if scale_mode_changed && !transposed_notes.is_empty() {
-            // Build intervals map from the transformed notes
-            let new_root_semitone = transposed_notes[0].semitone;
-            for (i, &degree) in self.semantic_degrees.iter().enumerate() {
-                if i < transposed_notes.len() {
-                    let note_semitone = transposed_notes[i].semitone;
-                    // Calculate semitone difference (preserving octave information)
-                    let semitone_diff = (note_semitone + 120 - new_root_semitone) % 120;
-
-                    // Map the semitone difference to the appropriate Interval variant
-                    // For extensions (9th, 11th, 13th), we need to use the extension-specific variants
-                    let interval = match (degree, semitone_diff % 12) {
-                        // 9ths
-                        (ChordDegree::Ninth, 1) => Some(Interval::FlatNinth),
-                        (ChordDegree::Ninth, 2) => Some(Interval::Ninth),
-                        (ChordDegree::Ninth, 3) => Some(Interval::SharpNinth),
-                        // 11ths
-                        (ChordDegree::Eleventh, 5) => Some(Interval::Eleventh),
-                        (ChordDegree::Eleventh, 6) => Some(Interval::SharpEleventh),
-                        // 13ths
-                        (ChordDegree::Thirteenth, 8) => Some(Interval::FlatThirteenth),
-                        (ChordDegree::Thirteenth, 9) => Some(Interval::Thirteenth),
-                        // Everything else use from_semitones
-                        _ => Interval::from_semitones(semitone_diff % 12),
-                    };
-
-                    if let Some(interval) = interval {
-                        transposed.intervals.insert(degree, interval);
-                    }
-                }
-            }
-            transposed.semantic_degrees = self.semantic_degrees.clone();
-        } else {
-            // Recompute intervals normally
-            transposed.compute_intervals();
-        }
-
-        transposed.normalize();
-
-        Some(transposed)
-    }
-
-    /// Helper: Transpose a root notation by a semitone interval
-    fn transpose_root_notation(&self, root: &RootNotation, semitones: u8) -> Option<RootNotation> {
-        if let Some(note) = root.resolve(None) {
-            let new_semitone = (note.semitone + semitones) % 12;
-            let new_note = MusicalNote::from_semitone(new_semitone, note.name.contains('#'));
-            Some(RootNotation::from_note_name(new_note))
-        } else {
-            None
-        }
-    }
-    /// Helper: Calculate chord quality from a set of notes (for scale-type transposition)
-    ///
-    /// Examines the interval between root and third to determine quality
-    fn calculate_quality_from_notes(&self, notes: &[MusicalNote]) -> Option<ChordQuality> {
-        if notes.is_empty() {
-            return None;
-        }
-
-        let root = &notes[0];
-
-        // Find the third (if present)
-        for note in notes.iter().skip(1) {
-            let interval = (note.semitone + 12 - root.semitone) % 12;
-            match interval {
-                3 => return Some(ChordQuality::Minor), // Minor third
-                4 => return Some(ChordQuality::Major), // Major third
-                _ => continue,
-            }
-        }
-
-        // No third found, keep original quality
-        Some(self.quality)
-    }
-
-    /// Get the scale degrees of each chord tone in a given key
-    ///
-    /// Returns a vector of tuples mapping each ChordDegree to its scale degree (1-7)
-    /// in the given key. This is useful for understanding the chord's function within
-    /// a key (e.g., "this chord has the 3rd and 7th of the key").
-    ///
-    /// # Arguments
-    /// * `key` - The key to analyze the chord in
-    ///
-    /// # Returns
-    /// * `Some(Vec<(ChordDegree, u8)>)` if the chord can be analyzed in this key
-    /// * `None` if the root cannot be resolved
-    ///
-    /// # Example
-    /// ```
-    /// use keyflow::chord::from_semitones;
-    /// use keyflow::primitives::{RootNotation, MusicalNote};
-    /// use keyflow::key::Key;
-    /// use keyflow::chord::ChordDegree;
-    ///
-    /// // Cmaj7 in C major: C=1, E=3, G=5, B=7
-    /// let root = RootNotation::from_note_name(MusicalNote::c());
-    /// // Cmaj7 = C (0), E (4), G (7), B (11)
-    /// let chord = from_semitones(&[0, 4, 7, 11], root).unwrap();
-    /// let degrees = chord.scale_degrees(&Key::major(MusicalNote::c())).unwrap();
-    /// assert_eq!(degrees[0], (ChordDegree::Root, 1));
-    /// assert_eq!(degrees[1], (ChordDegree::Third, 3));
-    /// ```
-    pub fn scale_degrees(&self, key: &Key) -> Option<Vec<(ChordDegree, u8)>> {
-        let key_root = key.root();
-
-        // Map each chord degree to its scale degree in the key
-        let mut result = Vec::with_capacity(self.semantic_degrees.len());
-
-        // Iterate through semantic_degrees (these are the chord tones we have)
-        for chord_degree in &self.semantic_degrees {
-            // Get the interval for this chord degree
-            if let Some(interval) = self.intervals.get(chord_degree) {
-                // Get the actual note for this interval
-                let root_note = self.root_note(Some(key))?;
-                let note_semitone = (root_note.semitone + interval.semitones()) % 12;
-
-                // Calculate the semitone distance from the key root
-                let interval_from_key = (note_semitone + 12 - key_root.semitone) % 12;
-
-                // Map semitones to scale degrees (1-7)
-                // This is approximate - in a real implementation you'd check against the actual scale
-                let scale_degree = match interval_from_key {
-                    0 => 1,       // Root
-                    1 | 2 => 2,   // Second (major or minor)
-                    3 | 4 => 3,   // Third (minor or major)
-                    5 => 4,       // Fourth
-                    6 | 7 => 5,   // Fifth (dim, perfect, or aug)
-                    8 | 9 => 6,   // Sixth (minor or major)
-                    10 | 11 => 7, // Seventh (minor or major)
-                    _ => 1,       // Fallback (shouldn't reach here)
-                };
-
-                result.push((*chord_degree, scale_degree));
-            }
-        }
-
-        Some(result)
-    }
-
-    pub(crate) fn normalize(&mut self) {
-        let mut desc = String::new();
-
-        let is_sixth_chord = self.additions.contains(&ChordDegree::Sixth) && self.family.is_none();
-        let is_six_nine_chord = is_sixth_chord && self.additions.contains(&ChordDegree::Ninth);
-
-        if is_sixth_chord && !is_six_nine_chord && self.quality == ChordQuality::Major {
-            desc.push_str("maj");
-        } else {
-            desc.push_str(&self.quality.to_string());
-        }
-
-        if let Some(ref family) = self.family {
-            if matches!(family, ChordFamily::Major7 | ChordFamily::MinorMajor7)
-                && self.extensions.has_any()
-            {
-                desc.push_str("maj");
-                if self.extensions.thirteenth.is_some() {
-                    desc.push_str("13");
-                } else if self.extensions.eleventh.is_some() {
-                    desc.push_str("11");
-                } else if self.extensions.ninth.is_some() {
-                    desc.push('9');
-                }
-                if let Some(qual) = self.extensions.ninth {
-                    if qual != ExtensionQuality::Natural {
-                        match qual {
-                            ExtensionQuality::Flat => desc.push_str("b9"),
-                            ExtensionQuality::Sharp => desc.push_str("#9"),
-                            _ => {}
-                        }
-                    }
-                }
-                if let Some(qual) = self.extensions.eleventh {
-                    if qual != ExtensionQuality::Natural {
-                        match qual {
-                            ExtensionQuality::Flat => desc.push_str("b11"),
-                            ExtensionQuality::Sharp => desc.push_str("#11"),
-                            _ => {}
-                        }
-                    }
-                }
-                if let Some(qual) = self.extensions.thirteenth {
-                    if qual != ExtensionQuality::Natural {
-                        match qual {
-                            ExtensionQuality::Flat => desc.push_str("b13"),
-                            ExtensionQuality::Sharp => desc.push_str("#13"),
-                            _ => {}
-                        }
-                    }
-                }
-            } else {
-                // Non-major family or no extensions
-                // The highest natural extension masks the seventh
-                // If all extensions are altered, the seventh must be shown explicitly
-                let should_show_seventh =
-                    !self.extensions.has_any() || !self.extensions.has_natural();
-                if should_show_seventh {
-                    desc.push_str(&family.to_string());
-                }
-                // Extensions
-                if self.extensions.has_any() {
-                    desc.push_str(&self.extensions.to_string());
-                }
-            }
-        } else {
-            // No family, just show extensions
-            if self.extensions.has_any() {
-                desc.push_str(&self.extensions.to_string());
-            }
-        }
-
-        // Alterations
-        for alteration in &self.alterations {
-            desc.push_str(&alteration.to_string());
-        }
-
-        // Additions (with special handling for 6 and 6/9)
-        let is_sixth_chord = self.additions.contains(&ChordDegree::Sixth) && self.family.is_none();
-        let is_six_nine_chord = is_sixth_chord && self.additions.contains(&ChordDegree::Ninth);
-
-        if is_six_nine_chord {
-            desc.push_str("6/9");
-            // Add any other additions
-            for addition in &self.additions {
-                if *addition != ChordDegree::Sixth && *addition != ChordDegree::Ninth {
-                    desc.push_str(&format!("add{}", addition));
-                }
-            }
-        } else {
-            for addition in &self.additions {
-                if *addition == ChordDegree::Sixth && is_sixth_chord {
-                    desc.push('6');
-                } else {
-                    desc.push_str(&format!("add{}", addition));
-                }
-            }
-        }
-
-        // Omissions
-        for omission in &self.omissions {
-            desc.push_str(&format!("no{}", omission));
-        }
-
-        // Bass note
-        if let Some(ref bass) = self.bass {
-            desc.push_str(&format!("/{}", bass));
-        }
-
-        self.descriptor = desc.clone();
-        self.normalized = format!("{}{}", self.root, desc);
-    }
-
+impl Chord {
     /// Parse a chord from tokens
     ///
     /// Expected format:
@@ -1067,6 +259,19 @@ impl Chord {
             family
         };
 
+        // Step 4b: Check for "sus" after family/extensions for "7sus4" format
+        // This handles chords like "G7sus4" or "C9sus4" where sus comes after the 7th
+        let mut quality = quality.0;
+        if consumed < tokens.len() && family.is_some() {
+            if let Ok((sus_quality, sus_consumed)) = Self::parse_suspended_suffix(&tokens[consumed..]) {
+                if matches!(sus_quality, ChordQuality::Suspended(_)) {
+                    quality = sus_quality;
+                    consumed += sus_consumed;
+                    debug!("Parsed suspended suffix (7sus4 format): {:?}, consumed {}", quality, sus_consumed);
+                }
+            }
+        }
+
         // Step 5: Parse alterations (b5, #5, b9, #9, #11, b13) if present
         let alterations = if consumed < tokens.len() {
             trace!("Parsing alterations from remaining tokens");
@@ -1158,7 +363,26 @@ impl Chord {
             omissions.0, consumed
         );
 
-        // Step 9: Parse slash chord (bass note) if present
+        // Step 9a: Check for slash family notation (/maj7, /m7) before slash chord
+        // This handles cases like "Abaug/maj7" or "Cm/maj7"
+        let mut final_family = family.clone();
+        if consumed < tokens.len() {
+            if let Ok((Some(slash_family), slash_consumed)) =
+                Self::parse_slash_family(&tokens[consumed..])
+            {
+                // Override or set the family from slash notation
+                if final_family.is_none() {
+                    final_family = Some(slash_family);
+                }
+                consumed += slash_consumed;
+                debug!(
+                    "Parsed slash family: {:?}, total consumed: {}",
+                    slash_family, consumed
+                );
+            }
+        }
+
+        // Step 9b: Parse slash chord (bass note) if present
         let bass = if consumed < tokens.len() {
             trace!("Parsing slash chord from remaining tokens");
             Self::parse_slash_chord(&tokens[consumed..])?
@@ -1193,7 +417,7 @@ impl Chord {
 
         debug!(
             "Chord parsing complete: root={:?}, quality={:?}, family={:?}, extensions={:?}, duration={:?}",
-            root_result.root, quality.0, family, extensions, duration
+            root_result.root, quality, final_family, extensions, duration
         );
 
         let mut chord = Self {
@@ -1201,8 +425,8 @@ impl Chord {
             descriptor: String::new(), // Will be computed
             normalized: String::new(), // Will be computed in normalize()
             root: root_result.root,
-            quality: quality.0,
-            family,
+            quality,
+            family: final_family,
             extensions,
             alterations: alterations.clone(),
             additions: additions.0,
@@ -1400,6 +624,15 @@ impl Chord {
                 break;
             }
 
+            // Skip whitespace before "add"
+            while consumed < tokens.len() && matches!(tokens[consumed].token_type, TokenType::Space) {
+                consumed += 1;
+            }
+
+            if consumed >= tokens.len() {
+                break;
+            }
+
             // Check for "add"
             if consumed + 2 < tokens.len() {
                 if let TokenType::Letter('a') = tokens[consumed].token_type {
@@ -1514,6 +747,9 @@ impl Chord {
 
     /// Parse slash chord (bass note): /E, /G, etc.
     /// Returns (Option<RootNotation>, tokens_consumed)
+    ///
+    /// Note: This does NOT handle "/maj7" or "/m7" - those are handled by
+    /// `parse_slash_family` which should be called first.
     fn parse_slash_chord(tokens: &[Token]) -> Result<(Option<RootNotation>, usize), ParseError> {
         if tokens.is_empty() {
             return Ok((None, 0));
@@ -1545,11 +781,105 @@ impl Chord {
         Ok((None, 0))
     }
 
+    /// Parse slash family notation: /maj7, /m7, etc.
+    /// This handles cases like "Abaug/maj7" where the slash indicates family, not bass note.
+    /// Returns (Option<ChordFamily>, tokens_consumed)
+    fn parse_slash_family(tokens: &[Token]) -> Result<(Option<ChordFamily>, usize), ParseError> {
+        if tokens.len() < 2 {
+            return Ok((None, 0));
+        }
+
+        // Check for slash
+        if !matches!(tokens[0].token_type, TokenType::Slash) {
+            return Ok((None, 0));
+        }
+
+        // Check for "maj7" after slash
+        if tokens.len() >= 5 {
+            if let (
+                TokenType::Letter('m'),
+                TokenType::Letter('a'),
+                TokenType::Letter('j'),
+                TokenType::Number(n),
+            ) = (
+                &tokens[1].token_type,
+                &tokens[2].token_type,
+                &tokens[3].token_type,
+                &tokens[4].token_type,
+            ) {
+                if n == "7" {
+                    return Ok((Some(ChordFamily::Major7), 5));
+                }
+            }
+        }
+
+        // Check for "m7" after slash (minor-major 7th or just minor 7th context)
+        if tokens.len() >= 3 {
+            if let (TokenType::Letter('m'), TokenType::Number(n)) =
+                (&tokens[1].token_type, &tokens[2].token_type)
+            {
+                if n == "7" {
+                    // /m7 in context like "Caug/m7" would be unusual
+                    // but "Cm/maj7" means minor with major 7th
+                    return Ok((Some(ChordFamily::MinorMajor7), 3));
+                }
+            }
+        }
+
+        Ok((None, 0))
+    }
+
+    /// Parse suspended suffix: sus, sus2, sus4
+    /// This handles the "7sus4" format where sus comes after the family
+    /// Returns (ChordQuality, tokens_consumed)
+    fn parse_suspended_suffix(tokens: &[Token]) -> Result<(ChordQuality, usize), ParseError> {
+        if tokens.len() < 3 {
+            return Ok((ChordQuality::Major, 0));
+        }
+
+        // Check for "sus"
+        if let (
+            TokenType::Letter('s'),
+            TokenType::Letter('u'),
+            TokenType::Letter('s'),
+        ) = (
+            &tokens[0].token_type,
+            &tokens[1].token_type,
+            &tokens[2].token_type,
+        ) {
+            let mut consumed = 3;
+
+            // Check for "2" or "4" after "sus"
+            if consumed < tokens.len() {
+                if let TokenType::Number(n) = &tokens[consumed].token_type {
+                    match n.as_str() {
+                        "2" => {
+                            return Ok((ChordQuality::Suspended(SuspendedType::Second), consumed + 1));
+                        }
+                        "4" => {
+                            return Ok((ChordQuality::Suspended(SuspendedType::Fourth), consumed + 1));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            // Just "sus" defaults to sus4
+            return Ok((ChordQuality::Suspended(SuspendedType::Fourth), consumed));
+        }
+
+        Ok((ChordQuality::Major, 0))
+    }
+
     /// Get the number of tokens consumed during parsing
     pub fn tokens_consumed(&self) -> usize {
         self.tokens_consumed
     }
 }
+
+// endregion: --- Parsing
+
+// region:    --- LilyPond
 
 impl Chord {
     /// Convert this chord to LilyPond chordmode notation
@@ -1672,6 +1002,10 @@ impl Chord {
     }
 }
 
+// endregion: --- LilyPond
+
+// region:    --- Display
+
 impl std::fmt::Display for Chord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Root
@@ -1681,6 +1015,11 @@ impl std::fmt::Display for Chord {
         let is_sixth_chord = self.additions.contains(&ChordDegree::Sixth) && self.family.is_none();
         let is_six_nine_chord = is_sixth_chord && self.additions.contains(&ChordDegree::Ninth);
 
+        // Check if this is a suspended chord with a seventh/extensions
+        // These display as "C7sus4" or "C9sus4", not "Csus47" or "Csus49"
+        let is_suspended = matches!(self.quality, ChordQuality::Suspended(_));
+        let is_suspended_with_seventh = is_suspended && self.family.is_some();
+
         // Quality (uses its own Display which outputs the symbol)
         // Special case: Power chord with only Second addition displays as "2" not "52"
         // So we skip displaying the quality "5" in this case
@@ -1689,11 +1028,14 @@ impl std::fmt::Display for Chord {
             && self.additions.contains(&ChordDegree::Second)
             && self.family.is_none();
 
-        // For major sixth chords, we need to show "maj" explicitly (Cmaj6, not C6)
-        // EXCEPT for 6/9 chords which stay as C6/9 (not Cmaj6/9)
-        // For minor sixth chords, "m" is already shown by the quality
-        if is_sixth_chord && !is_six_nine_chord && self.quality == ChordQuality::Major {
-            write!(f, "maj")?;
+        // For suspended chords with sevenths, we defer writing the "sus" part
+        // until after the family/extensions (C7sus4, not Csus47)
+        if is_suspended_with_seventh {
+            // Don't write quality yet - will be written after family/extensions
+        } else if is_sixth_chord && self.quality == ChordQuality::Major {
+            // For major sixth chords, just use "C6" (standard notation)
+            // Minor sixth chords will show "Cm6" via the quality display
+            // Skip quality display for major sixth chords
         } else if !is_power_with_second {
             // Skip quality display for Power+Second (will show as "2" in additions)
             write!(f, "{}", self.quality)?;
@@ -1834,6 +1176,12 @@ impl std::fmt::Display for Chord {
             }
         }
 
+        // For suspended chords with sevenths, write the "sus" part now
+        // (after family/extensions, so we get "C7sus4" not "Csus47")
+        if is_suspended_with_seventh {
+            write!(f, "{}", self.quality)?;
+        }
+
         // Alterations (each uses its own Display)
         for alteration in &self.alterations {
             write!(f, "{}", alteration)?;
@@ -1890,6 +1238,10 @@ impl std::fmt::Display for Chord {
         Ok(())
     }
 }
+
+// endregion: --- Display
+
+// region:    --- Tests
 
 #[cfg(test)]
 mod tests {
@@ -2014,8 +1366,12 @@ mod tests {
 
         assert_eq!(chord.quality, ChordQuality::Major);
         assert!(chord.duration.is_some());
-        if let Some(ChordRhythm::Lily { duration, .. }) = chord.duration {
-            assert_eq!(duration, LilySyntax::Quarter);
+        if let Some(rhythm) = &chord.duration {
+            if let Some((duration, _dotted, _triplet)) = rhythm.lily_parts() {
+                assert_eq!(duration, LilySyntax::Quarter);
+            } else {
+                panic!("Expected lily duration");
+            }
         } else {
             panic!("Expected Lily duration");
         }
@@ -2029,7 +1385,7 @@ mod tests {
 
         assert_eq!(chord.quality, ChordQuality::Minor);
         assert!(chord.duration.is_some());
-        if let Some(ChordRhythm::Slashes(count)) = chord.duration {
+        if let Some(ChordRhythm::Slashes { count, .. }) = chord.duration {
             assert_eq!(count, 4);
         } else {
             panic!("Expected Slashes duration");
@@ -2056,12 +1412,13 @@ mod tests {
 
         assert_eq!(chord.quality, ChordQuality::Major);
         assert!(chord.duration.is_some());
-        if let Some(ChordRhythm::Lily {
-            duration, dotted, ..
-        }) = chord.duration
-        {
-            assert_eq!(duration, LilySyntax::Eighth);
-            assert!(dotted);
+        if let Some(rhythm) = &chord.duration {
+            if let Some((duration, dotted, _triplet)) = rhythm.lily_parts() {
+                assert_eq!(duration, LilySyntax::Eighth);
+                assert!(dotted);
+            } else {
+                panic!("Expected lily duration");
+            }
         } else {
             panic!("Expected dotted Lily duration");
         }
@@ -2600,13 +1957,13 @@ mod tests {
         assert_eq!(chord.family, None);
         assert!(chord.has_degree(ChordDegree::Sixth));
 
-        // Display should show "Cmaj6" (major sixth chord)
+        // Display should show "C6" (major sixth chord - standard notation)
         let display = format!("{}", chord);
-        assert_eq!(display, "Cmaj6");
+        assert_eq!(display, "C6");
 
-        // Normalized should also be "Cmaj6"
-        assert_eq!(chord.normalized, "Cmaj6");
-        assert_eq!(chord.descriptor, "maj6");
+        // Normalized should also be "C6"
+        assert_eq!(chord.normalized, "C6");
+        assert_eq!(chord.descriptor, "6");
     }
 
     #[test]
@@ -3174,7 +2531,7 @@ mod tests {
         assert_eq!(transposed.quality, ChordQuality::Major);
         assert!(transposed.additions.contains(&ChordDegree::Sixth));
         assert_eq!(transposed.root_note(None).unwrap().name, "A");
-        assert_eq!(transposed.to_string(), "Amaj6"); // Major sixth chords display as "maj6"
+        assert_eq!(transposed.to_string(), "A6"); // Major sixth chords display as "6"
     }
 
     #[test]
@@ -3425,3 +2782,64 @@ mod tests {
         assert_eq!(transposed.to_string(), "A13");
     }
 }
+
+// endregion: --- Tests
+
+// region:    --- ChordSymbol Trait Implementation
+
+use crate::core::ChordSymbol;
+
+impl ChordSymbol for Chord {
+    fn root_str(&self) -> String {
+        self.root.to_string()
+    }
+
+    fn quality_str(&self) -> &str {
+        self.quality.symbol()
+    }
+
+    fn seventh_str(&self) -> Option<&str> {
+        self.family.as_ref().map(|f| f.symbol())
+    }
+
+    fn extensions_str(&self) -> String {
+        let mut result = String::new();
+
+        // Build extension string from highest to lowest
+        if self.extensions.thirteenth.is_some() {
+            result.push_str("13");
+        } else if self.extensions.eleventh.is_some() {
+            result.push_str("11");
+        } else if self.extensions.ninth.is_some() {
+            result.push_str("9");
+        }
+
+        result
+    }
+
+    fn alterations_str(&self) -> String {
+        let mut result = String::new();
+
+        for alt in &self.alterations {
+            result.push_str(&alt.to_string());
+        }
+
+        result
+    }
+
+    fn bass_str(&self) -> Option<String> {
+        self.bass.as_ref().map(|b| b.to_string())
+    }
+
+    // Override to use the already-computed normalized field
+    fn to_symbol_string(&self) -> String {
+        if self.normalized.is_empty() {
+            // Fallback to Display impl if normalized not set
+            self.to_string()
+        } else {
+            format!("{}{}", self.root, self.normalized)
+        }
+    }
+}
+
+// endregion: --- ChordSymbol Trait Implementation

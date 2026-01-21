@@ -24,7 +24,7 @@ pub struct TimingAnalysisConfig {
 impl Default for TimingAnalysisConfig {
     fn default() -> Self {
         Self {
-            source_ppq: 960, // REAPER default
+            source_ppq: 960,      // REAPER default
             on_beat_tolerance: 5, // Very tight for quantized MIDI
             detect_triplets: true,
             detect_standard: true,
@@ -88,11 +88,11 @@ pub fn analyze_chord_timing(
     // For 4/4: beat = quarter note = source_ppq ticks
     // For 6/8: beat = eighth note = source_ppq / 2 ticks
     let ticks_per_beat = match time_sig_denominator {
-        2 => config.source_ppq * 2, // half note beats
-        4 => config.source_ppq,     // quarter note beats
-        8 => config.source_ppq / 2, // eighth note beats
+        2 => config.source_ppq * 2,  // half note beats
+        4 => config.source_ppq,      // quarter note beats
+        8 => config.source_ppq / 2,  // eighth note beats
         16 => config.source_ppq / 4, // sixteenth note beats
-        _ => config.source_ppq,     // default to quarter
+        _ => config.source_ppq,      // default to quarter
     };
 
     let ticks_per_measure = ticks_per_beat * beats_per_measure as i64;
@@ -255,11 +255,14 @@ pub fn has_rhythmic_complexity(analyses: &[ChordTimingAnalysis]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chord::Chord;
+    use crate::chord::{Chord, ChordQuality};
+    use crate::primitives::{MusicalNote, RootNotation};
 
     fn make_detected_chord(start_ppq: i64, end_ppq: i64) -> DetectedChord {
+        let c_note = MusicalNote::from_string("C").unwrap();
+        let root = RootNotation::from_note_name(c_note);
         DetectedChord {
-            chord: Chord::major("C".to_string()),
+            chord: Chord::new(root, ChordQuality::Major),
             start_ppq,
             end_ppq,
             root_pitch: 60,

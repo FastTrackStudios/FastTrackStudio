@@ -262,26 +262,15 @@ impl Extensions {
                         }
                         "11" => {
                             debug!("Parsed 11th extension: {:?}", quality);
-                            // Natural 11 implies natural 9 (only if not already set)
-                            // Altered 11 does NOT imply anything
-                            if quality == ExtensionQuality::Natural && ninth.is_none() {
-                                ninth = Some(ExtensionQuality::Natural);
-                            }
+                            // Don't add implied 9th - preserve exactly what was written
+                            // The compute_intervals() method handles implied notes for voicing
                             eleventh = Some(quality);
                             consumed += 1;
                         }
                         "13" => {
                             debug!("Parsed 13th extension: {:?}", quality);
-                            // Natural 13 implies natural 9 and natural 11 (only if not already set)
-                            // Altered 13 does NOT imply anything
-                            if quality == ExtensionQuality::Natural {
-                                if ninth.is_none() {
-                                    ninth = Some(ExtensionQuality::Natural);
-                                }
-                                if eleventh.is_none() {
-                                    eleventh = Some(ExtensionQuality::Natural);
-                                }
-                            }
+                            // Don't add implied 9th/11th - preserve exactly what was written
+                            // The compute_intervals() method handles implied notes for voicing
                             thirteenth = Some(quality);
                             consumed += 1;
                         }
@@ -326,26 +315,48 @@ impl Extensions {
 
 impl std::fmt::Display for Extensions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // In standard chord notation, we show altered extensions inline
-        // e.g., "C7b9", "C13#11", etc.
-        // We display from lowest to highest so alterations appear in order
+        // In standard chord notation:
+        // - The highest natural extension becomes the chord name (C11, C13)
+        // - Lower natural extensions are implied and not shown
+        // - Altered extensions are always shown (C13#11, C11b9)
+        //
+        // Examples:
+        // - 9 natural → "9"
+        // - 11 natural (implies 9) → "11"
+        // - 13 natural (implies 9, 11) → "13"
+        // - 9 natural + 11 natural → "11" (9 is implied)
+        // - 9 sharp + 11 natural → "11#9" (altered 9 shown)
+        // - 9 natural + 11 sharp → "9#11" (show 9, then altered 11)
 
+        let highest_natural = self.highest();
+
+        // Show 9th if:
+        // - It's the highest extension, OR
+        // - It's altered (b9, #9)
         if let Some(quality) = self.ninth {
+            let is_highest = matches!(highest_natural, Some(ChordDegree::Ninth));
             match quality {
-                ExtensionQuality::Natural => write!(f, "9")?,
+                ExtensionQuality::Natural if is_highest => write!(f, "9")?,
+                ExtensionQuality::Natural => {} // Implied by higher extension
                 ExtensionQuality::Flat => write!(f, "b9")?,
                 ExtensionQuality::Sharp => write!(f, "#9")?,
             }
         }
 
+        // Show 11th if:
+        // - It's the highest extension, OR
+        // - It's altered (#11)
         if let Some(quality) = self.eleventh {
+            let is_highest = matches!(highest_natural, Some(ChordDegree::Eleventh));
             match quality {
-                ExtensionQuality::Natural => write!(f, "11")?,
+                ExtensionQuality::Natural if is_highest => write!(f, "11")?,
+                ExtensionQuality::Natural => {} // Implied by 13th
                 ExtensionQuality::Flat => write!(f, "b11")?,
                 ExtensionQuality::Sharp => write!(f, "#11")?,
             }
         }
 
+        // 13th is always shown if present (it's the highest possible)
         if let Some(quality) = self.thirteenth {
             match quality {
                 ExtensionQuality::Natural => write!(f, "13")?,

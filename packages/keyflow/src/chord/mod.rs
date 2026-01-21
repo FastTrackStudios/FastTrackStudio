@@ -1,14 +1,31 @@
 //! Chord system
 //!
 //! Defines chords with quality, family, extensions, alterations, and parsing
+//!
+//! # Module Organization
+//!
+//! - [`definition`] - Core Chord struct and construction
+//! - [`intervals`] - Interval computation and queries (impl blocks for Chord)
+//! - [`normalization`] - Chord symbol normalization (impl blocks for Chord)
+//! - [`transposition`] - Transposition and key analysis (impl blocks for Chord)
+//! - [`quality`], [`family`], [`extensions`] - Chord component types
+//! - [`alteration`], [`degree`] - Modification types
+//! - [`duration`] - Rhythm notation
+//! - [`root`] - Root parsing
+//! - [`semitone_sequence`] - Building chords from semitones
+//! - [`midi`] - MIDI note detection
 
 pub mod alteration;
 pub mod definition;
 pub mod degree;
+pub mod detail_level;
 pub mod duration;
 pub mod error;
 pub mod extensions;
 pub mod family;
+mod intervals; // Internal module - extends Chord with interval methods
+mod normalization; // Internal module - extends Chord with normalization
+mod transposition; // Internal module - extends Chord with transposition
 pub mod midi;
 pub mod quality;
 pub mod root;
@@ -18,6 +35,7 @@ pub mod timing;
 pub use alteration::Alteration;
 pub use definition::Chord;
 pub use degree::ChordDegree;
+pub use detail_level::{DetailLevel, UpperStructure};
 pub use duration::{ChordRhythm, LilySyntax, PushPullAmount, PushPullBase};
 pub use error::{ChordParseError, ChordParseErrors};
 pub use extensions::{ExtensionQuality, Extensions};
@@ -27,7 +45,7 @@ pub use midi::{
 };
 pub use quality::{ChordQuality, SuspendedType};
 pub use root::{RootParseResult, parse_root};
-pub use semitone_sequence::{SemitoneSequenceError, from_semitones, quality_from_semitones};
+pub use semitone_sequence::{SemitoneSequenceError, from_semitones, from_semitones_no_inversion, quality_from_semitones};
 pub use timing::{
     ChordTimingAnalysis, TimingAnalysisConfig, analyze_chord_timing, has_rhythmic_complexity,
     reaper_ppq_to_layout_ticks,
