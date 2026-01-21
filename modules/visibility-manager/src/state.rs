@@ -4,9 +4,9 @@
 //! Lua implementation, this version dynamically analyzes tracks and creates
 //! groups based on actual content rather than hardcoded presets.
 
-use crate::classification::{classify_tracks, known_groups, TrackClassification};
+use crate::classification::{TrackClassification, classify_tracks, known_groups};
 use crate::error::{Error, Result};
-use crate::group::{color_for_category, VisibilityGroup, VisibilityGroupId};
+use crate::group::{VisibilityGroup, VisibilityGroupId, color_for_category};
 use crate::snapshot::{Snapshot, SnapshotId, SnapshotStore};
 use crate::visibility::{TrackVisibility, VisibilityChanges, VisibilityTarget};
 use serde::{Deserialize, Serialize};
@@ -111,9 +111,8 @@ impl VisibilityManager {
     fn create_groups_from_classifications(&mut self, tracks: &[daw::tracks::Track]) {
         // Clear existing auto-generated groups (keep custom ones)
         self.groups.retain(|_, g| g.is_custom);
-        self.group_order.retain(|id| {
-            self.groups.get(id).map(|g| g.is_custom).unwrap_or(false)
-        });
+        self.group_order
+            .retain(|id| self.groups.get(id).map(|g| g.is_custom).unwrap_or(false));
 
         // Create groups for each known category
         for category in known_groups() {
@@ -147,9 +146,7 @@ impl VisibilityManager {
 
         for (index, track) in tracks.iter().enumerate() {
             let classification = self.classifications.get(&track.name.0);
-            let is_classified = classification
-                .map(|c| c.is_classified())
-                .unwrap_or(false);
+            let is_classified = classification.map(|c| c.is_classified()).unwrap_or(false);
 
             if !is_classified {
                 unsorted.add_track(index);
@@ -253,7 +250,9 @@ impl VisibilityManager {
 
     /// Deactivate a group (hide its tracks)
     pub fn deactivate_group(&mut self, id: &VisibilityGroupId) -> Result<VisibilityChanges> {
-        let group = self.groups.get_mut(id)
+        let group = self
+            .groups
+            .get_mut(id)
             .ok_or_else(|| Error::GroupNotFound(id.0.clone()))?;
 
         let mut changes = VisibilityChanges::new(self.target);
@@ -273,7 +272,9 @@ impl VisibilityManager {
 
     /// Toggle a group's visibility
     pub fn toggle_group(&mut self, id: &VisibilityGroupId) -> Result<VisibilityChanges> {
-        let is_active = self.groups.get(id)
+        let is_active = self
+            .groups
+            .get(id)
             .ok_or_else(|| Error::GroupNotFound(id.0.clone()))?
             .active;
 
@@ -335,7 +336,9 @@ impl VisibilityManager {
 
     /// Restore visibility from a snapshot
     pub fn restore_snapshot(&mut self, id: &SnapshotId) -> Result<VisibilityChanges> {
-        let snapshot = self.snapshots.get(id)
+        let snapshot = self
+            .snapshots
+            .get(id)
             .ok_or_else(|| Error::SnapshotNotFound(id.0.clone()))?
             .clone();
 
@@ -361,7 +364,8 @@ impl VisibilityManager {
         // Update group active states based on track visibility
         for group in self.groups.values_mut() {
             let all_visible = group.track_indices.iter().all(|&idx| {
-                self.track_visibility.get(&idx)
+                self.track_visibility
+                    .get(&idx)
                     .map(|v| v.is_visible(snapshot.target))
                     .unwrap_or(false)
             });

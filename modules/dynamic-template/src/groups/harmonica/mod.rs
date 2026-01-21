@@ -11,7 +11,7 @@ impl From<Harmonica> for Group<ItemMetadata> {
         Group::builder("Harmonica")
             .patterns(vec![
                 "harmonica",
-                "harp",  // Common blues term for harmonica
+                "harp", // Common blues term for harmonica
                 "mouth harp",
                 "blues harp",
             ])

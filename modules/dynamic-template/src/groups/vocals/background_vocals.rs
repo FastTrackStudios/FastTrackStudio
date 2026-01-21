@@ -101,12 +101,24 @@ impl From<BackgroundVocals> for ItemMetadataGroup {
             .prefix("BGV")
             .patterns([
                 // Standard abbreviations
-                "bgv", "bg", "bv", "background", "backing", "harmony", "choir",
+                "bgv",
+                "bg",
+                "bv",
+                "background",
+                "backing",
+                "harmony",
+                "choir",
                 // Ad-libs are typically supporting vocal elements
-                "ad lib", "adlib", "ad-lib",
+                "ad lib",
+                "adlib",
+                "ad-lib",
                 // Harmony position descriptors - these indicate BGV content
-                "high harmony", "low harmony", "mid harmony",
-                "upper harmony", "lower harmony", "middle harmony",
+                "high harmony",
+                "low harmony",
+                "mid harmony",
+                "upper harmony",
+                "lower harmony",
+                "middle harmony",
                 // "Hey Hey" is a common vocal hook/response pattern in pop/rock
                 "hey hey",
             ])

@@ -369,8 +369,8 @@ pub mod palette {
 
 /// Color definitions for top-level instrument groups
 pub mod groups {
-    use super::palette;
     use super::Color;
+    use super::palette;
 
     pub const DRUMS: Color = palette::red::S500;
     pub const PERCUSSION: Color = palette::orange::S500;
@@ -391,8 +391,8 @@ pub mod groups {
 
 /// Color definitions for guitar sub-groups
 pub mod guitars {
-    use super::palette;
     use super::Color;
+    use super::palette;
 
     pub const ELECTRIC: Color = palette::sky::S600;
     pub const ACOUSTIC: Color = palette::emerald::S400;
@@ -402,8 +402,8 @@ pub mod guitars {
 
 /// Color definitions for vocal sub-groups
 pub mod vocals {
-    use super::palette;
     use super::Color;
+    use super::palette;
 
     pub const LEAD: Color = palette::pink::S500;
     pub const BACKGROUND: Color = palette::pink::S300;
@@ -411,8 +411,8 @@ pub mod vocals {
 
 /// Color definitions for drum sub-groups
 pub mod drums {
-    use super::palette;
     use super::Color;
+    use super::palette;
 
     pub const DRUM_KIT: Color = palette::red::S500;
     pub const ELECTRONIC: Color = palette::red::S600;
@@ -426,8 +426,8 @@ pub mod drums {
 
 /// Color definitions for bass sub-groups
 pub mod bass {
-    use super::palette;
     use super::Color;
+    use super::palette;
 
     pub const GUITAR: Color = palette::amber::S500;
     pub const SYNTH: Color = palette::amber::S600;
@@ -436,8 +436,8 @@ pub mod bass {
 
 /// Color definitions for keys sub-groups
 pub mod keys {
-    use super::palette;
     use super::Color;
+    use super::palette;
 
     pub const PIANO: Color = palette::green::S500;
     pub const ELECTRIC: Color = palette::green::S600;
@@ -448,8 +448,8 @@ pub mod keys {
 
 /// Color definitions for synth sub-groups
 pub mod synths {
-    use super::palette;
     use super::Color;
+    use super::palette;
 
     pub const LEAD: Color = palette::violet::S500;
     pub const PAD: Color = palette::violet::S400;
@@ -461,8 +461,8 @@ pub mod synths {
 
 /// Color definitions for orchestra sub-groups
 pub mod orchestra {
-    use super::palette;
     use super::Color;
+    use super::palette;
 
     pub const STRINGS: Color = palette::rose::S600;
     pub const WOODWINDS: Color = palette::emerald::S600;
@@ -471,8 +471,8 @@ pub mod orchestra {
     pub const PERCUSSION: Color = palette::orange::S600;
 
     pub mod strings {
-        use super::super::palette;
         use super::super::Color;
+        use super::super::palette;
 
         pub const VIOLINS: Color = palette::rose::S500;
         pub const VIOLA: Color = palette::rose::S600;
@@ -481,8 +481,8 @@ pub mod orchestra {
     }
 
     pub mod woodwinds {
-        use super::super::palette;
         use super::super::Color;
+        use super::super::palette;
 
         pub const FLUTES: Color = palette::emerald::S400;
         pub const OBOES: Color = palette::emerald::S500;
@@ -492,8 +492,8 @@ pub mod orchestra {
     }
 
     pub mod brass {
-        use super::super::palette;
         use super::super::Color;
+        use super::super::palette;
 
         pub const TRUMPETS: Color = palette::amber::S400;
         pub const HORNS: Color = palette::amber::S500;
@@ -504,8 +504,8 @@ pub mod orchestra {
 
 /// Color definitions for percussion sub-groups
 pub mod percussion {
-    use super::palette;
     use super::Color;
+    use super::palette;
 
     pub const SHAKER: Color = palette::orange::S500;
     pub const TAMBOURINE: Color = palette::orange::S600;
@@ -519,8 +519,8 @@ pub mod percussion {
 
 /// Color definitions for guide/click tracks and song sections
 pub mod guide {
-    use super::palette;
     use super::Color;
+    use super::palette;
 
     // Main guide track types
     pub const CLICK: Color = palette::slate::S600;
@@ -1432,7 +1432,8 @@ pub const SHADES: [u16; 11] = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 
 /// Get all available color names in the palette
 pub const COLOR_NAMES: [&str; 22] = [
     "red", "orange", "amber", "yellow", "lime", "green", "emerald", "teal", "cyan", "sky", "blue",
-    "indigo", "violet", "purple", "fuchsia", "pink", "rose", "slate", "gray", "zinc", "stone", "neutral",
+    "indigo", "violet", "purple", "fuchsia", "pink", "rose", "slate", "gray", "zinc", "stone",
+    "neutral",
 ];
 
 /// Get a shade from a color by index (0-10, where 0=50, 5=500, 10=950)
@@ -1694,8 +1695,12 @@ pub fn hsl_to_rgb(h: f64, s: f64, l: f64) -> Color {
     let h = h / 360.0;
 
     fn hue_to_rgb(p: f64, q: f64, mut t: f64) -> f64 {
-        if t < 0.0 { t += 1.0; }
-        if t > 1.0 { t -= 1.0; }
+        if t < 0.0 {
+            t += 1.0;
+        }
+        if t > 1.0 {
+            t -= 1.0;
+        }
         if t < 1.0 / 6.0 {
             return p + (q - p) * 6.0 * t;
         }
@@ -1729,11 +1734,7 @@ pub fn adjust_lightness(color: Color, delta: f64) -> Color {
 }
 
 /// Generate a gradient using HSL interpolation for more natural color transitions
-pub fn generate_hsl_gradient(
-    base: Color,
-    count: usize,
-    lightness_range: (f64, f64),
-) -> Vec<Color> {
+pub fn generate_hsl_gradient(base: Color, count: usize, lightness_range: (f64, f64)) -> Vec<Color> {
     if count == 0 {
         return vec![];
     }
@@ -1928,7 +1929,10 @@ mod tests {
         assert_eq!(parse_tailwind_color("blue-300"), Some(palette::blue::S300));
         assert_eq!(parse_tailwind_color("sky-400"), Some(palette::sky::S400));
         assert_eq!(parse_tailwind_color("slate-50"), Some(palette::slate::S50));
-        assert_eq!(parse_tailwind_color("stone-950"), Some(palette::stone::S950));
+        assert_eq!(
+            parse_tailwind_color("stone-950"),
+            Some(palette::stone::S950)
+        );
 
         // Case insensitive
         assert_eq!(parse_tailwind_color("RED-500"), Some(palette::red::S500));

@@ -73,8 +73,14 @@ impl TrackVisibility {
             mcp_visible: track.show_in_mixer,
             tcp_height: track.track_height,
             mcp_height: None, // MCP height not in Track struct
-            tcp_collapsed: matches!(track.folder_state_tcp, Some(daw::tracks::api::folder::TcpFolderState::Collapsed)),
-            mcp_collapsed: matches!(track.folder_state_mcp, Some(daw::tracks::api::folder::McpFolderState::Collapsed)),
+            tcp_collapsed: matches!(
+                track.folder_state_tcp,
+                Some(daw::tracks::api::folder::TcpFolderState::Collapsed)
+            ),
+            mcp_collapsed: matches!(
+                track.folder_state_mcp,
+                Some(daw::tracks::api::folder::McpFolderState::Collapsed)
+            ),
         }
     }
 

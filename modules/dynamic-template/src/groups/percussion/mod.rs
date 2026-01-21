@@ -43,7 +43,13 @@ pub struct Sidestick;
 impl From<Sidestick> for Group<ItemMetadata> {
     fn from(_val: Sidestick) -> Self {
         Group::builder("Sidestick")
-            .patterns(vec!["sidestick", "side stick", "side-stick", "xstick", "x-stick"])
+            .patterns(vec![
+                "sidestick",
+                "side stick",
+                "side-stick",
+                "xstick",
+                "x-stick",
+            ])
             .build()
     }
 }

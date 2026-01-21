@@ -25,9 +25,11 @@ pub use groups::{
 pub use item_metadata::ItemMetadata;
 
 // Re-export monarchy types needed for direct classification
-pub use monarchy::{monarchy_sort, Structure};
-pub use protools::{extract_protools_metadata, strip_protools_markers, ProToolsMetadata};
-pub use song_name::{detect_song_names, detect_song_names_with_config, strip_song_names, SongNameConfig};
+pub use monarchy::{Structure, monarchy_sort};
+pub use protools::{ProToolsMetadata, extract_protools_metadata, strip_protools_markers};
+pub use song_name::{
+    SongNameConfig, detect_song_names, detect_song_names_with_config, strip_song_names,
+};
 pub use tempo::{extract_tempo, strip_tempo};
 
 // endregion: --- Modules
@@ -179,7 +181,8 @@ where
 
         // Detect song/project names that appear in 80%+ of inputs
         let song_name_config = song_name::SongNameConfig::default().with_threshold(0.8);
-        let detected_song_names = song_name::detect_song_names_with_config(&input_strings, &song_name_config);
+        let detected_song_names =
+            song_name::detect_song_names_with_config(&input_strings, &song_name_config);
 
         // Create a mapping from item string to original DAW Item
         let item_map: std::collections::HashMap<String, Vec<Item>> =

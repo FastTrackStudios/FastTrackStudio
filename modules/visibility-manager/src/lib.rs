@@ -11,11 +11,11 @@ mod snapshot;
 mod state;
 mod visibility;
 
-pub use classification::{classify_track, classify_tracks, TrackClassification};
+pub use classification::{TrackClassification, classify_track, classify_tracks};
 pub use error::{Error, Result};
 pub use group::{VisibilityGroup, VisibilityGroupId};
 pub use snapshot::{Snapshot, SnapshotId, SnapshotStore};
-pub use state::{VisibilityManager, ViewMode};
+pub use state::{ViewMode, VisibilityManager};
 pub use visibility::{TrackVisibility, VisibilityChanges, VisibilityTarget};
 
 /// Re-export dynamic-template types that are commonly used
@@ -27,9 +27,9 @@ pub use dynamic_template::{
 /// Prelude for convenient imports
 pub mod prelude {
     pub use crate::{
-        classify_track, classify_tracks, Error, Result, Snapshot, SnapshotId, SnapshotStore,
-        TrackClassification, TrackVisibility, ViewMode, VisibilityGroup, VisibilityGroupId,
-        VisibilityManager, VisibilityTarget,
+        Error, Result, Snapshot, SnapshotId, SnapshotStore, TrackClassification, TrackVisibility,
+        ViewMode, VisibilityGroup, VisibilityGroupId, VisibilityManager, VisibilityTarget,
+        classify_track, classify_tracks,
     };
 }
 

@@ -24,7 +24,7 @@ pub struct SongNameConfig {
 impl Default for SongNameConfig {
     fn default() -> Self {
         Self {
-            threshold: 1.0, // 100% - must appear in all files
+            threshold: 1.0,    // 100% - must appear in all files
             fuzzy_match: true, // Case-insensitive fuzzy matching enabled
         }
     }
@@ -48,32 +48,133 @@ impl SongNameConfig {
 /// These are common audio production terms, instrument names, and group names
 const EXCLUDED_PATTERNS: &[&str] = &[
     // File extensions and formats
-    "wav", "aiff", "flac", "mp3", "ogg", "aif",
+    "wav",
+    "aiff",
+    "flac",
+    "mp3",
+    "ogg",
+    "aif",
     // Common track numbering
-    "01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
-    "11", "12", "13", "14", "15", "16", "17", "18", "19", "20",
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "08",
+    "09",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "15",
+    "16",
+    "17",
+    "18",
+    "19",
+    "20",
     // Common audio terms
-    "mix", "master", "stem", "track", "audio", "final", "bounce",
+    "mix",
+    "master",
+    "stem",
+    "track",
+    "audio",
+    "final",
+    "bounce",
     // Recording identifiers
-    "take", "pass", "rec", "recording",
+    "take",
+    "pass",
+    "rec",
+    "recording",
     // Channel identifiers
-    "mono", "stereo", "left", "right",
+    "mono",
+    "stereo",
+    "left",
+    "right",
     // Version markers
-    "v1", "v2", "v3", "ver", "version",
+    "v1",
+    "v2",
+    "v3",
+    "ver",
+    "version",
     // Instrument/group names - these are NOT song names
-    "drums", "drum", "kick", "snare", "hat", "hihat", "tom", "toms", "cymbal", "cymbals",
-    "overhead", "room", "rooms",
-    "bass", "guitar", "guitars", "gtr", "acoustic", "electric", "amp", "di",
-    "clean", "dirty", "crunch", "distorted", "overdrive", "rhythm", "rhy", "solo",
-    "keys", "keyboard", "piano", "organ", "synth", "synths",
-    "vocal", "vocals", "vox", "voc", "lead", "bgv", "bgvs", "backing", "background",
-    "choir", "strings", "brass", "horns", "orchestra",
-    "percussion", "perc", "sfx", "fx", "effects",
+    "drums",
+    "drum",
+    "kick",
+    "snare",
+    "hat",
+    "hihat",
+    "tom",
+    "toms",
+    "cymbal",
+    "cymbals",
+    "overhead",
+    "room",
+    "rooms",
+    "bass",
+    "guitar",
+    "guitars",
+    "gtr",
+    "acoustic",
+    "electric",
+    "amp",
+    "di",
+    "clean",
+    "dirty",
+    "crunch",
+    "distorted",
+    "overdrive",
+    "rhythm",
+    "rhy",
+    "solo",
+    "keys",
+    "keyboard",
+    "piano",
+    "organ",
+    "synth",
+    "synths",
+    "vocal",
+    "vocals",
+    "vox",
+    "voc",
+    "lead",
+    "bgv",
+    "bgvs",
+    "backing",
+    "background",
+    "choir",
+    "strings",
+    "brass",
+    "horns",
+    "orchestra",
+    "percussion",
+    "perc",
+    "sfx",
+    "fx",
+    "effects",
     // Common metadata terms
-    "main", "dbl", "double", "triple", "chorus", "verse", "intro", "outro", "bridge",
-    "harmony", "harm", "unison",
+    "main",
+    "dbl",
+    "double",
+    "triple",
+    "chorus",
+    "verse",
+    "intro",
+    "outro",
+    "bridge",
+    "harmony",
+    "harm",
+    "unison",
     // Layer/position terms
-    "top", "bottom", "close", "far", "near", "mid", "side",
+    "top",
+    "bottom",
+    "close",
+    "far",
+    "near",
+    "mid",
+    "side",
     // Common performer names should NOT be excluded - they could be song names
 ];
 
@@ -107,7 +208,10 @@ pub fn detect_song_names(inputs: &[String]) -> HashSet<String> {
 ///
 /// # Returns
 /// Set of detected song name tokens (lowercase if fuzzy matching enabled)
-pub fn detect_song_names_with_config(inputs: &[String], config: &SongNameConfig) -> HashSet<String> {
+pub fn detect_song_names_with_config(
+    inputs: &[String],
+    config: &SongNameConfig,
+) -> HashSet<String> {
     if inputs.is_empty() {
         return HashSet::new();
     }
@@ -169,10 +273,15 @@ fn detect_with_fuzzy_matching(inputs: &[String], min_count: usize) -> HashSet<St
     for token in &all_tokens {
         // Find tokens that contain this one or that this one contains
         for other in &all_tokens {
-            if token != other && token.len() >= MIN_TOKEN_LENGTH && other.len() >= MIN_TOKEN_LENGTH {
+            if token != other && token.len() >= MIN_TOKEN_LENGTH && other.len() >= MIN_TOKEN_LENGTH
+            {
                 if other.contains(token.as_str()) || token.contains(other.as_str()) {
                     // Group under the shorter token (base form)
-                    let base = if token.len() <= other.len() { token } else { other };
+                    let base = if token.len() <= other.len() {
+                        token
+                    } else {
+                        other
+                    };
                     containment_groups
                         .entry(base.clone())
                         .or_default()
@@ -281,8 +390,10 @@ pub fn strip_song_names(input: &str, song_names: &HashSet<String>) -> String {
                     let after = &result[idx + token.len()..];
 
                     // Clean up separators around the removed token
-                    let before = before.trim_end_matches(|c: char| c == '-' || c == '_' || c == '.' || c == ' ');
-                    let after = after.trim_start_matches(|c: char| c == '-' || c == '_' || c == '.' || c == ' ');
+                    let before = before
+                        .trim_end_matches(|c: char| c == '-' || c == '_' || c == '.' || c == ' ');
+                    let after = after
+                        .trim_start_matches(|c: char| c == '-' || c == '_' || c == '.' || c == ' ');
 
                     result = if before.is_empty() {
                         after.to_string()
@@ -315,8 +426,14 @@ mod tests {
 
         let song_names = detect_song_names(&inputs);
         // With fuzzy matching enabled (default), returns lowercase
-        assert!(song_names.contains("thetrooper"), "Should detect 'thetrooper' as song name");
-        assert!(!song_names.contains("wav"), "Should not include file extension");
+        assert!(
+            song_names.contains("thetrooper"),
+            "Should detect 'thetrooper' as song name"
+        );
+        assert!(
+            !song_names.contains("wav"),
+            "Should not include file extension"
+        );
     }
 
     #[test]
@@ -329,7 +446,10 @@ mod tests {
         let config = SongNameConfig::default().with_fuzzy_match(false);
         let song_names = detect_song_names_with_config(&inputs, &config);
         // Without fuzzy matching, preserves original case
-        assert!(song_names.contains("TheTrooper"), "Should detect 'TheTrooper' with original case");
+        assert!(
+            song_names.contains("TheTrooper"),
+            "Should detect 'TheTrooper' with original case"
+        );
     }
 
     #[test]
@@ -345,7 +465,10 @@ mod tests {
         let song_names = detect_song_names(&inputs);
         // Fuzzy matching should detect "trooper" as appearing in all files
         // (because "thetrooper" contains "trooper")
-        assert!(song_names.contains("trooper"), "Should detect 'trooper' via fuzzy matching");
+        assert!(
+            song_names.contains("trooper"),
+            "Should detect 'trooper' via fuzzy matching"
+        );
     }
 
     #[test]
@@ -357,7 +480,10 @@ mod tests {
         ];
 
         let song_names = detect_song_names(&inputs);
-        assert!(!song_names.contains("wav"), "Should not detect 'wav' as song name");
+        assert!(
+            !song_names.contains("wav"),
+            "Should not detect 'wav' as song name"
+        );
         assert!(song_names.is_empty(), "Should not detect any song names");
     }
 
@@ -370,10 +496,7 @@ mod tests {
             strip_song_names("15-Rhy Gtr L-TheTrooper", &song_names),
             "15-Rhy Gtr L"
         );
-        assert_eq!(
-            strip_song_names("TheTrooper-Kick", &song_names),
-            "Kick"
-        );
+        assert_eq!(strip_song_names("TheTrooper-Kick", &song_names), "Kick");
     }
 
     #[test]
@@ -385,10 +508,7 @@ mod tests {
             strip_song_names("15-Rhy Gtr L-TheTrooper", &song_names),
             "15-Rhy Gtr L"
         );
-        assert_eq!(
-            strip_song_names("Trooper-mix1", &song_names),
-            "mix1"
-        );
+        assert_eq!(strip_song_names("Trooper-mix1", &song_names), "mix1");
     }
 
     #[test]
@@ -401,7 +521,10 @@ mod tests {
 
         let song_names = detect_song_names(&inputs);
         // With fuzzy matching (default), returns lowercase
-        assert!(song_names.contains("timeaftertime"), "Should detect 'timeaftertime' as song name");
+        assert!(
+            song_names.contains("timeaftertime"),
+            "Should detect 'timeaftertime' as song name"
+        );
     }
 
     #[test]

@@ -27,8 +27,8 @@ pub const MIC_MODELS: &[(&str, &str)] = &[
     ("tlm103", "Neumann TLM103"),
     ("tlm170", "Neumann TLM170"),
     ("neumann", "Neumann"),
-    ("47x", "Neumann U47"),      // Common abbreviation
-    ("67x", "Neumann U67"),      // Common abbreviation
+    ("47x", "Neumann U47"),         // Common abbreviation
+    ("67x", "Neumann U67"),         // Common abbreviation
     ("forty.seven", "Neumann U47"), // Stylized
     ("forty seven", "Neumann U47"),
     // Shure
@@ -40,7 +40,7 @@ pub const MIC_MODELS: &[(&str, &str)] = &[
     ("beta91", "Shure Beta 91"),
     ("ksm32", "Shure KSM32"),
     ("ksm44", "Shure KSM44"),
-    ("57", "Shure SM57"),        // Common shorthand in session
+    ("57", "Shure SM57"), // Common shorthand in session
     ("58", "Shure SM58"),
     // Sennheiser
     ("md421", "Sennheiser MD421"),
@@ -48,25 +48,25 @@ pub const MIC_MODELS: &[(&str, &str)] = &[
     ("e602", "Sennheiser e602"),
     ("e604", "Sennheiser e604"),
     ("e609", "Sennheiser e609"),
-    ("421", "Sennheiser MD421"),  // Common shorthand
+    ("421", "Sennheiser MD421"), // Common shorthand
     ("441", "Sennheiser MD441"),
     // AKG
     ("c414", "AKG C414"),
     ("c12", "AKG C12"),
     ("d112", "AKG D112"),
     ("c451", "AKG C451"),
-    ("414", "AKG C414"),          // Common shorthand
+    ("414", "AKG C414"), // Common shorthand
     ("112", "AKG D112"),
     // Royer
     ("r121", "Royer R-121"),
     ("r122", "Royer R-122"),
     ("sf12", "Royer SF-12"),
-    ("121", "Royer R-121"),       // Common shorthand
+    ("121", "Royer R-121"), // Common shorthand
     ("royer", "Royer"),
     // RCA/Ribbon
     ("rca44", "RCA 44"),
     ("rca77", "RCA 77"),
-    ("44a", "RCA 44"),            // Common shorthand
+    ("44a", "RCA 44"), // Common shorthand
     ("77dx", "RCA 77"),
     // AEA
     ("aea r84", "AEA R84"),
@@ -167,10 +167,10 @@ pub const PREAMP_MODELS: &[(&str, &str)] = &[
 /// Processing markers that indicate track state but aren't content descriptors
 /// Note: These are stripped only when they appear as standalone words or common suffixes
 pub const PROCESSING_MARKERS: &[&str] = &[
-    "lim",           // Limiter applied
+    "lim", // Limiter applied
     "limit",
     "limited",
-    "edt",           // Edit marker
+    "edt", // Edit marker
     // Note: "edit" and "edited" excluded - too common in valid names
     "no compression",
     "no comp",
@@ -179,17 +179,17 @@ pub const PROCESSING_MARKERS: &[&str] = &[
     // Note: "raw", "dry", "wet" excluded - could be valid instrument descriptors
     "processed",
     "unprocessed",
-    "print",         // Printed/committed effect
+    "print", // Printed/committed effect
     "printed",
-    "bounce",        // Bounced track
+    "bounce", // Bounced track
     "bounced",
     // Note: "dup" excluded - too short, matches partial words
     "duplicate",
-    "mst",           // Master
+    "mst", // Master
     // Note: "master" excluded - could be valid ("Guitar Master")
-    "rough",         // Rough mix
+    "rough", // Rough mix
     // Note: "final" excluded - could be valid in song section names
-    "alt",           // Alternate
+    "alt", // Alternate
     "backup",
 ];
 
@@ -292,17 +292,17 @@ pub fn contains_mic_model(input: &str) -> bool {
 /// Check if a string contains a preamp/compressor model
 pub fn contains_preamp_model(input: &str) -> bool {
     let lower = input.to_lowercase();
-    PREAMP_MODELS.iter().any(|(pattern, _)| {
-        contains_word(&lower, pattern)
-    })
+    PREAMP_MODELS
+        .iter()
+        .any(|(pattern, _)| contains_word(&lower, pattern))
 }
 
 /// Check if a string contains synth hardware
 pub fn contains_synth_hardware(input: &str) -> bool {
     let lower = input.to_lowercase();
-    SYNTH_HARDWARE.iter().any(|(pattern, _)| {
-        contains_word(&lower, pattern)
-    })
+    SYNTH_HARDWARE
+        .iter()
+        .any(|(pattern, _)| contains_word(&lower, pattern))
 }
 
 /// Strip equipment names from a display name
@@ -392,7 +392,8 @@ fn contains_word(haystack: &str, needle: &str) -> bool {
     for (idx, _) in haystack.match_indices(&needle_lower) {
         let before_ok = idx == 0 || !haystack.as_bytes()[idx - 1].is_ascii_alphanumeric();
         let after_idx = idx + needle_lower.len();
-        let after_ok = after_idx >= haystack.len() || !haystack.as_bytes()[after_idx].is_ascii_alphanumeric();
+        let after_ok =
+            after_idx >= haystack.len() || !haystack.as_bytes()[after_idx].is_ascii_alphanumeric();
 
         if before_ok && after_ok {
             return true;
@@ -414,7 +415,8 @@ fn strip_pattern(input: &str, pattern: &str) -> String {
     for (idx, _) in lower.match_indices(&pattern_lower) {
         let before_ok = idx == 0 || !lower.as_bytes()[idx - 1].is_ascii_alphanumeric();
         let after_idx = idx + pattern_lower.len();
-        let after_ok = after_idx >= lower.len() || !lower.as_bytes()[after_idx].is_ascii_alphanumeric();
+        let after_ok =
+            after_idx >= lower.len() || !lower.as_bytes()[after_idx].is_ascii_alphanumeric();
 
         if before_ok && after_ok {
             // Found a word boundary match - skip it
@@ -510,14 +512,8 @@ mod tests {
             strip_equipment("Breathy Synth 1 - Casio CTK-601 Briteness"),
             "Breathy Synth 1"
         );
-        assert_eq!(
-            strip_equipment("Bass Amp 44A. 260VU"),
-            "Bass Amp"
-        );
-        assert_eq!(
-            strip_equipment("OH L Neumann"),
-            "OH L"
-        );
+        assert_eq!(strip_equipment("Bass Amp 44A. 260VU"), "Bass Amp");
+        assert_eq!(strip_equipment("OH L Neumann"), "OH L");
     }
 
     #[test]
@@ -552,10 +548,7 @@ mod tests {
             strip_equipment("Breathy Synth 1 - Casio CTK-601 Briteness"),
             "Breathy Synth 1"
         );
-        assert_eq!(
-            strip_equipment("Weird Synth Patch - CASIO Charang"),
-            ""
-        );
+        assert_eq!(strip_equipment("Weird Synth Patch - CASIO Charang"), "");
 
         // From steve_maggiora_hey_lady
         assert_eq!(strip_equipment("Vocal 47X"), "Vocal");

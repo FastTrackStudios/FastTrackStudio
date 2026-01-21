@@ -3,7 +3,7 @@
 //! This module provides track classification by reusing the pattern matching
 //! from dynamic-template without the full sorting/organization logic.
 
-use dynamic_template::{default_config, DynamicTemplateConfig, OrganizeIntoTracks};
+use dynamic_template::{DynamicTemplateConfig, OrganizeIntoTracks, default_config};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -252,11 +252,15 @@ mod tests {
         let classifications = classify_tracks(names);
 
         assert_eq!(
-            classifications.get("Kick In").and_then(|c| c.primary_group.as_deref()),
+            classifications
+                .get("Kick In")
+                .and_then(|c| c.primary_group.as_deref()),
             Some("Drums")
         );
         assert_eq!(
-            classifications.get("Bass DI").and_then(|c| c.primary_group.as_deref()),
+            classifications
+                .get("Bass DI")
+                .and_then(|c| c.primary_group.as_deref()),
             Some("Bass")
         );
     }

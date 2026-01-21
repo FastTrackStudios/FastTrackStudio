@@ -171,7 +171,10 @@ mod tests {
 
     #[test]
     fn extract_tempo_in_filename() {
-        assert_eq!(extract_tempo("01.LV BECCA.TimeAfterTime.126bpm"), Some(126.0));
+        assert_eq!(
+            extract_tempo("01.LV BECCA.TimeAfterTime.126bpm"),
+            Some(126.0)
+        );
         assert_eq!(extract_tempo("Track_83.5BPM_v2.wav"), Some(83.5));
         assert_eq!(extract_tempo("Song.120bpm.stem.wav"), Some(120.0));
     }
@@ -223,7 +226,10 @@ mod tests {
     #[test]
     fn strip_tempo_real_world() {
         // From steve_maggiora_hey_lady test
-        assert_eq!(strip_tempo("AD.Big Kit Gretch.83.5BPM.L"), "AD.Big Kit Gretch.L");
+        assert_eq!(
+            strip_tempo("AD.Big Kit Gretch.83.5BPM.L"),
+            "AD.Big Kit Gretch.L"
+        );
         assert_eq!(strip_tempo("Bass.Di.83.5BPM"), "Bass.Di");
         assert_eq!(strip_tempo("H3000.One.New.83.5BPM.L"), "H3000.One.New.L");
     }
