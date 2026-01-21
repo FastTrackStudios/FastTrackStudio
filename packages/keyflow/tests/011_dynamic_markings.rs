@@ -70,10 +70,7 @@ Cmaj7/// <Build> Dm7/// Em7/// Fmaj7///
 
     // The <Build> should be attached to a measure
     // Let's just check that at least one measure has the dynamic
-    let measure_with_dynamic = section
-        .measures()
-        .iter()
-        .find(|m| !m.dynamics.is_empty());
+    let measure_with_dynamic = section.measures().iter().find(|m| !m.dynamics.is_empty());
 
     assert!(
         measure_with_dynamic.is_some(),
@@ -176,10 +173,7 @@ Cmaj7//// <Down> Dm7////
     let section = &chart.sections[0];
 
     // Find measure with dynamic
-    let measure_with_dynamic = section
-        .measures()
-        .iter()
-        .find(|m| !m.dynamics.is_empty());
+    let measure_with_dynamic = section.measures().iter().find(|m| !m.dynamics.is_empty());
 
     assert!(measure_with_dynamic.is_some());
     assert_eq!(measure_with_dynamic.unwrap().dynamics[0].text, "Down");
@@ -238,8 +232,14 @@ Cmaj7/// Dm7/// Em7/// Fmaj7///
         .find(|m| !m.dynamics.is_empty());
 
     // Both should have a measure with dynamics
-    assert!(m1_with_dynamic.is_some(), "Original chart should have dynamics");
-    assert!(m2_with_dynamic.is_some(), "Re-parsed chart should have dynamics");
+    assert!(
+        m1_with_dynamic.is_some(),
+        "Original chart should have dynamics"
+    );
+    assert!(
+        m2_with_dynamic.is_some(),
+        "Re-parsed chart should have dynamics"
+    );
 
     // The text should match
     assert_eq!(

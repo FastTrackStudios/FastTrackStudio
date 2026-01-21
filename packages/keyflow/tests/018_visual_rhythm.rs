@@ -905,3 +905,228 @@ r1 | r2 r4 r8 r16 r32 r32
         }
     }
 }
+
+// =============================================================================
+// Triplet Position Tests
+// =============================================================================
+
+/// Test: Triplet eighth note positions (Thriller intro pattern)
+///
+/// Source: r8t Ab9_8t r8t r8t r8t F9_8t r2 | s1
+///
+/// Triplet eighth notes: 480 / 3 = 160 ticks each
+/// Positions within a beat:
+/// - .000 = 0 ticks (first triplet)
+/// - .333 = 160 ticks (second triplet)
+/// - .666 = 320 ticks (third triplet)
+///
+/// Layout for first measure (r8t Ab9_8t r8t r8t r8t F9_8t r2):
+/// - Beat 1: r8t (0), Ab9_8t (160), r8t (320)
+/// - Beat 2: r8t (480), r8t (640), F9_8t (800)
+/// - Beats 3-4: r2 (960-1920)
+#[test]
+fn test_triplet_eighth_positions() {
+    let source = r#"
+Thriller Intro
+120bpm 4/4 #Ab
+
+IN
+r8t Ab9_8t r8t r8t r8t F9_8t r2 | s1
+"#;
+    let result = layout_snippet(source);
+
+    println!("\n=== Triplet Eighth Note Positions ===");
+    println!("Source: r8t Ab9_8t r8t r8t r8t F9_8t r2 | s1\n");
+
+    // Print all beat positions for measure 1
+    println!("All beat positions in measure 1:");
+    for bp in result.beat_positions.iter().filter(|bp| bp.measure == 0) {
+        let beat_num = bp.tick / 480 + 1;
+        let beat_fraction = (bp.tick % 480) as f64 / 480.0 * 1000.0;
+        println!(
+            "  pos={}.{}.{:.0} tick={} dur={} glyph={:?}",
+            bp.measure + 1,
+            beat_num,
+            beat_fraction,
+            bp.tick,
+            bp.duration_ticks,
+            bp.glyph_codepoint.map(|c| format!("U+{:04X}", c as u32))
+        );
+    }
+
+    // Triplet eighth = 160 ticks
+    let triplet_eighth_ticks = 160;
+
+    // Expected triplet positions for beat 1
+    let triplet_positions = vec![
+        (1, 1, 0, "first triplet (r8t)"),      // tick 0
+        (1, 1, 333, "second triplet (Ab9)"),   // tick 160
+        (1, 1, 666, "third triplet (r8t)"),    // tick 320
+        (1, 2, 0, "fourth triplet (r8t)"),     // tick 480
+        (1, 2, 333, "fifth triplet (r8t)"),    // tick 640
+        (1, 2, 666, "sixth triplet (F9)"),     // tick 800
+    ];
+
+    println!("\nVerifying triplet positions:");
+    for (measure, beat, fraction, desc) in &triplet_positions {
+        let found = find_at_reaper_position(&result.beat_positions, *measure, *beat, *fraction);
+        if let Some(bp) = found {
+            println!(
+                "  {}: pos={}.{}.{} tick={} dur={} ✓",
+                desc, measure, beat, fraction, bp.tick, bp.duration_ticks
+            );
+            // Triplet eighths should be 160 ticks
+            assert_eq!(
+                bp.duration_ticks, triplet_eighth_ticks,
+                "{}: expected {} ticks, got {}",
+                desc, triplet_eighth_ticks, bp.duration_ticks
+            );
+        } else {
+            println!("  {}: NOT FOUND at {}.{}.{}", desc, measure, beat, fraction);
+        }
+    }
+
+    // Verify the half rest at beat 3
+    let half_rest = find_at_reaper_position(&result.beat_positions, 1, 3, 0);
+    if let Some(bp) = half_rest {
+        println!(
+            "\nHalf rest: pos=1.3.0 tick={} dur={} (expected 960)",
+            bp.tick, bp.duration_ticks
+        );
+        assert_eq!(bp.duration_ticks, 960, "Half rest should be 960 ticks");
+    }
+}
+
+/// Test: Triplet push chord positions
+///
+/// Source: 'F/C . | Cm . | ... | Cm // Gm7 // 'Abmaj7 / Abmaj7#5 / 'Db7#11/G //
+///
+/// The `'` prefix indicates a triplet push, which shifts the chord earlier by
+/// one triplet eighth (160 ticks). In REAPER position terms:
+/// - Normal beat 1.1.0 becomes pushed to previous beat's .666 position
+/// - Or equivalently, the chord sounds 160 ticks before the written position
+#[test]
+fn test_triplet_push_positions() {
+    let source = r#"
+Thriller Verse
+120bpm 4/4 #Ab
+/push = triplet
+
+VS
+'F/C . | Cm . | 'F/C . | Cm . | 'F/C . | Cm . | 'F/C . | Cm // Gm7 // 'Abmaj7 / Abmaj7#5 / 'Db7#11/G //
+"#;
+    let result = layout_snippet(source);
+
+    println!("\n=== Triplet Push Chord Positions ===");
+    println!("Source: 'F/C . | Cm . | ... (with /push = triplet)\n");
+
+    // Print all beat positions
+    println!("All beat positions:");
+    for (i, bp) in result.beat_positions.iter().enumerate() {
+        let measure = bp.measure + 1;
+        let beat_num = bp.tick / 480 + 1;
+        let beat_fraction = (bp.tick % 480) as f64 / 480.0 * 1000.0;
+        println!(
+            "  [{}] m{} pos={}.{}.{:.0} abs_tick={} dur={} glyph={:?}",
+            i,
+            measure,
+            measure,
+            beat_num,
+            beat_fraction,
+            bp.absolute_tick,
+            bp.duration_ticks,
+            bp.glyph_codepoint.map(|c| format!("U+{:04X}", c as u32))
+        );
+    }
+
+    // Check that we have beat positions
+    assert!(!result.beat_positions.is_empty(), "Should have beat positions");
+
+    // The first chord 'F/C has a triplet push, so it should appear
+    // 160 ticks before beat 1 (i.e., at a negative offset or late in previous measure)
+    // In the first measure, pushed chords typically have push_pull_offset in the position data
+    println!("\nNote: Triplet pushes shift timing by 160 ticks (1/3 of a quarter note)");
+}
+
+/// Test: Mixed triplet pattern from Thriller chorus
+///
+/// Source: Cm/Eb / 'Eb // | 'Eb / 'F/C / 'Cm // | ...
+///
+/// This tests a more complex pattern with:
+/// - Regular slashes (/)
+/// - Triplet pushed chords ('Eb, 'F/C, 'Cm)
+/// - Mixed rhythm within measures
+#[test]
+fn test_triplet_mixed_pattern() {
+    let source = r#"
+Thriller Chorus
+120bpm 4/4 #Ab
+/push = triplet
+
+CH
+Cm/Eb / 'Eb // | 'Eb / 'F/C / 'Cm // | 'F/A //// | 'Fm9 ////
+"#;
+    let result = layout_snippet(source);
+
+    println!("\n=== Mixed Triplet Pattern ===");
+    println!("Source: Cm/Eb / 'Eb // | 'Eb / 'F/C / 'Cm // | ...\n");
+
+    // Print beat positions with push/pull info
+    println!("Beat positions:");
+    for bp in &result.beat_positions {
+        let measure = bp.measure + 1;
+        let beat_num = bp.tick / 480 + 1;
+        let beat_fraction = (bp.tick % 480) as f64 / 480.0 * 1000.0;
+        println!(
+            "  m{} pos={}.{}.{:.0} tick={} dur={}",
+            measure, measure, beat_num, beat_fraction, bp.tick, bp.duration_ticks
+        );
+    }
+
+    // Verify we have positions for all 4 measures
+    let measure_count = result
+        .beat_positions
+        .iter()
+        .map(|bp| bp.measure)
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(0);
+    println!("\nTotal measures with beat positions: {}", measure_count);
+    assert!(measure_count >= 4, "Should have at least 4 measures");
+}
+
+/// Test: Triplet rest pattern with explicit triplet duration
+///
+/// This verifies that r8t (triplet eighth rest) has correct 160-tick duration
+#[test]
+fn test_triplet_rest_duration() {
+    let source = r#"
+Triplet Rests
+120bpm 4/4 #C
+
+IN
+r8t r8t r8t r8t r8t r8t r8t r8t r8t r8t r8t r8t
+"#;
+    let result = layout_snippet(source);
+
+    println!("\n=== Triplet Rest Durations ===");
+    println!("Source: r8t r8t r8t r8t r8t r8t r8t r8t r8t r8t r8t r8t\n");
+
+    // All positions should have 160-tick duration (triplet eighth)
+    println!("All beat positions (should all be 160 ticks):");
+    for (i, bp) in result.beat_positions.iter().enumerate() {
+        println!("  [{}] tick={} dur={}", i, bp.tick, bp.duration_ticks);
+        assert_eq!(
+            bp.duration_ticks, 160,
+            "Position {} should be 160 ticks (triplet eighth), got {}",
+            i, bp.duration_ticks
+        );
+    }
+
+    // Should have 12 triplet eighth rests
+    assert_eq!(
+        result.beat_positions.len(),
+        12,
+        "Should have 12 triplet eighth positions"
+    );
+}

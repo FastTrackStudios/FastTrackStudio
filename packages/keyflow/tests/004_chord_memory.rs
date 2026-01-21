@@ -16,7 +16,7 @@ g c
 vs 4
 Gmaj13 C9 Gmaj13 C9
 ch 4
-e d Gmaj6 C5
+e d G6 C5
 vs
 br 2
 G C
@@ -85,7 +85,7 @@ G C
 
     let chorus_chord3 = &chorus_section.measures()[2].chords[0];
     assert_eq!(format!("{}", chorus_chord3.root), "G");
-    assert_eq!(chorus_chord3.full_symbol, "Gmaj6");
+    assert_eq!(chorus_chord3.full_symbol, "G6");
 
     let chorus_chord4 = &chorus_section.measures()[3].chords[0];
     assert_eq!(format!("{}", chorus_chord4.root), "C");
@@ -110,10 +110,10 @@ G C
     assert_eq!(bridge_section.section.section_type, SectionType::Bridge);
     assert_eq!(bridge_section.measures().len(), 2);
 
-    // Bridge: G C (uses global memory from Chorus: Gmaj6, C5)
+    // Bridge: G C (uses global memory from Chorus: G6, C5)
     let bridge_chord1 = &bridge_section.measures()[0].chords[0];
     assert_eq!(format!("{}", bridge_chord1.root), "G");
-    assert_eq!(bridge_chord1.full_symbol, "Gmaj6");
+    assert_eq!(bridge_chord1.full_symbol, "G6");
 
     let bridge_chord2 = &bridge_section.measures()[1].chords[0];
     assert_eq!(format!("{}", bridge_chord2.root), "C");
@@ -184,7 +184,7 @@ Gmaj7 Cmaj7
 vs 2
 Gmaj13 C9
 ch 2
-Gmaj6 C5
+G6 C5
 vs
 br 2
 G C
@@ -205,20 +205,20 @@ G C
     let verse1_chord1 = &verse1_section.measures()[0].chords[0];
     assert_eq!(verse1_chord1.full_symbol, "Gmaj13");
 
-    // Chorus: Gmaj6 C5 (updates global memory again)
+    // Chorus: G6 C5 (updates global memory again)
     let chorus_section = &chart.sections[2];
     let chorus_chord1 = &chorus_section.measures()[0].chords[0];
-    assert_eq!(chorus_chord1.full_symbol, "Gmaj6");
+    assert_eq!(chorus_chord1.full_symbol, "G6");
 
     // Verse 2: uses template from Verse 1 (Gmaj13, C9)
     let verse2_section = &chart.sections[3];
     let verse2_chord1 = &verse2_section.measures()[0].chords[0];
     assert_eq!(verse2_chord1.full_symbol, "Gmaj13");
 
-    // Bridge: G C uses global memory (Gmaj6, C5 from Chorus)
+    // Bridge: G C uses global memory (G6, C5 from Chorus)
     let bridge_section = &chart.sections[4];
     let bridge_chord1 = &bridge_section.measures()[0].chords[0];
-    assert_eq!(bridge_chord1.full_symbol, "Gmaj6");
+    assert_eq!(bridge_chord1.full_symbol, "G6");
 }
 
 /// Test 4: Complex memory scenario with multiple updates
@@ -330,7 +330,7 @@ fn test_global_memory_with_explicit_redefinition() {
 vs
 g
 ch
-Gmaj6
+G6
 vs
 g
 "#;
@@ -344,15 +344,15 @@ g
     let verse1_chord1 = &verse1_section.measures()[0].chords[0];
     assert_eq!(verse1_chord1.full_symbol, "G");
 
-    // Chorus: Gmaj6 updates global memory
+    // Chorus: G6 updates global memory
     let chorus_section = &chart.sections[1];
     let chorus_chord1 = &chorus_section.measures()[0].chords[0];
-    assert_eq!(chorus_chord1.full_symbol, "Gmaj6");
+    assert_eq!(chorus_chord1.full_symbol, "G6");
 
-    // Verse 2: g explicitly redefined, uses global memory = Gmaj6
+    // Verse 2: g explicitly redefined, uses global memory = G6
     let verse2_section = &chart.sections[2];
     let verse2_chord1 = &verse2_section.measures()[0].chords[0];
-    assert_eq!(verse2_chord1.full_symbol, "Gmaj6");
+    assert_eq!(verse2_chord1.full_symbol, "G6");
 }
 
 /// Test 7: Template length and inline chord notation

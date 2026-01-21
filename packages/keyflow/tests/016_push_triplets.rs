@@ -26,16 +26,31 @@ VS 4
     // When first chord has push, a space is inserted before it
     // So measure 0 has [space, C] instead of just [C]
     let measure_0 = &section.measures()[0];
-    println!("Measure 0 chords: {:?}", measure_0.chords.iter().map(|c| &c.full_symbol).collect::<Vec<_>>());
+    println!(
+        "Measure 0 chords: {:?}",
+        measure_0
+            .chords
+            .iter()
+            .map(|c| &c.full_symbol)
+            .collect::<Vec<_>>()
+    );
 
     // Find the C chord (might be at index 0 or 1 depending on space insertion)
-    let chord_c = measure_0.chords.iter().find(|c| c.full_symbol == "C")
+    let chord_c = measure_0
+        .chords
+        .iter()
+        .find(|c| c.full_symbol == "C")
         .expect("Should find C chord in measure 0");
 
     if let Some((is_push, amount)) = &chord_c.push_pull {
         assert!(*is_push, "Expected push notation");
         assert_eq!(amount.level, 1, "Expected single apostrophe level");
-        assert_eq!(amount.base, PushPullBase::Triplet, "Expected triplet base, got {:?}", amount.base);
+        assert_eq!(
+            amount.base,
+            PushPullBase::Triplet,
+            "Expected triplet base, got {:?}",
+            amount.base
+        );
     } else {
         panic!("Expected push_pull for 'tC, got None");
     }
@@ -46,7 +61,12 @@ VS 4
     if let Some((is_push, amount)) = &chord_em.push_pull {
         assert!(*is_push, "Expected push notation");
         assert_eq!(amount.level, 1);
-        assert_eq!(amount.base, PushPullBase::Triplet, "Expected triplet base, got {:?}", amount.base);
+        assert_eq!(
+            amount.base,
+            PushPullBase::Triplet,
+            "Expected triplet base, got {:?}",
+            amount.base
+        );
     } else {
         panic!("Expected push_pull for 'tEm, got None");
     }
@@ -95,7 +115,10 @@ VS 4
     let section = &chart.sections[0];
 
     // When first chord has push, a space is inserted before it
-    let chord_c = section.measures()[0].chords.iter().find(|c| c.full_symbol == "C")
+    let chord_c = section.measures()[0]
+        .chords
+        .iter()
+        .find(|c| c.full_symbol == "C")
         .expect("Should find C chord in measure 0");
 
     // ''tC should be triplet sixteenth push
@@ -124,14 +147,21 @@ VS 4
     let section = &chart.sections[0];
 
     // When first chord has push, a space is inserted before it
-    let chord_c = section.measures()[0].chords.iter().find(|c| c.full_symbol == "C")
+    let chord_c = section.measures()[0]
+        .chords
+        .iter()
+        .find(|c| c.full_symbol == "C")
         .expect("Should find C chord in measure 0");
 
     // ':5C should be quintuplet eighth push
     if let Some((is_push, amount)) = &chord_c.push_pull {
         assert!(*is_push, "Expected push notation");
         assert_eq!(amount.level, 1);
-        assert_eq!(amount.base, PushPullBase::Tuplet(5), "Expected quintuplet base");
+        assert_eq!(
+            amount.base,
+            PushPullBase::Tuplet(5),
+            "Expected quintuplet base"
+        );
     } else {
         panic!("Expected push_pull for ':5C, got None");
     }
@@ -158,7 +188,11 @@ C':7 D Em':7 F
     if let Some((is_push, amount)) = &chord_c.push_pull {
         assert!(!*is_push, "Expected pull notation");
         assert_eq!(amount.level, 1);
-        assert_eq!(amount.base, PushPullBase::Tuplet(7), "Expected septuplet base");
+        assert_eq!(
+            amount.base,
+            PushPullBase::Tuplet(7),
+            "Expected septuplet base"
+        );
     } else {
         panic!("Expected push_pull for C':7, got None");
     }
@@ -181,14 +215,21 @@ VS 4
     let section = &chart.sections[0];
 
     // When first chord has push, a space is inserted before it
-    let chord_c = section.measures()[0].chords.iter().find(|c| c.full_symbol == "C")
+    let chord_c = section.measures()[0]
+        .chords
+        .iter()
+        .find(|c| c.full_symbol == "C")
         .expect("Should find C chord in measure 0");
 
     // With /push = triplet, 'C should be triplet eighth push (not standard)
     if let Some((is_push, amount)) = &chord_c.push_pull {
         assert!(*is_push, "Expected push notation");
         assert_eq!(amount.level, 1);
-        assert_eq!(amount.base, PushPullBase::Triplet, "Expected triplet base from setting");
+        assert_eq!(
+            amount.base,
+            PushPullBase::Triplet,
+            "Expected triplet base from setting"
+        );
     } else {
         panic!("Expected push_pull for 'C with /push=triplet, got None");
     }
@@ -211,14 +252,21 @@ VS 4
     let section = &chart.sections[0];
 
     // When first chord has push, a space is inserted before it
-    let chord_c = section.measures()[0].chords.iter().find(|c| c.full_symbol == "C")
+    let chord_c = section.measures()[0]
+        .chords
+        .iter()
+        .find(|c| c.full_symbol == "C")
         .expect("Should find C chord in measure 0");
 
     // With /push = 5, 'C should be quintuplet eighth push
     if let Some((is_push, amount)) = &chord_c.push_pull {
         assert!(*is_push, "Expected push notation");
         assert_eq!(amount.level, 1);
-        assert_eq!(amount.base, PushPullBase::Tuplet(5), "Expected quintuplet base from setting");
+        assert_eq!(
+            amount.base,
+            PushPullBase::Tuplet(5),
+            "Expected quintuplet base from setting"
+        );
     } else {
         panic!("Expected push_pull for 'C with /push=5, got None");
     }
@@ -229,7 +277,11 @@ VS 4
     if let Some((is_push, amount)) = &chord_em.push_pull {
         assert!(*is_push, "Expected push notation");
         assert_eq!(amount.level, 2);
-        assert_eq!(amount.base, PushPullBase::Tuplet(5), "Expected quintuplet base from setting");
+        assert_eq!(
+            amount.base,
+            PushPullBase::Tuplet(5),
+            "Expected quintuplet base from setting"
+        );
     } else {
         panic!("Expected push_pull for ''Em with /push=5, got None");
     }
@@ -239,15 +291,24 @@ VS 4
 fn test_push_amount_beats_standard() {
     // Standard eighth
     let amount = PushPullAmount::eighth();
-    assert!((amount.to_beats() - 0.5).abs() < 0.001, "Eighth note should be 0.5 beats");
+    assert!(
+        (amount.to_beats() - 0.5).abs() < 0.001,
+        "Eighth note should be 0.5 beats"
+    );
 
     // Standard sixteenth
     let amount = PushPullAmount::sixteenth();
-    assert!((amount.to_beats() - 0.25).abs() < 0.001, "Sixteenth note should be 0.25 beats");
+    assert!(
+        (amount.to_beats() - 0.25).abs() < 0.001,
+        "Sixteenth note should be 0.25 beats"
+    );
 
     // Standard thirty-second
     let amount = PushPullAmount::thirty_second();
-    assert!((amount.to_beats() - 0.125).abs() < 0.001, "Thirty-second note should be 0.125 beats");
+    assert!(
+        (amount.to_beats() - 0.125).abs() < 0.001,
+        "Thirty-second note should be 0.125 beats"
+    );
 }
 
 #[test]
@@ -255,14 +316,20 @@ fn test_push_amount_beats_triplet() {
     // Triplet eighth = 0.5 * (2/3) = 0.333...
     let amount = PushPullAmount::eighth_triplet();
     let expected = 0.5 * (2.0 / 3.0);
-    assert!((amount.to_beats() - expected).abs() < 0.001,
-        "Triplet eighth should be ~0.333 beats, got {}", amount.to_beats());
+    assert!(
+        (amount.to_beats() - expected).abs() < 0.001,
+        "Triplet eighth should be ~0.333 beats, got {}",
+        amount.to_beats()
+    );
 
     // Triplet sixteenth = 0.25 * (2/3) = 0.166...
     let amount = PushPullAmount::sixteenth_triplet();
     let expected = 0.25 * (2.0 / 3.0);
-    assert!((amount.to_beats() - expected).abs() < 0.001,
-        "Triplet sixteenth should be ~0.166 beats, got {}", amount.to_beats());
+    assert!(
+        (amount.to_beats() - expected).abs() < 0.001,
+        "Triplet sixteenth should be ~0.166 beats, got {}",
+        amount.to_beats()
+    );
 }
 
 #[test]
@@ -270,8 +337,11 @@ fn test_push_amount_beats_quintuplet() {
     // Quintuplet eighth = 0.5 * (4/5) = 0.4
     let amount = PushPullAmount::from_count_tuplet(1, 5).unwrap();
     let expected = 0.5 * (4.0 / 5.0);
-    assert!((amount.to_beats() - expected).abs() < 0.001,
-        "Quintuplet eighth should be 0.4 beats, got {}", amount.to_beats());
+    assert!(
+        (amount.to_beats() - expected).abs() < 0.001,
+        "Quintuplet eighth should be 0.4 beats, got {}",
+        amount.to_beats()
+    );
 }
 
 #[test]
@@ -290,7 +360,10 @@ VS 4
     println!("Generated:\n{}", syntax);
 
     // The generated syntax should contain the triplet notation
-    assert!(syntax.contains("'t"), "Should preserve triplet notation in output");
+    assert!(
+        syntax.contains("'t"),
+        "Should preserve triplet notation in output"
+    );
 }
 
 #[test]
@@ -309,7 +382,10 @@ VS 4
     println!("Generated:\n{}", syntax);
 
     // The generated syntax should contain the tuplet notation
-    assert!(syntax.contains(":5"), "Should preserve tuplet notation in output");
+    assert!(
+        syntax.contains(":5"),
+        "Should preserve tuplet notation in output"
+    );
 }
 
 #[test]
@@ -329,7 +405,10 @@ VS 4
 
     // 'C should be standard eighth push
     // When first chord has push, a space is inserted before it
-    let chord_c = section.measures()[0].chords.iter().find(|c| c.full_symbol == "C")
+    let chord_c = section.measures()[0]
+        .chords
+        .iter()
+        .find(|c| c.full_symbol == "C")
         .expect("Should find C chord in measure 0");
     if let Some((is_push, amount)) = &chord_c.push_pull {
         assert!(*is_push);
@@ -340,7 +419,10 @@ VS 4
 
     // 'tD should be triplet eighth push (Dm from key of C)
     // When chord has push, a space is inserted before it
-    let chord_dm = section.measures()[1].chords.iter().find(|c| c.full_symbol == "Dm")
+    let chord_dm = section.measures()[1]
+        .chords
+        .iter()
+        .find(|c| c.full_symbol == "Dm")
         .expect("Should find Dm chord in measure 1");
     if let Some((is_push, amount)) = &chord_dm.push_pull {
         assert!(*is_push);
@@ -350,7 +432,10 @@ VS 4
     }
 
     // Em't should be triplet eighth pull
-    let chord_em = section.measures()[2].chords.iter().find(|c| c.full_symbol == "Em")
+    let chord_em = section.measures()[2]
+        .chords
+        .iter()
+        .find(|c| c.full_symbol == "Em")
         .expect("Should find Em chord in measure 2");
     if let Some((is_push, amount)) = &chord_em.push_pull {
         assert!(!*is_push);
@@ -360,7 +445,10 @@ VS 4
     }
 
     // F' should be standard eighth pull
-    let chord_f = section.measures()[3].chords.iter().find(|c| c.full_symbol == "F")
+    let chord_f = section.measures()[3]
+        .chords
+        .iter()
+        .find(|c| c.full_symbol == "F")
         .expect("Should find F chord in measure 3");
     if let Some((is_push, amount)) = &chord_f.push_pull {
         assert!(!*is_push);

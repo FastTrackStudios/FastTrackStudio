@@ -91,17 +91,11 @@ Cmaj7/// ->120bpm Dm7/// Em7/// ->140bpm Fmaj7///
 
     // First change: 100 -> 120
     assert_eq!(chart.tempo_changes[0].to_tempo.bpm as u32, 120);
-    assert_eq!(
-        chart.tempo_changes[0].from_tempo.unwrap().bpm as u32,
-        100
-    );
+    assert_eq!(chart.tempo_changes[0].from_tempo.unwrap().bpm as u32, 100);
 
     // Second change: 120 -> 140
     assert_eq!(chart.tempo_changes[1].to_tempo.bpm as u32, 140);
-    assert_eq!(
-        chart.tempo_changes[1].from_tempo.unwrap().bpm as u32,
-        120
-    );
+    assert_eq!(chart.tempo_changes[1].from_tempo.unwrap().bpm as u32, 120);
 }
 
 #[test]

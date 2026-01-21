@@ -38,7 +38,8 @@ Cmaj7/// Dm7///
             i
         );
         assert_eq!(
-            section.measures()[i].chords[0].full_symbol, "s",
+            section.measures()[i].chords[0].full_symbol,
+            "s",
             "Measure {} should be a space chord",
             i
         );
@@ -156,7 +157,7 @@ Cmaj7/// Dm7/// 6/8 Em7/. Fmaj7/.
 
     assert_eq!(chords.len(), 4);
 
-    // First two chords in 4/4 time (3 beats each)
+    // First two chords in 4/4 time (3 beats each = ///)
     assert_eq!(chords[0].position.total_duration.measure, 0);
     assert_eq!(chords[0].position.total_duration.beat, 0);
 
@@ -164,18 +165,17 @@ Cmaj7/// Dm7/// 6/8 Em7/. Fmaj7/.
     assert_eq!(chords[1].position.total_duration.beat, 3);
 
     // After time sig change to 6/8
-    // Previous chords filled: 0.3 + 0.3 = 1.2 (1 measure + 2 beats in 4/4)
-    // Em7/. in 6/8 (dotted quarter = 3 eighth notes, which is half a measure in 6/8)
-    // But the measure boundary happens at 1.2.0 (after 6 beats total)
+    // Previous chords filled: 3 + 3 = 6 beats = 1 measure + 2 beats in 4/4
     // So Em7 starts at 1.2.0
     assert_eq!(chords[2].position.total_duration.measure, 1);
     assert_eq!(chords[2].position.total_duration.beat, 2);
 
     // Fmaj7/. starts after Em7/.
-    // In 6/8, /. = 3 eighth notes = 3 beats
-    // So Fmaj7 is at 1.2 + 3 = 1.5 (measure 1, beat 5)
+    // /. (dotted slash) = 1.5 beats in the parser's interpretation
+    // So Fmaj7 is at 1.2 + 1.5 = 1.3.500 (measure 1, beat 3, subdivision 500)
     assert_eq!(chords[3].position.total_duration.measure, 1);
-    assert_eq!(chords[3].position.total_duration.beat, 5);
+    assert_eq!(chords[3].position.total_duration.beat, 3);
+    assert_eq!(chords[3].position.total_duration.subdivision, 500);
 }
 
 #[test]

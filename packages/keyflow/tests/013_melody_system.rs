@@ -105,7 +105,10 @@ Cmaj7/// $riff
     // 1' should be C with octave up modifier
     assert_eq!(melody.notes[3].pitch, "C");
     assert_eq!(melody.notes[3].scale_degree, Some(1));
-    assert_eq!(melody.notes[3].octave_modifier, keyflow::chart::OctaveModifier::Up);
+    assert_eq!(
+        melody.notes[3].octave_modifier,
+        keyflow::chart::OctaveModifier::Up
+    );
 }
 
 #[test]
@@ -126,11 +129,17 @@ Cmaj7///
 
     // G' should have octave up modifier
     assert_eq!(melody.notes[1].pitch, "G");
-    assert_eq!(melody.notes[1].octave_modifier, keyflow::chart::OctaveModifier::Up);
+    assert_eq!(
+        melody.notes[1].octave_modifier,
+        keyflow::chart::OctaveModifier::Up
+    );
 
     // C, should have octave down modifier
     assert_eq!(melody.notes[2].pitch, "C");
-    assert_eq!(melody.notes[2].octave_modifier, keyflow::chart::OctaveModifier::Down);
+    assert_eq!(
+        melody.notes[2].octave_modifier,
+        keyflow::chart::OctaveModifier::Down
+    );
 }
 
 #[test]

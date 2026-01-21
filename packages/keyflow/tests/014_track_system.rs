@@ -128,7 +128,10 @@ CH 8
     assert_eq!(chart.sections[0].tracks.len(), 3);
 
     // First: chords
-    assert_eq!(chart.sections[0].tracks[0].track_type, keyflow::chart::TrackType::Chords);
+    assert_eq!(
+        chart.sections[0].tracks[0].track_type,
+        keyflow::chart::TrackType::Chords
+    );
 
     // Second: melody lead
     let lead = &chart.sections[0].tracks[1];
@@ -225,7 +228,10 @@ Cmaj7/// Dm7/// Em7/// Fmaj7///
 
     // Both should have same structure
     assert_eq!(chart.sections.len(), reparsed.sections.len());
-    assert_eq!(chart.sections[0].tracks.len(), reparsed.sections[0].tracks.len());
+    assert_eq!(
+        chart.sections[0].tracks.len(),
+        reparsed.sections[0].tracks.len()
+    );
 
     // Chord track should match
     assert_eq!(
@@ -256,10 +262,16 @@ Cmaj7/// Dm7///
     // chord_track() should return the chord track
     let chord_track = section.chord_track();
     assert!(chord_track.is_some());
-    assert_eq!(chord_track.unwrap().track_type, keyflow::chart::TrackType::Chords);
+    assert_eq!(
+        chord_track.unwrap().track_type,
+        keyflow::chart::TrackType::Chords
+    );
 
     // melody_tracks() should return melody tracks
     let melody_tracks: Vec<_> = section.melody_tracks().collect();
     assert_eq!(melody_tracks.len(), 1);
-    assert_eq!(melody_tracks[0].track_type, keyflow::chart::TrackType::Melody);
+    assert_eq!(
+        melody_tracks[0].track_type,
+        keyflow::chart::TrackType::Melody
+    );
 }

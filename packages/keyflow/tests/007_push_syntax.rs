@@ -311,7 +311,7 @@ vs
                     assert!(is_push, "Expected 'C to have push notation");
                 }
                 // Should also have slash rhythm
-                assert!(matches!(chord.rhythm, ChordRhythm::Slashes(_)));
+                assert!(matches!(chord.rhythm, ChordRhythm::Slashes { .. }));
                 found_c = true;
                 break;
             }

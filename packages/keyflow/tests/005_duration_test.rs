@@ -44,7 +44,7 @@ Gmaj7_4 Cmaj7_2 Dm7_8 Em7_8
     assert_eq!(format!("{}", chord1.root), "G");
     assert_eq!(chord1.full_symbol, "Gmaj7");
     match &chord1.rhythm {
-        ChordRhythm::Lily { .. } => {
+        ChordRhythm::Explicit(_) => {
             assert_eq!(chord1.duration.to_beats(chart.time_signature.unwrap()), 1.0);
         }
         _ => panic!("Expected Lily duration for Gmaj7_4"),
@@ -55,7 +55,7 @@ Gmaj7_4 Cmaj7_2 Dm7_8 Em7_8
     assert_eq!(format!("{}", chord2.root), "C");
     assert_eq!(chord2.full_symbol, "Cmaj7");
     match &chord2.rhythm {
-        ChordRhythm::Lily { .. } => {
+        ChordRhythm::Explicit(_) => {
             assert_eq!(chord2.duration.to_beats(chart.time_signature.unwrap()), 2.0);
         }
         _ => panic!("Expected Lily duration for Cmaj7_2"),
@@ -66,7 +66,7 @@ Gmaj7_4 Cmaj7_2 Dm7_8 Em7_8
     assert_eq!(format!("{}", chord3.root), "D");
     assert_eq!(chord3.full_symbol, "Dm7");
     match &chord3.rhythm {
-        ChordRhythm::Lily { .. } => {
+        ChordRhythm::Explicit(_) => {
             assert_eq!(chord3.duration.to_beats(chart.time_signature.unwrap()), 0.5);
         }
         _ => panic!("Expected Lily duration for Dm7_8"),
@@ -77,7 +77,7 @@ Gmaj7_4 Cmaj7_2 Dm7_8 Em7_8
     assert_eq!(format!("{}", chord4.root), "E");
     assert_eq!(chord4.full_symbol, "Em7");
     match &chord4.rhythm {
-        ChordRhythm::Lily { .. } => {
+        ChordRhythm::Explicit(_) => {
             assert_eq!(chord4.duration.to_beats(chart.time_signature.unwrap()), 0.5);
         }
         _ => panic!("Expected Lily duration for Em7_8"),
@@ -123,7 +123,7 @@ Gmaj7//// Cmaj7// Dm7/ Em7/
     assert_eq!(format!("{}", chord1.root), "G");
     assert_eq!(chord1.full_symbol, "Gmaj7");
     match &chord1.rhythm {
-        ChordRhythm::Slashes(count) => {
+        ChordRhythm::Slashes { count, .. } => {
             assert_eq!(*count, 4);
             assert_eq!(chord1.duration.to_beats(chart.time_signature.unwrap()), 4.0);
         }
@@ -138,7 +138,7 @@ Gmaj7//// Cmaj7// Dm7/ Em7/
     assert_eq!(format!("{}", chord2.root), "C");
     assert_eq!(chord2.full_symbol, "Cmaj7");
     match &chord2.rhythm {
-        ChordRhythm::Slashes(count) => {
+        ChordRhythm::Slashes { count, .. } => {
             assert_eq!(*count, 2);
             assert_eq!(chord2.duration.to_beats(chart.time_signature.unwrap()), 2.0);
         }
@@ -149,7 +149,7 @@ Gmaj7//// Cmaj7// Dm7/ Em7/
     assert_eq!(format!("{}", chord3.root), "D");
     assert_eq!(chord3.full_symbol, "Dm7");
     match &chord3.rhythm {
-        ChordRhythm::Slashes(count) => {
+        ChordRhythm::Slashes { count, .. } => {
             assert_eq!(*count, 1);
             assert_eq!(chord3.duration.to_beats(chart.time_signature.unwrap()), 1.0);
         }
@@ -160,7 +160,7 @@ Gmaj7//// Cmaj7// Dm7/ Em7/
     assert_eq!(format!("{}", chord4.root), "E");
     assert_eq!(chord4.full_symbol, "Em7");
     match &chord4.rhythm {
-        ChordRhythm::Slashes(count) => {
+        ChordRhythm::Slashes { count, .. } => {
             assert_eq!(*count, 1);
             assert_eq!(chord4.duration.to_beats(chart.time_signature.unwrap()), 1.0);
         }
@@ -206,7 +206,7 @@ Gmaj7_4 C//// Dm7_2 Em7/
     let chord1 = &measure1.chords[0];
     assert_eq!(format!("{}", chord1.root), "G");
     assert_eq!(chord1.full_symbol, "Gmaj7");
-    assert!(matches!(chord1.rhythm, ChordRhythm::Lily { .. }));
+    assert!(matches!(chord1.rhythm, ChordRhythm::Explicit(_)));
     assert_eq!(chord1.duration.to_beats(chart.time_signature.unwrap()), 1.0);
 
     // Measure 2: C//// (4 beats fills the measure)
@@ -215,7 +215,7 @@ Gmaj7_4 C//// Dm7_2 Em7/
     let chord2 = &measure2.chords[0];
     assert_eq!(format!("{}", chord2.root), "C");
     assert_eq!(chord2.full_symbol, "C");
-    assert!(matches!(chord2.rhythm, ChordRhythm::Slashes(4)));
+    assert!(matches!(chord2.rhythm, ChordRhythm::Slashes { count: 4, .. }));
     assert_eq!(chord2.duration.to_beats(chart.time_signature.unwrap()), 4.0);
 
     // Measure 3: Dm7_2 (2 beats) + Em7/ (1 beat) = 3 beats (partial measure)
@@ -225,13 +225,13 @@ Gmaj7_4 C//// Dm7_2 Em7/
     let chord3 = &measure3.chords[0]; // Dm7_2
     assert_eq!(format!("{}", chord3.root), "D");
     assert_eq!(chord3.full_symbol, "Dm7");
-    assert!(matches!(chord3.rhythm, ChordRhythm::Lily { .. }));
+    assert!(matches!(chord3.rhythm, ChordRhythm::Explicit(_)));
     assert_eq!(chord3.duration.to_beats(chart.time_signature.unwrap()), 2.0);
 
     let chord4 = &measure3.chords[1]; // Em7/
     assert_eq!(format!("{}", chord4.root), "E");
     assert_eq!(chord4.full_symbol, "Em7");
-    assert!(matches!(chord4.rhythm, ChordRhythm::Slashes(1)));
+    assert!(matches!(chord4.rhythm, ChordRhythm::Slashes { count: 1, .. }));
     assert_eq!(chord4.duration.to_beats(chart.time_signature.unwrap()), 1.0);
 }
 
@@ -269,12 +269,11 @@ Gmaj7_4. Cmaj7_2. Dm7_8.
     assert_eq!(measure1.chords.len(), 1);
     let chord1 = &measure1.chords[0];
     assert_eq!(chord1.full_symbol, "Gmaj7");
-    match &chord1.rhythm {
-        ChordRhythm::Lily { dotted, .. } => {
-            assert!(*dotted);
-            assert_eq!(chord1.duration.to_beats(chart.time_signature.unwrap()), 1.5);
-        }
-        _ => panic!("Expected Lily duration with dot"),
+    if let Some((_, dotted, _)) = chord1.rhythm.lily_parts() {
+        assert!(dotted);
+        assert_eq!(chord1.duration.to_beats(chart.time_signature.unwrap()), 1.5);
+    } else {
+        panic!("Expected Lily duration with dot");
     }
 
     // Measure 2: Cmaj7_2. (3 beats) + Dm7_8. (0.75 beats) = 3.75 beats (partial measure)
@@ -283,25 +282,23 @@ Gmaj7_4. Cmaj7_2. Dm7_8.
 
     let chord2 = &measure2.chords[0]; // Cmaj7_2.
     assert_eq!(chord2.full_symbol, "Cmaj7");
-    match &chord2.rhythm {
-        ChordRhythm::Lily { dotted, .. } => {
-            assert!(*dotted);
-            assert_eq!(chord2.duration.to_beats(chart.time_signature.unwrap()), 3.0);
-        }
-        _ => panic!("Expected Lily duration with dot"),
+    if let Some((_, dotted, _)) = chord2.rhythm.lily_parts() {
+        assert!(dotted);
+        assert_eq!(chord2.duration.to_beats(chart.time_signature.unwrap()), 3.0);
+    } else {
+        panic!("Expected Lily duration with dot");
     }
 
     let chord3 = &measure2.chords[1]; // Dm7_8.
     assert_eq!(chord3.full_symbol, "Dm7");
-    match &chord3.rhythm {
-        ChordRhythm::Lily { dotted, .. } => {
-            assert!(*dotted);
-            assert_eq!(
-                chord3.duration.to_beats(chart.time_signature.unwrap()),
-                0.75
-            );
-        }
-        _ => panic!("Expected Lily duration with dot"),
+    if let Some((_, dotted, _)) = chord3.rhythm.lily_parts() {
+        assert!(dotted);
+        assert_eq!(
+            chord3.duration.to_beats(chart.time_signature.unwrap()),
+            0.75
+        );
+    } else {
+        panic!("Expected Lily duration with dot");
     }
 }
 
@@ -376,12 +373,12 @@ Gmaj13_4 C9_2 Gmaj13// C9/
 
     let chord1 = &measure1.chords[0]; // Gmaj13_4
     assert_eq!(chord1.full_symbol, "Gmaj13");
-    assert!(matches!(chord1.rhythm, ChordRhythm::Lily { .. }));
+    assert!(matches!(chord1.rhythm, ChordRhythm::Explicit(_)));
     assert_eq!(chord1.duration.to_beats(chart.time_signature.unwrap()), 1.0);
 
     let chord2 = &measure1.chords[1]; // C9_2
     assert_eq!(chord2.full_symbol, "C9");
-    assert!(matches!(chord2.rhythm, ChordRhythm::Lily { .. }));
+    assert!(matches!(chord2.rhythm, ChordRhythm::Explicit(_)));
     assert_eq!(chord2.duration.to_beats(chart.time_signature.unwrap()), 2.0);
 
     // Measure 2: Gmaj13// (2) + C9/ (1) = 3 beats (partial)
@@ -390,12 +387,12 @@ Gmaj13_4 C9_2 Gmaj13// C9/
 
     let chord3 = &measure2.chords[0]; // Gmaj13//
     assert_eq!(chord3.full_symbol, "Gmaj13");
-    assert!(matches!(chord3.rhythm, ChordRhythm::Slashes(2)));
+    assert!(matches!(chord3.rhythm, ChordRhythm::Slashes { count: 2, .. }));
     assert_eq!(chord3.duration.to_beats(chart.time_signature.unwrap()), 2.0);
 
     let chord4 = &measure2.chords[1]; // C9/
     assert_eq!(chord4.full_symbol, "C9");
-    assert!(matches!(chord4.rhythm, ChordRhythm::Slashes(1)));
+    assert!(matches!(chord4.rhythm, ChordRhythm::Slashes { count: 1, .. }));
     assert_eq!(chord4.duration.to_beats(chart.time_signature.unwrap()), 1.0);
 }
 

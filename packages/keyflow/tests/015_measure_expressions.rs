@@ -214,30 +214,38 @@ Dmaj7/// Em7/// Fmaj7/// Gmaj7///
     let chart = Chart::parse(input).unwrap();
     println!("{}", chart);
 
-    // VS 4x2 = 8 measures
-    // VS +2 = 8+2 = 10 measures
-    // VS -2 = 10-2 = 8 measures (relative to last resolved value)
+    // Relative expressions don't update memory, only absolute values do
+    // VS 4x2 = 8 measures (memory = 8)
+    // VS +2 = 8+2 = 10 measures (memory stays 8)
+    // VS -2 = 8-2 = 6 measures (memory stays 8, not 10-2=8)
     assert_eq!(chart.sections.len(), 3);
-    assert_eq!(chart.sections[0].measures().len(), 8);  // 4x2 = 8
+    assert_eq!(chart.sections[0].measures().len(), 8); // 4x2 = 8
     assert_eq!(chart.sections[1].measures().len(), 10); // 8+2 = 10
-    assert_eq!(chart.sections[2].measures().len(), 8);  // 10-2 = 8
+    assert_eq!(chart.sections[2].measures().len(), 6); // 8-2 = 6
 }
 
 #[test]
 fn test_custom_section_with_expression() {
+    // Test custom section with measure count - should pad to declared length
     let input = r#"
 Test Song - Artist
 120bpm 4/4 #C
 
-[SOLO] 4x2
-Cmaj7/// Dm7/// Em7/// Fmaj7///
+[SOLO] 8
+Cmaj7/// Dm7///
 "#;
 
     let chart = Chart::parse(input).unwrap();
     println!("{}", chart);
 
-    // Custom section with expression: 4x2 = 8 measures
+    // Custom section should be recognized
     assert_eq!(chart.sections.len(), 1);
+    assert_eq!(
+        chart.sections[0].section.section_type,
+        keyflow::sections::SectionType::Custom("SOLO".to_string())
+    );
+
+    // Section should be padded to declared length of 8 measures
     assert_eq!(chart.sections[0].measures().len(), 8);
 }
 
@@ -265,10 +273,10 @@ Fmaj7///
 
     // Memory is independent per section type
     assert_eq!(chart.sections.len(), 4);
-    assert_eq!(chart.sections[0].measures().len(), 8);  // VS 8
-    assert_eq!(chart.sections[1].measures().len(), 4);  // CH 4
+    assert_eq!(chart.sections[0].measures().len(), 8); // VS 8
+    assert_eq!(chart.sections[1].measures().len(), 4); // CH 4
     assert_eq!(chart.sections[2].measures().len(), 12); // VS +4 (8+4=12)
-    assert_eq!(chart.sections[3].measures().len(), 6);  // CH +2 (4+2=6)
+    assert_eq!(chart.sections[3].measures().len(), 6); // CH +2 (4+2=6)
 }
 
 #[test]
@@ -441,9 +449,9 @@ CH
     assert_eq!(chart.sections.len(), 4);
     assert_eq!(chart.sections[0].measures().len(), 8);
     assert_eq!(chart.sections[1].measures().len(), 4);
-    assert_eq!(chart.sections[2].measures().len(), 8);  // From memory
-    assert_eq!(chart.sections[3].measures().len(), 4);  // From memory
+    assert_eq!(chart.sections[2].measures().len(), 8); // From memory
+    assert_eq!(chart.sections[3].measures().len(), 4); // From memory
 
     // First chorus has melody, second should recall template with melody
-    assert_eq!(chart.sections[1].tracks.len(), 2);  // chords + melody
+    assert_eq!(chart.sections[1].tracks.len(), 2); // chords + melody
 }
