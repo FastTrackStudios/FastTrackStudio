@@ -725,6 +725,10 @@ impl ChartLayoutEngine {
                             time_end,
                             glyph_codepoint: Some(slash_glyph_for_ticks(segment.ticks)),
                             glyph_size: self.config.spatium,
+                            glyph_y: staff_y + staff_height / 2.0, // Center on staff
+                            has_stem: false, // Count-in uses stemless slashes
+                            stem_up: true,
+                            flag_count: 0,
                         });
 
                         // Render count text below slashes
@@ -836,6 +840,18 @@ impl ChartLayoutEngine {
                                 + ((segment.tick + segment.ticks) as f64 * seconds_per_tick);
                             let absolute_tick = measure_tick_start + segment.tick as i64;
 
+                            // Compute stem/flag info based on duration
+                            // Whole (1920) and half (960) are stemless in slash notation
+                            // Quarter (480) and shorter have stems
+                            let has_stem = segment.ticks < 960;
+                            let flag_count = match segment.ticks {
+                                t if t >= 480 => 0, // Quarter or longer: no flags
+                                t if t >= 240 => 1, // Eighth: 1 flag
+                                t if t >= 120 => 2, // 16th: 2 flags
+                                t if t >= 60 => 3,  // 32nd: 3 flags
+                                _ => 4,             // 64th: 4 flags
+                            };
+
                             beat_positions.push(BeatPosition {
                                 page: page_number,
                                 system: global_system_index,
@@ -852,6 +868,10 @@ impl ChartLayoutEngine {
                                 time_end,
                                 glyph_codepoint: Some(slash_glyph_for_ticks(segment.ticks)),
                                 glyph_size: self.config.spatium,
+                                glyph_y: staff_y + staff_height / 2.0, // Center on staff
+                                has_stem,
+                                stem_up: true, // Default to stem up
+                                flag_count,
                             });
                         }
 

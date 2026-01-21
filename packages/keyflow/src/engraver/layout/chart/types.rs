@@ -22,6 +22,34 @@ pub enum LayoutMode {
     Paginated { page_width: f64, page_height: f64 },
     /// Continuous scroll with unbounded vertical layout.
     ContinuousScroll { width: f64 },
+    /// Snippet mode: fits content height automatically.
+    /// For titleless charts that should be compact without whitespace.
+    Snippet { page_width: f64 },
+}
+
+impl LayoutMode {
+    /// Create a snippet layout mode for the given width.
+    /// Height will be calculated to fit the content.
+    #[must_use]
+    pub fn snippet(width: f64) -> Self {
+        Self::Snippet { page_width: width }
+    }
+
+    /// Create a snippet layout mode for Letter-size width (8.5").
+    #[must_use]
+    pub fn snippet_letter() -> Self {
+        Self::Snippet { page_width: 612.0 }
+    }
+
+    /// Get the page width for this layout mode.
+    #[must_use]
+    pub fn page_width(&self) -> f64 {
+        match self {
+            LayoutMode::Paginated { page_width, .. } => *page_width,
+            LayoutMode::ContinuousScroll { width } => *width,
+            LayoutMode::Snippet { page_width } => *page_width,
+        }
+    }
 }
 
 impl Default for LayoutMode {
@@ -75,6 +103,14 @@ pub struct BeatPosition {
     pub glyph_codepoint: Option<char>,
     /// Size of the glyph in spatiums (for scaling the outline).
     pub glyph_size: f64,
+    /// Y position of the glyph center (for notehead/rest vertical positioning).
+    pub glyph_y: f64,
+    /// Whether this note has a stem.
+    pub has_stem: bool,
+    /// Stem direction: true = up, false = down. Only meaningful if has_stem is true.
+    pub stem_up: bool,
+    /// Number of flags (0 for quarter and longer, 1 for 8th, 2 for 16th, 3 for 32nd).
+    pub flag_count: u8,
 }
 
 impl BeatPosition {
