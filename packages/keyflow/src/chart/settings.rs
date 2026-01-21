@@ -23,6 +23,10 @@ pub enum ChartSetting {
     SmartRepeats,
     /// Default push/pull mode (standard, triplet, or tuplet number)
     PushMode,
+    /// Automatically fill whole/half notes with quarter note slashes
+    /// When enabled (default), a whole note chord becomes 4 quarter slashes,
+    /// a half note becomes 2 quarter slashes. This is standard for master rhythm charts.
+    AutoRhythmSlashes,
 }
 
 /// Setting value types
@@ -40,6 +44,7 @@ impl ChartSettings {
 
         // Set defaults
         settings.insert(ChartSetting::SmartRepeats, SettingValue::Bool(false));
+        settings.insert(ChartSetting::AutoRhythmSlashes, SettingValue::Bool(true)); // ON by default
 
         Self {
             settings,
@@ -72,6 +77,11 @@ impl ChartSettings {
             }
             "PUSH" => {
                 self.push_mode = Self::parse_push_mode(value)?;
+                Ok(())
+            }
+            "AUTO_RHYTHM_SLASHES" | "AUTORHYTHMSLASHES" | "AUTO_SLASHES" => {
+                let bool_value = Self::parse_bool(value)?;
+                self.set(ChartSetting::AutoRhythmSlashes, SettingValue::Bool(bool_value));
                 Ok(())
             }
             _ => Err(format!("Unknown setting: '{}'", key)),
@@ -155,6 +165,22 @@ impl ChartSettings {
     pub fn smart_repeats(&self) -> bool {
         self.get_bool(ChartSetting::SmartRepeats)
     }
+
+    /// Check if auto rhythm slashes is enabled (default: true)
+    ///
+    /// When enabled, whole notes and half notes in rhythm charts are automatically
+    /// expanded to quarter note slashes. For example:
+    /// - A whole note chord becomes 4 quarter slashes
+    /// - A half note chord becomes 2 quarter slashes
+    ///
+    /// This is standard notation for master rhythm charts.
+    pub fn auto_rhythm_slashes(&self) -> bool {
+        // Default to true if not explicitly set
+        match self.settings.get(&ChartSetting::AutoRhythmSlashes) {
+            Some(SettingValue::Bool(b)) => *b,
+            _ => true, // Default ON
+        }
+    }
 }
 
 impl Default for ChartSettings {
@@ -169,6 +195,7 @@ impl ChartSetting {
         match self {
             ChartSetting::SmartRepeats => "SMART_REPEATS",
             ChartSetting::PushMode => "PUSH",
+            ChartSetting::AutoRhythmSlashes => "AUTO_RHYTHM_SLASHES",
         }
     }
 }

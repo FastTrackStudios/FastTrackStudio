@@ -121,28 +121,26 @@ impl ChordInstance {
     /// Convert rhythm to LilyPond duration notation
     /// Returns duration string that can be appended directly to chord (e.g., "4", "2", "1", "4.")
     fn rhythm_to_lilypond_duration(&self) -> Option<String> {
-        use crate::chord::{ChordRhythm, LilySyntax};
+        use crate::chord::LilySyntax;
 
-        match &self.rhythm {
-            ChordRhythm::Lily {
-                duration, dotted, ..
-            } => {
-                let dur_str = match duration {
-                    LilySyntax::Whole => "1",
-                    LilySyntax::Half => "2",
-                    LilySyntax::Quarter => "4",
-                    LilySyntax::Eighth => "8",
-                    LilySyntax::Sixteenth => "16",
-                    LilySyntax::ThirtySecond => "32",
-                };
-                if *dotted {
-                    // Dotted duration: "4." not ".4"
-                    Some(format!("{}.", dur_str))
-                } else {
-                    Some(dur_str.to_string())
-                }
+        // Use the lily_parts() method to extract duration info
+        if let Some((duration, dotted, _triplet)) = self.rhythm.lily_parts() {
+            let dur_str = match duration {
+                LilySyntax::Whole => "1",
+                LilySyntax::Half => "2",
+                LilySyntax::Quarter => "4",
+                LilySyntax::Eighth => "8",
+                LilySyntax::Sixteenth => "16",
+                LilySyntax::ThirtySecond => "32",
+            };
+            if dotted {
+                // Dotted duration: "4." not ".4"
+                Some(format!("{}.", dur_str))
+            } else {
+                Some(dur_str.to_string())
             }
-            _ => None,
+        } else {
+            None
         }
     }
 }
@@ -167,14 +165,178 @@ impl RhythmSlash {
     }
 }
 
+/// Represents a rest in the rhythm (no chord, just silence)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RestInstance {
+    /// Rhythm notation (duration, triplet, etc.)
+    pub rhythm: ChordRhythm,
+
+    /// Duration in measure.beats.subdivision format
+    pub duration: MusicalDuration,
+
+    /// Position in the song
+    pub position: AbsolutePosition,
+
+    /// Original token (e.g., "r8t", "r4", "r2")
+    pub original_token: String,
+}
+
+impl RestInstance {
+    /// Create a new rest instance
+    pub fn new(
+        rhythm: ChordRhythm,
+        duration: MusicalDuration,
+        position: AbsolutePosition,
+        original_token: String,
+    ) -> Self {
+        Self {
+            rhythm,
+            duration,
+            position,
+            original_token,
+        }
+    }
+}
+
+/// Represents a space in the rhythm (invisible placeholder - measure will be filled with auto slashes)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpaceInstance {
+    /// Rhythm notation (duration, triplet, etc.)
+    pub rhythm: ChordRhythm,
+
+    /// Duration in measure.beats.subdivision format
+    pub duration: MusicalDuration,
+
+    /// Position in the song
+    pub position: AbsolutePosition,
+
+    /// Original token (e.g., "s1", "s2", "s4")
+    pub original_token: String,
+}
+
+impl SpaceInstance {
+    /// Create a new space instance
+    pub fn new(
+        rhythm: ChordRhythm,
+        duration: MusicalDuration,
+        position: AbsolutePosition,
+        original_token: String,
+    ) -> Self {
+        Self {
+            rhythm,
+            duration,
+            position,
+            original_token,
+        }
+    }
+}
+
+/// A rhythm element - a chord, rest, or space
+///
+/// This represents a single element in a measure's rhythm pattern.
+/// Measures with explicit rhythm notation (like `r8t Ab9_8t r8t r4t F9_8t r2`)
+/// use this to preserve both chords and rests in their written order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RhythmElement {
+    /// A chord with rhythm
+    Chord(ChordInstance),
+    /// A rest (silence)
+    Rest(RestInstance),
+    /// A space (invisible placeholder - triggers auto-fill with slashes)
+    Space(SpaceInstance),
+}
+
+impl RhythmElement {
+    /// Get the duration of this element
+    pub fn duration(&self) -> &MusicalDuration {
+        match self {
+            RhythmElement::Chord(c) => &c.duration,
+            RhythmElement::Rest(r) => &r.duration,
+            RhythmElement::Space(s) => &s.duration,
+        }
+    }
+
+    /// Get the rhythm notation for this element
+    pub fn rhythm(&self) -> &ChordRhythm {
+        match self {
+            RhythmElement::Chord(c) => &c.rhythm,
+            RhythmElement::Rest(r) => &r.rhythm,
+            RhythmElement::Space(s) => &s.rhythm,
+        }
+    }
+
+    /// Check if this element is a rest
+    pub fn is_rest(&self) -> bool {
+        matches!(self, RhythmElement::Rest(_))
+    }
+
+    /// Check if this element is a chord
+    pub fn is_chord(&self) -> bool {
+        matches!(self, RhythmElement::Chord(_))
+    }
+
+    /// Get the position of this element
+    pub fn position(&self) -> &AbsolutePosition {
+        match self {
+            RhythmElement::Chord(c) => &c.position,
+            RhythmElement::Rest(r) => &r.position,
+            RhythmElement::Space(s) => &s.position,
+        }
+    }
+
+    /// Check if this element is a space (invisible placeholder)
+    pub fn is_space(&self) -> bool {
+        matches!(self, RhythmElement::Space(_))
+    }
+
+    /// Get a reference to the inner ChordInstance if this is a chord.
+    pub fn as_chord(&self) -> Option<&ChordInstance> {
+        match self {
+            RhythmElement::Chord(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    /// Get a reference to the inner RestInstance if this is a rest.
+    pub fn as_rest(&self) -> Option<&RestInstance> {
+        match self {
+            RhythmElement::Rest(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// Get a reference to the inner SpaceInstance if this is a space.
+    pub fn as_space(&self) -> Option<&SpaceInstance> {
+        match self {
+            RhythmElement::Space(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
 /// Represents a single measure with chords
 ///
 /// A measure is ALWAYS 1.0.0 in duration (one measure).
 /// The time signature defines how many beats are in that measure.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Measure {
-    /// Chords in this measure
+    /// Chords in this measure (legacy field for backward compatibility)
     pub chords: Vec<ChordInstance>,
+
+    /// Complete rhythm elements in this measure (chords and rests in order)
+    ///
+    /// This field preserves the full rhythm pattern as written, including rests.
+    /// For example, `r8t Ab9_8t r8t r4t F9_8t r2` stores 6 rhythm elements:
+    /// - Rest(eighth triplet)
+    /// - Chord(Ab9, eighth triplet)
+    /// - Rest(eighth triplet)
+    /// - Rest(quarter triplet)
+    /// - Chord(F9, eighth triplet)
+    /// - Rest(half)
+    ///
+    /// When this field is non-empty, the engraver should use it instead of
+    /// generating slash fills from the `chords` field.
+    pub rhythm_elements: Vec<RhythmElement>,
 
     /// Rhythm slashes for beats without explicit chords
     /// Generated by `generate_rhythm_slashes()` based on chord positions
@@ -205,6 +367,7 @@ impl Measure {
     pub fn new() -> Self {
         Self {
             chords: Vec::new(),
+            rhythm_elements: Vec::new(),
             rhythm_slashes: Vec::new(),
             time_signature: (4, 4), // Default to 4/4
             repeat_count: 1,        // Default to no repeat
@@ -213,6 +376,11 @@ impl Measure {
             melodies: Vec::new(),
             source_span: None,
         }
+    }
+
+    /// Check if this measure has explicit rhythm elements (chords and rests)
+    pub fn has_explicit_rhythm(&self) -> bool {
+        !self.rhythm_elements.is_empty()
     }
 
     pub fn with_chords(mut self, chords: Vec<ChordInstance>) -> Self {
@@ -260,25 +428,21 @@ impl Measure {
         for chord in &self.chords {
             let chord_beat = chord.position.total_duration.beat.max(0) as usize;
 
-            match &chord.rhythm {
-                // Explicit rests suppress slashes
-                ChordRhythm::Rest { .. } => {
-                    if chord_beat < beats as usize {
-                        suppressed_beats[chord_beat] = true;
-                    }
+            // Explicit rests suppress slashes
+            if chord.rhythm.is_rest() {
+                if chord_beat < beats as usize {
+                    suppressed_beats[chord_beat] = true;
                 }
+            } else if let ChordRhythm::Slashes { count, .. } = &chord.rhythm {
                 // Explicit slash notation (G////) means rhythm is already notated
-                ChordRhythm::Slashes(count) => {
-                    for i in 0..(*count as usize) {
-                        let beat_idx = chord_beat + i;
-                        if beat_idx < beats as usize {
-                            suppressed_beats[beat_idx] = true;
-                        }
+                for i in 0..(*count as usize) {
+                    let beat_idx = chord_beat + i;
+                    if beat_idx < beats as usize {
+                        suppressed_beats[beat_idx] = true;
                     }
                 }
-                // Default chord symbols don't suppress - we generate slashes for all beats
-                _ => {}
             }
+            // Default chord symbols don't suppress - we generate slashes for all beats
         }
 
         // Generate slashes for all beats except suppressed ones

@@ -296,9 +296,8 @@ impl Chart {
 
             for track in &section.tracks {
                 // Output track marker if this section has multiple tracks or track has a name
-                let needs_marker = has_multiple_tracks
-                    || track.name.is_some()
-                    || !track.is_default_chord_track();
+                let needs_marker =
+                    has_multiple_tracks || track.name.is_some() || !track.is_default_chord_track();
 
                 if needs_marker {
                     let marker = track.track_type.marker();
@@ -390,11 +389,8 @@ impl Chart {
                     .iter()
                     .map(|c| c.root.clone())
                     .collect();
-                let current_chords: Vec<_> = measure
-                    .chords
-                    .iter()
-                    .map(|c| c.root.clone())
-                    .collect();
+                let current_chords: Vec<_> =
+                    measure.chords.iter().map(|c| c.root.clone()).collect();
                 if start_chords == current_chords && idx > start_idx {
                     // This looks like a duplicate, stop looking for pattern marker
                     break;
@@ -594,11 +590,8 @@ impl Chart {
                     .iter()
                     .map(|c| c.root.clone())
                     .collect();
-                let current_chords: Vec<_> = measure
-                    .chords
-                    .iter()
-                    .map(|c| c.root.clone())
-                    .collect();
+                let current_chords: Vec<_> =
+                    measure.chords.iter().map(|c| c.root.clone()).collect();
                 if start_chords == current_chords && idx > start_idx {
                     break;
                 }
@@ -837,6 +830,18 @@ impl Chart {
     pub(crate) fn format_push_pull_amount(amount: &crate::chord::PushPullAmount) -> String {
         use crate::chord::PushPullBase;
 
+        // For duration-based push/pull, output the '_N' syntax
+        if let PushPullBase::Duration {
+            duration,
+            dotted,
+            triplet,
+        } = &amount.base
+        {
+            let dot_suffix = if *dotted { "." } else { "" };
+            let triplet_suffix = if *triplet { "t" } else { "" };
+            return format!("'_{}{}{}", duration.value(), dot_suffix, triplet_suffix);
+        }
+
         // Generate apostrophes based on level
         let apostrophes: String = "'".repeat(amount.level as usize);
 
@@ -845,6 +850,7 @@ impl Chart {
             PushPullBase::Standard => String::new(),
             PushPullBase::Triplet => "t".to_string(),
             PushPullBase::Tuplet(n) => format!(":{}", n),
+            PushPullBase::Duration { .. } => unreachable!(), // Already handled above
         };
 
         format!("{}{}", apostrophes, modifier)
@@ -894,56 +900,61 @@ impl Chart {
         use crate::chord::ChordRhythm;
         match rhythm {
             ChordRhythm::Default => String::new(),
-            ChordRhythm::Slashes(count) => "/".repeat(*count as usize),
-            ChordRhythm::Lily {
-                duration,
-                dotted,
-                multiplier,
-                tied,
-            } => {
-                let mut output = format!("_{}", duration.value());
+            ChordRhythm::Slashes { count, dotted, tied } => {
+                let mut output = "/".repeat(*count as usize);
                 if *dotted {
                     output.push('.');
-                }
-                if let Some(mult) = multiplier {
-                    output.push_str(&format!("*{}", mult));
                 }
                 if *tied {
                     output.push('~');
                 }
                 output
             }
-            ChordRhythm::Rest {
-                duration,
-                dotted,
-                multiplier,
-            } => {
-                let mut output = format!("r{}", duration.value());
-                if *dotted {
+            ChordRhythm::Explicit(nd) => {
+                use crate::core::duration::RhythmType;
+
+                // Determine prefix based on rhythm type
+                let prefix = match nd.rhythm_type {
+                    RhythmType::Chord => "_",
+                    RhythmType::Rest => "r",
+                    RhythmType::Space => "s",
+                    RhythmType::Slashes(count) => return "/".repeat(count as usize),
+                };
+
+                // Format the note value
+                let value_str = match nd.note_value {
+                    crate::core::duration::NoteValue::Whole => "1",
+                    crate::core::duration::NoteValue::Half => "2",
+                    crate::core::duration::NoteValue::Quarter => "4",
+                    crate::core::duration::NoteValue::Eighth => "8",
+                    crate::core::duration::NoteValue::Sixteenth => "16",
+                    crate::core::duration::NoteValue::ThirtySecond => "32",
+                    crate::core::duration::NoteValue::SixtyFourth => "64",
+                };
+
+                let mut output = format!("{}{}", prefix, value_str);
+
+                // Add triplet suffix if applicable
+                if nd.is_triplet() {
+                    output.push('t');
+                }
+
+                // Add dots
+                for _ in 0..nd.dots {
                     output.push('.');
                 }
-                if let Some(mult) = multiplier {
+
+                // Add multiplier
+                if let Some(mult) = nd.multiplier {
                     output.push_str(&format!("*{}", mult));
                 }
-                output
-            }
-            ChordRhythm::Space {
-                duration,
-                dotted,
-                multiplier,
-            } => {
-                let mut output = format!("s{}", duration.value());
-                if *dotted {
-                    output.push('.');
+
+                // Add tie
+                if nd.tied {
+                    output.push('~');
                 }
-                if let Some(mult) = multiplier {
-                    output.push_str(&format!("*{}", mult));
-                }
+
                 output
-            }
-            ChordRhythm::Push(_) | ChordRhythm::Pull(_) => {
-                // Push/pull is handled separately in format_chord_for_syntax
-                String::new()
             }
         }
     }

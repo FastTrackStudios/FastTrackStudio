@@ -109,7 +109,7 @@ impl ChordMemory {
                 self.remember_section(section_type, root, &global_remembered);
                 global_remembered
             } else if let Some(key_default) = Self::infer_from_key(root, current_key) {
-                // Not found anywhere - infer from key and remember in BOTH global and section
+                // Infer quality from key (works for scale degrees, Roman numerals, and note names)
                 self.remember_global(root, &key_default);
                 self.remember_section(section_type, root, &key_default);
                 key_default
@@ -120,6 +120,20 @@ impl ChordMemory {
                 parsed_symbol.to_string()
             }
         }
+    }
+
+    /// Check if a root is an explicit note name (A-G with optional accidental)
+    /// as opposed to a scale degree (1-7) or Roman numeral (I, ii, etc.)
+    fn is_explicit_note_name(root: &str) -> bool {
+        if root.is_empty() {
+            return false;
+        }
+        let first_char = root.chars().next().unwrap();
+        // Note names start with A-G (case insensitive)
+        matches!(
+            first_char.to_ascii_uppercase(),
+            'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G'
+        )
     }
 
     /// Infer a chord quality from the current key

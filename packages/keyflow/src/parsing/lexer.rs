@@ -80,9 +80,13 @@ impl Lexer {
 
         match ch {
             // Symbols
-            '#' | '♯' => {
-                Token::with_location(TokenType::Sharp, start_pos, ch.len_utf8(), start_line, start_column)
-            }
+            '#' | '♯' => Token::with_location(
+                TokenType::Sharp,
+                start_pos,
+                ch.len_utf8(),
+                start_line,
+                start_column,
+            ),
             '♭' => Token::with_location(
                 TokenType::Flat,
                 start_pos,
@@ -90,17 +94,23 @@ impl Lexer {
                 start_line,
                 start_column,
             ),
-            '/' => {
-                Token::with_location(TokenType::Slash, start_pos, 1, start_line, start_column)
-            }
+            '/' => Token::with_location(TokenType::Slash, start_pos, 1, start_line, start_column),
             '+' => Token::with_location(TokenType::Plus, start_pos, 1, start_line, start_column),
             '-' => Token::with_location(TokenType::Minus, start_pos, 1, start_line, start_column),
-            '_' => {
-                Token::with_location(TokenType::Underscore, start_pos, 1, start_line, start_column)
-            }
-            '\'' => {
-                Token::with_location(TokenType::Apostrophe, start_pos, 1, start_line, start_column)
-            }
+            '_' => Token::with_location(
+                TokenType::Underscore,
+                start_pos,
+                1,
+                start_line,
+                start_column,
+            ),
+            '\'' => Token::with_location(
+                TokenType::Apostrophe,
+                start_pos,
+                1,
+                start_line,
+                start_column,
+            ),
             '.' => Token::with_location(TokenType::Dot, start_pos, 1, start_line, start_column),
             '~' => Token::with_location(TokenType::Tilde, start_pos, 1, start_line, start_column),
             '*' => {
@@ -127,12 +137,8 @@ impl Lexer {
                 start_line,
                 start_column,
             ),
-            '(' => {
-                Token::with_location(TokenType::LParen, start_pos, 1, start_line, start_column)
-            }
-            ')' => {
-                Token::with_location(TokenType::RParen, start_pos, 1, start_line, start_column)
-            }
+            '(' => Token::with_location(TokenType::LParen, start_pos, 1, start_line, start_column),
+            ')' => Token::with_location(TokenType::RParen, start_pos, 1, start_line, start_column),
             ',' => Token::with_location(TokenType::Comma, start_pos, 1, start_line, start_column),
             '@' => Token::with_location(TokenType::At, start_pos, 1, start_line, start_column),
             ';' => {
@@ -164,7 +170,13 @@ impl Lexer {
                     }
                 }
                 let len = num.len();
-                Token::with_location(TokenType::Number(num), start_pos, len, start_line, start_column)
+                Token::with_location(
+                    TokenType::Number(num),
+                    start_pos,
+                    len,
+                    start_line,
+                    start_column,
+                )
             }
 
             // Letters - single character
