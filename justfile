@@ -875,3 +875,31 @@ help:
     echo "  .env file           Create .env from .env.example and customize paths"
     echo "  Environment vars    Can override .env: REAPER_PATH=/path just <command>"
 
+# ============================================================================
+# Web App Development
+# ============================================================================
+
+# Build Tailwind CSS for the web app
+web-css:
+    cd apps/web && bunx @tailwindcss/cli --input tailwind.css --output assets/tailwind.css
+
+# Watch and rebuild Tailwind CSS on changes
+web-css-watch:
+    cd apps/web && bunx @tailwindcss/cli --input tailwind.css --output assets/tailwind.css --watch
+
+# Run the web app dev server (builds CSS first)
+web: web-css
+    cd apps/web && dx serve
+
+# Run web dev server with CSS watcher in parallel
+web-dev:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Starting Tailwind CSS watcher and Dioxus dev server..."
+    echo "Press Ctrl+C to stop both"
+    # Run CSS watcher in background
+    (cd apps/web && bunx @tailwindcss/cli --input tailwind.css --output assets/tailwind.css --watch) &
+    CSS_PID=$!
+    # Run dx serve in foreground
+    trap "kill $CSS_PID 2>/dev/null" EXIT
+    cd apps/web && dx serve
