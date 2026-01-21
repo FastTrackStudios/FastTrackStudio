@@ -124,6 +124,21 @@ pub fn add_page_background(
     )]));
 }
 
+/// Add simple snippet background (white box only, no shadow).
+pub fn add_snippet_background(
+    root: &mut SceneNode,
+    page_x: f64,
+    page_y: f64,
+    page_width: f64,
+    page_height: f64,
+) {
+    // Just white paper, no shadow
+    root.add_child(SceneNode::anonymous_leaf(vec![PaintCommand::filled_rect(
+        Rect::new(page_x, page_y, page_x + page_width, page_y + page_height),
+        Color::WHITE,
+    )]));
+}
+
 /// Add page footer with "Created with FastTrackStudio" text.
 pub fn add_page_footer(
     root: &mut SceneNode,
@@ -173,6 +188,11 @@ pub fn add_title_header(
     metadata: &crate::SongMetadata,
     tempo: Option<&crate::time::Tempo>,
 ) -> f64 {
+    // If there's no title, skip the entire header (no part name, version, subtitle, etc.)
+    if metadata.title.is_none() {
+        return 0.0;
+    }
+
     let mut commands = Vec::new();
     let center_x = page_x + page_width / 2.0;
     let right_x = page_x + page_width - margins.right;

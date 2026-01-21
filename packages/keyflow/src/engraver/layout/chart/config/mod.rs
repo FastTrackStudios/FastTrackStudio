@@ -8,11 +8,11 @@
 //!
 //! These can be composed into [`ChartLayoutConfig`] for backward compatibility.
 
-mod behavioral;
+pub mod behavioral;
 mod layout_params;
 mod render_options;
 
-pub use behavioral::BehavioralFlags;
+pub use behavioral::{BehavioralFlags, DEFAULT_MIN_CHORD_SYMBOL_GAP};
 pub use layout_params::LayoutParams;
 pub use render_options::RenderOptions;
 
@@ -150,6 +150,12 @@ impl ChartLayoutConfig {
         self.behavior.use_stems
     }
 
+    /// Minimum horizontal gap between adjacent chord symbols (in points).
+    #[must_use]
+    pub fn min_chord_symbol_gap(&self) -> f64 {
+        self.behavior.min_chord_symbol_gap
+    }
+
     // =========================================================================
     // Builder-style setters
     // =========================================================================
@@ -172,6 +178,13 @@ impl ChartLayoutConfig {
     #[must_use]
     pub fn with_use_stems(mut self, use_stems: bool) -> Self {
         self.behavior.use_stems = use_stems;
+        self
+    }
+
+    /// Set the minimum horizontal gap between adjacent chord symbols (in points).
+    #[must_use]
+    pub fn with_min_chord_symbol_gap(mut self, gap: f64) -> Self {
+        self.behavior.min_chord_symbol_gap = gap;
         self
     }
 
@@ -237,6 +250,8 @@ impl ChartLayoutConfig {
             behavior: BehavioralFlags {
                 hide_repeated_chords: flat.hide_repeated_chords,
                 use_stems: flat.use_stems,
+                auto_rhythm_slashes: true, // Default to true for legacy conversion
+                min_chord_symbol_gap: behavioral::DEFAULT_MIN_CHORD_SYMBOL_GAP,
             },
         }
     }

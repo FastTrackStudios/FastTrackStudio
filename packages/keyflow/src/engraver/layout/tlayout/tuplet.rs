@@ -182,6 +182,7 @@ pub struct TupletLayout {
 /// * `ratio` - The tuplet ratio (e.g., 3:2 for triplet)
 /// * `spatium` - Staff space height
 /// * `config` - Tuplet configuration
+/// * `max_x` - Optional maximum X position (measure boundary) to clamp bracket endpoints
 ///
 /// # Returns
 /// A `TupletLayout` containing paint commands and bounds.
@@ -191,6 +192,7 @@ pub fn layout_tuplet(
     id: u64,
     spatium: f64,
     config: &TupletConfig,
+    max_x: Option<f64>,
 ) -> TupletLayout {
     if notes.len() < 2 {
         return TupletLayout {
@@ -222,6 +224,31 @@ pub fn layout_tuplet(
 
     // Check for collisions with inner notes and adjust
     let (p1, p2) = avoid_collisions(notes, p1, p2, is_up, spatium, config);
+
+    // Apply measure boundary constraint (MuseScore-style clamping)
+    // The bracket's right endpoint should not extend past the measure boundary,
+    // but it must still reach at least to the last note's position
+    let p2 = if let Some(boundary) = max_x {
+        let padding = 0.6 * spatium; // Standard tuplet bracket padding from barline
+        let max_endpoint = boundary - padding;
+
+        // Minimum endpoint is just past the last note (small extension for visual clarity)
+        let min_endpoint = last.x + spatium * 0.5;
+
+        // Clamp: prefer staying within boundary, but never go before last note
+        let clamped_x = p2.x.min(max_endpoint).max(min_endpoint);
+
+        #[cfg(debug_assertions)]
+        if p2.x != clamped_x {
+            eprintln!(
+                "[tuplet-boundary] Adjusting bracket p2.x from {:.1} to {:.1} (boundary={:.1}, last_note={:.1})",
+                p2.x, clamped_x, boundary, last.x
+            );
+        }
+        Point::new(clamped_x, p2.y)
+    } else {
+        p2
+    };
 
     // Determine if bracket should be shown
     let show_bracket = should_show_bracket(notes, config.bracket_type);
@@ -672,7 +699,7 @@ mod tests {
         ];
 
         let config = TupletConfig::default();
-        let result = layout_tuplet(&notes, TupletRatio::triplet(), 1, 5.0, &config);
+        let result = layout_tuplet(&notes, TupletRatio::triplet(), 1, 5.0, &config, None);
 
         // Should have commands for bracket and number
         assert!(!result.commands.is_empty());

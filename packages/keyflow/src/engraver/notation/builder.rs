@@ -19,7 +19,7 @@ use crate::engraver::scene::node::SceneNode;
 use crate::engraver::scene::paint::PaintCommand;
 
 use super::mode::NotationMode;
-use super::{Duration, TimeSignature};
+use super::{Duration, DurationKind, TimeSignature};
 
 /// A rhythm entry representing either a note/chord or a rest.
 ///
@@ -293,76 +293,38 @@ impl MeasureBuilder {
             return result;
         }
 
-        // Get time signature info for strong beats
-        let ts = self.time_signature.unwrap_or(TimeSignature::COMMON);
-        let (beats_per_measure, beat_unit) = (ts.numerator, ts.denominator);
-        let ticks_per_beat = match beat_unit {
-            4 => 480, // Quarter note = 480 ticks
-            8 => 240, // Eighth note = 240 ticks
-            2 => 960, // Half note = 960 ticks
-            _ => 480,
-        };
-
-        // Determine strong beat positions (in ticks)
-        // In 4/4: beats 1 and 3 are strong (ticks 0 and 960)
-        // In 3/4: only beat 1 is strong (tick 0)
-        // In 2/4: only beat 1 is strong (tick 0)
-        // In 6/8: beats 1 and 4 are strong (ticks 0 and 720)
-        let strong_beat_ticks: Vec<i32> = if beats_per_measure == 4 && beat_unit == 4 {
-            vec![0, ticks_per_beat * 2] // Beats 1 and 3
-        } else if beats_per_measure == 6 && beat_unit == 8 {
-            vec![0, ticks_per_beat * 3] // Beats 1 and 4
-        } else {
-            vec![0] // Only beat 1 is strong
-        };
-
-        // Track tick position and consecutive quarter groups
-        let mut current_tick: i32 = 0;
-        let mut consecutive_quarters: Vec<usize> = Vec::new();
-        let mut last_strong_beat_crossed: i32 = -1;
-
-        // Helper to mark a group as stemless if it has 2+ members
-        let mark_group = |result: &mut Vec<bool>, group: &[usize]| {
-            if group.len() >= 2 {
-                for &idx in group {
-                    result[idx] = true;
+        // Build a set of indices that are part of tuplet groups
+        // These notes need stems for bracket attachment
+        let mut in_tuplet: Vec<bool> = vec![false; self.rhythm.len()];
+        for spec in &self.tuplet_groups {
+            for i in spec.start_idx..spec.end_idx {
+                if i < in_tuplet.len() {
+                    in_tuplet[i] = true;
                 }
             }
-        };
-
-        for (i, dur) in self.rhythm.iter().enumerate() {
-            let note_tick = current_tick;
-            let is_quarter = *dur == Duration::Quarter;
-
-            // Check if we've crossed a strong beat since the last quarter
-            let crossed_strong_beat = strong_beat_ticks
-                .iter()
-                .any(|&sb| sb > 0 && sb > last_strong_beat_crossed && sb <= note_tick);
-
-            if is_quarter {
-                // If we crossed a strong beat, finalize the previous group
-                if crossed_strong_beat && !consecutive_quarters.is_empty() {
-                    mark_group(&mut result, &consecutive_quarters);
-                    consecutive_quarters.clear();
-                }
-
-                consecutive_quarters.push(i);
-
-                // Update last strong beat if we're on one
-                if strong_beat_ticks.contains(&note_tick) {
-                    last_strong_beat_crossed = note_tick;
-                }
-            } else {
-                // Non-quarter note: finalize the current group
-                mark_group(&mut result, &consecutive_quarters);
-                consecutive_quarters.clear();
-            }
-
-            current_tick += dur.ticks();
         }
 
-        // Handle any remaining consecutive quarters at end of measure
-        mark_group(&mut result, &consecutive_quarters);
+        // Auto-stemless logic:
+        // 1. Whole notes and half notes → stemless (rhythm slashes for longer durations)
+        // 2. Plain quarter notes NOT in tuplet groups → stemless
+        // 3. Notes in tuplet groups → stemmed (need stems for bracket attachment)
+        // 4. Eighth notes and shorter → stemmed (specific rhythms need visual clarity)
+        for (i, dur) in self.rhythm.iter().enumerate() {
+            // Skip tuplet notes - they need stems for bracket attachment
+            if in_tuplet[i] {
+                result[i] = false;
+                continue;
+            }
+
+            let is_long_duration = matches!(
+                dur.kind,
+                DurationKind::Whole | DurationKind::Half
+            );
+            let is_plain_quarter = matches!(dur.kind, DurationKind::Quarter) && dur.dots == 0;
+
+            // Long durations or plain quarters (outside tuplets) are stemless
+            result[i] = is_long_duration || is_plain_quarter;
+        }
 
         result
     }
@@ -524,7 +486,7 @@ impl MeasureBuilder {
 
         // Compute auto-stemless flags for rhythmic notation
         // If explicit stemless is set, all notes are stemless
-        // Otherwise, compute based on consecutive quarter note analysis
+        // Otherwise, compute based on duration (whole/half = stemless slashes)
         let auto_stemless_flags = if self.stemless {
             vec![true; self.rhythm.len()]
         } else {
@@ -537,12 +499,18 @@ impl MeasureBuilder {
         let stem_dir = self.mode.default_stem_direction();
         let note_line = self.mode.default_line();
 
-        // Helper to get head type for a specific note index, using override if available
+        // Helper to get head type for a specific note index
+        // Auto-stemless notes use slash noteheads, others use override or default
         let get_head_type = |idx: usize| -> NoteHeadType {
-            self.head_type_overrides
-                .get(idx)
-                .and_then(|opt| *opt)
-                .unwrap_or(default_head_type)
+            // Check explicit override first
+            if let Some(Some(override_type)) = self.head_type_overrides.get(idx) {
+                return *override_type;
+            }
+            // Auto-stemless notes (whole/half) use slash noteheads
+            if auto_stemless_flags.get(idx).copied().unwrap_or(false) {
+                return NoteHeadType::Slash;
+            }
+            default_head_type
         };
 
         // 1. Add clef segment
@@ -1095,8 +1063,22 @@ impl MeasureBuilder {
         }
 
         // Render tuplet brackets for any tuplet groups
+        // Use TARGET width (where barline will be drawn), not actual computed width
+        // This ensures brackets don't extend past barlines even when chord symbols
+        // push content wider than the allocated measure width
         if !self.tuplet_groups.is_empty() {
-            self.render_tuplet_brackets(ctx, segments, elements, &mut root);
+            let target_width = self.width.map(|w| w * spatium);
+            #[cfg(debug_assertions)]
+            {
+                let actual_width = segments.total_width();
+                eprintln!(
+                    "[measure-builder] Rendering {} tuplet groups, boundary={:?} (actual={:.1})",
+                    self.tuplet_groups.len(),
+                    target_width,
+                    actual_width,
+                );
+            }
+            self.render_tuplet_brackets(ctx, segments, elements, &mut root, target_width);
         }
 
         root
@@ -1109,6 +1091,7 @@ impl MeasureBuilder {
         segments: &SegmentList,
         elements: &[SceneElement],
         root: &mut SceneNode,
+        measure_width: Option<f64>,
     ) {
         let spatium = ctx.spatium();
         let note_line = self.mode.default_line();
@@ -1204,6 +1187,7 @@ impl MeasureBuilder {
                     tuplet_id,
                     spatium,
                     &config,
+                    measure_width,
                 );
                 root.add_child(tuplet_layout.scene);
                 tuplet_id += 1;

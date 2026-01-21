@@ -47,29 +47,18 @@ pub fn lily_syntax_to_duration(lily: LilySyntax, dotted: bool, triplet: bool) ->
 /// "fill this measure with automatic slashes".
 #[must_use]
 pub fn measure_has_explicit_chord_rhythm(measure: &Measure) -> bool {
-    // Helper to check if a chord has USER-specified explicit duration
-    // (not auto-assigned by the parser's apply_auto_durations)
-    let has_user_explicit_duration = |chord: &crate::ChordInstance| -> bool {
-        // Check if the original token contains '_' which indicates user-specified duration
-        chord.original_token.contains('_')
-    };
-
     // Check rhythm_elements first (preferred - contains both chords and rests)
     if !measure.rhythm_elements.is_empty() {
         let has_real_rhythm = measure.rhythm_elements.iter().any(|elem| {
             match elem {
                 RhythmElement::Chord(chord) => {
-                    // Only Lily (explicit note duration) counts as explicit rhythm
-                    // But only if the user actually wrote the duration (not auto-assigned)
-                    // Also skip pushed first chords (they spill back to previous measure)
+                    // Only Explicit durations count as explicit rhythm
+                    // Skip pushed first chords (they spill back to previous measure)
                     let is_pushed_first = chord
                         .push_pull
                         .as_ref()
                         .map_or(false, |(is_push, _)| *is_push);
-                    let is_user_explicit = has_user_explicit_duration(chord);
-                    !is_pushed_first
-                        && is_user_explicit
-                        && matches!(chord.rhythm, ChordRhythm::Lily { .. })
+                    !is_pushed_first && chord.rhythm.has_lily_duration()
                 }
                 RhythmElement::Rest(_) => true, // Rests count as real rhythm
                 RhythmElement::Space(_) => false, // Space triggers auto-fill
@@ -87,13 +76,7 @@ pub fn measure_has_explicit_chord_rhythm(measure: &Measure) -> bool {
                 .push_pull
                 .as_ref()
                 .map_or(false, |(is_push, _)| *is_push);
-        let is_user_explicit = has_user_explicit_duration(chord);
-        !is_pushed_first
-            && is_user_explicit
-            && matches!(
-                chord.rhythm,
-                ChordRhythm::Lily { .. } | ChordRhythm::Rest { .. }
-            )
+        !is_pushed_first && (chord.rhythm.has_lily_duration() || chord.rhythm.is_rest())
     })
 }
 
@@ -278,7 +261,7 @@ pub fn build_rhythm_with_triplets(
         });
 
         let chord_duration_beats = match &chord.rhythm {
-            ChordRhythm::Slashes(n) => *n as usize,
+            ChordRhythm::Slashes { count, .. } => *count as usize,
             _ => 1,
         };
 
@@ -327,6 +310,18 @@ pub fn build_rhythm_with_triplets(
             let end_idx = rhythm_index;
             tuplet_specs.push(TupletSpec::triplet(start_idx, end_idx));
         } else {
+            // Standard quarter note beat
+            // Check for standard (non-triplet) spillbacks that should appear on this beat
+            if let Some(spills) = spillbacks {
+                if let Some(spillback) = spills.iter().find(|s| {
+                    s.beat_position == beat_idx && s.push_base == PushPullBase::Standard
+                }) {
+                    // Record the chord position for the spillback
+                    // For standard pushes, the chord symbol appears on the quarter note
+                    spillback_chord_positions.push((rhythm_index, spillback.chord_symbol.clone()));
+                }
+            }
+
             rhythm.push(Duration::Quarter);
             rhythm_index += 1;
         }

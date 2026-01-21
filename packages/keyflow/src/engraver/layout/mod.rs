@@ -32,6 +32,7 @@
 // region:    --- Modules
 
 pub mod autoplace;
+pub mod boundary;
 #[cfg(feature = "engraver")]
 pub mod chart;
 pub mod context;
@@ -51,6 +52,10 @@ pub mod tlayout;
 // region:    --- Re-exports
 
 pub use autoplace::{Autoplace, AutoplaceConfig, AutoplaceResult, AutoplaceState};
+pub use boundary::{
+    BoundaryContext, calculate_overhang, clamp_point_to_boundary, clamp_to_boundary,
+    constrain_shape_to_boundary, padding as boundary_padding,
+};
 pub use context::{
     LayoutConfiguration, LayoutContext, LayoutContextOwned, LayoutMode, LayoutState,
 };

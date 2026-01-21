@@ -2,6 +2,21 @@
 //!
 //! This module extracts the duplicated chord rendering logic from
 //! `layout_paginated` and `layout_continuous` into reusable functions.
+//!
+//! # Collision Detection
+//!
+//! After rendering chord symbols, this module performs post-render collision
+//! detection to ensure chord symbols don't overlap. When adjacent chords
+//! would collide or be closer than the minimum gap, they are pushed apart:
+//! - The first chord shifts slightly left
+//! - The second chord shifts slightly right
+//!
+//! This approach is superior to pre-computed minimum widths because:
+//! 1. It uses actual rendered bounds rather than text width estimates
+//! 2. It only adds spacing where collisions actually occur
+//! 3. It prevents pushing content past barlines
+
+use kurbo::{Affine, Rect, Vec2};
 
 use crate::engraver::layout::context::LayoutContext;
 use crate::engraver::layout::tlayout::{layout_harmony, parse_chord, HarmonyParams, HarmonyStyle};
@@ -18,6 +33,8 @@ use super::types::PushSpillback;
 pub struct ChordRenderContext<'a> {
     /// Measure x position (start of measure content).
     pub measure_x: f64,
+    /// Measure width (for collision boundary clamping).
+    pub measure_width: f64,
     /// Chord y position (above staff).
     pub chord_y: f64,
     /// Page number (1-indexed, for paginated mode).
@@ -40,6 +57,9 @@ pub struct ChordRenderContext<'a> {
     pub time_signature: (u8, u8),
     /// Whether to hide repeated consecutive chords.
     pub hide_repeated_chords: bool,
+    /// Minimum horizontal gap between adjacent chord symbols (in points).
+    /// Set to 0.0 to disable collision detection.
+    pub min_chord_symbol_gap: f64,
 }
 
 /// Result of chord symbol rendering.
@@ -51,6 +71,139 @@ pub struct ChordRenderResult {
     pub last_chord_symbol: Option<String>,
     /// Next ID counter value.
     pub next_id: u64,
+}
+
+// ============================================================================
+// Collision Detection
+// ============================================================================
+
+/// Information about a rendered chord for collision detection.
+#[derive(Debug)]
+struct ChordBoundsInfo {
+    /// Index in the nodes vector.
+    node_idx: usize,
+    /// Original X position (in world coordinates).
+    original_x: f64,
+    /// Bounding box in world coordinates.
+    world_bounds: Rect,
+}
+
+/// Result of chord collision resolution.
+#[derive(Debug)]
+pub struct ChordCollisionResult {
+    /// X-position adjustments for each chord (indexed same as input).
+    /// Positive = shift right, negative = shift left.
+    pub adjustments: Vec<f64>,
+    /// Whether any collisions were detected and resolved.
+    pub had_collisions: bool,
+}
+
+/// Detect and resolve overlapping chord symbols.
+///
+/// This function takes rendered chord bounds and computes position adjustments
+/// needed to achieve the minimum gap between adjacent chords.
+///
+/// # Algorithm
+///
+/// For each adjacent pair of chords:
+/// 1. Compute the gap (left edge of B - right edge of A)
+/// 2. If gap < min_gap, compute the overlap amount
+/// 3. Split the overlap: shift A left, shift B right
+/// 4. Clamp adjustments to stay within measure bounds
+///
+/// # Arguments
+///
+/// * `chord_bounds` - List of chord bounds info, sorted by X position
+/// * `min_gap` - Minimum required horizontal gap between chords (in points)
+/// * `measure_start_x` - Left boundary of measure (don't shift past this)
+/// * `measure_end_x` - Right boundary of measure (don't shift past this)
+///
+/// # Returns
+///
+/// `ChordCollisionResult` with adjustments for each chord.
+fn resolve_chord_collisions(
+    chord_bounds: &[ChordBoundsInfo],
+    min_gap: f64,
+    measure_start_x: f64,
+    measure_end_x: f64,
+) -> ChordCollisionResult {
+    if chord_bounds.len() < 2 {
+        return ChordCollisionResult {
+            adjustments: vec![0.0; chord_bounds.len()],
+            had_collisions: false,
+        };
+    }
+
+    let mut adjustments = vec![0.0; chord_bounds.len()];
+    let mut had_collisions = false;
+
+    // Process adjacent pairs left-to-right
+    for i in 0..chord_bounds.len() - 1 {
+        let bounds_a = &chord_bounds[i];
+        let bounds_b = &chord_bounds[i + 1];
+
+        // Apply accumulated adjustments to get current positions
+        let adjusted_right_a = bounds_a.world_bounds.x1 + adjustments[i];
+        let adjusted_left_b = bounds_b.world_bounds.x0 + adjustments[i + 1];
+
+        // Compute current gap
+        let gap = adjusted_left_b - adjusted_right_a;
+
+        if gap < min_gap {
+            // Collision detected - compute overlap
+            let overlap = min_gap - gap;
+            had_collisions = true;
+
+            // Split the adjustment: shift A left, shift B right
+            // Use 40/60 split to favor moving the second chord right
+            // (first chord is often at beat 1, which should stay anchored)
+            let shift_left = overlap * 0.4;
+            let shift_right = overlap * 0.6;
+
+            // Compute tentative new positions
+            let new_left_a = bounds_a.world_bounds.x0 + adjustments[i] - shift_left;
+            let new_right_b = bounds_b.world_bounds.x1 + adjustments[i + 1] + shift_right;
+
+            // Clamp to measure bounds
+            if new_left_a < measure_start_x {
+                // Can't shift A left enough, push all onto B
+                let clamped_shift_left = (bounds_a.world_bounds.x0 + adjustments[i]) - measure_start_x;
+                adjustments[i] -= clamped_shift_left.max(0.0);
+                adjustments[i + 1] += overlap - clamped_shift_left.max(0.0);
+            } else if new_right_b > measure_end_x {
+                // Can't shift B right enough, push all onto A
+                let clamped_shift_right = measure_end_x - (bounds_b.world_bounds.x1 + adjustments[i + 1]);
+                adjustments[i + 1] += clamped_shift_right.max(0.0);
+                adjustments[i] -= overlap - clamped_shift_right.max(0.0);
+            } else {
+                // Normal case: apply the split
+                adjustments[i] -= shift_left;
+                adjustments[i + 1] += shift_right;
+            }
+
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[chord-collision] Detected overlap of {:.1}pt between chords {} and {}. \
+                 Adjustments: [{:.1}, {:.1}]",
+                overlap, i, i + 1, adjustments[i], adjustments[i + 1]
+            );
+        }
+    }
+
+    ChordCollisionResult {
+        adjustments,
+        had_collisions,
+    }
+}
+
+/// Apply position adjustments to chord nodes by modifying their transforms.
+fn apply_collision_adjustments(nodes: &mut [SceneNode], adjustments: &[f64]) {
+    for (node, &adjustment) in nodes.iter_mut().zip(adjustments.iter()) {
+        if adjustment.abs() > 0.001 {
+            // Apply horizontal translation to the existing transform
+            node.transform = node.transform.then_translate(Vec2::new(adjustment, 0.0));
+        }
+    }
 }
 
 /// Determine if a chord should be skipped (is a space/rest placeholder).
@@ -135,6 +288,7 @@ pub fn calculate_segment_index(
 
         if has_explicit_rhythm {
             // Explicit rhythm: find chord's index in rhythm_elements
+            // Each RhythmElement::Chord maps to a segment in order
             let mut seen_chord_count = 0;
             let mut found_idx = None;
             for (idx, elem) in measure.rhythm_elements.iter().enumerate() {
@@ -146,6 +300,18 @@ pub fn calculate_segment_index(
                     seen_chord_count += 1;
                 }
             }
+
+            // Debug: log segment count mismatch
+            #[cfg(debug_assertions)]
+            if segment_positions.len() < measure.rhythm_elements.len() {
+                eprintln!(
+                    "[chord-position] WARNING: segment_positions.len()={} < rhythm_elements.len()={} for chord_idx={}",
+                    segment_positions.len(),
+                    measure.rhythm_elements.len(),
+                    chord_idx
+                );
+            }
+
             return found_idx
                 .unwrap_or(chord_idx)
                 .min(segment_positions.len().saturating_sub(1));
@@ -163,7 +329,7 @@ pub fn calculate_segment_index(
                     break;
                 }
                 let chord_beats = match &c.rhythm {
-                    ChordRhythm::Slashes(n) => *n as usize,
+                    ChordRhythm::Slashes { count, .. } => *count as usize,
                     ChordRhythm::Default => 1,
                     _ => 1,
                 };
@@ -183,7 +349,7 @@ pub fn calculate_segment_index(
             break;
         }
         let chord_beats = match &c.rhythm {
-            ChordRhythm::Slashes(n) => *n as usize,
+            ChordRhythm::Slashes { count, .. } => *count as usize,
             ChordRhythm::Default => 1,
             _ => 1,
         };
@@ -229,10 +395,12 @@ pub fn should_hide_chord(
     previous_symbol.map_or(false, |prev| prev == current_symbol)
 }
 
-/// Render chord symbols for a measure.
+/// Render chord symbols for a measure with automatic collision detection.
 ///
 /// This handles all the complex logic for determining which chords to render,
-/// where to position them, and what metadata to attach.
+/// where to position them, and what metadata to attach. After rendering,
+/// it detects collisions between adjacent chord symbols and adjusts their
+/// positions to maintain the minimum gap.
 ///
 /// Note: `internal_push_positions` should already be included in `ctx`.
 pub fn render_chord_symbols(
@@ -243,6 +411,7 @@ pub fn render_chord_symbols(
     layout_ctx: &LayoutContext<'_>,
 ) -> ChordRenderResult {
     let mut nodes = Vec::new();
+    let mut chord_bounds_info: Vec<ChordBoundsInfo> = Vec::new();
     let mut last_chord_symbol = previous_chord_symbol.map(String::from);
 
     let is_boundary = is_at_boundary(ctx.measure_idx, ctx.local_measure_idx);
@@ -299,20 +468,6 @@ pub fn render_chord_symbols(
             is_boundary,
         );
 
-        #[cfg(debug_assertions)]
-        eprintln!(
-            "[chord-layout] section={} measure={} local={} chord_idx={} '{}' segment_idx={} rhythm_elems={} pushed={} boundary={}",
-            ctx.section_name,
-            ctx.measure_idx,
-            ctx.local_measure_idx,
-            chord_idx,
-            current_symbol,
-            segment_idx,
-            measure.rhythm_elements.len(),
-            chord.push_pull.is_some(),
-            is_pushed_at_boundary
-        );
-
         // Get segment x position
         let segment_x = ctx
             .segment_positions
@@ -328,7 +483,15 @@ pub fn render_chord_symbols(
         params.id = id_counter;
         id_counter += 1;
 
-        let (_, mut chord_node) = layout_harmony(&params, layout_ctx);
+        let (layout_data, mut chord_node) = layout_harmony(&params, layout_ctx);
+
+        // Store bounds info for collision detection
+        // layout_harmony returns bounds already in world coordinates (includes params.position)
+        chord_bounds_info.push(ChordBoundsInfo {
+            node_idx: nodes.len(),
+            original_x: chord_x,
+            world_bounds: layout_data.bounds,
+        });
 
         // Add metadata
         if let Some(page) = ctx.page_number {
@@ -356,6 +519,44 @@ pub fn render_chord_symbols(
         }
 
         nodes.push(chord_node);
+    }
+
+    // Perform collision detection and resolution if enabled
+    #[cfg(debug_assertions)]
+    if !chord_bounds_info.is_empty() {
+        eprintln!(
+            "[chord-collision] measure={} chords={} min_gap={:.1} bounds: {:?}",
+            ctx.measure_idx,
+            chord_bounds_info.len(),
+            ctx.min_chord_symbol_gap,
+            chord_bounds_info.iter().map(|b| (b.original_x, b.world_bounds.x0, b.world_bounds.x1)).collect::<Vec<_>>()
+        );
+    }
+
+    if ctx.min_chord_symbol_gap > 0.0 && chord_bounds_info.len() >= 2 {
+        let collision_result = resolve_chord_collisions(
+            &chord_bounds_info,
+            ctx.min_chord_symbol_gap,
+            ctx.measure_x,
+            ctx.measure_x + ctx.measure_width,
+        );
+
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[chord-collision] had_collisions={} adjustments={:?}",
+            collision_result.had_collisions,
+            collision_result.adjustments
+        );
+
+        if collision_result.had_collisions {
+            // Apply adjustments to nodes
+            for (bounds_info, &adjustment) in chord_bounds_info.iter().zip(collision_result.adjustments.iter()) {
+                if adjustment.abs() > 0.001 {
+                    let node = &mut nodes[bounds_info.node_idx];
+                    node.transform = node.transform.then_translate(Vec2::new(adjustment, 0.0));
+                }
+            }
+        }
     }
 
     ChordRenderResult {
@@ -456,5 +657,93 @@ mod tests {
 
         // Neither
         assert!(!is_at_boundary(5, 2));
+    }
+
+    // ==========================================================================
+    // Collision Detection Tests
+    // ==========================================================================
+
+    fn make_bounds(x0: f64, width: f64) -> ChordBoundsInfo {
+        ChordBoundsInfo {
+            node_idx: 0,
+            original_x: x0,
+            world_bounds: Rect::new(x0, 0.0, x0 + width, 20.0),
+        }
+    }
+
+    #[test]
+    fn test_collision_no_chords() {
+        let bounds: Vec<ChordBoundsInfo> = vec![];
+        let result = resolve_chord_collisions(&bounds, 4.0, 0.0, 200.0);
+        assert!(!result.had_collisions);
+        assert!(result.adjustments.is_empty());
+    }
+
+    #[test]
+    fn test_collision_single_chord() {
+        let bounds = vec![make_bounds(10.0, 30.0)];
+        let result = resolve_chord_collisions(&bounds, 4.0, 0.0, 200.0);
+        assert!(!result.had_collisions);
+        assert_eq!(result.adjustments.len(), 1);
+        assert!((result.adjustments[0]).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_collision_no_overlap() {
+        // Two chords with enough space between them
+        let bounds = vec![
+            make_bounds(10.0, 30.0),  // ends at 40
+            make_bounds(50.0, 30.0),  // starts at 50, gap of 10
+        ];
+        let result = resolve_chord_collisions(&bounds, 4.0, 0.0, 200.0);
+        assert!(!result.had_collisions);
+        assert!((result.adjustments[0]).abs() < 0.001);
+        assert!((result.adjustments[1]).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_collision_detected_and_resolved() {
+        // Two chords that overlap (gap of 2, need 4)
+        let bounds = vec![
+            make_bounds(10.0, 30.0),  // ends at 40
+            make_bounds(42.0, 30.0),  // starts at 42, gap of only 2
+        ];
+        let result = resolve_chord_collisions(&bounds, 4.0, 0.0, 200.0);
+        assert!(result.had_collisions);
+        // First chord should shift left
+        assert!(result.adjustments[0] < 0.0);
+        // Second chord should shift right
+        assert!(result.adjustments[1] > 0.0);
+        // Total adjustment should be approximately the overlap amount (2)
+        let total_adjustment = result.adjustments[1] - result.adjustments[0];
+        assert!((total_adjustment - 2.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_collision_clamped_at_measure_start() {
+        // Chord at very start of measure can't shift left
+        let bounds = vec![
+            make_bounds(0.0, 30.0),   // ends at 30, at measure start
+            make_bounds(32.0, 30.0),  // starts at 32, gap of only 2
+        ];
+        let result = resolve_chord_collisions(&bounds, 4.0, 0.0, 200.0);
+        assert!(result.had_collisions);
+        // First chord can't shift much left (clamped)
+        // Second chord takes most of the adjustment
+        assert!(result.adjustments[1] > result.adjustments[0].abs());
+    }
+
+    #[test]
+    fn test_collision_three_chords_cascade() {
+        // Three overlapping chords - adjustments should cascade
+        let bounds = vec![
+            make_bounds(10.0, 30.0),  // ends at 40
+            make_bounds(42.0, 30.0),  // starts at 42, ends at 72 (gap 2)
+            make_bounds(74.0, 30.0),  // starts at 74 (gap 2)
+        ];
+        let result = resolve_chord_collisions(&bounds, 4.0, 0.0, 200.0);
+        assert!(result.had_collisions);
+        // All three should have adjustments
+        // Pattern: left shifts left, middle may shift either way, right shifts right
     }
 }

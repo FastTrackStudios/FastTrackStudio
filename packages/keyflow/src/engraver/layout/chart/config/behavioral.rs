@@ -7,7 +7,7 @@
 ///
 /// These flags control the behavior of the layout engine rather than
 /// visual styling or physical layout dimensions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BehavioralFlags {
     /// Hide repeated consecutive chord symbols.
     ///
@@ -23,13 +23,45 @@ pub struct BehavioralFlags {
     /// triplet brackets. This is useful for charts with complex
     /// push/pull timing that needs to be precisely notated.
     pub use_stems: bool,
+
+    /// Automatically fill whole/half notes with quarter note slashes.
+    ///
+    /// When true (default), chords with whole note or half note durations
+    /// are automatically expanded to quarter note slashes:
+    /// - A whole note chord (4 beats) becomes 4 quarter slashes
+    /// - A half note chord (2 beats) becomes 2 quarter slashes
+    ///
+    /// This is the standard notation for master rhythm charts, making them
+    /// easier to read. Can be disabled via `/AUTO_RHYTHM_SLASHES=false` for
+    /// specific sections where sustained chords (diamonds) are desired.
+    pub auto_rhythm_slashes: bool,
+
+    /// Minimum horizontal gap between adjacent chord symbols (in points).
+    ///
+    /// When chord symbols would overlap or be closer than this gap,
+    /// they are automatically pushed apart:
+    /// - The first chord shifts slightly left
+    /// - The second chord shifts slightly right
+    ///
+    /// Default is 4.0 points (approximately 0.5-1.0 spatiums), which provides
+    /// enough separation for readability without excessive spacing.
+    pub min_chord_symbol_gap: f64,
 }
+
+/// Default minimum gap between chord symbols (in points).
+/// A small positive value (3.0) enables post-render collision detection,
+/// which pushes overlapping chord symbols apart by the minimum needed amount.
+/// This prevents chord symbol text from overlapping while minimizing
+/// chord/notation misalignment.
+pub const DEFAULT_MIN_CHORD_SYMBOL_GAP: f64 = 3.0;
 
 impl Default for BehavioralFlags {
     fn default() -> Self {
         Self {
             hide_repeated_chords: true,
             use_stems: false,
+            auto_rhythm_slashes: true, // ON by default for master rhythm charts
+            min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
         }
     }
 }
@@ -49,6 +81,8 @@ impl BehavioralFlags {
         Self {
             hide_repeated_chords: true,
             use_stems: false,
+            auto_rhythm_slashes: true,
+            min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
         }
     }
 
@@ -60,6 +94,8 @@ impl BehavioralFlags {
         Self {
             hide_repeated_chords: false,
             use_stems: true,
+            auto_rhythm_slashes: true,
+            min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
         }
     }
 
@@ -69,6 +105,8 @@ impl BehavioralFlags {
         Self {
             hide_repeated_chords: false,
             use_stems: false,
+            auto_rhythm_slashes: true,
+            min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
         }
     }
 
@@ -87,6 +125,20 @@ impl BehavioralFlags {
     #[must_use]
     pub const fn with_use_stems(mut self, use_stems: bool) -> Self {
         self.use_stems = use_stems;
+        self
+    }
+
+    /// Set whether to automatically fill whole/half notes with quarter slashes.
+    #[must_use]
+    pub const fn with_auto_rhythm_slashes(mut self, auto_slashes: bool) -> Self {
+        self.auto_rhythm_slashes = auto_slashes;
+        self
+    }
+
+    /// Set the minimum horizontal gap between adjacent chord symbols (in points).
+    #[must_use]
+    pub fn with_min_chord_symbol_gap(mut self, gap: f64) -> Self {
+        self.min_chord_symbol_gap = gap;
         self
     }
 
