@@ -462,6 +462,9 @@
   .min-h-\[50vh\] {
     min-height: 50vh;
   }
+  .min-h-\[200px\] {
+    min-height: 200px;
+  }
   .min-h-\[400px\] {
     min-height: 400px;
   }
@@ -649,6 +652,9 @@
   }
   .gap-1 {
     gap: calc(var(--spacing) * 1);
+  }
+  .gap-1\.5 {
+    gap: calc(var(--spacing) * 1.5);
   }
   .gap-2 {
     gap: calc(var(--spacing) * 2);

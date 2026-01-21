@@ -40,11 +40,22 @@ tempo: 120
 | G . . . | C . G . |
 "#;
 
+/// Preview mode - Snippet (content-sized) or Page (A4)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreviewMode {
+    Snippet,
+    Page,
+}
+
 /// Chart editor with live preview.
 #[component]
 pub fn ChartEditor() -> Element {
     // Source text state
     let mut source = use_signal(|| DEFAULT_CHART.to_string());
+    // Preview mode state
+    let mut preview_mode = use_signal(|| PreviewMode::Snippet);
+
+    let is_snippet = *preview_mode.read() == PreviewMode::Snippet;
 
     rsx! {
         div {
@@ -92,33 +103,79 @@ pub fn ChartEditor() -> Element {
             div {
                 class: "flex flex-col bg-muted/30 overflow-hidden",
 
-                // Preview header
+                // Preview header with mode toggle
                 div {
-                    class: "px-4 py-3 border-b border-border bg-card flex items-center gap-2 shrink-0",
+                    class: "px-4 py-3 border-b border-border bg-card flex items-center justify-between shrink-0",
 
-                    lucide_dioxus::Eye { class: "w-4 h-4 text-primary" }
-                    h2 {
-                        class: "text-sm font-semibold text-foreground",
-                        "Live Preview"
+                    // Left side - title
+                    div {
+                        class: "flex items-center gap-2",
+                        lucide_dioxus::Eye { class: "w-4 h-4 text-primary" }
+                        h2 {
+                            class: "text-sm font-semibold text-foreground",
+                            "Live Preview"
+                        }
                     }
-                    span {
-                        class: "text-xs text-muted-foreground ml-2",
-                        "(A4 • Scroll to zoom • Drag to pan)"
+
+                    // Right side - mode toggle
+                    div {
+                        class: "flex items-center gap-1 bg-muted rounded-lg p-1",
+
+                        button {
+                            class: if is_snippet {
+                                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-background text-foreground shadow-sm"
+                            } else {
+                                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                            },
+                            onclick: move |_| preview_mode.set(PreviewMode::Snippet),
+                            lucide_dioxus::Scissors { class: "w-3.5 h-3.5" }
+                            "Snippet"
+                        }
+
+                        button {
+                            class: if !is_snippet {
+                                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-background text-foreground shadow-sm"
+                            } else {
+                                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                            },
+                            onclick: move |_| preview_mode.set(PreviewMode::Page),
+                            lucide_dioxus::FileText { class: "w-3.5 h-3.5" }
+                            "Page (A4)"
+                        }
                     }
                 }
 
-                // Chart preview - A4 aspect ratio container
-                div {
-                    class: "flex-1 p-4 overflow-auto flex items-start justify-center",
-
-                    // A4 page container (210mm x 297mm = 1:1.414 ratio)
+                // Chart preview - changes based on mode
+                if is_snippet {
+                    // Snippet mode - content-sized, centered
                     div {
-                        class: "bg-white rounded-lg shadow-xl overflow-hidden",
-                        // A4 proportions: width is fixed, height maintains ratio
-                        style: "width: min(100%, 595px); aspect-ratio: 210 / 297; min-height: 0;",
+                        class: "flex-1 p-4 overflow-auto flex items-start justify-center",
 
-                        DynamicChartRenderer {
-                            source: source()
+                        div {
+                            class: "bg-white rounded-lg shadow-xl overflow-hidden",
+                            // Let content determine size
+                            style: "min-width: 400px; max-width: 100%;",
+
+                            DynamicChartRenderer {
+                                source: source(),
+                                mode: PreviewMode::Snippet
+                            }
+                        }
+                    }
+                } else {
+                    // Page mode - A4 aspect ratio
+                    div {
+                        class: "flex-1 p-4 overflow-auto flex items-start justify-center",
+
+                        div {
+                            class: "bg-white rounded-lg shadow-xl overflow-hidden",
+                            // A4 proportions: 210mm x 297mm
+                            style: "width: min(100%, 595px); aspect-ratio: 210 / 297; min-height: 0;",
+
+                            DynamicChartRenderer {
+                                source: source(),
+                                mode: PreviewMode::Page
+                            }
                         }
                     }
                 }
@@ -129,9 +186,11 @@ pub fn ChartEditor() -> Element {
 
 /// Dynamic chart renderer that works with owned strings.
 #[component]
-fn DynamicChartRenderer(source: String) -> Element {
+fn DynamicChartRenderer(source: String, mode: PreviewMode) -> Element {
     // Parse the chart to validate it
     let parse_result = keyflow::Chart::parse(&source);
+
+    let is_snippet = mode == PreviewMode::Snippet;
 
     match parse_result {
         Ok(chart) => {
@@ -141,37 +200,57 @@ fn DynamicChartRenderer(source: String) -> Element {
             let tempo = chart.metadata.tempo;
             let section_count = chart.sections.len();
 
+            // Container class changes based on mode
+            let container_class = if is_snippet {
+                "w-full flex flex-col relative"
+            } else {
+                "w-full h-full flex flex-col relative"
+            };
+
+            // Canvas style changes based on mode
+            let canvas_style = if is_snippet {
+                "touch-action: none; background: white; min-height: 300px;"
+            } else {
+                "touch-action: none; background: white;"
+            };
+
             rsx! {
                 div {
-                    class: "w-full h-full flex flex-col relative",
+                    class: "{container_class}",
 
                     // Canvas for WebGPU rendering - white background like paper
                     canvas {
                         id: "editor-chart-canvas",
-                        class: "w-full h-full cursor-grab active:cursor-grabbing",
-                        style: "touch-action: none; background: white;",
+                        class: if is_snippet {
+                            "w-full cursor-grab active:cursor-grabbing"
+                        } else {
+                            "w-full h-full cursor-grab active:cursor-grabbing"
+                        },
+                        style: "{canvas_style}",
                     }
 
-                    // Metadata overlay in top-left
-                    div {
-                        class: "absolute top-3 left-4 pointer-events-none",
-
+                    // Metadata overlay in top-left (only show in page mode to avoid clutter in snippet)
+                    if !is_snippet {
                         div {
-                            class: "text-lg font-bold text-gray-800",
-                            "{title}"
-                        }
+                            class: "absolute top-3 left-4 pointer-events-none",
 
-                        if let Some(artist) = artist {
                             div {
-                                class: "text-sm text-gray-600",
-                                "{artist}"
+                                class: "text-lg font-bold text-gray-800",
+                                "{title}"
                             }
-                        }
 
-                        if let Some(tempo) = tempo {
-                            div {
-                                class: "text-xs text-gray-500 mt-1",
-                                "{tempo} BPM"
+                            if let Some(artist) = artist {
+                                div {
+                                    class: "text-sm text-gray-600",
+                                    "{artist}"
+                                }
+                            }
+
+                            if let Some(tempo) = tempo {
+                                div {
+                                    class: "text-xs text-gray-500 mt-1",
+                                    "{tempo} BPM"
+                                }
                             }
                         }
                     }
@@ -183,7 +262,7 @@ fn DynamicChartRenderer(source: String) -> Element {
                     }
 
                     // WebGPU rendering
-                    DynamicChartCanvas { source: source }
+                    DynamicChartCanvas { source: source, mode: mode }
                 }
             }
         }
@@ -191,7 +270,11 @@ fn DynamicChartRenderer(source: String) -> Element {
             let error_msg = e.to_string();
             rsx! {
                 div {
-                    class: "w-full h-full flex items-center justify-center bg-red-50",
+                    class: if is_snippet {
+                        "w-full min-h-[200px] flex items-center justify-center bg-red-50"
+                    } else {
+                        "w-full h-full flex items-center justify-center bg-red-50"
+                    },
 
                     div {
                         class: "text-center p-6 max-w-md",
@@ -216,7 +299,8 @@ fn DynamicChartRenderer(source: String) -> Element {
 
 /// Canvas component with WebGPU rendering for dynamic content.
 #[component]
-fn DynamicChartCanvas(source: String) -> Element {
+fn DynamicChartCanvas(source: String, mode: PreviewMode) -> Element {
+    let _mode = mode; // Will be used for layout adjustments
     #[cfg(target_arch = "wasm32")]
     {
         use crate::renderer::ChartLayoutManager;
