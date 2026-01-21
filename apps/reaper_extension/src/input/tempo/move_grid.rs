@@ -3,9 +3,12 @@
 //! Implements the "Move closest measure grid line to mouse cursor" action.
 //! Based on SWS BR_Tempo.cpp MoveGridToMouse().
 
-use super::envelope::{move_tempo, TempoEnvelope, MIN_TEMPO_DIST};
-use super::grid::{get_closest_grid_line, get_closest_measure_grid_line, get_next_measure_position, get_previous_measure_position, position_at_mouse_cursor};
-use crate::input::continuous_action::{register_continuous_action, ContinuousAction};
+use super::envelope::{MIN_TEMPO_DIST, TempoEnvelope, move_tempo};
+use super::grid::{
+    get_closest_grid_line, get_closest_measure_grid_line, get_next_measure_position,
+    get_previous_measure_position, position_at_mouse_cursor,
+};
+use crate::input::continuous_action::{ContinuousAction, register_continuous_action};
 use crate::input::error::{lock_mut, lock_read, try_lock};
 use reaper_high::Reaper;
 use std::sync::{Mutex, OnceLock};
@@ -91,7 +94,8 @@ pub fn move_grid_init(init: bool) -> bool {
 
     if init {
         // Starting action
-        state.variant = lock_read(get_current_variant(), |v| *v).unwrap_or(MoveGridVariant::ClosestMeasure);
+        state.variant =
+            lock_read(get_current_variant(), |v| *v).unwrap_or(MoveGridVariant::ClosestMeasure);
         state.locked_id = None;
         state.last_position = 0.0;
         state.moved_grid_once = false;
@@ -152,8 +156,12 @@ pub fn move_grid_do_undo() -> u32 {
 
     let undo_desc = match state.variant {
         MoveGridVariant::ClosestMeasure => c"Move measure grid line to mouse",
-        MoveGridVariant::ClosestMeasureConstrained => c"Move measure grid line to mouse (constrained)",
-        MoveGridVariant::ClosestMeasureFullyConstrained => c"Move measure grid line to mouse (fully constrained)",
+        MoveGridVariant::ClosestMeasureConstrained => {
+            c"Move measure grid line to mouse (constrained)"
+        }
+        MoveGridVariant::ClosestMeasureFullyConstrained => {
+            c"Move measure grid line to mouse (fully constrained)"
+        }
         MoveGridVariant::ClosestGrid => c"Move grid line to mouse",
         MoveGridVariant::ClosestTempo => c"Move tempo marker to mouse",
     };
@@ -234,7 +242,9 @@ pub fn move_grid_to_mouse() {
                 let target_id = tempo_map.find(grid, MIN_TEMPO_DIST);
                 (grid, target_id)
             }
-            MoveGridVariant::ClosestMeasure | MoveGridVariant::ClosestMeasureConstrained | MoveGridVariant::ClosestMeasureFullyConstrained => {
+            MoveGridVariant::ClosestMeasure
+            | MoveGridVariant::ClosestMeasureConstrained
+            | MoveGridVariant::ClosestMeasureFullyConstrained => {
                 let grid = get_closest_measure_grid_line(mouse_position);
                 let target_id = tempo_map.find(grid, MIN_TEMPO_DIST);
                 (grid, target_id)
@@ -275,10 +285,7 @@ pub fn move_grid_to_mouse() {
                 if tempo_map.find(anchor_before_pos, MIN_TEMPO_DIST).is_none() {
                     // Create anchor marker with current tempo at that position
                     if let Some(prev_id) = tempo_map.find_previous(anchor_before_pos) {
-                        let shape = tempo_map
-                            .get_point(prev_id)
-                            .map(|p| p.shape)
-                            .unwrap_or(0);
+                        let shape = tempo_map.get_point(prev_id).map(|p| p.shape).unwrap_or(0);
                         let bpm = tempo_map.value_at_position(anchor_before_pos);
 
                         if tempo_map.create_point(prev_id, anchor_before_pos, bpm, shape) {
@@ -302,10 +309,7 @@ pub fn move_grid_to_mouse() {
                 if tempo_map.find(anchor_after_pos, MIN_TEMPO_DIST).is_none() {
                     // Create anchor marker with current tempo at that position
                     if let Some(prev_id) = tempo_map.find_previous(anchor_after_pos) {
-                        let shape = tempo_map
-                            .get_point(prev_id)
-                            .map(|p| p.shape)
-                            .unwrap_or(0);
+                        let shape = tempo_map.get_point(prev_id).map(|p| p.shape).unwrap_or(0);
                         let bpm = tempo_map.value_at_position(anchor_after_pos);
 
                         if tempo_map.create_point(prev_id, anchor_after_pos, bpm, shape) {
@@ -322,39 +326,34 @@ pub fn move_grid_to_mouse() {
         }
 
         // Check if we need to create a tempo marker at this grid position
-        let target_id: Option<usize> = if target_id.is_none() && state.variant != MoveGridVariant::ClosestTempo {
-            // No tempo marker on grid, create one
-            let tempo_map = state.tempo_map.as_mut().unwrap();
+        let target_id: Option<usize> =
+            if target_id.is_none() && state.variant != MoveGridVariant::ClosestTempo {
+                // No tempo marker on grid, create one
+                let tempo_map = state.tempo_map.as_mut().unwrap();
 
-            if let Some(prev_id) = tempo_map.find_previous(grid) {
-                let shape = tempo_map
-                    .get_point(prev_id)
-                    .map(|p| p.shape)
-                    .unwrap_or(0);
-                let bpm = tempo_map.value_at_position(grid);
+                if let Some(prev_id) = tempo_map.find_previous(grid) {
+                    let shape = tempo_map.get_point(prev_id).map(|p| p.shape).unwrap_or(0);
+                    let bpm = tempo_map.value_at_position(grid);
 
-                if tempo_map.create_point(prev_id, grid, bpm, shape) {
-                    Some(prev_id + 1)
+                    if tempo_map.create_point(prev_id, grid, bpm, shape) {
+                        Some(prev_id + 1)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
-                None
-            }
-        } else {
-            // Adjust target_id if we added an anchor before it
-            target_id.map(|id| id + anchor_offset)
-        };
+                // Adjust target_id if we added an anchor before it
+                target_id.map(|id| id + anchor_offset)
+            };
 
         // Can't move first tempo marker
         if let Some(id) = target_id {
             if id != 0 {
                 state.locked_id = Some(id);
                 time_diff = mouse_position - grid;
-                debug!(
-                    "Locked tempo marker {} at grid position {}",
-                    id, grid
-                );
+                debug!("Locked tempo marker {} at grid position {}", id, grid);
             }
         }
     }
@@ -380,10 +379,7 @@ pub fn move_grid_to_mouse() {
                 // Put tempo_map back
                 state.tempo_map = Some(tempo_map);
 
-                debug!(
-                    "Moved grid by {} to position {}",
-                    time_diff, mouse_position
-                );
+                debug!("Moved grid by {} to position {}", time_diff, mouse_position);
             }
         }
     }

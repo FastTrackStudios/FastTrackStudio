@@ -29,4 +29,5 @@ pub static ALL_PRESETS: &[fn() -> KeybindPreset] = &[
 ];
 
 /// All built-in override layers
-pub static ALL_OVERRIDES: &[fn() -> KeybindOverride] = &[tempo_map_override, fast_slip_edit_override];
+pub static ALL_OVERRIDES: &[fn() -> KeybindOverride] =
+    &[tempo_map_override, fast_slip_edit_override];

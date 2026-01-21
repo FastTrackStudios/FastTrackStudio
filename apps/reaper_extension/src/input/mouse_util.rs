@@ -20,8 +20,7 @@ pub fn is_hwnd_midi_editor(
     hwnd: HWND,
     medium_reaper: &MediumReaper,
 ) -> Option<(HWND, Option<HWND>)> {
-    window_detection::is_hwnd_midi_editor(hwnd, medium_reaper)
-        .map(|info| (info.hwnd, info.subview))
+    window_detection::is_hwnd_midi_editor(hwnd, medium_reaper).map(|info| (info.hwnd, info.subview))
 }
 
 /// Get mouse position in screen coordinates

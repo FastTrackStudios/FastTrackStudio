@@ -36,8 +36,8 @@ pub mod workflows;
 // endregion: --- Modules
 
 pub use continuous_action::{
-    is_action_active, register_continuous_action, start_continuous_action,
-    stop_all_continuous_actions, ContinuousAction,
+    ContinuousAction, is_action_active, register_continuous_action, start_continuous_action,
+    stop_all_continuous_actions,
 };
 pub use handler::InputHandler;
 pub use keybinds::{
@@ -46,4 +46,4 @@ pub use keybinds::{
     PresetBuilder, WheelBind, WheelDirection,
 };
 pub use state::{CommandState, Context, Mode};
-pub use tempo::{register_move_grid_actions, MoveGridVariant};
+pub use tempo::{MoveGridVariant, register_move_grid_actions};

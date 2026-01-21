@@ -13,8 +13,8 @@ use tracing::debug;
 
 // Re-export context detection types and functions from the context_detection module
 pub use super::context_detection::{
-    detect_context_at_point, detect_mouse_modifier_context, is_debug_mouse_context_enabled,
-    toggle_debug_mouse_context, ItemHitInfo, MouseContextResult, MouseModifierContext,
+    ItemHitInfo, MouseContextResult, MouseModifierContext, detect_context_at_point,
+    detect_mouse_modifier_context, is_debug_mouse_context_enabled, toggle_debug_mouse_context,
 };
 
 // region: --- Armed Click Action
@@ -210,10 +210,7 @@ fn is_in_arrange_view(mouse_x: i32, mouse_y: i32) -> bool {
         }
 
         // Check if mouse is within arrange bounds
-        mouse_x >= rect.left
-            && mouse_x < rect.right
-            && mouse_y >= rect.top
-            && mouse_y < rect.bottom
+        mouse_x >= rect.left && mouse_x < rect.right && mouse_y >= rect.top && mouse_y < rect.bottom
     } else {
         false
     }
@@ -242,11 +239,7 @@ pub fn get_item_at_point(mouse_x: i32, mouse_y: i32) -> Option<*mut reaper_low::
         )
     };
 
-    if item.is_null() {
-        None
-    } else {
-        Some(item)
-    }
+    if item.is_null() { None } else { Some(item) }
 }
 
 // endregion: --- Helper Functions

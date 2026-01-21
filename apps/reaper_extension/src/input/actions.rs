@@ -8,14 +8,14 @@ use crate::input::continuous_action::start_continuous_action;
 use crate::input::handler::InputHandler;
 use crate::input::item_actions;
 use crate::input::keybinds;
-use crate::input::mouse_modifiers::core::{set_mouse_modifier, MouseModifierFlag};
+use crate::input::mouse_modifiers::core::{MouseModifierFlag, set_mouse_modifier};
 use crate::input::mouse_modifiers::manager as mouse_manager;
-use crate::input::workflows;
 use crate::input::tempo::{
-    register_move_grid_actions, set_move_grid_variant,
+    MoveGridVariant, register_move_grid_actions, set_move_grid_variant,
     snap_grid_to_transient_constrained_handler, snap_grid_to_transient_fully_constrained_handler,
-    snap_grid_to_transient_handler, MoveGridVariant,
+    snap_grid_to_transient_handler,
 };
+use crate::input::workflows;
 use reaper_high::Reaper;
 use tracing::{debug, info};
 
@@ -66,7 +66,10 @@ fn get_input_passthrough_state() -> bool {
 /// Toggle FTS-Input debug logging on/off
 fn toggle_input_debug_logging_handler() {
     let is_enabled = InputHandler::toggle_debug_logging();
-    info!("FTS-Input debug logging toggled: {}", if is_enabled { "enabled" } else { "disabled" });
+    info!(
+        "FTS-Input debug logging toggled: {}",
+        if is_enabled { "enabled" } else { "disabled" }
+    );
 
     // Wake up REAPER to refresh action states
     if let Err(e) = Reaper::get().wake_up() {
@@ -85,7 +88,10 @@ fn toggle_debug_mouse_context_handler() {
     let reaper = Reaper::get();
 
     let status = if is_enabled { "enabled" } else { "disabled" };
-    reaper.show_console_msg(format!("Debug Mouse Context: {} (click anywhere to see context)\n", status));
+    reaper.show_console_msg(format!(
+        "Debug Mouse Context: {} (click anywhere to see context)\n",
+        status
+    ));
     info!("Debug Mouse Context toggled: {}", status);
 
     wake_reaper();
@@ -259,7 +265,11 @@ fn get_quick_edit_overlay_state() -> bool {
 fn toggle_tempo_mapping_workflow_handler() {
     match workflows::toggle("tempo_mapping") {
         Ok(is_active) => {
-            let status = if is_active { "activated" } else { "deactivated" };
+            let status = if is_active {
+                "activated"
+            } else {
+                "deactivated"
+            };
             info!("Tempo Mapping workflow {}", status);
         }
         Err(e) => {
@@ -279,7 +289,11 @@ fn toggle_fast_slip_edit_workflow_handler() {
     // custom click interception via ArmedClickAction
     match workflows::toggle("fast_slip_edit") {
         Ok(is_active) => {
-            let status = if is_active { "activated" } else { "deactivated" };
+            let status = if is_active {
+                "activated"
+            } else {
+                "deactivated"
+            };
             info!("Fast Slip Edit workflow {}", status);
         }
         Err(e) => {
@@ -421,7 +435,9 @@ fn dev_test_mouse_modifier_ids_handler() {
         }
     }
 
-    reaper.show_console_msg("Done! Open REAPER Preferences > Mouse Modifiers > Media item > left click\n");
+    reaper.show_console_msg(
+        "Done! Open REAPER Preferences > Mouse Modifiers > Media item > left click\n",
+    );
     reaper.show_console_msg("to see what behavior names correspond to each modifier.\n\n");
     reaper.show_console_msg("The modifier flags map as follows:\n");
     reaper.show_console_msg("  Default action = ID 16\n");

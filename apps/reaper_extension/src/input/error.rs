@@ -100,13 +100,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Use this when you need a copy of the value and can tolerate
 /// getting a default on error.
 pub fn lock_or_default<T: Default + Clone>(mutex: &Mutex<T>) -> T {
-    mutex
-        .lock()
-        .map(|guard| guard.clone())
-        .unwrap_or_else(|e| {
-            tracing::error!("Mutex poisoned, using default: {}", e);
-            T::default()
-        })
+    mutex.lock().map(|guard| guard.clone()).unwrap_or_else(|e| {
+        tracing::error!("Mutex poisoned, using default: {}", e);
+        T::default()
+    })
 }
 
 /// Try to lock a Mutex for mutation, logging on poison.

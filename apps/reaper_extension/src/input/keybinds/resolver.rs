@@ -391,14 +391,16 @@ mod tests {
             .with_priority(100)
             .with_bindings(vec![
                 Keybind::new("a", "override_action_a"), // Override 'a'
-                Keybind::new("c", "action_c"),         // New binding
+                Keybind::new("c", "action_c"),          // New binding
             ])
     }
 
     #[test]
     fn test_basic_resolution() {
         let mut resolver = KeybindResolver::new();
-        resolver.available_presets.insert("test".to_string(), test_preset());
+        resolver
+            .available_presets
+            .insert("test".to_string(), test_preset());
         resolver.set_preset_by_name("test");
 
         assert_eq!(
@@ -415,7 +417,9 @@ mod tests {
     #[test]
     fn test_override_resolution() {
         let mut resolver = KeybindResolver::new();
-        resolver.available_presets.insert("test".to_string(), test_preset());
+        resolver
+            .available_presets
+            .insert("test".to_string(), test_preset());
         resolver
             .available_overrides
             .insert("test_override".to_string(), test_override());

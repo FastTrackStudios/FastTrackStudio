@@ -295,7 +295,10 @@ pub fn detect_context_at_point(mouse_x: i32, mouse_y: i32) -> MouseContextResult
     };
 
     // Get window under mouse cursor (SWS approach)
-    let pt = reaper_low::raw::POINT { x: mouse_x, y: mouse_y };
+    let pt = reaper_low::raw::POINT {
+        x: mouse_x,
+        y: mouse_y,
+    };
     let hwnd_under_mouse = unsafe { swell.WindowFromPoint(pt) };
 
     if hwnd_under_mouse.is_null() {
@@ -328,7 +331,14 @@ pub fn detect_context_at_point(mouse_x: i32, mouse_y: i32) -> MouseContextResult
     // === Check TCP (Track Control Panel) ===
     let (tcp_hwnd, tcp_is_container) = reaper_windows::get_tcp_wnd(&medium);
     if let Some(tcp) = tcp_hwnd {
-        if let Some((track, track_ctx)) = check_tcp_context(hwnd_under_mouse, tcp, tcp_is_container, &pt, &medium, &swell) {
+        if let Some((track, track_ctx)) = check_tcp_context(
+            hwnd_under_mouse,
+            tcp,
+            tcp_is_container,
+            &pt,
+            &medium,
+            &swell,
+        ) {
             if track_ctx.is_spacer {
                 result.context = MouseModifierContext::Track;
                 result.details = "window: tcp, segment: track, details: spacer".to_string();
@@ -424,11 +434,23 @@ fn detect_ruler_context(
         details: String::new(),
     };
 
-    let mut ruler_rect = reaper_low::raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-    unsafe { swell.GetClientRect(ruler_hwnd, &mut ruler_rect); }
+    let mut ruler_rect = reaper_low::raw::RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    unsafe {
+        swell.GetClientRect(ruler_hwnd, &mut ruler_rect);
+    }
 
-    let mut pt_ruler = reaper_low::raw::POINT { x: mouse_x, y: mouse_y };
-    unsafe { swell.ScreenToClient(ruler_hwnd, &mut pt_ruler); }
+    let mut pt_ruler = reaper_low::raw::POINT {
+        x: mouse_x,
+        y: mouse_y,
+    };
+    unsafe {
+        swell.ScreenToClient(ruler_hwnd, &mut pt_ruler);
+    }
 
     let ruler_h = ruler_rect.bottom - ruler_rect.top;
     // SWS GetRulerLaneHeight logic
@@ -465,27 +487,59 @@ fn detect_ruler_context(
     const MARKER_EDGE_THRESHOLD: i32 = 5;
 
     let mut lane_bottom = 0;
-    if pt_ruler.y < { lane_bottom += region_h; lane_bottom } {
+    if pt_ruler.y < {
+        lane_bottom += region_h;
+        lane_bottom
+    } {
         // In region lane - check for specific regions
-        if let Some((ctx, details)) = detect_region_at_time(mouse_time, pt_ruler.x, ruler_zoom, start_time, low, MARKER_EDGE_THRESHOLD, true) {
+        if let Some((ctx, details)) = detect_region_at_time(
+            mouse_time,
+            pt_ruler.x,
+            ruler_zoom,
+            start_time,
+            low,
+            MARKER_EDGE_THRESHOLD,
+            true,
+        ) {
             result.context = ctx;
             result.details = details;
         } else {
             result.context = MouseModifierContext::RegionLane;
             result.details = "window: ruler, segment: region_lane".to_string();
         }
-    } else if pt_ruler.y < { lane_bottom += marker_h; lane_bottom } {
+    } else if pt_ruler.y < {
+        lane_bottom += marker_h;
+        lane_bottom
+    } {
         // In marker lane - check for specific markers
-        if let Some((ctx, details)) = detect_region_at_time(mouse_time, pt_ruler.x, ruler_zoom, start_time, low, MARKER_EDGE_THRESHOLD, false) {
+        if let Some((ctx, details)) = detect_region_at_time(
+            mouse_time,
+            pt_ruler.x,
+            ruler_zoom,
+            start_time,
+            low,
+            MARKER_EDGE_THRESHOLD,
+            false,
+        ) {
             result.context = ctx;
             result.details = details;
         } else {
             result.context = MouseModifierContext::MarkerLane;
             result.details = "window: ruler, segment: marker_lane".to_string();
         }
-    } else if pt_ruler.y < { lane_bottom += marker_h; lane_bottom } {
+    } else if pt_ruler.y < {
+        lane_bottom += marker_h;
+        lane_bottom
+    } {
         // In tempo lane - check for specific tempo markers
-        if let Some((ctx, details)) = detect_tempo_marker_at_time(mouse_time, pt_ruler.x, ruler_zoom, start_time, low, MARKER_EDGE_THRESHOLD) {
+        if let Some((ctx, details)) = detect_tempo_marker_at_time(
+            mouse_time,
+            pt_ruler.x,
+            ruler_zoom,
+            start_time,
+            low,
+            MARKER_EDGE_THRESHOLD,
+        ) {
             result.context = ctx;
             result.details = details;
         } else {
@@ -548,18 +602,27 @@ fn detect_region_at_time(
             let region_end_x = ((end - start_time) * zoom) as i32;
 
             // Check start edge
-            if mouse_x >= region_start_x - edge_threshold && mouse_x <= region_start_x + edge_threshold {
+            if mouse_x >= region_start_x - edge_threshold
+                && mouse_x <= region_start_x + edge_threshold
+            {
                 return Some((
                     MouseModifierContext::RegionMarkerEdge,
-                    format!("window: ruler, segment: region_lane, details: region_edge_left (idx: {}, pos: {:.3})", marker_idx, pos),
+                    format!(
+                        "window: ruler, segment: region_lane, details: region_edge_left (idx: {}, pos: {:.3})",
+                        marker_idx, pos
+                    ),
                 ));
             }
 
             // Check end edge
-            if mouse_x >= region_end_x - edge_threshold && mouse_x <= region_end_x + edge_threshold {
+            if mouse_x >= region_end_x - edge_threshold && mouse_x <= region_end_x + edge_threshold
+            {
                 return Some((
                     MouseModifierContext::RegionMarkerEdge,
-                    format!("window: ruler, segment: region_lane, details: region_edge_right (idx: {}, end: {:.3})", marker_idx, end),
+                    format!(
+                        "window: ruler, segment: region_lane, details: region_edge_right (idx: {}, end: {:.3})",
+                        marker_idx, end
+                    ),
                 ));
             }
 
@@ -567,7 +630,10 @@ fn detect_region_at_time(
             if mouse_time >= pos && mouse_time <= end {
                 return Some((
                     MouseModifierContext::Region,
-                    format!("window: ruler, segment: region_lane, details: region (idx: {}, pos: {:.3}, end: {:.3})", marker_idx, pos, end),
+                    format!(
+                        "window: ruler, segment: region_lane, details: region (idx: {}, pos: {:.3}, end: {:.3})",
+                        marker_idx, pos, end
+                    ),
                 ));
             }
         } else {
@@ -577,7 +643,10 @@ fn detect_region_at_time(
             if mouse_x >= marker_x - edge_threshold && mouse_x <= marker_x + edge_threshold {
                 return Some((
                     MouseModifierContext::RegionMarkerEdge,
-                    format!("window: ruler, segment: marker_lane, details: marker (idx: {}, pos: {:.3})", marker_idx, pos),
+                    format!(
+                        "window: ruler, segment: marker_lane, details: marker (idx: {}, pos: {:.3})",
+                        marker_idx, pos
+                    ),
                 ));
             }
         }
@@ -630,7 +699,10 @@ fn detect_tempo_marker_at_time(
         if mouse_x >= marker_x - edge_threshold && mouse_x <= marker_x + edge_threshold {
             return Some((
                 MouseModifierContext::TempoMarker,
-                format!("window: ruler, segment: tempo_lane, details: tempo_marker (idx: {}, pos: {:.3})", idx, time_pos),
+                format!(
+                    "window: ruler, segment: tempo_lane, details: tempo_marker (idx: {}, pos: {:.3})",
+                    idx, time_pos
+                ),
             ));
         }
     }
@@ -666,7 +738,10 @@ fn detect_midi_editor_context(
     };
 
     // Get window under mouse
-    let pt = reaper_low::raw::POINT { x: mouse_x, y: mouse_y };
+    let pt = reaper_low::raw::POINT {
+        x: mouse_x,
+        y: mouse_y,
+    };
     let hwnd_under_mouse = unsafe { swell.WindowFromPoint(pt) };
 
     // Check if we're over the piano (keyboard) view
@@ -682,7 +757,10 @@ fn detect_midi_editor_context(
     if let Some(notes_view) = reaper_windows::get_notes_view(midi_editor, medium) {
         if hwnd_under_mouse == notes_view {
             // Convert mouse to client coordinates relative to notes view
-            let mut pt_client = reaper_low::raw::POINT { x: mouse_x, y: mouse_y };
+            let mut pt_client = reaper_low::raw::POINT {
+                x: mouse_x,
+                y: mouse_y,
+            };
             unsafe {
                 swell.ScreenToClient(notes_view, &mut pt_client);
             }
@@ -916,9 +994,13 @@ fn detect_midi_note_at_point(
         }
 
         // Check horizontal hit (with edge detection)
-        if mouse_x >= note_start_x - MIDI_NOTE_EDGE_HIT && mouse_x <= note_end_x + MIDI_NOTE_EDGE_HIT {
+        if mouse_x >= note_start_x - MIDI_NOTE_EDGE_HIT
+            && mouse_x <= note_end_x + MIDI_NOTE_EDGE_HIT
+        {
             // Check if on left edge
-            if mouse_x >= note_start_x - MIDI_NOTE_EDGE_HIT && mouse_x <= note_start_x + MIDI_NOTE_EDGE_HIT {
+            if mouse_x >= note_start_x - MIDI_NOTE_EDGE_HIT
+                && mouse_x <= note_start_x + MIDI_NOTE_EDGE_HIT
+            {
                 return Some((
                     MouseModifierContext::MidiNoteEdge,
                     format!(
@@ -929,7 +1011,9 @@ fn detect_midi_note_at_point(
             }
 
             // Check if on right edge
-            if mouse_x >= note_end_x - MIDI_NOTE_EDGE_HIT && mouse_x <= note_end_x + MIDI_NOTE_EDGE_HIT {
+            if mouse_x >= note_end_x - MIDI_NOTE_EDGE_HIT
+                && mouse_x <= note_end_x + MIDI_NOTE_EDGE_HIT
+            {
                 return Some((
                     MouseModifierContext::MidiNoteEdge,
                     format!(
@@ -1083,8 +1167,13 @@ fn detect_arrange_context(
     };
 
     // Convert to client coords
-    let mut pt_client = reaper_low::raw::POINT { x: mouse_x, y: mouse_y };
-    unsafe { swell.ScreenToClient(arrange_hwnd, &mut pt_client); }
+    let mut pt_client = reaper_low::raw::POINT {
+        x: mouse_x,
+        y: mouse_y,
+    };
+    unsafe {
+        swell.ScreenToClient(arrange_hwnd, &mut pt_client);
+    }
     result.arrange_x = pt_client.x;
     result.arrange_y = pt_client.y;
 
@@ -1109,7 +1198,9 @@ fn detect_arrange_context(
         right: 0,
         bottom: 0,
     };
-    unsafe { swell.GetClientRect(arrange_hwnd, &mut arrange_rect); }
+    unsafe {
+        swell.GetClientRect(arrange_hwnd, &mut arrange_rect);
+    }
 
     let arrange_width = (arrange_rect.right - arrange_rect.left) as f64;
     let time_range = end_time - start_time;
@@ -1172,7 +1263,8 @@ fn detect_arrange_context(
 
     if !item.is_null() {
         // We're over an item - detect which part (edge, lower, fade, body)
-        result.context = detect_item_context_detailed(item, pt_client.x, pt_client.y, medium, &mut result);
+        result.context =
+            detect_item_context_detailed(item, pt_client.x, pt_client.y, medium, &mut result);
         let detail_str = match result.context {
             MouseModifierContext::Item => "item",
             MouseModifierContext::ItemLeftEdge | MouseModifierContext::ItemRightEdge => "item",
@@ -1187,7 +1279,14 @@ fn detect_arrange_context(
     // No item - check for razor edit areas
     // Razor edits are stored in track property P_RAZOREDITS as "start end isEnvelope, ..."
     let mouse_time = start_time + (pt_client.x as f64) / arrange_zoom;
-    if let Some(razor_ctx) = detect_razor_edit(track_ptr, mouse_time, arrange_zoom, pt_client.x, start_time, low) {
+    if let Some(razor_ctx) = detect_razor_edit(
+        track_ptr,
+        mouse_time,
+        arrange_zoom,
+        pt_client.x,
+        start_time,
+        low,
+    ) {
         result.context = razor_ctx.0;
         result.details = razor_ctx.1;
         return result;
@@ -1260,9 +1359,7 @@ fn detect_envelope_context(
 
         // Check if this envelope has its own lane (VIS property)
         // GetEnvelopeInfo_Value with "I_TCPH" gives TCP lane height (0 if no dedicated lane)
-        let lane_height = unsafe {
-            low.GetEnvelopeInfo_Value(envelope, c"I_TCPH".as_ptr())
-        } as i32;
+        let lane_height = unsafe { low.GetEnvelopeInfo_Value(envelope, c"I_TCPH".as_ptr()) } as i32;
 
         // Only check envelopes that have their own lane
         if lane_height <= 0 {
@@ -1271,9 +1368,7 @@ fn detect_envelope_context(
 
         // Get envelope lane Y offset in TCP (I_TCPY)
         // (Currently unused, but kept for future Y-coordinate hit testing)
-        let _lane_y_tcp = unsafe {
-            low.GetEnvelopeInfo_Value(envelope, c"I_TCPY".as_ptr())
-        } as i32;
+        let _lane_y_tcp = unsafe { low.GetEnvelopeInfo_Value(envelope, c"I_TCPY".as_ptr()) } as i32;
 
         // For arrange view, we need to translate TCP Y to arrange Y
         // The envelope lane in arrange corresponds to the same visual position as TCP
@@ -1334,9 +1429,8 @@ fn detect_envelope_context(
                 let point_count = unsafe { low.CountEnvelopePoints(envelope) };
 
                 if point_count > 0 {
-                    let nearest_point_idx = unsafe {
-                        low.GetEnvelopePointByTime(envelope, mouse_time)
-                    };
+                    let nearest_point_idx =
+                        unsafe { low.GetEnvelopePointByTime(envelope, mouse_time) };
 
                     // Check points around the nearest one
                     let search_range = 3;
@@ -1408,9 +1502,7 @@ fn detect_envelope_context(
 
         if point_count > 0 {
             // Find the point nearest to mouse time
-            let nearest_point_idx = unsafe {
-                low.GetEnvelopePointByTime(envelope, mouse_time)
-            };
+            let nearest_point_idx = unsafe { low.GetEnvelopePointByTime(envelope, mouse_time) };
 
             // Check points around the nearest one
             let search_range = 3; // Check a few points in each direction
@@ -1649,8 +1741,15 @@ fn detect_item_context_detailed(
         );
     }
 
-    let mut arrange_rect = reaper_low::raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-    unsafe { swell.GetClientRect(arrange_hwnd, &mut arrange_rect); }
+    let mut arrange_rect = reaper_low::raw::RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    unsafe {
+        swell.GetClientRect(arrange_hwnd, &mut arrange_rect);
+    }
 
     let arrange_width = arrange_rect.right - arrange_rect.left;
     let time_range = end_time - start_time;
@@ -1692,8 +1791,14 @@ fn detect_item_context_detailed(
 
     result.details = format!(
         "Item bounds: ({}, {}) - ({}, {}), Mouse rel: ({}, {}), Fades: in={}px out={}px",
-        item_screen_left, item_screen_top, item_screen_right, item_screen_bottom,
-        rel_x, rel_y, fade_in_px, fade_out_px
+        item_screen_left,
+        item_screen_top,
+        item_screen_right,
+        item_screen_bottom,
+        rel_x,
+        rel_y,
+        fade_in_px,
+        fade_out_px
     );
 
     // Now determine which context based on relative position
@@ -1734,9 +1839,8 @@ fn detect_item_context_detailed(
                 let mut sm_pos: f64 = 0.0;
                 let mut _src_pos: f64 = 0.0;
 
-                let sm_idx = unsafe {
-                    low.GetTakeStretchMarker(take, idx, &mut sm_pos, &mut _src_pos)
-                };
+                let sm_idx =
+                    unsafe { low.GetTakeStretchMarker(take, idx, &mut sm_pos, &mut _src_pos) };
 
                 if sm_idx >= 0 {
                     // Convert stretch marker position to screen X
@@ -1770,7 +1874,10 @@ fn check_tcp_context(
     pt: &reaper_low::raw::POINT,
     medium: &reaper_medium::Reaper,
     swell: &reaper_low::Swell,
-) -> Option<(*mut reaper_low::raw::MediaTrack, crate::input::reaper_windows::HwndToTrackContext)> {
+) -> Option<(
+    *mut reaper_low::raw::MediaTrack,
+    crate::input::reaper_windows::HwndToTrackContext,
+)> {
     use crate::input::reaper_windows;
 
     let hwnd_parent = unsafe { swell.GetParent(hwnd_under_mouse) };

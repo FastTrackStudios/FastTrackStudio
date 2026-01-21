@@ -402,7 +402,7 @@ pub struct PresetBuilder {
     name: String,
     description: String,
     version: String,
-    bindings: Vec<(Keybind, &'static str)>,       // (binding, section_name)
+    bindings: Vec<(Keybind, &'static str)>, // (binding, section_name)
     wheel_bindings: Vec<(WheelBind, &'static str)>,
     mouse_modifiers: Vec<(MouseModifier, &'static str)>,
     conflicts: Vec<BindingConflict>,
@@ -496,9 +496,11 @@ impl PresetBuilder {
                 modifier.modifiers.to_lowercase()
             );
             if !self.allow_override {
-                if let Some((_, existing_section)) = self.mouse_modifiers.iter().find(|(m, _)| {
-                    format!("{:?}:{}", m.context, m.modifiers.to_lowercase()) == key
-                }) {
+                if let Some((_, existing_section)) = self
+                    .mouse_modifiers
+                    .iter()
+                    .find(|(m, _)| format!("{:?}:{}", m.context, m.modifiers.to_lowercase()) == key)
+                {
                     self.conflicts.push(BindingConflict {
                         binding: format!("{:?}({})", modifier.context, modifier.modifiers),
                         first_section: (*existing_section).to_string(),

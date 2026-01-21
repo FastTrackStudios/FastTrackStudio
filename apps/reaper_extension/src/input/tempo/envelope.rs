@@ -102,7 +102,11 @@ impl TempoEnvelope {
                 self.points.push(TempoPoint {
                     time: timepos,
                     bpm,
-                    shape: if lineartempo { SHAPE_LINEAR } else { SHAPE_SQUARE },
+                    shape: if lineartempo {
+                        SHAPE_LINEAR
+                    } else {
+                        SHAPE_SQUARE
+                    },
                     sig_num: if timesig_num > 0 {
                         Some(timesig_num)
                     } else {
@@ -271,15 +275,15 @@ impl TempoEnvelope {
         for point in &self.points {
             unsafe {
                 low.SetTempoTimeSigMarker(
-                    std::ptr::null_mut(), // project
-                    -1,                   // ptidx (-1 to add new)
-                    point.time,           // timepos
-                    -1,                   // measurepos (-1 to use timepos)
-                    0.0,                  // beatpos
-                    point.bpm,            // bpm
-                    point.sig_num.unwrap_or(0), // timesig_num (0 for no change)
+                    std::ptr::null_mut(),         // project
+                    -1,                           // ptidx (-1 to add new)
+                    point.time,                   // timepos
+                    -1,                           // measurepos (-1 to use timepos)
+                    0.0,                          // beatpos
+                    point.bpm,                    // bpm
+                    point.sig_num.unwrap_or(0),   // timesig_num (0 for no change)
                     point.sig_denom.unwrap_or(0), // timesig_denom
-                    point.shape == SHAPE_LINEAR, // lineartempo
+                    point.shape == SHAPE_LINEAR,  // lineartempo
                 );
             }
         }

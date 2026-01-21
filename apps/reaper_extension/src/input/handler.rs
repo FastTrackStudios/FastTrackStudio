@@ -80,24 +80,26 @@ impl InputHandler {
         // Convert key code to string representation
         let key_str = match key_code {
             // Modifier keys (return early, don't apply modifier prefixes)
-            16 | 160 | 161 => return "shift".to_string(),  // VK_SHIFT, VK_LSHIFT, VK_RSHIFT
+            16 | 160 | 161 => return "shift".to_string(), // VK_SHIFT, VK_LSHIFT, VK_RSHIFT
             #[cfg(target_os = "macos")]
-            17 | 162 | 163 => return "cmd".to_string(),    // On macOS, VK_CONTROL = Command
+            17 | 162 | 163 => return "cmd".to_string(), // On macOS, VK_CONTROL = Command
             #[cfg(not(target_os = "macos"))]
-            17 | 162 | 163 => return "ctrl".to_string(),   // VK_CONTROL, VK_LCONTROL, VK_RCONTROL
-            18 | 164 | 165 => return "alt".to_string(),    // VK_MENU (Alt/Option), VK_LMENU, VK_RMENU
+            17 | 162 | 163 => return "ctrl".to_string(), // VK_CONTROL, VK_LCONTROL, VK_RCONTROL
+            18 | 164 | 165 => return "alt".to_string(), // VK_MENU (Alt/Option), VK_LMENU, VK_RMENU
             #[cfg(target_os = "macos")]
-            91 => return "ctrl".to_string(),               // On macOS, VK_LWIN = Control
+            91 => return "ctrl".to_string(), // On macOS, VK_LWIN = Control
             #[cfg(target_os = "macos")]
-            92 => return "ctrl".to_string(),               // On macOS, VK_RWIN = Control
+            92 => return "ctrl".to_string(), // On macOS, VK_RWIN = Control
             #[cfg(not(target_os = "macos"))]
-            91 => return "lmeta".to_string(),              // VK_LWIN (Left Win)
+            91 => return "lmeta".to_string(), // VK_LWIN (Left Win)
             #[cfg(not(target_os = "macos"))]
-            92 => return "rmeta".to_string(),              // VK_RWIN (Right Win)
+            92 => return "rmeta".to_string(), // VK_RWIN (Right Win)
             // Letters (A-Z)
             65..=90 => {
                 // Always use lowercase for the key name
-                char::from_u32((key_code + 32) as u32).unwrap_or('?').to_string()
+                char::from_u32((key_code + 32) as u32)
+                    .unwrap_or('?')
+                    .to_string()
             }
             // Numbers (0-9)
             48..=57 => char::from_u32(key_code as u32).unwrap_or('?').to_string(),
@@ -108,10 +110,10 @@ impl InputHandler {
             27 => "esc".to_string(),
             32 => "space".to_string(),
             // Arrow keys (virtual key codes)
-            0x25 => "left".to_string(),   // VK_LEFT
-            0x26 => "up".to_string(),     // VK_UP
-            0x27 => "right".to_string(),  // VK_RIGHT
-            0x28 => "down".to_string(),   // VK_DOWN
+            0x25 => "left".to_string(),  // VK_LEFT
+            0x26 => "up".to_string(),    // VK_UP
+            0x27 => "right".to_string(), // VK_RIGHT
+            0x28 => "down".to_string(),  // VK_DOWN
             // Function keys
             0x70..=0x7B => format!("f{}", key_code - 0x70 + 1), // F1-F12
             // Other special keys
@@ -507,7 +509,9 @@ impl InputHandler {
         DEBUG_LOGGING.store(enabled, std::sync::atomic::Ordering::Relaxed);
         let reaper = Reaper::get();
         if enabled {
-            reaper.show_console_msg("FTS-Input: Debug logging ENABLED - all key events will be logged\n");
+            reaper.show_console_msg(
+                "FTS-Input: Debug logging ENABLED - all key events will be logged\n",
+            );
         } else {
             reaper.show_console_msg("FTS-Input: Debug logging DISABLED\n");
         }

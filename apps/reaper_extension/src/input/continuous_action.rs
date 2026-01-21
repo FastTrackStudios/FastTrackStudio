@@ -55,12 +55,10 @@ static REGISTERED_ACTIONS: OnceLock<Mutex<HashMap<&'static str, ContinuousAction
 static ACTIVE_ACTION: OnceLock<Mutex<Option<ActiveAction>>> = OnceLock::new();
 
 /// Whether the timer is currently registered
-static TIMER_REGISTERED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static TIMER_REGISTERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Whether the accelerator is currently registered
-static ACCEL_REGISTERED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static ACCEL_REGISTERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn get_registry() -> &'static Mutex<HashMap<&'static str, ContinuousAction>> {
     REGISTERED_ACTIONS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -218,9 +216,7 @@ pub fn get_active_command_id() -> Option<&'static str> {
 /// This is the extern "C" function registered with REAPER's timer system.
 extern "C" fn continuous_action_timer() {
     // Execute the action - get the function pointer while holding the lock
-    let action_fn = lock_read(get_active(), |active| {
-        active.as_ref().map(|a| a.action)
-    });
+    let action_fn = lock_read(get_active(), |active| active.as_ref().map(|a| a.action));
 
     // Call the action outside the lock
     if let Some(Some(action)) = action_fn {

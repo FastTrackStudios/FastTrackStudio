@@ -42,7 +42,9 @@ impl KeybindConfig {
     pub fn config_path() -> Option<PathBuf> {
         // Try to get REAPER's resource path
         let reaper = reaper_high::Reaper::get();
-        let resource_path = reaper.medium_reaper().get_resource_path(|p| p.to_path_buf());
+        let resource_path = reaper
+            .medium_reaper()
+            .get_resource_path(|p| p.to_path_buf());
 
         let mut config_path = resource_path;
         config_path.push("FTS-Keybinds");
@@ -90,8 +92,8 @@ impl KeybindConfig {
             std::fs::create_dir_all(parent).map_err(|e| ConfigError::Io(e.to_string()))?;
         }
 
-        let content =
-            serde_json::to_string_pretty(self).map_err(|e| ConfigError::Serialize(e.to_string()))?;
+        let content = serde_json::to_string_pretty(self)
+            .map_err(|e| ConfigError::Serialize(e.to_string()))?;
 
         std::fs::write(&path, content).map_err(|e| ConfigError::Io(e.to_string()))?;
 
@@ -103,9 +105,8 @@ impl KeybindConfig {
     pub fn add_user_binding(&mut self, binding: Keybind) {
         // Remove any existing binding for the same keys/context
         let context = binding.effective_context();
-        self.user_bindings.retain(|b| {
-            !(b.keys == binding.keys && b.effective_context() == context)
-        });
+        self.user_bindings
+            .retain(|b| !(b.keys == binding.keys && b.effective_context() == context));
         self.user_bindings.push(binding);
     }
 

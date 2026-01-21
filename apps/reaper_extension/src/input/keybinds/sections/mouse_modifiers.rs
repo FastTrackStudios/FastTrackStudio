@@ -25,11 +25,19 @@ impl ActionSet for ReaperMouseModifiers {
             // Shift+drag on edge = slip edit
             MouseModifier::new(MouseModifierContext::MediaItemLeftEdge, "<S->", "slip_edit")
                 .with_description("Slip edit from left edge"),
-            MouseModifier::new(MouseModifierContext::MediaItemRightEdge, "<S->", "slip_edit")
-                .with_description("Slip edit from right edge"),
+            MouseModifier::new(
+                MouseModifierContext::MediaItemRightEdge,
+                "<S->",
+                "slip_edit",
+            )
+            .with_description("Slip edit from right edge"),
             // Alt+drag on item = copy
-            MouseModifier::new(MouseModifierContext::MediaItemBottomHalf, "<A->", "copy_item")
-                .with_description("Copy item on drag"),
+            MouseModifier::new(
+                MouseModifierContext::MediaItemBottomHalf,
+                "<A->",
+                "copy_item",
+            )
+            .with_description("Copy item on drag"),
         ]
     }
 }
@@ -50,13 +58,21 @@ impl ActionSet for LogicMouseModifiers {
             MouseModifier::new(MouseModifierContext::MediaItemRightEdge, "", "edge_resize")
                 .with_description("Resize item from right edge"),
             // Option+drag = copy (Logic style)
-            MouseModifier::new(MouseModifierContext::MediaItemBottomHalf, "<A->", "copy_item")
-                .with_description("Copy item on drag (Option+drag)"),
+            MouseModifier::new(
+                MouseModifierContext::MediaItemBottomHalf,
+                "<A->",
+                "copy_item",
+            )
+            .with_description("Copy item on drag (Option+drag)"),
             // Shift+drag on edge = slip edit
             MouseModifier::new(MouseModifierContext::MediaItemLeftEdge, "<S->", "slip_edit")
                 .with_description("Slip edit from left edge"),
-            MouseModifier::new(MouseModifierContext::MediaItemRightEdge, "<S->", "slip_edit")
-                .with_description("Slip edit from right edge"),
+            MouseModifier::new(
+                MouseModifierContext::MediaItemRightEdge,
+                "<S->",
+                "slip_edit",
+            )
+            .with_description("Slip edit from right edge"),
             // NOTE: No fade controls in corners - this is the key Logic difference
         ]
     }
@@ -74,13 +90,21 @@ fn fts_mouse_modifiers() -> Vec<MouseModifier> {
         MouseModifier::new(MouseModifierContext::MediaItemRightEdge, "", "edge_resize")
             .with_description("Resize item from right edge"),
         // Alt/Option+drag = copy
-        MouseModifier::new(MouseModifierContext::MediaItemBottomHalf, "<A->", "copy_item")
-            .with_description("Copy item on drag"),
+        MouseModifier::new(
+            MouseModifierContext::MediaItemBottomHalf,
+            "<A->",
+            "copy_item",
+        )
+        .with_description("Copy item on drag"),
         // Shift+drag on edge = slip edit
         MouseModifier::new(MouseModifierContext::MediaItemLeftEdge, "<S->", "slip_edit")
             .with_description("Slip edit from left edge"),
-        MouseModifier::new(MouseModifierContext::MediaItemRightEdge, "<S->", "slip_edit")
-            .with_description("Slip edit from right edge"),
+        MouseModifier::new(
+            MouseModifierContext::MediaItemRightEdge,
+            "<S->",
+            "slip_edit",
+        )
+        .with_description("Slip edit from right edge"),
     ];
 
     // Fade controls only with modifier (Cmd on macOS, Ctrl on others)

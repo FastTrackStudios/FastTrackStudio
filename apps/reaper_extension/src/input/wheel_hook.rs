@@ -9,7 +9,9 @@
 //!
 //! Logs mouse context on clicks and when context changes (on wheel events).
 
-use crate::input::executor::{execute_action, execute_midi_editor_wheel_action, execute_wheel_action};
+use crate::input::executor::{
+    execute_action, execute_midi_editor_wheel_action, execute_wheel_action,
+};
 use crate::input::keybinds::{self, KeybindContext};
 use crate::input::state::Context;
 use crate::input::workflows;
@@ -71,7 +73,7 @@ fn build_modifier_string(ctrl: bool, shift: bool, alt: bool) -> String {
     if modifiers.is_empty() {
         String::new()
     } else {
-        format!("<{}->" , modifiers.join("-"))
+        format!("<{}->", modifiers.join("-"))
     }
 }
 
@@ -272,7 +274,7 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
     // Check if interception is enabled
     if !crate::input::handler::InputHandler::is_enabled() {
         // Pass through to original procedure
-        return call_original_proc(hwnd, msg, w, l);
+        return unsafe { call_original_proc(hwnd, msg, w, l) };
     }
 
     // Handle mouse click events
@@ -286,7 +288,9 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
             // Convert to screen coordinates for context detection
             let swell = Swell::get();
             let mut pt_screen = pt;
-            swell.ClientToScreen(hwnd, &mut pt_screen);
+            unsafe {
+                swell.ClientToScreen(hwnd, &mut pt_screen);
+            }
 
             // Determine context from mouse position
             let reaper = Reaper::get();
@@ -338,7 +342,7 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
 
                         // Check if we should pass through or eat the click
                         if armed_click.pass_through {
-                            return call_original_proc(hwnd, msg, w, l);
+                            return unsafe { call_original_proc(hwnd, msg, w, l) };
                         }
 
                         // Eat the click - we handled it
@@ -367,7 +371,7 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
             }
 
             // Pass through mouse clicks to REAPER
-            return call_original_proc(hwnd, msg, w, l);
+            return unsafe { call_original_proc(hwnd, msg, w, l) };
         }
         _ => {}
     }
@@ -400,8 +404,16 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
             // Debug logging for wheel events - unified with keyboard debug logging
             if crate::input::handler::InputHandler::is_debug_logging() {
                 let direction = if delta > 0 { "up" } else { "down" };
-                let wheel_type = if is_horizontal { "horizontal" } else { "vertical" };
-                let mods = if modifier_str.is_empty() { "none".to_string() } else { modifier_str.clone() };
+                let wheel_type = if is_horizontal {
+                    "horizontal"
+                } else {
+                    "vertical"
+                };
+                let mods = if modifier_str.is_empty() {
+                    "none".to_string()
+                } else {
+                    modifier_str.clone()
+                };
                 reaper.show_console_msg(format!(
                     "[DEBUG] Wheel: {} {} in {} | delta: {} | modifiers: {}\n",
                     wheel_type, direction, context_name, delta, mods
@@ -412,19 +424,25 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
             if crate::input::handler::InputHandler::is_passthrough() {
                 // Log wheel event in passthrough mode
                 let direction = if delta > 0 { "up" } else { "down" };
-                let wheel_type = if is_horizontal { "horizontal wheel" } else { "wheel" };
+                let wheel_type = if is_horizontal {
+                    "horizontal wheel"
+                } else {
+                    "wheel"
+                };
                 reaper.show_console_msg(format!(
                     "Mouse {} {} in {} (passthrough)\n",
                     wheel_type, direction, context_name
                 ));
-                return call_original_proc(hwnd, msg, w, l);
+                return unsafe { call_original_proc(hwnd, msg, w, l) };
             }
 
             // Convert context for keybind resolution
             let kb_context = context_to_keybind_context(context);
 
             // Try to resolve a wheel binding
-            if let Some(action) = keybinds::resolve_wheel(kb_context, &modifier_str, is_horizontal, delta) {
+            if let Some(action) =
+                keybinds::resolve_wheel(kb_context, &modifier_str, is_horizontal, delta)
+            {
                 // Found a binding - execute the action with the wheel delta
                 debug!(
                     action = %action,
@@ -452,11 +470,11 @@ unsafe extern "C" fn wheel_hook_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM
 
             // No binding found - determine if we should eat or pass through
             // For now, pass through to REAPER for unbound wheel events
-            call_original_proc(hwnd, msg, w, l)
+            unsafe { call_original_proc(hwnd, msg, w, l) }
         }
         _ => {
             // Pass all other messages through to original procedure
-            call_original_proc(hwnd, msg, w, l)
+            unsafe { call_original_proc(hwnd, msg, w, l) }
         }
     }
 }
@@ -467,11 +485,11 @@ unsafe fn call_original_proc(hwnd: HWND, msg: UINT, w: WPARAM, l: LPARAM) -> LRE
     // Use try_with to avoid panic if RefCell is already borrowed
     // This can happen if the timer callback is running simultaneously
     match ORIGINAL_PROCS.try_with(|orig_map| orig_map.borrow().get(&hwnd).cloned()) {
-        Ok(Some(orig_fn)) => orig_fn(hwnd, msg, w, l),
+        Ok(Some(orig_fn)) => unsafe { orig_fn(hwnd, msg, w, l) },
         Ok(None) | Err(_) => {
             // Fallback to default window procedure if we can't get the original
             // or if RefCell is already borrowed
-            Swell::get().DefWindowProc(hwnd, msg, w, l)
+            unsafe { Swell::get().DefWindowProc(hwnd, msg, w, l) }
         }
     }
 }

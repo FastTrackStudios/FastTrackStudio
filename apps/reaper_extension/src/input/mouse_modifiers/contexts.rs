@@ -4,9 +4,7 @@
 //! Uses internal MM_CTX_* names which are the most reliable format.
 //! These correspond to the contexts available in Options > Preferences > Mouse Modifiers
 
-use super::behaviors::media_item::{
-    MediaItemLeftDragBehavior, MediaItemEdgeLeftDragBehavior,
-};
+use super::behaviors::media_item::{MediaItemEdgeLeftDragBehavior, MediaItemLeftDragBehavior};
 use super::behaviors::shared::traits::{BehaviorDisplay, BehaviorId};
 
 /// All mouse modifier contexts in REAPER

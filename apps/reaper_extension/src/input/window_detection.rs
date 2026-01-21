@@ -10,8 +10,8 @@
 //! - wheel_hook.rs (determine_context_from_hwnd)
 
 use crate::input::state::Context;
-use reaper_low::raw::{HWND, POINT};
 use reaper_low::Swell;
+use reaper_low::raw::{HWND, POINT};
 use reaper_medium::Reaper as MediumReaper;
 use swell_ui::Window;
 
@@ -333,7 +333,8 @@ pub fn detect_context_from_focus(medium_reaper: &MediumReaper) -> WindowContext 
 
     // Check if the focused window is in a MIDI editor
     if let Some(midi_editor_hwnd) = medium_reaper.midi_editor_get_active() {
-        let is_in_midi_editor = is_window_child_of(focused_hwnd.as_ptr(), midi_editor_hwnd.as_ptr());
+        let is_in_midi_editor =
+            is_window_child_of(focused_hwnd.as_ptr(), midi_editor_hwnd.as_ptr());
 
         if is_in_midi_editor {
             let mode = unsafe {
@@ -434,9 +435,7 @@ fn is_window_child_of(child: HWND, parent: HWND) -> bool {
 /// Compatibility wrapper that returns the tuple format used by existing code
 ///
 /// Returns (Context, context_name, window_title)
-pub fn detect_context_from_mouse_compat(
-    medium_reaper: &MediumReaper,
-) -> (Context, String, String) {
+pub fn detect_context_from_mouse_compat(medium_reaper: &MediumReaper) -> (Context, String, String) {
     let result = detect_context_from_mouse(medium_reaper);
     (result.context, result.context_name, result.window_title)
 }
@@ -444,9 +443,7 @@ pub fn detect_context_from_mouse_compat(
 /// Compatibility wrapper for focus-based detection
 ///
 /// Returns (Context, context_name, window_title)
-pub fn detect_context_from_focus_compat(
-    medium_reaper: &MediumReaper,
-) -> (Context, String, String) {
+pub fn detect_context_from_focus_compat(medium_reaper: &MediumReaper) -> (Context, String, String) {
     let result = detect_context_from_focus(medium_reaper);
     (result.context, result.context_name, result.window_title)
 }

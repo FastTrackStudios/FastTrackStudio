@@ -86,10 +86,7 @@ pub fn execute_action(action_id: &str) -> Result<(), Box<dyn std::error::Error>>
 ///
 /// # Safety
 /// This function uses unsafe code to call the low-level REAPER API.
-pub fn execute_wheel_action(
-    action_id: &str,
-    delta: i16,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn execute_wheel_action(action_id: &str, delta: i16) -> Result<(), Box<dyn std::error::Error>> {
     let reaper = Reaper::get();
     let medium_reaper = reaper.medium_reaper();
 

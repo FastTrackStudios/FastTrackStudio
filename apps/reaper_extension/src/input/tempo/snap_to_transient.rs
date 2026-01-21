@@ -3,7 +3,7 @@
 //! Moves the nearest measure grid line to align with the next transient.
 //! Uses REAPER's "Move cursor to next transient in items" action (40375).
 
-use super::envelope::{move_tempo, TempoEnvelope, MIN_TEMPO_DIST};
+use super::envelope::{MIN_TEMPO_DIST, TempoEnvelope, move_tempo};
 use super::grid::{
     get_closest_measure_grid_line, get_next_measure_position, get_previous_measure_position,
     position_at_mouse_cursor,
@@ -155,17 +155,7 @@ pub fn snap_grid_to_transient(variant: SnapToTransientVariant) {
         // Create initial tempo marker
         let tempo = unsafe { low.Master_GetTempo() };
         unsafe {
-            low.SetTempoTimeSigMarker(
-                std::ptr::null_mut(),
-                -1,
-                0.0,
-                -1,
-                0.0,
-                tempo,
-                0,
-                0,
-                false,
-            );
+            low.SetTempoTimeSigMarker(std::ptr::null_mut(), -1, 0.0, -1, 0.0, tempo, 0, 0, false);
         }
     }
 
