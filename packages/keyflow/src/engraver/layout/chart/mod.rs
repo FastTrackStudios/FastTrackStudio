@@ -592,10 +592,41 @@ impl ChartLayoutEngine {
                 let compact_scale = 0.4; // Count-in measures at 40% width
 
                 // Calculate content weights for spring-based distribution
+                // Also check for spillbacks from the next measure (triplet pushes that affect current measure width)
+                let all_measures = chart_section.measures();
                 let measure_weights: Vec<f64> = measure_indices
                     .iter()
-                    .filter_map(|&idx| chart_section.measures().get(idx))
-                    .map(|m| self.estimate_measure_content_weight(m, &text_metrics))
+                    .enumerate()
+                    .filter_map(|(i, &idx)| all_measures.get(idx).map(|m| (i, idx, m)))
+                    .map(|(i, idx, m)| {
+                        let mut weight = self.estimate_measure_content_weight(m, &text_metrics);
+
+                        // Check if NEXT measure has a first-chord triplet push (spillback)
+                        // This affects current measure's weight because the spillback renders here
+                        let next_idx = if i + 1 < measure_indices.len() {
+                            measure_indices.get(i + 1).copied()
+                        } else {
+                            // Check next measure in section (might be on next system)
+                            Some(idx + 1)
+                        };
+
+                        if let Some(next_idx) = next_idx {
+                            if let Some(next_measure) = all_measures.get(next_idx) {
+                                // Check if first chord has triplet push
+                                if let Some(first_chord) = next_measure.chords.first() {
+                                    let has_triplet_push = first_chord.push_pull.as_ref().map_or(false, |(is_push, amount)| {
+                                        *is_push && amount.base == PushPullBase::Triplet
+                                    });
+                                    if has_triplet_push {
+                                        // Spillback triplet adds extra elements to this measure
+                                        weight += 0.5;
+                                    }
+                                }
+                            }
+                        }
+
+                        weight
+                    })
                     .collect();
 
                 // Calculate base measure width based on mode
@@ -1207,10 +1238,37 @@ impl ChartLayoutEngine {
                 let is_short_system = effective_measure_count < max_measures as f64;
 
                 // Calculate content weights for spring-based distribution
+                // Also check for spillbacks from the next measure (triplet pushes that affect current measure width)
+                let all_measures = chart_section.measures();
                 let measure_weights: Vec<f64> = measure_indices
                     .iter()
-                    .filter_map(|&idx| chart_section.measures().get(idx))
-                    .map(|m| self.estimate_measure_content_weight(m, &text_metrics))
+                    .enumerate()
+                    .filter_map(|(i, &idx)| all_measures.get(idx).map(|m| (i, idx, m)))
+                    .map(|(i, idx, m)| {
+                        let mut weight = self.estimate_measure_content_weight(m, &text_metrics);
+
+                        // Check if NEXT measure has a first-chord triplet push (spillback)
+                        let next_idx = if i + 1 < measure_indices.len() {
+                            measure_indices.get(i + 1).copied()
+                        } else {
+                            Some(idx + 1)
+                        };
+
+                        if let Some(next_idx) = next_idx {
+                            if let Some(next_measure) = all_measures.get(next_idx) {
+                                if let Some(first_chord) = next_measure.chords.first() {
+                                    let has_triplet_push = first_chord.push_pull.as_ref().map_or(false, |(is_push, amount)| {
+                                        *is_push && amount.base == PushPullBase::Triplet
+                                    });
+                                    if has_triplet_push {
+                                        weight += 0.5;
+                                    }
+                                }
+                            }
+                        }
+
+                        weight
+                    })
                     .collect();
 
                 // Distribute width proportionally using spring physics
@@ -2592,9 +2650,32 @@ impl ChartLayoutEngine {
         }
 
         // Factor in rhythm complexity (triplets, pushed chords)
-        let has_complex_rhythm = measure.chords.iter().any(|c| c.push_pull.is_some());
-        if has_complex_rhythm {
-            weight += 0.2;
+        // Each triplet push creates 2 rhythm elements instead of 1 (TripletQuarter + TripletEighth)
+        // This needs significant additional space
+        let triplet_push_count = measure.chords.iter().filter(|c| {
+            c.push_pull.as_ref().map_or(false, |(is_push, amount)| {
+                *is_push && amount.base == PushPullBase::Triplet
+            })
+        }).count();
+
+        // Each triplet beat needs ~1.5x the space of a regular beat
+        // (2 elements per beat, plus bracket overhead)
+        if triplet_push_count > 0 {
+            weight += triplet_push_count as f64 * 0.5;
+        }
+
+        // Also check for explicit triplet notation in rhythm elements
+        let explicit_triplet_count = measure.rhythm_elements.iter().filter(|elem| {
+            match elem {
+                RhythmElement::Chord(c) => c.rhythm.lily_parts().map_or(false, |(_, _, is_triplet)| is_triplet),
+                RhythmElement::Rest(r) => r.rhythm.lily_parts().map_or(false, |(_, _, is_triplet)| is_triplet),
+                RhythmElement::Space(_) => false,
+            }
+        }).count();
+
+        if explicit_triplet_count > 2 {
+            // More than a single triplet group - needs extra space
+            weight += (explicit_triplet_count as f64 / 3.0) * 0.3;
         }
 
         // Factor in melodies (more notes = more space needed)
