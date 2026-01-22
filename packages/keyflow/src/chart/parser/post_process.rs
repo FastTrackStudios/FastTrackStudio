@@ -2,8 +2,8 @@
 //!
 //! Handles section numbering, push/pull adjustments, and position calculation.
 
-use crate::chart::types::ChordInstance;
 use crate::chart::Chart;
+use crate::chart::types::ChordInstance;
 use crate::chord::{ChordRhythm, PushPullAmount};
 use crate::primitives::RootNotation;
 use crate::sections::SectionNumberer;
@@ -223,9 +223,9 @@ impl Chart {
                                 } else {
                                     position_in_prev_measure
                                 };
-                                let total_beats =
-                                    (adjusted_measure_num.max(0) as f64 * beats_per_measure)
-                                        + position_in_prev_measure.max(0.0);
+                                let total_beats = (adjusted_measure_num.max(0) as f64
+                                    * beats_per_measure)
+                                    + position_in_prev_measure.max(0.0);
                                 let measure = (total_beats / beats_per_measure).floor() as i32;
                                 let beat = (total_beats % beats_per_measure).floor() as i32;
                                 let subdivision =
@@ -238,11 +238,10 @@ impl Chart {
                                     .floor() as i32;
                                 let beat = (adjusted_position_beats.max(0.0) % beats_per_measure)
                                     .floor() as i32;
-                                let subdivision = (((adjusted_position_beats.max(0.0)
-                                    % beats_per_measure)
-                                    % 1.0)
-                                    * 1000.0)
-                                    .round() as i32;
+                                let subdivision =
+                                    (((adjusted_position_beats.max(0.0) % beats_per_measure) % 1.0)
+                                        * 1000.0)
+                                        .round() as i32;
                                 MusicalPosition::try_new(measure, beat, subdivision.clamp(0, 999))
                                     .unwrap_or_else(|_| MusicalPosition::start())
                             };
@@ -258,8 +257,7 @@ impl Chart {
                             // Rests get their position set (for rendering) but also advance the timeline
                             let measure = (base_position_beats / beats_per_measure).floor() as i32;
                             let beat = (base_position_beats % beats_per_measure).floor() as i32;
-                            let subdivision =
-                                ((base_position_beats % 1.0) * 1000.0).round() as i32;
+                            let subdivision = ((base_position_beats % 1.0) * 1000.0).round() as i32;
                             let musical_pos =
                                 MusicalPosition::try_new(measure, beat, subdivision.clamp(0, 999))
                                     .unwrap_or_else(|_| MusicalPosition::start());
@@ -275,8 +273,7 @@ impl Chart {
                             // Spaces also advance the timeline (invisible duration)
                             let measure = (base_position_beats / beats_per_measure).floor() as i32;
                             let beat = (base_position_beats % beats_per_measure).floor() as i32;
-                            let subdivision =
-                                ((base_position_beats % 1.0) * 1000.0).round() as i32;
+                            let subdivision = ((base_position_beats % 1.0) * 1000.0).round() as i32;
                             let musical_pos =
                                 MusicalPosition::try_new(measure, beat, subdivision.clamp(0, 999))
                                     .unwrap_or_else(|_| MusicalPosition::start());

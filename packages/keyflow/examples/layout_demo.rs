@@ -30,8 +30,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use kurbo::{Affine, Point, Rect};
-use vello::peniko::Color;
 use vello::Scene;
+use vello::peniko::Color;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,

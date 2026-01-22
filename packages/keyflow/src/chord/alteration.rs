@@ -5,10 +5,11 @@
 use crate::chord::degree::ChordDegree;
 use crate::parsing::{ParseError, Token, TokenType};
 use crate::primitives::Interval;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// An alteration to a chord degree
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct Alteration {
     /// The degree being altered (e.g., 5th, 9th, 11th, 13th)
     pub degree: ChordDegree,

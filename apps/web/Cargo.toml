@@ -7,7 +7,7 @@ description = "FastTrackStudio Web App - Documentation, chart browser, and more"
 
 [dependencies]
 # Dioxus web framework
-dioxus = { version = "0.7.1", features = ["router"] }
+dioxus = { version = "0.7.3", features = ["router"] }
 
 # UI component library (shadcn-inspired, Tailwind-styled)
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", package = "lumen-blocks" }
@@ -15,7 +15,7 @@ dioxus-sdk-time = "0.7"
 lucide-dioxus = "2"
 
 # Chart parsing and layout
-keyflow = { path = "../../packages/keyflow", features = ["engraver"] }
+keyflow = { path = "../../packages/keyflow", features = ["engraver", "highlighting"] }
 
 # Geometry (match engraver version)
 kurbo = "0.12"
@@ -51,6 +51,7 @@ wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 console_error_panic_hook = "0.1"
 tracing-wasm = "0.2"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "registry"] }
 
 # Web APIs
 web-sys = { version = "0.3", features = [
@@ -73,6 +74,11 @@ web-sys = { version = "0.3", features = [
     "EventTarget",
     "AddEventListenerOptions",
     "DomRect",
+    # Resize observation
+    "ResizeObserver",
+    "ResizeObserverEntry",
+    "ResizeObserverOptions",
+    "ResizeObserverBoxOptions",
 ] }
 
 # Graphics rendering (WASM) - version must match vello 0.6's wgpu dependency

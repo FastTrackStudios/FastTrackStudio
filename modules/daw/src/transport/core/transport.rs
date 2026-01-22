@@ -1,7 +1,11 @@
 use crate::primitives::{Position, TimeSelection, TimeSignature};
+use facet::Facet;
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[repr(u8)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default, Facet,
+)]
 pub enum PlayState {
     #[default]
     Stopped,
@@ -21,7 +25,10 @@ impl fmt::Display for PlayState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[repr(u8)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default, Facet,
+)]
 pub enum RecordMode {
     #[default]
     Normal,
@@ -39,7 +46,7 @@ impl fmt::Display for RecordMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize, Facet)]
 pub struct Tempo {
     pub bpm: f64,
 }
@@ -73,7 +80,7 @@ impl fmt::Display for Tempo {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Facet)]
 pub struct Transport {
     pub play_state: PlayState,
     pub record_mode: RecordMode,

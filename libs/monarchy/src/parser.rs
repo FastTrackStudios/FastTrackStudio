@@ -33,6 +33,7 @@
 //! prefers matches where more parent groups also match the input.
 
 use crate::{Config, Item, Metadata, MonarchyError, Result};
+use facet::Facet;
 
 /// Parser that converts input strings into [`Item`]s with extracted metadata.
 ///
@@ -52,6 +53,7 @@ use crate::{Config, Item, Metadata, MonarchyError, Result};
 /// println!("Matched groups: {:?}", item.matched_groups);
 /// println!("Metadata: {:?}", item.metadata);
 /// ```
+#[derive(Clone, Debug, Facet)]
 pub struct Parser<M: Metadata> {
     config: Config<M>,
 }

@@ -365,9 +365,7 @@ fn looks_like_tuplet_group(
     config: &QuantizeConfig,
 ) -> bool {
     // All notes should be of the same tuplet type
-    let all_same_type = durations
-        .iter()
-        .all(|d| d.tuplet_type == Some(tuplet_type));
+    let all_same_type = durations.iter().all(|d| d.tuplet_type == Some(tuplet_type));
 
     if !all_same_type {
         return false;

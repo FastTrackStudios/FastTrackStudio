@@ -33,6 +33,7 @@
 //!     .build()
 //! ```
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Helper trait to convert various input types into a `Vec<String>` for patterns.
@@ -103,7 +104,7 @@ impl IntoPatterns for &[&str] {
 /// assert!(descriptor.matches("kick out"));
 /// assert!(!descriptor.matches("outside"));
 /// ```
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Facet)]
 pub struct FieldValueDescriptor {
     /// The value name (e.g., "Out", "Hi Hat", "Ride")
     pub value: String,
@@ -169,6 +170,7 @@ impl FieldValueDescriptor {
 }
 
 /// Builder for field value descriptors
+#[derive(Clone, Debug, Facet)]
 pub struct FieldValueDescriptorBuilder {
     descriptor: FieldValueDescriptor,
 }

@@ -2,8 +2,8 @@
 //!
 //! Uses X11 APIs for overlay windows, window finding, and rect queries.
 
-use crate::reaper::hwnd::RawHwnd;
 use super::{OverlayConfig, WindowRect};
+use crate::reaper::hwnd::RawHwnd;
 
 /// Configure a window for overlay mode.
 pub fn configure_overlay(_hwnd: RawHwnd, _config: &OverlayConfig) {

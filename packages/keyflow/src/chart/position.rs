@@ -3,6 +3,7 @@
 //! Represents hierarchical position within a rendered chart,
 //! enabling navigation and synchronization with DAW timelines.
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Comprehensive position within a chart for rendered elements.
@@ -12,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// - Navigation (jump to measure 32, beat 3)
 /// - DAW synchronization (tick-based position)
 /// - Layout queries (find all elements in system 2)
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct ChartPosition {
     /// System index (which horizontal line of music on the page, 0-indexed).
     /// A "system" is one complete line of music across the page width.

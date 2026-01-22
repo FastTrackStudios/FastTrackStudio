@@ -31,11 +31,13 @@ use winit::{
     window::{Window, WindowId},
 };
 
+use keyflow::Chart;
 use keyflow::engraver::fonts::SMuFLFont;
-use keyflow::engraver::layout::chart::{ChartLayoutConfig, ChartLayoutEngine, ChartLayoutResult, LayoutMode};
+use keyflow::engraver::layout::chart::{
+    ChartLayoutConfig, ChartLayoutEngine, ChartLayoutResult, LayoutMode,
+};
 use keyflow::engraver::renderer::{SceneRenderBuilder, VelloRenderContext};
 use keyflow::engraver::style::MStyle;
-use keyflow::Chart;
 
 const WINDOW_WIDTH: u32 = 1400;
 const WINDOW_HEIGHT: u32 = 400;
@@ -46,9 +48,11 @@ const DPI_SCALE: f64 = SCREEN_DPI / POINTS_PER_INCH;
 
 // Font paths
 const SMUFL_FONT_PATH: &str = "libs/reference/sheet-music/musescore/fonts/bravura/Bravura.otf";
-const SMUFL_METADATA_PATH: &str = "libs/reference/sheet-music/musescore/fonts/bravura/bravura_metadata.json";
+const SMUFL_METADATA_PATH: &str =
+    "libs/reference/sheet-music/musescore/fonts/bravura/bravura_metadata.json";
 const TEXT_FONT_PATH: &str = "libs/reference/sheet-music/musescore/fonts/FreeSans.ttf";
-const MUSEJAZZ_FONT_PATH: &str = "libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf";
+const MUSEJAZZ_FONT_PATH: &str =
+    "libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf";
 
 // =============================================================================
 // Test Patterns - Loaded from the patterns library
@@ -58,10 +62,7 @@ use keyflow::patterns::rhythm;
 
 /// Get patterns from the library for the viewer
 fn get_patterns() -> Vec<(&'static str, &'static str)> {
-    rhythm::ALL
-        .iter()
-        .map(|p| (p.title, p.source))
-        .collect()
+    rhythm::ALL.iter().map(|p| (p.title, p.source)).collect()
 }
 
 fn main() {
@@ -91,7 +92,8 @@ fn main() {
         SMuFLFont::from_reader(font_data, metadata_file).expect("Failed to load SMuFL font"),
     ));
     let text_font_data = Arc::new(std::fs::read(TEXT_FONT_PATH).expect("Failed to load text font"));
-    let musejazz_font_data = Arc::new(std::fs::read(MUSEJAZZ_FONT_PATH).expect("Failed to load MuseJazz font"));
+    let musejazz_font_data =
+        Arc::new(std::fs::read(MUSEJAZZ_FONT_PATH).expect("Failed to load MuseJazz font"));
 
     // Create layout engine
     let style: &'static MStyle = Box::leak(Box::new(MStyle::default()));
@@ -200,7 +202,11 @@ impl ApplicationHandler for App {
             .with_title(&title)
             .with_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
 
-        let window = Arc::new(event_loop.create_window(window_attrs).expect("Failed to create window"));
+        let window = Arc::new(
+            event_loop
+                .create_window(window_attrs)
+                .expect("Failed to create window"),
+        );
         let render_ctx = VelloRenderContext::new(window);
         let transform = Affine::translate((50.0, 100.0)) * Affine::scale(DPI_SCALE);
 
@@ -228,7 +234,8 @@ impl ApplicationHandler for App {
                         match code {
                             KeyCode::Escape => event_loop.exit(),
                             KeyCode::KeyR => {
-                                state.transform = Affine::translate((50.0, 100.0)) * Affine::scale(DPI_SCALE);
+                                state.transform =
+                                    Affine::translate((50.0, 100.0)) * Affine::scale(DPI_SCALE);
                                 state.render_ctx.request_redraw();
                             }
                             // Pattern switching with number keys
@@ -252,7 +259,9 @@ impl ApplicationHandler for App {
                         MouseScrollDelta::LineDelta(_, y) => y as f64,
                         MouseScrollDelta::PixelDelta(delta) => delta.y / PIXELS_PER_LINE,
                     };
-                    state.transform = state.transform.then_scale_about(BASE.powf(exponent), prior_position);
+                    state.transform = state
+                        .transform
+                        .then_scale_about(BASE.powf(exponent), prior_position);
                     state.render_ctx.request_redraw();
                 }
             }
@@ -268,7 +277,11 @@ impl ApplicationHandler for App {
                 state.prior_position = Some(pos);
             }
 
-            WindowEvent::MouseInput { state: button_state, button, .. } => {
+            WindowEvent::MouseInput {
+                state: button_state,
+                button,
+                ..
+            } => {
                 if button == MouseButton::Left {
                     state.mouse_down = button_state == ElementState::Pressed;
                 }

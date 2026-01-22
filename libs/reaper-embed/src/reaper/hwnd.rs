@@ -33,24 +33,16 @@ pub fn extract_hwnd<W: HasWindowHandle>(window: &W) -> Option<RawHwnd> {
 
     match handle.as_raw() {
         #[cfg(target_os = "windows")]
-        RawWindowHandle::Win32(win32) => {
-            Some(win32.hwnd.get() as RawHwnd)
-        }
+        RawWindowHandle::Win32(win32) => Some(win32.hwnd.get() as RawHwnd),
 
         #[cfg(target_os = "macos")]
-        RawWindowHandle::AppKit(appkit) => {
-            Some(appkit.ns_view.as_ptr())
-        }
+        RawWindowHandle::AppKit(appkit) => Some(appkit.ns_view.as_ptr()),
 
         #[cfg(target_os = "linux")]
-        RawWindowHandle::Xcb(xcb) => {
-            Some(xcb.window.get())
-        }
+        RawWindowHandle::Xcb(xcb) => Some(xcb.window.get()),
 
         #[cfg(target_os = "linux")]
-        RawWindowHandle::Xlib(xlib) => {
-            Some(xlib.window as u32)
-        }
+        RawWindowHandle::Xlib(xlib) => Some(xlib.window as u32),
 
         _ => None,
     }

@@ -2,8 +2,8 @@
 
 use atomic_float::AtomicF32;
 use fts_plugin_core::prelude::*;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 use crate::GuideParams;
 
@@ -45,12 +45,18 @@ pub fn create(
 /// Main app component
 fn App() -> Element {
     let shared = use_context::<SharedState>();
-    let ui_state = shared.get::<GuideUiState>().expect("GuideUiState not in context");
+    let ui_state = shared
+        .get::<GuideUiState>()
+        .expect("GuideUiState not in context");
 
     // Read transport values
     let tempo = ui_state.transport_tempo.load(Ordering::Relaxed);
-    let time_sig_num = ui_state.transport_time_sig_numerator.load(Ordering::Relaxed);
-    let time_sig_den = ui_state.transport_time_sig_denominator.load(Ordering::Relaxed);
+    let time_sig_num = ui_state
+        .transport_time_sig_numerator
+        .load(Ordering::Relaxed);
+    let time_sig_den = ui_state
+        .transport_time_sig_denominator
+        .load(Ordering::Relaxed);
     let _bar_number = ui_state.transport_bar_number.load(Ordering::Relaxed);
     let beat_position = ui_state.transport_beat_position.load(Ordering::Relaxed);
     let is_playing = ui_state.transport_playing.load(Ordering::Relaxed);

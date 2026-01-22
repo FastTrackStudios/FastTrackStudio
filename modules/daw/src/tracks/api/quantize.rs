@@ -1,10 +1,12 @@
 //! Input quantize settings
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Quantize to position
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[repr(i8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Facet)]
 pub enum QuantizeToPos {
     /// Previous position
     Previous = -1,
@@ -43,7 +45,8 @@ impl fmt::Display for QuantizeToPos {
 }
 
 /// Record path
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Facet)]
 pub enum RecordPath {
     /// Primary path
     #[default]
@@ -82,7 +85,7 @@ impl fmt::Display for RecordPath {
 }
 
 /// Input quantize settings for tracks
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct InputQuantize {
     /// Quantize MIDI (field 1)
     pub quantize_midi: bool,

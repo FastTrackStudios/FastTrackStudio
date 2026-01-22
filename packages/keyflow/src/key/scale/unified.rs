@@ -3,6 +3,7 @@
 use super::diatonic::DiatonicMode;
 use super::harmonic_minor::HarmonicMinorMode;
 use super::melodic_minor::MelodicMinorMode;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Type of musical scale family
@@ -30,7 +31,8 @@ impl ScaleType {
 }
 
 /// Unified mode enum that can represent any mode from any scale family
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum ScaleMode {
     Diatonic(DiatonicMode),
     HarmonicMinor(HarmonicMinorMode),

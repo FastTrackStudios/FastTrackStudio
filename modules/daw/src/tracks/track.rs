@@ -23,6 +23,7 @@ use crate::tracks::item::Item;
 use crate::tracks::types::{MetadataKey, TrackGuid, TrackName};
 use colored::Colorize;
 use derive_builder::Builder;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -31,7 +32,7 @@ use std::collections::HashMap;
 /// This struct contains all fields from the REAPER track state chunk,
 /// including basic properties, volume/pan, mute/solo, folder settings,
 /// fixed lanes, record settings, receives, hardware outputs, and more.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Builder, Facet)]
 #[builder(setter(into, strip_option), build_fn(skip))]
 pub struct Track {
     // === Basic Track Properties ===
@@ -193,6 +194,7 @@ pub struct Track {
 
     // === Metadata ===
     /// Optional metadata
+    #[facet(skip_serializing)]
     pub metadata: HashMap<MetadataKey, String>,
 
     // === Extension State ===

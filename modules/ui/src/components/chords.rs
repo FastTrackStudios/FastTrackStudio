@@ -226,7 +226,7 @@ fn extract_chords_from_chart(chart: &Chart, _project_name: &str) -> Vec<ChordDis
 
     // Iterate through all sections and measures to collect chords
     for section in &chart.sections {
-        for measure in &section.measures {
+        for measure in section.measures() {
             for chord_instance in &measure.chords {
                 let chord_display = convert_chord_instance_to_display(chord_instance, key);
                 chords.push(chord_display);

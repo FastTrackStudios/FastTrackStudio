@@ -146,7 +146,12 @@ impl BoundaryContext {
     #[inline]
     #[must_use]
     pub fn clamp_tuplet(&self, x: f64) -> f64 {
-        clamp_to_boundary(x, self.right_boundary, padding::TUPLET_BRACKET, self.spatium)
+        clamp_to_boundary(
+            x,
+            self.right_boundary,
+            padding::TUPLET_BRACKET,
+            self.spatium,
+        )
     }
 
     /// Clamp an X position using rhythm slash padding.
@@ -167,12 +172,7 @@ impl BoundaryContext {
     #[inline]
     #[must_use]
     pub fn clamp_chord_symbol(&self, x: f64) -> f64 {
-        clamp_to_boundary(
-            x,
-            self.right_boundary,
-            padding::CHORD_SYMBOL,
-            self.spatium,
-        )
+        clamp_to_boundary(x, self.right_boundary, padding::CHORD_SYMBOL, self.spatium)
     }
 
     /// Check if a position exceeds the boundary.

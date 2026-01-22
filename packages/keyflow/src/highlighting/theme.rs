@@ -4,10 +4,11 @@
 //! for common use cases (dark mode, light mode, terminal).
 
 use super::HighlightKind;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// An RGBA color value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct Color {
     /// Red component (0-255)
     pub r: u8,
@@ -99,7 +100,7 @@ impl Default for Color {
 }
 
 /// Style properties for a highlight kind.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
 pub struct Style {
     /// Foreground (text) color
     pub color: Color,
@@ -174,7 +175,7 @@ impl Default for Style {
 }
 
 /// A theme defines colors and styles for all highlight kinds.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Theme {
     /// Name of this theme
     pub name: String,
@@ -259,9 +260,7 @@ impl Theme {
             HighlightKind::Extension => &self.extension,
             HighlightKind::Modifier => &self.modifier,
             HighlightKind::Bass | HighlightKind::BassSlash => &self.bass,
-            HighlightKind::Duration | HighlightKind::Triplet | HighlightKind::Dot => {
-                &self.duration
-            }
+            HighlightKind::Duration | HighlightKind::Triplet | HighlightKind::Dot => &self.duration,
             HighlightKind::SlashRhythm => &self.slash_rhythm,
             HighlightKind::Rest | HighlightKind::Space => &self.rest,
             HighlightKind::Push | HighlightKind::Pull => &self.push_pull,
@@ -294,39 +293,39 @@ impl Theme {
             foreground: Color::rgb(212, 212, 212),
 
             // Chord components - warm colors for harmony
-            root: Style::bold(Color::rgb(255, 198, 109)),        // Golden orange
+            root: Style::bold(Color::rgb(255, 198, 109)), // Golden orange
             scale_degree: Style::bold(Color::rgb(255, 198, 109)), // Same as root
             roman_numeral: Style::bold(Color::rgb(255, 198, 109)), // Same as root
-            accidental: Style::color(Color::rgb(255, 138, 128)),  // Coral
-            quality: Style::color(Color::rgb(152, 195, 121)),     // Soft green
-            extension: Style::color(Color::rgb(97, 175, 239)),    // Sky blue
-            modifier: Style::color(Color::rgb(198, 120, 221)),    // Purple
-            bass: Style::color(Color::rgb(224, 108, 117)),        // Salmon
+            accidental: Style::color(Color::rgb(255, 138, 128)), // Coral
+            quality: Style::color(Color::rgb(152, 195, 121)), // Soft green
+            extension: Style::color(Color::rgb(97, 175, 239)), // Sky blue
+            modifier: Style::color(Color::rgb(198, 120, 221)), // Purple
+            bass: Style::color(Color::rgb(224, 108, 117)), // Salmon
 
             // Rhythm - cool colors
-            duration: Style::color(Color::rgb(86, 182, 194)),    // Cyan
+            duration: Style::color(Color::rgb(86, 182, 194)), // Cyan
             slash_rhythm: Style::color(Color::rgb(140, 140, 140)), // Gray
-            rest: Style::italic(Color::rgb(140, 140, 140)),       // Gray italic
-            push_pull: Style::color(Color::rgb(209, 154, 102)),   // Tan
+            rest: Style::italic(Color::rgb(140, 140, 140)),   // Gray italic
+            push_pull: Style::color(Color::rgb(209, 154, 102)), // Tan
 
             // Structure - distinct colors
-            section: Style::bold(Color::rgb(198, 120, 221)),     // Purple bold
+            section: Style::bold(Color::rgb(198, 120, 221)), // Purple bold
             measure_count: Style::color(Color::rgb(209, 154, 102)), // Tan
             section_comment: Style::italic(Color::rgb(106, 153, 85)), // Green italic
             measure_separator: Style::color(Color::rgb(100, 100, 100)), // Dark gray
 
             // Metadata
-            title: Style::bold(Color::rgb(229, 192, 123)),       // Warm yellow
-            tempo: Style::color(Color::rgb(97, 175, 239)),       // Blue
+            title: Style::bold(Color::rgb(229, 192, 123)), // Warm yellow
+            tempo: Style::color(Color::rgb(97, 175, 239)), // Blue
             time_signature: Style::color(Color::rgb(97, 175, 239)), // Blue
-            key: Style::color(Color::rgb(152, 195, 121)),        // Green
+            key: Style::color(Color::rgb(152, 195, 121)),  // Green
 
             // Other
-            comment: Style::italic(Color::rgb(106, 153, 85)),    // Muted green
-            command: Style::color(Color::rgb(198, 120, 221)),    // Purple
-            dynamic: Style::bold(Color::rgb(224, 108, 117)),     // Salmon bold
+            comment: Style::italic(Color::rgb(106, 153, 85)), // Muted green
+            command: Style::color(Color::rgb(198, 120, 221)), // Purple
+            dynamic: Style::bold(Color::rgb(224, 108, 117)),  // Salmon bold
             memory_recall: Style::color(Color::rgb(86, 182, 194)), // Cyan
-            unknown: Style::color(Color::rgb(244, 71, 71)),      // Error red
+            unknown: Style::color(Color::rgb(244, 71, 71)),   // Error red
         }
     }
 
@@ -341,39 +340,39 @@ impl Theme {
             foreground: Color::rgb(36, 36, 36),
 
             // Chord components - darker, saturated versions
-            root: Style::bold(Color::rgb(179, 119, 0)),          // Dark orange
+            root: Style::bold(Color::rgb(179, 119, 0)), // Dark orange
             scale_degree: Style::bold(Color::rgb(179, 119, 0)),
             roman_numeral: Style::bold(Color::rgb(179, 119, 0)),
-            accidental: Style::color(Color::rgb(194, 69, 69)),   // Dark red
-            quality: Style::color(Color::rgb(80, 120, 60)),      // Forest green
-            extension: Style::color(Color::rgb(0, 102, 153)),    // Dark blue
-            modifier: Style::color(Color::rgb(130, 70, 150)),    // Dark purple
-            bass: Style::color(Color::rgb(170, 70, 70)),         // Dark salmon
+            accidental: Style::color(Color::rgb(194, 69, 69)), // Dark red
+            quality: Style::color(Color::rgb(80, 120, 60)),    // Forest green
+            extension: Style::color(Color::rgb(0, 102, 153)),  // Dark blue
+            modifier: Style::color(Color::rgb(130, 70, 150)),  // Dark purple
+            bass: Style::color(Color::rgb(170, 70, 70)),       // Dark salmon
 
             // Rhythm
-            duration: Style::color(Color::rgb(0, 128, 128)),     // Teal
+            duration: Style::color(Color::rgb(0, 128, 128)), // Teal
             slash_rhythm: Style::color(Color::rgb(100, 100, 100)),
             rest: Style::italic(Color::rgb(100, 100, 100)),
-            push_pull: Style::color(Color::rgb(150, 100, 50)),   // Brown
+            push_pull: Style::color(Color::rgb(150, 100, 50)), // Brown
 
             // Structure
-            section: Style::bold(Color::rgb(130, 70, 150)),      // Purple
+            section: Style::bold(Color::rgb(130, 70, 150)), // Purple
             measure_count: Style::color(Color::rgb(150, 100, 50)),
             section_comment: Style::italic(Color::rgb(60, 120, 60)),
             measure_separator: Style::color(Color::rgb(150, 150, 150)),
 
             // Metadata
-            title: Style::bold(Color::rgb(140, 100, 30)),        // Dark gold
+            title: Style::bold(Color::rgb(140, 100, 30)), // Dark gold
             tempo: Style::color(Color::rgb(0, 102, 153)),
             time_signature: Style::color(Color::rgb(0, 102, 153)),
             key: Style::color(Color::rgb(80, 120, 60)),
 
             // Other
-            comment: Style::italic(Color::rgb(60, 120, 60)),     // Forest green
+            comment: Style::italic(Color::rgb(60, 120, 60)), // Forest green
             command: Style::color(Color::rgb(130, 70, 150)),
             dynamic: Style::bold(Color::rgb(170, 70, 70)),
             memory_recall: Style::color(Color::rgb(0, 128, 128)),
-            unknown: Style::color(Color::rgb(200, 0, 0)),        // Error red
+            unknown: Style::color(Color::rgb(200, 0, 0)), // Error red
         }
     }
 
@@ -385,7 +384,7 @@ impl Theme {
             background: Color::BLACK,
             foreground: Color::WHITE,
 
-            root: Style::bold(Color::rgb(255, 255, 0)),          // Yellow
+            root: Style::bold(Color::rgb(255, 255, 0)), // Yellow
             scale_degree: Style::bold(Color::rgb(255, 255, 0)),
             roman_numeral: Style::bold(Color::rgb(255, 255, 0)),
             accidental: Style::color(Color::rgb(255, 128, 128)), // Light red
@@ -394,12 +393,12 @@ impl Theme {
             modifier: Style::color(Color::rgb(255, 128, 255)),   // Light magenta
             bass: Style::color(Color::rgb(255, 200, 128)),       // Light orange
 
-            duration: Style::color(Color::rgb(0, 255, 255)),     // Cyan
+            duration: Style::color(Color::rgb(0, 255, 255)), // Cyan
             slash_rhythm: Style::color(Color::rgb(192, 192, 192)),
             rest: Style::italic(Color::rgb(192, 192, 192)),
             push_pull: Style::color(Color::rgb(255, 200, 100)),
 
-            section: Style::bold(Color::rgb(255, 128, 255)),     // Magenta
+            section: Style::bold(Color::rgb(255, 128, 255)), // Magenta
             measure_count: Style::color(Color::rgb(255, 200, 100)),
             section_comment: Style::italic(Color::rgb(128, 255, 128)),
             measure_separator: Style::color(Color::rgb(128, 128, 128)),

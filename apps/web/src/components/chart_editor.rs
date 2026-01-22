@@ -2,8 +2,8 @@
 //!
 //! Interactive split-view editor with live chart preview.
 
-use dioxus::prelude::*;
 use dioxus::dioxus_core::Task;
+use dioxus::prelude::*;
 use keyflow::highlighting::{HighlightKind, Highlighter};
 
 // =============================================================================
@@ -189,7 +189,11 @@ pub fn ChartEditor() -> Element {
 /// Dynamic chart renderer that accepts signals for reactive updates.
 /// The canvas always fills the container; mode affects the paper rendering inside.
 #[component]
-pub fn DynamicChartRenderer(source: Signal<String>, mode: Signal<PreviewMode>, canvas_id: Option<String>) -> Element {
+pub fn DynamicChartRenderer(
+    source: Signal<String>,
+    mode: Signal<PreviewMode>,
+    canvas_id: Option<String>,
+) -> Element {
     // Read source to trigger re-render on changes and for validation
     let source_value = source.read();
     let mode_value = *mode.read();
@@ -198,7 +202,8 @@ pub fn DynamicChartRenderer(source: Signal<String>, mode: Signal<PreviewMode>, c
     let first_line = source_value.lines().next().unwrap_or("(empty)");
     tracing::debug!(
         "[ChartRenderer] Rendering with mode={:?}, source_first_line='{}'",
-        mode_value, first_line
+        mode_value,
+        first_line
     );
 
     // Parse the chart to validate it
@@ -257,12 +262,16 @@ pub fn DynamicChartRenderer(source: Signal<String>, mode: Signal<PreviewMode>, c
 /// Canvas component with WebGPU rendering for dynamic content.
 /// Accepts signals directly to enable reactive effect tracking.
 #[component]
-fn DynamicChartCanvas(source: Signal<String>, mode: Signal<PreviewMode>, canvas_id: String) -> Element {
+fn DynamicChartCanvas(
+    source: Signal<String>,
+    mode: Signal<PreviewMode>,
+    canvas_id: String,
+) -> Element {
     #[cfg(target_arch = "wasm32")]
     {
         use crate::renderer::ChartLayoutManager;
-        use wasm_bindgen::prelude::*;
         use wasm_bindgen::JsCast;
+        use wasm_bindgen::prelude::*;
 
         // Create layout manager signal
         let mut layout_manager = use_signal(|| None::<ChartLayoutManager>);
@@ -304,10 +313,10 @@ fn DynamicChartCanvas(source: Signal<String>, mode: Signal<PreviewMode>, canvas_
                         {
                             let promise = js_sys::Promise::new(&mut |resolve, _reject| {
                                 if let Some(window) = web_sys::window() {
-                                    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                                        &resolve,
-                                        50, // Small delay for DOM to stabilize
-                                    );
+                                    let _ = window
+                                        .set_timeout_with_callback_and_timeout_and_arguments_0(
+                                            &resolve, 50, // Small delay for DOM to stabilize
+                                        );
                                 }
                             });
                             let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
@@ -351,7 +360,10 @@ fn DynamicChartCanvas(source: Signal<String>, mode: Signal<PreviewMode>, canvas_
                 last_mouse_y_clone.set(event.client_y() as f64);
             }) as Box<dyn FnMut(_)>);
             canvas
-                .add_event_listener_with_callback("mousedown", mousedown_closure.as_ref().unchecked_ref())
+                .add_event_listener_with_callback(
+                    "mousedown",
+                    mousedown_closure.as_ref().unchecked_ref(),
+                )
                 .ok();
             mousedown_closure.forget();
 
@@ -379,7 +391,10 @@ fn DynamicChartCanvas(source: Signal<String>, mode: Signal<PreviewMode>, canvas_
                 }
             }) as Box<dyn FnMut(_)>);
             canvas
-                .add_event_listener_with_callback("mousemove", mousemove_closure.as_ref().unchecked_ref())
+                .add_event_listener_with_callback(
+                    "mousemove",
+                    mousemove_closure.as_ref().unchecked_ref(),
+                )
                 .ok();
             mousemove_closure.forget();
 
@@ -389,7 +404,10 @@ fn DynamicChartCanvas(source: Signal<String>, mode: Signal<PreviewMode>, canvas_
                 is_dragging_clone.set(false);
             }) as Box<dyn FnMut(_)>);
             window
-                .add_event_listener_with_callback("mouseup", mouseup_closure.as_ref().unchecked_ref())
+                .add_event_listener_with_callback(
+                    "mouseup",
+                    mouseup_closure.as_ref().unchecked_ref(),
+                )
                 .ok();
             mouseup_closure.forget();
 
@@ -406,7 +424,8 @@ fn DynamicChartCanvas(source: Signal<String>, mode: Signal<PreviewMode>, canvas_
                 let new_scale = (old_scale * (1.0 + delta)).clamp(0.25, 4.0);
 
                 // Zoom towards mouse position
-                let rect = event.target()
+                let rect = event
+                    .target()
                     .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
                     .map(|e| e.get_bounding_client_rect());
 
@@ -441,13 +460,18 @@ fn DynamicChartCanvas(source: Signal<String>, mode: Signal<PreviewMode>, canvas_
 
             // Setup ResizeObserver to detect when canvas gets its proper size
             let mut render_trigger_clone = render_trigger.clone();
-            let resize_callback = Closure::wrap(Box::new(move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| {
-                // Trigger a re-render when size changes
-                let trigger = *render_trigger_clone.read();
-                render_trigger_clone.set(trigger.wrapping_add(1));
-            }) as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
+            let resize_callback = Closure::wrap(Box::new(
+                move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| {
+                    // Trigger a re-render when size changes
+                    let trigger = *render_trigger_clone.read();
+                    render_trigger_clone.set(trigger.wrapping_add(1));
+                },
+            )
+                as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
 
-            if let Ok(observer) = web_sys::ResizeObserver::new(resize_callback.as_ref().unchecked_ref()) {
+            if let Ok(observer) =
+                web_sys::ResizeObserver::new(resize_callback.as_ref().unchecked_ref())
+            {
                 if let Some(canvas) = document.get_element_by_id(&canvas_id_for_events) {
                     observer.observe(&canvas);
                 }
@@ -478,7 +502,10 @@ fn DynamicChartCanvas(source: Signal<String>, mode: Signal<PreviewMode>, canvas_
             let first_line = source_text.lines().next().unwrap_or("(empty)");
             tracing::debug!(
                 "[ChartCanvas] Render effect: initialized={}, trigger={}, mode={:?}, first_line='{}'",
-                initialized, trigger, current_mode, first_line
+                initialized,
+                trigger,
+                current_mode,
+                first_line
             );
 
             // NOW check if we should skip rendering
@@ -513,12 +540,20 @@ fn DynamicChartCanvas(source: Signal<String>, mode: Signal<PreviewMode>, canvas_
                 {
                     use wasm_bindgen::JsCast;
 
-                    let Some(window) = web_sys::window() else { return };
+                    let Some(window) = web_sys::window() else {
+                        return;
+                    };
                     let dpr = window.device_pixel_ratio();
 
-                    let Some(document) = window.document() else { return };
-                    let Some(canvas) = document.get_element_by_id(&canvas_id_inner) else { return };
-                    let Ok(html_canvas) = canvas.dyn_into::<web_sys::HtmlCanvasElement>() else { return };
+                    let Some(document) = window.document() else {
+                        return;
+                    };
+                    let Some(canvas) = document.get_element_by_id(&canvas_id_inner) else {
+                        return;
+                    };
+                    let Ok(html_canvas) = canvas.dyn_into::<web_sys::HtmlCanvasElement>() else {
+                        return;
+                    };
 
                     let rect = html_canvas.get_bounding_client_rect();
                     let css_width = rect.width();
@@ -531,12 +566,10 @@ fn DynamicChartCanvas(source: Signal<String>, mode: Signal<PreviewMode>, canvas_
                     // Use appropriate layout mode based on preview setting
                     manager.layout_chart_with_mode(&chart, css_width, is_snippet);
 
-                    if let Err(e) = manager.render_to_canvas_with_transform(
-                        &html_canvas,
-                        tx * dpr,
-                        ty * dpr,
-                        s * dpr,
-                    ).await {
+                    if let Err(e) = manager
+                        .render_to_canvas_with_transform(&html_canvas, tx * dpr, ty * dpr, s * dpr)
+                        .await
+                    {
                         tracing::error!("Failed to render chart: {}", e);
                     }
                 }
@@ -764,13 +797,13 @@ fn highlight_class(kind: HighlightKind) -> &'static str {
     match kind {
         // Chord components - Root and Accidental same color
         HighlightKind::Root => "text-sky-400 font-semibold",
-        HighlightKind::Accidental => "text-sky-400",  // Same as Root
+        HighlightKind::Accidental => "text-sky-400", // Same as Root
         HighlightKind::ScaleDegree => "text-purple-400 font-semibold",
         HighlightKind::RomanNumeral => "text-purple-400 font-semibold",
 
         // Quality and Extension same color
         HighlightKind::Quality => "text-amber-400",
-        HighlightKind::Extension => "text-amber-400",  // Same as Quality
+        HighlightKind::Extension => "text-amber-400", // Same as Quality
         HighlightKind::Modifier => "text-yellow-300",
 
         // Bass note - slightly different shade
@@ -821,6 +854,6 @@ fn highlight_class(kind: HighlightKind) -> &'static str {
 
         // Whitespace and unknown - muted, not distracting
         HighlightKind::Whitespace => "",
-        HighlightKind::Unknown => "text-gray-500",  // Muted instead of red
+        HighlightKind::Unknown => "text-gray-500", // Muted instead of red
     }
 }

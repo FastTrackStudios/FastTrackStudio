@@ -4,6 +4,7 @@
 
 use crate::lyrics::{Lyrics, LyricsAnnotations};
 use crate::setlist::core::{Section, Setlist, Song};
+use facet::Facet;
 use irpc::{Client, WithChannels, channel::mpsc, rpc::RemoteService, rpc_requests};
 use serde::{Deserialize, Serialize};
 
@@ -13,39 +14,39 @@ use iroh::{Endpoint, EndpointAddr, protocol::ProtocolHandler};
 use irpc_iroh::{IrohLazyRemoteConnection, IrohProtocol};
 
 /// Setlist structure changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SetlistStructureChangedMessage {
     pub setlist: Setlist,
 }
 
 /// Song added message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SongAddedMessage {
     pub song_index: usize,
     pub song: Song,
 }
 
 /// Song removed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SongRemovedMessage {
     pub song_index: usize,
 }
 
 /// Songs reordered message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SongsReorderedMessage {
     pub setlist: Setlist,
 }
 
 /// Song changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SongChangedMessage {
     pub song_index: usize,
     pub song: Song,
 }
 
 /// Section added message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SectionAddedMessage {
     pub song_index: usize,
     pub section_index: usize,
@@ -53,14 +54,14 @@ pub struct SectionAddedMessage {
 }
 
 /// Section removed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SectionRemovedMessage {
     pub song_index: usize,
     pub section_index: usize,
 }
 
 /// Section changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SectionChangedMessage {
     pub song_index: usize,
     pub section_index: usize,
@@ -68,21 +69,21 @@ pub struct SectionChangedMessage {
 }
 
 /// Lyrics changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct LyricsChangedMessage {
     pub song_index: usize,
     pub lyrics: Lyrics,
 }
 
 /// Lyrics annotations changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct LyricsAnnotationsChangedMessage {
     pub song_index: usize,
     pub annotations: LyricsAnnotations,
 }
 
 /// Active indices changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct ActiveIndicesChangedMessage {
     pub song_index: Option<usize>,
     pub section_index: Option<usize>,
@@ -90,56 +91,57 @@ pub struct ActiveIndicesChangedMessage {
 }
 
 /// Active song index changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct ActiveSongIndexChangedMessage {
     pub song_index: Option<usize>,
 }
 
 /// Active section index changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct ActiveSectionIndexChangedMessage {
     pub section_index: Option<usize>,
 }
 
 /// Active slide index changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct ActiveSlideIndexChangedMessage {
     pub slide_index: Option<usize>,
 }
 
 /// Subscribe requests
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeSetlistStructure;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeSongAdded;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeSongRemoved;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeSongsReordered;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeSongChanged;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeSectionAdded;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeSectionRemoved;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeSectionChanged;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeLyrics;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeLyricsAnnotations;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeActiveIndices;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeActiveSongIndex;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeActiveSectionIndex;
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeActiveSlideIndex;
 
 /// IRPC protocol for setlist reactive service
 #[rpc_requests(message = SetlistReactiveMessage)]
-#[derive(Serialize, Deserialize, Debug)]
+#[repr(u8)]
+#[derive(Serialize, Deserialize, Debug, Facet)]
 pub enum SetlistReactiveProtocol {
     /// Subscribe to setlist structure changes (server streaming)
     #[rpc(tx=mpsc::Sender<SetlistStructureChangedMessage>)]

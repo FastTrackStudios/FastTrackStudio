@@ -3,29 +3,35 @@
 //! This module extracts the duplicated chord rendering logic from
 //! `layout_paginated` and `layout_continuous` into reusable functions.
 //!
-//! # Collision Detection
+//! # Multi-Pass Layout Architecture
 //!
-//! After rendering chord symbols, this module performs post-render collision
-//! detection to ensure chord symbols don't overlap. When adjacent chords
-//! would collide or be closer than the minimum gap, they are pushed apart:
+//! With the multi-pass layout system (see [`super::measure_pass`]), chord symbol
+//! widths are pre-measured during Pass 1 (Measure). This provides accurate minimum
+//! measure widths to the layout pass, which should prevent most collisions.
+//!
+//! # Collision Detection (Safety Net)
+//!
+//! Despite accurate pre-measurement, collision detection is retained as a safety net.
+//! When adjacent chord symbols would overlap or be closer than the minimum gap:
 //! - The first chord shifts slightly left
-//! - The second chord shifts slightly right
+//! - The second chord stays at its notehead-aligned position
 //!
-//! This approach is superior to pre-computed minimum widths because:
-//! 1. It uses actual rendered bounds rather than text width estimates
-//! 2. It only adds spacing where collisions actually occur
-//! 3. It prevents pushing content past barlines
+//! With proper pre-measurement, collisions should be rare. The debug logging
+//! (enabled via `#[cfg(debug_assertions)]`) reports when collisions occur, which
+//! can indicate issues with the measure pass or layout distribution.
+//!
+//! To disable collision detection, set `min_chord_symbol_gap = 0.0` in config.
 
 use kurbo::{Affine, Rect, Vec2};
 use vello::peniko::Color;
 
-use crate::engraver::layout::context::LayoutContext;
-use crate::engraver::layout::tlayout::{layout_harmony, parse_chord, HarmonyParams, HarmonyStyle};
-use crate::engraver::scene::node::{metadata_keys, SceneNode};
-use crate::engraver::scene::paint::{PaintCommand, TextAnchor};
-use crate::engraver::scene::id::{ElementType, SemanticId};
 use crate::chart::types::{ChordInstance, Measure, RhythmElement};
 use crate::chord::ChordRhythm;
+use crate::engraver::layout::context::LayoutContext;
+use crate::engraver::layout::tlayout::{HarmonyParams, HarmonyStyle, layout_harmony, parse_chord};
+use crate::engraver::scene::id::{ElementType, SemanticId};
+use crate::engraver::scene::node::{SceneNode, metadata_keys};
+use crate::engraver::scene::paint::{PaintCommand, TextAnchor};
 use crate::time::TimeSignature;
 use crate::{ChartPosition, SourceLink};
 
@@ -126,15 +132,19 @@ pub struct ChordCollisionResult {
 /// For each adjacent pair of chords:
 /// 1. Compute the gap (left edge of B - right edge of A)
 /// 2. If gap < min_gap, compute the overlap amount
-/// 3. Split the overlap: shift A left, shift B right
-/// 4. Clamp adjustments to stay within measure bounds
+/// 3. **Only shift the first chord left** - the second chord's notehead position
+///    is already correct because `compute_chord_min_widths()` set segment minimums
+///
+/// The segment minimum widths ensure noteheads are positioned correctly.
+/// This function is a safety net that only moves the FIRST chord symbol left
+/// when there's still a collision (e.g., spring system didn't allocate full space).
 ///
 /// # Arguments
 ///
 /// * `chord_bounds` - List of chord bounds info, sorted by X position
 /// * `min_gap` - Minimum required horizontal gap between chords (in points)
-/// * `measure_start_x` - Left boundary of measure (don't shift past this)
-/// * `measure_end_x` - Right boundary of measure (don't shift past this)
+/// * `_measure_start_x` - Left boundary (unused - we allow moving past clef)
+/// * `_measure_end_x` - Right boundary (unused - we only shift first chord left)
 ///
 /// # Returns
 ///
@@ -142,8 +152,8 @@ pub struct ChordCollisionResult {
 fn resolve_chord_collisions(
     chord_bounds: &[ChordBoundsInfo],
     min_gap: f64,
-    measure_start_x: f64,
-    measure_end_x: f64,
+    _measure_start_x: f64,
+    _measure_end_x: f64,
 ) -> ChordCollisionResult {
     if chord_bounds.len() < 2 {
         return ChordCollisionResult {
@@ -172,38 +182,19 @@ fn resolve_chord_collisions(
             let overlap = min_gap - gap;
             had_collisions = true;
 
-            // Split the adjustment: shift A left, shift B right
-            // Use 40/60 split to favor moving the second chord right
-            // (first chord is often at beat 1, which should stay anchored)
-            let shift_left = overlap * 0.4;
-            let shift_right = overlap * 0.6;
-
-            // Compute tentative new positions
-            let new_left_a = bounds_a.world_bounds.x0 + adjustments[i] - shift_left;
-            let new_right_b = bounds_b.world_bounds.x1 + adjustments[i + 1] + shift_right;
-
-            // Clamp to measure bounds
-            if new_left_a < measure_start_x {
-                // Can't shift A left enough, push all onto B
-                let clamped_shift_left = (bounds_a.world_bounds.x0 + adjustments[i]) - measure_start_x;
-                adjustments[i] -= clamped_shift_left.max(0.0);
-                adjustments[i + 1] += overlap - clamped_shift_left.max(0.0);
-            } else if new_right_b > measure_end_x {
-                // Can't shift B right enough, push all onto A
-                let clamped_shift_right = measure_end_x - (bounds_b.world_bounds.x1 + adjustments[i + 1]);
-                adjustments[i + 1] += clamped_shift_right.max(0.0);
-                adjustments[i] -= overlap - clamped_shift_right.max(0.0);
-            } else {
-                // Normal case: apply the split
-                adjustments[i] -= shift_left;
-                adjustments[i + 1] += shift_right;
-            }
+            // Only shift the first chord left - the second chord's notehead
+            // is already correctly positioned via segment minimum widths.
+            // Moving only the first chord left preserves notehead-chord alignment.
+            adjustments[i] -= overlap;
 
             #[cfg(debug_assertions)]
             eprintln!(
                 "[chord-collision] Detected overlap of {:.1}pt between chords {} and {}. \
-                 Adjustments: [{:.1}, {:.1}]",
-                overlap, i, i + 1, adjustments[i], adjustments[i + 1]
+                 Moving first chord left by {:.1}pt (preserves notehead alignment)",
+                overlap,
+                i,
+                i + 1,
+                overlap
             );
         }
     }
@@ -243,7 +234,11 @@ fn create_push_marker(
     id: u64,
 ) -> SceneNode {
     let marker_text = "'";
-    let color = if is_push { push_marker_color() } else { pull_marker_color() };
+    let color = if is_push {
+        push_marker_color()
+    } else {
+        pull_marker_color()
+    };
 
     // Size the apostrophe relative to spatium (similar to chord symbol text)
     let font_size = spatium * 2.5;
@@ -264,10 +259,7 @@ fn create_push_marker(
         color,
     );
 
-    let mut node = SceneNode::leaf(
-        SemanticId::new(ElementType::Articulation, id),
-        vec![paint],
-    );
+    let mut node = SceneNode::leaf(SemanticId::new(ElementType::Articulation, id), vec![paint]);
     node.set_element_type("push_marker");
     node
 }
@@ -610,7 +602,10 @@ pub fn render_chord_symbols(
             ctx.measure_idx,
             chord_bounds_info.len(),
             ctx.min_chord_symbol_gap,
-            chord_bounds_info.iter().map(|b| (b.original_x, b.world_bounds.x0, b.world_bounds.x1)).collect::<Vec<_>>()
+            chord_bounds_info
+                .iter()
+                .map(|b| (b.original_x, b.world_bounds.x0, b.world_bounds.x1))
+                .collect::<Vec<_>>()
         );
     }
 
@@ -625,13 +620,15 @@ pub fn render_chord_symbols(
         #[cfg(debug_assertions)]
         eprintln!(
             "[chord-collision] had_collisions={} adjustments={:?}",
-            collision_result.had_collisions,
-            collision_result.adjustments
+            collision_result.had_collisions, collision_result.adjustments
         );
 
         if collision_result.had_collisions {
             // Apply adjustments to nodes
-            for (bounds_info, &adjustment) in chord_bounds_info.iter().zip(collision_result.adjustments.iter()) {
+            for (bounds_info, &adjustment) in chord_bounds_info
+                .iter()
+                .zip(collision_result.adjustments.iter())
+            {
                 if adjustment.abs() > 0.001 {
                     let node = &mut nodes[bounds_info.node_idx];
                     node.transform = node.transform.then_translate(Vec2::new(adjustment, 0.0));
@@ -773,8 +770,8 @@ mod tests {
     fn test_collision_no_overlap() {
         // Two chords with enough space between them
         let bounds = vec![
-            make_bounds(10.0, 30.0),  // ends at 40
-            make_bounds(50.0, 30.0),  // starts at 50, gap of 10
+            make_bounds(10.0, 30.0), // ends at 40
+            make_bounds(50.0, 30.0), // starts at 50, gap of 10
         ];
         let result = resolve_chord_collisions(&bounds, 4.0, 0.0, 200.0);
         assert!(!result.had_collisions);
@@ -786,45 +783,52 @@ mod tests {
     fn test_collision_detected_and_resolved() {
         // Two chords that overlap (gap of 2, need 4)
         let bounds = vec![
-            make_bounds(10.0, 30.0),  // ends at 40
-            make_bounds(42.0, 30.0),  // starts at 42, gap of only 2
+            make_bounds(10.0, 30.0), // ends at 40
+            make_bounds(42.0, 30.0), // starts at 42, gap of only 2
         ];
         let result = resolve_chord_collisions(&bounds, 4.0, 0.0, 200.0);
         assert!(result.had_collisions);
-        // First chord should shift left
+        // First chord should shift left by the full overlap amount
         assert!(result.adjustments[0] < 0.0);
-        // Second chord should shift right
-        assert!(result.adjustments[1] > 0.0);
-        // Total adjustment should be approximately the overlap amount (2)
-        let total_adjustment = result.adjustments[1] - result.adjustments[0];
-        assert!((total_adjustment - 2.0).abs() < 0.1);
+        // Second chord should NOT move (notehead position is correct via segment widths)
+        assert!((result.adjustments[1]).abs() < 0.001);
+        // First chord's adjustment should be approximately the overlap amount (2)
+        assert!((result.adjustments[0] + 2.0).abs() < 0.1);
     }
 
     #[test]
-    fn test_collision_clamped_at_measure_start() {
-        // Chord at very start of measure can't shift left
+    fn test_collision_allows_past_clef() {
+        // Chord at very start of measure CAN shift left past the clef
+        // This is intentional - the first chord can move past the clef position
         let bounds = vec![
-            make_bounds(0.0, 30.0),   // ends at 30, at measure start
-            make_bounds(32.0, 30.0),  // starts at 32, gap of only 2
+            make_bounds(0.0, 30.0),  // ends at 30, at measure start
+            make_bounds(32.0, 30.0), // starts at 32, gap of only 2
         ];
         let result = resolve_chord_collisions(&bounds, 4.0, 0.0, 200.0);
         assert!(result.had_collisions);
-        // First chord can't shift much left (clamped)
-        // Second chord takes most of the adjustment
-        assert!(result.adjustments[1] > result.adjustments[0].abs());
+        // First chord moves left by full overlap (even past measure start)
+        assert!(result.adjustments[0] < 0.0);
+        // Second chord does NOT move (notehead position is correct)
+        assert!((result.adjustments[1]).abs() < 0.001);
+        // First chord moves left by full overlap amount (2.0)
+        assert!((result.adjustments[0] + 2.0).abs() < 0.1);
     }
 
     #[test]
     fn test_collision_three_chords_cascade() {
-        // Three overlapping chords - adjustments should cascade
+        // Three overlapping chords - each first chord of a pair moves left
         let bounds = vec![
-            make_bounds(10.0, 30.0),  // ends at 40
-            make_bounds(42.0, 30.0),  // starts at 42, ends at 72 (gap 2)
-            make_bounds(74.0, 30.0),  // starts at 74 (gap 2)
+            make_bounds(10.0, 30.0), // ends at 40
+            make_bounds(42.0, 30.0), // starts at 42, ends at 72 (gap 2)
+            make_bounds(74.0, 30.0), // starts at 74 (gap 2)
         ];
         let result = resolve_chord_collisions(&bounds, 4.0, 0.0, 200.0);
         assert!(result.had_collisions);
-        // All three should have adjustments
-        // Pattern: left shifts left, middle may shift either way, right shifts right
+        // First chord shifts left for first pair collision
+        assert!(result.adjustments[0] < 0.0);
+        // Middle chord shifts left for second pair collision
+        assert!(result.adjustments[1] < 0.0);
+        // Last chord should not move (no chord after it)
+        assert!((result.adjustments[2]).abs() < 0.001);
     }
 }

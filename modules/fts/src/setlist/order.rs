@@ -3,11 +3,12 @@
 //! Manages the order of songs across multiple projects/tabs for live performance.
 //! This is separate from the single-project Setlist, which represents songs within one project.
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Represents a song entry in the setlist order
 /// This maps to a specific project tab and contains playback position information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SetlistEntry {
     /// Tab index (0-based) - identifies which project tab this song is in
     pub tab_index: usize,
@@ -20,7 +21,7 @@ pub struct SetlistEntry {
 }
 
 /// Complete setlist order - represents the sequence of songs across project tabs
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SetlistOrder {
     /// Ordered list of songs/tabs in the setlist
     pub entries: Vec<SetlistEntry>,

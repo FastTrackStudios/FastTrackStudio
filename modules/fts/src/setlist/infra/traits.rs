@@ -3,8 +3,8 @@
 //! These traits define abstract interfaces for DAW-agnostic setlist operations.
 //! Implementations are provided in the `reaper` module behind a feature flag.
 
-use crate::setlist::core::{Setlist, SetlistApi, SetlistError, Song};
 use super::commands::{LyricsState, NavigationCommand, TransportCommand};
+use crate::setlist::core::{Setlist, SetlistApi, SetlistError, Song};
 
 #[cfg(not(target_arch = "wasm32"))]
 use async_trait::async_trait;

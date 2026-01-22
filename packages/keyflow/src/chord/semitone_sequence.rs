@@ -69,11 +69,11 @@ pub type Result<T> = std::result::Result<T, SemitoneSequenceError>;
 /// The interpretation with more notes matching its triad is preferred.
 fn count_triad_notes(pitch_classes: &HashSet<u8>, quality: ChordQuality) -> u32 {
     let triad_intervals = match quality {
-        ChordQuality::Major => vec![0, 4, 7],           // Major: root, M3, P5
-        ChordQuality::Minor => vec![0, 3, 7],           // Minor: root, m3, P5
-        ChordQuality::Diminished => vec![0, 3, 6],      // Dim: root, m3, d5
-        ChordQuality::Augmented => vec![0, 4, 8],       // Aug: root, M3, A5
-        ChordQuality::Power => vec![0, 7],              // Power: root, P5
+        ChordQuality::Major => vec![0, 4, 7], // Major: root, M3, P5
+        ChordQuality::Minor => vec![0, 3, 7], // Minor: root, m3, P5
+        ChordQuality::Diminished => vec![0, 3, 6], // Dim: root, m3, d5
+        ChordQuality::Augmented => vec![0, 4, 8], // Aug: root, M3, A5
+        ChordQuality::Power => vec![0, 7],    // Power: root, P5
         ChordQuality::Suspended(SuspendedType::Second) => vec![0, 2, 7], // Sus2
         ChordQuality::Suspended(SuspendedType::Fourth) => vec![0, 5, 7], // Sus4
     };
@@ -223,9 +223,10 @@ fn find_simplest_interpretation(
 
             // Count alterations for determining if chord is "clean"
             let alteration_count = info.alterations.len();
-            let has_harsh_alterations = info.alterations.iter().any(|a| {
-                matches!(a.degree, ChordDegree::Fifth | ChordDegree::Ninth)
-            });
+            let has_harsh_alterations = info
+                .alterations
+                .iter()
+                .any(|a| matches!(a.degree, ChordDegree::Fifth | ChordDegree::Ninth));
 
             // Base score: triad notes * 10, minus complexity
             // Higher scores are better
@@ -239,9 +240,7 @@ fn find_simplest_interpretation(
             //
             // BUT: reduce the bonus if the chord has multiple harsh alterations
             // (like b5 + b9), because that likely means there's a simpler interpretation
-            if potential_root == 0
-                && (has_complete_triad || has_seventh || has_two_chord_pattern)
-            {
+            if potential_root == 0 && (has_complete_triad || has_seventh || has_two_chord_pattern) {
                 // Scale the bonus based on alteration count and harshness
                 // Clean chords get full bonus, altered chords get reduced bonus
                 let bonus = if alteration_count >= 2 && has_harsh_alterations {
@@ -547,7 +546,8 @@ fn analyze_chord_structure(semitones: &[u8]) -> Result<ChordInfo> {
     // Re-evaluate has_add4 based on family and ninth:
     // If there's a 7th or 9th AND pitch class 5 is present, it's an 11th, not add4
     // This handles Fm11 = Fm7 + 9 + 11, not Fm9add11
-    let has_implicit_eleventh = has_fourth_pitch_class && (family.is_some() || has_implicit_ninth || has_ninth_extension);
+    let has_implicit_eleventh =
+        has_fourth_pitch_class && (family.is_some() || has_implicit_ninth || has_ninth_extension);
     let has_add4_final = has_add4 && !has_implicit_eleventh;
 
     // Add4: has fourth AND third (not sus4) AND no 7th/9th (otherwise it's an 11th)
@@ -1169,10 +1169,7 @@ mod tests {
     fn test_sus4_vs_add4() {
         // Csus4: C F G (0, 5, 7) - no third
         let sus4 = from_semitones(&[0, 5, 7], c_root()).unwrap();
-        assert_eq!(
-            sus4.quality,
-            ChordQuality::Suspended(SuspendedType::Fourth)
-        );
+        assert_eq!(sus4.quality, ChordQuality::Suspended(SuspendedType::Fourth));
         assert!(!sus4.additions.contains(&ChordDegree::Fourth));
 
         // Cadd4: C E F G (0, 4, 5, 7) - has major third
@@ -1206,10 +1203,7 @@ mod tests {
     fn test_sus2_vs_add2() {
         // Csus2: C D G (0, 2, 7) - no third
         let sus2 = from_semitones(&[0, 2, 7], c_root()).unwrap();
-        assert_eq!(
-            sus2.quality,
-            ChordQuality::Suspended(SuspendedType::Second)
-        );
+        assert_eq!(sus2.quality, ChordQuality::Suspended(SuspendedType::Second));
         assert!(!sus2.additions.contains(&ChordDegree::Second));
 
         // Cadd2: C D E G (0, 2, 4, 7) - has major third
@@ -1230,19 +1224,31 @@ mod tests {
     fn test_chord_types_survey() {
         // 7sus4: C F G Bb (0, 5, 7, 10)
         let chord = from_semitones(&[0, 5, 7, 10], c_root()).unwrap();
-        println!("7sus4 [0,5,7,10]: {} (quality: {:?}, family: {:?})", chord, chord.quality, chord.family);
+        println!(
+            "7sus4 [0,5,7,10]: {} (quality: {:?}, family: {:?})",
+            chord, chord.quality, chord.family
+        );
 
         // 9sus4: C F G Bb D (0, 5, 7, 10, 14)
         let chord = from_semitones(&[0, 5, 7, 10, 14], c_root()).unwrap();
-        println!("9sus4 [0,5,7,10,14]: {} (quality: {:?}, family: {:?}, ext: {:?})", chord, chord.quality, chord.family, chord.extensions);
+        println!(
+            "9sus4 [0,5,7,10,14]: {} (quality: {:?}, family: {:?}, ext: {:?})",
+            chord, chord.quality, chord.family, chord.extensions
+        );
 
         // add9: C E G D (0, 4, 7, 14) - triad + 9th, no 7th
         let chord = from_semitones(&[0, 4, 7, 14], c_root()).unwrap();
-        println!("add9 [0,4,7,14]: {} (quality: {:?}, family: {:?}, add: {:?})", chord, chord.quality, chord.family, chord.additions);
+        println!(
+            "add9 [0,4,7,14]: {} (quality: {:?}, family: {:?}, add: {:?})",
+            chord, chord.quality, chord.family, chord.additions
+        );
 
         // madd9: C Eb G D (0, 3, 7, 14)
         let chord = from_semitones(&[0, 3, 7, 14], c_root()).unwrap();
-        println!("madd9 [0,3,7,14]: {} (quality: {:?}, family: {:?}, add: {:?})", chord, chord.quality, chord.family, chord.additions);
+        println!(
+            "madd9 [0,3,7,14]: {} (quality: {:?}, family: {:?}, add: {:?})",
+            chord, chord.quality, chord.family, chord.additions
+        );
 
         // add11: C E G F (0, 4, 7, 17)
         let chord = from_semitones(&[0, 4, 7, 17], c_root()).unwrap();
@@ -1258,23 +1264,38 @@ mod tests {
 
         // aug7: C E G# Bb (0, 4, 8, 10)
         let chord = from_semitones(&[0, 4, 8, 10], c_root()).unwrap();
-        println!("aug7 [0,4,8,10]: {} (quality: {:?}, family: {:?}, alt: {:?})", chord, chord.quality, chord.family, chord.alterations);
+        println!(
+            "aug7 [0,4,8,10]: {} (quality: {:?}, family: {:?}, alt: {:?})",
+            chord, chord.quality, chord.family, chord.alterations
+        );
 
         // augmaj7: C E G# B (0, 4, 8, 11)
         let chord = from_semitones(&[0, 4, 8, 11], c_root()).unwrap();
-        println!("augmaj7 [0,4,8,11]: {} (quality: {:?}, family: {:?}, alt: {:?})", chord, chord.quality, chord.family, chord.alterations);
+        println!(
+            "augmaj7 [0,4,8,11]: {} (quality: {:?}, family: {:?}, alt: {:?})",
+            chord, chord.quality, chord.family, chord.alterations
+        );
 
         // 7alt: C E Bb Db D# (0, 4, 10, 13, 15) - dominant with b9 and #9
         let chord = from_semitones(&[0, 4, 10, 13, 15], c_root()).unwrap();
-        println!("7alt [0,4,10,13,15]: {} (alt: {:?})", chord, chord.alterations);
+        println!(
+            "7alt [0,4,10,13,15]: {} (alt: {:?})",
+            chord, chord.alterations
+        );
 
         // 7#9: C E G Bb D# (0, 4, 7, 10, 15)
         let chord = from_semitones(&[0, 4, 7, 10, 15], c_root()).unwrap();
-        println!("7#9 [0,4,7,10,15]: {} (alt: {:?})", chord, chord.alterations);
+        println!(
+            "7#9 [0,4,7,10,15]: {} (alt: {:?})",
+            chord, chord.alterations
+        );
 
         // 7b9: C E G Bb Db (0, 4, 7, 10, 13)
         let chord = from_semitones(&[0, 4, 7, 10, 13], c_root()).unwrap();
-        println!("7b9 [0,4,7,10,13]: {} (alt: {:?})", chord, chord.alterations);
+        println!(
+            "7b9 [0,4,7,10,13]: {} (alt: {:?})",
+            chord, chord.alterations
+        );
 
         // m9: C Eb G Bb D (0, 3, 7, 10, 14)
         let chord = from_semitones(&[0, 3, 7, 10, 14], c_root()).unwrap();
@@ -1340,7 +1361,11 @@ mod tests {
         assert_eq!(chord.bass.as_ref().unwrap().to_string(), "C");
         // Ab should be spelled as G# or Ab depending on the algorithm
         let root_str = chord.root.to_string();
-        assert!(root_str == "Ab" || root_str == "G#", "Root should be Ab or G#: {}", root_str);
+        assert!(
+            root_str == "Ab" || root_str == "G#",
+            "Root should be Ab or G#: {}",
+            root_str
+        );
     }
 
     #[test]
@@ -1349,7 +1374,10 @@ mod tests {
         let chord = from_semitones(&[0, 4, 7], c_root()).unwrap();
 
         assert_eq!(chord.quality, ChordQuality::Major);
-        assert!(chord.bass.is_none(), "Simple major triad should not have bass note");
+        assert!(
+            chord.bass.is_none(),
+            "Simple major triad should not have bass note"
+        );
         assert_eq!(chord.root.to_string(), "C");
         assert_eq!(chord.to_string(), "C");
     }
@@ -1360,7 +1388,10 @@ mod tests {
         let chord = from_semitones(&[0, 3, 7], c_root()).unwrap();
 
         assert_eq!(chord.quality, ChordQuality::Minor);
-        assert!(chord.bass.is_none(), "Simple minor triad should not have bass note");
+        assert!(
+            chord.bass.is_none(),
+            "Simple minor triad should not have bass note"
+        );
         assert_eq!(chord.root.to_string(), "C");
     }
 
@@ -1383,18 +1414,24 @@ mod tests {
 
         // F/C: C F A
         let chord = from_semitones(&[0, 5, 9], c_root()).unwrap();
-        println!("[0, 5, 9] C F A: {} (quality: {:?}, bass: {:?})",
-                 chord, chord.quality, chord.bass);
+        println!(
+            "[0, 5, 9] C F A: {} (quality: {:?}, bass: {:?})",
+            chord, chord.quality, chord.bass
+        );
 
         // Am/C: C E A
         let chord = from_semitones(&[0, 4, 9], c_root()).unwrap();
-        println!("[0, 4, 9] C E A: {} (quality: {:?}, bass: {:?})",
-                 chord, chord.quality, chord.bass);
+        println!(
+            "[0, 4, 9] C E A: {} (quality: {:?}, bass: {:?})",
+            chord, chord.quality, chord.bass
+        );
 
         // Ab/C: C Eb Ab
         let chord = from_semitones(&[0, 3, 8], c_root()).unwrap();
-        println!("[0, 3, 8] C Eb Ab: {} (quality: {:?}, bass: {:?})",
-                 chord, chord.quality, chord.bass);
+        println!(
+            "[0, 3, 8] C Eb Ab: {} (quality: {:?}, bass: {:?})",
+            chord, chord.quality, chord.bass
+        );
 
         // Em/G: G B E (should be detected as Em with G bass)
         let g_root = {
@@ -1402,8 +1439,10 @@ mod tests {
             RootNotation::from_note_name(g_note)
         };
         let chord = from_semitones(&[0, 4, 9], g_root).unwrap();
-        println!("[0, 4, 9] on G (G B E): {} (quality: {:?}, bass: {:?})",
-                 chord, chord.quality, chord.bass);
+        println!(
+            "[0, 4, 9] on G (G B E): {} (quality: {:?}, bass: {:?})",
+            chord, chord.quality, chord.bass
+        );
 
         // G/B: B D G
         let b_root = {
@@ -1411,8 +1450,10 @@ mod tests {
             RootNotation::from_note_name(b_note)
         };
         let chord = from_semitones(&[0, 3, 8], b_root).unwrap();
-        println!("[0, 3, 8] on B (B D G): {} (quality: {:?}, bass: {:?})",
-                 chord, chord.quality, chord.bass);
+        println!(
+            "[0, 3, 8] on B (B D G): {} (quality: {:?}, bass: {:?})",
+            chord, chord.quality, chord.bass
+        );
     }
 
     #[test]
@@ -1422,7 +1463,10 @@ mod tests {
         let chord = from_semitones_no_inversion(&[0, 5, 9], c_root()).unwrap();
 
         // Without inversion detection, this should be some complex chord on C
-        assert!(chord.bass.is_none(), "No inversion should not have bass note");
+        assert!(
+            chord.bass.is_none(),
+            "No inversion should not have bass note"
+        );
         assert_eq!(chord.root.to_string(), "C");
     }
 }

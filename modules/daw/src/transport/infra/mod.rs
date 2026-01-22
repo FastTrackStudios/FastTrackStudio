@@ -17,15 +17,18 @@
 //! - `websocket.rs` - WebSocket real-time adapter (future)
 //! - `grpc.rs` - gRPC adapter (future)
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod http;
 #[cfg(all(not(target_arch = "wasm32"), feature = "iroh"))]
 pub mod irpc;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod stream;
 
 // Future protocol adapters
 // pub mod midi;
 
 // Re-export all infrastructure adapters
+#[cfg(not(target_arch = "wasm32"))]
 pub use http::create_transport_http_router;
 
 // Future re-exports

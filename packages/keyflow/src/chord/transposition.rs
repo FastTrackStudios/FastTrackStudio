@@ -496,8 +496,20 @@ mod tests {
         let degrees = chord.scale_degrees(&c_key).unwrap();
 
         // C major triad in C major should have: root=1, third=3, fifth=5
-        assert!(degrees.iter().any(|(d, s)| *d == ChordDegree::Root && *s == 1));
-        assert!(degrees.iter().any(|(d, s)| *d == ChordDegree::Third && *s == 3));
-        assert!(degrees.iter().any(|(d, s)| *d == ChordDegree::Fifth && *s == 5));
+        assert!(
+            degrees
+                .iter()
+                .any(|(d, s)| *d == ChordDegree::Root && *s == 1)
+        );
+        assert!(
+            degrees
+                .iter()
+                .any(|(d, s)| *d == ChordDegree::Third && *s == 3)
+        );
+        assert!(
+            degrees
+                .iter()
+                .any(|(d, s)| *d == ChordDegree::Fifth && *s == 5)
+        );
     }
 }

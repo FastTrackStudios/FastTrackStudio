@@ -1,10 +1,12 @@
 //! Track timebase settings
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Track timebase (BEAT) - how the track handles time
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Facet)]
 pub enum TrackTimebase {
     /// Use project default timebase (-1)
     #[default]

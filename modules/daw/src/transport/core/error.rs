@@ -1,4 +1,7 @@
-#[derive(Debug, Clone, PartialEq)]
+use facet::Facet;
+
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub enum TransportError {
     InvalidTempo(String),
 

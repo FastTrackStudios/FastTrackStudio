@@ -200,7 +200,9 @@ impl GuideSampleLoader {
         let without_prefix = filename
             .strip_prefix("English Female - ")
             .unwrap_or(filename);
-        let without_ext = without_prefix.strip_suffix(".wav").unwrap_or(without_prefix);
+        let without_ext = without_prefix
+            .strip_suffix(".wav")
+            .unwrap_or(without_prefix);
 
         // Split on space to separate type and number
         let parts: Vec<&str> = without_ext.split(' ').collect();
@@ -256,8 +258,7 @@ impl GuideSampleLoader {
             decoded_audio.clone(),
         );
 
-        let guide_key =
-            get_guide_key(&section_info.section_type_name, section_info.section_number);
+        let guide_key = get_guide_key(&section_info.section_type_name, section_info.section_number);
         let mut guide_samples = guide_samples.lock().unwrap();
         guide_samples.insert(guide_key, decoded_audio);
 

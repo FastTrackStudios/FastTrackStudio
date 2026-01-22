@@ -32,7 +32,9 @@ pub use dasp_sample::Sample;
 pub use delay::{BoundedBuffer, FixedBuffer, RingBuffer};
 
 // Re-export envelope primitives
-pub use envelope::{EnvelopeDetector, FullWave, NegativeHalfWave, PeakDetect, PositiveHalfWave, Rms};
+pub use envelope::{
+    EnvelopeDetector, FullWave, NegativeHalfWave, PeakDetect, PositiveHalfWave, Rms,
+};
 
 // Re-export resampling primitives
 pub use resample::{FloorInterpolator, Interpolator, LinearInterpolator, SincInterpolator};

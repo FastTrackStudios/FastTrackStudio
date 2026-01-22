@@ -8,8 +8,8 @@
 
 use crate::engraver::layout::context::LayoutContext;
 use crate::engraver::layout::tlayout::{
-    layout_clef, layout_keysig, layout_timesig, ClefParams, ClefType, KeySigParams, KeySigType,
-    TimeSigParams, TimeSigType,
+    ClefParams, ClefType, KeySigParams, KeySigType, TimeSigParams, TimeSigType, layout_clef,
+    layout_keysig, layout_timesig,
 };
 use crate::engraver::scene::node::SceneNode;
 use crate::key::Key;
@@ -46,18 +46,18 @@ pub fn key_to_fifths(key: &Key) -> i8 {
     // C=0, G=1, D=2, A=3, E=4, B=5, F#=6, C#=7
     // F=-1, Bb=-2, Eb=-3, Ab=-4, Db=-5, Gb=-6, Cb=-7
     let base_fifths = match effective_semitone {
-        0 => 0,  // C
-        1 => 7,  // C# / Db (prefer sharps for C#)
-        2 => 2,  // D
-        3 => -3, // Eb / D# (prefer flats for Eb)
-        4 => 4,  // E
-        5 => -1, // F
-        6 => 6,  // F# / Gb (prefer sharps for F#)
-        7 => 1,  // G
-        8 => -4, // Ab / G# (prefer flats for Ab)
-        9 => 3,  // A
+        0 => 0,   // C
+        1 => 7,   // C# / Db (prefer sharps for C#)
+        2 => 2,   // D
+        3 => -3,  // Eb / D# (prefer flats for Eb)
+        4 => 4,   // E
+        5 => -1,  // F
+        6 => 6,   // F# / Gb (prefer sharps for F#)
+        7 => 1,   // G
+        8 => -4,  // Ab / G# (prefer flats for Ab)
+        9 => 3,   // A
         10 => -2, // Bb / A# (prefer flats for Bb)
-        11 => 5, // B / Cb (prefer natural for B)
+        11 => 5,  // B / Cb (prefer natural for B)
         _ => 0,
     };
 

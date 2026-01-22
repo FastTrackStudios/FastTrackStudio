@@ -3,11 +3,12 @@
 //! Configuration options for chart parsing and display
 
 use crate::chord::PushPullBase;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Chart configuration settings
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ChartSettings {
     /// Internal settings storage
     settings: HashMap<ChartSetting, SettingValue>,
@@ -17,7 +18,8 @@ pub struct ChartSettings {
 }
 
 /// Available chart settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum ChartSetting {
     /// Automatically group repeated phrases into 4-bar units with repeat signs
     SmartRepeats,
@@ -34,7 +36,8 @@ pub enum ChartSetting {
 }
 
 /// Setting value types
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum SettingValue {
     Bool(bool),
     String(String),
@@ -86,12 +89,18 @@ impl ChartSettings {
             }
             "AUTO_RHYTHM_SLASHES" | "AUTORHYTHMSLASHES" | "AUTO_SLASHES" => {
                 let bool_value = Self::parse_bool(value)?;
-                self.set(ChartSetting::AutoRhythmSlashes, SettingValue::Bool(bool_value));
+                self.set(
+                    ChartSetting::AutoRhythmSlashes,
+                    SettingValue::Bool(bool_value),
+                );
                 Ok(())
             }
             "PUSH_ALTERS_RHYTHM" | "PUSHALTERSRHYTHM" => {
                 let bool_value = Self::parse_bool(value)?;
-                self.set(ChartSetting::PushAltersRhythm, SettingValue::Bool(bool_value));
+                self.set(
+                    ChartSetting::PushAltersRhythm,
+                    SettingValue::Bool(bool_value),
+                );
                 Ok(())
             }
             _ => Err(format!("Unknown setting: '{}'", key)),

@@ -2,11 +2,12 @@ use crate::marker_region::core::Marker;
 use crate::primitives::TimeSignature;
 use crate::tracks::Track;
 use crate::transport::{RecordMode, Tempo, Transport, TransportActions, TransportError};
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Embeddable project state that carries its own transport.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct Project<T> {
     name: String,
     description: Option<String>,

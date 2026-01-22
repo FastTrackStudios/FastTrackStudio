@@ -1,8 +1,9 @@
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A newtype for track names to provide type safety and prevent "string-ly typed" bugs.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default, Facet)]
 pub struct TrackName(pub String);
 
 impl From<String> for TrackName {
@@ -52,7 +53,7 @@ impl TrackName {
 }
 
 /// A newtype for track GUIDs (typically REAPER's {GUID} format).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct TrackGuid(pub String);
 
 impl From<String> for TrackGuid {
@@ -80,7 +81,7 @@ impl AsRef<str> for TrackGuid {
 }
 
 /// A newtype for metadata keys to prevent typos when accessing track metadata.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct MetadataKey(pub String);
 
 impl From<String> for MetadataKey {

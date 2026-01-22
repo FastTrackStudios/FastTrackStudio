@@ -6,7 +6,7 @@
 use crate::sections::SectionType;
 use std::collections::HashMap;
 
-use crate::engraver::layout::tlayout::{rehearsal_themes, RehearsalMarkStyle};
+use crate::engraver::layout::tlayout::{RehearsalMarkStyle, rehearsal_themes};
 
 /// Get theme for section type.
 ///
@@ -126,7 +126,10 @@ mod tests {
             get_section_theme(&SectionType::Post(Box::new(SectionType::Chorus)));
         let chorus_theme = get_section_theme(&SectionType::Chorus);
 
-        assert_eq!(pre_chorus_theme.background_color, chorus_theme.background_color);
+        assert_eq!(
+            pre_chorus_theme.background_color,
+            chorus_theme.background_color
+        );
         assert_eq!(
             post_chorus_theme.background_color,
             chorus_theme.background_color

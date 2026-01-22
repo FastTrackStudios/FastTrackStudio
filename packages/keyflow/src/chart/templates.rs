@@ -6,11 +6,12 @@ use super::types::Measure;
 use crate::key::Key;
 use crate::primitives::{MusicalNote, Note};
 use crate::sections::SectionType;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Manages section templates for chord progression reuse
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct TemplateManager {
     /// Stored templates (section type -> measures)
     templates: HashMap<String, Vec<Measure>>,

@@ -1021,16 +1021,14 @@ fn create_text_items_from_lyrics_handler() {
 pub fn register_all_actions() {
     // Collect ALL actions into a single batch for registration
     // (Multiple register_actions() calls cause actions to not appear in REAPER's action list)
-    let mut all_actions: Vec<ActionDef> = vec![
-        ActionDef {
-            command_id: "FTS_ABOUT",
-            display_name: "About FastTrackStudio".to_string(),
-            handler: about_fasttrackstudio_handler,
-            appears_in_menu: true,
-            section: crate::infrastructure::action_registry::ActionSection::Main,
-            ..Default::default()
-        },
-    ];
+    let mut all_actions: Vec<ActionDef> = vec![ActionDef {
+        command_id: "FTS_ABOUT",
+        display_name: "About FastTrackStudio".to_string(),
+        handler: about_fasttrackstudio_handler,
+        appears_in_menu: true,
+        section: crate::infrastructure::action_registry::ActionSection::Main,
+        ..Default::default()
+    }];
 
     // Add Input actions to the batch (if input feature is enabled)
     #[cfg(feature = "input")]

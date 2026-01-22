@@ -59,7 +59,10 @@ pub type EnvelopeDetector<F, D> = Detector<F, D>;
 /// * `attack_frames` - Attack time in frames (use `time_to_frames` to convert from seconds)
 /// * `release_frames` - Release time in frames
 #[must_use]
-pub fn peak_detector_mono(attack_frames: f32, release_frames: f32) -> EnvelopeDetector<[f32; 1], PeakDetect<FullWave>> {
+pub fn peak_detector_mono(
+    attack_frames: f32,
+    release_frames: f32,
+) -> EnvelopeDetector<[f32; 1], PeakDetect<FullWave>> {
     Detector::peak(attack_frames, release_frames)
 }
 
@@ -69,7 +72,10 @@ pub fn peak_detector_mono(attack_frames: f32, release_frames: f32) -> EnvelopeDe
 /// * `attack_frames` - Attack time in frames
 /// * `release_frames` - Release time in frames
 #[must_use]
-pub fn peak_detector_stereo(attack_frames: f32, release_frames: f32) -> EnvelopeDetector<[f32; 2], PeakDetect<FullWave>> {
+pub fn peak_detector_stereo(
+    attack_frames: f32,
+    release_frames: f32,
+) -> EnvelopeDetector<[f32; 2], PeakDetect<FullWave>> {
     Detector::peak(attack_frames, release_frames)
 }
 

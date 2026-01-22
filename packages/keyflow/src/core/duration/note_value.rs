@@ -4,6 +4,7 @@
 //! modifications. This is the single source of truth for note value definitions.
 
 use super::{StandardTicks, Ticks, ToTicks};
+use facet::Facet;
 
 /// Canonical note value (duration kind).
 ///
@@ -21,7 +22,8 @@ use super::{StandardTicks, Ticks, ToTicks};
 /// | Sixteenth | 120 | 0.25 |
 /// | ThirtySecond | 60 | 0.125 |
 /// | SixtyFourth | 30 | 0.0625 |
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Facet)]
 pub enum NoteValue {
     /// Whole note (semibreve) - 4 beats in 4/4
     Whole,

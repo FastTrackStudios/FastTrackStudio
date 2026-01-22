@@ -9,7 +9,7 @@ mod routes;
 mod state;
 
 use dioxus::prelude::*;
-use lucide_dioxus::{BookOpen, Github, ArrowLeft, PenTool};
+use lucide_dioxus::{ArrowLeft, BookOpen, Github, PenTool};
 
 // Static assets
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -45,13 +45,13 @@ fn main() {
         // - dioxus at warn level (filter out signal tracing)
         // - Everything else at warn level
         let filter = tracing_subscriber::EnvFilter::new(
-            "warn,web=debug,keyflow=info,keyflow::engraver=debug"
+            "warn,web=debug,keyflow=info,keyflow::engraver=debug",
         );
 
         tracing_subscriber::registry()
             .with(filter)
             .with(tracing_wasm::WASMLayer::new(
-                tracing_wasm::WASMLayerConfig::default()
+                tracing_wasm::WASMLayerConfig::default(),
             ))
             .init();
     }
@@ -63,7 +63,7 @@ fn main() {
         tracing_subscriber::fmt()
             .with_env_filter(
                 EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| EnvFilter::new("warn,web=debug,keyflow=info"))
+                    .unwrap_or_else(|_| EnvFilter::new("warn,web=debug,keyflow=info")),
             )
             .init();
     }
@@ -360,8 +360,8 @@ fn ChartEditor() -> Element {
 /// Individual pattern view with chart rendering
 #[component]
 fn PatternView(id: String) -> Element {
-    use keyflow::patterns::{find_pattern, PatternCategory};
     use components::PreviewMode;
+    use keyflow::patterns::{PatternCategory, find_pattern};
 
     let pattern = find_pattern(&id);
 

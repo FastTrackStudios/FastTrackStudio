@@ -51,6 +51,7 @@
 //! ```
 
 use crate::{Metadata, Structure};
+use facet::Facet;
 
 /// Assertion helper for verifying [`Structure`] contents in tests.
 ///
@@ -66,6 +67,7 @@ use crate::{Metadata, Structure};
 ///         .has_items(3)
 ///         .done();
 /// ```
+#[derive(Clone, Debug, Facet)]
 pub struct StructureAssertion<'a, M: Metadata> {
     structure: &'a Structure<M>,
     path: Vec<String>,
@@ -164,6 +166,7 @@ impl<'a, M: Metadata> StructureAssertion<'a, M> {
 }
 
 /// Assertion helper for a specific group
+#[derive(Clone, Debug, Facet)]
 pub struct GroupAssertion<'a, M: Metadata> {
     group: &'a Structure<M>,
     parent: StructureAssertion<'a, M>,

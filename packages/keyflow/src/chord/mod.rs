@@ -24,13 +24,13 @@ pub mod error;
 pub mod extensions;
 pub mod family;
 mod intervals; // Internal module - extends Chord with interval methods
-mod normalization; // Internal module - extends Chord with normalization
-mod transposition; // Internal module - extends Chord with transposition
 pub mod midi;
+mod normalization; // Internal module - extends Chord with normalization
 pub mod quality;
 pub mod root;
 pub mod semitone_sequence;
 pub mod timing;
+mod transposition; // Internal module - extends Chord with transposition
 
 pub use alteration::Alteration;
 pub use definition::Chord;
@@ -45,7 +45,9 @@ pub use midi::{
 };
 pub use quality::{ChordQuality, SuspendedType};
 pub use root::{RootParseResult, parse_root};
-pub use semitone_sequence::{SemitoneSequenceError, from_semitones, from_semitones_no_inversion, quality_from_semitones};
+pub use semitone_sequence::{
+    SemitoneSequenceError, from_semitones, from_semitones_no_inversion, quality_from_semitones,
+};
 pub use timing::{
     ChordTimingAnalysis, TimingAnalysisConfig, analyze_chord_timing, has_rhythmic_complexity,
     reaper_ppq_to_layout_ticks,

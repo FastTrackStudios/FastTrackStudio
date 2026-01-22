@@ -216,7 +216,7 @@ fn SectionDisplay(section: ChartSection, section_index: usize, chart: Chart) -> 
     let start_measure_number = {
         let mut measure_num = 1u32;
         for prev_section in chart.sections.iter().take(section_index) {
-            measure_num += prev_section.measures.len() as u32;
+            measure_num += prev_section.measures().len() as u32;
         }
         measure_num
     };
@@ -225,7 +225,7 @@ fn SectionDisplay(section: ChartSection, section_index: usize, chart: Chart) -> 
         div {
             class: "section mb-8",
             // Display measures in rows of 4 (section marker will be rendered in left margin)
-            {render_section_measures(&section.measures, start_measure_number, section_index, chart.clone(), section_name.clone())}
+            {render_section_measures(&section.measures(), start_measure_number, section_index, chart.clone(), section_name.clone())}
         }
     }
 }

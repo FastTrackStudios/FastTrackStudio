@@ -154,7 +154,8 @@ mod tests {
         let params = LayoutParams::default();
 
         let content_width = params.content_width(612.0);
-        let expected_width = 612.0 - constants::DEFAULT_MARGIN_LEFT - constants::DEFAULT_MARGIN_RIGHT;
+        let expected_width =
+            612.0 - constants::DEFAULT_MARGIN_LEFT - constants::DEFAULT_MARGIN_RIGHT;
         assert!((content_width - expected_width).abs() < 0.001);
 
         let content_height = params.content_height(792.0);

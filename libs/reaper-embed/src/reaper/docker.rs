@@ -6,10 +6,10 @@
 //! This module provides the `DockController` for managing window docking
 //! and screenset persistence.
 
-use std::ffi::{c_char, c_int, c_void, CString};
+use std::ffi::{CString, c_char, c_int, c_void};
 
-use reaper_low::raw::HWND;
 use reaper_low::Reaper;
+use reaper_low::raw::HWND;
 
 use super::hwnd::RawHwnd;
 
@@ -120,10 +120,7 @@ impl DockController {
         }
         self.current_dock = -1;
 
-        log::debug!(
-            "Undocked window '{}'",
-            self.name.to_string_lossy()
-        );
+        log::debug!("Undocked window '{}'", self.name.to_string_lossy());
     }
 
     /// Check if the window is currently docked.
@@ -133,9 +130,8 @@ impl DockController {
     /// This function calls unsafe REAPER APIs.
     pub fn is_docked(&self, reaper: &Reaper) -> bool {
         let mut is_floating = false;
-        let dock_index = unsafe {
-            reaper.DockIsChildOfDock(self.to_reaper_hwnd(), &mut is_floating)
-        };
+        let dock_index =
+            unsafe { reaper.DockIsChildOfDock(self.to_reaper_hwnd(), &mut is_floating) };
         dock_index >= 0
     }
 
@@ -149,7 +145,11 @@ impl DockController {
             self.undock(reaper);
         } else {
             // Dock to the last known dock position, or default to 0
-            let dock = if self.current_dock >= 0 { self.current_dock } else { 0 };
+            let dock = if self.current_dock >= 0 {
+                self.current_dock
+            } else {
+                0
+            };
             self.dock(reaper, dock);
         }
     }

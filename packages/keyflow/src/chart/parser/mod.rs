@@ -60,9 +60,9 @@ impl Chart {
 
     /// Parse a chart from input string
     pub fn parse(input: &str) -> Result<Self, String> {
+        use crate::time::TimeSignature;
         use crate::key::Key;
         use crate::primitives::MusicalNote;
-        use crate::time::TimeSignature;
 
         let mut chart = Self::new();
         let lines: Vec<&str> = input
@@ -649,15 +649,18 @@ C G Am F
 
         // Default time signature should be 4/4
         assert_eq!(
-            chart.time_signature.unwrap().numerator, 4,
+            chart.time_signature.unwrap().numerator,
+            4,
             "Default time signature numerator should be 4"
         );
         assert_eq!(
-            chart.time_signature.unwrap().denominator, 4,
+            chart.time_signature.unwrap().denominator,
+            4,
             "Default time signature denominator should be 4"
         );
         assert_eq!(
-            chart.initial_time_signature.unwrap().numerator, 4,
+            chart.initial_time_signature.unwrap().numerator,
+            4,
             "Initial time signature should also be 4/4"
         );
 
@@ -666,10 +669,17 @@ C G Am F
         assert_eq!(key.root().name(), "C", "Default key root should be C");
 
         let current_key = chart.current_key.as_ref().expect("Should have current key");
-        assert_eq!(current_key.root().name(), "C", "Current key root should be C");
+        assert_eq!(
+            current_key.root().name(),
+            "C",
+            "Current key root should be C"
+        );
 
         // No title should be set
-        assert!(chart.metadata.title.is_none(), "Title should be None for titleless snippet");
+        assert!(
+            chart.metadata.title.is_none(),
+            "Title should be None for titleless snippet"
+        );
     }
 
     #[test]

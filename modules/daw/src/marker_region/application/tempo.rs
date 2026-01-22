@@ -4,12 +4,13 @@
 //! from different sources (REAPER API, RPP files, etc.)
 
 use crate::primitives::Position;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::fmt;
 
 /// A tempo/time signature change point
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Facet)]
 pub struct TempoTimePoint {
     /// Position where this change occurs (includes both time and musical position)
     pub position: Position,
@@ -133,7 +134,7 @@ impl fmt::Display for TempoTimePoint {
 }
 
 /// Collection of tempo and time signature changes
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct TempoTimeEnvelope {
     /// All tempo/time signature change points, sorted by position
     pub points: Vec<TempoTimePoint>,

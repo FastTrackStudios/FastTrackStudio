@@ -1,12 +1,13 @@
 //! Media item data structures for REAPER
 
 use derive_builder::Builder;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
 
 /// Fade curve types for items
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
 #[repr(i32)]
 pub enum FadeCurveType {
     Linear = 0,
@@ -47,7 +48,7 @@ impl fmt::Display for FadeCurveType {
 }
 
 /// Channel mode for takes
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
 #[repr(i32)]
 pub enum ChannelMode {
     Normal = 0,
@@ -93,7 +94,7 @@ impl fmt::Display for ChannelMode {
 }
 
 /// Pitch shifting and time stretch modes for PLAYRATE field 4
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
 #[repr(i32)]
 pub enum PitchMode {
     ProjectDefault = -1,
@@ -164,7 +165,7 @@ impl fmt::Display for PitchMode {
 }
 
 /// Solo states for MUTE field 2
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
 #[repr(i32)]
 pub enum SoloState {
     NotSoloed = 0,
@@ -196,7 +197,8 @@ impl fmt::Display for SoloState {
 }
 
 /// Source types for SOURCE blocks
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum SourceType {
     Wave,
     Midi,
@@ -227,7 +229,7 @@ impl fmt::Display for SourceType {
 }
 
 /// Item timebase for BEAT field
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
 #[repr(i32)]
 pub enum ItemTimebase {
     ProjectDefault = -1,
@@ -259,7 +261,7 @@ impl fmt::Display for ItemTimebase {
 }
 
 /// A REAPER media item
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Builder, Facet)]
 #[builder(setter(into), default)]
 pub struct Item {
     // Item ID
@@ -300,7 +302,7 @@ pub struct Item {
 }
 
 /// Fade settings for an item
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct FadeSettings {
     pub curve_type: FadeCurveType, // field 1 - fade curve type
     pub time: f64,                 // field 2 - fade time in seconds
@@ -312,14 +314,14 @@ pub struct FadeSettings {
 }
 
 /// Mute and solo settings for an item
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct MuteSettings {
     pub muted: bool,           // field 1 - item is muted
     pub solo_state: SoloState, // field 2 - solo state (-1, 0, 1)
 }
 
 /// Volume and pan settings
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct VolPanSettings {
     pub item_trim: f64,    // field 1 - item trim (1.0 = 0 dB)
     pub take_pan: f64,     // field 2 - take pan (-1.0 to 1.0)
@@ -328,7 +330,7 @@ pub struct VolPanSettings {
 }
 
 /// Play rate settings
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct PlayRateSettings {
     pub rate: f64,             // field 1 - play rate
     pub preserve_pitch: bool,  // field 2 - preserve pitch while changing rate
@@ -339,7 +341,7 @@ pub struct PlayRateSettings {
 }
 
 /// A take within a media item
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Take {
     pub is_selected: bool,                  // TAKE SEL - Is this take selected
     pub name: String,                       // NAME - Take name
@@ -354,7 +356,7 @@ pub struct Take {
 }
 
 /// Source block for a take
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct SourceBlock {
     pub source_type: SourceType, // WAVE, MIDI, etc.
     pub file_path: String,       // FILE - Source file path

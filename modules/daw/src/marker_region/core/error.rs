@@ -2,10 +2,12 @@
 //!
 //! This module defines error types specific to marker and region operations.
 
+use facet::Facet;
 use std::fmt;
 
 /// Errors that can occur during marker and region operations
-#[derive(Debug, Clone, PartialEq)]
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub enum MarkerRegionError {
     /// Invalid marker position
     InvalidMarkerPosition(f64),

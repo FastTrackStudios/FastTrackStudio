@@ -1,11 +1,12 @@
 //! Core data types for lyrics
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Represents a complete lyrics document
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Lyrics {
     /// Unique identifier for this lyrics document
     pub id: Option<Uuid>,
@@ -82,7 +83,7 @@ impl Lyrics {
 }
 
 /// Represents a section within the lyrics (e.g., [Verse 1], [Chorus])
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct LyricSection {
     /// Unique identifier for this section
     pub id: Option<Uuid>,
@@ -139,7 +140,8 @@ impl LyricSection {
 }
 
 /// Hint about the section type (for matching with setlist sections)
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum SectionTypeHint {
     Intro,
     Verse,
@@ -195,7 +197,7 @@ impl SectionTypeHint {
 }
 
 /// Represents a single line of lyrics
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct LyricLine {
     /// Unique identifier for this line
     pub id: Option<Uuid>,
@@ -359,7 +361,8 @@ impl LyricLine {
 }
 
 /// Represents a part of a lyric line (either regular text or parenthetical)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum LinePart {
     /// Regular lyric text
     Regular(String),
@@ -368,7 +371,7 @@ pub enum LinePart {
 }
 
 /// Represents a syllable within a word (for karaoke-style display)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Syllable {
     /// The text of this syllable
     pub text: String,
@@ -383,7 +386,7 @@ pub struct Syllable {
 }
 
 /// Represents a word broken down into syllables
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Word {
     /// The full word text
     pub text: String,

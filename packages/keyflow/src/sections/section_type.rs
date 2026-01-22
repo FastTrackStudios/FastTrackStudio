@@ -3,10 +3,12 @@
 //! Defines different types of song sections
 
 use super::measure_expr::MeasureExpression;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Represents different types of song sections
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub enum SectionType {
     Intro,
     Verse,

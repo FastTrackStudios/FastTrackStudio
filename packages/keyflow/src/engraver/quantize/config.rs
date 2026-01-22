@@ -51,7 +51,7 @@ impl Default for QuantizeConfig {
             detect_quintuplets: true,
             detect_sextuplets: true,
             detect_septuplets: true,
-            tolerance_ticks: 12, // ~2.5% of a quarter note at 480 PPQ
+            tolerance_ticks: 12,    // ~2.5% of a quarter note at 480 PPQ
             min_duration_ticks: 30, // 64th note at 480 PPQ
             compound_meter: false,
         }
@@ -70,7 +70,7 @@ impl QuantizeConfig {
     pub fn reaper() -> Self {
         Self {
             source_ppq: 960,
-            tolerance_ticks: 24, // Scaled for 960 PPQ
+            tolerance_ticks: 24,    // Scaled for 960 PPQ
             min_duration_ticks: 60, // 64th note at 960 PPQ
             ..Default::default()
         }
@@ -188,15 +188,15 @@ mod tests {
 
     #[test]
     fn test_compound_meter_detection() {
-        assert!(QuantizeConfig::is_compound_time_signature(&TimeSignature::new(
-            6, 8
-        )));
-        assert!(QuantizeConfig::is_compound_time_signature(&TimeSignature::new(
-            9, 8
-        )));
-        assert!(QuantizeConfig::is_compound_time_signature(&TimeSignature::new(
-            12, 8
-        )));
+        assert!(QuantizeConfig::is_compound_time_signature(
+            &TimeSignature::new(6, 8)
+        ));
+        assert!(QuantizeConfig::is_compound_time_signature(
+            &TimeSignature::new(9, 8)
+        ));
+        assert!(QuantizeConfig::is_compound_time_signature(
+            &TimeSignature::new(12, 8)
+        ));
         assert!(!QuantizeConfig::is_compound_time_signature(
             &TimeSignature::new(4, 4)
         ));

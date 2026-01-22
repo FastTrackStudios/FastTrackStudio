@@ -1,5 +1,6 @@
 use dioxus_native::prelude::*;
-use dioxus_native::{use_wgpu, use_post_processor};
+use dioxus_native::{use_post_processor, use_wgpu};
+use lucide_dioxus::{Heart, Mail, Plus, Settings, Trash2, User};
 use lumen_blocks::components::accordion::{
     Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 };
@@ -10,8 +11,7 @@ use lumen_blocks::components::collapsible::{Collapsible, CollapsibleContent, Col
 use lumen_blocks::components::input::{Input, InputSize, InputVariant};
 use lumen_blocks::components::progress::{Progress, ProgressSize, ProgressVariant};
 use lumen_blocks::components::switch::{Switch, SwitchSize};
-use lumen_blocks::components::toast::{use_toast, ToastOptions, ToastProvider};
-use lucide_dioxus::{Heart, Mail, Plus, Settings, Trash2, User};
+use lumen_blocks::components::toast::{ToastOptions, ToastProvider, use_toast};
 
 mod bunnymark;
 mod glow;
@@ -30,9 +30,9 @@ fn app() -> Element {
 
     // Bloom effect state
     let mut bloom_enabled = use_signal(|| true);
-    let mut bloom_threshold = use_signal(|| 0.3f32);  // Lower = more bloom
-    let mut bloom_intensity = use_signal(|| 2.0f32);  // Bloom strength
-    let mut bloom_radius = use_signal(|| 10.0f32);    // Affects soft knee
+    let mut bloom_threshold = use_signal(|| 0.3f32); // Lower = more bloom
+    let mut bloom_intensity = use_signal(|| 2.0f32); // Bloom strength
+    let mut bloom_radius = use_signal(|| 10.0f32); // Affects soft knee
 
     // Create shared bloom state that can be updated dynamically
     let bloom_state = use_hook(|| GlowState::new());
@@ -709,7 +709,9 @@ fn InteractiveCanvas() -> Element {
     // Use use_hook to create paint source and sender ONLY ONCE
     // This avoids the bug where re-renders create new senders to unregistered paint sources
     let sender = use_hook(|| {
-        std::rc::Rc::new(std::cell::RefCell::new(None::<std::sync::mpsc::Sender<InteractiveMessage>>))
+        std::rc::Rc::new(std::cell::RefCell::new(
+            None::<std::sync::mpsc::Sender<InteractiveMessage>>,
+        ))
     });
 
     let paint_source_id = {
@@ -722,7 +724,10 @@ fn InteractiveCanvas() -> Element {
     };
 
     // Get the sender (it's populated after use_wgpu runs)
-    let sender = sender.borrow().clone().expect("Sender should be initialized");
+    let sender = sender
+        .borrow()
+        .clone()
+        .expect("Sender should be initialized");
 
     // Track focus state for visual feedback
     let mut is_focused = use_signal(|| false);

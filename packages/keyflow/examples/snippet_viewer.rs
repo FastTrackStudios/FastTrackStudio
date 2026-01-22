@@ -34,11 +34,11 @@ use winit::{
     window::{Window, WindowId},
 };
 
+use keyflow::Chart;
 use keyflow::engraver::fonts::SMuFLFont;
 use keyflow::engraver::layout::chart::{ChartLayoutEngine, ChartLayoutResult, LayoutMode};
 use keyflow::engraver::renderer::{SceneRenderBuilder, VelloRenderContext};
 use keyflow::engraver::style::MStyle;
-use keyflow::Chart;
 
 const WINDOW_WIDTH: u32 = 1000;
 const WINDOW_HEIGHT: u32 = 700;
@@ -153,8 +153,11 @@ pub fn view_snippet(keyflow_source: &str, config: SnippetConfig) -> SnippetResul
 
     // Create layout engine and layout the chart
     let style: &'static MStyle = Box::leak(Box::new(MStyle::default()));
-    let layout_engine =
-        ChartLayoutEngine::new(style, fonts.text_font_data.clone(), fonts.musejazz_font_data.clone());
+    let layout_engine = ChartLayoutEngine::new(
+        style,
+        fonts.text_font_data.clone(),
+        fonts.musejazz_font_data.clone(),
+    );
 
     // Use paginated mode
     let layout_mode = LayoutMode::Paginated {
@@ -262,14 +265,22 @@ fn main() {
         // Print section info
         for (i, section) in result.chart.sections.iter().enumerate() {
             let measures = section.measures();
-            println!("  Section {}: {:?} ({} measures)", i, section.section.section_type, measures.len());
+            println!(
+                "  Section {}: {:?} ({} measures)",
+                i,
+                section.section.section_type,
+                measures.len()
+            );
 
             // Print rhythm element counts for each measure
             for (m_idx, measure) in measures.iter().enumerate() {
                 let chord_count = measure.chords.len();
                 let elem_count = measure.rhythm_elements.len();
                 if chord_count > 0 || elem_count > 0 {
-                    println!("    Measure {}: {} chords, {} rhythm_elements", m_idx, chord_count, elem_count);
+                    println!(
+                        "    Measure {}: {} chords, {} rhythm_elements",
+                        m_idx, chord_count, elem_count
+                    );
                 }
             }
         }
@@ -325,7 +336,10 @@ impl ApplicationHandler for App {
         let render_ctx = VelloRenderContext::new(window);
 
         // Take the pre-loaded layout and fonts
-        let layout_result = self.layout_result.take().expect("Layout result should be set");
+        let layout_result = self
+            .layout_result
+            .take()
+            .expect("Layout result should be set");
         let fonts = self.fonts.take().expect("Fonts should be loaded");
 
         // Initial transform: translate to show content, then apply DPI scale

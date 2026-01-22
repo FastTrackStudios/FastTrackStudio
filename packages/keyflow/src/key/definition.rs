@@ -4,11 +4,12 @@
 
 use super::scale::{ScaleMode, ScaleType};
 use crate::primitives::{Interval, MusicalNote, Note};
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A musical key - just a root note and a scale mode
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct Key {
     pub root: MusicalNote,
     pub mode: ScaleMode,

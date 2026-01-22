@@ -2,7 +2,7 @@
 //!
 //! Handles building sections from regions within songs.
 
-use super::parser::{extract_number_from_name, parse_section_type_from_name};
+use super::parser::{extract_number_from_name, parse_section_from_name};
 use super::stats::record_section_created;
 use crate::setlist::core::{Section, SectionType, Song};
 use daw::marker_region::core::{Marker, Region};
@@ -119,11 +119,17 @@ pub fn build_sections_from_regions(
 
 /// Build a section from a region
 fn build_section_from_region(region: &Region) -> Option<Section> {
-    // Try to parse section type from region name
-    let section_type = parse_section_type_from_name(&region.name);
+    // Try to parse section info from region name (includes type and optional comment)
+    let parsed = parse_section_from_name(&region.name);
 
-    // If we couldn't parse a section type, use Custom to indicate it's an unrecognized section
-    let section_type = section_type.unwrap_or_else(|| SectionType::Custom(region.name.clone()));
+    // Get section type (or use Custom if we couldn't parse)
+    let section_type = parsed
+        .as_ref()
+        .map(|p| p.section_type.clone())
+        .unwrap_or_else(|| SectionType::Custom(region.name.clone()));
+
+    // Get comment if present (e.g., "Horns" from `Interlude "Horns"`)
+    let comment = parsed.as_ref().and_then(|p| p.comment.clone());
 
     // Extract number from name if present (but not for Custom sections)
     let number = if matches!(section_type, SectionType::Custom(_)) {
@@ -144,6 +150,9 @@ fn build_section_from_region(region: &Region) -> Option<Section> {
         number,
     ) {
         Ok(mut section) => {
+            // Store comment if present
+            section.comment = comment;
+
             // Store color from region directly in section
             section.color = region.color;
             // Log color for debugging
@@ -152,7 +161,8 @@ fn build_section_from_region(region: &Region) -> Option<Section> {
                     section_name = ?section.name,
                     region_name = %region.name,
                     color = color_val,
-                    "Stored color in section"
+                    comment = ?section.comment,
+                    "Stored color and comment in section"
                 );
             }
             // Calculate and store length_measures in metadata (computed field, not stored in struct)
@@ -177,7 +187,7 @@ fn create_count_in_section(
     song_start_pos: daw::primitives::Position,
 ) -> Option<Section> {
     match Section::new_with_positions(
-        SectionType::Custom("Count-In".to_string()),
+        SectionType::CountIn,
         count_in_start_pos,
         song_start_pos,
         "Count-In".to_string(),
@@ -206,7 +216,7 @@ fn create_end_section(
     end_pos: daw::primitives::Position,
 ) -> Option<Section> {
     match Section::new_with_positions(
-        SectionType::Custom("End".to_string()),
+        SectionType::End,
         song_end_pos,
         end_pos,
         "End".to_string(),

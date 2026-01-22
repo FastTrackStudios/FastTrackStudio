@@ -86,14 +86,12 @@ impl TriggerScheduler {
         let bar_start = params.current_bar_start_quarters;
         if bar_start.is_finite() {
             // Position in measure (quarter notes)
-            let pos_in_measure_quarter =
-                params.current_beat_position_quarter_notes - bar_start;
+            let pos_in_measure_quarter = params.current_beat_position_quarter_notes - bar_start;
             // Convert to beats, then find which beat we're in, then convert back to quarters
             let pos_in_measure_beats = pos_in_measure_quarter * params.beats_per_quarter;
             let beat_number_in_measure = pos_in_measure_beats.floor();
             // Position of start of current beat in quarter notes (within measure)
-            let beat_start_in_measure_quarter =
-                beat_number_in_measure / params.beats_per_quarter;
+            let beat_start_in_measure_quarter = beat_number_in_measure / params.beats_per_quarter;
             bar_start + beat_start_in_measure_quarter
         } else {
             // Fallback: calculate from beat position
@@ -110,8 +108,7 @@ impl TriggerScheduler {
     ) -> f64 {
         let bar_start = params.current_bar_start_quarters;
         if bar_start.is_finite() {
-            let pos_in_measure_quarter =
-                params.current_beat_position_quarter_notes - bar_start;
+            let pos_in_measure_quarter = params.current_beat_position_quarter_notes - bar_start;
             let pos_in_measure_beats = pos_in_measure_quarter * params.beats_per_quarter;
             let next_beat_in_measure = pos_in_measure_beats.floor() + 1.0;
             let next_beat_start_in_measure_quarter =
@@ -294,7 +291,8 @@ impl TriggerScheduler {
             let samples_until_sixteenth =
                 (quarters_until_sixteenth * params.samples_per_quarter).round() as i64;
 
-            if samples_until_sixteenth >= 0 && (samples_until_sixteenth as usize) < params.buffer_len
+            if samples_until_sixteenth >= 0
+                && (samples_until_sixteenth as usize) < params.buffer_len
             {
                 debug!(
                     target: "fts_guide::audio",

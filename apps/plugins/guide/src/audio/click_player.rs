@@ -252,13 +252,7 @@ impl ClickPlayer {
     ) {
         Self::play_beat(state, sample_data_beat, gain, click_left, click_right);
         Self::play_eighth(state, sample_data_eighth, gain, click_left, click_right);
-        Self::play_sixteenth(
-            state,
-            sample_data_sixteenth,
-            gain,
-            click_left,
-            click_right,
-        );
+        Self::play_sixteenth(state, sample_data_sixteenth, gain, click_left, click_right);
         Self::play_triplet(state, sample_data_triplet, gain, click_left, click_right);
         Self::play_measure_accent(
             state,

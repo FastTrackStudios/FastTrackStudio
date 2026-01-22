@@ -12,7 +12,11 @@ use crate::time::{Tempo, TimeSignature};
 
 impl Chart {
     /// Phase 1: Parse metadata
-    pub(super) fn parse_metadata(&mut self, lines: &[&str], start_idx: usize) -> Result<usize, String> {
+    pub(super) fn parse_metadata(
+        &mut self,
+        lines: &[&str],
+        start_idx: usize,
+    ) -> Result<usize, String> {
         let mut idx = start_idx;
 
         // Skip empty lines and parse settings
@@ -267,7 +271,8 @@ impl Chart {
         }
 
         // Must contain only digits and operators (+, -, x, *)
-        word.chars().all(|c| c.is_ascii_digit() || c == '+' || c == '-' || c == 'x' || c == '*')
+        word.chars()
+            .all(|c| c.is_ascii_digit() || c == '+' || c == '-' || c == 'x' || c == '*')
     }
 
     /// Parse a metadata line (e.g., "120bpm 4/4 #G")
@@ -333,7 +338,8 @@ impl Chart {
         for part in &parts {
             let is_tempo = part.ends_with("bpm") || part.parse::<u32>().is_ok();
             let is_time_sig = Self::parse_time_signature(part).is_some();
-            let is_key = (part.starts_with('#') || part.starts_with('b')) && Key::parse(part).is_ok();
+            let is_key =
+                (part.starts_with('#') || part.starts_with('b')) && Key::parse(part).is_ok();
 
             if !is_tempo && !is_time_sig && !is_key {
                 return false;
@@ -394,7 +400,11 @@ impl Chart {
     }
 
     /// Continue parsing metadata after a pure metadata line was found
-    fn continue_metadata_parsing(&mut self, lines: &[&str], start_idx: usize) -> Result<usize, String> {
+    fn continue_metadata_parsing(
+        &mut self,
+        lines: &[&str],
+        start_idx: usize,
+    ) -> Result<usize, String> {
         let mut idx = start_idx;
 
         // Skip empty lines and parse settings

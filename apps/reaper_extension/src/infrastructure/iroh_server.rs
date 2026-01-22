@@ -15,6 +15,8 @@ use tracing::{error, info, warn};
 /// - TrackApi::ALPN
 /// - SetlistStreamApi::ALPN
 /// - LyricsApi::ALPN
+/// - ChartApi::ALPN
+/// - ChartStreamApi::ALPN (for web viewers with playback)
 pub mod alpn {
     /// ALPN for transport protocol (matches TransportApi::ALPN)
     pub const TRANSPORT: &[u8] = daw::transport::TransportApi::ALPN;
@@ -28,6 +30,10 @@ pub mod alpn {
     /// ALPN for chart protocol (matches ChartApi::ALPN)
     #[cfg(feature = "keyflow")]
     pub const CHART: &[u8] = fts::chords::reactive::irpc::ChartApi::ALPN;
+    /// ALPN for chart stream protocol with playback (matches ChartStreamApi::ALPN)
+    /// Used by web viewers for real-time chart display with cursor synchronization
+    #[cfg(feature = "keyflow")]
+    pub const CHART_STREAM: &[u8] = fts::chords::reactive::irpc::ChartStreamApi::ALPN;
 }
 
 /// Start the IROH server with all IRPC APIs (Transport, Tracks, Setlist)
@@ -114,6 +120,11 @@ pub fn start_iroh_server(
         fts::chords::reactive::irpc::ChartApi::spawn(chords_service_box)
     };
 
+    // Create chart stream API for web viewers (if keyflow feature is enabled)
+    // This provides real-time chart data with playback position updates
+    #[cfg(feature = "keyflow")]
+    let mut chart_stream_api = fts::chords::reactive::irpc::ChartStreamApi::spawn();
+
     // Create setlist stream API (on main thread)
     let setlist_api = match stream_service.create_stream_api() {
         Ok(api) => api,
@@ -130,6 +141,8 @@ pub fn start_iroh_server(
     let lyrics_handler_data = lyrics_api.take_handler_data();
     #[cfg(feature = "keyflow")]
     let chart_handler_data = chart_api.take_handler_data();
+    #[cfg(feature = "keyflow")]
+    let chart_stream_handler_data = chart_stream_api.take_handler_data();
 
     // Expose all handlers (on main thread)
     let transport_handler = match transport_api.expose() {
@@ -172,6 +185,15 @@ pub fn start_iroh_server(
         Ok(handler) => handler,
         Err(e) => {
             warn!("Failed to expose chart service: {}", e);
+            return;
+        }
+    };
+
+    #[cfg(feature = "keyflow")]
+    let chart_stream_handler = match chart_stream_api.expose() {
+        Ok(handler) => handler,
+        Err(e) => {
+            warn!("Failed to expose chart stream service: {}", e);
             return;
         }
     };
@@ -416,7 +438,7 @@ pub fn start_iroh_server(
             {
                 if let Some((rx, chart_broadcast)) = chart_handler_data {
                     let chart_broadcast_clone = chart_broadcast.clone();
-                    
+
                     tokio::spawn(async move {
                         use fts::chords::reactive::irpc::ChartUpdateMessage;
                         use irpc::WithChannels;
@@ -433,9 +455,9 @@ pub fn start_iroh_server(
                                         loop {
                                             tokio::select! {
                                                 Ok(msg) = chart_rx.recv() => {
-                                                    if tx.send(msg).await.is_err() { 
+                                                    if tx.send(msg).await.is_err() {
                                                         warn!("[Chart Handler] Client disconnected (chart_rx)");
-                                                        break; 
+                                                        break;
                                                     }
                                                 }
                                                 else => break,
@@ -453,10 +475,66 @@ pub fn start_iroh_server(
                         warn!("[Chart Handler] Handler loop ended");
                     });
                 }
+
+                // Chart stream handler for web viewers with playback position updates
+                if let Some((rx, stream_broadcast)) = chart_stream_handler_data {
+                    let stream_broadcast_clone = stream_broadcast.clone();
+
+                    tokio::spawn(async move {
+                        use fts::chords::reactive::irpc::{ChartStreamMessage, ChartStreamMessageWrapper};
+                        use irpc::WithChannels;
+                        let mut rx = rx;
+                        info!("[Chart Stream Handler] Started listening for chart stream subscription requests");
+                        while let Ok(msg_opt) = rx.recv().await {
+                            match msg_opt {
+                                Some(ChartStreamMessageWrapper::SubscribeChartStream(WithChannels { tx, .. })) => {
+                                    info!("[Chart Stream Handler] ✅ Web client subscribed to chart stream");
+                                    let mut stream_rx = stream_broadcast_clone.subscribe();
+
+                                    tokio::spawn(async move {
+                                        info!("[Chart Stream Handler] Started forwarding chart stream to web client");
+                                        loop {
+                                            tokio::select! {
+                                                Ok(msg) = stream_rx.recv() => {
+                                                    if tx.send(msg).await.is_err() {
+                                                        warn!("[Chart Stream Handler] Web client disconnected");
+                                                        break;
+                                                    }
+                                                }
+                                                else => break,
+                                            }
+                                        }
+                                        info!("[Chart Stream Handler] Stopped forwarding chart stream to web client");
+                                    });
+                                }
+                                None => {
+                                    warn!("[Chart Stream Handler] Message channel closed");
+                                    break;
+                                }
+                            }
+                        }
+                        warn!("[Chart Stream Handler] Handler loop ended");
+                    });
+                }
             }
             
-            // Create IROH endpoint
-            let endpoint = match iroh::Endpoint::bind().await {
+            // Create IROH endpoint with DNS discovery for web client connections
+            //
+            // Discovery setup enables web clients to connect using just the endpoint ID:
+            // - PkarrPublisher::n0_dns() publishes our endpoint info to n0's DNS servers
+            // - DnsDiscovery::n0_dns() resolves endpoint IDs via DNS
+            // - RelayMode::Default enables relay transport (required for browser clients)
+            //
+            // This allows URLs like /chart/{endpoint_id} to work without additional info
+            use iroh::discovery::{dns::DnsDiscovery, pkarr::PkarrPublisher};
+
+            let endpoint = match iroh::Endpoint::builder()
+                .relay_mode(iroh::endpoint::RelayMode::Default)
+                .discovery(PkarrPublisher::n0_dns())
+                .discovery(DnsDiscovery::n0_dns())
+                .bind()
+                .await
+            {
                 Ok(ep) => ep,
                 Err(e) => {
                     error!("Failed to create IROH endpoint: {}", e);
@@ -479,8 +557,9 @@ pub fn start_iroh_server(
             #[cfg(feature = "keyflow")]
             {
                 router_builder = router_builder.accept(alpn::CHART, chart_handler);
+                router_builder = router_builder.accept(alpn::CHART_STREAM, chart_stream_handler);
             }
-            
+
             let _router = router_builder.spawn();
             
             // Store endpoint ID for client discovery
@@ -497,7 +576,9 @@ pub fn start_iroh_server(
             info!("Lyrics ALPN: {:?}", String::from_utf8_lossy(alpn::LYRICS));
             #[cfg(feature = "keyflow")]
             info!("Chart ALPN: {:?}", String::from_utf8_lossy(alpn::CHART));
-                    
+            #[cfg(feature = "keyflow")]
+            info!("Chart Stream ALPN: {:?}", String::from_utf8_lossy(alpn::CHART_STREAM));
+
             // Keep router alive - it handles all connections
             // The router will run until shutdown is called
             loop {

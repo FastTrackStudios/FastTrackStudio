@@ -3,10 +3,10 @@
 //! Handles parsing of chart sections including verse, chorus, bridge, etc.
 //! Also handles track grouping and section content parsing.
 
+use crate::chart::Chart;
 use crate::chart::melody::Melody;
 use crate::chart::track::{Track, TrackType};
 use crate::chart::types::{ChartSection, Measure, RhythmElement};
-use crate::chart::Chart;
 use crate::primitives::RootNotation;
 use crate::sections::{Section, SectionType};
 use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition, TimeSignature};
@@ -15,7 +15,11 @@ use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition, TimeSignat
 
 impl Chart {
     /// Phase 2: Parse sections and content
-    pub(super) fn parse_sections(&mut self, lines: &[&str], start_idx: usize) -> Result<usize, String> {
+    pub(super) fn parse_sections(
+        &mut self,
+        lines: &[&str],
+        start_idx: usize,
+    ) -> Result<usize, String> {
         let mut idx = start_idx;
 
         while idx < lines.len() {
@@ -320,7 +324,12 @@ impl Chart {
                                                 root_notation,
                                                 crate::chord::ChordQuality::Major,
                                             ),
-                                            ChordRhythm::space(LilySyntax::Whole, false, false, None),
+                                            ChordRhythm::space(
+                                                LilySyntax::Whole,
+                                                false,
+                                                false,
+                                                None,
+                                            ),
                                             "s".to_string(),
                                             space_duration,
                                             AbsolutePosition::at_beginning(),
@@ -397,7 +406,11 @@ impl Chart {
     }
 
     /// Parse "pre" section (pre-chorus, pre-verse, etc.)
-    pub(super) fn parse_pre_section(&mut self, lines: &[&str], start_idx: usize) -> Result<usize, String> {
+    pub(super) fn parse_pre_section(
+        &mut self,
+        lines: &[&str],
+        start_idx: usize,
+    ) -> Result<usize, String> {
         let line = lines[start_idx];
         let parts: Vec<&str> = line.split_whitespace().collect();
 
@@ -413,7 +426,11 @@ impl Chart {
     }
 
     /// Parse "post" section (post-chorus, post-verse, etc.)
-    pub(super) fn parse_post_section(&mut self, lines: &[&str], start_idx: usize) -> Result<usize, String> {
+    pub(super) fn parse_post_section(
+        &mut self,
+        lines: &[&str],
+        start_idx: usize,
+    ) -> Result<usize, String> {
         let line = lines[start_idx];
         let parts: Vec<&str> = line.split_whitespace().collect();
 

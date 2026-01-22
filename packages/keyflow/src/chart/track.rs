@@ -21,10 +21,12 @@
 
 use super::melody::Melody;
 use super::types::Measure;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Type of content a track contains
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default, Facet)]
+#[repr(u8)]
 pub enum TrackType {
     /// Chord symbols with rhythm notation (default)
     #[default]
@@ -84,7 +86,7 @@ impl TrackType {
 ///
 /// Tracks run in parallel and can contain different types of content.
 /// The default track type is Chords, which doesn't require a marker.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Track {
     /// Type of track content
     pub track_type: TrackType,

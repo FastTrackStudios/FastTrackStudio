@@ -1,17 +1,18 @@
 //! FX chain data structures for REAPER
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A REAPER FX chain
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct FxChain {
     pub name: String,
     pub plugins: Vec<Plugin>,
 }
 
 /// A plugin in an FX chain
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Plugin {
     pub name: String,
     pub plugin_type: String,

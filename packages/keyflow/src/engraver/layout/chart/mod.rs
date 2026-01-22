@@ -10,6 +10,7 @@ pub mod config;
 pub mod constants;
 pub mod layout_state;
 pub mod measure_layout;
+pub mod measure_pass;
 pub mod page_rendering;
 pub mod pipeline;
 pub mod prefix_renderer;
@@ -18,7 +19,7 @@ pub mod section_layout;
 pub mod types;
 
 // Re-export new config types (ChartLayoutConfig is still defined locally for backward compatibility)
-pub use config::{BehavioralFlags, LayoutParams, RenderOptions, DEFAULT_MIN_CHORD_SYMBOL_GAP};
+pub use config::{BehavioralFlags, DEFAULT_MIN_CHORD_SYMBOL_GAP, LayoutParams, RenderOptions};
 // Note: config::ChartLayoutConfig and config::FlatChartLayoutConfig are available
 // but not re-exported to avoid conflict with the legacy struct below
 
@@ -29,8 +30,16 @@ pub use types::{
     expand_melodies_across_measures, slash_glyph_for_ticks,
 };
 
+// Re-export measurement pass types for multi-pass layout
+pub use measure_pass::{
+    ChartMeasurements, MeasureMeasurements, MeasurementCache, compute_measure_weight,
+    measure_chart, measure_measure,
+};
+
 use std::sync::Arc;
 
+use crate::chart::types::{Measure, RhythmElement};
+use crate::chord::{LilySyntax, PushPullBase};
 use crate::engraver::layout::context::LayoutContext;
 use crate::engraver::layout::orchestrator::{PageLayout, PageMargins, SystemLayout};
 use crate::engraver::layout::segment::SegmentType;
@@ -43,19 +52,19 @@ use crate::engraver::layout::tlayout::{
     layout_tie, layout_timesig, parse_chord, rehearsal_themes,
 };
 use crate::engraver::model::{DurationKind, NoteHead};
-use crate::engraver::notation::{Duration, MeasureBuilder, MeasureScene, RhythmEntry, TupletRatio, TupletSpec};
+use crate::engraver::notation::{
+    Duration, MeasureBuilder, MeasureScene, RhythmEntry, TupletRatio, TupletSpec,
+};
 use crate::engraver::scene::id::{ElementType, SemanticId};
 use crate::engraver::scene::node::{SceneNode, metadata_keys};
 use crate::engraver::scene::paint::{FontStyle, FontWeight, PaintCommand, TextAnchor};
 use crate::engraver::style::MStyle;
-use crate::chart::types::{Measure, RhythmElement};
-use crate::chord::{ChordRhythm, LilySyntax, PushPullBase};
-use crate::sections::SectionType;
 use crate::time::TimeSignature;
+use crate::sections::SectionType;
 use crate::{Chart, ChartPosition, SourceLink};
 use kurbo::{Affine, Rect};
+use rhythm_builder::{NoteHeadOverride, RhythmBuildConfig, RhythmBuildResult, RhythmSource};
 use vello::peniko::Color;
-
 
 /// Chart layout engine configuration.
 #[derive(Debug, Clone)]
@@ -146,15 +155,15 @@ impl ChartLayoutConfig {
             max_measures_per_system: 4,
             min_measure_width: 100.0,
             harmony_style: HarmonyStyle::musejazz(),
-            hide_repeated_chords: true,  // Hide repeated chord symbols
-            use_stems: true,             // Use stems for explicit rhythms (triplets, pushes)
-            auto_rhythm_slashes: true,   // Auto-fill with stemless quarter slashes
-            show_measure_numbers: true,  // Show measure numbers
-            measure_number_offset: 0,    // No offset (measure 1 = 1)
-            count_in_measures: 0,        // No count-in by default
-            snippet_mode: false,         // Full page mode with shadow
+            hide_repeated_chords: true, // Hide repeated chord symbols
+            use_stems: true,            // Use stems for explicit rhythms (triplets, pushes)
+            auto_rhythm_slashes: true,  // Auto-fill with stemless quarter slashes
+            show_measure_numbers: true, // Show measure numbers
+            measure_number_offset: 0,   // No offset (measure 1 = 1)
+            count_in_measures: 0,       // No count-in by default
+            snippet_mode: false,        // Full page mode with shadow
             min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
-            push_alters_rhythm: true,    // Show accurate rhythm notation for pushes
+            push_alters_rhythm: true, // Show accurate rhythm notation for pushes
         }
     }
 
@@ -470,8 +479,35 @@ impl ChartLayoutEngine {
         // Pre-compute section letters for consecutive repeats
         let section_letters = self.compute_section_letters(&chart.sections);
 
+        // === PASS 1: MEASURE ===
+        // Pre-measure all chord symbols to get accurate widths for layout
+        // This replaces the estimate_measure_content_weight/compute_minimum_measure_width calls
+        let mut measurement_cache = measure_pass::MeasurementCache::new();
+        let chart_measurements = measure_pass::measure_chart(
+            chart
+                .sections
+                .iter()
+                .filter(|s| {
+                    !s.section.section_type.is_compact()
+                        && !matches!(s.section.section_type, SectionType::End)
+                })
+                .map(|s| s.measures()),
+            &harmony_style,
+            &mut measurement_cache,
+        );
+
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[measure-pass] Pre-measured {} measures, cached {} chord widths",
+            chart_measurements.len(),
+            measurement_cache.len()
+        );
+
         // Track if we've added the title header (only on first page)
         let mut title_header_added = false;
+
+        // Track global measure offset for looking up pre-measured values
+        let mut global_section_measure_offset: usize = 0;
 
         // Process each section
         for (section_idx, chart_section) in chart.sections.iter().enumerate() {
@@ -499,14 +535,10 @@ impl ChartLayoutEngine {
 
             // Check for cross-section spillback: if the NEXT section starts with a pushed chord,
             // it spills back to THIS section's last measure
-            let next_non_compact_section = chart
-                .sections
-                .iter()
-                .skip(section_idx + 1)
-                .find(|s| {
-                    !s.section.section_type.is_compact()
-                        && !matches!(s.section.section_type, SectionType::End)
-                });
+            let next_non_compact_section = chart.sections.iter().skip(section_idx + 1).find(|s| {
+                !s.section.section_type.is_compact()
+                    && !matches!(s.section.section_type, SectionType::End)
+            });
             if let Some(next_section) = next_non_compact_section {
                 if let Some(mut spillback) = detect_section_start_spillback(next_section.measures())
                 {
@@ -569,7 +601,14 @@ impl ChartLayoutEngine {
                         page_width,
                         page_height,
                     );
-                    self.add_page_footer(&mut root, page_x, page_offset_y, page_width, page_height, &chart.metadata);
+                    self.add_page_footer(
+                        &mut root,
+                        page_x,
+                        page_offset_y,
+                        page_width,
+                        page_height,
+                        &chart.metadata,
+                    );
 
                     // Add title header on first page only
                     if !title_header_added {
@@ -628,13 +667,27 @@ impl ChartLayoutEngine {
                 // Calculate content weights for spring-based distribution
                 // Also check for spillbacks from the next measure (triplet pushes that affect current measure width)
                 let all_measures = chart_section.measures();
-                // Calculate weights based purely on beat count for consistent measure widths
-                // Spillback rendering is handled separately without affecting measure widths
-                let measure_weights: Vec<f64> = measure_indices
+
+                // Calculate weights and minimum widths for each measure
+                // Weights come from rhythm builder (handles triplets, etc.)
+                // Min widths come from pre-measured chord symbol widths (Pass 1 results)
+                let (measure_weights, measure_min_widths): (Vec<f64>, Vec<f64>) = measure_indices
                     .iter()
-                    .filter_map(|&idx| all_measures.get(idx))
-                    .map(|m| self.estimate_measure_content_weight(m, &text_metrics))
-                    .collect();
+                    .filter_map(|&idx| all_measures.get(idx).map(|m| (idx, m)))
+                    .map(|(idx, m)| {
+                        // Weight still uses rhythm builder (correct for triplets/complex rhythms)
+                        let weight = self.estimate_measure_content_weight(m, &text_metrics);
+
+                        // Min width from pre-measured chord widths (Pass 1)
+                        let global_idx = global_section_measure_offset + idx;
+                        let min_width = chart_measurements
+                            .get(global_idx)
+                            .map(|m| m.min_width)
+                            .unwrap_or(0.0);
+
+                        (weight, min_width)
+                    })
+                    .unzip();
 
                 // Calculate base measure width based on mode
                 let base_measure_width = if self.config.snippet_mode {
@@ -657,7 +710,8 @@ impl ChartLayoutEngine {
                 let effective_measure_count =
                     num_count_in as f64 * compact_scale + num_measures as f64;
                 // Snippet mode always treated as short system (no stretching)
-                let is_short_system = self.config.snippet_mode || effective_measure_count < max_measures as f64;
+                let is_short_system =
+                    self.config.snippet_mode || effective_measure_count < max_measures as f64;
 
                 // Distribute width proportionally using spring physics
                 // For full systems, distribute the entire measures_area_width
@@ -684,11 +738,15 @@ impl ChartLayoutEngine {
                     total_width_to_distribute,
                     compact_scale,
                     base_measure_width,
+                    &measure_min_widths,
                 );
 
                 // Count-in measure width (compact) - from distribution
                 let count_in_width = if num_count_in > 0 {
-                    distributed_widths.first().copied().unwrap_or(base_measure_width * compact_scale)
+                    distributed_widths
+                        .first()
+                        .copied()
+                        .unwrap_or(base_measure_width * compact_scale)
                 } else {
                     base_measure_width * compact_scale
                 };
@@ -750,7 +808,8 @@ impl ChartLayoutEngine {
                     page_number: Some(page_number),
                 };
 
-                let prefix_result = prefix_renderer::render_system_prefix(&prefix_ctx, id_counter, &ctx);
+                let prefix_result =
+                    prefix_renderer::render_system_prefix(&prefix_ctx, id_counter, &ctx);
 
                 for node in prefix_result.nodes {
                     root.add_child(node);
@@ -842,7 +901,7 @@ impl ChartLayoutEngine {
                             glyph_codepoint: Some(slash_glyph_for_ticks(segment.ticks)),
                             glyph_size: self.config.spatium,
                             glyph_y: staff_y + staff_height / 2.0, // Center on staff
-                            has_stem: false, // Count-in uses stemless slashes
+                            has_stem: false,                       // Count-in uses stemless slashes
                             stem_up: true,
                             flag_count: 0,
                         });
@@ -1073,6 +1132,9 @@ impl ChartLayoutEngine {
                 page_y += system_height + self.config.system_spacing;
                 global_system_index += 1;
             }
+
+            // Update global measure offset for next section (for chart_measurements lookup)
+            global_section_measure_offset += chart_section.measures().len();
         }
 
         // Finalize last page
@@ -1144,11 +1206,30 @@ impl ChartLayoutEngine {
         // Pre-compute section letters for consecutive repeats
         let section_letters = self.compute_section_letters(&chart.sections);
 
+        // === PASS 1: MEASURE ===
+        // Pre-measure all chord symbols to get accurate widths for layout
+        let mut measurement_cache = measure_pass::MeasurementCache::new();
+        let chart_measurements = measure_pass::measure_chart(
+            chart
+                .sections
+                .iter()
+                .filter(|s| {
+                    !s.section.section_type.is_compact()
+                        && !matches!(s.section.section_type, SectionType::End)
+                })
+                .map(|s| s.measures()),
+            &harmony_style,
+            &mut measurement_cache,
+        );
+
         // Get time signature for beat calculations
         let time_signature = chart
             .time_signature
             .map(|ts| (ts.numerator as u8, ts.denominator as u8))
             .unwrap_or((4u8, 4u8));
+
+        // Track global measure offset for looking up pre-measured values
+        let mut global_section_measure_offset: usize = 0;
 
         // Process each section
         for (section_idx, chart_section) in chart.sections.iter().enumerate() {
@@ -1176,14 +1257,10 @@ impl ChartLayoutEngine {
 
             // Check for cross-section spillback: if the NEXT section starts with a pushed chord,
             // it spills back to THIS section's last measure
-            let next_non_compact_section = chart
-                .sections
-                .iter()
-                .skip(section_idx + 1)
-                .find(|s| {
-                    !s.section.section_type.is_compact()
-                        && !matches!(s.section.section_type, SectionType::End)
-                });
+            let next_non_compact_section = chart.sections.iter().skip(section_idx + 1).find(|s| {
+                !s.section.section_type.is_compact()
+                    && !matches!(s.section.section_type, SectionType::End)
+            });
             if let Some(next_section) = next_non_compact_section {
                 if let Some(mut spillback) = detect_section_start_spillback(next_section.measures())
                 {
@@ -1252,14 +1329,29 @@ impl ChartLayoutEngine {
                 let is_short_system = effective_measure_count < max_measures as f64;
 
                 // Calculate content weights for spring-based distribution
-                // Weights are purely beat-based for consistent measure widths
-                // Spillback rendering is handled separately without affecting measure widths
+                // Also check for spillbacks from the next measure (triplet pushes that affect current measure width)
                 let all_measures = chart_section.measures();
-                let measure_weights: Vec<f64> = measure_indices
+
+                // Calculate weights and minimum widths for each measure
+                // Weights come from rhythm builder (handles triplets, etc.)
+                // Min widths come from pre-measured chord symbol widths (Pass 1 results)
+                let (measure_weights, measure_min_widths): (Vec<f64>, Vec<f64>) = measure_indices
                     .iter()
-                    .filter_map(|&idx| all_measures.get(idx))
-                    .map(|m| self.estimate_measure_content_weight(m, &text_metrics))
-                    .collect();
+                    .filter_map(|&idx| all_measures.get(idx).map(|m| (idx, m)))
+                    .map(|(idx, m)| {
+                        // Weight still uses rhythm builder (correct for triplets/complex rhythms)
+                        let weight = self.estimate_measure_content_weight(m, &text_metrics);
+
+                        // Min width from pre-measured chord widths (Pass 1)
+                        let global_idx = global_section_measure_offset + idx;
+                        let min_width = chart_measurements
+                            .get(global_idx)
+                            .map(|m| m.min_width)
+                            .unwrap_or(0.0);
+
+                        (weight, min_width)
+                    })
+                    .unzip();
 
                 // Distribute width proportionally using spring physics
                 let total_width_to_distribute = if is_short_system {
@@ -1275,11 +1367,15 @@ impl ChartLayoutEngine {
                     total_width_to_distribute,
                     compact_scale,
                     base_measure_width,
+                    &measure_min_widths,
                 );
 
                 // Count-in measure width (compact) - from distribution
                 let count_in_width = if num_count_in > 0 {
-                    distributed_widths.first().copied().unwrap_or(base_measure_width * compact_scale)
+                    distributed_widths
+                        .first()
+                        .copied()
+                        .unwrap_or(base_measure_width * compact_scale)
                 } else {
                     base_measure_width * compact_scale
                 };
@@ -1338,7 +1434,8 @@ impl ChartLayoutEngine {
                     page_number: None, // Continuous mode has no pages
                 };
 
-                let prefix_result = prefix_renderer::render_system_prefix(&prefix_ctx, id_counter, &ctx);
+                let prefix_result =
+                    prefix_renderer::render_system_prefix(&prefix_ctx, id_counter, &ctx);
 
                 for node in prefix_result.nodes {
                     root.add_child(node);
@@ -1545,6 +1642,9 @@ impl ChartLayoutEngine {
                 total_height += system_height + self.config.system_spacing;
                 global_system_index += 1;
             }
+
+            // Update global measure offset for next section (for chart_measurements lookup)
+            global_section_measure_offset += chart_section.measures().len();
         }
 
         total_height += self.config.margins.bottom;
@@ -1566,7 +1666,10 @@ impl ChartLayoutEngine {
         measures: &[crate::chart::types::Measure],
         _content_width: f64,
     ) -> Vec<Vec<usize>> {
-        measure_layout::group_measures_into_systems(measures.len(), self.config.max_measures_per_system)
+        measure_layout::group_measures_into_systems(
+            measures.len(),
+            self.config.max_measures_per_system,
+        )
     }
 
     /// Convert a Keyflow ChordInstance to engraver HarmonyParams.
@@ -1943,147 +2046,66 @@ impl ChartLayoutEngine {
         let beats_per_measure = time_signature.0 as f64;
 
         // Check if the measure has explicit chord rhythms (Lily, Rest, Space notation)
-        // These take precedence over melodies and slash fills
-        let has_explicit_chord_rhythm = self.measure_has_explicit_chord_rhythm(measure);
+        let has_explicit_chord_rhythm = rhythm_builder::measure_has_explicit_chord_rhythm(measure);
 
-        // When we have explicit chord rhythms, use entries directly (notes and rests)
-        // Otherwise, use the existing rhythm-based approach
-        let (rhythm_entries, full_rhythm, rhythm_ticks, tuplet_specs, head_type_overrides, internal_push_positions) =
-            if has_explicit_chord_rhythm {
-                // Build rhythm from explicit chord rhythms (r8t, Ab9_8t, etc.)
-                let (mut entries, ticks, specs) = self.build_rhythm_from_chord_rhythms(measure);
+        // Determine the rhythm source
+        let source = if has_explicit_chord_rhythm {
+            RhythmSource::ExplicitRhythm(&measure.rhythm_elements)
+        } else if let Some(data) = melody_data {
+            RhythmSource::MelodyData(data)
+        } else {
+            RhythmSource::SlashNotation {
+                chords: &measure.chords,
+                spillbacks,
+            }
+        };
 
-                // Fill remaining space with quarter note slashes to match time signature
-                // This ensures measures with incomplete explicit rhythms still fill properly
-                let remaining_ticks = measure_ticks - ticks;
-                if remaining_ticks > 0 {
-                    let quarter_ticks = 480;
-                    let num_fill_quarters = remaining_ticks / quarter_ticks;
-                    for _ in 0..num_fill_quarters {
-                        entries.push(RhythmEntry::Note(Duration::Quarter));
-                    }
-                }
+        let config = RhythmBuildConfig {
+            time_signature,
+            use_stems: self.config.use_stems,
+            auto_rhythm_slashes: false, // Applied separately below for finer control
+        };
 
-                let final_ticks: i32 = entries.iter().map(|e| e.duration().ticks()).sum();
-                (Some(entries), Vec::new(), final_ticks, specs, Vec::new(), Vec::new())
-            } else if let Some(data) = melody_data {
-                // Use preprocessed melody segments
-                let melody_durations: Vec<Duration> =
-                    data.segments.iter().map(|seg| seg.to_duration()).collect();
-                let melody_ticks: i32 = melody_durations.iter().map(|d| d.ticks()).sum();
+        // Build rhythm using the unified pipeline
+        let rhythm_result = rhythm_builder::build_rhythm(source, &config);
 
-                // Fill remaining space with quarter note slashes
-                let remaining_ticks = measure_ticks - melody_ticks;
-                let num_melody_notes = melody_durations.len();
-                let fill_slashes = if remaining_ticks > 0 {
-                    let quarter_ticks = 480;
-                    let num_fill_quarters = remaining_ticks / quarter_ticks;
-                    (0..num_fill_quarters)
-                        .map(|_| Duration::Quarter)
-                        .collect::<Vec<_>>()
-                } else {
-                    Vec::new()
-                };
-                let num_fill_notes = fill_slashes.len();
+        // Convert head type overrides from NoteHeadOverride to NoteHeadType
+        let head_type_overrides: Vec<Option<NoteHeadType>> = rhythm_result
+            .head_type_overrides
+            .iter()
+            .map(|opt| {
+                opt.map(|o| match o {
+                    NoteHeadOverride::Default => NoteHeadType::Normal,
+                    NoteHeadOverride::Slash => NoteHeadType::Slash,
+                })
+            })
+            .collect();
 
-                let full_rhythm: Vec<Duration> = melody_durations
-                    .into_iter()
-                    .chain(fill_slashes.into_iter())
-                    .collect();
-
-                let head_overrides: Vec<Option<NoteHeadType>> = if num_fill_notes > 0 {
-                    let mut overrides = Vec::with_capacity(num_melody_notes + num_fill_notes);
-                    for _ in 0..num_melody_notes {
-                        overrides.push(None);
-                    }
-                    for _ in 0..num_fill_notes {
-                        overrides.push(Some(NoteHeadType::Slash));
-                    }
-                    overrides
-                } else {
-                    Vec::new()
-                };
-
-                let ticks: i32 = full_rhythm.iter().map(|d| d.ticks()).sum();
-                (None, full_rhythm, ticks, Vec::new(), head_overrides, Vec::new())
-            } else if has_melodies {
-                // Legacy: Convert raw melody notes to durations (no spillover handling)
-                let melody_durations: Vec<Duration> = measure
-                    .melodies
-                    .iter()
-                    .flat_map(|m| m.notes.iter())
-                    .map(|note| self.melody_note_to_duration(note))
-                    .collect();
-                let melody_ticks: i32 = melody_durations.iter().map(|d| d.ticks()).sum();
-
-                // Fill remaining space with quarter note slashes
-                let remaining_ticks = measure_ticks - melody_ticks;
-                let num_melody_notes = melody_durations.len();
-                let fill_slashes = if remaining_ticks > 0 {
-                    let quarter_ticks = 480;
-                    let num_fill_quarters = remaining_ticks / quarter_ticks;
-                    (0..num_fill_quarters)
-                        .map(|_| Duration::Quarter)
-                        .collect::<Vec<_>>()
-                } else {
-                    Vec::new()
-                };
-                let num_fill_notes = fill_slashes.len();
-
-                let full_rhythm: Vec<Duration> = melody_durations
-                    .into_iter()
-                    .chain(fill_slashes.into_iter())
-                    .collect();
-
-                let head_overrides: Vec<Option<NoteHeadType>> = if num_fill_notes > 0 {
-                    let mut overrides = Vec::with_capacity(num_melody_notes + num_fill_notes);
-                    for _ in 0..num_melody_notes {
-                        overrides.push(None);
-                    }
-                    for _ in 0..num_fill_notes {
-                        overrides.push(Some(NoteHeadType::Slash));
-                    }
-                    overrides
-                } else {
-                    Vec::new()
-                };
-
-                let ticks: i32 = full_rhythm.iter().map(|d| d.ticks()).sum();
-                (None, full_rhythm, ticks, Vec::new(), head_overrides, Vec::new())
+        // Convert RhythmBuildResult to the format expected by MeasureBuilder
+        let (rhythm_entries, full_rhythm, rhythm_ticks, tuplet_specs, internal_push_positions) =
+            if has_explicit_chord_rhythm || melody_data.is_some() {
+                // Use entries directly for explicit rhythms and melody data
+                (
+                    Some(rhythm_result.entries),
+                    Vec::<Duration>::new(),
+                    rhythm_result.total_ticks,
+                    rhythm_result.tuplet_specs,
+                    rhythm_result.internal_push_positions,
+                )
             } else {
-                // No melodies or explicit rhythms - use slash notation
-                // Count only non-pushed chords - pushed chords spill to the previous beat
-                // and don't consume their own beat position
-                let non_pushed_count = measure.chords.iter().filter(|c| {
-                    c.push_pull.as_ref().map_or(true, |(is_push, _)| !is_push)
-                }).count();
-                let num_beats = non_pushed_count.max(time_signature.0 as usize);
-
-                // Check if any chord in this measure has a triplet push
-                let has_triplet_push = measure.chords.iter().any(|c| {
-                    if let Some((is_push, amount)) = &c.push_pull {
-                        *is_push && amount.base == PushPullBase::Triplet && amount.level == 1
-                    } else {
-                        false
-                    }
-                });
-
-                // Check for spillback chords (from next measure pushing back)
-                // and build rhythm with triplet subdivisions if:
-                // - use_stems is enabled, OR
-                // - there are spillbacks, OR
-                // - any chord has a triplet push
-                let (rhythm, ticks, specs, _spillback_chords, internal_push_positions) = if self.config.use_stems || spillbacks.is_some() || has_triplet_push {
-                    // Build rhythm with triplet subdivisions for pushed chords
-                    self.build_rhythm_with_triplets(measure, num_beats, spillbacks)
-                } else {
-                    // Simple quarter note slashes
-                    let rhythm: Vec<Duration> =
-                        (0..num_beats).map(|_| Duration::Quarter).collect();
-                    let ticks: i32 = rhythm.iter().map(|d| d.ticks()).sum();
-                    (rhythm, ticks, Vec::new(), Vec::new(), Vec::new())
-                };
-                (None, rhythm, ticks, specs, Vec::new(), internal_push_positions)
+                // Convert entries to Duration vec for slash notation
+                let rhythm: Vec<Duration> = rhythm_result
+                    .entries
+                    .iter()
+                    .map(RhythmEntry::duration)
+                    .collect();
+                (
+                    None,
+                    rhythm,
+                    rhythm_result.total_ticks,
+                    rhythm_result.tuplet_specs,
+                    rhythm_result.internal_push_positions,
+                )
             };
 
         // Convert measure width from points to spatiums for justification
@@ -2105,7 +2127,8 @@ impl ChartLayoutEngine {
         // This makes master rhythm charts easier to read by showing consistent quarter slashes
         // instead of whole note diamonds for sustained chords
         // Track whether we did auto-expansion (those slashes should be stemless)
-        let auto_expanded = self.config.auto_rhythm_slashes && !has_melodies && !has_explicit_chord_rhythm;
+        let auto_expanded =
+            self.config.auto_rhythm_slashes && !has_melodies && !has_explicit_chord_rhythm;
         let full_rhythm = if auto_expanded {
             self.expand_rhythm_to_quarters(full_rhythm)
         } else {
@@ -2121,9 +2144,10 @@ impl ChartLayoutEngine {
 
         // Set the rhythm using either entries (for explicit rhythms) or rhythm (for slash fills)
         if let Some(entries) = rhythm_entries {
-            // Also expand entries if auto_rhythm_slashes is on (but only for non-explicit rhythms)
-            // IMPORTANT: Don't expand when has_explicit_chord_rhythm - user specified exact durations
-            let entries = if self.config.auto_rhythm_slashes && !has_melodies && !has_explicit_chord_rhythm {
+            // Expand half/whole note entries to quarter slashes when auto_rhythm_slashes is enabled.
+            // This converts diamond noteheads to slash noteheads for master rhythm chart style.
+            // Rests are preserved as-is (expand_entries_to_quarters keeps them unchanged).
+            let entries = if self.config.auto_rhythm_slashes && !has_melodies {
                 self.expand_entries_to_quarters(entries)
             } else {
                 entries
@@ -2191,36 +2215,6 @@ impl ChartLayoutEngine {
         }
 
         result
-    }
-
-    /// Build rhythm array with triplet subdivisions for pushed chords.
-    ///
-    /// Delegates to the standalone function in [`rhythm_builder`].
-    #[allow(clippy::type_complexity)]
-    fn build_rhythm_with_triplets(
-        &self,
-        measure: &crate::chart::types::Measure,
-        num_beats: usize,
-        spillbacks: Option<&[PushSpillback]>,
-    ) -> (Vec<Duration>, i32, Vec<TupletSpec>, Vec<(usize, String)>, Vec<(usize, usize)>) {
-        rhythm_builder::build_rhythm_with_triplets(measure, num_beats, spillbacks)
-    }
-
-    /// Check if a measure has explicit chord rhythms (Lily or Rest notation).
-    ///
-    /// Delegates to the standalone function in [`rhythm_builder`].
-    fn measure_has_explicit_chord_rhythm(&self, measure: &Measure) -> bool {
-        rhythm_builder::measure_has_explicit_chord_rhythm(measure)
-    }
-
-    /// Build rhythm entries from explicit chord rhythms.
-    ///
-    /// Delegates to the standalone function in [`rhythm_builder`].
-    fn build_rhythm_from_chord_rhythms(
-        &self,
-        measure: &Measure,
-    ) -> (Vec<RhythmEntry>, i32, Vec<TupletSpec>) {
-        rhythm_builder::build_rhythm_from_chord_rhythms(measure)
     }
 
     /// Convert keyflow LilySyntax to engraver Duration.
@@ -2501,126 +2495,251 @@ impl ChartLayoutEngine {
     /// A weight value (typically 1.0-3.0) where higher = more space needed
     /// Compute minimum segment widths based on actual chord symbol layout bounds.
     ///
-    /// Compute minimum segment widths for chord symbol collision avoidance.
+    /// Compute minimum segment widths based on chord symbol collision avoidance.
     ///
-    /// NOTE: Pre-layout collision detection is disabled as it was causing inconsistent
-    /// measure widths. Returns zeros to let natural spacing occur. Collision resolution
-    /// happens post-render in chord_renderer where we have actual rendered bounds.
+    /// This calculates the minimum width each segment needs so that chord symbols
+    /// placed above them don't collide with the next chord symbol. By setting
+    /// segment minimum widths, the spacing system will allocate enough horizontal
+    /// space for chord symbols, and the noteheads will naturally move to accommodate.
+    ///
+    /// # Arguments
+    /// * `measure` - The measure containing chord data
+    /// * `num_segments` - Number of rhythm segments in this measure
+    /// * `measure_width` - Target measure width in points
+    /// * `_ctx` - Layout context
+    ///
+    /// # Returns
+    /// A vector of minimum widths (in spatiums) for each segment index.
     fn compute_chord_min_widths(
         &self,
-        _measure: &crate::chart::types::Measure,
+        measure: &crate::chart::types::Measure,
         num_segments: usize,
-        _measure_width: f64,
-        _ctx: &LayoutContext<'_>,
+        measure_width: f64,
+        ctx: &LayoutContext<'_>,
     ) -> Vec<f64> {
-        vec![0.0; num_segments]
+        let spatium = ctx.spatium();
+        let mut min_widths = vec![0.0; num_segments];
+
+        // Filter to visible chords (not spaces/rests)
+        let visible_chords: Vec<_> = measure
+            .chords
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                !c.full_symbol.is_empty() && c.full_symbol != "s" && c.full_symbol != "r"
+            })
+            .collect();
+
+        if visible_chords.len() < 2 {
+            return min_widths; // No collision possible with 0 or 1 chord
+        }
+
+        // Get font metrics for measuring chord symbol widths
+        let text_metrics = self.config.harmony_style.text_font_metrics.as_ref();
+        let base_font_size = self.config.harmony_style.root_size;
+        let min_gap = base_font_size * 0.5; // Minimum gap between chord symbols
+
+        // Estimate segment width assuming equal distribution
+        let estimated_segment_width = if num_segments > 0 {
+            measure_width / (num_segments as f64)
+        } else {
+            measure_width
+        };
+
+        // Calculate chord widths and required segment widths
+        for i in 0..visible_chords.len() - 1 {
+            let (idx1, chord1) = visible_chords[i];
+            let (idx2, _chord2) = visible_chords[i + 1];
+
+            // Calculate chord width using actual font metrics if available
+            let chord1_width = if let Some(metrics) = text_metrics {
+                metrics.horizontal_advance(&chord1.full_symbol, base_font_size)
+            } else {
+                // Fallback estimate: ~0.6 × font_size per character
+                chord1.full_symbol.len() as f64 * base_font_size * 0.6
+            };
+            // Add minimum width floor
+            let chord1_width = chord1_width.max(base_font_size * 1.5);
+
+            // Calculate how many segments between these chords
+            let segment_gap = idx2.saturating_sub(idx1);
+            if segment_gap == 0 {
+                continue; // Same segment, can't help here
+            }
+
+            // Required space for chord symbol + gap
+            let required_space = chord1_width + min_gap;
+
+            // If one segment, that segment needs the full space
+            // If multiple segments, distribute the requirement
+            let available_space = segment_gap as f64 * estimated_segment_width;
+
+            if required_space > available_space {
+                // Collision would occur - set minimum width for the first chord's segment
+                // The segment needs to be wide enough for the chord symbol + gap
+                // NOTE: min_width is in POINTS (same units as segment.width), not spatiums
+                let min_width_points = required_space;
+
+                // Only set if it's larger than the current minimum
+                if idx1 < min_widths.len() {
+                    min_widths[idx1] = min_widths[idx1].max(min_width_points);
+                }
+
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "[chord-min-width] Chord '{}' at seg {} needs width {:.1}pt. \
+                     Available: {:.1}pt. Setting min_width[{}]={:.1}pt",
+                    chord1.full_symbol,
+                    idx1,
+                    required_space,
+                    available_space,
+                    idx1,
+                    min_widths[idx1]
+                );
+            }
+        }
+
+        #[cfg(debug_assertions)]
+        if min_widths.iter().any(|&w| w > 0.0) {
+            eprintln!("[chord-min-width] Final min_widths (pts): {:?}", min_widths);
+        }
+
+        min_widths
     }
 
     fn estimate_measure_content_weight(
         &self,
         measure: &crate::chart::types::Measure,
-        _text_metrics: &TextFontMetrics,
+        text_metrics: &TextFontMetrics,
     ) -> f64 {
-        // Weight is based on the sum of natural widths of all rhythm elements.
-        // This follows MuseScore's duration stretch formula: slope^log2(ticks/480)
-        // where slope (measure_spacing) is typically 1.3.
+        // Weight is based on the ACTUAL rhythm elements (after push/pull processing).
+        // We call the real rhythm building functions to get accurate counts,
+        // not estimates. This ensures weight calculation matches rendering.
         //
-        // This ensures measures with more segments (especially shorter notes)
-        // get proportionally more space to fit all content.
+        // Triplets receive extra weight because they require bracket notation
+        // (└3┘) which needs horizontal space for visual clarity.
         //
-        // Additionally, triplets receive extra weight because they require bracket
-        // notation (└3┘) which needs horizontal space for visual clarity.
+        // Chord collision penalty: When adjacent chord symbols would overlap,
+        // we add extra weight so the spring system allocates more space to this
+        // measure. This is half the solution - the other half is handled in
+        // resolve_chord_collisions() which moves the first chord left.
 
-        const QUARTER_TICKS: f64 = 480.0;
-        const MEASURE_SPACING: f64 = 1.3; // MuseScore default slope
-        const TRIPLET_BONUS: f64 = 0.15;  // Extra weight per triplet element
+        const TRIPLET_BONUS: f64 = 0.15; // Extra weight per triplet element
+        const CHORD_COLLISION_BONUS: f64 = 0.25; // Extra weight per collision
 
-        /// Calculate duration stretch for a given tick count using MuseScore formula
-        fn duration_stretch(ticks: i32) -> f64 {
-            if ticks <= 0 {
-                return 1.0;
+        // Get the time signature to determine beats per measure
+        let num_beats = measure.time_signature.0 as usize;
+
+        // Check if measure has explicit chord rhythms
+        let has_explicit = rhythm_builder::measure_has_explicit_chord_rhythm(measure);
+
+        // Build the actual rhythm to count elements (same logic as rendering)
+        let source = if has_explicit {
+            RhythmSource::ExplicitRhythm(&measure.rhythm_elements)
+        } else {
+            RhythmSource::SlashNotation {
+                chords: &measure.chords,
+                spillbacks: None, // spillbacks only affect RECEIVING measure
             }
-            let ratio = f64::from(ticks) / QUARTER_TICKS;
-            MEASURE_SPACING.powf(ratio.log2())
-        }
+        };
 
-        /// Extract ticks from a ChordRhythm
-        fn rhythm_ticks(rhythm: &ChordRhythm) -> i32 {
-            match rhythm {
-                ChordRhythm::Slashes { count, dotted, .. } => {
-                    let base = 480 * (*count as i32);
-                    if *dotted { base * 3 / 2 } else { base }
-                }
-                ChordRhythm::Default => 1920, // One bar = 4 beats
-                ChordRhythm::Explicit(nd) => nd.total_ticks_480(),
-            }
-        }
+        let config = RhythmBuildConfig {
+            time_signature: (num_beats as u8, 4),
+            use_stems: self.config.use_stems,
+            auto_rhythm_slashes: false,
+        };
 
-        /// Check if a ChordRhythm is a triplet
-        fn is_triplet(rhythm: &ChordRhythm) -> bool {
-            rhythm.lily_parts().map_or(false, |(_, _, triplet)| triplet)
-        }
+        let result = rhythm_builder::build_rhythm(source, &config);
+        let triplet_elements: usize = result
+            .tuplet_specs
+            .iter()
+            .map(|s| s.end_idx - s.start_idx)
+            .sum();
+        let (element_count, triplet_count) = (result.len(), triplet_elements);
 
-        // Sum the natural widths (stretch factors) for all rhythm elements,
-        // count segments, and count triplet elements
-        let (total_stretch, segment_count, triplet_count): (f64, usize, usize) =
-            if !measure.rhythm_elements.is_empty() {
-                // Use rhythm_elements which includes both chords and rests
-                let mut stretch = 0.0;
-                let mut triplets = 0;
-                for elem in &measure.rhythm_elements {
-                    let (ticks, is_trip) = match elem {
-                        crate::chart::types::RhythmElement::Chord(chord) => {
-                            (rhythm_ticks(&chord.rhythm), is_triplet(&chord.rhythm))
-                        }
-                        crate::chart::types::RhythmElement::Rest(rest) => {
-                            (rhythm_ticks(&rest.rhythm), is_triplet(&rest.rhythm))
-                        }
-                        crate::chart::types::RhythmElement::Space(space) => {
-                            (480, is_triplet(&space.rhythm)) // Quarter note equivalent
-                        }
-                    };
-                    stretch += duration_stretch(ticks);
-                    if is_trip {
-                        triplets += 1;
-                    }
-                }
-                (stretch, measure.rhythm_elements.len(), triplets)
-            } else {
-                // Fallback: use chords only
-                let mut stretch = 0.0;
-                let mut triplets = 0;
-                for c in &measure.chords {
-                    stretch += duration_stretch(rhythm_ticks(&c.rhythm));
-                    if is_triplet(&c.rhythm) {
-                        triplets += 1;
-                    }
-                }
-                (stretch, measure.chords.len().max(1), triplets)
-            };
-
-        // Calculate weight from two factors:
-        // 1. Stretch-based weight: sum of rhythmic stretches / 4 (so 4 quarter notes = 1.0)
-        // 2. Segment-based weight: number of segments / 4 (so 4 segments = 1.0)
-        //
-        // Take the MAX to ensure measures with many short notes get enough space.
-        // A measure with 6 thirty-second notes has low stretch (~2.8) but needs 6 segment widths.
-        let stretch_weight = total_stretch / 4.0;
-        let segment_weight = segment_count as f64 / 4.0;
+        // Calculate weight based on segment count
+        // 4 segments = 1.0 weight (standard 4/4 measure)
+        let segment_weight = element_count as f64 / 4.0;
 
         // Add triplet complexity bonus - brackets need extra horizontal space
         let triplet_bonus = triplet_count as f64 * TRIPLET_BONUS;
 
-        // Use the larger of the two weights, plus triplet bonus
-        let weight = stretch_weight.max(segment_weight).max(1.0) + triplet_bonus;
+        // Calculate chord collision penalty using actual rendered widths
+        let collision_penalty =
+            self.estimate_chord_collision_penalty(measure, element_count, text_metrics);
+
+        // Use segment weight as primary factor, plus bonuses
+        let weight =
+            segment_weight.max(1.0) + triplet_bonus + collision_penalty * CHORD_COLLISION_BONUS;
 
         // Clamp to reasonable range
         weight.clamp(0.5, 4.0)
     }
 
+    /// Estimate the chord collision penalty for a measure.
+    ///
+    /// This analyzes the chord symbols in the measure and estimates how many
+    /// would collide based on their beat positions and rendered widths.
+    /// Returns a count of expected collisions (0 = no collisions expected).
+    fn estimate_chord_collision_penalty(
+        &self,
+        measure: &crate::chart::types::Measure,
+        num_segments: usize,
+        text_metrics: &TextFontMetrics,
+    ) -> f64 {
+        // Filter to visible chords (not spaces/rests)
+        let visible_chords: Vec<_> = measure
+            .chords
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                !c.full_symbol.is_empty() && c.full_symbol != "s" && c.full_symbol != "r"
+            })
+            .collect();
+
+        if visible_chords.len() < 2 {
+            return 0.0; // No collision possible with 0 or 1 chord
+        }
+
+        // Estimate chord widths using text metrics
+        let base_font_size = self.config.harmony_style.root_size;
+        let min_gap = base_font_size * 0.5; // Minimum gap between chord symbols
+
+        // Estimate segment width assuming equal distribution
+        // We use an approximate measure width (90pt per segment is typical)
+        let estimated_segment_width = 90.0 / (num_segments.max(1) as f64);
+
+        let mut collision_count = 0.0;
+
+        for i in 0..visible_chords.len() - 1 {
+            let (idx1, chord1) = visible_chords[i];
+            let (idx2, _chord2) = visible_chords[i + 1];
+
+            // Calculate chord width using actual font metrics
+            let chord1_width = text_metrics.horizontal_advance(&chord1.full_symbol, base_font_size);
+            // Add minimum width floor
+            let chord1_width = chord1_width.max(base_font_size * 1.5);
+
+            // Estimate available space between chord positions
+            // Each chord is positioned at its segment start
+            let segment_gap = (idx2 - idx1) as f64 * estimated_segment_width;
+
+            // Check if chord + gap would exceed available space
+            let required_space = chord1_width + min_gap;
+            if required_space > segment_gap {
+                // Collision expected - add weight proportional to overlap
+                let overlap = required_space - segment_gap;
+                // Normalize overlap to a 0-1 scale (capped at 1.0)
+                collision_count += (overlap / estimated_segment_width).min(1.0);
+            }
+        }
+
+        collision_count
+    }
+
     /// Distribute available width among measures using spring physics.
     ///
-    /// Delegates to [`measure_layout::distribute_measure_widths`].
+    /// Delegates to [`measure_layout::distribute_measure_widths_with_mins`].
     fn distribute_measure_widths(
         &self,
         weights: &[f64],
@@ -2628,102 +2747,22 @@ impl ChartLayoutEngine {
         total_width: f64,
         compact_scale: f64,
         base_measure_width: f64,
+        min_widths: &[f64],
     ) -> Vec<f64> {
-        measure_layout::distribute_measure_widths(
+        measure_layout::distribute_measure_widths_with_mins(
             weights,
             count_in_measures,
             total_width,
             compact_scale,
             base_measure_width,
+            min_widths,
         )
     }
 
-    /// Compute chord symbol widths for a measure and check for collisions.
-    ///
-    /// Returns the optimal font scale factor (1.0 = no scaling needed, < 1.0 = reduce size).
-    /// This implements dynamic font sizing to prevent chord symbol collisions.
-    ///
-    /// # Arguments
-    /// * `chords` - The chord symbols in the measure
-    /// * `segment_positions` - X positions of each segment (from rhythm layout)
-    /// * `measure_width` - Total width of the measure
-    /// * `style` - Current harmony style (for font size reference)
-    /// * `text_metrics` - Text metrics for width calculation
-    ///
-    /// # Returns
-    /// A scale factor to apply to the harmony style (1.0 if no scaling needed)
-    fn compute_chord_font_scale(
-        &self,
-        chords: &[crate::chart::types::ChordInstance],
-        segment_positions: &[f64],
-        measure_width: f64,
-        style: &HarmonyStyle,
-        text_metrics: &TextFontMetrics,
-    ) -> f64 {
-        // Filter to only visible chords (not spaces/rests)
-        let visible_chords: Vec<_> = chords
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| !c.full_symbol.is_empty() && c.full_symbol != "s" && c.full_symbol != "r")
-            .collect();
-
-        if visible_chords.len() <= 1 {
-            return 1.0; // No collision possible with 0 or 1 chord
-        }
-
-        // Compute widths of all visible chord symbols at current font size
-        let base_font_size = style.root_size;
-        let min_spacing = base_font_size * 0.3; // Minimum space between chords
-
-        let chord_widths: Vec<(usize, f64)> = visible_chords
-            .iter()
-            .map(|(idx, c)| {
-                let width = text_metrics.horizontal_advance(&c.full_symbol, base_font_size);
-                (*idx, width.max(base_font_size * 1.5)) // Minimum width
-            })
-            .collect();
-
-        // Check for collisions between consecutive chords
-        let mut max_scale: f64 = 1.0;
-
-        for i in 0..chord_widths.len() - 1 {
-            let (idx1, width1) = chord_widths[i];
-            let (idx2, _width2) = chord_widths[i + 1];
-
-            // Get segment positions for these chords
-            let pos1 = segment_positions.get(idx1).copied().unwrap_or(0.0);
-            let pos2 = segment_positions.get(idx2).copied().unwrap_or(measure_width);
-
-            // Available space between chord positions
-            let available_space = pos2 - pos1;
-
-            // Required space = chord width + minimum spacing
-            let required_space = width1 + min_spacing;
-
-            // If chord extends beyond available space, compute scale factor
-            if required_space > available_space && available_space > 0.0 {
-                let scale: f64 = available_space / required_space;
-                max_scale = max_scale.min(scale);
-            }
-        }
-
-        // Clamp to reasonable range (don't scale below 50% or above 100%)
-        max_scale.clamp(0.5, 1.0)
-    }
-
-    /// Create a scaled harmony style for collision avoidance.
-    ///
-    /// # Arguments
-    /// * `base_style` - The original harmony style
-    /// * `scale` - Scale factor (0.5 to 1.0)
-    ///
-    /// # Returns
-    /// A new harmony style with scaled font sizes
-    fn scaled_harmony_style(&self, base_style: &HarmonyStyle, scale: f64) -> HarmonyStyle {
-        let mut scaled = base_style.clone();
-        scaled.root_size *= scale;
-        scaled
-    }
+    // NOTE: compute_minimum_measure_width, compute_chord_font_scale, and scaled_harmony_style
+    // have been removed as part of the multi-pass layout refactor. Minimum measure widths are
+    // now pre-computed in measure_pass.rs during Pass 1 (Measure), eliminating redundant
+    // estimation. See measure_pass::measure_measure() for the replacement implementation.
 }
 
 // region:    --- Test Utilities

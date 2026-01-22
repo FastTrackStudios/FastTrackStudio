@@ -389,7 +389,9 @@ impl Plugin for FtsGuide {
         if let Some(tempo) = transport.tempo {
             self.transport_tempo.store(tempo as f32, Ordering::Relaxed);
         }
-        if let Some((num, denom)) = transport.time_sig_numerator.zip(transport.time_sig_denominator)
+        if let Some((num, denom)) = transport
+            .time_sig_numerator
+            .zip(transport.time_sig_denominator)
         {
             self.transport_time_sig_numerator
                 .store(num, Ordering::Relaxed);

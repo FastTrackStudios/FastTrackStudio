@@ -1,10 +1,12 @@
 //! Envelope data structures for REAPER
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Envelope point shapes
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[repr(i32)]
 pub enum EnvelopePointShape {
     Linear = 0,
     Square = 1,
@@ -55,7 +57,7 @@ impl From<i64> for EnvelopePointShape {
 /// Automation items are reusable automation patterns that can be pooled and shared
 /// across multiple envelope instances. They contain their own envelope points and
 /// can be looped, have different play rates, and baseline/amplitude adjustments.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct AutomationItem {
     /// Pool index - pooled instances have the same index
     /// (greater by 1 than the one displayed by default in the Name field of AI Properties window)
@@ -141,7 +143,7 @@ impl fmt::Display for AutomationItem {
 /// These blocks contain arbitrary data that can be added by extensions
 /// using the GetSetEnvelopeInfo_String() function with 'P_EXT' parameter.
 /// The structure is unknown and can vary, so we preserve the raw content.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ExtensionData {
     /// The parameter name (field 1)
     pub parmname: String,
@@ -170,7 +172,7 @@ impl fmt::Display for ExtensionData {
 /// field 5, int (bool), selected (optional)
 /// field 6, int, ?? (optional)
 /// field 7, float, bezier tension (optional)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct EnvelopePoint {
     pub position: f64,                // field 1: position in seconds
     pub value: f64,                   // field 2: envelope value
@@ -207,7 +209,7 @@ impl fmt::Display for EnvelopePoint {
 }
 
 /// A REAPER envelope
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Envelope {
     pub envelope_type: String,
     pub guid: String,

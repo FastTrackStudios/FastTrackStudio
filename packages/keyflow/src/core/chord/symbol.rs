@@ -76,7 +76,10 @@ pub trait ChordSymbol {
     /// Check if this is a major chord (major quality, no seventh or major 7th).
     fn is_major(&self) -> bool {
         self.quality_str().is_empty()
-            && matches!(self.seventh_str(), None | Some("maj7") | Some("Maj7") | Some("M7"))
+            && matches!(
+                self.seventh_str(),
+                None | Some("maj7") | Some("Maj7") | Some("M7")
+            )
     }
 
     /// Check if this is a minor chord.

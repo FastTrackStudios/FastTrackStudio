@@ -103,16 +103,9 @@ fn main() {
     println!("Individual chord examples:\n");
 
     let chords = [
-        "Gmaj7",
-        "Am7b5",
-        "Dm9",
-        "Bb7#11",
-        "Csus4",
-        "F/A",
-        "Em7_8",
-        "'G",  // push notation
-        "G////",  // slash rhythm
-        "r4",  // rest
+        "Gmaj7", "Am7b5", "Dm9", "Bb7#11", "Csus4", "F/A", "Em7_8", "'G",    // push notation
+        "G////", // slash rhythm
+        "r4",    // rest
     ];
 
     for chord in &chords {

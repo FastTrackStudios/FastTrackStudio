@@ -6,7 +6,8 @@
 /// Distribute available width among measures using spring physics.
 ///
 /// This implements MuseScore-style proportional spacing where measures with
-/// more content receive proportionally more width.
+/// more content receive proportionally more width, while respecting minimum
+/// widths for each measure.
 ///
 /// # Arguments
 /// * `weights` - Content weights for each regular measure
@@ -25,6 +26,42 @@ pub fn distribute_measure_widths(
     compact_scale: f64,
     base_measure_width: f64,
 ) -> Vec<f64> {
+    // Delegate to the version with no minimum widths
+    distribute_measure_widths_with_mins(
+        weights,
+        count_in_measures,
+        total_width,
+        compact_scale,
+        base_measure_width,
+        &[], // No minimum widths
+    )
+}
+
+/// Distribute available width among measures with minimum width constraints.
+///
+/// This implements MuseScore-style proportional spacing where measures with
+/// more content receive proportionally more width, while ensuring each measure
+/// is at least as wide as its minimum.
+///
+/// # Arguments
+/// * `weights` - Content weights for each regular measure
+/// * `count_in_measures` - Number of count-in measures (fixed width)
+/// * `total_width` - Total available width for all measures
+/// * `compact_scale` - Scale factor for count-in measures (typically 0.5)
+/// * `base_measure_width` - Base width for a single measure
+/// * `min_widths` - Minimum widths for each regular measure (empty = no constraints)
+///
+/// # Returns
+/// Vector of widths for each measure (count-in measures first, then regular)
+#[must_use]
+pub fn distribute_measure_widths_with_mins(
+    weights: &[f64],
+    count_in_measures: usize,
+    total_width: f64,
+    compact_scale: f64,
+    base_measure_width: f64,
+    min_widths: &[f64],
+) -> Vec<f64> {
     if weights.is_empty() {
         return Vec::new();
     }
@@ -34,12 +71,12 @@ pub fn distribute_measure_widths(
     let count_in_total = count_in_measures as f64 * count_in_width;
 
     // Remaining width for regular measures
-    let regular_width = total_width - count_in_total;
+    let available_for_regular = total_width - count_in_total;
 
     // Sum of weights for spring calculation
     let weight_sum: f64 = weights.iter().sum();
 
-    // Distribute width proportionally to weights
+    // First pass: calculate proportional widths
     let mut widths = Vec::with_capacity(count_in_measures + weights.len());
 
     // Add count-in widths
@@ -47,20 +84,68 @@ pub fn distribute_measure_widths(
         widths.push(count_in_width);
     }
 
-    // Add regular measure widths (proportional to weight)
-    if weight_sum > 0.0 {
-        for &weight in weights {
-            let proportion = weight / weight_sum;
-            let measure_width = regular_width * proportion;
-            widths.push(measure_width);
-        }
+    // Calculate initial proportional widths for regular measures
+    let mut regular_widths: Vec<f64> = if weight_sum > 0.0 {
+        weights
+            .iter()
+            .map(|&weight| {
+                let proportion = weight / weight_sum;
+                available_for_regular * proportion
+            })
+            .collect()
     } else {
         // Fallback: equal distribution
-        let equal_width = regular_width / weights.len() as f64;
-        for _ in weights {
-            widths.push(equal_width);
+        let equal_width = available_for_regular / weights.len() as f64;
+        vec![equal_width; weights.len()]
+    };
+
+    // Second pass: enforce minimum widths and redistribute excess
+    if !min_widths.is_empty() {
+        // Track which measures are at their minimum (locked)
+        let mut locked = vec![false; regular_widths.len()];
+        let mut deficit = 0.0;
+
+        // Find measures that need to be expanded to their minimum
+        for (i, &min_w) in min_widths.iter().enumerate() {
+            if i < regular_widths.len() && regular_widths[i] < min_w {
+                deficit += min_w - regular_widths[i];
+                regular_widths[i] = min_w;
+                locked[i] = true;
+            }
+        }
+
+        // If there's a deficit, take space from unlocked measures proportionally
+        if deficit > 0.0 {
+            // Calculate total width available from unlocked measures
+            let unlocked_total: f64 = regular_widths
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !locked[*i])
+                .map(|(i, &w)| {
+                    // Only take down to minimum
+                    let min = min_widths.get(i).copied().unwrap_or(0.0);
+                    (w - min).max(0.0)
+                })
+                .sum();
+
+            if unlocked_total > 0.0 {
+                // Distribute deficit proportionally among unlocked measures
+                let compression_ratio = (unlocked_total - deficit).max(0.0) / unlocked_total;
+
+                for (i, width) in regular_widths.iter_mut().enumerate() {
+                    if !locked[i] {
+                        let min = min_widths.get(i).copied().unwrap_or(0.0);
+                        let compressible = (*width - min).max(0.0);
+                        *width = min + compressible * compression_ratio;
+                    }
+                }
+            }
+            // If unlocked_total <= 0, we can't compress further - measures will overflow
         }
     }
+
+    // Add regular widths to output
+    widths.extend(regular_widths);
 
     widths
 }

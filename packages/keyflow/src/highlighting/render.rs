@@ -207,7 +207,11 @@ impl Renderer {
     /// }
     /// ```
     #[must_use]
-    pub fn to_styled_spans(source: &str, spans: &[HighlightSpan], theme: &Theme) -> Vec<StyledSpan> {
+    pub fn to_styled_spans(
+        source: &str,
+        spans: &[HighlightSpan],
+        theme: &Theme,
+    ) -> Vec<StyledSpan> {
         let mut styled = Vec::new();
         let mut pos = 0;
 

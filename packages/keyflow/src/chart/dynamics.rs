@@ -10,6 +10,7 @@
 //! conflict with custom section syntax which uses `[Section Name]`.
 
 use crate::time::AbsolutePosition;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -17,7 +18,7 @@ use std::fmt;
 ///
 /// These are free-form text descriptions like "Build", "Down", "Go Crazy"
 /// that indicate energy levels and intensity changes to performers.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct DynamicMarking {
     /// The text of the dynamic marking (e.g., "Build", "Down", "Soft")
     pub text: String,

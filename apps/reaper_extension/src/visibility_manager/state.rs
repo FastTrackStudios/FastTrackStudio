@@ -77,7 +77,8 @@ pub fn refresh_from_project() {
 
             // Get folder depth change (I_FOLDERDEPTH)
             let folder_depth_param = c"I_FOLDERDEPTH".as_ptr();
-            let folder_depth_value = low.GetMediaTrackInfo_Value(reaper_track, folder_depth_param) as i32;
+            let folder_depth_value =
+                low.GetMediaTrackInfo_Value(reaper_track, folder_depth_param) as i32;
             let folder_depth_change = FolderDepthChange::from_reaper_value(folder_depth_value);
 
             // Store folder info BEFORE updating depth (depth is for this track's position)

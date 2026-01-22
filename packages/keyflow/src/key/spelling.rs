@@ -12,10 +12,12 @@
 
 use crate::primitives::note::Note;
 use crate::primitives::{Accidental, MusicalNote};
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// The spelling mode determines how strictly to follow traditional notation rules
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum SpellingMode {
     /// Every letter A-G appears exactly once. May use double sharps/flats.
     #[default]
@@ -152,7 +154,7 @@ impl KeySpelling {
 
         // Standard major key signatures by semitone
         match major_root_semitone {
-            0 => (true, 0),  // C major: no sharps/flats
+            0 => (true, 0), // C major: no sharps/flats
             1 => {
                 // C# or Db major
                 if root_has_flat || (!root_has_sharp && !is_major) {
@@ -161,7 +163,7 @@ impl KeySpelling {
                     (true, 7) // C# major: 7 sharps
                 }
             }
-            2 => (true, 2),  // D major: 2 sharps
+            2 => (true, 2), // D major: 2 sharps
             3 => {
                 // D# or Eb major
                 if root_has_sharp {
@@ -170,7 +172,7 @@ impl KeySpelling {
                     (false, -3) // Eb major: 3 flats
                 }
             }
-            4 => (true, 4),  // E major: 4 sharps
+            4 => (true, 4),   // E major: 4 sharps
             5 => (false, -1), // F major: 1 flat
             6 => {
                 // F# or Gb major
@@ -180,9 +182,9 @@ impl KeySpelling {
                     (true, 6) // F# major: 6 sharps
                 }
             }
-            7 => (true, 1),  // G major: 1 sharp
-            8 => (false, -4), // Ab major: 4 flats
-            9 => (true, 3),  // A major: 3 sharps
+            7 => (true, 1),    // G major: 1 sharp
+            8 => (false, -4),  // Ab major: 4 flats
+            9 => (true, 3),    // A major: 3 sharps
             10 => (false, -2), // Bb major: 2 flats
             11 => {
                 // B or Cb major

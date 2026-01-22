@@ -1,8 +1,9 @@
 use crate::{Group, Metadata};
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for the monarchy sorting system
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Facet)]
 pub struct Config<M: Metadata> {
     /// Groups that define the sorting patterns
     pub groups: Vec<Group<M>>,
@@ -15,7 +16,7 @@ pub struct Config<M: Metadata> {
 }
 
 /// Rules for parsing input strings into metadata
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Facet)]
 pub struct ParserRules {
     /// Delimiters to use when splitting input strings
     pub delimiters: Vec<String>,
@@ -34,7 +35,8 @@ impl Default for ParserRules {
 }
 
 /// Strategy for handling items that don't match any group
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[repr(u8)]
+#[derive(Clone, Debug, Serialize, Deserialize, Facet)]
 pub enum FallbackStrategy {
     /// Create a "Misc" group for unmatched items
     CreateMisc,
@@ -60,6 +62,7 @@ impl<M: Metadata> Config<M> {
 }
 
 /// Builder for creating Config - the only way to create a Config
+#[derive(Clone, Debug, Facet)]
 pub struct ConfigBuilder<M: Metadata> {
     groups: Vec<Group<M>>,
     parser_rules: ParserRules,

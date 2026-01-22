@@ -166,10 +166,11 @@ pub use monarchy_derive::{Metadata, MetadataBuilder};
 // Re-export serde traits for derive usage
 pub use serde::{Deserialize, Serialize};
 
+use facet::Facet;
 use serde::{Serializer, ser::SerializeStruct};
 
 /// Represents a parsed item with metadata
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Facet)]
 pub struct Item<M: Metadata> {
     /// Unique identifier for this item
     pub id: String,
@@ -295,7 +296,7 @@ where
 }
 
 /// Result of scoped sorting - contains both sorted structure and items that couldn't be sorted
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Facet)]
 pub struct ScopedSortResult<M: Metadata> {
     /// Items that were successfully sorted into the structure
     pub sorted: Structure<M>,

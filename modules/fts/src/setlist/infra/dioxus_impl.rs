@@ -7,10 +7,12 @@ mod dioxus_impl {
     use crate::setlist::core::Setlist;
     use crate::setlist::infra::api_trait::{AppState, SetlistDataSource, TransportState};
     use crate::setlist::infra::dioxus::*;
+    use facet::Facet;
 
     /// Dioxus-based implementation of SetlistDataSource
     ///
     /// This implementation reads from Dioxus global signals.
+    #[derive(Facet)]
     pub struct DioxusSetlistDataSource;
 
     impl SetlistDataSource for DioxusSetlistDataSource {

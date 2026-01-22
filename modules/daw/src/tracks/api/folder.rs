@@ -1,5 +1,8 @@
+use facet::Facet;
+
 /// Folder state for TCP (Track Control Panel)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Facet)]
 pub enum TcpFolderState {
     /// Normal folder state
     Normal,
@@ -10,7 +13,8 @@ pub enum TcpFolderState {
 }
 
 /// Folder state for MCP (Mixer Control Panel)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Facet)]
 pub enum McpFolderState {
     /// Normal folder state
     Normal,
@@ -26,8 +30,9 @@ pub enum McpFolderState {
 /// - `-1` = track is the last in the innermost folder (closes one level)
 /// - `-2` = track is the last in the innermost and next-innermost folders (closes two levels)
 /// - etc.
+#[repr(i8)]
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, Facet,
 )]
 pub enum FolderDepthChange {
     /// Closes multiple folder levels (e.g., -2, -3, -4, etc.)
@@ -99,7 +104,7 @@ impl From<FolderDepthChange> for i32 {
 ///
 /// This is calculated by summing all `FolderDepthChange` values from track 0 to the current track.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, Facet,
 )]
 pub struct TrackDepth(i32);
 

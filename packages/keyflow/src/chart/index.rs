@@ -16,6 +16,7 @@ use std::ops::Range;
 use super::position::ChartPosition;
 use super::source_link::SourceLink;
 use crate::parsing::TextSpan;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Unique identifier for indexed elements.
@@ -46,7 +47,7 @@ pub type ElementId = u64;
 ///     println!("Source: line {}, column {}", link.span.line, link.span.column);
 /// }
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Facet)]
 pub struct ChartIndex {
     /// Map from source byte offset to element IDs.
     /// Multiple elements can share the same source offset (e.g., chord + accidental).

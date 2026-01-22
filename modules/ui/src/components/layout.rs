@@ -1260,7 +1260,7 @@ pub fn MainContent(
 
                 info!(
                     "  Chart section found: {} measures",
-                    chart_section.measures.len()
+                    chart_section.measures().len()
                 );
                 info!("  Starting at measure {}", start_measure);
 
@@ -1300,7 +1300,7 @@ pub fn MainContent(
                 let mut measure_quarter_note_lengths = Vec::new();
                 let mut total_quarter_notes = 0.0;
 
-                for (measure_idx, measure) in chart_section.measures.iter().enumerate() {
+                for (measure_idx, measure) in chart_section.measures().iter().enumerate() {
                     let measure_number_absolute = start_measure + measure_idx as i32;
 
                     // Use measure's time signature if available, otherwise check tempo changes for this measure

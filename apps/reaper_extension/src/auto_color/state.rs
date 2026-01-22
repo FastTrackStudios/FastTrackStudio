@@ -3,13 +3,13 @@
 //! Handles track classification and color application using dynamic-template.
 
 use dynamic_template::colors::{
-    color_for_group, color_for_path, color_for_region, from_reaper_custom_color,
-    generate_child_gradient, to_reaper_custom_color, GradientDirection,
+    GradientDirection, color_for_group, color_for_path, color_for_region, from_reaper_custom_color,
+    generate_child_gradient, to_reaper_custom_color,
 };
 use dynamic_template::icons::icon_for_group;
 use dynamic_template::layouts::layout_for_group;
 use dynamic_template::{
-    default_config, monarchy_sort, DynamicTemplateConfig, ItemMetadata, Structure,
+    DynamicTemplateConfig, ItemMetadata, Structure, default_config, monarchy_sort,
 };
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
@@ -497,10 +497,7 @@ pub fn apply_colors_to_all_regions() -> (usize, usize) {
                     );
 
                     colored += 1;
-                    info!(
-                        "Colored region '{}' -> color 0x{:06X}",
-                        name, rgb_color
-                    );
+                    info!("Colored region '{}' -> color 0x{:06X}", name, rgb_color);
                 } else {
                     skipped += 1;
                 }
@@ -580,10 +577,7 @@ pub fn apply_colors_to_all_markers() -> (usize, usize) {
                     );
 
                     colored += 1;
-                    info!(
-                        "Colored marker '{}' -> color 0x{:06X}",
-                        name, rgb_color
-                    );
+                    info!("Colored marker '{}' -> color 0x{:06X}", name, rgb_color);
                 } else {
                     skipped += 1;
                 }
@@ -1240,9 +1234,7 @@ fn get_folder_children_indices(folder_index: i32) -> Vec<i32> {
 /// 3. Apply gradient colors to children
 ///
 /// Returns (folders_processed, children_colored)
-pub fn apply_gradient_to_selected_folder_children(
-    direction: GradientDirection,
-) -> (usize, usize) {
+pub fn apply_gradient_to_selected_folder_children(direction: GradientDirection) -> (usize, usize) {
     use reaper_high::Reaper;
 
     let reaper = Reaper::get();
@@ -1269,7 +1261,8 @@ pub fn apply_gradient_to_selected_folder_children(
             }
 
             // Get the folder's track index
-            let folder_index = low.GetMediaTrackInfo_Value(folder_track, c"IP_TRACKNUMBER".as_ptr()) as i32 - 1;
+            let folder_index =
+                low.GetMediaTrackInfo_Value(folder_track, c"IP_TRACKNUMBER".as_ptr()) as i32 - 1;
 
             // Get folder's current color
             let folder_color_raw =
@@ -1450,7 +1443,8 @@ pub fn set_children_to_parent_color() -> (usize, usize) {
             }
 
             // Get the folder's track index
-            let folder_index = low.GetMediaTrackInfo_Value(folder_track, c"IP_TRACKNUMBER".as_ptr()) as i32 - 1;
+            let folder_index =
+                low.GetMediaTrackInfo_Value(folder_track, c"IP_TRACKNUMBER".as_ptr()) as i32 - 1;
 
             // Get folder's current color (raw REAPER format)
             let folder_color_raw =

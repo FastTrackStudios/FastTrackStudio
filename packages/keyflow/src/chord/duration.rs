@@ -9,6 +9,7 @@
 use crate::core::duration::{NotationDuration, NoteValue, RhythmType, TupletRatio};
 use crate::parsing::{ParseError, Token, TokenType};
 use crate::time::{MusicalDuration, TimeSignature};
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
@@ -19,18 +20,15 @@ use crate::core::time::TimeSignature as CoreTimeSignature;
 ///
 /// This enum represents the input notation for rhythm, which is then converted
 /// to [`NotationDuration`] for unified duration calculations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum ChordRhythm {
     /// Default - one bar (implied if no rhythm specified)
     Default,
 
     /// Slash notation - each slash is one beat (/, //, ///, ////)
     /// Can be dotted (/., //., etc.) and/or tied
-    Slashes {
-        count: u8,
-        dotted: bool,
-        tied: bool,
-    },
+    Slashes { count: u8, dotted: bool, tied: bool },
 
     /// Explicit duration (chord, rest, or space) using NotationDuration
     /// This unified representation supports dots, ties, triplets, and multipliers
@@ -38,7 +36,8 @@ pub enum ChordRhythm {
 }
 
 /// Lily-inspired duration values
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum LilySyntax {
     Whole,        // 1
     Half,         // 2
@@ -110,7 +109,8 @@ impl From<NoteValue> for LilySyntax {
 // endregion: --- NoteValue Conversions
 
 /// Base subdivision for push/pull timing
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default, Facet)]
+#[repr(u8)]
 pub enum PushPullBase {
     /// Standard (binary) subdivision
     #[default]
@@ -153,7 +153,11 @@ impl PushPullBase {
     /// Returns None for non-Duration bases
     pub fn duration_beats(&self) -> Option<f64> {
         match self {
-            PushPullBase::Duration { duration, dotted, triplet } => {
+            PushPullBase::Duration {
+                duration,
+                dotted,
+                triplet,
+            } => {
                 // Calculate beats based on duration (assuming 4/4 time, quarter = 1 beat)
                 let base_beats = match duration {
                     LilySyntax::Whole => 4.0,
@@ -163,8 +167,16 @@ impl PushPullBase {
                     LilySyntax::Sixteenth => 0.25,
                     LilySyntax::ThirtySecond => 0.125,
                 };
-                let dotted_beats = if *dotted { base_beats * 1.5 } else { base_beats };
-                let triplet_beats = if *triplet { dotted_beats * 2.0 / 3.0 } else { dotted_beats };
+                let dotted_beats = if *dotted {
+                    base_beats * 1.5
+                } else {
+                    base_beats
+                };
+                let triplet_beats = if *triplet {
+                    dotted_beats * 2.0 / 3.0
+                } else {
+                    dotted_beats
+                };
                 Some(triplet_beats)
             }
             _ => None,
@@ -173,7 +185,7 @@ impl PushPullBase {
 }
 
 /// Push/Pull amount (number of apostrophes + optional base)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct PushPullAmount {
     /// The subdivision level (1 = eighth, 2 = sixteenth, 3 = thirty-second)
     pub level: u8,
@@ -262,7 +274,11 @@ impl PushPullAmount {
     pub fn from_duration(duration: LilySyntax, dotted: bool, triplet: bool) -> Self {
         Self {
             level: 1, // Not used for Duration base
-            base: PushPullBase::Duration { duration, dotted, triplet },
+            base: PushPullBase::Duration {
+                duration,
+                dotted,
+                triplet,
+            },
         }
     }
 
@@ -295,7 +311,13 @@ impl ChordRhythm {
     }
 
     /// Create a Lily-style chord duration
-    pub fn lily(duration: LilySyntax, dotted: bool, triplet: bool, tied: bool, multiplier: Option<u16>) -> Self {
+    pub fn lily(
+        duration: LilySyntax,
+        dotted: bool,
+        triplet: bool,
+        tied: bool,
+        multiplier: Option<u16>,
+    ) -> Self {
         let mut nd = NotationDuration::new(duration.into());
         nd.dots = if dotted { 1 } else { 0 };
         nd.tied = tied;
@@ -308,7 +330,12 @@ impl ChordRhythm {
     }
 
     /// Create a rest rhythm
-    pub fn rest(duration: LilySyntax, dotted: bool, triplet: bool, multiplier: Option<u16>) -> Self {
+    pub fn rest(
+        duration: LilySyntax,
+        dotted: bool,
+        triplet: bool,
+        multiplier: Option<u16>,
+    ) -> Self {
         let mut nd = NotationDuration::new(duration.into());
         nd.dots = if dotted { 1 } else { 0 };
         nd.multiplier = multiplier;
@@ -320,7 +347,12 @@ impl ChordRhythm {
     }
 
     /// Create a space rhythm
-    pub fn space(duration: LilySyntax, dotted: bool, triplet: bool, multiplier: Option<u16>) -> Self {
+    pub fn space(
+        duration: LilySyntax,
+        dotted: bool,
+        triplet: bool,
+        multiplier: Option<u16>,
+    ) -> Self {
         let mut nd = NotationDuration::new(duration.into());
         nd.dots = if dotted { 1 } else { 0 };
         nd.multiplier = multiplier;
@@ -670,9 +702,15 @@ impl ChordRhythm {
         };
 
         if is_rest {
-            Ok((ChordRhythm::rest(duration, dotted, triplet, multiplier), consumed))
+            Ok((
+                ChordRhythm::rest(duration, dotted, triplet, multiplier),
+                consumed,
+            ))
         } else {
-            Ok((ChordRhythm::space(duration, dotted, triplet, multiplier), consumed))
+            Ok((
+                ChordRhythm::space(duration, dotted, triplet, multiplier),
+                consumed,
+            ))
         }
     }
 
@@ -720,7 +758,11 @@ impl ChordRhythm {
 
         match self {
             ChordRhythm::Default => NotationDuration::one_measure(core_ts),
-            ChordRhythm::Slashes { count, dotted, tied } => {
+            ChordRhythm::Slashes {
+                count,
+                dotted,
+                tied,
+            } => {
                 let mut nd = NotationDuration::new(NoteValue::Quarter);
                 nd.rhythm_type = RhythmType::Slashes(*count);
                 nd.dots = if *dotted { 1 } else { 0 };
@@ -741,7 +783,11 @@ impl ChordRhythm {
             ChordRhythm::Slashes { count, dotted, .. } => {
                 // Each slash is one beat (in the time signature denominator)
                 let base_beats = f64::from(*count);
-                let total_beats = if *dotted { base_beats * 1.5 } else { base_beats };
+                let total_beats = if *dotted {
+                    base_beats * 1.5
+                } else {
+                    base_beats
+                };
                 MusicalDuration::from_beats(total_beats, time_sig)
             }
             ChordRhythm::Explicit(nd) => {
@@ -871,7 +917,10 @@ mod tests {
     fn test_lily_parts_extraction() {
         // Explicit Lily variant
         let rhythm = ChordRhythm::lily(LilySyntax::Quarter, true, false, false, None);
-        assert_eq!(rhythm.lily_parts(), Some((LilySyntax::Quarter, true, false)));
+        assert_eq!(
+            rhythm.lily_parts(),
+            Some((LilySyntax::Quarter, true, false))
+        );
 
         // Rest variant with triplet
         let rhythm = ChordRhythm::rest(LilySyntax::Eighth, false, true, None);

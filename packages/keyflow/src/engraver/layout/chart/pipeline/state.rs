@@ -82,11 +82,7 @@ impl LayoutState {
     }
 
     /// Create state for paginated mode with count-in offset.
-    pub fn for_paginated(
-        margin_top: f64,
-        count_in_seconds: f64,
-        count_in_ticks: i64,
-    ) -> Self {
+    pub fn for_paginated(margin_top: f64, count_in_seconds: f64, count_in_ticks: i64) -> Self {
         Self {
             current_y: margin_top,
             cumulative_time: -count_in_seconds,

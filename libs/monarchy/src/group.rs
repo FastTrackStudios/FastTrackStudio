@@ -1,9 +1,11 @@
 use crate::field_value::FieldValueDescriptor;
 use crate::{IntoField, Metadata};
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Strategy for how items should be grouped when a metadata field is present
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[repr(u8)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Facet)]
 pub enum FieldGroupingStrategy {
     /// Default behavior: items with the field value become children grouped by value
     /// Items without the field stay at the current level
@@ -82,7 +84,7 @@ impl IntoVec<String> for &[&str] {
 }
 
 /// Defines a group pattern for organizing items
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Facet)]
 pub struct Group<M: Metadata> {
     /// Name of this group (used for display)
     pub name: String,
@@ -268,6 +270,7 @@ impl<M: Metadata> GroupBuilder<M> {
 }
 
 /// Builder for creating Groups with a fluent API
+#[derive(Clone, Debug, Facet)]
 pub struct GroupBuilder<M: Metadata> {
     /// The group being built (public for extension traits)
     pub group: Group<M>,

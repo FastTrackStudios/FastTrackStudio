@@ -1,5 +1,6 @@
 //! MIDI note name settings
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// MIDI note name (MIDINOTENAMES)
@@ -10,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Field 3: Note name (string)
 /// Field 4: Unknown field
 /// Field 5: Note number (duplicate?)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct MidiNoteName {
     /// MIDI channel number (-1 = Omni)
     pub channel: i32,

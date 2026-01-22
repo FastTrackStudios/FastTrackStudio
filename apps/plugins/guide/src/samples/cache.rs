@@ -119,7 +119,15 @@ impl SampleCache {
             );
         }
 
-        (beat, eighth, sixteenth, triplet, accent, num_channels, sample_length)
+        (
+            beat,
+            eighth,
+            sixteenth,
+            triplet,
+            accent,
+            num_channels,
+            sample_length,
+        )
     }
 
     /// Clear all guide samples from the cache

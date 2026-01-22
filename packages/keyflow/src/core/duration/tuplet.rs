@@ -3,6 +3,8 @@
 //! A tuplet is a rhythmic grouping where a certain number of notes are played
 //! in the time normally occupied by a different number of notes.
 
+use facet::Facet;
+
 /// Tuplet ratio (e.g., 3:2 for triplet).
 ///
 /// The ratio indicates how many notes (numerator) are played in the time
@@ -11,7 +13,7 @@
 /// - 5:4 (quintuplet): 5 notes in the space of 4
 /// - 6:4 (sextuplet): 6 notes in the space of 4
 /// - 7:8 (septuplet): 7 notes in the space of 8 (MuseScore convention)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Facet)]
 pub struct TupletRatio {
     /// How many notes in the tuplet group
     pub numerator: u8,

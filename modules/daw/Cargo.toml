@@ -32,7 +32,7 @@ futures-util = "0.3.31"
 helgoboss-midi = "0.4.0"
 matchit = "0.9.0"
 rosc = "0.11.4"
-rxrust = { workspace = true }
+# rxrust moved to non-WASM dependencies (not compatible with wasm32)
 
 # Instruments module dependencies
 strsim = "0.11"
@@ -42,8 +42,21 @@ indexmap = { version = "2.0", features = ["serde"] }
 once_cell = "1.19"
 rgb = { version = "0.8", features = ["serde"] }
 
+# Facet reflection (WASM compatible)
+facet = { workspace = true }
+
+# Roam RPC framework and actions (WASM compatible)
+roam = { workspace = true }
+actions = { workspace = true }
+
+# WASM-specific dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { version = "1.0", features = ["v4", "serde", "js"] }
+getrandom = { version = "0.2", features = ["js"] }
+
 # Server dependencies (excluded for WASM builds)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rxrust = { workspace = true }
 tokio = { version = "1.48.0", features = ["full"] }
 axum = { version = "0.8.6", features = ["default", "ws"] }
 http = "1.3.1"

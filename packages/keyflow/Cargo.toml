@@ -35,9 +35,6 @@ color-eyre = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 colored = "3.0"
 regex = "1.11.3"
-daw = { path = "../../modules/daw" }
-uuid = { version = "1.0", features = ["serde", "v4"] }
-helgoboss-midi = "0.4.0"
 derive_more = { version = "1.0", features = ["debug", "display", "from", "error"] }
 
 # GPU rendering (optional, for engraver feature)
@@ -75,9 +72,30 @@ pollster = { version = "0.4", optional = true }
 env_logger = { version = "0.11", optional = true }
 log = { version = "0.4", optional = true }
 
+# DAW and facet (WASM compatible)
+daw = { path = "../../modules/daw" }
+facet = { workspace = true }
+helgoboss-midi = "0.4.0"
+
+# WASM-specific dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { version = "1.0", features = ["serde", "v4", "js"] }
+getrandom = { version = "0.2", features = ["js"] }
+# WASM wgpu needs webgpu/webgl features (unified with main wgpu dep)
+wgpu = { version = "26", features = ["wgsl", "webgpu", "webgl"], optional = true }
+
+# Non-WASM dependencies
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+uuid = { version = "1.0", features = ["serde", "v4"] }
+
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 pollster = "0.4"
+
+[[bin]]
+name = "debug-keyflow"
+path = "src/bin/debug_keyflow.rs"
+required-features = ["engraver"]
 
 [[example]]
 name = "reckless_love"

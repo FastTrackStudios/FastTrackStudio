@@ -29,7 +29,9 @@ use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 /// - 960: REAPER default
 /// - 96: Simple/low-resolution MIDI
 /// - 24: MIDI clock resolution
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct Ticks<const PPQ: u32>(pub i64);
 
 /// Standard MIDI tick resolution (480 PPQ).
@@ -105,11 +107,7 @@ impl<const PPQ: u32> Ticks<PPQ> {
     /// Get the absolute value.
     #[must_use]
     pub const fn abs(self) -> Self {
-        if self.0 < 0 {
-            Self(-self.0)
-        } else {
-            self
-        }
+        if self.0 < 0 { Self(-self.0) } else { self }
     }
 
     /// Check if this is zero.

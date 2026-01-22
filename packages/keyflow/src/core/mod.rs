@@ -16,7 +16,7 @@ pub mod time;
 // Re-export primary types for convenience
 pub use chord::ChordSymbol;
 pub use duration::{
-    DurationContext, FromTicks, NotationDuration, NoteValue, ReaperTicks, RhythmType, StandardTicks,
-    Ticks, ToBeats, ToNotationDuration, ToTicks, TupletRatio,
+    DurationContext, FromTicks, NotationDuration, NoteValue, ReaperTicks, RhythmType,
+    StandardTicks, Ticks, ToBeats, ToNotationDuration, ToTicks, TupletRatio,
 };
 pub use time::TimeSignature;

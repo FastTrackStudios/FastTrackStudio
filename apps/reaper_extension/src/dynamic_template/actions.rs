@@ -144,7 +144,7 @@ fn delete_empty_tracks(tracks_to_check: &HashSet<*mut MediaTrack>) {
 
     if deleted_count > 0 {
         reaper.show_console_msg(
-            format!("Deleted {} empty original track(s)\n", deleted_count).as_str()
+            format!("Deleted {} empty original track(s)\n", deleted_count).as_str(),
         );
     }
 }
@@ -162,9 +162,7 @@ fn sort_items_core(items: Vec<ItemInfo>, action_name: &str, undo_name: &str) {
         return;
     }
 
-    reaper.show_console_msg(
-        format!("Found {} item(s):\n", items.len()).as_str()
-    );
+    reaper.show_console_msg(format!("Found {} item(s):\n", items.len()).as_str());
 
     // Log item names (limit to first 20 for large projects)
     let display_count = items.len().min(20);
@@ -184,9 +182,7 @@ fn sort_items_core(items: Vec<ItemInfo>, action_name: &str, undo_name: &str) {
         .collect();
 
     // Extract just the names for sorting
-    let item_names: Vec<String> = items.iter()
-        .map(|item| item.name.clone())
-        .collect();
+    let item_names: Vec<String> = items.iter().map(|item| item.name.clone()).collect();
 
     // Use dynamic-template to organize items
     let config = default_config();
@@ -238,7 +234,11 @@ fn sort_selected_items_handler() {
         return;
     }
 
-    sort_items_core(items, "Sort Selected Items", "Sort selected items into template");
+    sort_items_core(
+        items,
+        "Sort Selected Items",
+        "Sort selected items into template",
+    );
 }
 
 /// Sort ALL items in the project into a template structure
@@ -265,7 +265,11 @@ fn format_track_structure(tracks: &[Track]) -> String {
 
     for track in tracks {
         let indent = "  ".repeat(depth.max(0) as usize);
-        let track_type = if track.is_folder { "[Folder]" } else { "[Track]" };
+        let track_type = if track.is_folder {
+            "[Folder]"
+        } else {
+            "[Track]"
+        };
 
         output.push_str(&format!("{}{} {}", indent, track_type, track.name.0));
 
@@ -283,10 +287,7 @@ fn format_track_structure(tracks: &[Track]) -> String {
 }
 
 /// Create tracks in REAPER based on the organized structure
-fn create_tracks_in_reaper(
-    tracks: &[Track],
-    items: &[ItemInfo],
-) {
+fn create_tracks_in_reaper(tracks: &[Track], items: &[ItemInfo]) {
     let reaper = Reaper::get();
     let medium = reaper.medium_reaper();
     let low = medium.low();
@@ -295,7 +296,10 @@ fn create_tracks_in_reaper(
     use std::collections::HashMap;
     let mut item_map: HashMap<&str, Vec<*mut MediaItem>> = HashMap::new();
     for item in items {
-        item_map.entry(item.name.as_str()).or_default().push(item.media_item);
+        item_map
+            .entry(item.name.as_str())
+            .or_default()
+            .push(item.media_item);
     }
 
     // Track the current insertion index (at end of current tracks)
@@ -332,11 +336,7 @@ fn create_tracks_in_reaper(
             // Set folder depth using the track's folder_depth_change value
             let param_folder = CString::new("I_FOLDERDEPTH").unwrap();
             let folder_value = track.folder_depth_change.to_reaper_value() as f64;
-            low.SetMediaTrackInfo_Value(
-                reaper_track,
-                param_folder.as_ptr(),
-                folder_value,
-            );
+            low.SetMediaTrackInfo_Value(reaper_track, param_folder.as_ptr(), folder_value);
 
             // Move items to this track
             for item in &track.items {
@@ -349,9 +349,8 @@ fn create_tracks_in_reaper(
                 }
             }
 
-            reaper.show_console_msg(
-                format!("{}Created track: {}\n", indent, track.name.0).as_str()
-            );
+            reaper
+                .show_console_msg(format!("{}Created track: {}\n", indent, track.name.0).as_str());
 
             // Update depth for next track
             depth += track.folder_depth_change.to_reaper_value();
@@ -377,7 +376,9 @@ fn import_and_sort_handler() {
         // Create a buffer for the file path
         let mut file_buf = vec![0u8; 4096];
         let title = CString::new("Select audio files to import and sort").unwrap();
-        let filter = CString::new("Audio Files\0*.wav;*.mp3;*.aiff;*.flac;*.ogg;*.m4a\0All Files\0*.*\0\0").unwrap();
+        let filter =
+            CString::new("Audio Files\0*.wav;*.mp3;*.aiff;*.flac;*.ogg;*.m4a\0All Files\0*.*\0\0")
+                .unwrap();
 
         // Use GetUserFileNameForRead which allows multiple selection
         let result = low.GetUserFileNameForRead(
@@ -425,7 +426,9 @@ fn import_and_sort_handler() {
             return;
         }
 
-        reaper.show_console_msg(format!("Imported {} item(s), now sorting...\n\n", items.len()).as_str());
+        reaper.show_console_msg(
+            format!("Imported {} item(s), now sorting...\n\n", items.len()).as_str(),
+        );
 
         // Collect original tracks
         let original_tracks: HashSet<*mut MediaTrack> = items
@@ -435,9 +438,7 @@ fn import_and_sort_handler() {
             .collect();
 
         // Extract names and sort
-        let item_names: Vec<String> = items.iter()
-            .map(|item| item.name.clone())
-            .collect();
+        let item_names: Vec<String> = items.iter().map(|item| item.name.clone()).collect();
 
         let config = default_config();
         match item_names.organize_into_tracks(&config, None) {

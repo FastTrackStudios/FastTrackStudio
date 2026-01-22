@@ -25,6 +25,7 @@
 //! - `r_4` - quarter rest
 
 use crate::time::AbsolutePosition;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -44,7 +45,8 @@ const PITCH_CLASS: [(&str, i8); 7] = [
 const SCALE_DEGREES: [&str; 7] = ["C", "D", "E", "F", "G", "A", "B"];
 
 /// Octave modifier for relative pitch calculation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Facet)]
+#[repr(u8)]
 pub enum OctaveModifier {
     /// No modifier - use closest octave (relative mode)
     #[default]
@@ -56,7 +58,7 @@ pub enum OctaveModifier {
 }
 
 /// A single note in a melody
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct MelodyNote {
     /// The pitch name (C, D, E, F, G, A, B) with optional accidental
     /// "r" for rest
@@ -418,7 +420,7 @@ impl fmt::Display for MelodyNote {
 }
 
 /// A melody is a sequence of notes
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Melody {
     /// The notes in this melody
     pub notes: Vec<MelodyNote>,
@@ -522,7 +524,7 @@ impl fmt::Display for Melody {
 }
 
 /// Storage for melody variables
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
 pub struct MelodyVariables {
     /// Map from variable name to melody
     variables: HashMap<String, Melody>,

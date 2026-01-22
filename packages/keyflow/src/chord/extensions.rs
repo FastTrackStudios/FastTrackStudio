@@ -5,11 +5,13 @@
 use crate::chord::degree::ChordDegree;
 use crate::parsing::{ParseError, Token, TokenType};
 use crate::primitives::Interval;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument, trace};
 
 /// Type of extension quality
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum ExtensionQuality {
     /// Natural extension (9, 11, 13)
     Natural,
@@ -20,7 +22,7 @@ pub enum ExtensionQuality {
 }
 
 /// Extensions on a chord (9th, 11th, 13th)
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Facet)]
 pub struct Extensions {
     /// Ninth extension (if present)
     pub ninth: Option<ExtensionQuality>,

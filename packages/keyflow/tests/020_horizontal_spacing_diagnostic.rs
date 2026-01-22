@@ -14,13 +14,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use keyflow::Chart;
 use keyflow::engraver::layout::chart::{ChartLayoutConfig, ChartLayoutEngine, LayoutMode};
 use keyflow::engraver::layout::segment::SegmentType;
 use keyflow::engraver::scene::id::ElementType;
 use keyflow::engraver::scene::node::SceneNode;
 use keyflow::engraver::scene::traverse::SceneNodeExt;
 use keyflow::engraver::style::MStyle;
-use keyflow::Chart;
 
 /// Test chart with explicit durations to diagnose spacing
 const SPACING_TEST_CHART: &str = r#"Spacing Test
@@ -51,15 +51,12 @@ fn create_test_engine() -> ChartLayoutEngine {
         std::fs::read(&text_font_path)
             .unwrap_or_else(|e| panic!("Failed to load text font at {:?}: {}", text_font_path, e)),
     );
-    let musejazz_font_data = Arc::new(
-        std::fs::read(&musejazz_font_path)
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Failed to load MuseJazz font at {:?}: {}",
-                    musejazz_font_path, e
-                )
-            }),
-    );
+    let musejazz_font_data = Arc::new(std::fs::read(&musejazz_font_path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to load MuseJazz font at {:?}: {}",
+            musejazz_font_path, e
+        )
+    }));
 
     let style: &'static MStyle = Box::leak(Box::new(MStyle::default()));
     let config = ChartLayoutConfig::master_rhythm();
@@ -290,10 +287,7 @@ fn test_snippet_mode_layout() {
     eprintln!("Page width (points): {:.2}", page_width);
 
     // Use snippet mode like the web app
-    let result = engine.layout_chart(
-        &chart,
-        &LayoutMode::Snippet { page_width },
-    );
+    let result = engine.layout_chart(&chart, &LayoutMode::Snippet { page_width });
 
     eprintln!("Total width: {:.2}", result.total_width);
     eprintln!("Total height: {:.2}", result.total_height);
@@ -313,8 +307,12 @@ fn test_snippet_mode_layout() {
         // Calculate measure bounds from first/last beat
         if let (Some(first), Some(last)) = (sorted_beats.first(), sorted_beats.last()) {
             let measure_width = (last.x + last.width) - first.x;
-            eprintln!("  Measure range: x={:.2} to {:.2} (width={:.2})",
-                first.x, last.x + last.width, measure_width);
+            eprintln!(
+                "  Measure range: x={:.2} to {:.2} (width={:.2})",
+                first.x,
+                last.x + last.width,
+                measure_width
+            );
         }
 
         for bp in &sorted_beats {
@@ -338,10 +336,16 @@ fn test_snippet_mode_layout() {
     if let Some(measure_beats) = measures.get(&1) {
         let x_positions: Vec<f64> = measure_beats.iter().map(|bp| bp.x).collect();
         let min_x = x_positions.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max_x = x_positions.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let max_x = x_positions
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max);
         let spread = max_x - min_x;
 
-        eprintln!("\nMeasure 1 x-position spread: {:.2} (min={:.2}, max={:.2})", spread, min_x, max_x);
+        eprintln!(
+            "\nMeasure 1 x-position spread: {:.2} (min={:.2}, max={:.2})",
+            spread, min_x, max_x
+        );
 
         // The spread should be significant (at least 50 points for 6 beats with varied durations)
         assert!(

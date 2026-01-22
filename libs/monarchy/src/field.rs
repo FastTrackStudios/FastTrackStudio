@@ -32,6 +32,7 @@
 //! ```
 
 use crate::{Group, Metadata};
+use facet::Facet;
 
 /// Trait for types that can be converted into a metadata field configuration.
 ///
@@ -60,7 +61,7 @@ pub trait IntoField<M: Metadata> {
 ///         .build()
 /// );
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Facet)]
 pub struct MetadataField<M: Metadata> {
     /// The field enum variant this represents.
     pub field: M::Field,

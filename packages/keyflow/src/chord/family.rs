@@ -6,10 +6,12 @@ use crate::chord::degree::ChordDegree;
 use crate::chord::quality::ChordQuality;
 use crate::parsing::{ParseError, Token, TokenType};
 use crate::primitives::Interval;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Chord family - represents the seventh type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum ChordFamily {
     /// Major seventh (maj7) - adds major 7th to major triad
     Major7,

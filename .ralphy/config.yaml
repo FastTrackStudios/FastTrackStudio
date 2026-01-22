@@ -1,0 +1,41 @@
+# Ralphy Configuration
+# https://github.com/michaelshimeles/ralphy
+
+# Project info (auto-detected, edit if needed)
+project:
+  name: "FastTrackStudio"
+  language: "Rust"
+  framework: "Dioxus, nih-plug, reaper-rs"
+  description: "Music production toolset integrating with REAPER DAW"
+
+# Commands (auto-detected from package.json/pyproject.toml)
+commands:
+  test: "cargo test"
+  lint: "cargo clippy"
+  build: "cargo build"
+
+# Task Master Integration
+# PRDs are stored in .taskmaster/docs/
+# Tasks are generated to .taskmaster/tasks/tasks.json
+taskmaster:
+  prd_path: ".taskmaster/docs/prd.md"
+  tasks_path: ".taskmaster/tasks/tasks.json"
+
+# Rules - instructions the AI MUST follow
+# These are injected into every prompt
+rules:
+  - "Read and follow CLAUDE.md for project conventions"
+  - "Use justfile commands when available (just build, just test, just lint)"
+  - "Avoid over-engineering - only make changes directly requested"
+  - "unsafe_code is forbidden except in reaper_extension and fts with reaper feature"
+  - "Use Dioxus 0.7 patterns for UI components"
+  - "Follow existing module patterns in the codebase"
+
+# Boundaries - files/folders the AI should not modify
+boundaries:
+  never_touch:
+    - "libs/vendor/**"
+    - "libs/nih-plug/**"
+    - "*.lock"
+    - ".env"
+    - ".taskmaster/config.json"

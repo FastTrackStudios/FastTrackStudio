@@ -1,15 +1,18 @@
 //! Automation mode for tracks
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Wrapper for unknown enum values to preserve them during serialization
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct Hidden<T>(pub T);
 
 /// Automation mode for tracks
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Facet)]
 pub enum AutomationMode {
+    #[default]
     TrimRead,
     Read,
     Touch,

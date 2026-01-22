@@ -219,6 +219,9 @@ pub mod core;
 // Application layer module
 pub mod application;
 
+// Roam service module
+pub mod service;
+
 // Infrastructure adapters module (to be implemented later)
 // pub mod infra;
 
@@ -233,6 +236,11 @@ pub use application::{
     MarkerRegionSourceBuilder, MockMarkerRegionService, ReaperMarkerRegionSource,
     RppMarkerRegionSource, SourceType, TempoTimeEnvelope, TempoTimePoint, mock_source,
     mock_source_with_data, reaper_source,
+};
+
+// Roam service exports
+pub use service::{
+    MarkerInfo, MarkerRegionCommand, MarkerRegionEvent, MarkerRegionService, RegionInfo,
 };
 
 // Re-export infrastructure adapters for convenience (to be implemented later)

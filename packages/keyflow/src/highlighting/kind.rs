@@ -4,13 +4,14 @@
 //! structure for representing highlighted regions in source text.
 
 use crate::parsing::TextSpan;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// A highlighted region in source text.
 ///
 /// Combines a source span with its semantic highlight kind,
 /// enabling renderers to apply appropriate styling.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
 pub struct HighlightSpan {
     /// The source text region this highlight covers
     pub span: TextSpan,
@@ -51,7 +52,8 @@ impl HighlightSpan {
 ///
 /// Each variant represents a distinct semantic element in Keyflow notation,
 /// allowing themes to style different parts of the chart appropriately.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum HighlightKind {
     // ==================== Chord Components ====================
     /// Root note of a chord (G, C#, Bb)

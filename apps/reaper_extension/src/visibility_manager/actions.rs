@@ -8,7 +8,10 @@ use std::ffi::CString;
 use tracing::{info, warn};
 use visibility_manager::{ViewMode, VisibilityGroupId, VisibilityTarget};
 
-use super::state::{apply_changes, get_folder_children, get_manager, get_or_init_manager, is_folder_track, refresh_from_project};
+use super::state::{
+    apply_changes, get_folder_children, get_manager, get_or_init_manager, is_folder_track,
+    refresh_from_project,
+};
 
 /// Analyze project and show current visibility groups
 fn analyze_project_handler() {
@@ -30,7 +33,9 @@ fn analyze_project_handler() {
         if groups.is_empty() {
             reaper.show_console_msg("No visibility groups found. Project may be empty.\n");
         } else {
-            reaper.show_console_msg(format!("Found {} visibility groups:\n\n", groups.len()).as_str());
+            reaper.show_console_msg(
+                format!("Found {} visibility groups:\n\n", groups.len()).as_str(),
+            );
 
             for group in groups {
                 let status = if group.active { "VISIBLE" } else { "HIDDEN" };
@@ -40,7 +45,8 @@ fn analyze_project_handler() {
                         status,
                         group.name,
                         group.track_count()
-                    ).as_str()
+                    )
+                    .as_str(),
                 );
             }
         }
@@ -71,9 +77,7 @@ fn show_all_handler() {
             let changes = manager.show_all();
             apply_changes(&changes);
 
-            reaper.show_console_msg(
-                format!("Showed {} tracks\n", changes.show.len()).as_str()
-            );
+            reaper.show_console_msg(format!("Showed {} tracks\n", changes.show.len()).as_str());
         }
 
         low.Undo_EndBlock(undo_name.as_ptr(), 0);
@@ -98,9 +102,7 @@ fn hide_all_handler() {
             let changes = manager.hide_all();
             apply_changes(&changes);
 
-            reaper.show_console_msg(
-                format!("Hid {} tracks\n", changes.hide.len()).as_str()
-            );
+            reaper.show_console_msg(format!("Hid {} tracks\n", changes.hide.len()).as_str());
         }
 
         low.Undo_EndBlock(undo_name.as_ptr(), 0);
@@ -188,7 +190,7 @@ fn toggle_group_handler(group_id: &str, group_name: &str) {
                 }
                 Err(e) => {
                     reaper.show_console_msg(
-                        format!("No {} tracks in project\n", group_name).as_str()
+                        format!("No {} tracks in project\n", group_name).as_str(),
                     );
                 }
             }
@@ -262,9 +264,7 @@ fn save_snapshot_handler() {
     let mut guard = get_or_init_manager();
     if let Some(manager) = guard.as_mut() {
         let snapshot_id = manager.save_snapshot("Quick Snapshot");
-        reaper.show_console_msg(
-            format!("Saved snapshot: {}\n", snapshot_id.0).as_str()
-        );
+        reaper.show_console_msg(format!("Saved snapshot: {}\n", snapshot_id.0).as_str());
     }
 }
 
@@ -294,7 +294,7 @@ fn stateless_toggle_group(group_id: &str, group_name: &str) {
             if let Some(group) = manager.get_group(&id) {
                 if group.is_empty() {
                     reaper.show_console_msg(
-                        format!("No {} tracks in project\n", group_name).as_str()
+                        format!("No {} tracks in project\n", group_name).as_str(),
                     );
                     low.Undo_EndBlock(undo_name.as_ptr(), 0);
                     return;
@@ -316,7 +316,8 @@ fn stateless_toggle_group(group_id: &str, group_name: &str) {
                 for &track_idx in &all_indices {
                     let track = low.GetTrack(std::ptr::null_mut(), track_idx as i32);
                     if !track.is_null() {
-                        let visible = low.GetMediaTrackInfo_Value(track, c"B_SHOWINTCP".as_ptr()) != 0.0;
+                        let visible =
+                            low.GetMediaTrackInfo_Value(track, c"B_SHOWINTCP".as_ptr()) != 0.0;
                         if !visible {
                             any_hidden = true;
                             break;
@@ -343,12 +344,14 @@ fn stateless_toggle_group(group_id: &str, group_name: &str) {
 
                 let action = if show { "Showed" } else { "Hid" };
                 reaper.show_console_msg(
-                    format!("{} {} {} tracks (including folder children)\n", action, count, group_name).as_str()
+                    format!(
+                        "{} {} {} tracks (including folder children)\n",
+                        action, count, group_name
+                    )
+                    .as_str(),
                 );
             } else {
-                reaper.show_console_msg(
-                    format!("No {} tracks in project\n", group_name).as_str()
-                );
+                reaper.show_console_msg(format!("No {} tracks in project\n", group_name).as_str());
             }
         }
 
@@ -381,9 +384,7 @@ fn show_only_group(group_id: &str, group_name: &str) {
                 .unwrap_or_default();
 
             if base_indices.is_empty() {
-                reaper.show_console_msg(
-                    format!("No {} tracks in project\n", group_name).as_str()
-                );
+                reaper.show_console_msg(format!("No {} tracks in project\n", group_name).as_str());
                 low.Undo_EndBlock(undo_name.as_ptr(), 0);
                 return;
             }
@@ -423,7 +424,11 @@ fn show_only_group(group_id: &str, group_name: &str) {
             low.UpdateArrange();
 
             reaper.show_console_msg(
-                format!("Showing {} {} tracks (including folder children), hid {} others\n", shown, group_name, hidden).as_str()
+                format!(
+                    "Showing {} {} tracks (including folder children), hid {} others\n",
+                    shown, group_name, hidden
+                )
+                .as_str(),
             );
         }
 
@@ -457,7 +462,11 @@ fn show_with_others_group(group_id: &str, group_name: &str) {
         low.UpdateArrange();
 
         reaper.show_console_msg(
-            format!("Showed all {} tracks (including {})\n", num_tracks, group_name).as_str()
+            format!(
+                "Showed all {} tracks (including {})\n",
+                num_tracks, group_name
+            )
+            .as_str(),
         );
 
         low.Undo_EndBlock(undo_name.as_ptr(), 0);
@@ -465,40 +474,100 @@ fn show_with_others_group(group_id: &str, group_name: &str) {
 }
 
 // Stateless Toggle handlers
-fn stateless_toggle_drums() { stateless_toggle_group("drums", "Drums"); }
-fn stateless_toggle_bass() { stateless_toggle_group("bass", "Bass"); }
-fn stateless_toggle_guitars() { stateless_toggle_group("guitars", "Guitars"); }
-fn stateless_toggle_keys() { stateless_toggle_group("keys", "Keys"); }
-fn stateless_toggle_synths() { stateless_toggle_group("synths", "Synths"); }
-fn stateless_toggle_vocals() { stateless_toggle_group("vocals", "Vocals"); }
-fn stateless_toggle_horns() { stateless_toggle_group("horns", "Horns"); }
-fn stateless_toggle_sfx() { stateless_toggle_group("sfx", "SFX"); }
-fn stateless_toggle_percussion() { stateless_toggle_group("percussion", "Percussion"); }
-fn stateless_toggle_orchestra() { stateless_toggle_group("orchestra", "Orchestra"); }
+fn stateless_toggle_drums() {
+    stateless_toggle_group("drums", "Drums");
+}
+fn stateless_toggle_bass() {
+    stateless_toggle_group("bass", "Bass");
+}
+fn stateless_toggle_guitars() {
+    stateless_toggle_group("guitars", "Guitars");
+}
+fn stateless_toggle_keys() {
+    stateless_toggle_group("keys", "Keys");
+}
+fn stateless_toggle_synths() {
+    stateless_toggle_group("synths", "Synths");
+}
+fn stateless_toggle_vocals() {
+    stateless_toggle_group("vocals", "Vocals");
+}
+fn stateless_toggle_horns() {
+    stateless_toggle_group("horns", "Horns");
+}
+fn stateless_toggle_sfx() {
+    stateless_toggle_group("sfx", "SFX");
+}
+fn stateless_toggle_percussion() {
+    stateless_toggle_group("percussion", "Percussion");
+}
+fn stateless_toggle_orchestra() {
+    stateless_toggle_group("orchestra", "Orchestra");
+}
 
 // Show Only handlers (shift-click equivalent)
-fn show_only_drums() { show_only_group("drums", "Drums"); }
-fn show_only_bass() { show_only_group("bass", "Bass"); }
-fn show_only_guitars() { show_only_group("guitars", "Guitars"); }
-fn show_only_keys() { show_only_group("keys", "Keys"); }
-fn show_only_synths() { show_only_group("synths", "Synths"); }
-fn show_only_vocals() { show_only_group("vocals", "Vocals"); }
-fn show_only_horns() { show_only_group("horns", "Horns"); }
-fn show_only_sfx() { show_only_group("sfx", "SFX"); }
-fn show_only_percussion() { show_only_group("percussion", "Percussion"); }
-fn show_only_orchestra() { show_only_group("orchestra", "Orchestra"); }
+fn show_only_drums() {
+    show_only_group("drums", "Drums");
+}
+fn show_only_bass() {
+    show_only_group("bass", "Bass");
+}
+fn show_only_guitars() {
+    show_only_group("guitars", "Guitars");
+}
+fn show_only_keys() {
+    show_only_group("keys", "Keys");
+}
+fn show_only_synths() {
+    show_only_group("synths", "Synths");
+}
+fn show_only_vocals() {
+    show_only_group("vocals", "Vocals");
+}
+fn show_only_horns() {
+    show_only_group("horns", "Horns");
+}
+fn show_only_sfx() {
+    show_only_group("sfx", "SFX");
+}
+fn show_only_percussion() {
+    show_only_group("percussion", "Percussion");
+}
+fn show_only_orchestra() {
+    show_only_group("orchestra", "Orchestra");
+}
 
 // Show With Others handlers
-fn show_with_others_drums() { show_with_others_group("drums", "Drums"); }
-fn show_with_others_bass() { show_with_others_group("bass", "Bass"); }
-fn show_with_others_guitars() { show_with_others_group("guitars", "Guitars"); }
-fn show_with_others_keys() { show_with_others_group("keys", "Keys"); }
-fn show_with_others_synths() { show_with_others_group("synths", "Synths"); }
-fn show_with_others_vocals() { show_with_others_group("vocals", "Vocals"); }
-fn show_with_others_horns() { show_with_others_group("horns", "Horns"); }
-fn show_with_others_sfx() { show_with_others_group("sfx", "SFX"); }
-fn show_with_others_percussion() { show_with_others_group("percussion", "Percussion"); }
-fn show_with_others_orchestra() { show_with_others_group("orchestra", "Orchestra"); }
+fn show_with_others_drums() {
+    show_with_others_group("drums", "Drums");
+}
+fn show_with_others_bass() {
+    show_with_others_group("bass", "Bass");
+}
+fn show_with_others_guitars() {
+    show_with_others_group("guitars", "Guitars");
+}
+fn show_with_others_keys() {
+    show_with_others_group("keys", "Keys");
+}
+fn show_with_others_synths() {
+    show_with_others_group("synths", "Synths");
+}
+fn show_with_others_vocals() {
+    show_with_others_group("vocals", "Vocals");
+}
+fn show_with_others_horns() {
+    show_with_others_group("horns", "Horns");
+}
+fn show_with_others_sfx() {
+    show_with_others_group("sfx", "SFX");
+}
+fn show_with_others_percussion() {
+    show_with_others_group("percussion", "Percussion");
+}
+fn show_with_others_orchestra() {
+    show_with_others_group("orchestra", "Orchestra");
+}
 
 /// Get Visibility Manager actions for registration
 pub fn actions() -> Vec<ActionDef> {
@@ -661,7 +730,6 @@ pub fn actions() -> Vec<ActionDef> {
             section: ActionSection::Main,
             ..Default::default()
         },
-
         // =========================================================================
         // STATELESS TOGGLE ACTIONS (check actual REAPER state)
         // =========================================================================
@@ -745,7 +813,6 @@ pub fn actions() -> Vec<ActionDef> {
             section: ActionSection::Main,
             ..Default::default()
         },
-
         // =========================================================================
         // SHOW ONLY ACTIONS (shift-click equivalent - show group, hide all others)
         // =========================================================================
@@ -829,7 +896,6 @@ pub fn actions() -> Vec<ActionDef> {
             section: ActionSection::Main,
             ..Default::default()
         },
-
         // =========================================================================
         // SHOW WITH OTHERS ACTIONS (show group + all other tracks)
         // =========================================================================

@@ -92,17 +92,27 @@ pub fn process_deferred_ops() {
 
     for op in ops {
         match op {
-            DeferredOp::Add { button, workflow_id } => {
+            DeferredOp::Add {
+                button,
+                workflow_id,
+            } => {
                 if let Err(e) = add_button_immediate(&button, &workflow_id) {
                     warn!(error = %e, "Deferred toolbar add failed");
                 }
             }
-            DeferredOp::AddAtPosition { button, workflow_id, position } => {
+            DeferredOp::AddAtPosition {
+                button,
+                workflow_id,
+                position,
+            } => {
                 if let Err(e) = add_button_at_position_immediate(&button, &workflow_id, position) {
                     warn!(error = %e, "Deferred toolbar add at position failed");
                 }
             }
-            DeferredOp::Remove { toolbar, command_name } => {
+            DeferredOp::Remove {
+                toolbar,
+                command_name,
+            } => {
                 if let Err(e) = remove_button_immediate(&toolbar, &command_name) {
                     warn!(error = %e, "Deferred toolbar remove failed");
                 }
@@ -112,7 +122,10 @@ pub fn process_deferred_ops() {
                     warn!(error = %e, "Deferred workflow toolbar remove failed");
                 }
             }
-            DeferredOp::Update { button, workflow_id } => {
+            DeferredOp::Update {
+                button,
+                workflow_id,
+            } => {
                 if let Err(e) = update_button_immediate(&button, &workflow_id) {
                     warn!(error = %e, "Deferred toolbar update failed");
                 }
@@ -384,16 +397,15 @@ fn add_button_immediate(button: &ToolbarButton, workflow_id: &str) -> Result<Com
 
     // Add to toolbar
     // Safe to use Refresh since we're in the timer callback (deferred context)
-    let result = medium
-        .add_custom_menu_or_toolbar_item_command(
-            toolbar_name.as_str(),
-            PositionDescriptor::Append,
-            command_id,
-            button.toolbar_flags,
-            button.label.as_str(),
-            icon_path,
-            UiRefreshBehavior::Refresh,
-        );
+    let result = medium.add_custom_menu_or_toolbar_item_command(
+        toolbar_name.as_str(),
+        PositionDescriptor::Append,
+        command_id,
+        button.toolbar_flags,
+        button.label.as_str(),
+        icon_path,
+        UiRefreshBehavior::Refresh,
+    );
 
     match &result {
         Ok(()) => info!(
@@ -430,7 +442,11 @@ fn add_button_immediate(button: &ToolbarButton, workflow_id: &str) -> Result<Com
 }
 
 /// Add a button at a specific position (immediate)
-fn add_button_at_position_immediate(button: &ToolbarButton, workflow_id: &str, position: u32) -> Result<CommandId, String> {
+fn add_button_at_position_immediate(
+    button: &ToolbarButton,
+    workflow_id: &str,
+    position: u32,
+) -> Result<CommandId, String> {
     let toolbar_name = button.toolbar.as_str();
 
     if !is_available() {
@@ -504,7 +520,11 @@ fn update_button_immediate(button: &ToolbarButton, workflow_id: &str) -> Result<
     if let Some(pos) = position {
         // Remove from current position (no refresh yet)
         medium
-            .delete_custom_menu_or_toolbar_item(toolbar_name.as_str(), pos, UiRefreshBehavior::NoRefresh)
+            .delete_custom_menu_or_toolbar_item(
+                toolbar_name.as_str(),
+                pos,
+                UiRefreshBehavior::NoRefresh,
+            )
             .map_err(|e| format!("Failed to remove toolbar button: {}", e))?;
 
         // Re-add at same position with new label
@@ -612,7 +632,11 @@ fn remove_button_immediate(toolbar: &ToolbarTarget, command_name: &str) -> Resul
     // Find and remove the button
     if let Some(pos) = scan_toolbar_for_command(&toolbar_name, command_id) {
         medium
-            .delete_custom_menu_or_toolbar_item(toolbar_name.as_str(), pos, UiRefreshBehavior::Refresh)
+            .delete_custom_menu_or_toolbar_item(
+                toolbar_name.as_str(),
+                pos,
+                UiRefreshBehavior::Refresh,
+            )
             .map_err(|e| format!("Failed to remove toolbar button: {}", e))?;
 
         debug!(
@@ -735,16 +759,15 @@ fn scan_toolbar_for_command(toolbar_name: &str, command_id: CommandId) -> Option
     let mut pos = 0;
 
     loop {
-        let result = reaper.get_custom_menu_or_toolbar_item(toolbar_name, pos, |item| {
-            match item? {
+        let result =
+            reaper.get_custom_menu_or_toolbar_item(toolbar_name, pos, |item| match item? {
                 MenuOrToolbarItem::Command(cmd) if cmd.command_id == command_id => Some(Some(pos)),
                 _ => Some(None),
-            }
-        });
+            });
 
         match result {
-            None => return None, // No more items
-            Some(None) => pos += 1, // Not this one, continue
+            None => return None,             // No more items
+            Some(None) => pos += 1,          // Not this one, continue
             Some(Some(p)) => return Some(p), // Found it
         }
     }
@@ -802,8 +825,7 @@ mod tests {
 
     #[test]
     fn test_toolbar_button_double_wide() {
-        let button = ToolbarButton::new("FTS_TEST", "Test")
-            .double_wide();
+        let button = ToolbarButton::new("FTS_TEST", "Test").double_wide();
 
         assert_eq!(button.toolbar_flags, flags::DOUBLE_WIDE);
     }

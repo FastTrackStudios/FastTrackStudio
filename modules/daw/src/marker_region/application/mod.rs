@@ -13,6 +13,8 @@
 //! These implementations are completely isolated from protocol concerns and can
 //! work with any infrastructure adapter in the system.
 
+use facet::Facet;
+
 pub mod mock;
 pub mod reaper;
 pub mod rpp;
@@ -40,13 +42,15 @@ impl ApplicationMarkerRegionSource for RppMarkerRegionSource {}
 // ============================================================================
 
 /// Builder for creating marker/region source implementations with common configurations
+#[derive(Debug, Clone, Facet)]
 pub struct MarkerRegionSourceBuilder {
     source_type: SourceType,
     config: SourceConfig,
 }
 
 /// Types of marker/region source implementations available
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Facet)]
+#[repr(u8)]
 pub enum SourceType {
     Mock,
     MockWithSampleData,
@@ -56,7 +60,7 @@ pub enum SourceType {
 }
 
 /// Configuration options for marker/region source implementations
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Facet)]
 pub struct SourceConfig {
     pub writable: Option<bool>,
     pub validate_on_load: bool,

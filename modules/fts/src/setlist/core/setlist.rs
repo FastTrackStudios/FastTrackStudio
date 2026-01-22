@@ -5,13 +5,14 @@
 
 use daw::marker_region::core::Marker;
 use daw::primitives::Position;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::{SectionType, SetlistError, Song};
 
-/// Color representation with name and hex string
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// Note: Color doesn't need Facet - it's only used internally
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Color {
     pub name: String,
     pub hex: String,
@@ -33,7 +34,10 @@ impl Color {
 }
 
 /// Represents a complete setlist
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Note: Setlist doesn't derive Facet because Song contains complex nested types
+/// (Project<Transport>, Lyrics, Chart) that don't have Facet implementations.
+/// Use the service types (SetlistInfo, SongInfo) for RPC communication.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Setlist {
     /// Unique identifier for this setlist
     pub id: Option<uuid::Uuid>,
@@ -470,7 +474,7 @@ impl std::fmt::Display for Setlist {
 }
 
 /// Summary information about a setlist
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct SetlistSummary {
     pub name: String,
     pub song_count: usize,
@@ -483,7 +487,7 @@ pub struct SetlistSummary {
 
 /// Setlist order management for live performance
 /// This represents the sequence of songs across multiple project tabs
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SetlistOrder {
     /// Ordered list of songs/tabs in the setlist
     pub entries: Vec<SetlistEntry>,
@@ -597,7 +601,7 @@ impl Default for SetlistOrder {
 
 /// Represents a song entry in the setlist order
 /// This maps to a specific project tab and contains playback position information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SetlistEntry {
     /// Tab index (0-based) - identifies which project tab this song is in
     pub tab_index: usize,

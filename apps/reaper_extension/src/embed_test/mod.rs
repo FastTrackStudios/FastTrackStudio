@@ -7,22 +7,21 @@ use raw_window_handle::{
     AppKitDisplayHandle, AppKitWindowHandle, DisplayHandle, HandleError, HasDisplayHandle,
     HasWindowHandle, RawDisplayHandle, RawWindowHandle, WindowHandle,
 };
-use reaper_embed::{
-    DockedWindow, ReaperWindow, TransparentWindow, VelloEmbedSource, WindowConfig,
-};
+use reaper_embed::{DockedWindow, ReaperWindow, TransparentWindow, VelloEmbedSource, WindowConfig};
 use reaper_high::Reaper;
 use reaper_low::raw::HWND;
 use std::cell::RefCell;
 use std::ptr::NonNull;
 use std::time::Instant;
 use tracing::{info, warn};
+use vello::Scene;
 use vello::kurbo::{Affine, Circle, Point, Rect, RoundedRect, Vec2};
 use vello::peniko::Color;
 use vello::peniko::Fill;
-use vello::Scene;
 
 // Type alias for the transparent window with our source type
-type TestTransparentWindow = TransparentWindow<VelloEmbedSource<Box<dyn FnMut(&mut Scene, u32, u32) + Send>>>;
+type TestTransparentWindow =
+    TransparentWindow<VelloEmbedSource<Box<dyn FnMut(&mut Scene, u32, u32) + Send>>>;
 
 // Thread-local storage for test windows (REAPER extension runs on main thread only)
 thread_local! {
@@ -54,9 +53,8 @@ impl HasWindowHandle for ReaperMainWindow {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
         // On macOS, REAPER's HWND is actually an NSView*
         let ns_view = self.hwnd as *mut std::ffi::c_void;
-        let handle = AppKitWindowHandle::new(
-            NonNull::new(ns_view).ok_or(HandleError::Unavailable)?,
-        );
+        let handle =
+            AppKitWindowHandle::new(NonNull::new(ns_view).ok_or(HandleError::Unavailable)?);
         let raw = RawWindowHandle::AppKit(handle);
         // SAFETY: The window handle is valid for the lifetime of self
         Ok(unsafe { WindowHandle::borrow_raw(raw) })
@@ -78,8 +76,7 @@ impl HasWindowHandle for ReaperMainWindow {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
         use raw_window_handle::Win32WindowHandle;
         let handle = Win32WindowHandle::new(
-            std::num::NonZeroIsize::new(self.hwnd as isize)
-                .ok_or(HandleError::Unavailable)?,
+            std::num::NonZeroIsize::new(self.hwnd as isize).ok_or(HandleError::Unavailable)?,
         );
         let raw = RawWindowHandle::Win32(handle);
         // SAFETY: The window handle is valid for the lifetime of self
@@ -295,10 +292,11 @@ fn open_overlay_window_handler() {
     let start_time = Instant::now();
 
     // Create a boxed closure for the scene builder
-    let builder: Box<dyn FnMut(&mut Scene, u32, u32) + Send> = Box::new(move |scene, width, height| {
-        let elapsed = start_time.elapsed().as_secs_f64();
-        create_overlay_scene(scene, width, height, elapsed);
-    });
+    let builder: Box<dyn FnMut(&mut Scene, u32, u32) + Send> =
+        Box::new(move |scene, width, height| {
+            let elapsed = start_time.elapsed().as_secs_f64();
+            create_overlay_scene(scene, width, height, elapsed);
+        });
 
     let source = VelloEmbedSource::new(builder);
 
@@ -389,7 +387,12 @@ fn create_overlay_scene(scene: &mut Scene, width: u32, height: u32, elapsed_secs
         Affine::IDENTITY,
         Color::from_rgba8(255, 255, 255, 60),
         None,
-        &Rect::new(center_x - 30.0, center_y - 1.0, center_x + 30.0, center_y + 1.0),
+        &Rect::new(
+            center_x - 30.0,
+            center_y - 1.0,
+            center_x + 30.0,
+            center_y + 1.0,
+        ),
     );
 
     // Vertical line
@@ -398,7 +401,12 @@ fn create_overlay_scene(scene: &mut Scene, width: u32, height: u32, elapsed_secs
         Affine::IDENTITY,
         Color::from_rgba8(255, 255, 255, 60),
         None,
-        &Rect::new(center_x - 1.0, center_y - 30.0, center_x + 1.0, center_y + 30.0),
+        &Rect::new(
+            center_x - 1.0,
+            center_y - 30.0,
+            center_x + 1.0,
+            center_y + 30.0,
+        ),
     );
 }
 

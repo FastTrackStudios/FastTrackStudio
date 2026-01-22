@@ -5,6 +5,7 @@
 //! data from different DAW implementations.
 
 use crate::marker_region::core::{Marker, MarkerRegionError, MarkerSource, Region, RegionSource};
+use facet::Facet;
 
 /// Combined trait for sources that provide both markers and regions
 pub trait MarkerRegionSource: MarkerSource + RegionSource + Send + Sync {
@@ -154,7 +155,8 @@ pub trait MarkerRegionSource: MarkerSource + RegionSource + Send + Sync {
 }
 
 /// Navigation point that can be either a marker or region boundary
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Facet)]
+#[repr(u8)]
 pub enum NavigationPoint {
     /// A marker at a specific time
     Marker(Marker),
@@ -237,7 +239,7 @@ impl std::fmt::Display for NavigationPoint {
 }
 
 /// Summary information about a marker/region source
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct SourceSummary {
     /// Name of the source
     pub source_name: String,

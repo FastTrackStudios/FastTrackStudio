@@ -1,8 +1,9 @@
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::fmt;
 
-#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Facet)]
 pub struct MusicalPosition {
     pub measure: i32,
     pub beat: i32,
@@ -92,7 +93,7 @@ impl fmt::Display for MusicalPosition {
     }
 }
 
-#[derive(Type, Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Type, Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct TimePosition {
     pub minutes: i32,
     pub seconds: i32,
@@ -214,7 +215,7 @@ impl fmt::Display for TimePosition {
 
 /// PPQ (Parts Per Quarter note) position
 /// Represents a position in PPQ ticks, commonly used in MIDI sequencing
-#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Hash)]
+#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Hash, Facet)]
 pub struct PPQPosition {
     pub ppq: i64,
 }
@@ -273,7 +274,7 @@ impl fmt::Display for PPQPosition {
     }
 }
 
-#[derive(Type, Serialize, Deserialize, Debug, Clone)]
+#[derive(Type, Serialize, Deserialize, Debug, Clone, Facet)]
 pub struct Position {
     pub musical: MusicalPosition,
     pub time: TimePosition,
@@ -357,7 +358,7 @@ impl PartialOrd for Position {
     }
 }
 
-#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Facet)]
 pub struct TimeRange {
     pub start: Position,
     pub end: Position,
@@ -402,7 +403,7 @@ pub type TimeSelection = TimeRange;
 
 pub type LoopPoints = TimeRange;
 
-#[derive(Type, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Type, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
 pub struct TimeSignature {
     pub numerator: i32,
     pub denominator: i32,
@@ -439,7 +440,7 @@ impl fmt::Display for TimeSignature {
 
 /// Musical duration - how long something lasts in musical time
 /// Uses the same structure as MusicalPosition but represents a duration rather than a position
-#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Facet)]
 pub struct MusicalDuration {
     pub measure: i32,
     pub beat: i32,
@@ -556,7 +557,7 @@ impl fmt::Display for MusicalDuration {
 
 /// PPQ (Parts Per Quarter note) duration
 /// Represents a duration in PPQ ticks, commonly used in MIDI sequencing
-#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Hash)]
+#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Hash, Facet)]
 pub struct PPQDuration {
     pub ppq: i64,
 }
@@ -617,7 +618,7 @@ impl fmt::Display for PPQDuration {
 
 /// Time duration - how long something lasts in real time
 /// Uses the same structure as TimePosition but represents a duration rather than a position
-#[derive(Type, Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Type, Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct TimeDuration {
     pub minutes: i32,
     pub seconds: i32,
@@ -739,7 +740,7 @@ impl fmt::Display for TimeDuration {
 
 /// Combined duration - represents both musical and time duration
 /// Similar to Position but for durations
-#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Type, Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Facet)]
 pub struct Duration {
     pub musical: MusicalDuration,
     pub time: TimeDuration,

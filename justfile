@@ -871,6 +871,15 @@ help:
     echo "  just bundle wgpu_reaper_demo  # Just build the plugin"
     echo "  just list-plugins             # See available plugins"
     echo ""
+    echo "Ralphy + Task Master:"
+    echo "  just ralphy <task>  Run single task with Ralphy"
+    echo "  just ralphy-prd     Run Ralphy on Task Master PRD"
+    echo "  just ralphy-tasks   Export Task Master tasks and run with Ralphy"
+    echo "  just ralphy-export  Export Task Master tasks to Ralphy format"
+    echo "  just ralphy-pr      Run with branch-per-task and PR creation"
+    echo "  just ralphy-dry     Dry-run to see what would happen"
+    echo "  just ralphy-config  Show Ralphy configuration"
+    echo ""
     echo "Configuration:"
     echo "  .env file           Create .env from .env.example and customize paths"
     echo "  Environment vars    Can override .env: REAPER_PATH=/path just <command>"
@@ -903,3 +912,39 @@ web-dev:
     # Run dx serve in foreground
     trap "kill $CSS_PID 2>/dev/null" EXIT
     cd apps/web && dx serve
+
+# ============================================================================
+# Ralphy + Task Master Integration
+# ============================================================================
+
+# Export Task Master tasks to Ralphy-compatible markdown
+ralphy-export:
+    .ralphy/taskmaster-to-ralphy.sh
+
+# Run Ralphy on Task Master PRD (create .taskmaster/docs/prd.md first)
+ralphy-prd:
+    ralphy --prd .taskmaster/docs/prd.md
+
+# Run Ralphy on exported tasks from Task Master
+ralphy-tasks: ralphy-export
+    ralphy --prd .ralphy/tasks.md
+
+# Run a single task with Ralphy
+ralphy TASK:
+    ralphy "{{TASK}}"
+
+# Run Ralphy in fast mode (skip tests/lint)
+ralphy-fast TASK:
+    ralphy --fast "{{TASK}}"
+
+# Run Ralphy with branch-per-task and PR creation
+ralphy-pr:
+    ralphy --prd .taskmaster/docs/prd.md --branch-per-task --create-pr
+
+# Dry-run Ralphy to see what would happen
+ralphy-dry:
+    ralphy --dry-run --prd .taskmaster/docs/prd.md
+
+# Show Ralphy configuration
+ralphy-config:
+    ralphy --config

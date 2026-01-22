@@ -2,16 +2,18 @@
 //!
 //! Uses Cocoa APIs for overlay windows, window finding, and rect queries.
 
+#![allow(unused_imports)]
+
 use cocoa::appkit::{
     NSBackingStoreType, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
-use cocoa::base::{id, nil, NO, YES};
+use cocoa::base::{NO, YES, id, nil};
 use cocoa::foundation::{NSPoint, NSRect, NSSize, NSString};
-use objc::runtime::{Object, Sel, BOOL};
+use objc::runtime::{BOOL, Object, Sel};
 use objc::{class, msg_send, sel, sel_impl};
 
-use crate::reaper::hwnd::RawHwnd;
 use super::{OverlayConfig, WindowRect};
+use crate::reaper::hwnd::RawHwnd;
 
 /// Configure a window for overlay mode.
 ///
@@ -62,8 +64,11 @@ pub fn configure_overlay(ns_view: RawHwnd, config: &OverlayConfig) {
             let _: () = msg_send![window, setLevel: 3i64];
         }
 
-        log::debug!("Configured overlay window: transparent={}, click_through={}",
-            config.transparent, config.click_through);
+        log::debug!(
+            "Configured overlay window: transparent={}, click_through={}",
+            config.transparent,
+            config.click_through
+        );
     }
 }
 
@@ -100,8 +105,7 @@ pub fn find_child_by_id(parent: RawHwnd, child_id: u32) -> Option<RawHwnd> {
         }
 
         // Search subviews for matching tag
-        find_view_by_tag(view, child_id as i64)
-            .map(|v| v as RawHwnd)
+        find_view_by_tag(view, child_id as i64).map(|v| v as RawHwnd)
     }
 }
 
@@ -256,10 +260,7 @@ pub fn create_overlay_window(x: i32, y: i32, width: u32, height: u32) -> Option<
 
         let style = NSWindowStyleMask::NSBorderlessWindowMask;
 
-        let window: id = msg_send![
-            class!(NSWindow),
-            alloc
-        ];
+        let window: id = msg_send![class!(NSWindow), alloc];
 
         let window: id = msg_send![
             window,
@@ -288,7 +289,13 @@ pub fn create_overlay_window(x: i32, y: i32, width: u32, height: u32) -> Option<
         // Get the content view to return
         let content_view: id = msg_send![window, contentView];
 
-        log::debug!("Created overlay window at ({}, {}) size {}x{}", x, y, width, height);
+        log::debug!(
+            "Created overlay window at ({}, {}) size {}x{}",
+            x,
+            y,
+            width,
+            height
+        );
 
         Some(content_view as RawHwnd)
     }

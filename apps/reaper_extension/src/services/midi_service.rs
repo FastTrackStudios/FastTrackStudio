@@ -4,15 +4,16 @@
 //! used by chord_overlay, chart_window, and other features.
 
 use keyflow::chord::{
-    DetectedChord, MidiNote as KeyflowMidiNote, TimingAnalysisConfig,
-    analyze_chord_timing, detect_chords_from_midi_notes, ChordTimingAnalysis,
+    ChordTimingAnalysis, DetectedChord, MidiNote as KeyflowMidiNote, TimingAnalysisConfig,
+    analyze_chord_timing, detect_chords_from_midi_notes,
 };
 use reaper_high::{Project, Reaper, Track};
 use reaper_medium::MediaItemTake;
 use tracing::warn;
 
 /// Minimum chord duration in PPQ to filter out arpeggiated fragments
-pub const MIN_CHORD_DURATION_PPQ: i64 = 180;
+/// Set low enough to capture staccato chords (160 ticks = short stab)
+pub const MIN_CHORD_DURATION_PPQ: i64 = 120;
 
 /// Find a track by name in the project (case-insensitive)
 pub fn find_track_by_name(project: Project, name: &str) -> Option<Track> {
@@ -53,9 +54,8 @@ pub fn get_first_midi_take(track: &Track) -> Option<MidiTakeInfo> {
     }
 
     // Get item start position in project time
-    let item_start_time = unsafe {
-        low.GetMediaItemInfo_Value(item_raw.as_ptr(), c"D_POSITION".as_ptr())
-    };
+    let item_start_time =
+        unsafe { low.GetMediaItemInfo_Value(item_raw.as_ptr(), c"D_POSITION".as_ptr()) };
 
     // Convert item start time to measure number
     let mut measures: i32 = 0;
@@ -154,7 +154,7 @@ pub struct AnalyzedChord {
 ///
 /// Returns analyzed chords with push/pull timing information.
 /// The measure_index in timing analysis is offset by the MIDI item's start position
-/// so it aligns with the project's measure numbers.
+/// to give absolute REAPER measure numbers.
 pub fn detect_chords_from_midi_track(
     project: Project,
     time_sig_numerator: u8,
@@ -166,7 +166,6 @@ pub fn detect_chords_from_midi_track(
     // Get MIDI take with item position info
     let midi_info = get_first_midi_take(&track)?;
     let take = midi_info.take;
-    let item_start_measure = midi_info.item_start_measure;
 
     // Read MIDI notes
     let midi_notes = read_midi_notes_from_take(take);
@@ -195,7 +194,7 @@ pub fn detect_chords_from_midi_track(
     let low_reaper = reaper.medium_reaper().low();
 
     // Convert to AnalyzedChord with project times
-    // Offset measure_index by item_start_measure to align with project measures
+    // measure_index is offset by item_start_measure to give absolute REAPER measure
     let analyzed: Vec<AnalyzedChord> = detected_chords
         .iter()
         .zip(timing_analyses.iter())
@@ -207,9 +206,10 @@ pub fn detect_chords_from_midi_track(
                 low_reaper.MIDI_GetProjTimeFromPPQPos(take.as_ptr(), chord.end_ppq as f64)
             };
 
-            // Offset measure_index by item start position
+            // Offset measure_index by item start position to get absolute REAPER measure
             let mut adjusted_timing = timing.clone();
-            adjusted_timing.measure_index = (timing.measure_index as i32 + item_start_measure) as usize;
+            adjusted_timing.measure_index =
+                (timing.measure_index as i32 + midi_info.item_start_measure) as usize;
 
             AnalyzedChord {
                 chord: chord.clone(),

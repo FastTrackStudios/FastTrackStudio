@@ -1,14 +1,16 @@
 //! Send mode for hardware outputs
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Wrapper for unknown enum values to preserve them during serialization
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct Hidden<T>(pub T);
 
 /// Send mode for hardware outputs
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
 pub enum SendMode {
     /// Post-Fader (Post-Pan)
     PostFader,

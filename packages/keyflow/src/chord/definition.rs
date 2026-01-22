@@ -23,6 +23,7 @@ use super::root;
 use crate::key::{Key, KeySpelling, SpellingMode};
 use crate::parsing::{ParseError, Token, TokenType};
 use crate::primitives::{Interval, MusicalNote, RootNotation};
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{debug, instrument, trace};
@@ -30,7 +31,7 @@ use tracing::{debug, instrument, trace};
 // region:    --- Chord Struct
 
 /// A complete chord with root, quality, family, extensions, and alterations
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
 pub struct Chord {
     /// The original input string that was parsed
     pub origin: String,
@@ -151,7 +152,6 @@ impl Chord {
 // NOTE: Transposition methods have been extracted to transposition.rs
 // This includes: transpose_to, transpose_root_notation, calculate_quality_from_notes, scale_degrees
 
-
 // region:    --- Parsing
 
 impl Chord {
@@ -263,11 +263,16 @@ impl Chord {
         // This handles chords like "G7sus4" or "C9sus4" where sus comes after the 7th
         let mut quality = quality.0;
         if consumed < tokens.len() && family.is_some() {
-            if let Ok((sus_quality, sus_consumed)) = Self::parse_suspended_suffix(&tokens[consumed..]) {
+            if let Ok((sus_quality, sus_consumed)) =
+                Self::parse_suspended_suffix(&tokens[consumed..])
+            {
                 if matches!(sus_quality, ChordQuality::Suspended(_)) {
                     quality = sus_quality;
                     consumed += sus_consumed;
-                    debug!("Parsed suspended suffix (7sus4 format): {:?}, consumed {}", quality, sus_consumed);
+                    debug!(
+                        "Parsed suspended suffix (7sus4 format): {:?}, consumed {}",
+                        quality, sus_consumed
+                    );
                 }
             }
         }
@@ -625,7 +630,8 @@ impl Chord {
             }
 
             // Skip whitespace before "add"
-            while consumed < tokens.len() && matches!(tokens[consumed].token_type, TokenType::Space) {
+            while consumed < tokens.len() && matches!(tokens[consumed].token_type, TokenType::Space)
+            {
                 consumed += 1;
             }
 
@@ -838,11 +844,7 @@ impl Chord {
         }
 
         // Check for "sus"
-        if let (
-            TokenType::Letter('s'),
-            TokenType::Letter('u'),
-            TokenType::Letter('s'),
-        ) = (
+        if let (TokenType::Letter('s'), TokenType::Letter('u'), TokenType::Letter('s')) = (
             &tokens[0].token_type,
             &tokens[1].token_type,
             &tokens[2].token_type,
@@ -854,10 +856,16 @@ impl Chord {
                 if let TokenType::Number(n) = &tokens[consumed].token_type {
                     match n.as_str() {
                         "2" => {
-                            return Ok((ChordQuality::Suspended(SuspendedType::Second), consumed + 1));
+                            return Ok((
+                                ChordQuality::Suspended(SuspendedType::Second),
+                                consumed + 1,
+                            ));
                         }
                         "4" => {
-                            return Ok((ChordQuality::Suspended(SuspendedType::Fourth), consumed + 1));
+                            return Ok((
+                                ChordQuality::Suspended(SuspendedType::Fourth),
+                                consumed + 1,
+                            ));
                         }
                         _ => {}
                     }

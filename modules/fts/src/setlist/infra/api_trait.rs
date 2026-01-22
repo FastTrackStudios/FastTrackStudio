@@ -11,9 +11,10 @@
 //! - iroh-docs implementation (for P2P sync)
 
 use crate::setlist::core::Setlist;
+use facet::Facet;
 
 /// Transport state needed for computing active song/section
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Facet)]
 pub struct TransportState {
     pub is_playing: bool,
     pub is_recording: bool,
@@ -25,7 +26,7 @@ pub struct TransportState {
 }
 
 /// App state (counting in, loop, etc.)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Facet)]
 pub struct AppState {
     pub is_counting_in: bool,
     pub loop_enabled: bool,

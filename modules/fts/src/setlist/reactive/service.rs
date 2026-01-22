@@ -10,6 +10,7 @@ use super::{
 };
 use crate::lyrics::{Lyrics, LyricsAnnotations};
 use crate::setlist::core::{Section, Setlist, Song};
+use facet::Facet;
 use rxrust::prelude::Observer;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
@@ -17,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use tracing::info;
 
 /// State managed by the setlist reactive service
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Facet)]
 pub struct SetlistReactiveState {
     /// Current setlist structure
     pub setlist: Option<Setlist>,
@@ -39,7 +40,7 @@ pub struct SetlistReactiveState {
 /// 2. Compares new state with old state to detect changes
 /// 3. Emits granular updates via reactive streams
 /// 4. Provides APIs for updating state
-#[derive(Debug)]
+#[derive(Debug, Facet)]
 pub struct SetlistReactiveService {
     /// Current state
     state: Arc<Mutex<SetlistReactiveState>>,

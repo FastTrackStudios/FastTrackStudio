@@ -3,9 +3,11 @@
 //! The harmonic minor scale and its 7 modes
 
 use super::trait_module::ScaleFamily;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum HarmonicMinorMode {
     HarmonicMinor,
     LocrianNatural6,

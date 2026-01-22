@@ -9,59 +9,34 @@ use keyflow::Chart;
 use winit::dpi::LogicalSize;
 use winit::window::WindowAttributes;
 
-mod chart_layout;
 mod chart_vello_renderer;
 use chart_vello_renderer::{ChartMessage, ChartVelloPaintSource};
 
 /// Default chart text to start with
-const DEFAULT_CHART_TEXT: &str = r#"Autumn Leaves (Extended) - Joseph Kosma
-120bpm 4/4 #G
+const DEFAULT_CHART_TEXT: &str = r#"Thriller - Dirty Loops, Cory Wong
+Transcribed By Cody Wright
+120bpm 4/4 #C
+V2
 
-intro 8
-mainTheme = m{ E_4 F#_4 G_4. A_8 B_2 }
-Gmaj7 m{ E_4 F#_4 G_4. A_8 } Cmaj7 m{ B_2 r_2 } F#m7b5 B7
-Em7 $mainTheme A7 m{ r_1 } Dmaj7 G7
-
-vs 16
-Em7 Am7 D7 Gmaj7
-Cmaj7 F#m7b5 B7 Em
-Em7 Am7 D7 Gmaj7
-Cmaj7 F#m7b5 B7 Em7
-
-pre 4
-Am7 m{ A_8 B_8 C_4 D_4 E_4 } D7 Bm7 E7
-
-ch 16
-Am7 D7 Gmaj7 Cmaj7
-F#m7b5 B7 Em7 E7
-Am7 D7 Gmaj7 Cmaj7
-F#m7b5 B7 Em7 m{ r_1 }
-
-vs 16
-Em7 Am7 D7 Gmaj7
-Cmaj7 F#m7b5 B7 Em
-Em7 Am7 D7 Gmaj7
-Cmaj7 F#m7b5 B7 Em7
-
-pre 4
-
-ch 16
-
-br 8
-Cmaj7 m{ G_4 F#_4 E_4 D_4 } Bm7 Am7 Gmaj7
-F#m7b5 B7 Em7 A7
-
-inst 16
-Gmaj7 Cmaj7 F#m7b5 B7
-Em7 Am7 D7 Gmaj7
-Cmaj7 F#m7b5 B7 Em
-Em7 Am7 D7 G7
-
-ch 16
-
-outro 8
-Gmaj7 m{ E_2 r_4 D_4 } Cmaj7 m{ C_2. r_4 } F#m7b5 B7
-Em7 Am7 D7 Gmaj7 m{ G_1 }
+Count 2
+Hits 2
+Intro 4 "Groove"
+VS 16
+CH 8
+INST 4
+VS
+CH
+BR 10
+VS
+CH +2
+CH
+Interlude 8
+Interlude "Horn"
+Interlude "Winds"
+Interlude "Trumpets"
+Outro 8
+Outro
+Hits 4
 "#;
 
 fn main() {
@@ -149,7 +124,9 @@ fn app() -> Element {
 fn ChartPreviewCanvas(chart: Option<Chart>) -> Element {
     // Create paint source and store sender
     let sender = use_hook(|| {
-        std::rc::Rc::new(std::cell::RefCell::new(None::<std::sync::mpsc::Sender<ChartMessage>>))
+        std::rc::Rc::new(std::cell::RefCell::new(
+            None::<std::sync::mpsc::Sender<ChartMessage>>,
+        ))
     });
 
     let paint_source_id = {

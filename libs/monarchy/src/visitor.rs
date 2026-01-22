@@ -17,6 +17,7 @@
 //! ```
 
 use crate::{Config, Group, Metadata, Structure, ToDisplayName};
+use facet::Facet;
 
 /// Trait for visiting and transforming Structure nodes
 ///
@@ -69,6 +70,7 @@ impl<M: Metadata> Visitable<M> for Structure<M> {
 }
 
 /// Helper struct with shared config lookup methods
+#[derive(Clone, Debug)]
 struct CollapseHelper<'a, M: Metadata> {
     config: &'a Config<M>,
     /// Names of metadata field groups that don't count as organizational subgroups
@@ -240,6 +242,7 @@ impl<'a, M: Metadata> CollapseHelper<'a, M> {
 /// - Never collapse deepest groups (Kick, Snare, etc.)
 /// - Never collapse metadata-derived groups (In, Out, L, R, etc.)
 /// - Collapse intermediate config groups that have a single child
+#[derive(Clone, Debug, Facet)]
 pub struct CollapseIntermediateGroups<'a, M: Metadata> {
     helper: CollapseHelper<'a, M>,
 }
@@ -352,6 +355,7 @@ impl<'a, M: Metadata> StructureVisitor<M> for CollapseIntermediateGroups<'a, M> 
 /// For example:
 /// - Drums -> Kick (single deepest group) becomes just Kick
 /// - Drums -> [Kick, Snare] stays as Drums -> [Kick, Snare]
+#[derive(Clone, Debug, Facet)]
 pub struct CollapseTopLevelGroups<'a, M: Metadata> {
     helper: CollapseHelper<'a, M>,
 }
@@ -507,6 +511,7 @@ impl<'a, M: Metadata> StructureVisitor<M> for CollapseTopLevelGroups<'a, M> {
 /// This is a convenience wrapper that applies:
 /// 1. CollapseIntermediateGroups - removes unnecessary intermediate levels
 /// 2. CollapseTopLevelGroups - removes top-level groups when they have single children
+#[derive(Clone, Debug, Facet)]
 pub struct CollapseHierarchy<'a, M: Metadata> {
     config: &'a Config<M>,
 }
@@ -549,6 +554,7 @@ impl<'a, M: Metadata> StructureVisitor<M> for CollapseHierarchy<'a, M> {
 ///
 /// If ALL items match (or none match), no subfolder is created - items stay at current level.
 /// This prevents unnecessary nesting when there's nothing to separate.
+#[derive(Clone, Debug, Facet)]
 pub struct ApplyTaggedCollections<'a, M: Metadata> {
     config: &'a Config<M>,
 }
@@ -653,6 +659,7 @@ impl<'a, M: Metadata> StructureVisitor<M> for ApplyTaggedCollections<'a, M> {
 ///     structure.children.push(unsorted_folder);
 /// }
 /// ```
+#[derive(Clone, Debug, Facet)]
 pub struct CollectUnsorted<M: Metadata> {
     /// Name to use for unsorted folder (default: "Unsorted")
     pub folder_name: String,
@@ -739,6 +746,7 @@ pub fn collect_unsorted_to_root_with_name<M: Metadata>(
 }
 
 /// Visitor that removes empty nodes (no items and no children)
+#[derive(Clone, Debug, Facet)]
 pub struct RemoveEmptyNodes;
 
 impl<M: Metadata> StructureVisitor<M> for RemoveEmptyNodes {
@@ -752,6 +760,7 @@ impl<M: Metadata> StructureVisitor<M> for RemoveEmptyNodes {
 ///
 /// If a node has exactly one child and no items, the child is promoted
 /// to replace the parent (the parent is removed from the hierarchy).
+#[derive(Clone, Debug, Facet)]
 pub struct PromoteSingleChild;
 
 impl<M: Metadata> StructureVisitor<M> for PromoteSingleChild {
@@ -774,6 +783,7 @@ impl<M: Metadata> StructureVisitor<M> for PromoteSingleChild {
 /// Example: Cymbals/OH -> OH (when OH is the only cymbal)
 ///
 /// This is applied recursively from the bottom up.
+#[derive(Clone, Debug, Facet)]
 pub struct CollapseSingleChildFolders;
 
 impl<M: Metadata> StructureVisitor<M> for CollapseSingleChildFolders {
@@ -816,6 +826,7 @@ pub fn collapse_single_child_folders<M: Metadata>(root: &mut Structure<M>) {
 ///
 /// Exception: Items that only differ by playlist/take metadata stay together
 /// (handled by checking the Playlist metadata field if it exists)
+#[derive(Clone, Debug, Facet)]
 pub struct ExpandItemsToChildren;
 
 impl<M: Metadata + ToDisplayName> StructureVisitor<M> for ExpandItemsToChildren {
@@ -866,6 +877,7 @@ pub fn expand_items_to_children<M: Metadata + ToDisplayName>(root: &mut Structur
 ///
 /// If stripping results in an empty string, falls back to the configured
 /// fallback name (default: group name or "Main").
+#[derive(Clone, Debug, Facet)]
 pub struct CleanupDisplayNames {
     /// Stack of ancestor names as we traverse
     context_stack: Vec<String>,

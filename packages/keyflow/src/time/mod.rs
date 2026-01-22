@@ -10,12 +10,13 @@ pub use daw::primitives::{
 };
 pub use daw::transport::Tempo;
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Chart-specific position that includes section index
 /// This wraps DAW's Position with section tracking for chart parsing
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct AbsolutePosition {
     /// The total duration from the start of the song (using DAW's MusicalPosition)
     pub total_duration: MusicalPosition,

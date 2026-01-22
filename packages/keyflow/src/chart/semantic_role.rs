@@ -3,13 +3,15 @@
 //! Describes the contextual significance of elements in the chart,
 //! used for special rendering, navigation, and playback behavior.
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Semantic role describing an element's contextual significance.
 ///
 /// Elements can have multiple roles (e.g., both `FirstInMeasure` and `SectionStart`).
 /// These roles affect rendering decisions, playback behavior, and user interaction.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum SemanticRole {
     /// First element in a system (affects spacing, may show clef/time sig).
     FirstInSystem,
@@ -119,7 +121,8 @@ impl SemanticRole {
 }
 
 /// Types of navigation markers in music notation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum NavigationType {
     /// Dal Segno - go back to the segno sign
     DalSegno,

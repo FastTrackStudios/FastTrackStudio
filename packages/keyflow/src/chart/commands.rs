@@ -3,11 +3,13 @@
 //! Special commands that can be applied to chords, melodies, or rhythms
 //! Commands can be specified with slash syntax (/fermata) or shorthand (->)
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Commands that can be applied to musical elements
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum Command {
     /// Fermata - hold the note/chord longer
     Fermata,

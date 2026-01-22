@@ -3,11 +3,13 @@
 //! Uses keyflow types for all musical structure. Only timing
 //! and configuration data is defined here.
 
+use facet::Facet;
 use keyflow::{Chord, Key, MusicalNote};
 use serde::{Deserialize, Serialize};
 
 /// Display format for chords
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum ChordDisplayFormat {
     /// Standard chord names: Amaj7, D/F#, Gm7b5
     Name,
@@ -21,7 +23,7 @@ pub enum ChordDisplayFormat {
 ///
 /// The musical structure (chord, root note, bass note) comes from keyflow.
 /// Only timing and MIDI data are DAW-specific.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ChordData {
     /// The detected chord (from keyflow)
     pub chord: Chord,
@@ -40,7 +42,7 @@ pub struct ChordData {
 }
 
 /// Complete chord analysis with all display formats
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ChordAnalysis {
     /// The chord data with timing
     pub data: ChordData,
@@ -53,7 +55,7 @@ pub struct ChordAnalysis {
 }
 
 /// Collection of detected chords
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ChordsData {
     /// All detected chords in chronological order
     pub chords: Vec<ChordAnalysis>,
@@ -64,7 +66,7 @@ pub struct ChordsData {
 }
 
 /// Configuration for chord detection
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct ChordConfig {
     /// Track name to read chords from (default: "CHORDS")
     pub track_name: String,
@@ -91,7 +93,7 @@ impl Default for ChordConfig {
 ///
 /// This is DAW-specific timing data. The pitch can be converted to
 /// keyflow's MusicalNote when needed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct MidiNoteEvent {
     /// MIDI note number (0-127)
     pub pitch: u8,

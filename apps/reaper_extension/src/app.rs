@@ -15,7 +15,7 @@ use crate::infrastructure::reactive_app_state::ReactiveAppStateService;
 use crate::infrastructure::reactive_polling::ReactivePollingService;
 #[cfg(feature = "core")]
 use crate::services::{
-    CommandService, SeekService, SetlistService, SmoothSeekService, StreamService,
+    CommandService, ReaperTransport, SeekService, SetlistService, SmoothSeekService, StreamService,
 };
 
 /// Application container - holds all services and manages initialization
@@ -43,6 +43,11 @@ pub struct App {
     pub reactive_polling: Arc<ReactivePollingService>,
     #[cfg(feature = "core")]
     pub reactive_state: Arc<ReactiveAppStateService>,
+
+    // Roam RPC services (for cross-process communication)
+    /// Roam-based transport service for RPC communication
+    #[cfg(feature = "core")]
+    pub roam_transport: Arc<ReaperTransport>,
 
     // Keep session alive (wrapped in RefCell for interior mutability)
     _session: std::cell::RefCell<ReaperSession>,
@@ -74,6 +79,9 @@ impl App {
                 setlist_service.clone(),
             ));
 
+            // Initialize roam RPC services
+            let roam_transport = Arc::new(ReaperTransport::new());
+
             Ok(Self {
                 setlist_service,
                 command_service,
@@ -84,6 +92,7 @@ impl App {
                 change_detection,
                 reactive_polling,
                 reactive_state,
+                roam_transport,
                 _session: std::cell::RefCell::new(session),
             })
         }

@@ -6,10 +6,11 @@
 
 use crate::marker_region::core::MarkerRegionError;
 use crate::primitives::TimeRange;
+use facet::Facet;
 use specta::Type;
 
 /// A region represents a named span of time on the timeline
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Type, Facet)]
 pub struct Region {
     /// Unique identifier for this region (if supported by the source)
     pub id: Option<u32>,

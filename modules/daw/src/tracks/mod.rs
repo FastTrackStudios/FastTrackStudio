@@ -5,7 +5,9 @@ pub mod envelope;
 pub mod fx_chain;
 pub mod hierarchy_builder;
 pub mod item;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod reactive;
+pub mod service;
 pub mod track;
 pub mod track_chunk;
 pub mod track_list;
@@ -26,8 +28,9 @@ pub use envelope::{AutomationItem, Envelope, EnvelopePoint, EnvelopePointShape, 
 pub use fx_chain::{FxChain, Plugin};
 pub use hierarchy_builder::{TrackHierarchyBuilder, build_hierarchy, build_track_hierarchy};
 pub use item::Item;
-#[cfg(feature = "iroh")]
+#[cfg(all(not(target_arch = "wasm32"), feature = "iroh"))]
 pub use reactive::irpc::{TrackApi, TrackProtocol, TrackUpdateMessage};
+#[cfg(not(target_arch = "wasm32"))]
 pub use reactive::{
     DefaultTrackReactiveService, EventStreamSubject as TrackEventStreamSubject,
     TrackReactiveService, TrackReactiveState, TrackStreams,
@@ -38,3 +41,6 @@ pub use track::{
 pub use track_chunk::{ParsedTrackChunk, parse_track_chunk};
 pub use track_list::{AddChild, IntoTrackVec, PrintTrackTree};
 pub use types::{MetadataKey, TrackGuid, TrackName};
+
+// Roam service exports
+pub use service::{TrackCommand, TrackEvent, TrackInfo, TrackService};

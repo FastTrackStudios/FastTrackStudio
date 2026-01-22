@@ -6,10 +6,11 @@
 
 use crate::marker_region::core::MarkerRegionError;
 use crate::primitives::Position;
+use facet::Facet;
 use specta::Type;
 
 /// A marker represents a named point in time on the timeline
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Type, Facet)]
 pub struct Marker {
     /// Unique identifier for this marker (if supported by the source)
     pub id: Option<u32>,

@@ -38,6 +38,12 @@ impl TimeSignature {
     /// Common time (4/4).
     pub const COMMON: Self = Self::new(4, 4);
 
+    /// Returns common time (4/4). Alias for `COMMON` for compatibility.
+    #[must_use]
+    pub const fn common_time() -> Self {
+        Self::COMMON
+    }
+
     /// Cut time (2/2).
     pub const CUT: Self = Self::new(2, 2);
 

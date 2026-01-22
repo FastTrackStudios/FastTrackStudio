@@ -3,6 +3,7 @@
 //! Provides the [`Spanned`] wrapper and [`AstNode`] trait for source tracking.
 
 use crate::parsing::TextSpan;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// A value with an associated source span.
@@ -21,7 +22,7 @@ use serde::{Deserialize, Serialize};
 /// assert_eq!(value.value, "Cmaj7");
 /// assert_eq!(value.span.len, 5);
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct Spanned<T> {
     /// The wrapped value
     pub value: T,

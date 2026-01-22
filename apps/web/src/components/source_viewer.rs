@@ -67,12 +67,18 @@ fn highlight_line(line: &str) -> String {
     // Title line (first non-empty, non-directive line)
     // Comments (lines starting with //)
     if trimmed.starts_with("//") {
-        return format!(r#"<span class="text-gray-500">{}</span>"#, escape_html(line));
+        return format!(
+            r#"<span class="text-gray-500">{}</span>"#,
+            escape_html(line)
+        );
     }
 
     // Directives (lines starting with /)
     if trimmed.starts_with('/') && !trimmed.starts_with("//") {
-        return format!(r#"<span class="text-purple-400">{}</span>"#, escape_html(line));
+        return format!(
+            r#"<span class="text-purple-400">{}</span>"#,
+            escape_html(line)
+        );
     }
 
     // Metadata line (tempo, time signature, key)
@@ -82,7 +88,10 @@ fn highlight_line(line: &str) -> String {
 
     // Section markers (VS, CH, BR, IN, OU, etc.)
     if is_section_marker(trimmed) {
-        return format!(r#"<span class="text-blue-400 font-semibold">{}</span>"#, escape_html(line));
+        return format!(
+            r#"<span class="text-blue-400 font-semibold">{}</span>"#,
+            escape_html(line)
+        );
     }
 
     // Chord lines
@@ -95,7 +104,9 @@ fn is_section_marker(line: &str) -> bool {
         "VS", "CH", "BR", "IN", "OU", "PC", "TG", "INT", "VT", "INTRO", "VERSE", "CHORUS",
         "BRIDGE", "OUTRO", "PRE", "TAG",
     ];
-    markers.iter().any(|m| line == *m || line.starts_with(&format!("{m} ")))
+    markers
+        .iter()
+        .any(|m| line == *m || line.starts_with(&format!("{m} ")))
 }
 
 /// Highlight metadata line (tempo, time signature, key).
@@ -107,7 +118,12 @@ fn highlight_metadata(line: &str) -> String {
     if let Some(bpm_pos) = line.find("bpm") {
         // Find the start of the tempo number
         let mut start = bpm_pos;
-        while start > 0 && line.chars().nth(start - 1).is_some_and(|c| c.is_ascii_digit()) {
+        while start > 0
+            && line
+                .chars()
+                .nth(start - 1)
+                .is_some_and(|c| c.is_ascii_digit())
+        {
             start -= 1;
         }
         if start < bpm_pos {
@@ -125,10 +141,7 @@ fn highlight_metadata(line: &str) -> String {
         if let Some(ts_pos) = line[current_pos..].find(ts) {
             let abs_pos = current_pos + ts_pos;
             result.push_str(&escape_html(&line[current_pos..abs_pos]));
-            result.push_str(&format!(
-                r#"<span class="text-orange-400">{}</span>"#,
-                ts
-            ));
+            result.push_str(&format!(r#"<span class="text-orange-400">{}</span>"#, ts));
             current_pos = abs_pos + ts.len();
             break;
         }

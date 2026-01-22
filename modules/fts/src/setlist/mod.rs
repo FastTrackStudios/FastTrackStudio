@@ -6,8 +6,9 @@ pub mod application;
 pub mod core;
 pub mod infra;
 pub mod order;
+pub mod service;
 
-#[cfg(feature = "iroh")]
+#[cfg(all(feature = "iroh", not(target_arch = "wasm32")))]
 pub mod reactive;
 
 // Command types are always available (shared between iroh and reaper features)
@@ -17,7 +18,7 @@ pub use infra::commands::{LyricsState, NavigationCommand, TransportCommand};
 #[cfg(not(target_arch = "wasm32"))]
 pub use infra::traits::{SetlistCommandHandler, SetlistStateProvider};
 
-#[cfg(feature = "iroh")]
+#[cfg(all(feature = "iroh", not(target_arch = "wasm32")))]
 pub use infra::stream::{
     SeekToSection, SeekToSong, SeekToTime, SetlistStreamApi, SetlistUpdateMessage, ToggleLoop,
 };
@@ -33,7 +34,13 @@ pub use core::{
     SetlistSummary, Song, SongSummary,
 };
 
-#[cfg(feature = "iroh")]
+// Roam service exports
+pub use service::{
+    ActiveIndices, SectionInfo, SetlistCommand, SetlistEvent, SetlistInfo,
+    SetlistService as RoamSetlistService, SongInfo,
+};
+
+#[cfg(all(feature = "iroh", not(target_arch = "wasm32")))]
 pub use reactive::{
     ActiveIndicesStreams, EventStreamSubject, LyricsStreams, SetlistReactiveService,
     SetlistReactiveState, SetlistReactiveStreams, SetlistStreams, SongStreams,

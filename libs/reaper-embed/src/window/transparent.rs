@@ -3,6 +3,8 @@
 //! A borderless transparent window that receives mouse events (not click-through).
 //! Uses native platform windows with GPU rendering via Vello.
 
+#![allow(unused_imports)]
+
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
     RawWindowHandle, WindowHandle,
@@ -58,9 +60,8 @@ unsafe impl Sync for NativeHandleWrapper {}
 impl HasWindowHandle for NativeHandleWrapper {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
         use raw_window_handle::AppKitWindowHandle;
-        let handle = AppKitWindowHandle::new(
-            NonNull::new(self.ns_view).ok_or(HandleError::Unavailable)?,
-        );
+        let handle =
+            AppKitWindowHandle::new(NonNull::new(self.ns_view).ok_or(HandleError::Unavailable)?);
         let raw = RawWindowHandle::AppKit(handle);
         // SAFETY: The window handle is valid for the lifetime of the wrapper
         Ok(unsafe { WindowHandle::borrow_raw(raw) })
@@ -132,13 +133,7 @@ impl<S: EmbedSource> TransparentWindow<S> {
     /// # Returns
     ///
     /// A `TransparentWindow` handle, or an error if creation failed.
-    pub fn open(
-        x: i32,
-        y: i32,
-        width: u32,
-        height: u32,
-        source: S,
-    ) -> Result<Self, GpuError> {
+    pub fn open(x: i32, y: i32, width: u32, height: u32, source: S) -> Result<Self, GpuError> {
         let bounds = WindowRect::new(x, y, width, height);
 
         // Create native transparent window
@@ -231,7 +226,8 @@ impl<S: EmbedSource> TransparentWindow<S> {
 
         // Build the scene
         let mut scene = Scene::new();
-        self.source.render(&mut scene, self.bounds.width, self.bounds.height);
+        self.source
+            .render(&mut scene, self.bounds.width, self.bounds.height);
 
         // Render
         gpu.render(&scene)
@@ -240,6 +236,16 @@ impl<S: EmbedSource> TransparentWindow<S> {
     /// Get the current bounds.
     pub fn bounds(&self) -> &WindowRect {
         &self.bounds
+    }
+
+    /// Set whether the window should ignore mouse events (click-through).
+    ///
+    /// When `true`, all mouse events pass through to windows underneath.
+    /// Use this for overlay windows that should not intercept user input.
+    pub fn set_click_through(&mut self, click_through: bool) {
+        if let Some(hwnd) = self.hwnd {
+            set_native_click_through(hwnd, click_through);
+        }
     }
 
     /// Close the window.
@@ -264,7 +270,7 @@ impl<S: EmbedSource> Drop for TransparentWindow<S> {
 #[cfg(target_os = "macos")]
 fn create_native_transparent_window(x: i32, y: i32, width: u32, height: u32) -> Option<RawHwnd> {
     use cocoa::appkit::{NSBackingStoreType, NSWindow, NSWindowStyleMask};
-    use cocoa::base::{id, nil, NO, YES};
+    use cocoa::base::{NO, YES, id, nil};
     use cocoa::foundation::{NSPoint, NSRect, NSSize};
     use objc::{class, msg_send, sel, sel_impl};
 
@@ -340,7 +346,13 @@ fn create_native_transparent_window(x: i32, y: i32, width: u32, height: u32) -> 
             let _: () = msg_send![layer, setBackgroundColor: cg_color];
         }
 
-        log::debug!("Created transparent interactive window at ({}, {}) size {}x{}", x, y, width, height);
+        log::debug!(
+            "Created transparent interactive window at ({}, {}) size {}x{}",
+            x,
+            y,
+            width,
+            height
+        );
 
         Some(content_view as RawHwnd)
     }
@@ -398,7 +410,7 @@ fn show_native_window(_hwnd: RawHwnd, _show: bool) {
 
 #[cfg(target_os = "macos")]
 fn set_native_window_frame(ns_view: RawHwnd, x: i32, y: i32, width: u32, height: u32) {
-    use cocoa::base::{id, nil, YES};
+    use cocoa::base::{YES, id, nil};
     use cocoa::foundation::{NSPoint, NSRect, NSSize};
     use objc::{class, msg_send, sel, sel_impl};
 
@@ -466,12 +478,44 @@ fn close_native_window(ns_view: RawHwnd) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn set_native_click_through(ns_view: RawHwnd, click_through: bool) {
+    use cocoa::base::{NO, YES, id};
+    use objc::{msg_send, sel, sel_impl};
+
+    unsafe {
+        let view: id = ns_view as id;
+        if view.is_null() {
+            return;
+        }
+
+        let window: id = msg_send![view, window];
+        if window.is_null() {
+            return;
+        }
+
+        let value = if click_through { YES } else { NO };
+        let _: () = msg_send![window, setIgnoresMouseEvents: value];
+        log::debug!("Set window click-through: {}", click_through);
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn close_native_window(_hwnd: RawHwnd) {
     // TODO: Implement
 }
 
+#[cfg(target_os = "windows")]
+fn set_native_click_through(_hwnd: RawHwnd, _click_through: bool) {
+    // TODO: Implement using WS_EX_TRANSPARENT
+}
+
 #[cfg(target_os = "linux")]
 fn close_native_window(_hwnd: RawHwnd) {
     // TODO: Implement
+}
+
+#[cfg(target_os = "linux")]
+fn set_native_click_through(_hwnd: RawHwnd, _click_through: bool) {
+    // TODO: Implement using X11 input passthrough
 }

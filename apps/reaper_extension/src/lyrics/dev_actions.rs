@@ -293,21 +293,27 @@ unsafe fn ppq_to_musical_position(
 
     // Calculate tick (sub-beat position, 0-959 for 960 ticks per quarter note)
     // First, get PPQ position of measure start
-    let measure_start_ppq = medium_reaper
-        .low()
-        .MIDI_GetPPQPosFromProjQN(take.as_ptr(), measure_start_qn);
+    let measure_start_ppq = unsafe {
+        medium_reaper
+            .low()
+            .MIDI_GetPPQPosFromProjQN(take.as_ptr(), measure_start_qn)
+    };
     let ppq_into_measure = ppq - measure_start_ppq;
 
     // Get PPQ resolution (usually 960 PPQ per quarter note)
     // We'll calculate it from the beat position
-    let beat_start_ppq = medium_reaper.low().MIDI_GetPPQPosFromProjQN(
-        take.as_ptr(),
-        measure_start_qn + ((beat_number - 1.0) * qn_per_beat),
-    );
-    let ppq_per_beat = medium_reaper.low().MIDI_GetPPQPosFromProjQN(
-        take.as_ptr(),
-        measure_start_qn + (beat_number * qn_per_beat),
-    ) - beat_start_ppq;
+    let beat_start_ppq = unsafe {
+        medium_reaper.low().MIDI_GetPPQPosFromProjQN(
+            take.as_ptr(),
+            measure_start_qn + ((beat_number - 1.0) * qn_per_beat),
+        )
+    };
+    let ppq_per_beat = unsafe {
+        medium_reaper.low().MIDI_GetPPQPosFromProjQN(
+            take.as_ptr(),
+            measure_start_qn + (beat_number * qn_per_beat),
+        )
+    } - beat_start_ppq;
 
     // Calculate tick (0-959 per quarter note, or scaled to beat)
     let ppq_into_beat = ppq - beat_start_ppq;

@@ -5,6 +5,7 @@
 
 use super::span::{AstNode, Spanned};
 use crate::parsing::TextSpan;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Abstract syntax tree for rhythm notation.
@@ -12,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// Captures the syntactic structure of rhythm notation without computing
 /// actual durations. This allows different interpretation strategies
 /// depending on context (time signature, tempo, etc.).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
 pub struct RhythmAst {
     /// The kind of rhythm notation
     pub kind: RhythmKind,
@@ -86,7 +87,8 @@ impl AstNode for RhythmAst {
 }
 
 /// Kind of rhythm notation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum RhythmKind {
     /// Default duration (one measure, no explicit notation)
     Default,
@@ -111,7 +113,7 @@ pub enum RhythmKind {
 }
 
 /// Number of slashes in slash notation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct SlashCountAst(pub u8);
 
 impl SlashCountAst {
@@ -125,7 +127,7 @@ impl SlashCountAst {
 }
 
 /// Duration in lily-style notation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct DurationAst {
     /// The base note value (1=whole, 2=half, 4=quarter, 8=eighth, 16=sixteenth, 32=thirty-second)
     pub base: u8,
@@ -230,7 +232,7 @@ impl Default for DurationAst {
 }
 
 /// Push/pull timing modifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct PushPullAst {
     /// Level of subdivision (1=eighth, 2=sixteenth, 3=thirty-second)
     pub level: u8,
@@ -286,7 +288,8 @@ impl PushPullAst {
 }
 
 /// Base timing for push/pull.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum PushPullBaseAst {
     /// Standard (binary) subdivision
     Standard,

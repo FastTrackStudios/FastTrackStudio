@@ -11,11 +11,11 @@
 
 // region:    --- Modules
 
-mod error;
 pub mod ast;
 pub mod chart;
 pub mod chord;
 pub mod core;
+mod error;
 pub mod key;
 pub mod metadata;
 pub mod parsing;

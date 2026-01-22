@@ -3,12 +3,12 @@
 // Uses progressive downsample/upsample for high-quality bloom
 
 use dioxus_native::{
-    wgpu::{self, Device, Queue, TextureFormat, TextureView},
     PostProcessContext, PostProcessor,
+    wgpu::{self, Device, Queue, TextureFormat, TextureView},
 };
 use std::borrow::Cow;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use wesl::include_wesl;
 
 /// Number of mip levels for bloom (each level is half the previous size)
@@ -31,9 +31,9 @@ pub struct BloomParams {
 impl Default for BloomParams {
     fn default() -> Self {
         Self {
-            threshold: 0.3,  // Lower = more bloom
-            knee: 0.3,       // Soft knee
-            intensity: 2.0,  // Visible bloom
+            threshold: 0.3, // Lower = more bloom
+            knee: 0.3,      // Soft knee
+            intensity: 2.0, // Visible bloom
             enabled: 1.0,
         }
     }
@@ -355,11 +355,12 @@ impl PostProcessor for GlowPostProcessor {
         queue.write_buffer(&params_buffer, 0, bytemuck::cast_slice(&[params]));
 
         // Create pipeline layouts
-        let single_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Bloom single texture pipeline layout"),
-            bind_group_layouts: &[&single_texture_layout],
-            push_constant_ranges: &[],
-        });
+        let single_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Bloom single texture pipeline layout"),
+                bind_group_layouts: &[&single_texture_layout],
+                push_constant_ranges: &[],
+            });
 
         let dual_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Bloom dual texture pipeline layout"),
@@ -374,37 +375,39 @@ impl PostProcessor for GlowPostProcessor {
         });
 
         // Helper to create pipeline
-        let create_pipeline =
-            |label: &str, layout: &wgpu::PipelineLayout, entry_point: &str| -> wgpu::RenderPipeline {
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some(label),
-                    layout: Some(layout),
-                    vertex: wgpu::VertexState {
-                        module: &vertex_shader,
-                        entry_point: Some("vs_main"),
-                        buffers: &[],
-                        compilation_options: Default::default(),
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &shader,
-                        entry_point: Some(entry_point),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                        compilation_options: Default::default(),
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        ..Default::default()
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    multiview: None,
-                    cache: None,
-                })
-            };
+        let create_pipeline = |label: &str,
+                               layout: &wgpu::PipelineLayout,
+                               entry_point: &str|
+         -> wgpu::RenderPipeline {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(layout),
+                vertex: wgpu::VertexState {
+                    module: &vertex_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some(entry_point),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            })
+        };
 
         // Create pipelines
         self.prefilter_pipeline = Some(create_pipeline(
@@ -487,7 +490,10 @@ impl PostProcessor for GlowPostProcessor {
         let height = ctx.height;
 
         // Recreate mip chains if size changed (do this before borrowing other fields)
-        if self.current_width != width || self.current_height != height || self.downsample_chain.is_none() {
+        if self.current_width != width
+            || self.current_height != height
+            || self.downsample_chain.is_none()
+        {
             self.create_mip_chains(ctx.device, width, height);
         }
 
@@ -557,7 +563,9 @@ impl PostProcessor for GlowPostProcessor {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(downsample_chain.view(mip - 1)),
+                        resource: wgpu::BindingResource::TextureView(
+                            downsample_chain.view(mip - 1),
+                        ),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -603,7 +611,9 @@ impl PostProcessor for GlowPostProcessor {
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(downsample_chain.view(MIP_COUNT - 1)),
+                        resource: wgpu::BindingResource::TextureView(
+                            downsample_chain.view(MIP_COUNT - 1),
+                        ),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,

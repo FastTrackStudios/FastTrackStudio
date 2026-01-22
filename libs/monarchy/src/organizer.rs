@@ -33,6 +33,7 @@
 //! ```
 
 use crate::{CollapseHierarchy, Config, Group, Item, Metadata, Structure};
+use facet::Facet;
 
 /// Organizes parsed [`Item`]s into a hierarchical [`Structure`].
 ///
@@ -51,6 +52,7 @@ use crate::{CollapseHierarchy, Config, Group, Item, Metadata, Structure};
 /// // The structure now contains a tree of groups and items
 /// structure.print_tree();
 /// ```
+#[derive(Clone, Debug, Facet)]
 pub struct Organizer<M: Metadata> {
     config: Config<M>,
 }

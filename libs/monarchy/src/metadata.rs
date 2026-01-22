@@ -74,6 +74,7 @@
 //! }
 //! ```
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
@@ -141,12 +142,13 @@ pub trait Metadata: Clone + Default + Send + Sync + 'static {
         + PartialEq
         + Serialize
         + for<'de> Deserialize<'de>
+        + Facet
         + Send
         + Sync
         + 'static;
 
     /// The value type that can be stored in this metadata
-    type Value: Clone + Debug + Send + Sync + 'static;
+    type Value: Clone + Debug + Facet + Send + Sync + 'static;
 
     /// Get a value for a given field
     fn get(&self, field: &Self::Field) -> Option<Self::Value>;

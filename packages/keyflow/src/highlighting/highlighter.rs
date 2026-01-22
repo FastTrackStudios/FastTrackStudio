@@ -70,7 +70,11 @@ impl Highlighter {
         // Find the semicolon
         if let Some(semi_pos) = line.find(';') {
             // Highlight the semicolon
-            spans.push(HighlightSpan::from_range(semi_pos, 1, HighlightKind::CommentMarker));
+            spans.push(HighlightSpan::from_range(
+                semi_pos,
+                1,
+                HighlightKind::CommentMarker,
+            ));
 
             // Highlight the rest as comment
             let comment_start = semi_pos + 1;
@@ -127,7 +131,10 @@ impl Highlighter {
         // Key signature: starts with # or b followed by uppercase letter
         if (trimmed.starts_with('#') || trimmed.starts_with('b'))
             && trimmed.len() >= 2
-            && trimmed.chars().nth(1).is_some_and(|c| c.is_ascii_uppercase())
+            && trimmed
+                .chars()
+                .nth(1)
+                .is_some_and(|c| c.is_ascii_uppercase())
         {
             return Some(Self::highlight_key_line(line));
         }
@@ -163,10 +170,18 @@ impl Highlighter {
             let artist_start = leading_ws + dash_pos + 3;
 
             // Title
-            spans.push(HighlightSpan::from_range(leading_ws, dash_pos, HighlightKind::Title));
+            spans.push(HighlightSpan::from_range(
+                leading_ws,
+                dash_pos,
+                HighlightKind::Title,
+            ));
 
             // Dash (as part of title formatting)
-            spans.push(HighlightSpan::from_range(title_end, 3, HighlightKind::Title));
+            spans.push(HighlightSpan::from_range(
+                title_end,
+                3,
+                HighlightKind::Title,
+            ));
 
             // Artist
             if artist_start < line.len() {
@@ -196,14 +211,22 @@ impl Highlighter {
 
         // Check for tempo change arrow
         if trimmed.starts_with("->") {
-            spans.push(HighlightSpan::from_range(leading_ws, 2, HighlightKind::TempoArrow));
+            spans.push(HighlightSpan::from_range(
+                leading_ws,
+                2,
+                HighlightKind::TempoArrow,
+            ));
             spans.push(HighlightSpan::from_range(
                 leading_ws + 2,
                 trimmed.len() - 2,
                 HighlightKind::Tempo,
             ));
         } else {
-            spans.push(HighlightSpan::from_range(leading_ws, trimmed.len(), HighlightKind::Tempo));
+            spans.push(HighlightSpan::from_range(
+                leading_ws,
+                trimmed.len(),
+                HighlightKind::Tempo,
+            ));
         }
 
         spans
@@ -213,7 +236,11 @@ impl Highlighter {
     fn highlight_key_line(line: &str) -> Vec<HighlightSpan> {
         let leading_ws = line.len() - line.trim_start().len();
         let trimmed = line.trim();
-        vec![HighlightSpan::from_range(leading_ws, trimmed.len(), HighlightKind::Key)]
+        vec![HighlightSpan::from_range(
+            leading_ws,
+            trimmed.len(),
+            HighlightKind::Key,
+        )]
     }
 
     /// Highlight a time signature line.
@@ -274,8 +301,20 @@ impl Highlighter {
         // Also check for preset modifiers (Down, Build, etc.)
         let is_preset_modifier = matches!(
             first_word_lower.as_str(),
-            "down" | "build" | "half-time" | "halftime" | "double-time" | "doubletime" | "soft"
-                | "loud" | "quiet" | "big" | "small" | "sparse" | "full" | "stripped"
+            "down"
+                | "build"
+                | "half-time"
+                | "halftime"
+                | "double-time"
+                | "doubletime"
+                | "soft"
+                | "loud"
+                | "quiet"
+                | "big"
+                | "small"
+                | "sparse"
+                | "full"
+                | "stripped"
         );
 
         if is_section {
@@ -304,15 +343,27 @@ impl Highlighter {
         // Find brackets
         if let (Some(open), Some(close)) = (line.find('['), line.find(']')) {
             // Opening bracket
-            spans.push(HighlightSpan::from_range(open, 1, HighlightKind::SectionBracket));
+            spans.push(HighlightSpan::from_range(
+                open,
+                1,
+                HighlightKind::SectionBracket,
+            ));
 
             // Section name
             if close > open + 1 {
-                spans.push(HighlightSpan::from_range(open + 1, close - open - 1, HighlightKind::Section));
+                spans.push(HighlightSpan::from_range(
+                    open + 1,
+                    close - open - 1,
+                    HighlightKind::Section,
+                ));
             }
 
             // Closing bracket
-            spans.push(HighlightSpan::from_range(close, 1, HighlightKind::SectionBracket));
+            spans.push(HighlightSpan::from_range(
+                close,
+                1,
+                HighlightKind::SectionBracket,
+            ));
 
             // Check for measure count after bracket
             let after_bracket = &line[close + 1..];
@@ -350,7 +401,11 @@ impl Highlighter {
             .next()
             .map(|s| s.len())
             .unwrap_or(0);
-        spans.push(HighlightSpan::from_range(pos, keyword_len, HighlightKind::Section));
+        spans.push(HighlightSpan::from_range(
+            pos,
+            keyword_len,
+            HighlightKind::Section,
+        ));
         pos += keyword_len;
 
         // Skip whitespace
@@ -421,7 +476,11 @@ impl Highlighter {
 
         // Second word is the section keyword
         if words.len() > 1 {
-            spans.push(HighlightSpan::from_range(pos, words[1].len(), HighlightKind::Section));
+            spans.push(HighlightSpan::from_range(
+                pos,
+                words[1].len(),
+                HighlightKind::Section,
+            ));
             pos += words[1].len();
 
             // Skip whitespace
@@ -455,7 +514,9 @@ impl Highlighter {
             .strip_prefix('[')
             .and_then(|s| s.strip_suffix(']'))
             .or_else(|| {
-                trimmed.strip_prefix('[').and_then(|s| s.find(']').map(|i| &s[..i]))
+                trimmed
+                    .strip_prefix('[')
+                    .and_then(|s| s.find(']').map(|i| &s[..i]))
             })?;
 
         let name_lower = name.to_lowercase();
@@ -510,7 +571,12 @@ impl Highlighter {
                     let kind = if slash_count == 1 {
                         // Check context - is this a measure separator or bass note slash?
                         // If preceded by a letter, it's likely a bass slash
-                        if i > 0 && matches!(tokens[i - 1].token_type, TokenType::Letter(_) | TokenType::Number(_)) {
+                        if i > 0
+                            && matches!(
+                                tokens[i - 1].token_type,
+                                TokenType::Letter(_) | TokenType::Number(_)
+                            )
+                        {
                             HighlightKind::BassSlash
                         } else {
                             HighlightKind::MeasureSeparator
@@ -551,7 +617,11 @@ impl Highlighter {
                         }
                     }
 
-                    spans.push(HighlightSpan::from_range(start_pos, len, HighlightKind::Duration));
+                    spans.push(HighlightSpan::from_range(
+                        start_pos,
+                        len,
+                        HighlightKind::Duration,
+                    ));
                 }
 
                 // Apostrophe - push or pull notation
@@ -574,8 +644,7 @@ impl Highlighter {
                         && matches!(
                             tokens[i - len].token_type,
                             TokenType::Letter(_) | TokenType::Number(_)
-                        )
-                    {
+                        ) {
                         HighlightKind::Pull
                     } else {
                         HighlightKind::Push
@@ -590,7 +659,10 @@ impl Highlighter {
 
                     // Check if this could be a chord root (A-G, uppercase or lowercase)
                     if c.to_ascii_uppercase().is_ascii_alphabetic()
-                        && matches!(c.to_ascii_uppercase(), 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G')
+                        && matches!(
+                            c.to_ascii_uppercase(),
+                            'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G'
+                        )
                     {
                         // This looks like a chord root
                         spans.push(HighlightSpan::from_range(start_pos, 1, HighlightKind::Root));
@@ -652,10 +724,18 @@ impl Highlighter {
                         spans.push(HighlightSpan::from_range(start_pos, rest_len, kind));
                     } else if *c == 'm' {
                         // Quality marker (minor)
-                        spans.push(HighlightSpan::from_range(start_pos, 1, HighlightKind::Quality));
+                        spans.push(HighlightSpan::from_range(
+                            start_pos,
+                            1,
+                            HighlightKind::Quality,
+                        ));
                     } else if *c == 't' {
                         // Triplet marker
-                        spans.push(HighlightSpan::from_range(start_pos, 1, HighlightKind::Triplet));
+                        spans.push(HighlightSpan::from_range(
+                            start_pos,
+                            1,
+                            HighlightKind::Triplet,
+                        ));
                     } else if ['I', 'V', 'i', 'v'].contains(c) {
                         // Roman numeral - highlight the whole numeral
                         let (len, kind) = Self::parse_roman_numeral(&tokens, i);
@@ -674,59 +754,111 @@ impl Highlighter {
 
                     // Check if this is a scale degree (1-7 at start of chord position)
                     if (1..=7).contains(&num_val) && Self::is_chord_position(&tokens, i) {
-                        spans.push(HighlightSpan::from_range(start_pos, num.len(), HighlightKind::ScaleDegree));
+                        spans.push(HighlightSpan::from_range(
+                            start_pos,
+                            num.len(),
+                            HighlightKind::ScaleDegree,
+                        ));
                     } else if [7, 9, 11, 13, 6].contains(&num_val) {
                         // Extension number
-                        spans.push(HighlightSpan::from_range(start_pos, num.len(), HighlightKind::Extension));
+                        spans.push(HighlightSpan::from_range(
+                            start_pos,
+                            num.len(),
+                            HighlightKind::Extension,
+                        ));
                     } else {
                         // Generic number (might be measure count or part of modifier)
-                        spans.push(HighlightSpan::from_range(start_pos, num.len(), HighlightKind::MeasureCount));
+                        spans.push(HighlightSpan::from_range(
+                            start_pos,
+                            num.len(),
+                            HighlightKind::MeasureCount,
+                        ));
                     }
                 }
 
                 // Sharp and flat symbols
                 TokenType::Sharp => {
-                    spans.push(HighlightSpan::from_range(token.pos, 1, HighlightKind::Accidental));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        1,
+                        HighlightKind::Accidental,
+                    ));
                 }
                 TokenType::Flat => {
-                    spans.push(HighlightSpan::from_range(token.pos, 1, HighlightKind::Accidental));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        1,
+                        HighlightKind::Accidental,
+                    ));
                 }
 
                 // Special chord symbols
                 TokenType::Triangle => {
                     // Major 7 symbol (△)
-                    spans.push(HighlightSpan::from_range(token.pos, token.len, HighlightKind::Quality));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        token.len,
+                        HighlightKind::Quality,
+                    ));
                 }
                 TokenType::Circle => {
                     // Diminished symbol (°)
-                    spans.push(HighlightSpan::from_range(token.pos, token.len, HighlightKind::Quality));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        token.len,
+                        HighlightKind::Quality,
+                    ));
                 }
                 TokenType::HalfDiminished => {
                     // Half-diminished symbol (ø)
-                    spans.push(HighlightSpan::from_range(token.pos, token.len, HighlightKind::Quality));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        token.len,
+                        HighlightKind::Quality,
+                    ));
                 }
 
                 // Plus and minus (augmented, minor, or modifiers)
                 TokenType::Plus => {
-                    spans.push(HighlightSpan::from_range(token.pos, 1, HighlightKind::Quality));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        1,
+                        HighlightKind::Quality,
+                    ));
                 }
                 TokenType::Minus => {
-                    spans.push(HighlightSpan::from_range(token.pos, 1, HighlightKind::Quality));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        1,
+                        HighlightKind::Quality,
+                    ));
                 }
 
                 // Parentheses (for modifiers)
                 TokenType::LParen | TokenType::RParen => {
-                    spans.push(HighlightSpan::from_range(token.pos, 1, HighlightKind::Modifier));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        1,
+                        HighlightKind::Modifier,
+                    ));
                 }
 
                 // At sign (command marker)
                 TokenType::At => {
-                    spans.push(HighlightSpan::from_range(token.pos, 1, HighlightKind::Command));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        1,
+                        HighlightKind::Command,
+                    ));
                 }
 
                 // Semicolon (comment start)
                 TokenType::Semicolon => {
-                    spans.push(HighlightSpan::from_range(token.pos, 1, HighlightKind::CommentMarker));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        1,
+                        HighlightKind::CommentMarker,
+                    ));
                     // Rest of line is comment
                     let comment_start = token.pos + 1;
                     if comment_start < line.len() {
@@ -745,7 +877,11 @@ impl Highlighter {
                     if i > 0 && matches!(tokens[i - 1].token_type, TokenType::Minus) {
                         // Already highlighted as part of tempo change
                     } else {
-                        spans.push(HighlightSpan::from_range(token.pos, 1, HighlightKind::Unknown));
+                        spans.push(HighlightSpan::from_range(
+                            token.pos,
+                            1,
+                            HighlightKind::Unknown,
+                        ));
                     }
                 }
 
@@ -756,12 +892,20 @@ impl Highlighter {
 
                 // Tilde (memory recall)
                 TokenType::Tilde => {
-                    spans.push(HighlightSpan::from_range(token.pos, 1, HighlightKind::MemoryRecall));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        1,
+                        HighlightKind::MemoryRecall,
+                    ));
                 }
 
                 // Asterisk (repeat marker or multiplication)
                 TokenType::Asterisk => {
-                    spans.push(HighlightSpan::from_range(token.pos, 1, HighlightKind::Repeat));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        1,
+                        HighlightKind::Repeat,
+                    ));
                 }
 
                 // Space - skip
@@ -769,12 +913,20 @@ impl Highlighter {
 
                 // Comma - modifier separator
                 TokenType::Comma => {
-                    spans.push(HighlightSpan::from_range(token.pos, 1, HighlightKind::Modifier));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        1,
+                        HighlightKind::Modifier,
+                    ));
                 }
 
                 // Illegal token
                 TokenType::Illegal => {
-                    spans.push(HighlightSpan::from_range(token.pos, token.len, HighlightKind::Unknown));
+                    spans.push(HighlightSpan::from_range(
+                        token.pos,
+                        token.len,
+                        HighlightKind::Unknown,
+                    ));
                 }
             }
 
@@ -801,7 +953,11 @@ impl Highlighter {
     }
 
     /// Highlight chord quality markers and advance the token index.
-    fn highlight_chord_quality(tokens: &[Token], start_idx: usize, spans: &mut Vec<HighlightSpan>) -> usize {
+    fn highlight_chord_quality(
+        tokens: &[Token],
+        start_idx: usize,
+        spans: &mut Vec<HighlightSpan>,
+    ) -> usize {
         let mut idx = start_idx;
 
         // Look for quality markers starting after the root
@@ -815,7 +971,11 @@ impl Highlighter {
                         if let (TokenType::Letter('a'), TokenType::Letter('j')) =
                             (&tokens[idx + 2].token_type, &tokens[idx + 3].token_type)
                         {
-                            spans.push(HighlightSpan::from_range(next.pos, 3, HighlightKind::Quality));
+                            spans.push(HighlightSpan::from_range(
+                                next.pos,
+                                3,
+                                HighlightKind::Quality,
+                            ));
                             idx += 3;
                             continue;
                         }
@@ -825,13 +985,21 @@ impl Highlighter {
                         if let (TokenType::Letter('i'), TokenType::Letter('n')) =
                             (&tokens[idx + 2].token_type, &tokens[idx + 3].token_type)
                         {
-                            spans.push(HighlightSpan::from_range(next.pos, 3, HighlightKind::Quality));
+                            spans.push(HighlightSpan::from_range(
+                                next.pos,
+                                3,
+                                HighlightKind::Quality,
+                            ));
                             idx += 3;
                             continue;
                         }
                     }
                     // Just 'm' for minor
-                    spans.push(HighlightSpan::from_range(next.pos, 1, HighlightKind::Quality));
+                    spans.push(HighlightSpan::from_range(
+                        next.pos,
+                        1,
+                        HighlightKind::Quality,
+                    ));
                     idx += 1;
                 }
                 // Diminished: dim, o
@@ -840,7 +1008,11 @@ impl Highlighter {
                         if let (TokenType::Letter('i'), TokenType::Letter('m')) =
                             (&tokens[idx + 2].token_type, &tokens[idx + 3].token_type)
                         {
-                            spans.push(HighlightSpan::from_range(next.pos, 3, HighlightKind::Quality));
+                            spans.push(HighlightSpan::from_range(
+                                next.pos,
+                                3,
+                                HighlightKind::Quality,
+                            ));
                             idx += 3;
                             continue;
                         }
@@ -853,7 +1025,11 @@ impl Highlighter {
                         if let (TokenType::Letter('u'), TokenType::Letter('g')) =
                             (&tokens[idx + 2].token_type, &tokens[idx + 3].token_type)
                         {
-                            spans.push(HighlightSpan::from_range(next.pos, 3, HighlightKind::Quality));
+                            spans.push(HighlightSpan::from_range(
+                                next.pos,
+                                3,
+                                HighlightKind::Quality,
+                            ));
                             idx += 3;
                             continue;
                         }
@@ -869,18 +1045,18 @@ impl Highlighter {
                             // Check for sus2 or sus4
                             let sus_len = if idx + 4 < tokens.len() {
                                 if let TokenType::Number(n) = &tokens[idx + 4].token_type {
-                                    if n == "2" || n == "4" {
-                                        4
-                                    } else {
-                                        3
-                                    }
+                                    if n == "2" || n == "4" { 4 } else { 3 }
                                 } else {
                                     3
                                 }
                             } else {
                                 3
                             };
-                            spans.push(HighlightSpan::from_range(next.pos, sus_len, HighlightKind::Quality));
+                            spans.push(HighlightSpan::from_range(
+                                next.pos,
+                                sus_len,
+                                HighlightKind::Quality,
+                            ));
                             idx += sus_len;
                             continue;
                         }
@@ -893,22 +1069,38 @@ impl Highlighter {
                         if let (TokenType::Letter('a'), TokenType::Letter('j')) =
                             (&tokens[idx + 2].token_type, &tokens[idx + 3].token_type)
                         {
-                            spans.push(HighlightSpan::from_range(next.pos, 3, HighlightKind::Quality));
+                            spans.push(HighlightSpan::from_range(
+                                next.pos,
+                                3,
+                                HighlightKind::Quality,
+                            ));
                             idx += 3;
                             continue;
                         }
                     }
                     // Just 'M' for major
-                    spans.push(HighlightSpan::from_range(next.pos, 1, HighlightKind::Quality));
+                    spans.push(HighlightSpan::from_range(
+                        next.pos,
+                        1,
+                        HighlightKind::Quality,
+                    ));
                     idx += 1;
                 }
                 // Special symbols
                 TokenType::Triangle | TokenType::Circle | TokenType::HalfDiminished => {
-                    spans.push(HighlightSpan::from_range(next.pos, next.len, HighlightKind::Quality));
+                    spans.push(HighlightSpan::from_range(
+                        next.pos,
+                        next.len,
+                        HighlightKind::Quality,
+                    ));
                     idx += 1;
                 }
                 TokenType::Plus | TokenType::Minus => {
-                    spans.push(HighlightSpan::from_range(next.pos, 1, HighlightKind::Quality));
+                    spans.push(HighlightSpan::from_range(
+                        next.pos,
+                        1,
+                        HighlightKind::Quality,
+                    ));
                     idx += 1;
                 }
                 _ => break,
@@ -1052,8 +1244,15 @@ mod tests {
         // In Keyflow, multiple chords on a line are separated by spaces
         let spans = Highlighter::highlight_line("G Am D");
         // Should have at least 3 root highlights (G, A, D)
-        let root_count = spans.iter().filter(|s| s.kind == HighlightKind::Root).count();
-        assert!(root_count >= 3, "Expected at least 3 roots, got {}", root_count);
+        let root_count = spans
+            .iter()
+            .filter(|s| s.kind == HighlightKind::Root)
+            .count();
+        assert!(
+            root_count >= 3,
+            "Expected at least 3 roots, got {}",
+            root_count
+        );
     }
 
     #[test]
@@ -1066,7 +1265,11 @@ mod tests {
     #[test]
     fn test_highlight_custom_section() {
         let spans = Highlighter::highlight_line("[SOLO Keys] 8");
-        assert!(spans.iter().any(|s| s.kind == HighlightKind::SectionBracket));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == HighlightKind::SectionBracket)
+        );
         assert!(spans.iter().any(|s| s.kind == HighlightKind::Section));
         assert!(spans.iter().any(|s| s.kind == HighlightKind::MeasureCount));
     }

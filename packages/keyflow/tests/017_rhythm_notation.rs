@@ -251,8 +251,9 @@ fn test_eighth_note() {
 #[test]
 fn test_sixteenth_note() {
     // 16 sixteenth notes fill one measure
-    let chart =
-        parse_chart("C_16 D_16 E_16 F_16 G_16 A_16 B_16 C_16 D_16 E_16 F_16 G_16 A_16 B_16 C_16 D_16");
+    let chart = parse_chart(
+        "C_16 D_16 E_16 F_16 G_16 A_16 B_16 C_16 D_16 E_16 F_16 G_16 A_16 B_16 C_16 D_16",
+    );
 
     let section = &chart.sections[0];
     let measure = &section.measures()[0];

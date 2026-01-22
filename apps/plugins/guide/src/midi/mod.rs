@@ -4,4 +4,4 @@
 
 pub mod notes;
 
-pub use notes::{get_midi_note_for_section_type, MIDI_NOTES_COUNT};
+pub use notes::{MIDI_NOTES_COUNT, get_midi_note_for_section_type};

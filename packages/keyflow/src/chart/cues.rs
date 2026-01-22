@@ -8,11 +8,13 @@
 //! - `@drums:3 "crash"` - cue at beat 3
 
 use crate::time::AbsolutePosition;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Represents an instrument group that can be targeted by cues
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum InstrumentGroup {
     All,
     Keys,
@@ -53,7 +55,7 @@ impl fmt::Display for InstrumentGroup {
 }
 
 /// Represents a text cue for a specific instrument group
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct TextCue {
     pub group: InstrumentGroup,
     pub text: String,

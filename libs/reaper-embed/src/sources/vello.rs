@@ -96,7 +96,10 @@ where
 {
     /// Create a new Vello embed source with render and event handlers.
     pub fn new(render_fn: R, event_fn: E) -> Self {
-        Self { render_fn, event_fn }
+        Self {
+            render_fn,
+            event_fn,
+        }
     }
 }
 

@@ -450,7 +450,10 @@ fn calculate_bracket_endpoints(
             non_rest_ys.iter().copied().fold(f64::INFINITY, f64::min)
         } else {
             // For downward bracket, use the maximum (lowest on screen) Y
-            non_rest_ys.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+            non_rest_ys
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max)
         };
         (unified_y, unified_y)
     } else {

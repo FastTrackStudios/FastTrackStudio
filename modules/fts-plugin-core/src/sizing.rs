@@ -139,7 +139,8 @@ impl AspectRatio {
                 height_ratio,
                 base_width,
             } => {
-                let base_height = (*base_width as u64 * *height_ratio as u64 / *width_ratio as u64) as u32;
+                let base_height =
+                    (*base_width as u64 * *height_ratio as u64 / *width_ratio as u64) as u32;
                 (*base_width, base_height)
             }
         }

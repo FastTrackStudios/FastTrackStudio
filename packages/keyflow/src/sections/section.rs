@@ -5,12 +5,13 @@
 
 use super::section_type::SectionType;
 use daw::primitives::Position;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Represents a section with its type and optional number
 /// Can be used for both chart parsing and DAW integration
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Section {
     /// Section type
     pub section_type: SectionType,

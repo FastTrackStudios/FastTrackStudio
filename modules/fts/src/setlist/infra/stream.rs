@@ -7,6 +7,7 @@ use crate::{Setlist, SetlistApi, Song};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use daw::transport::Transport;
+use facet::Facet;
 use iroh::{Endpoint, EndpointAddr, protocol::ProtocolHandler};
 use irpc::{
     Client, Request, WithChannels,
@@ -39,7 +40,8 @@ pub use super::traits::{SetlistCommandHandler, SetlistStateProvider};
 ///
 /// Note: Uses externally tagged enum (default) for PostCard compatibility.
 /// PostCard does not support internally tagged enums.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum SetlistUpdateMessage {
     /// Full setlist update (sent on initial connection or major changes)
     /// Contains the complete setlist structure (songs, sections, metadata) but NOT tracks/transport
@@ -96,76 +98,76 @@ pub enum SetlistUpdateMessage {
 }
 
 /// Request to subscribe to setlist structure updates (songs, sections, metadata)
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeSetlistStructure;
 
 /// Request to subscribe to active indices updates (which song/section/slide is active)
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeActiveIndices;
 
 /// Request to subscribe to song tracks updates
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeSongTracks;
 
 /// Request to subscribe to song transport updates
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeSongTransport;
 
 /// Request to subscribe to all setlist updates (legacy, for backward compatibility)
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeSetlist;
 
 // TransportCommand and NavigationCommand are imported from super::commands
 
 /// Seek to a specific section
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SeekToSection {
     pub song_index: usize,
     pub section_index: usize,
 }
 
 /// Seek to a specific song (switches to that song's tab and moves cursor to beginning)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SeekToSong {
     pub song_index: usize,
 }
 
 /// Seek to a specific time position within a song
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SeekToTime {
     pub song_index: usize,
     pub time_seconds: f64, // Time position relative to song start
 }
 
 /// Seek to a specific musical position within a song
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct SeekToMusicalPosition {
     pub song_index: usize,
     pub musical_position: daw::primitives::MusicalPosition,
 }
 
 /// Toggle loop for current song
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct ToggleLoop;
 
 /// Advance to the next syllable and assign it to the next MIDI note at edit cursor
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct AdvanceSyllable;
 
 /// Get current lyrics state
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct GetLyricsState;
 
 // LyricsState is imported from super::commands
 
 /// Assign syllable to MIDI note at edit cursor position
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct AssignSyllableToNote {
     pub syllable_text: String,
 }
 
 /// Update lyrics for a song
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct UpdateLyrics {
     pub song_index: usize,
     pub lyrics: crate::lyrics::core::Lyrics,
@@ -173,7 +175,8 @@ pub struct UpdateLyrics {
 
 /// IRPC protocol for setlist stream service
 #[rpc_requests(message = SetlistStreamMessage)]
-#[derive(Serialize, Deserialize, Debug)]
+#[repr(u8)]
+#[derive(Serialize, Deserialize, Debug, Facet)]
 pub enum SetlistStreamProtocol {
     /// Subscribe to setlist structure updates (songs, sections, metadata) - server streaming
     #[rpc(tx=mpsc::Sender<SetlistUpdateMessage>)]

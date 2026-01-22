@@ -46,12 +46,9 @@ pub fn read_markers_from_project(project: &Project) -> Result<Vec<Marker>, Strin
                 let position_seconds: f64 = info.position.into();
 
                 // Get name - convert ReaperString to String and clean it up
-                let name = bookmark
-                    .name()
-                    .to_string()
-                    .trim_matches('"')
-                    .trim()
-                    .to_string();
+                // Only strip outer quotes if they wrap the entire name (REAPER sometimes does this)
+                let raw_name = bookmark.name().to_string();
+                let name = strip_balanced_outer_quotes(&raw_name).trim().to_string();
 
                 // Get color if available - convert NativeColor to RGB and then to u32
                 let color = extract_color_from_native(info.color);
@@ -119,12 +116,9 @@ pub fn read_regions_from_project(project: &Project) -> Result<Vec<Region>, Strin
                     let end_position_seconds: f64 = end_position.into();
 
                     // Get name - convert ReaperString to String and clean it up
-                    let name = bookmark
-                        .name()
-                        .to_string()
-                        .trim_matches('"')
-                        .trim()
-                        .to_string();
+                    // Only strip outer quotes if they wrap the entire name (REAPER sometimes does this)
+                    let raw_name = bookmark.name().to_string();
+                    let name = strip_balanced_outer_quotes(&raw_name).trim().to_string();
 
                     // Get color if available - convert NativeColor to RGB and then to u32
                     let color = extract_color_from_native(info.color);
@@ -196,4 +190,22 @@ pub fn read_regions_from_project(project: &Project) -> Result<Vec<Region>, Strin
     });
 
     Ok(regions)
+}
+
+/// Strip balanced outer quotes from a string.
+/// Only removes quotes if they wrap the entire string (start AND end with quotes).
+/// This preserves internal quotes that are part of the content.
+///
+/// Examples:
+/// - `"Hello World"` -> `Hello World` (balanced, stripped)
+/// - `Interlude A "Horns"` -> `Interlude A "Horns"` (not balanced at start, preserved)
+/// - `"Something` -> `"Something` (not balanced at end, preserved)
+fn strip_balanced_outer_quotes(s: &str) -> &str {
+    let trimmed = s.trim();
+    if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+        // Strip the outer quotes
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    }
 }

@@ -215,7 +215,10 @@ Gmaj7_4 C//// Dm7_2 Em7/
     let chord2 = &measure2.chords[0];
     assert_eq!(format!("{}", chord2.root), "C");
     assert_eq!(chord2.full_symbol, "C");
-    assert!(matches!(chord2.rhythm, ChordRhythm::Slashes { count: 4, .. }));
+    assert!(matches!(
+        chord2.rhythm,
+        ChordRhythm::Slashes { count: 4, .. }
+    ));
     assert_eq!(chord2.duration.to_beats(chart.time_signature.unwrap()), 4.0);
 
     // Measure 3: Dm7_2 (2 beats) + Em7/ (1 beat) = 3 beats (partial measure)
@@ -231,7 +234,10 @@ Gmaj7_4 C//// Dm7_2 Em7/
     let chord4 = &measure3.chords[1]; // Em7/
     assert_eq!(format!("{}", chord4.root), "E");
     assert_eq!(chord4.full_symbol, "Em7");
-    assert!(matches!(chord4.rhythm, ChordRhythm::Slashes { count: 1, .. }));
+    assert!(matches!(
+        chord4.rhythm,
+        ChordRhythm::Slashes { count: 1, .. }
+    ));
     assert_eq!(chord4.duration.to_beats(chart.time_signature.unwrap()), 1.0);
 }
 
@@ -387,12 +393,18 @@ Gmaj13_4 C9_2 Gmaj13// C9/
 
     let chord3 = &measure2.chords[0]; // Gmaj13//
     assert_eq!(chord3.full_symbol, "Gmaj13");
-    assert!(matches!(chord3.rhythm, ChordRhythm::Slashes { count: 2, .. }));
+    assert!(matches!(
+        chord3.rhythm,
+        ChordRhythm::Slashes { count: 2, .. }
+    ));
     assert_eq!(chord3.duration.to_beats(chart.time_signature.unwrap()), 2.0);
 
     let chord4 = &measure2.chords[1]; // C9/
     assert_eq!(chord4.full_symbol, "C9");
-    assert!(matches!(chord4.rhythm, ChordRhythm::Slashes { count: 1, .. }));
+    assert!(matches!(
+        chord4.rhythm,
+        ChordRhythm::Slashes { count: 1, .. }
+    ));
     assert_eq!(chord4.duration.to_beats(chart.time_signature.unwrap()), 1.0);
 }
 

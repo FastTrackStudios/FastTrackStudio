@@ -3,6 +3,7 @@
 //! Exposes all transport reactive streams over IRPC so they can be reactive over the network.
 
 use crate::transport::{PlayState, Tempo, Transport};
+use facet::Facet;
 use iroh::{Endpoint, EndpointAddr, protocol::ProtocolHandler};
 use irpc::{Client, WithChannels, channel::mpsc, rpc::RemoteService, rpc_requests};
 use irpc_iroh::{IrohLazyRemoteConnection, IrohProtocol};
@@ -11,35 +12,36 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc as tokio_mpsc};
 
 /// Transport changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct TransportChangedMessage {
     pub project_id: String,
     pub transport: Transport,
 }
 
 /// Play state changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct PlayStateChangedMessage {
     pub project_id: String,
     pub play_state: PlayState,
 }
 
 /// Tempo changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct TempoChangedMessage {
     pub project_id: String,
     pub tempo: Tempo,
 }
 
 /// Position changed message
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct PositionChangedMessage {
     pub project_id: String,
     pub position: f64,
 }
 
 /// All transport reactive update messages
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub enum TransportUpdateMessage {
     TransportChanged(TransportChangedMessage),
     PlayStateChanged(PlayStateChangedMessage),
@@ -48,12 +50,13 @@ pub enum TransportUpdateMessage {
 }
 
 /// Request to subscribe to transport updates
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeTransport;
 
 /// IRPC protocol for transport service
+#[repr(u8)]
 #[rpc_requests(message = TransportMessage)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Facet)]
 pub enum TransportProtocol {
     /// Subscribe to transport updates (server streaming)
     #[rpc(tx = mpsc::Sender<TransportUpdateMessage>)]

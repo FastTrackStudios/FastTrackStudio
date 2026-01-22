@@ -10,6 +10,7 @@ pub mod irpc;
 pub mod reaper;
 
 use crate::chords::types::ChordsData;
+use facet::Facet;
 use rxrust::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -19,7 +20,7 @@ use std::sync::{Arc, Mutex};
 pub type EventStreamSubject<T> = RefCell<LocalSubject<'static, T, ()>>;
 
 /// Reactive streams for chords state
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Facet)]
 pub struct ChordsStreams {
     /// Chords changed for a specific project
     pub chords_changed: EventStreamSubject<(String, ChordsData)>, // project_name, chords
@@ -37,7 +38,7 @@ impl ChordsStreams {
 }
 
 /// State managed by the chords reactive service
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Facet)]
 pub struct ChordsReactiveState {
     /// Chords for each project (project_name -> chords)
     pub chords: HashMap<String, ChordsData>,
@@ -66,7 +67,7 @@ pub trait ChordsReactiveService {
 ///
 /// This manages state and emits to reactive streams.
 /// Backend-specific implementations can wrap this and subscribe to backend events.
-#[derive(Debug)]
+#[derive(Debug, Facet)]
 pub struct DefaultChordsReactiveService {
     /// Current state
     state: Arc<Mutex<ChordsReactiveState>>,

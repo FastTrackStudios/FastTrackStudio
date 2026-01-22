@@ -2,6 +2,7 @@
 //!
 //! Provides both a trait for accidental-aware types and a concrete enum for accidentals
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Trait for types that can have accidentals applied to them
@@ -23,7 +24,8 @@ pub trait WithAccidental {
 }
 
 /// Concrete accidental type enum
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum Accidental {
     DoubleFlat,
     Flat,

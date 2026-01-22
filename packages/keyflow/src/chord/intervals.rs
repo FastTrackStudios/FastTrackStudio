@@ -167,9 +167,7 @@ impl Chord {
     /// 9th, 11th, and 13th extensions.
     #[must_use]
     pub fn exceeds_level(&self, level: super::detail_level::DetailLevel) -> bool {
-        self.extensions
-            .highest()
-            .is_some_and(|h| !level.allows(h))
+        self.extensions.highest().is_some_and(|h| !level.allows(h))
     }
 
     /// Display this chord at a specific detail level.

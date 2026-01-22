@@ -2,7 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use dioxus_native::{CustomPaintCtx, CustomPaintSource, DeviceHandle, TextureHandle};
 use nanorand::{Rng, WyRand};
 use std::borrow::Cow;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use wesl::include_wesl;
 use wgpu::util::DeviceExt;
 
@@ -175,7 +175,7 @@ impl ActiveBunnymark {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
                             min_binding_size: wgpu::BufferSize::new(
-                                std::mem::size_of::<Globals>() as _,
+                                std::mem::size_of::<Globals>() as _
                             ),
                         },
                         count: None,

@@ -12,7 +12,10 @@ impl SampleLoader {
     /// Load an audio file using Symphonium, which handles resampling automatically
     ///
     /// `target_sample_rate` should match the plugin's current sample rate
-    pub fn load_file(path: &str, target_sample_rate: f32) -> Result<DecodedAudioF32, Box<dyn Error>> {
+    pub fn load_file(
+        path: &str,
+        target_sample_rate: f32,
+    ) -> Result<DecodedAudioF32, Box<dyn Error>> {
         let mut loader = SymphoniumLoader::new();
 
         // Load the audio file with resampling to match plugin sample rate

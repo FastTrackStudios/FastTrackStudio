@@ -3,9 +3,10 @@
 //! Intermediate representation for chord notation that preserves source spans
 //! and defers semantic analysis like interval computation.
 
-use super::span::{AstNode, Spanned};
 use super::RhythmAst;
+use super::span::{AstNode, Spanned};
 use crate::parsing::TextSpan;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Abstract syntax tree for a chord.
@@ -24,7 +25,7 @@ use serde::{Deserialize, Serialize};
 /// - quality: Some(QualityAst::Major)
 /// - extension: Some(ExtensionAst::Seventh { quality: Major })
 /// - bass: Some(BassToneAst { letter: 'G', accidental: None })
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
 pub struct ChordAst {
     /// The root of the chord (note letter, scale degree, or roman numeral)
     pub root: Spanned<RootAst>,
@@ -102,7 +103,8 @@ impl AstNode for ChordAst {
 }
 
 /// Root of a chord (note letter, scale degree, or roman numeral).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum RootAst {
     /// Note name root (C, D, E, F, G, A, B)
     NoteName {
@@ -149,7 +151,8 @@ impl RootAst {
 }
 
 /// Accidental modifier for roots and bass notes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum AccidentalAst {
     /// Sharp (#)
     Sharp,
@@ -178,7 +181,8 @@ impl AccidentalAst {
 }
 
 /// Chord quality marker.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum QualityAst {
     /// Major (M, maj, or implied)
     Major,
@@ -199,7 +203,7 @@ pub enum QualityAst {
 }
 
 /// Extension AST (7th, 9th, 11th, 13th).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct ExtensionAst {
     /// The extension degree (7, 9, 11, 13, 6)
     pub degree: u8,
@@ -246,7 +250,8 @@ impl ExtensionAst {
 }
 
 /// Quality modifier for extensions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum ExtensionQualityAst {
     /// Major (maj7, delta)
     Major,
@@ -261,7 +266,8 @@ pub enum ExtensionQualityAst {
 }
 
 /// Chord modifier (alteration, addition, or omission).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum ChordModifierAst {
     /// Alteration (b5, #5, b9, #9, #11, b13, etc.)
     Alteration(AlterationAst),
@@ -272,7 +278,7 @@ pub enum ChordModifierAst {
 }
 
 /// Alteration to a chord degree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct AlterationAst {
     /// The altered degree (5, 9, 11, 13, etc.)
     pub degree: u8,
@@ -325,7 +331,7 @@ impl AlterationAst {
 }
 
 /// Bass tone for slash chords.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Facet)]
 pub struct BassToneAst {
     /// The bass note letter (C, D, E, F, G, A, B) or scale degree
     pub root: RootAst,

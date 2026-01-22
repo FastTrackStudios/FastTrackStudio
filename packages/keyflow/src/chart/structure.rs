@@ -13,11 +13,12 @@ use crate::metadata::SongMetadata;
 use crate::primitives::Note;
 use crate::sections::{Section, SectionType};
 use crate::time::{AbsolutePosition, MusicalPosition, Tempo, TimeSignature};
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// The complete parsed chart structure
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Chart {
     /// Song metadata (title, artist, etc.)
     pub metadata: SongMetadata,
@@ -900,7 +901,11 @@ impl Chart {
         use crate::chord::ChordRhythm;
         match rhythm {
             ChordRhythm::Default => String::new(),
-            ChordRhythm::Slashes { count, dotted, tied } => {
+            ChordRhythm::Slashes {
+                count,
+                dotted,
+                tied,
+            } => {
                 let mut output = "/".repeat(*count as usize);
                 if *dotted {
                     output.push('.');

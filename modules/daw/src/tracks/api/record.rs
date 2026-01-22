@@ -1,15 +1,17 @@
 //! Record settings for tracks
 
 use crate::tracks::api::quantize::RecordPath;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Wrapper for unknown enum values to preserve them during serialization
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct Hidden<T>(pub T);
 
 /// Record mode for tracks
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
 pub enum RecordMode {
     Input,
     OutputStereo,
@@ -96,7 +98,8 @@ impl fmt::Display for RecordMode {
 }
 
 /// Monitor mode for tracks
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
 pub enum MonitorMode {
     Off,
     On,
@@ -145,7 +148,7 @@ impl fmt::Display for MonitorMode {
 }
 
 /// Record settings for tracks
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct RecordSettings {
     pub armed: bool,                // field 1 - armed
     pub input: i32,                 // field 2 - input (device + channel coded)

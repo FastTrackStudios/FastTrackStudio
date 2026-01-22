@@ -3,10 +3,12 @@
 //! Provides comprehensive error handling for all setlist operations including
 //! validation, parsing, and source-specific errors.
 
+use facet::Facet;
 use thiserror::Error;
 
 /// Main error type for setlist operations
-#[derive(Error, Debug, Clone, PartialEq)]
+#[derive(Error, Debug, Clone, PartialEq, Facet)]
+#[repr(u8)]
 pub enum SetlistError {
     /// Section validation errors
     #[error("Invalid section: {message}")]

@@ -201,9 +201,7 @@ impl Range {
     /// Create a time range in milliseconds.
     #[must_use]
     pub fn time_ms(min: f32, max: f32) -> Self {
-        Self::new(min, max)
-            .with_default(min)
-            .with_skew(Skew::Log)
+        Self::new(min, max).with_default(min).with_skew(Skew::Log)
     }
 
     /// Convert a normalized value (0-1) to actual value.

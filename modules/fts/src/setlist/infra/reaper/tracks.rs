@@ -10,6 +10,7 @@
 
 use daw::tracks::api::folder::FolderDepthChange;
 use daw::tracks::{Track, TrackGuid, TrackName, parse_track_chunk};
+use facet::Facet;
 use reaper_high::{Project, Track as ReaperTrack};
 use reaper_medium::ChunkCacheHint;
 use serde::{Deserialize, Serialize};
@@ -21,7 +22,7 @@ use tracing::{debug, warn};
 ///
 /// Only includes essential track information, similar to CSI's approach.
 /// Excludes heavy data like items, envelopes, FX chains, receives, etc.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Facet)]
 pub struct TrackSummary {
     /// Track name
     pub name: TrackName,

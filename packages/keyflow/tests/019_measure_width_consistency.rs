@@ -20,12 +20,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use keyflow::Chart;
 use keyflow::engraver::layout::chart::{ChartLayoutConfig, ChartLayoutEngine, LayoutMode};
 use keyflow::engraver::scene::id::ElementType;
 use keyflow::engraver::scene::node::SceneNode;
 use keyflow::engraver::scene::traverse::SceneNodeExt;
 use keyflow::engraver::style::MStyle;
-use keyflow::Chart;
 
 /// The test chart source - Push Pull Triplets
 const TEST_CHART: &str = r#"Push Pull Triplets - Test
@@ -70,16 +70,19 @@ fn workspace_root() -> PathBuf {
 fn create_test_engine() -> ChartLayoutEngine {
     let root = workspace_root();
     let text_font_path = root.join("libs/reference/sheet-music/musescore/fonts/FreeSans.ttf");
-    let musejazz_font_path = root.join("libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf");
+    let musejazz_font_path =
+        root.join("libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf");
 
     let text_font_data = Arc::new(
         std::fs::read(&text_font_path)
             .unwrap_or_else(|e| panic!("Failed to load text font at {:?}: {}", text_font_path, e)),
     );
-    let musejazz_font_data = Arc::new(
-        std::fs::read(&musejazz_font_path)
-            .unwrap_or_else(|e| panic!("Failed to load MuseJazz font at {:?}: {}", musejazz_font_path, e)),
-    );
+    let musejazz_font_data = Arc::new(std::fs::read(&musejazz_font_path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to load MuseJazz font at {:?}: {}",
+            musejazz_font_path, e
+        )
+    }));
 
     let style: &'static MStyle = Box::leak(Box::new(MStyle::default()));
     let config = ChartLayoutConfig::default();
@@ -149,7 +152,11 @@ fn test_chart_parses_successfully() {
     let chart = parse_test_chart();
 
     // Should have: COUNT, IN, VS, CH, BR, VS sections
-    assert!(chart.sections.len() >= 5, "Expected at least 5 sections, got {}", chart.sections.len());
+    assert!(
+        chart.sections.len() >= 5,
+        "Expected at least 5 sections, got {}",
+        chart.sections.len()
+    );
 }
 
 #[test]
@@ -157,8 +164,15 @@ fn test_vs_sections_have_correct_measure_count() {
     let chart = parse_test_chart();
 
     // Find VS sections
-    let vs_sections: Vec<_> = chart.sections.iter()
-        .filter(|s| matches!(s.section.section_type, keyflow::sections::SectionType::Verse { .. }))
+    let vs_sections: Vec<_> = chart
+        .sections
+        .iter()
+        .filter(|s| {
+            matches!(
+                s.section.section_type,
+                keyflow::sections::SectionType::Verse { .. }
+            )
+        })
         .collect();
 
     assert_eq!(vs_sections.len(), 2, "Expected 2 VS sections");
@@ -166,7 +180,13 @@ fn test_vs_sections_have_correct_measure_count() {
     // Each VS should have 8 measures
     for (i, vs) in vs_sections.iter().enumerate() {
         let measure_count = vs.measures().len();
-        assert_eq!(measure_count, 8, "VS{} should have 8 measures, got {}", i + 1, measure_count);
+        assert_eq!(
+            measure_count,
+            8,
+            "VS{} should have 8 measures, got {}",
+            i + 1,
+            measure_count
+        );
     }
 }
 
@@ -175,8 +195,15 @@ fn test_vs_measures_have_identical_content_structure() {
     let chart = parse_test_chart();
 
     // Find first VS section
-    let vs1 = chart.sections.iter()
-        .find(|s| matches!(s.section.section_type, keyflow::sections::SectionType::Verse { .. }))
+    let vs1 = chart
+        .sections
+        .iter()
+        .find(|s| {
+            matches!(
+                s.section.section_type,
+                keyflow::sections::SectionType::Verse { .. }
+            )
+        })
         .expect("VS section not found");
 
     let measures = vs1.measures();
@@ -188,13 +215,21 @@ fn test_vs_measures_have_identical_content_structure() {
     for &idx in &[0, 2, 4, 6] {
         let m = &measures[idx];
         assert_eq!(m.chords.len(), 2, "Measure {} should have 2 chords", idx);
-        assert_eq!(m.chords[0].full_symbol, "F/C", "Measure {} first chord should be F/C", idx);
+        assert_eq!(
+            m.chords[0].full_symbol, "F/C",
+            "Measure {} first chord should be F/C",
+            idx
+        );
     }
 
     for &idx in &[1, 3, 5] {
         let m = &measures[idx];
         assert_eq!(m.chords.len(), 2, "Measure {} should have 2 chords", idx);
-        assert_eq!(m.chords[0].full_symbol, "Cm", "Measure {} first chord should be Cm", idx);
+        assert_eq!(
+            m.chords[0].full_symbol, "Cm",
+            "Measure {} first chord should be Cm",
+            idx
+        );
     }
 }
 
@@ -208,10 +243,13 @@ fn test_identical_measures_have_same_width() {
     let engine = create_test_engine();
 
     // Layout in paginated mode
-    let result = engine.layout_chart(&chart, &LayoutMode::Paginated {
-        page_width: 595.0,  // A4 width in points
-        page_height: 842.0, // A4 height in points
-    });
+    let result = engine.layout_chart(
+        &chart,
+        &LayoutMode::Paginated {
+            page_width: 595.0,  // A4 width in points
+            page_height: 842.0, // A4 height in points
+        },
+    );
 
     let barline_positions = find_barline_positions(&result.scene);
     let measure_widths = calculate_measure_widths(&barline_positions);
@@ -235,10 +273,13 @@ fn test_vs1_first_measure_not_elongated() {
     let chart = parse_test_chart();
     let engine = create_test_engine();
 
-    let result = engine.layout_chart(&chart, &LayoutMode::Paginated {
-        page_width: 595.0,
-        page_height: 842.0,
-    });
+    let result = engine.layout_chart(
+        &chart,
+        &LayoutMode::Paginated {
+            page_width: 595.0,
+            page_height: 842.0,
+        },
+    );
 
     let barline_positions = find_barline_positions(&result.scene);
     let measure_widths = calculate_measure_widths(&barline_positions);
@@ -259,7 +300,8 @@ fn test_vs1_first_measure_not_elongated() {
     eprintln!("\n=== Width Groups (5pt tolerance) ===");
     for (i, group) in groups.iter().enumerate() {
         if let Some(first_idx) = group.first() {
-            let width = measure_widths.iter()
+            let width = measure_widths
+                .iter()
                 .find(|(idx, _)| idx == first_idx)
                 .map(|(_, w)| *w)
                 .unwrap_or(0.0);
@@ -270,19 +312,30 @@ fn test_vs1_first_measure_not_elongated() {
     // This test is primarily for investigation - the assertion will fail
     // if measure 3 is significantly wider than measures 5, 7, 9
     let vs1_fc_measures = [3, 5, 7, 9]; // Assuming these are the 'F/C . measures
-    let vs1_fc_widths: Vec<f64> = vs1_fc_measures.iter()
-        .filter_map(|&idx| measure_widths.iter().find(|(i, _)| *i == idx).map(|(_, w)| *w))
+    let vs1_fc_widths: Vec<f64> = vs1_fc_measures
+        .iter()
+        .filter_map(|&idx| {
+            measure_widths
+                .iter()
+                .find(|(i, _)| *i == idx)
+                .map(|(_, w)| *w)
+        })
         .collect();
 
     if vs1_fc_widths.len() >= 2 {
         let first_width = vs1_fc_widths[0];
-        let others_avg: f64 = vs1_fc_widths[1..].iter().sum::<f64>() / (vs1_fc_widths.len() - 1) as f64;
+        let others_avg: f64 =
+            vs1_fc_widths[1..].iter().sum::<f64>() / (vs1_fc_widths.len() - 1) as f64;
         let diff = (first_width - others_avg).abs();
 
         eprintln!("\nVS1 'F/C . measures:");
         eprintln!("  First (m3): {:.2} pts", first_width);
         eprintln!("  Others avg: {:.2} pts", others_avg);
-        eprintln!("  Difference: {:.2} pts ({:.1}%)", diff, (diff / others_avg) * 100.0);
+        eprintln!(
+            "  Difference: {:.2} pts ({:.1}%)",
+            diff,
+            (diff / others_avg) * 100.0
+        );
 
         // Allow 10% variance as acceptable
         let variance_percent = (diff / others_avg) * 100.0;
@@ -303,8 +356,15 @@ fn test_content_weight_calculation() {
     let chart = parse_test_chart();
 
     // Find VS1 section
-    let vs1 = chart.sections.iter()
-        .find(|s| matches!(s.section.section_type, keyflow::sections::SectionType::Verse { .. }))
+    let vs1 = chart
+        .sections
+        .iter()
+        .find(|s| {
+            matches!(
+                s.section.section_type,
+                keyflow::sections::SectionType::Verse { .. }
+            )
+        })
         .expect("VS section not found");
 
     let measures = vs1.measures();
@@ -315,14 +375,16 @@ fn test_content_weight_calculation() {
 
     eprintln!("\n=== VS1 Measure Content Analysis ===");
     for (idx, measure) in measures.iter().enumerate() {
-        let total_beats: f64 = measure.chords.iter()
+        let total_beats: f64 = measure
+            .chords
+            .iter()
             .map(|c| match &c.rhythm {
                 keyflow::chord::ChordRhythm::Slashes { count, dotted, .. } => {
                     let base = *count as f64;
                     if *dotted { base * 1.5 } else { base }
                 }
                 keyflow::chord::ChordRhythm::Default => 4.0,
-                keyflow::chord::ChordRhythm::Explicit(nd) => nd.total_ticks_480() as f64 / 480.0
+                keyflow::chord::ChordRhythm::Explicit(nd) => nd.total_ticks_480() as f64 / 480.0,
             })
             .sum();
 
@@ -331,13 +393,20 @@ fn test_content_weight_calculation() {
             idx,
             measure.chords.len(),
             total_beats,
-            measure.chords.iter().map(|c| &c.full_symbol).collect::<Vec<_>>()
+            measure
+                .chords
+                .iter()
+                .map(|c| &c.full_symbol)
+                .collect::<Vec<_>>()
         );
 
         // Check push/pull on first chord
         if let Some(first_chord) = measure.chords.first() {
             if first_chord.push_pull.is_some() {
-                eprintln!("  -> First chord has push/pull: {:?}", first_chord.push_pull);
+                eprintln!(
+                    "  -> First chord has push/pull: {:?}",
+                    first_chord.push_pull
+                );
             }
         }
     }
@@ -347,8 +416,15 @@ fn test_content_weight_calculation() {
 fn test_push_pull_detection_in_vs1() {
     let chart = parse_test_chart();
 
-    let vs1 = chart.sections.iter()
-        .find(|s| matches!(s.section.section_type, keyflow::sections::SectionType::Verse { .. }))
+    let vs1 = chart
+        .sections
+        .iter()
+        .find(|s| {
+            matches!(
+                s.section.section_type,
+                keyflow::sections::SectionType::Verse { .. }
+            )
+        })
         .expect("VS section not found");
 
     let measures = vs1.measures();
@@ -359,7 +435,9 @@ fn test_push_pull_detection_in_vs1() {
             if let Some((is_push, amount)) = &chord.push_pull {
                 eprintln!(
                     "Measure {} chord {}: {} has {} {:?}",
-                    idx, chord_idx, chord.full_symbol,
+                    idx,
+                    chord_idx,
+                    chord.full_symbol,
                     if *is_push { "PUSH" } else { "PULL" },
                     amount
                 );
@@ -387,20 +465,36 @@ fn test_spillback_from_in_to_count() {
     // The first measure starts with triplet rests and pushed chords
     // This might cause spillback to the COUNT section
 
-    let in_section = chart.sections.iter()
-        .find(|s| matches!(s.section.section_type, keyflow::sections::SectionType::Intro { .. }))
+    let in_section = chart
+        .sections
+        .iter()
+        .find(|s| {
+            matches!(
+                s.section.section_type,
+                keyflow::sections::SectionType::Intro { .. }
+            )
+        })
         .expect("IN section not found");
 
     let in_measures = in_section.measures();
 
     eprintln!("\n=== IN Section First Measure Analysis ===");
     let first_measure = &in_measures[0];
-    eprintln!("Chords: {:?}", first_measure.chords.iter().map(|c| &c.full_symbol).collect::<Vec<_>>());
+    eprintln!(
+        "Chords: {:?}",
+        first_measure
+            .chords
+            .iter()
+            .map(|c| &c.full_symbol)
+            .collect::<Vec<_>>()
+    );
     eprintln!("Rhythm elements: {:?}", first_measure.rhythm_elements.len());
 
     for (idx, chord) in first_measure.chords.iter().enumerate() {
-        eprintln!("Chord {}: {} rhythm={:?} push_pull={:?}",
-            idx, chord.full_symbol, chord.rhythm, chord.push_pull);
+        eprintln!(
+            "Chord {}: {} rhythm={:?} push_pull={:?}",
+            idx, chord.full_symbol, chord.rhythm, chord.push_pull
+        );
     }
 }
 
@@ -411,8 +505,15 @@ fn test_spillback_from_vs1_to_in() {
     // VS section has: 'F/C . | Cm . | ...
     // The 'F/C has a push, which might cause spillback to IN section
 
-    let vs1 = chart.sections.iter()
-        .find(|s| matches!(s.section.section_type, keyflow::sections::SectionType::Verse { .. }))
+    let vs1 = chart
+        .sections
+        .iter()
+        .find(|s| {
+            matches!(
+                s.section.section_type,
+                keyflow::sections::SectionType::Verse { .. }
+            )
+        })
         .expect("VS section not found");
 
     let vs_measures = vs1.measures();
@@ -421,18 +522,25 @@ fn test_spillback_from_vs1_to_in() {
     let first_measure = &vs_measures[0];
 
     for (idx, chord) in first_measure.chords.iter().enumerate() {
-        eprintln!("Chord {}: '{}' rhythm={:?} push_pull={:?}",
-            idx, chord.full_symbol, chord.rhythm, chord.push_pull);
+        eprintln!(
+            "Chord {}: '{}' rhythm={:?} push_pull={:?}",
+            idx, chord.full_symbol, chord.rhythm, chord.push_pull
+        );
     }
 
     // The 'F/C chord should have push_pull set
     let first_chord = &first_measure.chords[0];
     if let Some((is_push, amount)) = &first_chord.push_pull {
-        eprintln!("\nFirst chord push/pull: is_push={} base={:?}", is_push, amount.base);
+        eprintln!(
+            "\nFirst chord push/pull: is_push={} base={:?}",
+            is_push, amount.base
+        );
 
         // If this is a triplet push, it might be causing spillback weight adjustment
         if *is_push && matches!(amount.base, keyflow::chord::PushPullBase::Triplet) {
-            eprintln!("WARNING: This is a TRIPLET PUSH - check if this triggers spillback weight adjustment");
+            eprintln!(
+                "WARNING: This is a TRIPLET PUSH - check if this triggers spillback weight adjustment"
+            );
         }
     }
 }

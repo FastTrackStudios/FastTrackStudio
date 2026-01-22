@@ -12,10 +12,11 @@ use crate::parsing::TextSpan;
 use crate::primitives::RootNotation;
 use crate::sections::Section;
 use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition};
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Represents a chord instance with position and timing information
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ChordInstance {
     /// Root notation (preserves original format: note, degree, or roman)
     pub root: RootNotation,
@@ -149,7 +150,7 @@ impl ChordInstance {
 ///
 /// Used in lead sheet notation to show rhythm without specific pitches.
 /// Slashes are generated for beats that don't have explicit chords or rests.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct RhythmSlash {
     /// Beat number within the measure (0-indexed)
     pub beat: u8,
@@ -166,7 +167,7 @@ impl RhythmSlash {
 }
 
 /// Represents a rest in the rhythm (no chord, just silence)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct RestInstance {
     /// Rhythm notation (duration, triplet, etc.)
     pub rhythm: ChordRhythm,
@@ -199,7 +200,7 @@ impl RestInstance {
 }
 
 /// Represents a space in the rhythm (invisible placeholder - measure will be filled with auto slashes)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct SpaceInstance {
     /// Rhythm notation (duration, triplet, etc.)
     pub rhythm: ChordRhythm,
@@ -236,7 +237,8 @@ impl SpaceInstance {
 /// This represents a single element in a measure's rhythm pattern.
 /// Measures with explicit rhythm notation (like `r8t Ab9_8t r8t r4t F9_8t r2`)
 /// use this to preserve both chords and rests in their written order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum RhythmElement {
     /// A chord with rhythm
     Chord(ChordInstance),
@@ -318,7 +320,7 @@ impl RhythmElement {
 ///
 /// A measure is ALWAYS 1.0.0 in duration (one measure).
 /// The time signature defines how many beats are in that measure.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Measure {
     /// Chords in this measure (legacy field for backward compatibility)
     pub chords: Vec<ChordInstance>,
@@ -475,7 +477,7 @@ impl Default for Measure {
 ///
 /// A section can have multiple tracks running in parallel (chords, melody, rhythm, etc.)
 /// The default track type is Chords, which maintains backward compatibility.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ChartSection {
     /// Section information (type, number, etc.)
     pub section: Section,
@@ -623,7 +625,7 @@ impl ChartSection {
 }
 
 /// Represents a key change event in the chart
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct KeyChange {
     /// Position where the key change occurs
     pub position: AbsolutePosition,
@@ -655,7 +657,7 @@ impl KeyChange {
 }
 
 /// Represents a time signature change at a specific position
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct TimeSignatureChange {
     /// Position where the time signature change occurs
     pub position: AbsolutePosition,
@@ -685,7 +687,7 @@ impl TimeSignatureChange {
 ///
 /// Tempo changes are indicated with arrow notation: `->140bpm` or `->120`
 /// They can be placed inline with chords or on their own line.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct TempoChange {
     /// Position where the tempo change occurs
     pub position: AbsolutePosition,

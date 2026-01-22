@@ -6,10 +6,11 @@
 
 use crate::transport::core::transport::Transport;
 use async_trait::async_trait;
+use facet::Facet;
 use std::fmt::Debug;
 
 /// A transport update sent over a stream
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Facet)]
 pub struct TransportUpdate {
     pub transport: Transport,
 }
@@ -31,7 +32,8 @@ pub trait TransportStreamReceiver: Send + Sync {
 }
 
 /// Errors that can occur when working with transport streams
-#[derive(Debug, thiserror::Error)]
+#[repr(u8)]
+#[derive(Debug, thiserror::Error, Facet)]
 pub enum TransportStreamError {
     #[error("Connection error: {0}")]
     Connection(String),
@@ -40,7 +42,7 @@ pub enum TransportStreamError {
     StreamEnded,
 
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(String),
 
     #[error("Other error: {0}")]
     Other(String),
@@ -78,4 +80,10 @@ pub async fn create_transport_stream_from_socket(
     socket_addr: String,
 ) -> Result<Box<dyn TransportStream>, TransportStreamError> {
     backend.create_stream(socket_addr).await
+}
+
+impl From<std::io::Error> for TransportStreamError {
+    fn from(err: std::io::Error) -> Self {
+        TransportStreamError::Io(err.to_string())
+    }
 }

@@ -32,11 +32,11 @@ use winit::{
     window::{Window, WindowId},
 };
 
+use keyflow::Chart;
 use keyflow::engraver::fonts::SMuFLFont;
 use keyflow::engraver::layout::chart::{ChartLayoutEngine, ChartLayoutResult, LayoutMode};
 use keyflow::engraver::renderer::{SceneRenderBuilder, VelloRenderContext};
 use keyflow::engraver::style::MStyle;
-use keyflow::Chart;
 
 const WINDOW_WIDTH: u32 = 1400;
 const WINDOW_HEIGHT: u32 = 900;
@@ -74,130 +74,190 @@ fn get_equivalence_sets() -> Vec<EquivalenceSet> {
             description: "Simple Progression - No Metadata (defaults to 4/4, C)",
             variants: vec![
                 // No time signature or key needed - defaults to 4/4, C major
-                ("Scale degrees (default)", r#"
+                (
+                    "Scale degrees (default)",
+                    r#"
 VS
 1 4 5 1
-"#),
-                ("Scale degrees with _1 (whole note)", r#"
+"#,
+                ),
+                (
+                    "Scale degrees with _1 (whole note)",
+                    r#"
 VS
 1_1 4_1 5_1 1_1
-"#),
-                ("Scale degrees with //// (4 slashes)", r#"
+"#,
+                ),
+                (
+                    "Scale degrees with //// (4 slashes)",
+                    r#"
 VS
 1 //// | 4 //// | 5 //// | 1 ////
-"#),
-                ("Explicit chords (C major)", r#"
+"#,
+                ),
+                (
+                    "Explicit chords (C major)",
+                    r#"
 VS
 C | F | G | C
-"#),
+"#,
+                ),
             ],
         },
         EquivalenceSet {
             description: "Key of G (only need #G)",
             variants: vec![
                 // Just #G to change key - time sig defaults to 4/4
-                ("With key signature only", r#"
+                (
+                    "With key signature only",
+                    r#"
 #G
 
 VS
 1 4 6 5
-"#),
-                ("Explicit chords", r#"
+"#,
+                ),
+                (
+                    "Explicit chords",
+                    r#"
 #G
 
 VS
 G | C | Em | D
-"#),
+"#,
+                ),
             ],
         },
         EquivalenceSet {
             description: "Two Chords Per Measure (half notes)",
             variants: vec![
-                ("With // (half note)", r#"
+                (
+                    "With // (half note)",
+                    r#"
 VS
 C // Am // | F // G //
-"#),
-                ("With _2 (half note)", r#"
+"#,
+                ),
+                (
+                    "With _2 (half note)",
+                    r#"
 VS
 C_2 Am_2 | F_2 G_2
-"#),
-                ("Mixed notation", r#"
+"#,
+                ),
+                (
+                    "Mixed notation",
+                    r#"
 VS
 C_2 Am // | F // G_2
-"#),
+"#,
+                ),
             ],
         },
         EquivalenceSet {
             description: "Quarter Notes (4 per measure)",
             variants: vec![
-                ("With / (quarter note)", r#"
+                (
+                    "With / (quarter note)",
+                    r#"
 VS
 C / Am / F / G /
-"#),
-                ("With _4 (quarter note)", r#"
+"#,
+                ),
+                (
+                    "With _4 (quarter note)",
+                    r#"
 VS
 C_4 Am_4 F_4 G_4
-"#),
+"#,
+                ),
             ],
         },
         EquivalenceSet {
             description: "Mixed Rhythm (half + two quarters)",
             variants: vec![
-                ("Slash notation", r#"
+                (
+                    "Slash notation",
+                    r#"
 VS
 C // Am / G /
-"#),
-                ("Explicit notation", r#"
+"#,
+                ),
+                (
+                    "Explicit notation",
+                    r#"
 VS
 C_2 Am_4 G_4
-"#),
-                ("Scale degrees with slashes", r#"
+"#,
+                ),
+                (
+                    "Scale degrees with slashes",
+                    r#"
 VS
 1 // 2 / 5 /
-"#),
+"#,
+                ),
             ],
         },
         EquivalenceSet {
             description: "Dotted Rhythms (defaults to 4/4, C)",
             variants: vec![
-                ("Dotted quarter + eighth", r#"
+                (
+                    "Dotted quarter + eighth",
+                    r#"
 VS
 C /. D_8 Em //
-"#),
-                ("Explicit dotted", r#"
+"#,
+                ),
+                (
+                    "Explicit dotted",
+                    r#"
 VS
 C_4. D_8 Em_2
-"#),
+"#,
+                ),
             ],
         },
         EquivalenceSet {
             description: "With Rests (defaults to 4/4, C)",
             variants: vec![
-                ("Rest after chord", r#"
+                (
+                    "Rest after chord",
+                    r#"
 VS
 C /// r4
-"#),
-                ("Explicit rest", r#"
+"#,
+                ),
+                (
+                    "Explicit rest",
+                    r#"
 VS
 C_2. r4
-"#),
+"#,
+                ),
             ],
         },
         EquivalenceSet {
             description: "6/8 Time (only time signature needed)",
             variants: vec![
-                ("Explicit 6/8 with chords", r#"
+                (
+                    "Explicit 6/8 with chords",
+                    r#"
 6/8
 
 VS
 C // Am //
-"#),
-                ("With key change to G", r#"
+"#,
+                ),
+                (
+                    "With key change to G",
+                    r#"
 6/8 #G
 
 VS
 G // Em //
-"#),
+"#,
+                ),
             ],
         },
     ]
@@ -258,13 +318,13 @@ struct DisplaySet {
     variants: Vec<LayoutedVariant>,
 }
 
-fn layout_all_sets(
-    sets: &[EquivalenceSet],
-    fonts: &SnippetFonts,
-) -> Vec<DisplaySet> {
+fn layout_all_sets(sets: &[EquivalenceSet], fonts: &SnippetFonts) -> Vec<DisplaySet> {
     let style: &'static MStyle = Box::leak(Box::new(MStyle::default()));
-    let layout_engine =
-        ChartLayoutEngine::new(style, fonts.text_font_data.clone(), fonts.musejazz_font_data.clone());
+    let layout_engine = ChartLayoutEngine::new(
+        style,
+        fonts.text_font_data.clone(),
+        fonts.musejazz_font_data.clone(),
+    );
 
     // Use Snippet mode to auto-fit height to content
     let layout_mode = LayoutMode::snippet(400.0); // Narrow for side-by-side
@@ -327,7 +387,10 @@ fn main() {
             let section = &variant.chart.sections[0];
             let measures = section.measures().len();
             let chords: usize = section.measures().iter().map(|m| m.chords.len()).sum();
-            println!("     - {}: {} measures, {} chords", variant.label, measures, chords);
+            println!(
+                "     - {}: {} measures, {} chords",
+                variant.label, measures, chords
+            );
         }
     }
     println!();
@@ -544,8 +607,7 @@ impl ApplicationHandler for App {
                     let mut variant_scene = variant.layout.scene.clone();
 
                     // Apply column offset, then view transform
-                    variant_scene.transform = state.transform
-                        * Affine::translate((x_offset, 0.0));
+                    variant_scene.transform = state.transform * Affine::translate((x_offset, 0.0));
 
                     renderer.render(&mut vello_scene, &variant_scene);
                 }

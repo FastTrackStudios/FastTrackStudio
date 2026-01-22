@@ -230,8 +230,9 @@ impl Oversampler {
         process(&mut self.up_output[0][..up_frames]);
 
         // Downsample
-        let down_input_adapter = SequentialSliceOfVecs::new(&self.up_output, self.channels, up_frames)
-            .expect("Failed to create down input adapter");
+        let down_input_adapter =
+            SequentialSliceOfVecs::new(&self.up_output, self.channels, up_frames)
+                .expect("Failed to create down input adapter");
         let down_capacity = self.down_output[0].len();
         let mut down_output_adapter =
             SequentialSliceOfVecs::new_mut(&mut self.down_output, self.channels, down_capacity)
@@ -297,8 +298,9 @@ impl Oversampler {
         process(&mut left[0][..up_frames], &mut right[0][..up_frames]);
 
         // Downsample
-        let down_input_adapter = SequentialSliceOfVecs::new(&self.up_output, self.channels, up_frames)
-            .expect("Failed to create down input adapter");
+        let down_input_adapter =
+            SequentialSliceOfVecs::new(&self.up_output, self.channels, up_frames)
+                .expect("Failed to create down input adapter");
         let down_capacity = self.down_output[0].len();
         let mut down_output_adapter =
             SequentialSliceOfVecs::new_mut(&mut self.down_output, self.channels, down_capacity)

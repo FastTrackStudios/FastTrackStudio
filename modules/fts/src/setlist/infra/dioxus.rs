@@ -7,6 +7,7 @@
 mod dioxus_impl {
     use crate::SetlistApi;
     use dioxus::prelude::*;
+    use facet::Facet;
     use std::collections::HashMap;
 
     // ============================================================================
@@ -21,7 +22,7 @@ mod dioxus_impl {
     // ============================================================================
 
     /// Transport information for a specific project
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Facet)]
     pub struct ProjectTransportInfo {
         pub position_seconds: f64,
         pub tempo_bpm: f64,

@@ -8,14 +8,14 @@
 //! - Key signatures from the chart's key context
 //! - Proper handling of rests and spaces from rhythm_elements
 
+use crate::chart::types::{RestInstance, RhythmElement, SpaceInstance};
+use crate::core::ChordSymbol as ChordSymbolTrait;
 use crate::engraver::model::{
     ChordSymbol, Duration, DurationKind, KeySignature, LayoutBreak, Measure as EngraverMeasure,
     MusicElement, Note, NoteHead, Octave, Part, PartId, Pitch, PitchClass, RehearsalMark,
     RehearsalMarkStyle, Rest, Score, ScoreMetadata, Stem, TimeSignature as EngraverTimeSig, Voice,
 };
 use crate::engraver::quantize::{QuantizeConfig, quantize_duration};
-use crate::chart::types::{RestInstance, RhythmElement, SpaceInstance};
-use crate::core::ChordSymbol as ChordSymbolTrait;
 use crate::{DurationTrait, Note as KeyflowNote};
 
 // region:    --- From<Chart> for Score

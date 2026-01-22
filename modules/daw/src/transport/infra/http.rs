@@ -7,33 +7,34 @@ use axum::{
     response::Json,
     routing::{get, post},
 };
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 // Request/Response types for HTTP endpoints
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Facet)]
 pub struct SetTempoRequest {
     pub bpm: f64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Facet)]
 pub struct SetTimeSignatureRequest {
     pub numerator: i32,
     pub denominator: i32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Facet)]
 pub struct SetPositionRequest {
     pub seconds: f64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Facet)]
 pub struct SetRecordModeRequest {
     pub mode: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Facet)]
 pub struct TransportStatusResponse {
     pub is_playing: bool,
     pub is_recording: bool,
@@ -43,23 +44,23 @@ pub struct TransportStatusResponse {
     pub record_mode: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Facet)]
 pub struct TimeSignatureResponse {
     pub numerator: i32,
     pub denominator: i32,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Facet)]
 pub struct TempoResponse {
     pub bpm: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Facet)]
 pub struct PositionResponse {
     pub seconds: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Facet)]
 pub struct ActionResponse {
     pub success: bool,
     pub message: String,

@@ -27,12 +27,14 @@
 //! }
 //! ```
 
+use facet::Facet;
 use thiserror::Error;
 
 /// Error types for monarchy operations.
 ///
 /// All fallible operations in monarchy return `Result<T, MonarchyError>`.
-#[derive(Error, Debug)]
+#[repr(u8)]
+#[derive(Error, Debug, Facet)]
 pub enum MonarchyError {
     /// A parsing error occurred while processing an input string.
     #[error("Parse error: {0}")]
@@ -51,12 +53,24 @@ pub enum MonarchyError {
 
     /// A JSON serialization or deserialization error occurred.
     #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
+    Serialization(String),
 
     /// A TOML parsing error occurred (for configuration files).
     #[error("TOML error: {0}")]
-    Toml(#[from] toml::de::Error),
+    Toml(String),
 }
 
 /// Result type alias using [`MonarchyError`].
 pub type Result<T> = std::result::Result<T, MonarchyError>;
+
+impl From<serde_json::Error> for MonarchyError {
+    fn from(err: serde_json::Error) -> Self {
+        MonarchyError::Serialization(err.to_string())
+    }
+}
+
+impl From<toml::de::Error> for MonarchyError {
+    fn from(err: toml::de::Error) -> Self {
+        MonarchyError::Toml(err.to_string())
+    }
+}

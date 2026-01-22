@@ -4,6 +4,7 @@
 
 pub mod parser;
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Song Metadata
@@ -11,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// Represents song information like title, artist, composer, etc.
 
 /// Complete song metadata
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, Facet)]
 pub struct SongMetadata {
     pub title: Option<String>,
     pub subtitle: Option<String>,

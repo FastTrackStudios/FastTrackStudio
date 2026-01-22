@@ -182,21 +182,24 @@ pub fn actions() -> Vec<ActionDef> {
         // Apply colors to everything (tracks, regions, markers)
         ActionDef {
             command_id: "FTS_AUTOCOLOR_APPLY_EVERYTHING",
-            display_name: "FTS-Auto Format: Auto-color everything (tracks, regions, markers)".to_string(),
+            display_name: "FTS-Auto Format: Auto-color everything (tracks, regions, markers)"
+                .to_string(),
             handler: apply_everything_handler,
             ..Default::default()
         },
         // Clear all colors (tracks, regions, markers)
         ActionDef {
             command_id: "FTS_AUTOCOLOR_CLEAR_EVERYTHING",
-            display_name: "FTS-Auto Format: Clear all colors (tracks, regions, markers)".to_string(),
+            display_name: "FTS-Auto Format: Clear all colors (tracks, regions, markers)"
+                .to_string(),
             handler: clear_everything_handler,
             ..Default::default()
         },
         // Apply everything (colors + icons + layouts)
         ActionDef {
             command_id: "FTS_AUTO_APPLY_ALL",
-            display_name: "FTS-Auto Format: Apply all auto-formatting (colors, icons, layouts)".to_string(),
+            display_name: "FTS-Auto Format: Apply all auto-formatting (colors, icons, layouts)"
+                .to_string(),
             handler: apply_all_formatting_handler,
             ..Default::default()
         },
@@ -218,14 +221,16 @@ pub fn actions() -> Vec<ActionDef> {
         // Apply gradient to all folder children (darken)
         ActionDef {
             command_id: "FTS_AUTOCOLOR_ALL_CHILDREN_DARKEN",
-            display_name: "FTS-Auto Format: Color all folder children gradient (darken)".to_string(),
+            display_name: "FTS-Auto Format: Color all folder children gradient (darken)"
+                .to_string(),
             handler: color_all_children_darken_handler,
             ..Default::default()
         },
         // Apply gradient to all folder children (lighten)
         ActionDef {
             command_id: "FTS_AUTOCOLOR_ALL_CHILDREN_LIGHTEN",
-            display_name: "FTS-Auto Format: Color all folder children gradient (lighten)".to_string(),
+            display_name: "FTS-Auto Format: Color all folder children gradient (lighten)"
+                .to_string(),
             handler: color_all_children_lighten_handler,
             ..Default::default()
         },

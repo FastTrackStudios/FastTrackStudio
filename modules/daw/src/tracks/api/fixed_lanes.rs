@@ -1,9 +1,10 @@
 //! Fixed item lanes settings (REAPER 7+)
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Fixed lanes settings (REAPER 7+)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct FixedLanesSettings {
     pub bitfield: i32,             // field 1 - bitfield for various options
     pub allow_editing: bool,       // field 2 - allow editing source media while comping
@@ -13,7 +14,7 @@ pub struct FixedLanesSettings {
 }
 
 /// Lane solo settings (REAPER 7+)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct LaneSoloSettings {
     pub playing_lanes: i32,   // field 1 - bitfield of playing lanes
     pub unknown_field_2: i32, // field 2 - unknown
@@ -26,7 +27,7 @@ pub struct LaneSoloSettings {
 }
 
 /// Lane record settings (REAPER 7+)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct LaneRecordSettings {
     pub record_enabled_lane: i32, // field 1 - 0-based index of record enabled lane
     pub comping_enabled_lane: i32, // field 2 - 0-based index of comping enabled lane
@@ -34,7 +35,7 @@ pub struct LaneRecordSettings {
 }
 
 /// Lane name settings (REAPER 7+)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct LaneNameSettings {
     pub lane_count: i32,         // field 1 - number of lanes
     pub lane_names: Vec<String>, // field 2+ - lane names

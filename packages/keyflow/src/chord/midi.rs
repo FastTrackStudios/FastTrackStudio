@@ -2,7 +2,7 @@
 //!
 //! Provides utilities for converting MIDI events to chords and working with MIDI note data.
 
-use crate::chord::{from_semitones, Chord, ChordDegree, ChordQuality};
+use crate::chord::{Chord, ChordDegree, ChordQuality, from_semitones};
 use crate::primitives::note::Note;
 use crate::primitives::{MusicalNote, RootNotation};
 use helgoboss_midi::KeyNumber;
@@ -1710,16 +1710,13 @@ mod tests {
         );
 
         // Should have bass note of G
-        assert!(
-            chord.bass.is_some(),
-            "Should have G as bass note"
-        );
+        assert!(chord.bass.is_some(), "Should have G as bass note");
 
-        let bass_str = chord.bass.as_ref().map(|b| b.to_string()).unwrap_or_default();
-        assert_eq!(
-            bass_str, "G",
-            "Bass should be G, got: {}",
-            bass_str
-        );
+        let bass_str = chord
+            .bass
+            .as_ref()
+            .map(|b| b.to_string())
+            .unwrap_or_default();
+        assert_eq!(bass_str, "G", "Bass should be G, got: {}", bass_str);
     }
 }

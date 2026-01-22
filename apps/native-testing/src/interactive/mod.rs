@@ -2,7 +2,7 @@ use bytemuck::{Pod, Zeroable};
 use dioxus_native::{CustomPaintCtx, CustomPaintSource, DeviceHandle, TextureHandle};
 use nanorand::{Rng, WyRand};
 use std::borrow::Cow;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use wesl::include_wesl;
 use wgpu::util::DeviceExt;
 
@@ -178,18 +178,23 @@ impl InteractivePaintSource {
                             let canvas_x = x - state.canvas_offset[0];
                             let canvas_y = y - state.canvas_offset[1];
                             // Only spawn if click is within canvas bounds
-                            if canvas_x >= 0.0 && canvas_x <= state.extent[0] as f32
-                                && canvas_y >= 0.0 && canvas_y <= state.extent[1] as f32
+                            if canvas_x >= 0.0
+                                && canvas_x <= state.extent[0] as f32
+                                && canvas_y >= 0.0
+                                && canvas_y <= state.extent[1] as f32
                             {
                                 state.spawn_particles_at(canvas_x, canvas_y, 15);
                             }
                         }
                     }
-                },
+                }
             }
         }
         if msg_count > 0 {
-            println!("[Interactive] Processed {} messages, keys_held: {:?}", msg_count, state.keys_held);
+            println!(
+                "[Interactive] Processed {} messages, keys_held: {:?}",
+                msg_count, state.keys_held
+            );
         }
     }
 
@@ -437,7 +442,9 @@ impl ActiveInteractive {
 
         if all_particles.is_empty() {
             // Nothing to render, just clear
-            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
             {
                 let _rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: None,
@@ -466,17 +473,21 @@ impl ActiveInteractive {
         }
 
         // Create buffers
-        let screen_size_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Screen Size Buffer"),
-            contents: bytemuck::cast_slice(&[width as f32, height as f32]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let screen_size_buffer =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Screen Size Buffer"),
+                    contents: bytemuck::cast_slice(&[width as f32, height as f32]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
 
-        let particle_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Particle Buffer"),
-            contents: bytemuck::cast_slice(&all_particles),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let particle_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Particle Buffer"),
+                contents: bytemuck::cast_slice(&all_particles),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
 
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Interactive Bind Group"),
@@ -493,7 +504,9 @@ impl ActiveInteractive {
             ],
         });
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,

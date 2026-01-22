@@ -3,6 +3,8 @@
 //! Transparent window that draws over existing REAPER windows without capturing input.
 //! Inspired by the TK_Trackname_in_Arrange Lua script pattern.
 
+#![allow(unused_imports)]
+
 use vello::Scene;
 
 use crate::embed_source::EmbedSource;
@@ -73,12 +75,7 @@ impl<S: EmbedSource> OverlayWindow<S> {
             .unwrap_or(WindowRect::new(100, 100, 800, 600));
 
         // Create the overlay window
-        let hwnd = platform::create_overlay_window(
-            bounds.x,
-            bounds.y,
-            bounds.width,
-            bounds.height,
-        );
+        let hwnd = platform::create_overlay_window(bounds.x, bounds.y, bounds.width, bounds.height);
 
         let mut overlay = Self {
             source,
@@ -102,17 +99,16 @@ impl<S: EmbedSource> OverlayWindow<S> {
     fn find_target_window(main_hwnd: RawHwnd, target: &OverlayTarget) -> Option<RawHwnd> {
         match target {
             OverlayTarget::MainWindow => Some(main_hwnd),
-            OverlayTarget::ArrangeView => {
-                platform::find_child_by_id(main_hwnd, crate::reaper::windows::child_ids::ARRANGE_VIEW)
-            }
+            OverlayTarget::ArrangeView => platform::find_child_by_id(
+                main_hwnd,
+                crate::reaper::windows::child_ids::ARRANGE_VIEW,
+            ),
             OverlayTarget::Mixer => {
                 // Mixer window ID would need to be discovered
                 log::warn!("Mixer overlay target not yet implemented");
                 None
             }
-            OverlayTarget::ChildById(id) => {
-                platform::find_child_by_id(main_hwnd, *id)
-            }
+            OverlayTarget::ChildById(id) => platform::find_child_by_id(main_hwnd, *id),
         }
     }
 
@@ -205,7 +201,8 @@ impl<S: EmbedSource> OverlayWindow<S> {
 
         // Build the scene
         let mut scene = Scene::new();
-        self.source.render(&mut scene, self.bounds.width, self.bounds.height);
+        self.source
+            .render(&mut scene, self.bounds.width, self.bounds.height);
 
         // TODO: Render with GPU when implemented
         // if let Some(ref mut gpu) = self.gpu {

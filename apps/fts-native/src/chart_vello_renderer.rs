@@ -16,10 +16,10 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 
 use anyrender_vello::{CustomPaintCtx, CustomPaintSource, TextureHandle};
+use keyflow::Chart;
 use keyflow::engraver::fonts::SMuFLFont;
 use keyflow::engraver::renderer::scene_renderer::{SceneRenderBuilder, VelloSceneRenderer};
 use keyflow::engraver::style::MStyle;
-use keyflow::Chart;
 use kurbo::{Affine, Point, Rect};
 use skrifa::MetadataProvider;
 use skrifa::prelude::LocationRef;
@@ -40,9 +40,8 @@ static BRAVURA_METADATA: &[u8] = include_bytes!(
 );
 static TEXT_FONT: &[u8] =
     include_bytes!("../../../libs/reference/sheet-music/musescore/fonts/FreeSans.ttf");
-static MUSEJAZZ_TEXT_FONT: &[u8] = include_bytes!(
-    "../../../libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf"
-);
+static MUSEJAZZ_TEXT_FONT: &[u8] =
+    include_bytes!("../../../libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf");
 
 /// Path to system Arial Bold font on macOS
 const ARIAL_BOLD_PATH: &str = "/System/Library/Fonts/Supplemental/Arial Bold.ttf";

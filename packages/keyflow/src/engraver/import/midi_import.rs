@@ -188,8 +188,7 @@ impl MidiFile {
                 match event.kind {
                     TrackEventKind::Meta(meta) => match meta {
                         MetaMessage::TrackName(name) => {
-                            track_name =
-                                Some(String::from_utf8_lossy(name).to_string());
+                            track_name = Some(String::from_utf8_lossy(name).to_string());
                         }
                         MetaMessage::Tempo(tempo) => {
                             tempo_map.push(TempoEvent {
@@ -240,8 +239,7 @@ impl MidiFile {
 
                                 if velocity > 0 {
                                     // Note on
-                                    pending_notes
-                                        .insert((pitch, ch), (current_tick, velocity));
+                                    pending_notes.insert((pitch, ch), (current_tick, velocity));
                                 } else {
                                     // Note on with velocity 0 = note off
                                     if let Some((start_tick, vel)) =
@@ -262,8 +260,7 @@ impl MidiFile {
                             }
                             MidiMessage::NoteOff { key, .. } => {
                                 let pitch = key.as_int();
-                                if let Some((start_tick, vel)) =
-                                    pending_notes.remove(&(pitch, ch))
+                                if let Some((start_tick, vel)) = pending_notes.remove(&(pitch, ch))
                                 {
                                     let duration = current_tick.saturating_sub(start_tick);
                                     if duration > 0 {
@@ -338,7 +335,11 @@ impl MidiFile {
     /// Get all notes across all tracks, sorted by start time.
     #[must_use]
     pub fn all_notes(&self) -> Vec<MidiNote> {
-        let mut all: Vec<MidiNote> = self.tracks.iter().flat_map(|t| t.notes.iter().copied()).collect();
+        let mut all: Vec<MidiNote> = self
+            .tracks
+            .iter()
+            .flat_map(|t| t.notes.iter().copied())
+            .collect();
         all.sort_by_key(|n| n.start_tick);
         all
     }
@@ -352,10 +353,7 @@ impl MidiFile {
     /// Get the initial tempo in BPM.
     #[must_use]
     pub fn initial_tempo(&self) -> f64 {
-        self.tempo_map
-            .first()
-            .map(|t| t.bpm())
-            .unwrap_or(120.0)
+        self.tempo_map.first().map(|t| t.bpm()).unwrap_or(120.0)
     }
 
     /// Get time signature changes.
@@ -451,9 +449,7 @@ impl MidiFile {
     /// Get the tick position of SONGSTART marker (or 0 if not found).
     #[must_use]
     pub fn songstart_tick(&self) -> u32 {
-        self.find_marker("SONGSTART")
-            .map(|m| m.tick)
-            .unwrap_or(0)
+        self.find_marker("SONGSTART").map(|m| m.tick).unwrap_or(0)
     }
 
     /// Convert a tick position to a musical position (measure, beat, subdivision).
@@ -497,7 +493,8 @@ impl MidiFile {
         let mut ts_idx = 0;
 
         // Find time signatures after songstart
-        let effective_time_sigs: Vec<_> = self.time_signatures
+        let effective_time_sigs: Vec<_> = self
+            .time_signatures
             .iter()
             .filter(|ts| ts.tick >= songstart)
             .map(|ts| TimeSignatureEvent {
@@ -575,12 +572,12 @@ impl MidiFile {
         // If denominator is 8 (eighth), ticks_per_beat = ppq / 2
         // If denominator is 2 (half), ticks_per_beat = ppq * 2
         match denominator {
-            1 => self.ppq * 4, // Whole note
-            2 => self.ppq * 2, // Half note
-            4 => self.ppq,     // Quarter note
-            8 => self.ppq / 2, // Eighth note
+            1 => self.ppq * 4,  // Whole note
+            2 => self.ppq * 2,  // Half note
+            4 => self.ppq,      // Quarter note
+            8 => self.ppq / 2,  // Eighth note
             16 => self.ppq / 4, // Sixteenth note
-            _ => self.ppq,     // Default to quarter
+            _ => self.ppq,      // Default to quarter
         }
     }
 
@@ -619,7 +616,12 @@ impl MusicalPosition {
     /// Format as M.B.S string (e.g., "1.2.0" for measure 1, beat 2, subdivision 0).
     #[must_use]
     pub fn to_string_1indexed(&self) -> String {
-        format!("{}.{}.{}", self.measure + 1, self.beat + 1, self.subdivision)
+        format!(
+            "{}.{}.{}",
+            self.measure + 1,
+            self.beat + 1,
+            self.subdivision
+        )
     }
 }
 
@@ -767,9 +769,9 @@ impl PushPullAmount {
     #[must_use]
     pub fn keyflow_notation(&self) -> &'static str {
         match self {
-            Self::TripletEighth => "t",   // triplet eighth
-            Self::TripletQuarter => "T",  // triplet quarter (2x triplet eighth)
-            Self::StraightEighth => "e",  // straight eighth
+            Self::TripletEighth => "t",     // triplet eighth
+            Self::TripletQuarter => "T",    // triplet quarter (2x triplet eighth)
+            Self::StraightEighth => "e",    // straight eighth
             Self::StraightSixteenth => "s", // straight sixteenth
             Self::Other(_) => "?",
         }
@@ -1040,10 +1042,28 @@ fn is_section_marker(text: &str) -> bool {
 
     // Known section marker patterns
     let section_markers = [
-        "SONGSTART", "Count-In", "SONGEND", "HITS",
-        "VS", "CH", "BR", "PC", "IN", "OUT",
-        "Verse", "Chorus", "Bridge", "Intro", "Outro", "Pre-Chorus",
-        "Interlude", "Solo", "Break", "Tag", "Coda", "Instrumental",
+        "SONGSTART",
+        "Count-In",
+        "SONGEND",
+        "HITS",
+        "VS",
+        "CH",
+        "BR",
+        "PC",
+        "IN",
+        "OUT",
+        "Verse",
+        "Chorus",
+        "Bridge",
+        "Intro",
+        "Outro",
+        "Pre-Chorus",
+        "Interlude",
+        "Solo",
+        "Break",
+        "Tag",
+        "Coda",
+        "Instrumental",
     ];
 
     for marker in section_markers {
@@ -1076,8 +1096,12 @@ fn is_chord_marker(text: &str) -> bool {
 
     // Skip other known non-chord markers
     let non_chord_markers = [
-        "Triad Melody", "Brass Line Here", "Guitar Lick Here",
-        "Brass", "Echo Walkdown", "Get This Lick",
+        "Triad Melody",
+        "Brass Line Here",
+        "Guitar Lick Here",
+        "Brass",
+        "Echo Walkdown",
+        "Get This Lick",
     ];
 
     for marker in non_chord_markers {
@@ -1100,7 +1124,9 @@ impl MidiNote {
     /// Get the note name (e.g., "C4", "F#5").
     #[must_use]
     pub fn note_name(&self) -> String {
-        let note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        let note_names = [
+            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+        ];
         let octave = (self.pitch / 12) as i8 - 1;
         let note_idx = (self.pitch % 12) as usize;
         format!("{}{}", note_names[note_idx], octave)
@@ -1140,8 +1166,20 @@ mod tests {
 
     #[test]
     fn test_is_accidental() {
-        let c = MidiNote { pitch: 60, velocity: 100, start_tick: 0, duration_ticks: 480, channel: 0 };
-        let csharp = MidiNote { pitch: 61, velocity: 100, start_tick: 0, duration_ticks: 480, channel: 0 };
+        let c = MidiNote {
+            pitch: 60,
+            velocity: 100,
+            start_tick: 0,
+            duration_ticks: 480,
+            channel: 0,
+        };
+        let csharp = MidiNote {
+            pitch: 61,
+            velocity: 100,
+            start_tick: 0,
+            duration_ticks: 480,
+            channel: 0,
+        };
 
         assert!(!c.is_accidental());
         assert!(csharp.is_accidental());
@@ -1171,12 +1209,17 @@ mod tests {
         println!("PPQ: {}", midi.ppq());
         println!("Initial tempo: {:.1} BPM", midi.initial_tempo());
         println!("Initial time sig: {:?}", midi.initial_time_signature());
-        println!("Duration: {} ticks ({:.2}s)", midi.duration_ticks(), midi.tick_to_seconds(midi.duration_ticks()));
+        println!(
+            "Duration: {} ticks ({:.2}s)",
+            midi.duration_ticks(),
+            midi.tick_to_seconds(midi.duration_ticks())
+        );
 
         // Track info
         println!("\nTracks ({} with notes):", midi.tracks().len());
         for track in midi.tracks() {
-            println!("  Track {}: {:?} ({} notes, channel {:?})",
+            println!(
+                "  Track {}: {:?} ({} notes, channel {:?})",
                 track.index,
                 track.name,
                 track.notes.len(),
@@ -1185,8 +1228,13 @@ mod tests {
 
             // Print first few notes
             for (i, note) in track.notes.iter().take(5).enumerate() {
-                println!("    Note {}: {} at tick {} for {} ticks",
-                    i, note.note_name(), note.start_tick, note.duration_ticks);
+                println!(
+                    "    Note {}: {} at tick {} for {} ticks",
+                    i,
+                    note.note_name(),
+                    note.start_tick,
+                    note.duration_ticks
+                );
             }
             if track.notes.len() > 5 {
                 println!("    ... and {} more notes", track.notes.len() - 5);
@@ -1196,8 +1244,10 @@ mod tests {
         // Markers
         println!("\nMarkers ({}):", midi.markers().len());
         for marker in midi.markers().iter().take(20) {
-            println!("  Tick {}: {:?} - {:?}",
-                marker.tick, marker.marker_type, marker.text);
+            println!(
+                "  Tick {}: {:?} - {:?}",
+                marker.tick, marker.marker_type, marker.text
+            );
         }
 
         // Tempo changes (first 10)
@@ -1319,7 +1369,10 @@ mod tests {
         // Test: one measure after SONGSTART
         let one_measure = songstart + ticks_per_measure;
         let pos = midi.tick_to_musical_position(one_measure);
-        println!("One measure after SONGSTART (tick {}): {:?}", one_measure, pos);
+        println!(
+            "One measure after SONGSTART (tick {}): {:?}",
+            one_measure, pos
+        );
         assert_eq!(pos.measure, 1, "Should be measure 1");
         assert_eq!(pos.beat, 0, "Should be beat 0");
 
@@ -1334,8 +1387,10 @@ mod tests {
         let first_chord_tick = 11840;
         let pos = midi.tick_to_musical_position(first_chord_tick);
         let relative = first_chord_tick - songstart;
-        println!("\nFirst chord Ab9 at tick {} (relative {}): {:?}",
-            first_chord_tick, relative, pos);
+        println!(
+            "\nFirst chord Ab9 at tick {} (relative {}): {:?}",
+            first_chord_tick, relative, pos
+        );
         // relative = 320, which is 320/960 = 1/3 beat = triplet offset
         // So it should be measure 0, beat 0, subdivision 320
         assert_eq!(pos.measure, 0);
@@ -1364,33 +1419,48 @@ mod tests {
         }
 
         // Verify key section positions
-        let count_in = sections.iter().find(|s| s.section_type == SectionType::CountIn);
+        let count_in = sections
+            .iter()
+            .find(|s| s.section_type == SectionType::CountIn);
         assert!(count_in.is_some(), "Should have Count-In marker");
         let count_in = count_in.unwrap();
         // Count-in is at tick 3840, which is 1 measure before SONGSTART (11520)
         // Relative to SONGSTART, this is -2 measures (or measure -2)
         println!("\nCount-In at measure {}", count_in.position.measure);
 
-        let songstart = sections.iter().find(|s| s.section_type == SectionType::SongStart);
+        let songstart = sections
+            .iter()
+            .find(|s| s.section_type == SectionType::SongStart);
         assert!(songstart.is_some(), "Should have SONGSTART marker");
         let songstart = songstart.unwrap();
-        assert_eq!(songstart.position.measure, 0, "SONGSTART should be measure 0");
+        assert_eq!(
+            songstart.position.measure, 0,
+            "SONGSTART should be measure 0"
+        );
 
         // Check Verse 1 position
-        let vs1 = sections.iter().find(|s| {
-            s.section_type == SectionType::Verse && s.number == Some(1)
-        });
+        let vs1 = sections
+            .iter()
+            .find(|s| s.section_type == SectionType::Verse && s.number == Some(1));
         assert!(vs1.is_some(), "Should have VS 1 marker");
         let vs1 = vs1.unwrap();
-        println!("VS 1 at measure {} (tick {})", vs1.position.measure + 1, vs1.tick);
+        println!(
+            "VS 1 at measure {} (tick {})",
+            vs1.position.measure + 1,
+            vs1.tick
+        );
 
         // Check Chorus 1 position
-        let ch1 = sections.iter().find(|s| {
-            s.section_type == SectionType::Chorus && s.number == Some(1)
-        });
+        let ch1 = sections
+            .iter()
+            .find(|s| s.section_type == SectionType::Chorus && s.number == Some(1));
         assert!(ch1.is_some(), "Should have CH 1 marker");
         let ch1 = ch1.unwrap();
-        println!("CH 1 at measure {} (tick {})", ch1.position.measure + 1, ch1.tick);
+        println!(
+            "CH 1 at measure {} (tick {})",
+            ch1.position.measure + 1,
+            ch1.tick
+        );
     }
 
     #[test]
@@ -1412,8 +1482,10 @@ mod tests {
         let count_in_ticks = songstart_tick - count_in_tick;
         let count_in_measures = count_in_ticks / ticks_per_measure;
 
-        println!("Count-in duration: {} ticks = {} measures",
-            count_in_ticks, count_in_measures);
+        println!(
+            "Count-in duration: {} ticks = {} measures",
+            count_in_ticks, count_in_measures
+        );
 
         // In this file:
         // Count-In at tick 3840
@@ -1438,10 +1510,7 @@ mod tests {
         for section in &sections {
             println!(
                 "{:24} @ M{:3} (tick {:6}) - {:?}",
-                section.name,
-                section.position.measure,
-                section.tick,
-                section.section_type,
+                section.name, section.position.measure, section.tick, section.section_type,
             );
         }
 
@@ -1454,27 +1523,40 @@ mod tests {
         // etc.
 
         // Verify key positions
-        let count_in = sections.iter().find(|s| s.section_type == SectionType::CountIn);
+        let count_in = sections
+            .iter()
+            .find(|s| s.section_type == SectionType::CountIn);
         assert!(count_in.is_some(), "Should have Count-In");
         let count_in = count_in.unwrap();
-        assert_eq!(count_in.position.measure, 2, "Count-In should start at measure 2");
+        assert_eq!(
+            count_in.position.measure, 2,
+            "Count-In should start at measure 2"
+        );
 
-        let hits = sections.iter().find(|s| s.section_type == SectionType::Hits);
+        let hits = sections
+            .iter()
+            .find(|s| s.section_type == SectionType::Hits);
         assert!(hits.is_some(), "Should have HITS");
         let hits = hits.unwrap();
         assert_eq!(hits.position.measure, 4, "HITS should start at measure 4");
 
-        let intro = sections.iter().find(|s| s.section_type == SectionType::Intro);
+        let intro = sections
+            .iter()
+            .find(|s| s.section_type == SectionType::Intro);
         assert!(intro.is_some(), "Should have Intro");
         let intro = intro.unwrap();
         assert_eq!(intro.position.measure, 6, "Intro should start at measure 6");
 
-        let vs1 = sections.iter().find(|s| s.section_type == SectionType::Verse && s.number == Some(1));
+        let vs1 = sections
+            .iter()
+            .find(|s| s.section_type == SectionType::Verse && s.number == Some(1));
         assert!(vs1.is_some(), "Should have VS 1");
         let vs1 = vs1.unwrap();
         assert_eq!(vs1.position.measure, 10, "VS 1 should start at measure 10");
 
-        let ch1 = sections.iter().find(|s| s.section_type == SectionType::Chorus && s.number == Some(1));
+        let ch1 = sections
+            .iter()
+            .find(|s| s.section_type == SectionType::Chorus && s.number == Some(1));
         assert!(ch1.is_some(), "Should have CH 1");
         let ch1 = ch1.unwrap();
         assert_eq!(ch1.position.measure, 26, "CH 1 should start at measure 26");
@@ -1485,8 +1567,10 @@ mod tests {
             let current = &sections[i];
             let next = &sections[i + 1];
             let length = next.position.measure - current.position.measure;
-            println!("{:24} -> {:24} = {} measures",
-                current.name, next.name, length);
+            println!(
+                "{:24} -> {:24} = {} measures",
+                current.name, next.name, length
+            );
         }
     }
 
@@ -1519,8 +1603,14 @@ mod tests {
         // Ab9 should be at measure 4 beat 1 + triplet (HITS starts at measure 4)
         let first = &chords[0];
         assert_eq!(first.chord_name, "Ab9");
-        assert_eq!(first.position.measure, 4, "First chord should be in measure 4 (HITS section)");
-        assert_eq!(first.position.subdivision, 320, "First chord should have 320 tick subdivision (triplet)");
+        assert_eq!(
+            first.position.measure, 4,
+            "First chord should be in measure 4 (HITS section)"
+        );
+        assert_eq!(
+            first.position.subdivision, 320,
+            "First chord should have 320 tick subdivision (triplet)"
+        );
     }
 
     #[test]
@@ -1560,20 +1650,32 @@ mod tests {
         assert_eq!(ab9.chord_name, "Ab9");
         assert_eq!(ab9.position.subdivision, 320);
         let ab9_pp = ab9.detect_push_pull(ppq);
-        assert_eq!(ab9_pp, PushPull::Pull(PushPullAmount::TripletEighth),
-            "Ab9 should be pulled by triplet eighth");
-        assert_eq!(ab9.to_keyflow_notation(ppq), "Ab9t'",
-            "Ab9 keyflow notation should be Ab9t' (pulled)");
+        assert_eq!(
+            ab9_pp,
+            PushPull::Pull(PushPullAmount::TripletEighth),
+            "Ab9 should be pulled by triplet eighth"
+        );
+        assert_eq!(
+            ab9.to_keyflow_notation(ppq),
+            "Ab9t'",
+            "Ab9 keyflow notation should be Ab9t' (pulled)"
+        );
 
         // 2. F9 - second chord, should be a PUSH by triplet eighth (640 ticks = 320 before next beat)
         let f9 = &chords[1];
         assert_eq!(f9.chord_name, "F9");
         assert_eq!(f9.position.subdivision, 640);
         let f9_pp = f9.detect_push_pull(ppq);
-        assert_eq!(f9_pp, PushPull::Push(PushPullAmount::TripletEighth),
-            "F9 should be pushed by triplet eighth");
-        assert_eq!(f9.to_keyflow_notation(ppq), "'tF9",
-            "F9 keyflow notation should be 'tF9 (pushed)");
+        assert_eq!(
+            f9_pp,
+            PushPull::Push(PushPullAmount::TripletEighth),
+            "F9 should be pushed by triplet eighth"
+        );
+        assert_eq!(
+            f9.to_keyflow_notation(ppq),
+            "'tF9",
+            "F9 keyflow notation should be 'tF9 (pushed)"
+        );
     }
 
     #[test]
@@ -1619,16 +1721,18 @@ mod tests {
         let chords = midi.chord_markers_absolute();
 
         // Find VS 1 section
-        let vs1 = sections.iter().find(|s| {
-            s.section_type == SectionType::Verse && s.number == Some(1)
-        }).expect("Should have VS 1");
+        let vs1 = sections
+            .iter()
+            .find(|s| s.section_type == SectionType::Verse && s.number == Some(1))
+            .expect("Should have VS 1");
 
         println!("\n=== Verse 1 Chord Structure ===\n");
         println!("VS 1 starts at measure {}", vs1.position.measure);
 
         // Get chords in/around verse 1
         // VS 1 is at measure 10, so look for chords from measure 9 (anticipation) to measure 26 (CH 1)
-        let verse_chords: Vec<_> = chords.iter()
+        let verse_chords: Vec<_> = chords
+            .iter()
             .filter(|c| c.position.measure >= 9 && c.position.measure < 26)
             .collect();
 
@@ -1654,15 +1758,20 @@ mod tests {
         let first_verse_chord = verse_chords.first().expect("Should have chords");
         assert_eq!(first_verse_chord.chord_name, "Fmaj/C");
         let first_pp = first_verse_chord.detect_push_pull(ppq);
-        assert!(matches!(first_pp, PushPull::Push(_)),
-            "First verse chord should be pushed");
+        assert!(
+            matches!(first_pp, PushPull::Push(_)),
+            "First verse chord should be pushed"
+        );
 
         // The second chord should be Cm on the downbeat (measure 12)
         let second_chord = verse_chords.get(1).expect("Should have second chord");
         assert_eq!(second_chord.chord_name, "Cm");
         let second_pp = second_chord.detect_push_pull(ppq);
-        assert_eq!(second_pp, PushPull::OnBeat,
-            "Second verse chord (Cm) should be on beat");
+        assert_eq!(
+            second_pp,
+            PushPull::OnBeat,
+            "Second verse chord (Cm) should be on beat"
+        );
     }
 
     #[test]
@@ -1703,8 +1812,14 @@ mod tests {
 
         // Verify measure 4 (HITS) has Ab9t' - absolute measures are 1-indexed
         let m4_chords = measures.get(&4).expect("Should have measure 4 (HITS)");
-        let m4_keyflow: Vec<String> = m4_chords.iter().map(|c| c.to_keyflow_notation(ppq)).collect();
-        assert!(m4_keyflow.contains(&"Ab9t'".to_string()), "Measure 4 should contain Ab9t'");
+        let m4_keyflow: Vec<String> = m4_chords
+            .iter()
+            .map(|c| c.to_keyflow_notation(ppq))
+            .collect();
+        assert!(
+            m4_keyflow.contains(&"Ab9t'".to_string()),
+            "Measure 4 should contain Ab9t'"
+        );
 
         // F9 is pushed so its logical measure is 5 (beat 2 of measure 4 pushes to beat 3)
         let m5_chords = measures.get(&5); // measure 5 (1-indexed)
@@ -1729,18 +1844,23 @@ mod tests {
 
         // Get section markers to find chorus
         let sections = midi.section_markers_absolute();
-        let ch1 = sections.iter()
+        let ch1 = sections
+            .iter()
             .find(|s| s.section_type == SectionType::Chorus && s.number == Some(1))
             .expect("Should have CH 1 section");
 
         println!("\n=== Chorus Chord Structure (Key: Eb) ===\n");
-        println!("CH 1 starts at measure {} (tick {})", ch1.position.measure, ch1.tick);
+        println!(
+            "CH 1 starts at measure {} (tick {})",
+            ch1.position.measure, ch1.tick
+        );
 
         // Get chord markers (using absolute for correct measure numbers)
         let chords = midi.chord_markers_absolute();
 
         // Filter chords in measures 26-33 (chorus is 8 measures based on structure)
-        let chorus_chords: Vec<_> = chords.iter()
+        let chorus_chords: Vec<_> = chords
+            .iter()
             .filter(|c| {
                 let abs_measure = c.position.measure;
                 abs_measure >= 26 && abs_measure < 34
@@ -1759,35 +1879,58 @@ mod tests {
 
             let keyflow = chord.to_keyflow_notation(ppq);
 
-            println!("  M{}.B{}.S{:3}: {} ({}) - tick {}",
-                     chord.position.measure,
-                     chord.position.beat + 1, // 1-indexed for display
-                     chord.position.subdivision,
-                     keyflow,
-                     duration_str,
-                     chord.tick);
+            println!(
+                "  M{}.B{}.S{:3}: {} ({}) - tick {}",
+                chord.position.measure,
+                chord.position.beat + 1, // 1-indexed for display
+                chord.position.subdivision,
+                keyflow,
+                duration_str,
+                chord.tick
+            );
         }
 
         // Verify first chorus chord structure:
         // 1. First chord is Cm/Eb on beat 1
-        let first = chorus_chords.first().expect("Should have first chorus chord");
-        assert_eq!(first.chord_name, "Cm/Eb", "First chorus chord should be Cm/Eb");
-        assert_eq!(first.position.beat, 0, "First chorus chord should be on beat 1 (0-indexed)");
-        assert_eq!(first.position.subdivision, 0, "First chorus chord should be on the beat");
+        let first = chorus_chords
+            .first()
+            .expect("Should have first chorus chord");
+        assert_eq!(
+            first.chord_name, "Cm/Eb",
+            "First chorus chord should be Cm/Eb"
+        );
+        assert_eq!(
+            first.position.beat, 0,
+            "First chorus chord should be on beat 1 (0-indexed)"
+        );
+        assert_eq!(
+            first.position.subdivision, 0,
+            "First chorus chord should be on the beat"
+        );
 
         // 2. Second chord is Ebmaj, pushed by triplet eighth
-        let second = chorus_chords.get(1).expect("Should have second chorus chord");
-        assert_eq!(second.chord_name, "Ebmaj", "Second chorus chord should be Ebmaj");
+        let second = chorus_chords
+            .get(1)
+            .expect("Should have second chorus chord");
+        assert_eq!(
+            second.chord_name, "Ebmaj",
+            "Second chorus chord should be Ebmaj"
+        );
         let second_pp = second.detect_push_pull(ppq);
-        assert!(matches!(second_pp, PushPull::Push(PushPullAmount::TripletEighth)),
-            "Second chorus chord should be pushed by triplet eighth, got: {:?}", second_pp);
+        assert!(
+            matches!(second_pp, PushPull::Push(PushPullAmount::TripletEighth)),
+            "Second chorus chord should be pushed by triplet eighth, got: {:?}",
+            second_pp
+        );
 
         // 3. Verify durations
         let first_duration = first.duration_to_next(Some(second));
         println!("\nDuration analysis:");
-        println!("  Cm/Eb duration: {} ticks = {} beats",
-                 first_duration.unwrap_or(0),
-                 ChordMarker::duration_in_beats(first_duration.unwrap_or(0), ppq));
+        println!(
+            "  Cm/Eb duration: {} ticks = {} beats",
+            first_duration.unwrap_or(0),
+            ChordMarker::duration_in_beats(first_duration.unwrap_or(0), ppq)
+        );
 
         // The Cm/Eb should be roughly a quarter note (on beat push means it lasts until 0.667 of beat)
         // Actually: Cm/Eb is at beat 1.0, Ebmaj is at beat 1.667
@@ -1796,8 +1939,11 @@ mod tests {
             let beats = ChordMarker::duration_in_beats(d, ppq);
             println!("  Cm/Eb lasts {:.2} beats ({} ticks)", beats, d);
             // Should be about 2/3 beat (pushed by triplet)
-            assert!(beats > 0.5 && beats < 1.0,
-                "Cm/Eb should be about 2/3 beat, got {:.2}", beats);
+            assert!(
+                beats > 0.5 && beats < 1.0,
+                "Cm/Eb should be about 2/3 beat, got {:.2}",
+                beats
+            );
         }
 
         // Calculate Ebmaj duration to next chord
@@ -1855,7 +2001,11 @@ mod keyflow_comparison_tests {
                         discrepancies.push((
                             midi_name.clone(),
                             normalized.clone(),
-                            format!("M{}.B{}", chord.position.measure + 1, chord.position.beat + 1),
+                            format!(
+                                "M{}.B{}",
+                                chord.position.measure + 1,
+                                chord.position.beat + 1
+                            ),
                         ));
                     }
                 }
@@ -1884,9 +2034,8 @@ mod keyflow_comparison_tests {
         }
 
         // Collect unique chord names for analysis
-        let unique_chords: std::collections::HashSet<_> = chords.iter()
-            .map(|c| c.chord_name.clone())
-            .collect();
+        let unique_chords: std::collections::HashSet<_> =
+            chords.iter().map(|c| c.chord_name.clone()).collect();
 
         println!("=== Unique Chord Names ({}) ===", unique_chords.len());
         let mut sorted: Vec<_> = unique_chords.iter().collect();
@@ -2036,7 +2185,9 @@ mod keyflow_comparison_tests {
 
         // Respell all detected chords using the key context
         for chord_event in &mut detected {
-            chord_event.chord.respell_root(&key_spelling, SpellingMode::Relaxed);
+            chord_event
+                .chord
+                .respell_root(&key_spelling, SpellingMode::Relaxed);
         }
 
         println!("Detected {} chord events from notes\n", detected.len());
@@ -2049,12 +2200,16 @@ mod keyflow_comparison_tests {
         println!("=== First 30 Detected Chords (with Eb key spelling) ===\n");
         for (i, chord) in detected.iter().take(30).enumerate() {
             // Find the nearest marker to this detected chord's start time
-            let nearest_marker = markers.iter()
+            let nearest_marker = markers
+                .iter()
                 .min_by_key(|m| ((m.tick as i64) - chord.start_ppq).abs());
 
             let marker_info = if let Some(marker) = nearest_marker {
                 let diff = (marker.tick as i64) - chord.start_ppq;
-                format!("nearest marker: {} at tick {} (diff: {})", marker.chord_name, marker.tick, diff)
+                format!(
+                    "nearest marker: {} at tick {} (diff: {})",
+                    marker.chord_name, marker.tick, diff
+                )
             } else {
                 "no marker".to_string()
             };
@@ -2079,28 +2234,29 @@ mod keyflow_comparison_tests {
 
         for detected_chord in &detected {
             // Find marker at similar position
-            let matching = markers.iter().find(|m| {
-                ((m.tick as i64) - detected_chord.start_ppq).abs() < tolerance
-            });
+            let matching = markers
+                .iter()
+                .find(|m| ((m.tick as i64) - detected_chord.start_ppq).abs() < tolerance);
 
             if let Some(marker) = matching {
                 matched_position += 1;
                 // Normalize marker name for comparison (strip "maj" prefix if present)
-                let marker_normalized = marker.chord_name
-                    .replace("maj", "")
-                    .replace("Maj", "");
-                let detected_normalized = detected_chord.chord.normalized
+                let marker_normalized = marker.chord_name.replace("maj", "").replace("Maj", "");
+                let detected_normalized = detected_chord
+                    .chord
+                    .normalized
                     .replace("maj", "")
                     .replace("Maj", "");
 
-                if marker_normalized == detected_normalized ||
-                   marker.chord_name == detected_chord.chord.normalized {
+                if marker_normalized == detected_normalized
+                    || marker.chord_name == detected_chord.chord.normalized
+                {
                     matched_name += 1;
                 } else {
                     name_mismatches.push((
                         detected_chord.chord.normalized.clone(),
                         marker.chord_name.clone(),
-                        detected_chord.start_ppq
+                        detected_chord.start_ppq,
                     ));
                 }
             } else {
@@ -2118,7 +2274,10 @@ mod keyflow_comparison_tests {
         if !name_mismatches.is_empty() {
             println!("\n=== Name Mismatches (first 20) ===");
             for (detected, marker, tick) in name_mismatches.iter().take(20) {
-                println!("  tick {:6}: detected '{}' vs marker '{}'", tick, detected, marker);
+                println!(
+                    "  tick {:6}: detected '{}' vs marker '{}'",
+                    tick, detected, marker
+                );
             }
         }
     }

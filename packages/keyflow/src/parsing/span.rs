@@ -3,6 +3,7 @@
 //! Represents a span of text in the original source input.
 //! Used for bidirectional linking between rendered elements and source text.
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
@@ -10,7 +11,7 @@ use std::ops::Range;
 ///
 /// Used for source linking between rendered elements and original text,
 /// enabling features like click-to-highlight and in-place editing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct TextSpan {
     /// Byte offset from the start of the source
     pub start: usize,

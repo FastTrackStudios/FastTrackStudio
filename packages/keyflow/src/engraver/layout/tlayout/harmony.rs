@@ -394,10 +394,7 @@ pub fn layout_harmony(
         "HarmonyStyle requires text_font_metrics for layout. \
          Use HarmonyStyle::with_text_font_metrics() to provide font metrics.",
     );
-    let symbol_metrics = style
-        .symbol_font_metrics
-        .as_ref()
-        .unwrap_or(text_metrics);
+    let symbol_metrics = style.symbol_font_metrics.as_ref().unwrap_or(text_metrics);
 
     // Measure text width using actual font metrics (no estimation fallback)
     let measure_text_width = |text: &str, font_size: f64, use_symbol_font: bool| -> f64 {

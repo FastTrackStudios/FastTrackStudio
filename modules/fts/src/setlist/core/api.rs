@@ -4,6 +4,7 @@
 //! computed fields like active song, next/previous song, next/previous section, etc.
 //! This is what gets sent over the stream instead of the raw `Setlist`.
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 use super::{Section, Setlist, Song};
@@ -13,7 +14,7 @@ use super::{Section, Setlist, Song};
 /// This struct wraps a `Setlist` and provides computed fields that are derived
 /// from REAPER's transport state (active song, active section, etc.).
 /// This is what gets sent over the stream and stored in the global signal.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct SetlistApi {
     /// The underlying setlist
     pub setlist: Setlist,

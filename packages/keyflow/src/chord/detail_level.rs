@@ -6,14 +6,16 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::chord::Chord;
 use crate::chord::degree::ChordDegree;
 use crate::chord::quality::ChordQuality;
-use crate::chord::Chord;
 use crate::primitives::note::Note;
 use crate::primitives::{MusicalNote, RootNotation};
+use facet::Facet;
 
 /// Controls the maximum complexity of chord extensions displayed
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default, Facet)]
+#[repr(u8)]
 pub enum DetailLevel {
     /// Show up to 7th chords. 9ths, 11ths, 13ths become polychords
     Sevenths,
@@ -131,8 +133,10 @@ pub fn compute_upper_structure(chord: &Chord, level: DetailLevel) -> Option<Uppe
     // Calculate the actual note name for the upper root
     // Use prefer_sharp based on the original root's spelling
     let prefer_sharp = root_note.name().contains('#');
-    let upper_root_note =
-        MusicalNote::from_semitone((root_note.semitone() + upper_root_semitone) % 12, prefer_sharp);
+    let upper_root_note = MusicalNote::from_semitone(
+        (root_note.semitone() + upper_root_semitone) % 12,
+        prefer_sharp,
+    );
     let upper_root = RootNotation::from_note_name(upper_root_note);
 
     // Create simplified upper chord
@@ -215,28 +219,16 @@ mod tests {
     #[test]
     fn test_quality_from_intervals() {
         // Major triad: 0, 4, 7
-        assert_eq!(
-            quality_from_intervals(&[0, 4, 7]),
-            ChordQuality::Major
-        );
+        assert_eq!(quality_from_intervals(&[0, 4, 7]), ChordQuality::Major);
 
         // Minor triad: 0, 3, 7
-        assert_eq!(
-            quality_from_intervals(&[0, 3, 7]),
-            ChordQuality::Minor
-        );
+        assert_eq!(quality_from_intervals(&[0, 3, 7]), ChordQuality::Minor);
 
         // Diminished: 0, 3, 6
-        assert_eq!(
-            quality_from_intervals(&[0, 3, 6]),
-            ChordQuality::Diminished
-        );
+        assert_eq!(quality_from_intervals(&[0, 3, 6]), ChordQuality::Diminished);
 
         // Augmented: 0, 4, 8
-        assert_eq!(
-            quality_from_intervals(&[0, 4, 8]),
-            ChordQuality::Augmented
-        );
+        assert_eq!(quality_from_intervals(&[0, 4, 8]), ChordQuality::Augmented);
 
         // Just minor 3rd (incomplete) -> Minor
         assert_eq!(quality_from_intervals(&[0, 3]), ChordQuality::Minor);
@@ -335,7 +327,11 @@ mod tests {
 
         // At Sevenths level, should become a polychord
         let display = chord.display_at_level(DetailLevel::Sevenths);
-        assert!(display.contains("/"), "Expected slash chord at Sevenths level: {}", display);
+        assert!(
+            display.contains("/"),
+            "Expected slash chord at Sevenths level: {}",
+            display
+        );
     }
 
     #[test]
@@ -353,7 +349,11 @@ mod tests {
 
         // At Sevenths level, should become a polychord
         let display = chord.display_at_level(DetailLevel::Sevenths);
-        assert!(display.contains("/"), "Expected slash chord at Sevenths level: {}", display);
+        assert!(
+            display.contains("/"),
+            "Expected slash chord at Sevenths level: {}",
+            display
+        );
     }
 
     #[test]
@@ -367,7 +367,12 @@ mod tests {
         // Should be the same at all levels
         for level in DetailLevel::all() {
             let display = chord.display_at_level(level);
-            assert!(!display.contains("/"), "Dm7 should not become slash chord at {:?}: {}", level, display);
+            assert!(
+                !display.contains("/"),
+                "Dm7 should not become slash chord at {:?}: {}",
+                level,
+                display
+            );
         }
     }
 
@@ -406,10 +411,8 @@ mod tests {
         // C11
         let mut chord = make_chord("C", ChordQuality::Major);
         chord.family = Some(ChordFamily::Dominant7);
-        chord.extensions = Extensions::with_eleventh(
-            ExtensionQuality::Natural,
-            ExtensionQuality::Natural,
-        );
+        chord.extensions =
+            Extensions::with_eleventh(ExtensionQuality::Natural, ExtensionQuality::Natural);
         chord.compute_intervals();
         chord.normalize();
 

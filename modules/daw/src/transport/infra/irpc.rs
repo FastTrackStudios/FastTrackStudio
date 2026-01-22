@@ -4,6 +4,7 @@
 //! This protocol is backend-agnostic and can be implemented by any DAW backend.
 
 use crate::transport::core::transport::Transport;
+use facet::Facet;
 use irpc::{Client, WithChannels, channel::mpsc, rpc::RemoteService, rpc_requests};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -12,7 +13,7 @@ use tokio::time;
 use tracing::{info, warn};
 
 /// Transport update message sent over the irpc stream
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct TransportUpdateMessage {
     pub transport: Transport,
     /// The name of the active project (used to determine which song is active)
@@ -37,12 +38,13 @@ impl From<crate::transport::infra::stream::TransportUpdate> for TransportUpdateM
 }
 
 /// Request to subscribe to transport updates
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Facet)]
 pub struct SubscribeTransport;
 
 /// IRPC protocol for transport stream service
+#[repr(u8)]
 #[rpc_requests(message = TransportStreamMessage)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Facet)]
 pub enum TransportStreamProtocol {
     /// Subscribe to transport state updates (server streaming)
     #[rpc(tx=mpsc::Sender<TransportUpdateMessage>)]

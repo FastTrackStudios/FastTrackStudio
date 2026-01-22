@@ -2,14 +2,16 @@
 
 use crate::tracks::api::automation::AutomationMode;
 use crate::tracks::envelope::Envelope;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Wrapper for unknown enum values to preserve them during serialization
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct Hidden<T>(pub T);
 
 /// Receive mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
 pub enum ReceiveMode {
     /// Post Fader (Post Pan)
     PostFader,
@@ -50,7 +52,7 @@ impl From<i32> for ReceiveMode {
 }
 
 /// Track receive settings
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct TrackReceive {
     pub source_track_index: i32, // field 1 - source track index (zero based)
     pub mode: ReceiveMode,       // field 2 - mode

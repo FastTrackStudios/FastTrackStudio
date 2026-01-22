@@ -5,10 +5,13 @@
 
 use crate::chord::quality::ChordQuality;
 use crate::primitives::Interval;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Semantic degree within a chord
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Facet,
+)]
 #[repr(u8)]
 pub enum ChordDegree {
     Root = 1,

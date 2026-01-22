@@ -14,10 +14,12 @@ members = [
     "libs/pdf",
     "libs/swell-ui",
     "libs/reaper-embed",
+    "modules/actions",
     "modules/daw",
     "modules/dynamic-template",
     "modules/fts",
     "modules/fts-plugin-core",
+    "modules/microservice",
     "modules/plugin-hub",
     "modules/plugins/ui",
     "modules/plugins/gain",
@@ -48,7 +50,11 @@ license = "MIT OR Apache-2.0"
 edition = "2024"
 repository = "https://github.com/codywright/FastTrackStudio"
 
+[workspace.metadata.crane]
+name = "fts-workspace"
+
 [workspace.dependencies]
+actions = { path = "modules/actions" }
 anyhow = "1.0"
 async-trait = "0.1"
 atomic_float = "1.0"
@@ -77,6 +83,11 @@ tracing = "0.1"
 dioxus-sdk-time = "0.7"
 lucide-dioxus = "2"
 ui = { path = "modules/ui" }
+
+# Roam RPC framework (facet must match roam's version exactly)
+roam = { git = "https://github.com/bearcove/roam.git" }
+facet = { version = "0.42.0", git = "https://github.com/facet-rs/facet", branch = "main", features = ["camino", "reflect", "uuid"] }
+microservice = { path = "modules/microservice" }
 
 [workspace.dependencies.chrono]
 version = "0.4"
@@ -214,6 +225,8 @@ anyrender_vello_cpu = { path = "libs/vendor/anyrender/crates/anyrender_vello_cpu
 anyrender_vello_hybrid = { path = "libs/vendor/anyrender/crates/anyrender_vello_hybrid" }
 anyrender_svg = { path = "libs/vendor/anyrender/crates/anyrender_svg" }
 wgpu_context = { path = "libs/vendor/anyrender/crates/wgpu_context" }
+# Facet - roam requires git version, patch crates.io to avoid duplicates
+facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
 
 # Profile settings for WASM builds
 # The "too many locals" error occurs when compiling large Rust projects to WASM in debug mode

@@ -1,6 +1,6 @@
 //! Plugin shell/wrapper component with top bar and size controls.
 
-use crate::sizing::{AspectRatio, SizeTier, MAX_WINDOW_SIZE};
+use crate::sizing::{AspectRatio, MAX_WINDOW_SIZE, SizeTier};
 use lumen_blocks::components::button::{Button, ButtonSize, ButtonVariant};
 use nih_plug::nih_log;
 use nih_plug_dioxus::TAILWIND_CSS;
@@ -22,7 +22,10 @@ pub const SIZE_PRESET_NAMES: &[&str] = &[
     "Fullscreen",
 ];
 
-#[deprecated(since = "0.2.0", note = "Use sizing::AspectRatio::dimensions() instead")]
+#[deprecated(
+    since = "0.2.0",
+    note = "Use sizing::AspectRatio::dimensions() instead"
+)]
 pub const SIZE_PRESETS: &[(u32, u32)] = &[
     (320, 180),
     (480, 270),
@@ -54,7 +57,13 @@ html, body {
 fn do_resize(aspect: AspectRatio, tier: SizeTier) {
     let (width, height) = aspect.dimensions_with_max(tier, MAX_WINDOW_SIZE);
     if let Some(state) = try_use_context::<Arc<DioxusState>>() {
-        nih_log!("[RESIZE] Requesting {}x{} ({} {})", width, height, aspect.name(), tier.name());
+        nih_log!(
+            "[RESIZE] Requesting {}x{} ({} {})",
+            width,
+            height,
+            aspect.name(),
+            tier.name()
+        );
         state.request_resize(width, height);
     }
 }

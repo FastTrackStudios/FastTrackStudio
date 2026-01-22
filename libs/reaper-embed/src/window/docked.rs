@@ -7,7 +7,7 @@ use raw_window_handle::HasWindowHandle;
 use reaper_low::Reaper;
 
 use crate::embed_source::EmbedSource;
-use crate::reaper::docker::{simple_screenset_callback, DockController};
+use crate::reaper::docker::{DockController, simple_screenset_callback};
 use crate::reaper::hwnd::{extract_hwnd, to_reaper_hwnd};
 use crate::window_handler::ReaperWindowHandler;
 

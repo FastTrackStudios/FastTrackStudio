@@ -23,8 +23,12 @@ use kurbo::{Affine, Point, Rect};
 use vello::peniko::Color;
 
 use crate::engraver::fonts::SMuFLFont;
-use crate::engraver::layout::context::{LayoutConfiguration, LayoutContext, LayoutContextOwned, LayoutMode};
-use crate::engraver::layout::tlayout::chord::{ChordNote, ChordParams, StemDirection, layout_chord};
+use crate::engraver::layout::context::{
+    LayoutConfiguration, LayoutContext, LayoutContextOwned, LayoutMode,
+};
+use crate::engraver::layout::tlayout::chord::{
+    ChordNote, ChordParams, StemDirection, layout_chord,
+};
 use crate::engraver::layout::tlayout::clef::{ClefParams, ClefType, layout_clef};
 use crate::engraver::layout::tlayout::keysig::{KeySigParams, KeySigType, layout_keysig};
 use crate::engraver::layout::tlayout::note::{

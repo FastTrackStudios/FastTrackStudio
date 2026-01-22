@@ -19,21 +19,30 @@ chrono = { workspace = true }
 splitty = "1.0.2"
 colored = "2.1"
 
+# Workspace dependencies
+daw = { path = "../../modules/daw" }
+keyflow = { path = "../../packages/keyflow" }
+
+# Roam RPC framework
+roam = { workspace = true }
+facet = { workspace = true }
+
 # Common async dependencies (used by reaper and iroh features)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
+# Native-only: tokio with full features
+tokio = { version = "1.0", features = ["full"], optional = true }
 
-# IROH/IRPC dependencies (server-only, optional)
+# IROH/IRPC dependencies (optional)
 irpc = { workspace = true, optional = true }
 irpc-iroh = { version = "0.11.0", optional = true }
 iroh = { version = "0.95", features = ["discovery-local-network"], optional = true }
-tokio = { version = "1.0", features = ["full"], optional = true }
 rxrust = { workspace = true, optional = true }
 
-# Workspace dependencies
-daw = { path = "../../modules/daw" }
-keyflow = { path = "../../packages/keyflow" }
+# WASM: tokio with minimal features (no runtime)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1.0", default-features = false, features = ["sync"], optional = true }
 
 # Dioxus integration (optional)
 [dependencies.dioxus]

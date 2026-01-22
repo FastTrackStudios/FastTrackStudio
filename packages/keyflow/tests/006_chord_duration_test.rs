@@ -236,7 +236,10 @@ I_2 IV_2 vi_2 V_2
 
     let chord4 = &intro.measures()[1].chords[0];
     assert_eq!(chord4.full_symbol, "C");
-    assert!(matches!(chord4.rhythm, ChordRhythm::Slashes { count: 4, .. }));
+    assert!(matches!(
+        chord4.rhythm,
+        ChordRhythm::Slashes { count: 4, .. }
+    ));
 
     // Test Verse - scale degrees with underscore duration
     // 1_4 (1) + 4_2 (2) + 6_4 (1) = 4 beats = measure 0
@@ -422,7 +425,10 @@ Gmaj7//// Em7_2 D7_2 Cmaj7////
     // Gmaj7//// (explicit quality with slash notation)
     let chord1 = &intro.measures()[0].chords[0];
     assert_eq!(chord1.full_symbol, "Gmaj7");
-    assert!(matches!(chord1.rhythm, ChordRhythm::Slashes { count: 4, .. }));
+    assert!(matches!(
+        chord1.rhythm,
+        ChordRhythm::Slashes { count: 4, .. }
+    ));
     assert_eq!(chord1.duration.to_beats(chart.time_signature.unwrap()), 4.0);
 
     // Em7_2 (explicit quality with underscore notation)
@@ -440,7 +446,10 @@ Gmaj7//// Em7_2 D7_2 Cmaj7////
     // Cmaj7//// (explicit quality with slash notation)
     let chord4 = &intro.measures()[2].chords[0];
     assert_eq!(chord4.full_symbol, "Cmaj7");
-    assert!(matches!(chord4.rhythm, ChordRhythm::Slashes { count: 4, .. }));
+    assert!(matches!(
+        chord4.rhythm,
+        ChordRhythm::Slashes { count: 4, .. }
+    ));
     assert_eq!(chord4.duration.to_beats(chart.time_signature.unwrap()), 4.0);
 }
 

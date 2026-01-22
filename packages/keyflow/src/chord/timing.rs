@@ -5,10 +5,11 @@
 
 use super::duration::{PushPullAmount, PushPullBase};
 use super::midi::DetectedChord;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for timing analysis
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
 pub struct TimingAnalysisConfig {
     /// PPQ resolution of the source MIDI (REAPER uses 960 by default)
     pub source_ppq: i64,

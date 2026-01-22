@@ -2,24 +2,25 @@
 
 use crate::tracks::api::automation::AutomationMode;
 use crate::tracks::api::send_mode::SendMode;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// MIDI hardware output settings
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct MidiOutputSettings {
     pub device: i32,  // device index (floor(val / 32))
     pub channel: i32, // channel number (val & 0x1F)
 }
 
 /// Master/parent send settings
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct MasterSendSettings {
     pub enabled: bool,        // field 1 - enabled
     pub unknown_field_2: i32, // field 2 - unknown
 }
 
 /// Hardware output settings
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct HardwareOutputSettings {
     pub output_index: i32,                       // field 1 - output index
     pub send_mode: SendMode,                     // field 2 - send mode

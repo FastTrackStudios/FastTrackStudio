@@ -46,6 +46,7 @@ use crate::{
     config::FallbackStrategy, CollapseHierarchy, Config, Group, Item, Metadata, MonarchyError,
     Organizer, Parser, Result, Structure,
 };
+use facet::Facet;
 
 // region:    --- ScopedSortResult
 
@@ -70,7 +71,7 @@ use crate::{
 ///     // Add back to Unsorted folder or handle differently
 /// }
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Facet)]
 pub struct ScopedSortResult<M: Metadata> {
     /// Items that were successfully sorted into a hierarchical structure.
     pub sorted: Structure<M>,

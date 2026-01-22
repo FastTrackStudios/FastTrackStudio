@@ -10,9 +10,9 @@ use raw_window_handle::{
 use thiserror::Error;
 use vello::{AaSupport, RenderParams, Renderer as VelloRenderer, RendererOptions, Scene};
 use wgpu::{
-    Adapter, Device, Features, Instance, MemoryHints, Queue, RequestAdapterError, Surface,
-    SurfaceConfiguration, TextureFormat, TextureUsages, TextureDescriptor, TextureDimension,
-    Extent3d,
+    Adapter, Device, Extent3d, Features, Instance, MemoryHints, Queue, RequestAdapterError,
+    Surface, SurfaceConfiguration, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureUsages,
 };
 
 /// Errors that can occur during GPU initialization
@@ -143,13 +143,14 @@ impl GpuState {
         let limits = adapter.limits();
 
         // Request device
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("reaper-embed"),
-            required_features: features,
-            required_limits: limits,
-            memory_hints: MemoryHints::Performance,
-            trace: wgpu::Trace::default(),
-        }))?;
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("reaper-embed"),
+                required_features: features,
+                required_limits: limits,
+                memory_hints: MemoryHints::Performance,
+                trace: wgpu::Trace::default(),
+            }))?;
 
         // Configure surface
         let surface_caps = surface.get_capabilities(&adapter);
@@ -165,11 +166,20 @@ impl GpuState {
             .alpha_modes
             .iter()
             .find(|m| **m == wgpu::CompositeAlphaMode::PreMultiplied)
-            .or_else(|| surface_caps.alpha_modes.iter().find(|m| **m == wgpu::CompositeAlphaMode::PostMultiplied))
+            .or_else(|| {
+                surface_caps
+                    .alpha_modes
+                    .iter()
+                    .find(|m| **m == wgpu::CompositeAlphaMode::PostMultiplied)
+            })
             .copied()
             .unwrap_or(surface_caps.alpha_modes[0]);
 
-        log::debug!("Surface alpha mode: {:?} (available: {:?})", alpha_mode, surface_caps.alpha_modes);
+        log::debug!(
+            "Surface alpha mode: {:?} (available: {:?})",
+            alpha_mode,
+            surface_caps.alpha_modes
+        );
 
         let surface_config = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_DST,
@@ -196,7 +206,8 @@ impl GpuState {
 
         // Create intermediate texture for Vello rendering
         // Vello requires Rgba8Unorm format for its compute shaders
-        let intermediate_texture = create_intermediate_texture(&device, width.max(1), height.max(1));
+        let intermediate_texture =
+            create_intermediate_texture(&device, width.max(1), height.max(1));
 
         // Create texture blitter for copying intermediate to surface
         let texture_blitter = TextureBlitter::new(&device, surface_format);
@@ -243,7 +254,8 @@ impl GpuState {
         let surface_texture = self.surface.get_current_texture()?;
 
         // Create view for the intermediate texture
-        let intermediate_view = self.intermediate_texture
+        let intermediate_view = self
+            .intermediate_texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let render_params = RenderParams {
@@ -267,12 +279,8 @@ impl GpuState {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        self.texture_blitter.blit(
-            &self.device,
-            &self.queue,
-            &intermediate_view,
-            &surface_view,
-        );
+        self.texture_blitter
+            .blit(&self.device, &self.queue, &intermediate_view, &surface_view);
 
         surface_texture.present();
         Ok(())

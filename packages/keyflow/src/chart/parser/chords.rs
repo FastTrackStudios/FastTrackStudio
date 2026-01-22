@@ -4,13 +4,13 @@
 //! functionality including duration calculation, slash chords, and push/pull notation.
 
 use super::helpers::{PushPullModifier, RepeatCount};
+use crate::chart::Chart;
 use crate::chart::cues::TextCue;
 use crate::chart::dynamics::DynamicMarking;
 use crate::chart::melody::Melody;
 use crate::chart::types::{
     ChordInstance, KeyChange, Measure, RestInstance, RhythmElement, SpaceInstance, TempoChange,
 };
-use crate::chart::Chart;
 use crate::chord::{ChordRhythm, LilySyntax};
 use crate::key::Key;
 use crate::parsing::{Lexer, TextSpan};
@@ -194,14 +194,14 @@ impl Chart {
                         let after_duration = &after_underscore[candidate.len()..];
 
                         // Check for optional dotted (.) or triplet (t) modifier
-                        let (has_dot, has_triplet, suffix_len) =
-                            if after_duration.starts_with('.') {
-                                (true, false, 1)
-                            } else if after_duration.starts_with('t') {
-                                (false, true, 1)
-                            } else {
-                                (false, false, 0)
-                            };
+                        let (has_dot, has_triplet, suffix_len) = if after_duration.starts_with('.')
+                        {
+                            (true, false, 1)
+                        } else if after_duration.starts_with('t') {
+                            (false, true, 1)
+                        } else {
+                            (false, false, 0)
+                        };
 
                         // Verify nothing else follows (or it's end of string)
                         if after_duration.len() == suffix_len {
@@ -318,7 +318,10 @@ impl Chart {
     ///   "| G C |" → "| G_2 C_2 |" (2 chords = half notes each)
     ///   "G C | D" → "G_2 C_2 | D_1" (2 chords before | = half notes, 1 after = whole)
     ///   "G C E D | A" → "G_4 C_4 E_4 D_4 | A_1" (4 chords before | = quarter notes, 1 after = whole)
-    pub(super) fn apply_auto_durations_between_separators(line: &str, beats_per_measure: f64) -> String {
+    pub(super) fn apply_auto_durations_between_separators(
+        line: &str,
+        beats_per_measure: f64,
+    ) -> String {
         // Check if line has any separators - if not, return as-is
         if !line.contains('|') {
             return line.to_string();
@@ -357,10 +360,7 @@ impl Chart {
                 .iter()
                 .filter(|t| {
                     // Count as chord if it's not a command, cue, dot repeat, or other special token
-                    !t.starts_with('/')
-                        && !t.starts_with('@')
-                        && !t.starts_with('"')
-                        && **t != "." // Don't count dot repeats
+                    !t.starts_with('/') && !t.starts_with('@') && !t.starts_with('"') && **t != "." // Don't count dot repeats
                 })
                 .count();
 
@@ -701,18 +701,17 @@ impl Chart {
                 if let Some(cmd) = Command::parse_slash(token_str) {
                     // Apply command to the last chord in rhythm_elements (source of truth)
                     // and also to chords for backward compatibility during parsing
-                    let applied = if let Some(last_elem) =
-                        current_measure.rhythm_elements.last_mut()
-                    {
-                        if let RhythmElement::Chord(c) = last_elem {
-                            c.commands.push(cmd.clone());
-                            true
+                    let applied =
+                        if let Some(last_elem) = current_measure.rhythm_elements.last_mut() {
+                            if let RhythmElement::Chord(c) = last_elem {
+                                c.commands.push(cmd.clone());
+                                true
+                            } else {
+                                false
+                            }
                         } else {
                             false
-                        }
-                    } else {
-                        false
-                    };
+                        };
 
                     // Also apply to chords vec for backward compatibility
                     if let Some(last_chord) = current_measure.chords.last_mut() {
@@ -767,8 +766,8 @@ impl Chart {
 
                         // Convert to Lily rhythm for proper representation
                         let lily_duration = match slash_count {
-                            1 => LilySyntax::Quarter, // /. = dotted quarter
-                            2 => LilySyntax::Half,    // //. = dotted half
+                            1 => LilySyntax::Quarter,   // /. = dotted quarter
+                            2 => LilySyntax::Half,      // //. = dotted half
                             3 | 4 => LilySyntax::Whole, // ///. or ////. = dotted whole
                             _ => LilySyntax::Quarter,
                         };
@@ -808,8 +807,10 @@ impl Chart {
                                     for elem in last_measure.rhythm_elements.iter_mut().rev() {
                                         if let RhythmElement::Chord(c) = elem {
                                             c.rhythm = dotted_slash_rhythm.clone();
-                                            c.duration =
-                                                MusicalDuration::from_beats(dotted_duration, time_sig);
+                                            c.duration = MusicalDuration::from_beats(
+                                                dotted_duration,
+                                                time_sig,
+                                            );
                                             break;
                                         }
                                     }
@@ -842,149 +843,175 @@ impl Chart {
                             .last()
                             .map_or(false, |c| c.rhythm.is_tied())
                             || (!measures.is_empty()
-                                && measures.last().and_then(|m| m.chords.last()).map_or(false, |c| c.rhythm.is_tied()));
+                                && measures
+                                    .last()
+                                    .and_then(|m| m.chords.last())
+                                    .map_or(false, |c| c.rhythm.is_tied()));
 
                         if last_chord_is_tied {
                             // Fall through to tie handling code below
                         } else {
-                        // Apply slash rhythm to the last chord
-                        // Within same measure: slashes SET the duration (explicit slashes override auto-fill)
-                        // Across bar line (after |): slashes ADD to existing duration for cross-barline chords
-                        // "Cm/Eb /" means Cm/Eb for 1 beat
-                        // "Eb ///" means Eb for 3 beats
-                        // "Abmaj9 //// | //" means Abmaj9 for 6 beats (spans 1.5 bars)
-                        let applied = if let Some(last_chord) = current_measure.chords.last_mut() {
-                            // Only accumulate if previous token was also a slash (consecutive slashes).
-                            // This prevents accumulating on top of auto-filled slash rhythm.
-                            // "C // G //" - when we see first "/" after C, it should SET to 1 (not accumulate).
-                            // When we see second "/" after first, it should accumulate to 2.
-                            let new_count = if last_token_was_slash {
-                                if let ChordRhythm::Slashes { count: existing, .. } = &last_chord.rhythm {
-                                    existing + slash_count
-                                } else {
-                                    slash_count
-                                }
-                            } else {
-                                // First slash after a chord - SET (override auto-fill)
-                                slash_count
-                            };
-                            last_chord.rhythm = ChordRhythm::slashes(new_count);
-                            last_chord.duration =
-                                MusicalDuration::from_beats(f64::from(new_count), time_sig);
-
-                            // Also update the chord in rhythm_elements
-                            for elem in current_measure.rhythm_elements.iter_mut().rev() {
-                                if let RhythmElement::Chord(c) = elem {
-                                    c.rhythm = ChordRhythm::slashes(new_count);
-                                    c.duration =
-                                        MusicalDuration::from_beats(f64::from(new_count), time_sig);
-                                    break;
-                                }
-                            }
-                            true
-                        } else if !measures.is_empty() {
-                            // Current measure is empty - slashes apply to previous measure's chord
-                            if let Some(last_measure) = measures.last_mut() {
-                                if let Some(last_chord) = last_measure.chords.last_mut() {
-                                    // If after explicit | separator, add SPACES to current measure
-                                    // instead of modifying previous chord's duration.
-                                    // This creates visual continuation without breaking layout.
-                                    // "Abmaj9 //// | //" = Abmaj9 (4 beats) + 2 spaces (continuation)
-                                    // "Cm/Eb / Eb ///" with auto-complete = SET (3 beats)
-                                    if measure_was_created_by_separator {
-                                        // After explicit separator: add SPACES to current measure
-                                        // as continuation of the previous chord. These render as
-                                        // rhythm slashes without a chord symbol.
-
-                                        // Create a space for each beat of continuation
-                                        for i in 0..slash_count {
-                                            let space_duration = MusicalDuration::from_beats(1.0, time_sig);
-                                            let space_rhythm = ChordRhythm::slashes(1);
-                                            let space = SpaceInstance::new(
-                                                space_rhythm,
-                                                space_duration,
-                                                AbsolutePosition::new(
-                                                    MusicalPosition::try_new(
-                                                        measures.len() as i32,
-                                                        i as i32,
-                                                        0,
-                                                    )
-                                                    .unwrap_or_else(|_| MusicalPosition::start()),
-                                                    self.sections.len(),
-                                                ),
-                                                format!("/{}", "/".repeat(i as usize)),
-                                            );
-                                            current_measure.rhythm_elements.push(RhythmElement::Space(space));
-                                        }
-                                        current_measure_beats += f64::from(slash_count);
-                                        true
-                                    } else {
-                                        // Auto-completed measure: only accumulate if previous was slash
-                                        let new_count = if last_token_was_slash {
-                                            if let ChordRhythm::Slashes { count: existing, .. } = &last_chord.rhythm {
-                                                existing + slash_count
-                                            } else {
-                                                slash_count
-                                            }
+                            // Apply slash rhythm to the last chord
+                            // Within same measure: slashes SET the duration (explicit slashes override auto-fill)
+                            // Across bar line (after |): slashes ADD to existing duration for cross-barline chords
+                            // "Cm/Eb /" means Cm/Eb for 1 beat
+                            // "Eb ///" means Eb for 3 beats
+                            // "Abmaj9 //// | //" means Abmaj9 for 6 beats (spans 1.5 bars)
+                            let applied =
+                                if let Some(last_chord) = current_measure.chords.last_mut() {
+                                    // Only accumulate if previous token was also a slash (consecutive slashes).
+                                    // This prevents accumulating on top of auto-filled slash rhythm.
+                                    // "C // G //" - when we see first "/" after C, it should SET to 1 (not accumulate).
+                                    // When we see second "/" after first, it should accumulate to 2.
+                                    let new_count = if last_token_was_slash {
+                                        if let ChordRhythm::Slashes {
+                                            count: existing, ..
+                                        } = &last_chord.rhythm
+                                        {
+                                            existing + slash_count
                                         } else {
                                             slash_count
-                                        };
-                                        last_chord.rhythm = ChordRhythm::slashes(new_count);
-                                        last_chord.duration =
-                                            MusicalDuration::from_beats(f64::from(new_count), time_sig);
-
-                                        // Also update the chord in rhythm_elements
-                                        for elem in last_measure.rhythm_elements.iter_mut().rev() {
-                                            if let RhythmElement::Chord(c) = elem {
-                                                c.rhythm = ChordRhythm::slashes(new_count);
-                                                c.duration =
-                                                    MusicalDuration::from_beats(f64::from(new_count), time_sig);
-                                                break;
-                                            }
                                         }
-                                        true
+                                    } else {
+                                        // First slash after a chord - SET (override auto-fill)
+                                        slash_count
+                                    };
+                                    last_chord.rhythm = ChordRhythm::slashes(new_count);
+                                    last_chord.duration =
+                                        MusicalDuration::from_beats(f64::from(new_count), time_sig);
+
+                                    // Also update the chord in rhythm_elements
+                                    for elem in current_measure.rhythm_elements.iter_mut().rev() {
+                                        if let RhythmElement::Chord(c) = elem {
+                                            c.rhythm = ChordRhythm::slashes(new_count);
+                                            c.duration = MusicalDuration::from_beats(
+                                                f64::from(new_count),
+                                                time_sig,
+                                            );
+                                            break;
+                                        }
+                                    }
+                                    true
+                                } else if !measures.is_empty() {
+                                    // Current measure is empty - slashes apply to previous measure's chord
+                                    if let Some(last_measure) = measures.last_mut() {
+                                        if let Some(last_chord) = last_measure.chords.last_mut() {
+                                            // If after explicit | separator, add SPACES to current measure
+                                            // instead of modifying previous chord's duration.
+                                            // This creates visual continuation without breaking layout.
+                                            // "Abmaj9 //// | //" = Abmaj9 (4 beats) + 2 spaces (continuation)
+                                            // "Cm/Eb / Eb ///" with auto-complete = SET (3 beats)
+                                            if measure_was_created_by_separator {
+                                                // After explicit separator: add SPACES to current measure
+                                                // as continuation of the previous chord. These render as
+                                                // rhythm slashes without a chord symbol.
+
+                                                // Create a space for each beat of continuation
+                                                for i in 0..slash_count {
+                                                    let space_duration =
+                                                        MusicalDuration::from_beats(1.0, time_sig);
+                                                    let space_rhythm = ChordRhythm::slashes(1);
+                                                    let space = SpaceInstance::new(
+                                                        space_rhythm,
+                                                        space_duration,
+                                                        AbsolutePosition::new(
+                                                            MusicalPosition::try_new(
+                                                                measures.len() as i32,
+                                                                i as i32,
+                                                                0,
+                                                            )
+                                                            .unwrap_or_else(|_| {
+                                                                MusicalPosition::start()
+                                                            }),
+                                                            self.sections.len(),
+                                                        ),
+                                                        format!("/{}", "/".repeat(i as usize)),
+                                                    );
+                                                    current_measure
+                                                        .rhythm_elements
+                                                        .push(RhythmElement::Space(space));
+                                                }
+                                                current_measure_beats += f64::from(slash_count);
+                                                true
+                                            } else {
+                                                // Auto-completed measure: only accumulate if previous was slash
+                                                let new_count = if last_token_was_slash {
+                                                    if let ChordRhythm::Slashes {
+                                                        count: existing,
+                                                        ..
+                                                    } = &last_chord.rhythm
+                                                    {
+                                                        existing + slash_count
+                                                    } else {
+                                                        slash_count
+                                                    }
+                                                } else {
+                                                    slash_count
+                                                };
+                                                last_chord.rhythm = ChordRhythm::slashes(new_count);
+                                                last_chord.duration = MusicalDuration::from_beats(
+                                                    f64::from(new_count),
+                                                    time_sig,
+                                                );
+
+                                                // Also update the chord in rhythm_elements
+                                                for elem in
+                                                    last_measure.rhythm_elements.iter_mut().rev()
+                                                {
+                                                    if let RhythmElement::Chord(c) = elem {
+                                                        c.rhythm = ChordRhythm::slashes(new_count);
+                                                        c.duration = MusicalDuration::from_beats(
+                                                            f64::from(new_count),
+                                                            time_sig,
+                                                        );
+                                                        break;
+                                                    }
+                                                }
+                                                true
+                                            }
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
                                     }
                                 } else {
                                     false
-                                }
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        };
+                                };
 
-                        if applied {
-                            // Recalculate total beats for current measure since the duration changed
-                            if !current_measure.chords.is_empty() || !current_measure.rhythm_elements.is_empty() {
-                                // Mark that this measure has slash rhythm, so subsequent
-                                // chords can fill remaining beats
-                                measure_has_slash_rhythm = true;
-                            } else if !measures.is_empty() {
-                                // The slash was applied to the previous measure (SET mode).
-                                // Check if it now has room and we should "un-pop" it.
-                                let prev_measure_beats: f64 = measures
-                                    .last()
-                                    .unwrap()
-                                    .chords
-                                    .iter()
-                                    .map(|c| c.duration.to_beats(time_sig))
-                                    .sum();
-
-                                if prev_measure_beats < beats_per_measure - 0.001 {
-                                    // Previous measure now has room - pop it back to current_measure
-                                    // so subsequent chords can be added to it
-                                    current_measure = measures.pop().unwrap();
-                                    current_measure_beats = prev_measure_beats;
-                                    // Mark that this measure has slash rhythm since we un-popped it
+                            if applied {
+                                // Recalculate total beats for current measure since the duration changed
+                                if !current_measure.chords.is_empty()
+                                    || !current_measure.rhythm_elements.is_empty()
+                                {
+                                    // Mark that this measure has slash rhythm, so subsequent
+                                    // chords can fill remaining beats
                                     measure_has_slash_rhythm = true;
+                                } else if !measures.is_empty() {
+                                    // The slash was applied to the previous measure (SET mode).
+                                    // Check if it now has room and we should "un-pop" it.
+                                    let prev_measure_beats: f64 = measures
+                                        .last()
+                                        .unwrap()
+                                        .chords
+                                        .iter()
+                                        .map(|c| c.duration.to_beats(time_sig))
+                                        .sum();
+
+                                    if prev_measure_beats < beats_per_measure - 0.001 {
+                                        // Previous measure now has room - pop it back to current_measure
+                                        // so subsequent chords can be added to it
+                                        current_measure = measures.pop().unwrap();
+                                        current_measure_beats = prev_measure_beats;
+                                        // Mark that this measure has slash rhythm since we un-popped it
+                                        measure_has_slash_rhythm = true;
+                                    }
+                                    // Note: if we didn't un-pop (measure is full), don't set
+                                    // measure_has_slash_rhythm for the empty current measure
                                 }
-                                // Note: if we didn't un-pop (measure is full), don't set
-                                // measure_has_slash_rhythm for the empty current measure
+                                last_token_was_slash = true;
+                                continue;
                             }
-                            last_token_was_slash = true;
-                            continue;
-                        }
                         } // end else !last_chord_is_tied
                     }
                 }
@@ -1073,8 +1100,7 @@ impl Chart {
                             // Add slash duration to the tied chord
                             let current_beats = last_chord.duration.to_beats(time_sig);
                             let new_beats = current_beats + f64::from(slash_count);
-                            last_chord.duration =
-                                MusicalDuration::from_beats(new_beats, time_sig);
+                            last_chord.duration = MusicalDuration::from_beats(new_beats, time_sig);
                             // Clear the tie flag after extending
                             last_chord.rhythm.clear_tie();
                             // Update in rhythm_elements too
@@ -1487,7 +1513,8 @@ impl Chart {
                                 .iter()
                                 .take_while(|t| {
                                     // Stop at measure separator or new chord
-                                    **t != "|" && !t.chars().next().map_or(true, |c| c.is_alphabetic())
+                                    **t != "|"
+                                        && !t.chars().next().map_or(true, |c| c.is_alphabetic())
                                 })
                                 .any(|t| t.chars().all(|c| c == '/') && !t.is_empty());
 
@@ -1737,8 +1764,8 @@ impl Chart {
 
         // For slash chords with just a root (no explicit quality), don't recall from memory.
         // Writing "F/C" means "F major over C bass", not "whatever F I used before with C bass".
-        let is_slash_chord_with_just_root = chord.bass.is_some()
-            && chord_part.len() <= root_from_token.len() + 1; // +1 for possible accidental
+        let is_slash_chord_with_just_root =
+            chord.bass.is_some() && chord_part.len() <= root_from_token.len() + 1; // +1 for possible accidental
 
         // Use ChordMemory to process this chord and get the appropriate full symbol
         // Pass chord_part (which includes quality like "2maj") so it can detect explicit quality

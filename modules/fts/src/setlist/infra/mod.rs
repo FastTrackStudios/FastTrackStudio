@@ -9,7 +9,7 @@ pub mod commands;
 pub mod dioxus;
 #[cfg(feature = "dioxus")]
 pub mod dioxus_impl;
-#[cfg(feature = "iroh")]
+#[cfg(all(feature = "iroh", not(target_arch = "wasm32")))]
 pub mod stream;
 pub mod traits;
 

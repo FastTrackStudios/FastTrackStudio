@@ -6,10 +6,12 @@
 //! - Subtraction: `8-1` → 7 measures, `-1` → memory - 1
 //! - Multiplication: `4x4` or `4*4` → 16 measures
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// A measure count expression that can be absolute or relative to memory
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum MeasureExpression {
     /// No expression - use section memory
     UseMemory,

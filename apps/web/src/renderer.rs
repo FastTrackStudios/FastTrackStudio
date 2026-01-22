@@ -5,29 +5,26 @@
 
 use std::sync::Arc;
 
+use keyflow::Chart;
 use keyflow::engraver::fonts::SMuFLFont;
+use keyflow::engraver::layout::ChartLayoutMode;
 use keyflow::engraver::layout::chart::{ChartLayoutConfig, ChartLayoutEngine, ChartLayoutResult};
-use keyflow::engraver::layout::tlayout::HarmonyStyle;
-use keyflow::engraver::layout::{ChartLayoutMode, PageMargins};
 use keyflow::engraver::renderer::scene_renderer::SceneRenderBuilder;
 use keyflow::engraver::style::MStyle;
-use keyflow::Chart;
+use vello::Scene;
 use vello::kurbo::{Affine, Rect};
 use vello::peniko::Color;
-use vello::Scene;
 
 // Embedded fonts from musescore reference library
-static BRAVURA_FONT: &[u8] = include_bytes!(
-    "../../../libs/reference/sheet-music/musescore/fonts/bravura/Bravura.otf"
-);
+static BRAVURA_FONT: &[u8] =
+    include_bytes!("../../../libs/reference/sheet-music/musescore/fonts/bravura/Bravura.otf");
 static BRAVURA_METADATA: &[u8] = include_bytes!(
     "../../../libs/reference/sheet-music/musescore/fonts/bravura/bravura_metadata.json"
 );
 static TEXT_FONT: &[u8] =
     include_bytes!("../../../libs/reference/sheet-music/musescore/fonts/FreeSans.ttf");
-static MUSEJAZZ_TEXT_FONT: &[u8] = include_bytes!(
-    "../../../libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf"
-);
+static MUSEJAZZ_TEXT_FONT: &[u8] =
+    include_bytes!("../../../libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf");
 
 /// Screen DPI for rendering
 const SCREEN_DPI: f64 = 96.0;
@@ -72,8 +69,7 @@ impl ChartLayoutManager {
         // Create layout engine with fonts
         // Leak the style for 'static lifetime (web app runs for session duration)
         let style = Box::leak(Box::new(MStyle::new()));
-        let layout_engine =
-            ChartLayoutEngine::new(style, text_font_data.clone(), symbol_font_data);
+        let layout_engine = ChartLayoutEngine::new(style, text_font_data.clone(), symbol_font_data);
 
         Ok(Self {
             smufl_font,
@@ -87,40 +83,50 @@ impl ChartLayoutManager {
         })
     }
 
-    /// Layout a chart and cache the result.
-    pub fn layout_chart(&mut self, chart: &Chart, viewport_width: f64, viewport_height: f64) {
-        // Simple hash based on chart data
-        let chart_hash = self.compute_chart_hash(chart);
+    /// Layout a chart using snippet mode (content-sized, no fixed page).
+    pub fn layout_chart(&mut self, chart: &Chart, viewport_width: f64, _viewport_height: f64) {
+        self.layout_chart_with_mode(chart, viewport_width, true);
+    }
+
+    /// Layout a chart with a specified mode.
+    ///
+    /// # Arguments
+    /// * `chart` - The parsed chart to layout
+    /// * `viewport_width` - Width of the viewport in CSS pixels
+    /// * `snippet_mode` - If true, use snippet mode (content-sized). If false, use A4 paginated mode.
+    pub fn layout_chart_with_mode(
+        &mut self,
+        chart: &Chart,
+        viewport_width: f64,
+        snippet_mode: bool,
+    ) {
+        // Simple hash based on chart data and mode
+        let chart_hash = self.compute_chart_hash_with_mode(chart, snippet_mode);
 
         // Skip if already laid out
         if self.layout_result.is_some() && chart_hash == self.last_chart_hash {
             return;
         }
 
-        // Configure layout for snippet mode (documentation)
-        let config = ChartLayoutConfig {
-            margins: PageMargins {
-                top: 20.0,
-                bottom: 20.0,
-                left: 20.0,
-                right: 20.0,
-            },
-            spatium: 5.0,
-            system_spacing: 30.0,
-            max_measures_per_system: 4,
-            min_measure_width: 80.0,
-            harmony_style: HarmonyStyle::musejazz(),
-            hide_repeated_chords: false,
-            use_stems: true,
-            show_measure_numbers: true,
-            measure_number_offset: 0,
-            count_in_measures: 0,
-            snippet_mode: true,
-        };
+        // A4 dimensions in points (72 points per inch)
+        const A4_WIDTH: f64 = 595.0; // 210mm = 8.27" = 595 points
+        const A4_HEIGHT: f64 = 842.0; // 297mm = 11.69" = 842 points
 
-        // Use snippet mode for documentation patterns
-        let mode = ChartLayoutMode::Snippet {
-            page_width: viewport_width / DPI_SCALE,
+        let (mode, config) = if snippet_mode {
+            // Snippet mode: content-sized, minimal margins
+            let config = ChartLayoutConfig::snippet();
+            let mode = ChartLayoutMode::Snippet {
+                page_width: viewport_width / DPI_SCALE,
+            };
+            (mode, config)
+        } else {
+            // Page mode: A4 paginated with Master Rhythm preset
+            let config = ChartLayoutConfig::master_rhythm();
+            let mode = ChartLayoutMode::Paginated {
+                page_width: A4_WIDTH,
+                page_height: A4_HEIGHT,
+            };
+            (mode, config)
         };
 
         // Perform layout
@@ -132,14 +138,19 @@ impl ChartLayoutManager {
         self.last_chart_hash = chart_hash;
     }
 
-    /// Compute a simple hash of the chart for cache invalidation.
-    fn compute_chart_hash(&self, chart: &Chart) -> u64 {
+    /// Compute a hash of the chart including layout mode.
+    ///
+    /// This hash is used for cache invalidation - if the hash changes, we re-layout.
+    /// We hash the debug representation of the chart which includes all content.
+    fn compute_chart_hash_with_mode(&self, chart: &Chart, snippet_mode: bool) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        chart.sections.len().hash(&mut hasher);
-        if let Some(title) = &chart.metadata.title {
-            title.hash(&mut hasher);
-        }
+
+        // Hash the entire chart structure using debug representation
+        // This ensures ANY change to the chart content invalidates the cache
+        format!("{:?}", chart).hash(&mut hasher);
+        snippet_mode.hash(&mut hasher);
+
         hasher.finish()
     }
 

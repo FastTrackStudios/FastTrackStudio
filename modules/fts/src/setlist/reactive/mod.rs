@@ -5,6 +5,7 @@
 
 use crate::lyrics::{Lyrics, LyricsAnnotations};
 use crate::setlist::core::{Section, Setlist, Song};
+use facet::Facet;
 use rxrust::prelude::*;
 use std::cell::RefCell;
 
@@ -18,7 +19,7 @@ pub use service::{SetlistReactiveService, SetlistReactiveState};
 pub mod irpc;
 
 /// Reactive streams for setlist structure
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Facet)]
 pub struct SetlistStreams {
     /// Setlist structure changed (songs, sections, metadata)
     pub setlist_structure_changed: EventStreamSubject<Setlist>,
@@ -48,7 +49,7 @@ impl SetlistStreams {
 }
 
 /// Reactive streams for song state
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Facet)]
 pub struct SongStreams {
     /// Song metadata changed (name, markers, etc.)
     pub song_changed: EventStreamSubject<(usize, Song)>,
@@ -78,7 +79,7 @@ impl SongStreams {
 }
 
 /// Reactive streams for lyrics state
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Facet)]
 pub struct LyricsStreams {
     /// Lyrics changed for a specific song (full lyrics structure)
     /// Note: Lyrics are part of the Song in the setlist, but this stream allows
@@ -103,7 +104,7 @@ impl LyricsStreams {
 }
 
 /// Reactive streams for active indices (navigation state)
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Facet)]
 pub struct ActiveIndicesStreams {
     /// Active indices changed (song/section/slide)
     pub active_indices_changed: EventStreamSubject<(Option<usize>, Option<usize>, Option<usize>)>,
@@ -133,7 +134,7 @@ impl ActiveIndicesStreams {
 }
 
 /// All setlist reactive streams composed together
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Facet)]
 pub struct SetlistReactiveStreams {
     pub setlist: SetlistStreams,
     pub song: SongStreams,

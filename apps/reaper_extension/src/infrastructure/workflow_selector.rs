@@ -7,7 +7,7 @@
 //! Both use popup menus when clicked and display as double-wide text icons.
 
 use reaper_high::Reaper;
-use reaper_low::{raw, Swell};
+use reaper_low::{Swell, raw};
 use std::ffi::CString;
 use tracing::{debug, info};
 
@@ -73,10 +73,30 @@ pub fn show_profile_menu() -> Option<u32> {
     let is_enabled = InputHandler::is_enabled();
 
     unsafe {
-        add_menu_item(menu, profile_menu::FTS, "FastTrackStudio", current_preset == "fastrackstudio");
-        add_menu_item(menu, profile_menu::LOGIC, "Logic", current_preset == "logic");
-        add_menu_item(menu, profile_menu::REAPER, "Reaper", current_preset == "reaper");
-        add_menu_item(menu, profile_menu::REAVIM, "ReaVim", current_preset == "reavim");
+        add_menu_item(
+            menu,
+            profile_menu::FTS,
+            "FastTrackStudio",
+            current_preset == "fastrackstudio",
+        );
+        add_menu_item(
+            menu,
+            profile_menu::LOGIC,
+            "Logic",
+            current_preset == "logic",
+        );
+        add_menu_item(
+            menu,
+            profile_menu::REAPER,
+            "Reaper",
+            current_preset == "reaper",
+        );
+        add_menu_item(
+            menu,
+            profile_menu::REAVIM,
+            "ReaVim",
+            current_preset == "reavim",
+        );
 
         // Separator
         let mut sep_info = raw::MENUITEMINFO {

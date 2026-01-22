@@ -1,14 +1,16 @@
 //! Collapse/folder state types
 
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Wrapper for unknown enum values to preserve them during serialization
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct Hidden<T>(pub T);
 
 /// Collapse state in Arrange view
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub enum ArrangeCollapseState {
     /// Not collapsed
     NotCollapsed,
@@ -56,7 +58,8 @@ impl fmt::Display for ArrangeCollapseState {
 }
 
 /// Collapse state in Mixer
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub enum MixerCollapseState {
     /// Not collapsed
     NotCollapsed,
@@ -99,7 +102,8 @@ impl fmt::Display for MixerCollapseState {
 }
 
 /// Collapse state in track wiring
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub enum WiringCollapseState {
     /// Not collapsed
     NotCollapsed,
@@ -142,7 +146,7 @@ impl fmt::Display for WiringCollapseState {
 }
 
 /// Bus compact settings (BUSCOMP) - collapse folder settings
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct BusCompactSettings {
     /// Collapse state in Arrange view (field 1)
     pub arrange: ArrangeCollapseState,

@@ -8,30 +8,30 @@ mod infrastructure;
 mod input;
 mod services;
 
+#[cfg(feature = "auto_color")]
+mod auto_color;
 #[cfg(feature = "keyflow")]
 mod chart;
+#[cfg(feature = "chart_window")]
+mod chart_window;
+#[cfg(feature = "chord_overlay")]
+mod chord_overlay;
 #[cfg(feature = "dynamic_template")]
 mod dynamic_template;
+#[cfg(feature = "embed_test")]
+mod embed_test;
+#[cfg(feature = "key_overlay")]
+mod key_overlay;
 #[cfg(feature = "live")]
 mod live;
 #[cfg(feature = "lyrics")]
 mod lyrics;
-#[cfg(feature = "visibility_manager")]
-mod visibility_manager;
-#[cfg(feature = "auto_color")]
-mod auto_color;
-#[cfg(feature = "embed_test")]
-mod embed_test;
-#[cfg(feature = "trackname_overlay")]
-mod trackname_overlay;
 #[cfg(feature = "measure_overlay")]
 mod measure_overlay;
-#[cfg(feature = "chord_overlay")]
-mod chord_overlay;
-#[cfg(feature = "key_overlay")]
-mod key_overlay;
-#[cfg(feature = "chart_window")]
-mod chart_window;
+#[cfg(feature = "trackname_overlay")]
+mod trackname_overlay;
+#[cfg(feature = "visibility_manager")]
+mod visibility_manager;
 
 /// Polling state management for continuous updates
 pub mod polling_state {
@@ -250,7 +250,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
                 // Poll cursor positions and transport - emits reactive events only when values change
                 // Do this AFTER setlist update to avoid nested borrows
                 // Only poll after setlist is ready to avoid RefCell borrow issues
-                if app.setlist_service.get_setlist().is_some() {
+                if let Some(setlist_api) = app.setlist_service.get_setlist() {
                     app.reactive_polling.poll();
 
                     // Update transport reactive service from REAPER
@@ -258,6 +258,60 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
                     if let Some(ref transport_service) = app.reactive_state.reaper_transport_service
                     {
                         transport_service.update_from_reaper();
+                    }
+
+                    // Update roam transport service from REAPER
+                    // This keeps the roam RPC service in sync with REAPER state
+                    app.roam_transport.update_from_reaper();
+
+                    // Update shared playback state for chart window
+                    // This provides transport info without direct REAPER queries
+                    #[cfg(feature = "chart_window")]
+                    {
+                        use reaper_high::Reaper;
+                        let reaper = Reaper::get();
+                        let project = reaper.current_project();
+                        let play_state =
+                            reaper.medium_reaper().get_play_state_ex(project.context());
+
+                        let position = if play_state.is_playing {
+                            project.play_position_latency_compensated().get()
+                        } else {
+                            project
+                                .edit_cursor_position()
+                                .map(|p| p.get())
+                                .unwrap_or(0.0)
+                        };
+
+                        // Get song timing info
+                        let (song_start, song_end, tempo, time_sig) =
+                            if let Some(song) = setlist_api.active_song() {
+                                (
+                                    song.effective_start(),
+                                    song.effective_end(),
+                                    song.starting_tempo.unwrap_or(120.0),
+                                    song.starting_time_signature.clone().unwrap_or_else(|| {
+                                        daw::primitives::TimeSignature::new(4, 4)
+                                    }),
+                                )
+                            } else {
+                                (0.0, 0.0, 120.0, daw::primitives::TimeSignature::new(4, 4))
+                            };
+
+                        crate::chart_window::update_shared_playback_state(
+                            position,
+                            play_state.is_playing,
+                            play_state.is_paused,
+                            play_state.is_recording,
+                            setlist_api.active_song_index(),
+                            setlist_api.active_section_index(),
+                            setlist_api.song_progress.unwrap_or(0.0),
+                            setlist_api.section_progress.unwrap_or(0.0),
+                            tempo,
+                            time_sig,
+                            song_start,
+                            song_end,
+                        );
                     }
 
                     // Poll all tracks every ~5 seconds to catch changes that don't have reactive events

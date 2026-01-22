@@ -6,19 +6,24 @@
 use daw::marker_region::{application::TempoTimePoint, core::Marker};
 use daw::primitives::{Position, TimeSignature};
 use daw::project::Project;
-use daw::transport::{Transport, TransportActions, TransportError};
+use daw::transport::{Tempo, Transport, TransportActions, TransportError};
+use facet::Facet;
+use keyflow::chart::types::{ChartSection, Measure};
+use keyflow::{Chart, Key};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::lyrics::core::Lyrics;
-use keyflow::Chart;
 
 use super::section::validate;
 use super::section::{section_from_seconds, section_new, section_with_id};
 use super::{Section, SectionType, SectionTypeExt, SetlistError};
 
 /// Represents a song in the setlist
-#[derive(Serialize, Deserialize)]
+/// Note: Song doesn't derive Facet because it contains complex nested types
+/// (Project<Transport>, Lyrics, Chart) that don't have Facet implementations.
+/// Use the service type SongInfo for RPC communication.
+#[derive(Serialize, Deserialize, Facet)]
 pub struct Song {
     /// Unique identifier for this song
     pub id: Option<uuid::Uuid>,
@@ -767,6 +772,92 @@ impl Song {
     pub fn has_lyrics(&self) -> bool {
         self.lyrics.is_some()
     }
+
+    /// Convert this Song to a keyflow Chart
+    ///
+    /// This creates a Chart structure from the Song's sections, tempo, time signature,
+    /// and metadata. The Chart can then be rendered using the ChartLayoutEngine.
+    ///
+    /// # Returns
+    /// A new Chart populated with:
+    /// - Song name as chart title
+    /// - Starting tempo
+    /// - Starting time signature
+    /// - Key from metadata (if present)
+    /// - Sections converted to ChartSections with measure counts
+    pub fn to_chart(&self) -> Chart {
+        let mut chart = Chart::new();
+
+        // Set metadata
+        chart.metadata.title = Some(self.name.clone());
+
+        // Set tempo from starting_tempo
+        if let Some(tempo_bpm) = self.starting_tempo {
+            chart.tempo = Some(Tempo::new(tempo_bpm));
+        }
+
+        // Set time signature (keyflow uses the same TimeSignature type from daw)
+        if let Some(ref ts) = self.starting_time_signature {
+            chart.initial_time_signature = Some(ts.clone());
+            chart.time_signature = Some(ts.clone());
+        }
+
+        // Parse key from metadata if present
+        if let Some(key_str) = self.metadata.get("key") {
+            if let Ok(key) = Key::parse(key_str) {
+                chart.initial_key = Some(key.clone());
+                chart.current_key = Some(key);
+            }
+        }
+
+        // Convert sections to ChartSections
+        // Get time signature for measure calculations
+        let time_sig = self
+            .starting_time_signature
+            .clone()
+            .unwrap_or_else(|| TimeSignature::new(4, 4));
+        let tempo = self.starting_tempo.unwrap_or(120.0);
+        let beats_per_measure = time_sig.numerator as f64;
+        let beat_duration_seconds = 60.0 / tempo;
+        let measure_duration_seconds = beats_per_measure * beat_duration_seconds;
+
+        for section in &self.sections {
+            // Calculate measure count from section duration
+            let measure_count = if let Some(duration) = section.duration_seconds() {
+                (duration / measure_duration_seconds).round() as usize
+            } else if let Some(count) = section.measure_count {
+                count
+            } else {
+                // Default to 4 measures if we can't determine
+                4
+            };
+
+            // Create a Section for the ChartSection (clone the existing one and set measure_count)
+            let mut chart_section = section.clone();
+            chart_section.measure_count = Some(measure_count);
+
+            // Create empty measures for this section
+            let measures: Vec<Measure> = (0..measure_count)
+                .map(|_| {
+                    Measure::new()
+                        .with_time_signature((time_sig.numerator as u8, time_sig.denominator as u8))
+                })
+                .collect();
+
+            // Create ChartSection with the measures
+            let keyflow_section = ChartSection::new(chart_section).with_measures(measures);
+            chart.sections.push(keyflow_section);
+        }
+
+        chart
+    }
+
+    /// Generate a chart from this song and store it in the chart field
+    ///
+    /// This is a convenience method that calls `to_chart()` and stores the result.
+    pub fn generate_chart(&mut self) {
+        self.chart = Some(self.to_chart());
+    }
 }
 
 // Song no longer implements TransportActions directly
@@ -860,7 +951,7 @@ impl std::fmt::Display for Song {
 }
 
 /// Summary information about a song
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct SongSummary {
     pub name: String,
     pub duration: f64,

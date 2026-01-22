@@ -6,6 +6,7 @@
 use super::position::ChartPosition;
 use super::semantic_role::SemanticRole;
 use crate::parsing::TextSpan;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Complete source linking information for a chart element.
@@ -14,7 +15,7 @@ use serde::{Deserialize, Serialize};
 /// - Click on rendered chord → highlight source text
 /// - Edit source text → update rendered element
 /// - Navigate by position → find source location
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct SourceLink {
     /// Text span in the original source.
     /// This is the byte range in the input text that generated this element.

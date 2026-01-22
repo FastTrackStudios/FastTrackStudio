@@ -6,6 +6,7 @@
 
 use super::{NoteValue, Ticks, TupletRatio};
 use crate::core::time::TimeSignature;
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 
 /// Unified duration for conversion between notation systems.
@@ -28,7 +29,7 @@ use serde::{Deserialize, Serialize};
 /// assert_eq!(duration.dots, 1);
 /// assert!(matches!(duration.rhythm_type, RhythmType::Chord));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 pub struct NotationDuration {
     /// The base note value (quarter, eighth, etc.)
     pub note_value: NoteValue,
@@ -50,7 +51,8 @@ pub struct NotationDuration {
 }
 
 /// Type of rhythm element.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Facet)]
+#[repr(u8)]
 pub enum RhythmType {
     /// A sounding chord
     #[default]
@@ -203,10 +205,7 @@ impl NotationDuration {
     /// Check if this is a sounding duration (chord, not rest/space).
     #[must_use]
     pub const fn is_sounding(&self) -> bool {
-        matches!(
-            self.rhythm_type,
-            RhythmType::Chord | RhythmType::Slashes(_)
-        )
+        matches!(self.rhythm_type, RhythmType::Chord | RhythmType::Slashes(_))
     }
 
     /// Check if this is a rest.
@@ -247,7 +246,7 @@ impl NotationDuration {
         // Apply dots: each dot adds half the previous value
         let dotted = match self.dots {
             0 => base,
-            1 => base + base / 2,           // 1.5x
+            1 => base + base / 2,            // 1.5x
             2 => base + base / 2 + base / 4, // 1.75x
             _ => base + base / 2 + base / 4, // Cap at double-dotted
         };
@@ -416,7 +415,9 @@ mod tests {
 
         // Double-dotted quarter = 480 + 240 + 120 = 840
         assert_eq!(
-            NotationDuration::quarter().double_dotted().total_ticks_480(),
+            NotationDuration::quarter()
+                .double_dotted()
+                .total_ticks_480(),
             840
         );
     }

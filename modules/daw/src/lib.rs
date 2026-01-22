@@ -18,17 +18,35 @@ pub mod marker_region;
 pub mod mix_fx;
 pub mod project;
 pub mod state;
-pub mod streams;
 pub mod tracks;
 pub mod transport;
+
+// Reactive streams (requires rxrust, not available on WASM)
+#[cfg(not(target_arch = "wasm32"))]
+pub mod streams;
 
 // Re-export commonly used types for convenience
 pub use marker_region::{Marker, MarkerRegionSource, Region};
 pub use primitives::*;
 pub use project::Project;
 pub use state::DawReactiveState;
-pub use streams::{DawStreams, EventStreamSubject, ProjectStreams};
-pub use tracks::reactive::TrackStreams;
 pub use tracks::{Envelope, FxChain, Item, Track};
-pub use transport::reactive::TransportStreams;
 pub use transport::{PlayState, RecordMode, Tempo, Transport, TransportActions, TransportError};
+
+// Roam service exports
+pub use marker_region::{
+    MarkerInfo, MarkerRegionCommand, MarkerRegionEvent, MarkerRegionService, RegionInfo,
+};
+pub use project::{ProjectCommand, ProjectEvent, ProjectInfo, ProjectService};
+pub use tracks::{TrackCommand, TrackEvent, TrackInfo, TrackService};
+pub use transport::{TransportCommand, TransportEvent, TransportService};
+#[cfg(not(target_arch = "wasm32"))]
+pub use transport::MockTransport;
+
+// Reactive exports (only on native)
+#[cfg(not(target_arch = "wasm32"))]
+pub use streams::{DawStreams, EventStreamSubject, ProjectStreams};
+#[cfg(not(target_arch = "wasm32"))]
+pub use tracks::reactive::TrackStreams;
+#[cfg(not(target_arch = "wasm32"))]
+pub use transport::reactive::TransportStreams;

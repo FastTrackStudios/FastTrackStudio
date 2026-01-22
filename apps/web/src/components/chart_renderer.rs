@@ -4,9 +4,23 @@
 
 use dioxus::prelude::*;
 
+/// Layout mode for chart rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LayoutMode {
+    /// Content-sized layout (measures don't fill line)
+    #[default]
+    Snippet,
+    /// A4 page layout with Master Rhythm preset (measures fill line)
+    Page,
+}
+
 /// Chart renderer component that displays a keyflow chart.
+///
+/// # Props
+/// - `source`: The keyflow source code to render
+/// - `layout_mode`: Optional layout mode (default: Snippet)
 #[component]
-pub fn ChartRenderer(source: &'static str) -> Element {
+pub fn ChartRenderer(source: &'static str, #[props(default)] layout_mode: LayoutMode) -> Element {
     // Parse the chart to validate it
     let parse_result = keyflow::Chart::parse(source);
 
@@ -18,28 +32,23 @@ pub fn ChartRenderer(source: &'static str) -> Element {
 
             rsx! {
                 div {
-                    class: "w-full h-full flex flex-col",
+                    class: "w-full h-full relative",
 
-                    // Canvas for WebGPU rendering
-                    div {
-                        class: "flex-1 relative min-h-[400px]",
-
-                        // Canvas - sized by JS to account for DPR
-                        canvas {
-                            id: "chart-canvas",
-                            class: "w-full h-full bg-gray-700 rounded cursor-grab active:cursor-grabbing",
-                            style: "touch-action: none;",
-                        }
-
-                        // Info overlay
-                        div {
-                            class: "absolute bottom-2 left-2 text-xs text-gray-400 pointer-events-none",
-                            "{title} - {section_count} section(s)"
-                        }
-
-                        // WebGPU initialization and interaction
-                        ChartCanvas { source: source }
+                    // Canvas - fills entire container
+                    canvas {
+                        id: "chart-canvas",
+                        class: "w-full h-full bg-gray-700 cursor-grab active:cursor-grabbing",
+                        style: "touch-action: none;",
                     }
+
+                    // Info overlay
+                    div {
+                        class: "absolute bottom-2 left-2 text-xs text-gray-400 pointer-events-none",
+                        "{title} - {section_count} section(s)"
+                    }
+
+                    // WebGPU initialization and interaction
+                    ChartCanvas { source: source, layout_mode: layout_mode }
                 }
             }
         }
@@ -69,12 +78,12 @@ pub fn ChartRenderer(source: &'static str) -> Element {
 
 /// Canvas component with WebGPU rendering setup and mouse interaction.
 #[component]
-fn ChartCanvas(source: &'static str) -> Element {
+fn ChartCanvas(source: &'static str, #[props(default)] layout_mode: LayoutMode) -> Element {
     #[cfg(target_arch = "wasm32")]
     {
         use crate::renderer::ChartLayoutManager;
-        use wasm_bindgen::prelude::*;
         use wasm_bindgen::JsCast;
+        use wasm_bindgen::prelude::*;
 
         // Create layout manager signal
         let mut layout_manager = use_signal(|| None::<ChartLayoutManager>);
@@ -137,7 +146,10 @@ fn ChartCanvas(source: &'static str) -> Element {
                 last_mouse_y_clone.set(event.client_y() as f64);
             }) as Box<dyn FnMut(_)>);
             canvas
-                .add_event_listener_with_callback("mousedown", mousedown_closure.as_ref().unchecked_ref())
+                .add_event_listener_with_callback(
+                    "mousedown",
+                    mousedown_closure.as_ref().unchecked_ref(),
+                )
                 .ok();
             mousedown_closure.forget();
 
@@ -165,7 +177,10 @@ fn ChartCanvas(source: &'static str) -> Element {
                 }
             }) as Box<dyn FnMut(_)>);
             canvas
-                .add_event_listener_with_callback("mousemove", mousemove_closure.as_ref().unchecked_ref())
+                .add_event_listener_with_callback(
+                    "mousemove",
+                    mousemove_closure.as_ref().unchecked_ref(),
+                )
                 .ok();
             mousemove_closure.forget();
 
@@ -175,7 +190,10 @@ fn ChartCanvas(source: &'static str) -> Element {
                 is_dragging_clone.set(false);
             }) as Box<dyn FnMut(_)>);
             window
-                .add_event_listener_with_callback("mouseup", mouseup_closure.as_ref().unchecked_ref())
+                .add_event_listener_with_callback(
+                    "mouseup",
+                    mouseup_closure.as_ref().unchecked_ref(),
+                )
                 .ok();
             mouseup_closure.forget();
 
@@ -192,7 +210,8 @@ fn ChartCanvas(source: &'static str) -> Element {
                 let new_scale = (old_scale * (1.0 + delta)).clamp(0.25, 4.0);
 
                 // Zoom towards mouse position
-                let rect = event.target()
+                let rect = event
+                    .target()
                     .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
                     .map(|e| e.get_bounding_client_rect());
 
@@ -250,7 +269,9 @@ fn ChartCanvas(source: &'static str) -> Element {
 
                             if let Some(document) = window.document() {
                                 if let Some(canvas) = document.get_element_by_id("chart-canvas") {
-                                    if let Ok(html_canvas) = canvas.dyn_into::<web_sys::HtmlCanvasElement>() {
+                                    if let Ok(html_canvas) =
+                                        canvas.dyn_into::<web_sys::HtmlCanvasElement>()
+                                    {
                                         // Get CSS size
                                         let rect = html_canvas.get_bounding_client_rect();
                                         let css_width = rect.width();
@@ -262,16 +283,21 @@ fn ChartCanvas(source: &'static str) -> Element {
                                         html_canvas.set_width(buffer_width);
                                         html_canvas.set_height(buffer_height);
 
-                                        // Layout chart at CSS size
-                                        manager.layout_chart(&chart, css_width, css_height);
+                                        // Layout chart at CSS size with appropriate mode
+                                        let is_snippet = layout_mode == LayoutMode::Snippet;
+                                        manager
+                                            .layout_chart_with_mode(&chart, css_width, is_snippet);
 
                                         // Render with transform (scaled by DPR)
-                                        if let Err(e) = manager.render_to_canvas_with_transform(
-                                            &html_canvas,
-                                            tx * dpr,
-                                            ty * dpr,
-                                            s * dpr,
-                                        ).await {
+                                        if let Err(e) = manager
+                                            .render_to_canvas_with_transform(
+                                                &html_canvas,
+                                                tx * dpr,
+                                                ty * dpr,
+                                                s * dpr,
+                                            )
+                                            .await
+                                        {
                                             tracing::error!("Failed to render chart: {}", e);
                                         }
                                     }

@@ -13,7 +13,7 @@ use crate::engraver::layout::tlayout::{
     TimeSigParams, TimeSigType, TupletConfig, TupletNote, TupletRatio, layout_barline, layout_beam,
     layout_chord, layout_clef, layout_note, layout_rest, layout_timesig, layout_tuplet,
 };
-use crate::engraver::quantize::{detect_tuplet_groups, QuantizeConfig, QuantizedDuration};
+use crate::engraver::quantize::{QuantizeConfig, QuantizedDuration, detect_tuplet_groups};
 use crate::engraver::scene::id::{ElementType, SemanticId};
 use crate::engraver::scene::node::SceneNode;
 use crate::engraver::scene::paint::PaintCommand;
@@ -316,10 +316,7 @@ impl MeasureBuilder {
                 continue;
             }
 
-            let is_long_duration = matches!(
-                dur.kind,
-                DurationKind::Whole | DurationKind::Half
-            );
+            let is_long_duration = matches!(dur.kind, DurationKind::Whole | DurationKind::Half);
             let is_plain_quarter = matches!(dur.kind, DurationKind::Quarter) && dur.dots == 0;
 
             // Long durations or plain quarters (outside tuplets) are stemless
@@ -1707,7 +1704,7 @@ mod tests {
     // Integration tests for from_quantized()
     #[test]
     fn test_from_quantized_triplet_eighths() {
-        use crate::engraver::quantize::{quantize_duration_batch, QuantizeConfig};
+        use crate::engraver::quantize::{QuantizeConfig, quantize_duration_batch};
 
         let config = QuantizeConfig::default();
         // Three triplet eighths (160 ticks each at 480 PPQ)
@@ -1732,7 +1729,7 @@ mod tests {
 
     #[test]
     fn test_from_quantized_mixed_rhythms() {
-        use crate::engraver::quantize::{quantize_duration_batch, QuantizeConfig};
+        use crate::engraver::quantize::{QuantizeConfig, quantize_duration_batch};
 
         let config = QuantizeConfig::default();
         // Quarter + 3 triplet eighths + quarter
@@ -1757,7 +1754,7 @@ mod tests {
 
     #[test]
     fn test_from_quantized_no_tuplets() {
-        use crate::engraver::quantize::{quantize_duration_batch, QuantizeConfig};
+        use crate::engraver::quantize::{QuantizeConfig, quantize_duration_batch};
 
         let config = QuantizeConfig::default();
         // Four regular quarter notes
@@ -1784,7 +1781,7 @@ mod tests {
 
     #[test]
     fn test_from_quantized_reaper_ppq() {
-        use crate::engraver::quantize::{quantize_duration_batch, QuantizeConfig};
+        use crate::engraver::quantize::{QuantizeConfig, quantize_duration_batch};
 
         // REAPER uses 960 PPQ
         let config = QuantizeConfig::reaper();

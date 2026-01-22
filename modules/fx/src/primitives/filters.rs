@@ -337,7 +337,11 @@ impl OnePole {
     pub fn lowpass(sample_rate: f32, freq: f32) -> Self {
         let omega = 2.0 * PI * freq / sample_rate;
         let b = omega / (1.0 + omega);
-        Self { a: 1.0 - b, b, z1: 0.0 }
+        Self {
+            a: 1.0 - b,
+            b,
+            z1: 0.0,
+        }
     }
 
     /// Create a one-pole filter from a time constant.
@@ -348,10 +352,18 @@ impl OnePole {
     #[must_use]
     pub fn from_time_constant(sample_rate: f32, time_constant: f32) -> Self {
         if time_constant <= 0.0 {
-            return Self { a: 0.0, b: 1.0, z1: 0.0 };
+            return Self {
+                a: 0.0,
+                b: 1.0,
+                z1: 0.0,
+            };
         }
         let a = (-1.0 / (time_constant * sample_rate)).exp();
-        Self { a, b: 1.0 - a, z1: 0.0 }
+        Self {
+            a,
+            b: 1.0 - a,
+            z1: 0.0,
+        }
     }
 
     /// Set the cutoff frequency.
@@ -394,7 +406,11 @@ impl OnePole {
 
 impl Default for OnePole {
     fn default() -> Self {
-        Self { a: 0.0, b: 1.0, z1: 0.0 }
+        Self {
+            a: 0.0,
+            b: 1.0,
+            z1: 0.0,
+        }
     }
 }
 
@@ -423,8 +439,8 @@ pub struct SvfOutput {
 /// Good for synth filters and effects where cutoff is modulated.
 #[derive(Clone, Debug)]
 pub struct Svf {
-    f: f32,  // frequency coefficient
-    q: f32,  // damping (1/Q)
+    f: f32, // frequency coefficient
+    q: f32, // damping (1/Q)
     low: f32,
     band: f32,
 }
@@ -540,7 +556,11 @@ impl DcBlocker {
     /// * `r` - Pole radius (0.99-0.999 typical, higher = lower cutoff)
     #[must_use]
     pub fn new(r: f32) -> Self {
-        Self { x1: 0.0, y1: 0.0, r }
+        Self {
+            x1: 0.0,
+            y1: 0.0,
+            r,
+        }
     }
 
     /// Process a single sample.

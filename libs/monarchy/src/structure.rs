@@ -47,6 +47,7 @@
 //! ```
 
 use crate::{Item, Metadata};
+use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -73,7 +74,7 @@ use std::fmt;
 ///     println!("{}: {} items", child.name, child.total_items());
 /// }
 /// ```
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Facet)]
 pub struct Structure<M: Metadata> {
     /// Name of this level in the hierarchy (e.g., "Kick", "Snare").
     pub name: String,

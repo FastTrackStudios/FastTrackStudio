@@ -25,9 +25,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use keyflow::Chart;
 use keyflow::engraver::layout::chart::{ChartLayoutConfig, ChartLayoutEngine, LayoutMode};
 use keyflow::engraver::style::MStyle;
-use keyflow::Chart;
 
 // =============================================================================
 // SMuFL Glyph Definitions
@@ -199,16 +199,19 @@ fn workspace_root() -> PathBuf {
 fn create_test_engine() -> ChartLayoutEngine {
     let root = workspace_root();
     let text_font_path = root.join("libs/reference/sheet-music/musescore/fonts/FreeSans.ttf");
-    let musejazz_font_path = root.join("libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf");
+    let musejazz_font_path =
+        root.join("libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf");
 
     let text_font_data = Arc::new(
         std::fs::read(&text_font_path)
             .unwrap_or_else(|e| panic!("Failed to load text font at {:?}: {}", text_font_path, e)),
     );
-    let musejazz_font_data = Arc::new(
-        std::fs::read(&musejazz_font_path)
-            .unwrap_or_else(|e| panic!("Failed to load MuseJazz font at {:?}: {}", musejazz_font_path, e)),
-    );
+    let musejazz_font_data = Arc::new(std::fs::read(&musejazz_font_path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to load MuseJazz font at {:?}: {}",
+            musejazz_font_path, e
+        )
+    }));
 
     let style: &'static MStyle = Box::leak(Box::new(MStyle::default()));
     let mut config = ChartLayoutConfig::default();
@@ -269,8 +272,14 @@ C_1
     let result = layout_snippet(source);
 
     // Verify we got a valid layout with content
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
-    assert!(!result.beat_positions.is_empty(), "Should have beat positions");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
+    assert!(
+        !result.beat_positions.is_empty(),
+        "Should have beat positions"
+    );
 }
 
 /// Test: Half note chord (G_2)
@@ -284,8 +293,14 @@ G_2 G_2
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
-    assert!(result.beat_positions.len() >= 2, "Should have at least 2 beat positions");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
+    assert!(
+        result.beat_positions.len() >= 2,
+        "Should have at least 2 beat positions"
+    );
 }
 
 /// Test: Quarter note chord (D_4)
@@ -299,8 +314,14 @@ D_4 D_4 D_4 D_4
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
-    assert!(result.beat_positions.len() >= 4, "Should have at least 4 beat positions");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
+    assert!(
+        result.beat_positions.len() >= 4,
+        "Should have at least 4 beat positions"
+    );
 }
 
 /// Test: Eighth note chord (Em_8)
@@ -314,8 +335,14 @@ Em_8 Em_8 Em_8 Em_8 Em_8 Em_8 Em_8 Em_8
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
-    assert!(result.beat_positions.len() >= 8, "Should have at least 8 beat positions");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
+    assert!(
+        result.beat_positions.len() >= 8,
+        "Should have at least 8 beat positions"
+    );
 }
 
 /// Test: Sixteenth note chord (G_16)
@@ -329,7 +356,10 @@ G_16 G_16 G_16 G_16 G_16 G_16 G_16 G_16 G_16 G_16 G_16 G_16 G_16 G_16 G_16 G_16
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
 }
 
 /// Test: Thirty-second note chord (D_32)
@@ -343,7 +373,10 @@ D_32 D_32 D_32 D_32 D_32 D_32 D_32 D_32 D_32 D_32 D_32 D_32 D_32 D_32 D_32 D_32 
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
 }
 
 /// Test: Mixed chord note values in progression
@@ -357,9 +390,15 @@ C_1 | G_2 D_4 Em_8 G_16 D_32 r32
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
     // Two measures worth of beats
-    assert!(result.beat_positions.len() >= 2, "Should have beats from both measures");
+    assert!(
+        result.beat_positions.len() >= 2,
+        "Should have beats from both measures"
+    );
 }
 
 // =============================================================================
@@ -377,7 +416,10 @@ r1
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
 }
 
 /// Test: Half rest (r2)
@@ -391,7 +433,10 @@ r2 r2
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
 }
 
 /// Test: Quarter rest (r4)
@@ -405,7 +450,10 @@ r4 r4 r4 r4
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
 }
 
 /// Test: Eighth rest (r8)
@@ -419,7 +467,10 @@ r8 r8 r8 r8 r8 r8 r8 r8
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
 }
 
 /// Test: Sixteenth rest (r16)
@@ -433,7 +484,10 @@ r16 r16 r16 r16 r16 r16 r16 r16 r16 r16 r16 r16 r16 r16 r16 r16
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
 }
 
 /// Test: Thirty-second rest (r32)
@@ -447,7 +501,10 @@ r32 r32 r32 r32 r32 r32 r32 r32 r32 r32 r32 r32 r32 r32 r32 r32 r32 r32 r32 r32 
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
 }
 
 /// Test: Mixed rest values - same positions as chord tests
@@ -461,7 +518,10 @@ r1 | r2 r4 r8 r16 r32 r32
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
 }
 
 // =============================================================================
@@ -479,7 +539,10 @@ C_2 r2
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
 }
 
 /// Test: Rest followed by chord
@@ -493,7 +556,10 @@ r2 G_2
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
 }
 
 /// Test: Syncopated rhythm with rests
@@ -507,7 +573,10 @@ r8 C_8 r8 D_8 r8 E_8 r8 F_8
 "#;
     let result = layout_snippet(source);
 
-    assert!(!result.scene.children.is_empty(), "Layout should have children");
+    assert!(
+        !result.scene.children.is_empty(),
+        "Layout should have children"
+    );
 }
 
 // =============================================================================
@@ -541,13 +610,20 @@ r1 | r2 r4 r8 r16 r32 r32
     for (i, bp) in result.beat_positions.iter().enumerate() {
         println!(
             "[{}] measure={} beat={} tick={} duration={} abs_tick={} glyph={:?}",
-            i, bp.measure, bp.beat, bp.tick, bp.duration_ticks, bp.absolute_tick,
+            i,
+            bp.measure,
+            bp.beat,
+            bp.tick,
+            bp.duration_ticks,
+            bp.absolute_tick,
             bp.glyph_codepoint.map(|c| format!("U+{:04X}", c as u32))
         );
     }
 
     // Find the last 32nd rest (should be in measure 2, at tick 1860)
-    let last_32nd = result.beat_positions.iter()
+    let last_32nd = result
+        .beat_positions
+        .iter()
         .filter(|bp| bp.measure == 1) // Measure 2 is index 1
         .filter(|bp| bp.duration_ticks == 60) // 32nd note = 60 ticks
         .last();
@@ -556,8 +632,10 @@ r1 | r2 r4 r8 r16 r32 r32
     let bp = last_32nd.unwrap();
 
     println!("\nLast 32nd rest found at:");
-    println!("  measure={} beat={} tick={} absolute_tick={}",
-             bp.measure, bp.beat, bp.tick, bp.absolute_tick);
+    println!(
+        "  measure={} beat={} tick={} absolute_tick={}",
+        bp.measure, bp.beat, bp.tick, bp.absolute_tick
+    );
 
     // The last 32nd should be at tick 1860 within measure 2
     assert_eq!(bp.measure, 1, "Should be in measure 2 (index 1)");
@@ -579,7 +657,11 @@ C_1 | G_2 D_4 Em_8 G_16 D_32 r32
     for (i, bp) in result.beat_positions.iter().enumerate() {
         println!(
             "[{}] m{}.b{}.t{} (abs:{}) dur={} glyph={:?}",
-            i, bp.measure + 1, bp.beat + 1, bp.tick, bp.absolute_tick,
+            i,
+            bp.measure + 1,
+            bp.beat + 1,
+            bp.tick,
+            bp.absolute_tick,
             bp.duration_ticks,
             bp.glyph_codepoint.map(|c| format!("U+{:04X}", c as u32))
         );
@@ -587,7 +669,9 @@ C_1 | G_2 D_4 Em_8 G_16 D_32 r32
 
     // Query for position 2.4 (measure 2, beat 4) which should be around the 16th/32nd notes
     // Beat 4 starts at tick 1440 (after half=960 + quarter=480)
-    let beat_4_elements: Vec<_> = result.beat_positions.iter()
+    let beat_4_elements: Vec<_> = result
+        .beat_positions
+        .iter()
         .filter(|bp| bp.measure == 1 && bp.tick >= 1440)
         .collect();
 
@@ -596,7 +680,10 @@ C_1 | G_2 D_4 Em_8 G_16 D_32 r32
         println!("  tick={} duration={}", bp.tick, bp.duration_ticks);
     }
 
-    assert!(!beat_4_elements.is_empty(), "Should have elements at beat 4");
+    assert!(
+        !beat_4_elements.is_empty(),
+        "Should have elements at beat 4"
+    );
 }
 
 /// Test: Query by REAPER-style position (measure.beat.fraction)
@@ -615,16 +702,24 @@ r1 | r2 r4 r8 r16 r32 r32
     // Beat 4 starts at tick 1440, 0.875 * 480 = 420 ticks
     // 1440 + 420 = 1860 ticks (the last 32nd rest)
     let target_tick = reaper_position_to_tick(2, 4, 875, 480);
-    println!("\nQuerying position 2.4.875 -> absolute tick {}", target_tick);
+    println!(
+        "\nQuerying position 2.4.875 -> absolute tick {}",
+        target_tick
+    );
 
     let found = find_at_reaper_position(&result.beat_positions, 2, 4, 875);
 
     assert!(found.is_some(), "Should find element at position 2.4.875");
     let bp = found.unwrap();
 
-    println!("Found: measure={} beat={} tick={} duration={} glyph={:?}",
-             bp.measure + 1, bp.beat + 1, bp.tick, bp.duration_ticks,
-             bp.glyph_codepoint.map(|c| format!("U+{:04X}", c as u32)));
+    println!(
+        "Found: measure={} beat={} tick={} duration={} glyph={:?}",
+        bp.measure + 1,
+        bp.beat + 1,
+        bp.tick,
+        bp.duration_ticks,
+        bp.glyph_codepoint.map(|c| format!("U+{:04X}", c as u32))
+    );
 
     // Should be the last 32nd rest (60 ticks duration)
     assert_eq!(bp.duration_ticks, 60, "Should be a 32nd note (60 ticks)");
@@ -652,7 +747,9 @@ C_1 | G_2 D_4 Em_8 G_16 D_32 r32
 
     let expectations = vec![
         ExpectedBeat {
-            measure: 1, beat: 1, fraction: 0,
+            measure: 1,
+            beat: 1,
+            fraction: 0,
             duration_ticks: 1920,
             glyph: SmuflGlyph::NoteheadSlashWhite,
             has_stem: false,
@@ -660,7 +757,9 @@ C_1 | G_2 D_4 Em_8 G_16 D_32 r32
             desc: "C_1 whole note",
         },
         ExpectedBeat {
-            measure: 2, beat: 1, fraction: 0,
+            measure: 2,
+            beat: 1,
+            fraction: 0,
             duration_ticks: 960,
             glyph: SmuflGlyph::NoteheadSlashHalf,
             has_stem: false,
@@ -668,7 +767,9 @@ C_1 | G_2 D_4 Em_8 G_16 D_32 r32
             desc: "G_2 half note",
         },
         ExpectedBeat {
-            measure: 2, beat: 3, fraction: 0,
+            measure: 2,
+            beat: 3,
+            fraction: 0,
             duration_ticks: 480,
             glyph: SmuflGlyph::NoteheadSlashBlack,
             has_stem: true,
@@ -676,7 +777,9 @@ C_1 | G_2 D_4 Em_8 G_16 D_32 r32
             desc: "D_4 quarter note",
         },
         ExpectedBeat {
-            measure: 2, beat: 4, fraction: 0,
+            measure: 2,
+            beat: 4,
+            fraction: 0,
             duration_ticks: 240,
             glyph: SmuflGlyph::NoteheadSlashBlack,
             has_stem: true,
@@ -684,7 +787,9 @@ C_1 | G_2 D_4 Em_8 G_16 D_32 r32
             desc: "Em_8 eighth note",
         },
         ExpectedBeat {
-            measure: 2, beat: 4, fraction: 500,
+            measure: 2,
+            beat: 4,
+            fraction: 500,
             duration_ticks: 120,
             glyph: SmuflGlyph::NoteheadSlashBlack,
             has_stem: true,
@@ -692,7 +797,9 @@ C_1 | G_2 D_4 Em_8 G_16 D_32 r32
             desc: "G_16 sixteenth note",
         },
         ExpectedBeat {
-            measure: 2, beat: 4, fraction: 750,
+            measure: 2,
+            beat: 4,
+            fraction: 750,
             duration_ticks: 60,
             glyph: SmuflGlyph::NoteheadSlashBlack,
             has_stem: true,
@@ -700,7 +807,9 @@ C_1 | G_2 D_4 Em_8 G_16 D_32 r32
             desc: "D_32 thirty-second note",
         },
         ExpectedBeat {
-            measure: 2, beat: 4, fraction: 875,
+            measure: 2,
+            beat: 4,
+            fraction: 875,
             duration_ticks: 60,
             glyph: SmuflGlyph::NoteheadSlashBlack,
             has_stem: true,
@@ -721,7 +830,9 @@ C_1 | G_2 D_4 Em_8 G_16 D_32 r32
             println!(
                 "{}: pos={}.{}.{} dur={} glyph={:?} stem={} flags={} x={:.1} y={:.1}",
                 expected.desc,
-                expected.measure, expected.beat, expected.fraction,
+                expected.measure,
+                expected.beat,
+                expected.fraction,
                 bp.duration_ticks,
                 bp.glyph_codepoint.map(|c| format!("U+{:04X}", c as u32)),
                 bp.has_stem,
@@ -793,12 +904,14 @@ fn assert_beat_properties(
     assert!(
         bp.x > 0.0,
         "{}: invalid x position ({})",
-        expected.desc, bp.x
+        expected.desc,
+        bp.x
     );
     assert!(
         bp.glyph_y > 0.0,
         "{}: invalid glyph_y position ({})",
-        expected.desc, bp.glyph_y
+        expected.desc,
+        bp.glyph_y
     );
 }
 
@@ -819,7 +932,9 @@ r1 | r2 r4 r8 r16 r32 r32
 
     let expectations = vec![
         ExpectedBeat {
-            measure: 1, beat: 1, fraction: 0,
+            measure: 1,
+            beat: 1,
+            fraction: 0,
             duration_ticks: 1920,
             glyph: SmuflGlyph::NoteheadSlashWhite,
             has_stem: false,
@@ -827,7 +942,9 @@ r1 | r2 r4 r8 r16 r32 r32
             desc: "r1 whole rest",
         },
         ExpectedBeat {
-            measure: 2, beat: 1, fraction: 0,
+            measure: 2,
+            beat: 1,
+            fraction: 0,
             duration_ticks: 960,
             glyph: SmuflGlyph::NoteheadSlashHalf,
             has_stem: false,
@@ -835,7 +952,9 @@ r1 | r2 r4 r8 r16 r32 r32
             desc: "r2 half rest",
         },
         ExpectedBeat {
-            measure: 2, beat: 3, fraction: 0,
+            measure: 2,
+            beat: 3,
+            fraction: 0,
             duration_ticks: 480,
             glyph: SmuflGlyph::NoteheadSlashBlack,
             has_stem: true,
@@ -843,7 +962,9 @@ r1 | r2 r4 r8 r16 r32 r32
             desc: "r4 quarter rest",
         },
         ExpectedBeat {
-            measure: 2, beat: 4, fraction: 0,
+            measure: 2,
+            beat: 4,
+            fraction: 0,
             duration_ticks: 240,
             glyph: SmuflGlyph::NoteheadSlashBlack,
             has_stem: true,
@@ -851,7 +972,9 @@ r1 | r2 r4 r8 r16 r32 r32
             desc: "r8 eighth rest",
         },
         ExpectedBeat {
-            measure: 2, beat: 4, fraction: 500,
+            measure: 2,
+            beat: 4,
+            fraction: 500,
             duration_ticks: 120,
             glyph: SmuflGlyph::NoteheadSlashBlack,
             has_stem: true,
@@ -859,7 +982,9 @@ r1 | r2 r4 r8 r16 r32 r32
             desc: "r16 sixteenth rest",
         },
         ExpectedBeat {
-            measure: 2, beat: 4, fraction: 750,
+            measure: 2,
+            beat: 4,
+            fraction: 750,
             duration_ticks: 60,
             glyph: SmuflGlyph::NoteheadSlashBlack,
             has_stem: true,
@@ -867,7 +992,9 @@ r1 | r2 r4 r8 r16 r32 r32
             desc: "r32 first 32nd rest",
         },
         ExpectedBeat {
-            measure: 2, beat: 4, fraction: 875,
+            measure: 2,
+            beat: 4,
+            fraction: 875,
             duration_ticks: 60,
             glyph: SmuflGlyph::NoteheadSlashBlack,
             has_stem: true,
@@ -888,7 +1015,9 @@ r1 | r2 r4 r8 r16 r32 r32
             println!(
                 "{}: pos={}.{}.{} dur={} glyph={:?} stem={} flags={} x={:.1} y={:.1}",
                 expected.desc,
-                expected.measure, expected.beat, expected.fraction,
+                expected.measure,
+                expected.beat,
+                expected.fraction,
                 bp.duration_ticks,
                 bp.glyph_codepoint.map(|c| format!("U+{:04X}", c as u32)),
                 bp.has_stem,
@@ -959,12 +1088,12 @@ r8t Ab9_8t r8t r8t r8t F9_8t r2 | s1
 
     // Expected triplet positions for beat 1
     let triplet_positions = vec![
-        (1, 1, 0, "first triplet (r8t)"),      // tick 0
-        (1, 1, 333, "second triplet (Ab9)"),   // tick 160
-        (1, 1, 666, "third triplet (r8t)"),    // tick 320
-        (1, 2, 0, "fourth triplet (r8t)"),     // tick 480
-        (1, 2, 333, "fifth triplet (r8t)"),    // tick 640
-        (1, 2, 666, "sixth triplet (F9)"),     // tick 800
+        (1, 1, 0, "first triplet (r8t)"),    // tick 0
+        (1, 1, 333, "second triplet (Ab9)"), // tick 160
+        (1, 1, 666, "third triplet (r8t)"),  // tick 320
+        (1, 2, 0, "fourth triplet (r8t)"),   // tick 480
+        (1, 2, 333, "fifth triplet (r8t)"),  // tick 640
+        (1, 2, 666, "sixth triplet (F9)"),   // tick 800
     ];
 
     println!("\nVerifying triplet positions:");
@@ -1040,7 +1169,10 @@ VS
     }
 
     // Check that we have beat positions
-    assert!(!result.beat_positions.is_empty(), "Should have beat positions");
+    assert!(
+        !result.beat_positions.is_empty(),
+        "Should have beat positions"
+    );
 
     // The first chord 'F/C has a triplet push, so it should appear
     // 160 ticks before beat 1 (i.e., at a negative offset or late in previous measure)
