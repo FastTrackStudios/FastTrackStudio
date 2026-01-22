@@ -2589,15 +2589,14 @@ impl ChartLayoutEngine {
             }
 
             // The first chord (segment 0) can overhang left into the clef area,
-            // so we don't need to reserve its full width in the segment.
-            let effective_width = if idx1 == 0 {
-                chord1_width * 0.5 // Allow 50% overhang for first chord
-            } else {
-                chord1_width
-            };
+            // so we don't need to expand segment 0 for collision avoidance.
+            // The collision resolution in collision.rs will shift it left at render time.
+            if idx1 == 0 {
+                continue; // Skip segment 0 - first chord uses overhang, not segment expansion
+            }
 
             // Required space for chord symbol + gap
-            let required_space = effective_width + min_gap;
+            let required_space = chord1_width + min_gap;
 
             // If one segment, that segment needs the full space
             // If multiple segments, distribute the requirement
@@ -2616,12 +2615,11 @@ impl ChartLayoutEngine {
 
                 #[cfg(debug_assertions)]
                 eprintln!(
-                    "[chord-min-width] Chord '{}' at seg {} needs width {:.1}pt (effective: {:.1}pt). \
+                    "[chord-min-width] Chord '{}' at seg {} needs width {:.1}pt. \
                      Available: {:.1}pt. Setting min_width[{}]={:.1}pt",
                     chord1.full_symbol,
                     idx1,
                     chord1_width,
-                    effective_width,
                     available_space,
                     idx1,
                     min_widths[idx1]
@@ -2665,54 +2663,34 @@ impl ChartLayoutEngine {
         measure: &crate::chart::types::Measure,
         _text_metrics: &TextFontMetrics,
     ) -> f64 {
-        const TRIPLET_BONUS: f64 = 0.15; // Extra weight per triplet element
-
         // Get the time signature to determine beats per measure
         let num_beats = measure.time_signature.0 as usize;
 
-        // Check if measure has explicit chord rhythms
-        let has_explicit = rhythm_builder::measure_has_explicit_chord_rhythm(measure);
+        // Base weight from beats, NOT segments.
+        // Triplets subdivide beats but shouldn't make the measure wider.
+        // A 4/4 measure with triplets should have the same width as one without.
+        let beat_weight = num_beats as f64 / 4.0;
 
-        // Build the actual rhythm to count elements (same logic as rendering)
-        let source = if has_explicit {
-            RhythmSource::ExplicitRhythm(&measure.rhythm_elements)
-        } else {
-            RhythmSource::SlashNotation {
-                chords: &measure.chords,
-                spillbacks: None, // spillbacks only affect RECEIVING measure
-            }
-        };
-
-        let config = RhythmBuildConfig {
-            time_signature: (num_beats as u8, 4),
-            use_stems: self.config.use_stems,
-            auto_rhythm_slashes: false,
-        };
-
-        let result = rhythm_builder::build_rhythm(source, &config);
-        let triplet_elements: usize = result
-            .tuplet_specs
+        // Small bonus for visible chord count (more chords = slightly more width needed)
+        // This is much smaller than before since min_width handles collision space.
+        let visible_chords = measure
+            .chords
             .iter()
-            .map(|s| s.end_idx - s.start_idx)
-            .sum();
-        let (element_count, triplet_count) = (result.len(), triplet_elements);
+            .filter(|c| !c.full_symbol.is_empty() && c.full_symbol != "s" && c.full_symbol != "r")
+            .count();
+        let chord_bonus = if visible_chords > 2 {
+            (visible_chords - 2) as f64 * 0.05
+        } else {
+            0.0
+        };
 
-        // Calculate weight based on segment count
-        // 4 segments = 1.0 weight (standard 4/4 measure)
-        let segment_weight = element_count as f64 / 4.0;
+        // Collision space is handled by min_width from measurement cache.
+        // Weight only affects proportional distribution, not minimums.
 
-        // Add triplet complexity bonus - brackets need extra horizontal space
-        let triplet_bonus = triplet_count as f64 * TRIPLET_BONUS;
-
-        // Collision penalty is no longer computed here - the measurement cache
-        // provides min_width which is used as a hard constraint in distribution.
-        // This is more accurate than the old heuristic (90pt/segment assumption).
-
-        // Use segment weight as primary factor, plus triplet bonus
-        let weight = segment_weight.max(1.0) + triplet_bonus;
+        let weight = beat_weight.max(1.0) + chord_bonus;
 
         // Clamp to reasonable range
-        weight.clamp(0.5, 4.0)
+        weight.clamp(0.5, 3.0)
     }
 
     /// Distribute available width among measures using spring physics.
