@@ -1,2 +1,3 @@
 # Ralphy Progress Log
 
+- [✓] 2026-01-22 10:59 - Create `measure_pass.rs` with `MeasurementCache` struct
