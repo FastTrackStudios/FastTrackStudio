@@ -762,9 +762,11 @@ impl ChartLayoutEngine {
                     base_measure_width * compact_scale
                 };
 
-                // Calculate actual system width
+                // Calculate actual system width.
+                // For short systems, use the sum of distributed_widths (not total_width_to_distribute)
+                // because min_widths may force measures to expand beyond the planned width.
                 let actual_system_width = if is_short_system {
-                    prefix_width + total_width_to_distribute
+                    prefix_width + distributed_widths.iter().sum::<f64>()
                 } else {
                     content_width
                 };
@@ -1396,9 +1398,11 @@ impl ChartLayoutEngine {
                     base_measure_width * compact_scale
                 };
 
-                // Calculate actual system width
+                // Calculate actual system width.
+                // For short systems, use the sum of distributed_widths (not total_width_to_distribute)
+                // because min_widths may force measures to expand beyond the planned width.
                 let actual_system_width = if is_short_system {
-                    prefix_width + total_width_to_distribute
+                    prefix_width + distributed_widths.iter().sum::<f64>()
                 } else {
                     content_width
                 };
@@ -2538,16 +2542,28 @@ impl ChartLayoutEngine {
         measure_width: f64,
         ctx: &LayoutContext<'_>,
     ) -> Vec<f64> {
+        use crate::chart::types::RhythmElement;
+
         let spatium = ctx.spatium();
         let mut min_widths = vec![0.0; num_segments];
 
-        // Filter to visible chords (not spaces/rests)
+        // Build list of (segment_index, chord) by iterating rhythm_elements.
+        // This gets the ACTUAL segment position of each chord, not just the chord index.
         let visible_chords: Vec<_> = measure
-            .chords
+            .rhythm_elements
             .iter()
             .enumerate()
-            .filter(|(_, c)| {
-                !c.full_symbol.is_empty() && c.full_symbol != "s" && c.full_symbol != "r"
+            .filter_map(|(seg_idx, elem)| {
+                if let RhythmElement::Chord(chord) = elem {
+                    // Skip invisible chords (spaces, rests represented as chords)
+                    if !chord.full_symbol.is_empty()
+                        && chord.full_symbol != "s"
+                        && chord.full_symbol != "r"
+                    {
+                        return Some((seg_idx, chord));
+                    }
+                }
+                None
             })
             .collect();
 
@@ -2588,25 +2604,27 @@ impl ChartLayoutEngine {
                 continue; // Same segment, can't help here
             }
 
-            // The first chord (segment 0) can overhang left into the clef area,
-            // so we don't need to expand segment 0 for collision avoidance.
-            // The collision resolution in collision.rs will shift it left at render time.
-            if idx1 == 0 {
-                continue; // Skip segment 0 - first chord uses overhang, not segment expansion
-            }
-
             // Required space for chord symbol + gap
             let required_space = chord1_width + min_gap;
 
-            // If one segment, that segment needs the full space
-            // If multiple segments, distribute the requirement
+            // Available space based on current segment widths
             let available_space = segment_gap as f64 * estimated_segment_width;
 
+            // Only set minimum if there would be an actual collision
             if required_space > available_space {
-                // Collision would occur - set minimum width for the first chord's segment
-                // The segment needs to be wide enough for the chord symbol + gap
-                // NOTE: min_width is in POINTS (same units as segment.width), not spatiums
-                let min_width_points = required_space;
+                // Collision deficit = how much the chords would overlap
+                let collision_deficit = required_space - available_space;
+
+                // Split the work between segment spacing and left-shifting.
+                // First chord (segment 0) can overhang into clef area, so it relies
+                // more on movement (70%) and less on spacing (30%).
+                // Other chords use 50/50 split.
+                let spacing_ratio = if idx1 == 0 { 0.3 } else { 0.5 };
+                let spacing_contribution = collision_deficit * spacing_ratio;
+
+                // Add the spacing contribution to the current estimated segment width
+                // NOTE: min_width is in POINTS (same units as segment.width)
+                let min_width_points = estimated_segment_width + spacing_contribution;
 
                 // Only set if it's larger than the current minimum
                 if idx1 < min_widths.len() {
@@ -2615,12 +2633,12 @@ impl ChartLayoutEngine {
 
                 #[cfg(debug_assertions)]
                 eprintln!(
-                    "[chord-min-width] Chord '{}' at seg {} needs width {:.1}pt. \
-                     Available: {:.1}pt. Setting min_width[{}]={:.1}pt",
+                    "[chord-min-width] Chord '{}' at seg {} collision: deficit={:.1}pt, \
+                     spacing contribution={:.1}pt. Setting min_width[{}]={:.1}pt",
                     chord1.full_symbol,
                     idx1,
-                    chord1_width,
-                    available_space,
+                    collision_deficit,
+                    spacing_contribution,
                     idx1,
                     min_widths[idx1]
                 );
