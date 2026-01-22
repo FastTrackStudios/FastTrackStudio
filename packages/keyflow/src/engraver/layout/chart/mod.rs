@@ -466,12 +466,25 @@ impl ChartLayoutEngine {
             .map(|ts| (ts.numerator as u8, ts.denominator as u8))
             .unwrap_or((4u8, 4u8));
 
+        // Detect count-in from parsed chart sections if not configured explicitly.
+        // If the chart has a CountIn section, use its measure count.
+        let count_in_measures = if self.config.count_in_measures > 0 {
+            self.config.count_in_measures as usize
+        } else {
+            chart
+                .sections
+                .iter()
+                .find(|s| matches!(s.section.section_type, SectionType::CountIn))
+                .map(|s| s.measures().len())
+                .unwrap_or(0)
+        };
+
         // Calculate count-in duration in ticks and seconds
         // Count-in should have NEGATIVE time values so that:
         // - Count-in measures have negative time (before SONGSTART)
         // - Real measures start at time 0 (at SONGSTART)
         let ticks_per_measure = time_signature.0 as i64 * (1920i64 / time_signature.1 as i64);
-        let count_in_ticks = self.config.count_in_measures as i64 * ticks_per_measure;
+        let count_in_ticks = count_in_measures as i64 * ticks_per_measure;
         let count_in_seconds = count_in_ticks as f64 * seconds_per_tick;
 
         // Track cumulative time and ticks through the song
@@ -669,7 +682,7 @@ impl ChartLayoutEngine {
                 // Add count-in measures on the first system of the first section only
                 let num_count_in = if section_idx == 0 && sys_idx == 0 && !count_in_rendered {
                     count_in_rendered = true;
-                    self.config.count_in_measures as usize
+                    count_in_measures
                 } else {
                     0
                 };
@@ -921,7 +934,7 @@ impl ChartLayoutEngine {
 
                         // Render count text below slashes
                         if let Some(count_text) =
-                            self.get_count_in_text(count_in_display_num, beat_idx, num_beats)
+                            self.get_count_in_text(count_in_display_num, beat_idx, num_beats, count_in_measures)
                         {
                             let count_node = self.create_count_text(
                                 &count_text,
@@ -1001,7 +1014,7 @@ impl ChartLayoutEngine {
                         // Position above the clef (at content_x) rather than the measure start
                         if self.config.show_measure_numbers && local_measure_idx == 0 {
                             let display_measure_num = (global_measure_index as i32)
-                                - self.config.count_in_measures as i32
+                                - count_in_measures as i32
                                 + 1;
                             let measure_num_node = self.create_measure_number(
                                 display_measure_num,
@@ -1246,12 +1259,24 @@ impl ChartLayoutEngine {
             .map(|ts| (ts.numerator as u8, ts.denominator as u8))
             .unwrap_or((4u8, 4u8));
 
+        // Detect count-in from parsed chart sections if not configured explicitly.
+        let count_in_measures = if self.config.count_in_measures > 0 {
+            self.config.count_in_measures as usize
+        } else {
+            chart
+                .sections
+                .iter()
+                .find(|s| matches!(s.section.section_type, SectionType::CountIn))
+                .map(|s| s.measures().len())
+                .unwrap_or(0)
+        };
+
         // Track global measure offset for looking up pre-measured values
         let mut global_section_measure_offset: usize = 0;
 
         // Process each section
         for (section_idx, chart_section) in chart.sections.iter().enumerate() {
-            // Skip count-in sections - we synthesize count-in from config.count_in_measures
+            // Skip count-in sections - we synthesize count-in from config
             if chart_section.section.section_type.is_compact() {
                 continue; // Don't render count-in as separate section
             }
@@ -1332,7 +1357,7 @@ impl ChartLayoutEngine {
                 // Add count-in measures on the first system of the first section only
                 let num_count_in = if section_idx == 0 && sys_idx == 0 && !count_in_rendered {
                     count_in_rendered = true;
-                    self.config.count_in_measures as usize
+                    count_in_measures
                 } else {
                     0
                 };
@@ -1519,7 +1544,7 @@ impl ChartLayoutEngine {
                         .enumerate()
                     {
                         if let Some(count_text) =
-                            self.get_count_in_text(count_in_display_num, beat_idx, num_beats)
+                            self.get_count_in_text(count_in_display_num, beat_idx, num_beats, count_in_measures)
                         {
                             let count_node = self.create_count_text(
                                 &count_text,
@@ -1583,7 +1608,7 @@ impl ChartLayoutEngine {
                         // Position above the clef (at content_x) rather than the measure start
                         if self.config.show_measure_numbers && local_measure_idx == 0 {
                             let display_measure_num = (global_measure_index as i32)
-                                - self.config.count_in_measures as i32
+                                - count_in_measures as i32
                                 + 1;
                             let measure_num_node = self.create_measure_number(
                                 display_measure_num,
@@ -1825,8 +1850,8 @@ impl ChartLayoutEngine {
 
     /// Get the count-in text for a beat in a count-in measure.
     ///
-    /// Count-in measures are determined by the config.count_in_measures value,
-    /// which comes from the distance between Count-In marker and SONGSTART marker.
+    /// Count-in measures are determined by the count_in_measures parameter,
+    /// which comes from either config or parsed CountIn sections.
     /// - 1 measure count-in: measure 0 gets full count (1,2,3,4)
     /// - 2 measure count-in: measure -1 gets half-time (1,2), measure 0 gets full (1,2,3,4)
     fn get_count_in_text(
@@ -1834,8 +1859,9 @@ impl ChartLayoutEngine {
         display_measure_num: i32,
         beat_idx: usize,
         _num_beats: usize,
+        count_in_measures: usize,
     ) -> Option<String> {
-        let count_in = self.config.count_in_measures;
+        let count_in = count_in_measures as u8;
 
         if count_in == 0 {
             return None; // No count-in configured

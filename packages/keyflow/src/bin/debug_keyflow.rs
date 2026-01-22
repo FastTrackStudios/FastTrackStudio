@@ -51,6 +51,10 @@ struct Config {
     show_rhythm: bool,
     /// Chart input (if provided on command line)
     input: Option<String>,
+    /// File path to read chart from
+    file_path: Option<String>,
+    /// Read from stdin
+    read_stdin: bool,
     /// Page width for layout
     page_width: f64,
 }
@@ -62,6 +66,8 @@ impl Default for Config {
             show_tree: false,
             show_rhythm: false,
             input: None,
+            file_path: None,
+            read_stdin: false,
             page_width: 612.0, // 8.5" in points
         }
     }
@@ -89,6 +95,13 @@ fn parse_args() -> Config {
                     config.page_width = args[i].parse().unwrap_or(612.0);
                 }
             }
+            "--file" | "-f" => {
+                i += 1;
+                if i < args.len() {
+                    config.file_path = Some(args[i].clone());
+                }
+            }
+            "--stdin" => config.read_stdin = true,
             "--help" | "-h" => {
                 print_help();
                 std::process::exit(0);
@@ -123,6 +136,8 @@ OPTIONS:
     -r, --rhythm      Show rhythm builder details
     -a, --all         Show all debug information
     -w, --width <W>   Set page width in points (default: 612.0)
+    -f, --file <F>    Read chart from file (supports multi-line)
+    --stdin           Read full chart from stdin (supports multi-line)
     -h, --help        Show this help message
 
 EXAMPLES:
@@ -131,6 +146,12 @@ EXAMPLES:
 
     # Show detailed segment info
     debug-keyflow -s "'F/C . | Cm ."
+
+    # Read from a file (multi-line support)
+    debug-keyflow -f mychart.txt
+
+    # Read from stdin (pipe or heredoc)
+    echo -e "Count 2: | |\nVS: Cm | Fm" | debug-keyflow --stdin
 
     # Interactive mode (type charts, press Enter)
     debug-keyflow
@@ -145,6 +166,8 @@ CHART SYNTAX:
     / or .      - Repeat previous chord
     |           - Measure separator
     ////        - Four slashes (4 beats)
+    Count 2:    - Count-in section with 2 measures
+    VS:         - Verse section
 "#
     );
 }
@@ -189,13 +212,22 @@ struct LayoutFonts {
 
 /// Wrap input in a minimal chart structure for parsing
 fn wrap_as_chart(input: &str) -> String {
-    // Check if input already has section markers
-    if input.contains("\nVS")
+    // Check if input already has section markers (case-insensitive check for common sections)
+    let input_lower = input.to_lowercase();
+    let has_section_marker = input.contains("\nVS")
         || input.contains("\nCH")
+        || input.contains("\nCount")
+        || input.contains("\ncount")
         || input.starts_with("VS")
         || input.starts_with("CH")
         || input.starts_with("IN")
-    {
+        || input.starts_with("Count")
+        || input.starts_with("count")
+        || input_lower.starts_with("verse")
+        || input_lower.starts_with("chorus")
+        || input_lower.starts_with("intro");
+
+    if has_section_marker {
         // Already has structure, add minimal header if needed
         if !input.lines().any(|l| l.contains("bpm")) {
             format!("Debug Chart\n120bpm 4/4\n\n{input}")
@@ -211,6 +243,14 @@ fn wrap_as_chart(input: &str) -> String {
 /// Analyze and print chart information
 fn analyze_chart(input: &str, config: &Config, fonts: &LayoutFonts) {
     let chart_source = wrap_as_chart(input);
+
+    #[cfg(debug_assertions)]
+    {
+        eprintln!("[debug] Wrapped chart source:");
+        eprintln!("---BEGIN---");
+        eprintln!("{}", chart_source);
+        eprintln!("---END---");
+    }
 
     // Parse the chart
     let chart = match Chart::parse(&chart_source) {
@@ -435,6 +475,36 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    // Read from file if specified
+    if let Some(ref path) = config.file_path {
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                analyze_chart(&content, &config, &fonts);
+                return;
+            }
+            Err(e) => {
+                eprintln!("Error reading file '{}': {}", path, e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Read all from stdin if --stdin flag is set
+    if config.read_stdin {
+        let stdin = io::stdin();
+        let mut content = String::new();
+        for line in stdin.lock().lines() {
+            if let Ok(l) = line {
+                content.push_str(&l);
+                content.push('\n');
+            }
+        }
+        if !content.trim().is_empty() {
+            analyze_chart(&content, &config, &fonts);
+        }
+        return;
+    }
 
     if let Some(ref input) = config.input {
         // Analyze provided input
