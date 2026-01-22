@@ -30,6 +30,8 @@ use crate::engraver::layout::shape::Shape;
 use crate::engraver::layout::text_metrics::TextFontMetrics;
 use crate::engraver::layout::tlayout::HarmonyStyle;
 
+use super::rhythm_builder::{self, RhythmBuildConfig, RhythmSource};
+
 /// Cache key for harmony layout data.
 ///
 /// This key uniquely identifies a chord symbol with its style parameters,
@@ -394,6 +396,41 @@ pub fn measure_measure(
     style: &HarmonyStyle,
     cache: &mut MeasurementCache,
 ) -> MeasureMeasurements {
+    // Detect if this measure has triplet pushes - if so, we need stemmed notation
+    // which creates 2 segments per triplet beat instead of 1
+    let has_triplet_push = measure.chords.iter().any(|c| {
+        c.push_pull.as_ref().is_some_and(|(is_push, amount)| {
+            *is_push
+                && amount.base == crate::chord::PushPullBase::Triplet
+                && amount.level == 1
+        })
+    });
+
+    // Use the extended version with detected use_stems (no spillbacks at this stage)
+    measure_measure_with_config(measure, style, cache, has_triplet_push, None)
+}
+
+/// Measure a single measure's content with full configuration.
+///
+/// This version accepts additional parameters for accurate segment-count calculation
+/// when the measure contains push/pull timing.
+///
+/// # Arguments
+/// * `measure` - The measure to measure
+/// * `style` - Harmony style (provides font size)
+/// * `cache` - Measurement cache to use/populate
+/// * `use_stems` - Whether stemmed notation is used (affects triplet segment count)
+/// * `spillbacks` - Optional spillback chords from next measure
+///
+/// # Returns
+/// Measurement data for the measure
+pub fn measure_measure_with_config(
+    measure: &Measure,
+    style: &HarmonyStyle,
+    cache: &mut MeasurementCache,
+    use_stems: bool,
+    spillbacks: Option<&[super::PushSpillback]>,
+) -> MeasureMeasurements {
     let text_metrics = match style.text_font_metrics.as_ref() {
         Some(m) => m,
         None => {
@@ -403,8 +440,10 @@ pub fn measure_measure(
     };
 
     let font_size = style.root_size;
-    let min_gap = font_size * 0.5; // Minimum gap between chord symbols
-    let height = font_size * 1.2; // Approximate height including superscripts
+    // Minimum gap between chord symbols for min_width calculation.
+    // This is smaller than the collision detection gap because we rely on
+    // the first chord shifting left (overhang) rather than stretching the measure.
+    let min_gap = font_size * 0.25;
 
     // Collect visible chord widths and layout data
     let mut chord_widths = Vec::new();
@@ -429,7 +468,7 @@ pub fn measure_measure(
                 bbox,
                 shape,
                 text_width: width,
-                segment_index: chord_idx, // Initial estimate, may be updated by rhythm builder
+                segment_index: chord_idx, // Initial estimate, updated below
                 visible: true,
                 chord_index: chord_idx,
             });
@@ -438,16 +477,130 @@ pub fn measure_measure(
         }
     }
 
-    // Calculate minimum width from actual measurements
-    // This replaces compute_minimum_measure_width()
-    let min_width = if chord_widths.len() < 2 {
-        // No collision possible with 0 or 1 chord
+    // Run the rhythm builder to get the ACTUAL segment count.
+    // This is critical because triplet beats create 2 segments instead of 1.
+    let has_explicit = rhythm_builder::measure_has_explicit_chord_rhythm(measure);
+    let source = if has_explicit {
+        RhythmSource::ExplicitRhythm(&measure.rhythm_elements)
+    } else {
+        RhythmSource::SlashNotation {
+            chords: &measure.chords,
+            spillbacks,
+        }
+    };
+
+    let config = RhythmBuildConfig {
+        time_signature: (measure.time_signature.0, 4),
+        use_stems,
+        auto_rhythm_slashes: false,
+    };
+
+    let rhythm_result = rhythm_builder::build_rhythm(source, &config);
+    let num_segments = rhythm_result.len();
+
+    // Calculate minimum width from actual measurements using segment-based layout.
+    // This accounts for the fact that chords are placed at specific segments,
+    // so a wide chord might need more than its "fair share" of segment space.
+    let min_width = if chord_layouts.len() < 2 || num_segments == 0 {
+        // No collision possible with 0 or 1 visible chord
         0.0
     } else {
-        // Sum all chord widths + gaps between them
-        let total_chord_width: f64 = chord_widths.iter().sum();
-        let total_gaps = (chord_widths.len() - 1) as f64 * min_gap;
-        total_chord_width + total_gaps
+        // Compute per-segment minimum widths.
+        // For slash notation, chord index typically maps directly to beat, and each beat
+        // may be 1 or 2 segments depending on triplets.
+        let mut segment_mins = vec![0.0_f64; num_segments];
+
+        // Build mapping from chord index to segment index
+        // For triplet beats, chord at beat N maps to segment 0 of that beat's triplet group
+        // This is a simplified mapping - actual positions depend on push/pull
+        let chord_to_segment: Vec<usize> = if has_explicit {
+            // For explicit rhythm, chord indices map directly to rhythm entry indices
+            (0..measure.chords.len()).collect()
+        } else {
+            // For slash notation, we need to account for triplet expansion
+            // Each beat is 1 segment (normal) or 2 segments (triplet)
+            let mut mapping = Vec::new();
+            let mut segment_idx = 0;
+            let num_beats = measure.time_signature.0 as usize;
+
+            for beat_idx in 0..num_beats {
+                // Count entries for this beat (1 for normal, 2 for triplet)
+                let is_triplet = rhythm_result.tuplet_specs.iter().any(|spec| {
+                    segment_idx >= spec.start_idx && segment_idx < spec.end_idx
+                });
+
+                // Chord at this beat maps to current segment
+                if beat_idx < measure.chords.len() {
+                    mapping.push(segment_idx);
+                }
+
+                // Advance segment index (2 for triplet, 1 for normal)
+                segment_idx += if is_triplet { 2 } else { 1 };
+            }
+
+            // Ensure we have a mapping for all chords
+            while mapping.len() < measure.chords.len() {
+                mapping.push(mapping.last().copied().unwrap_or(0));
+            }
+
+            mapping
+        };
+
+        // Update chord_layouts with correct segment indices
+        for layout in &mut chord_layouts {
+            if layout.chord_index < chord_to_segment.len() {
+                layout.segment_index = chord_to_segment[layout.chord_index];
+            }
+        }
+
+        // Build list of (segment_index, width) for visible chords
+        let visible_chord_info: Vec<(usize, f64)> = chord_layouts
+            .iter()
+            .map(|c| (c.segment_index, c.text_width))
+            .collect();
+
+        // For each pair of adjacent visible chords, compute segment minimums
+        for i in 0..visible_chord_info.len() - 1 {
+            let (idx1, width1) = visible_chord_info[i];
+            let (idx2, _) = visible_chord_info[i + 1];
+
+            let segment_gap = idx2.saturating_sub(idx1);
+            if segment_gap == 0 {
+                continue; // Same segment, can't help
+            }
+
+            // The first chord can overhang left into the clef area, so we don't
+            // need to reserve its full width. Allow 50% overhang for segment 0.
+            let effective_width = if idx1 == 0 {
+                width1 * 0.5 // First chord can overhang 50% left
+            } else {
+                width1
+            };
+
+            // Required space for this chord + gap before next chord
+            let required_space = effective_width + min_gap;
+
+            // The first segment needs to accommodate the chord width + gap
+            // (subsequent segments in the gap just need baseline width)
+            if idx1 < segment_mins.len() {
+                segment_mins[idx1] = segment_mins[idx1].max(required_space);
+            }
+        }
+
+        // Sum segment minimums to get total min_width.
+        // Segments with a minimum use that value; others use baseline.
+        let baseline_segment_width = font_size * 1.2; // Reasonable minimum per segment
+
+        // Add trailing padding to prevent noteheads from overflowing into barline.
+        // This accounts for the last notehead width plus some breathing room.
+        let trailing_padding = font_size * 0.8;
+
+        let segment_total: f64 = segment_mins
+            .iter()
+            .map(|&m| if m > 0.0 { m } else { baseline_segment_width })
+            .sum();
+
+        segment_total + trailing_padding
     };
 
     MeasureMeasurements {

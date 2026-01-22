@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 
-use crate::chord::PushPullBase;
 use crate::engraver::layout::orchestrator::{PageLayout, PageMargins};
 use crate::engraver::model::{DurationKind, NoteHead};
 use crate::engraver::notation::Duration;
@@ -661,118 +660,11 @@ pub fn expand_melodies_across_measures(
 }
 
 // ============================================================================
-// Push Spillback Types
+// Push Spillback Types (Re-exported from chart::rhythm)
 // ============================================================================
-
-/// Represents a chord that pushes back from a measure into the previous measure.
-///
-/// When a chord has push notation (e.g., `'F/C` with triplet push), it anticipates
-/// the beat and starts before its nominal position. If the push crosses a barline,
-/// the chord "spills back" into the previous measure.
-#[derive(Debug, Clone)]
-pub struct PushSpillback {
-    /// The chord symbol that spills back
-    pub chord_symbol: String,
-    /// The beat position within the affected measure (typically last beat)
-    pub beat_position: usize,
-    /// The push amount (how much earlier the chord starts)
-    pub push_base: PushPullBase,
-    /// Push level (1 = eighth, 2 = sixteenth triplet, etc.)
-    pub push_level: u8,
-}
-
-/// Detects if a section starts with a pushed chord that spills back.
-///
-/// Returns the spillback info if the first chord of the section is pushed,
-/// or None if there's no cross-section spillback.
-pub fn detect_section_start_spillback(
-    section_measures: &[crate::chart::types::Measure],
-) -> Option<PushSpillback> {
-    if let Some(first_measure) = section_measures.first() {
-        // Find the first chord that has push_pull set (skip space/rest placeholders)
-        // The parser may insert space placeholders at beat 1 for pushed chords
-        for chord in &first_measure.chords {
-            #[cfg(debug_assertions)]
-            eprintln!(
-                "[detect-section-spillback] Checking chord: '{}', push_pull: {:?}",
-                chord.full_symbol, chord.push_pull
-            );
-
-            // Skip space/rest placeholders
-            if chord.full_symbol == "s" || chord.full_symbol == "r" || chord.full_symbol.is_empty()
-            {
-                continue;
-            }
-
-            if let Some((is_push, amount)) = &chord.push_pull {
-                if *is_push {
-                    // This chord is pushed - spills back to previous section
-                    #[cfg(debug_assertions)]
-                    eprintln!(
-                        "[detect-section-spillback] Found pushed chord: '{}'",
-                        chord.full_symbol
-                    );
-
-                    return Some(PushSpillback {
-                        chord_symbol: chord.full_symbol.clone(),
-                        beat_position: 3, // Last beat of 4/4, will be adjusted based on time sig
-                        push_base: amount.base.clone(),
-                        push_level: amount.level,
-                    });
-                }
-            }
-
-            // If we found a non-space chord without push_pull, no spillback
-            break;
-        }
-    }
-    None
-}
-
-/// Detects push spillbacks across measure boundaries in a section.
-///
-/// Scans all measures for chords with push notation that cross barlines,
-/// and returns a map from measure index to the spillback chords that affect it.
-pub fn detect_push_spillbacks(
-    section_measures: &[crate::chart::types::Measure],
-) -> HashMap<usize, Vec<PushSpillback>> {
-    let mut result: HashMap<usize, Vec<PushSpillback>> = HashMap::new();
-
-    for (measure_idx, measure) in section_measures.iter().enumerate() {
-        // Check if this measure starts with a pushed chord
-        if let Some(first_chord) = measure.chords.first() {
-            if let Some((is_push, amount)) = &first_chord.push_pull {
-                if *is_push {
-                    // This chord pushes back - affects the PREVIOUS measure
-                    if measure_idx > 0 {
-                        let prev_measure_idx = measure_idx - 1;
-
-                        // Get the time signature of the previous measure to find last beat
-                        let prev_time_sig = section_measures
-                            .get(prev_measure_idx)
-                            .map(|m| m.time_signature)
-                            .unwrap_or((4, 4));
-                        let last_beat = (prev_time_sig.0 as usize).saturating_sub(1);
-
-                        let spillback = PushSpillback {
-                            chord_symbol: first_chord.full_symbol.clone(),
-                            beat_position: last_beat,
-                            push_base: amount.base.clone(),
-                            push_level: amount.level,
-                        };
-
-                        result.entry(prev_measure_idx).or_default().push(spillback);
-
-                        #[cfg(debug_assertions)]
-                        eprintln!(
-                            "[push-spillback] Measure {} chord '{}' spills back to measure {} beat {}",
-                            measure_idx, first_chord.full_symbol, prev_measure_idx, last_beat
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    result
-}
+//
+// The canonical spillback types and detection functions are now in
+// crate::chart::rhythm. They are re-exported through this module's parent
+// (engraver::layout::chart) for backward compatibility.
+//
+// See: crate::chart::rhythm::{Spillback, detect_push_spillbacks, detect_section_start_spillback}

@@ -27,8 +27,15 @@ pub use config::{BehavioralFlags, DEFAULT_MIN_CHORD_SYMBOL_GAP, LayoutParams, Re
 // Re-export main types for convenience
 pub use types::{
     BeatPosition, ChartLayoutResult, LayoutMode, MeasureMelodyData, MelodyNoteSegment,
-    PageLayoutMetrics, PushSpillback, detect_push_spillbacks, detect_section_start_spillback,
-    expand_melodies_across_measures, slash_glyph_for_ticks,
+    PageLayoutMetrics, expand_melodies_across_measures, slash_glyph_for_ticks,
+};
+
+// Re-export rhythm types from chart module (canonical source)
+// These were previously in types.rs but now live in chart::rhythm
+pub use crate::chart::rhythm::{
+    BeatStructure, ResolvedRhythm, SectionRhythms, Spillback as PushSpillback,
+    detect_push_spillbacks, detect_section_start_spillback, resolve_measure_rhythm,
+    resolve_section_rhythms,
 };
 
 // Re-export measurement pass types for multi-pass layout
@@ -2581,8 +2588,16 @@ impl ChartLayoutEngine {
                 continue; // Same segment, can't help here
             }
 
+            // The first chord (segment 0) can overhang left into the clef area,
+            // so we don't need to reserve its full width in the segment.
+            let effective_width = if idx1 == 0 {
+                chord1_width * 0.5 // Allow 50% overhang for first chord
+            } else {
+                chord1_width
+            };
+
             // Required space for chord symbol + gap
-            let required_space = chord1_width + min_gap;
+            let required_space = effective_width + min_gap;
 
             // If one segment, that segment needs the full space
             // If multiple segments, distribute the requirement
@@ -2601,16 +2616,25 @@ impl ChartLayoutEngine {
 
                 #[cfg(debug_assertions)]
                 eprintln!(
-                    "[chord-min-width] Chord '{}' at seg {} needs width {:.1}pt. \
+                    "[chord-min-width] Chord '{}' at seg {} needs width {:.1}pt (effective: {:.1}pt). \
                      Available: {:.1}pt. Setting min_width[{}]={:.1}pt",
                     chord1.full_symbol,
                     idx1,
-                    required_space,
+                    chord1_width,
+                    effective_width,
                     available_space,
                     idx1,
                     min_widths[idx1]
                 );
             }
+        }
+
+        // Set minimum for last segment to prevent notehead overflow into barline.
+        // The last notehead needs room to render without crossing the barline.
+        let last_segment_padding = spatium * 1.5; // ~1.5 staff spaces for last notehead
+        if num_segments > 0 {
+            let last_idx = num_segments - 1;
+            min_widths[last_idx] = min_widths[last_idx].max(last_segment_padding);
         }
 
         #[cfg(debug_assertions)]

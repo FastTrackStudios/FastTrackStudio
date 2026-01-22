@@ -11,6 +11,7 @@ pub mod melody;
 pub mod memory;
 pub mod parser;
 pub mod position;
+pub mod rhythm;
 pub mod semantic_role;
 pub mod settings;
 pub mod source_link;
@@ -29,6 +30,10 @@ pub use index::{ChartIndex, ElementId};
 pub use melody::{Melody, MelodyNote, MelodyVariables, OctaveModifier};
 pub use memory::ChordMemory;
 pub use position::ChartPosition;
+pub use rhythm::{
+    BeatStructure, ResolvedRhythm, SectionRhythms, Spillback, detect_push_spillbacks,
+    detect_section_start_spillback, resolve_measure_rhythm, resolve_section_rhythms,
+};
 pub use semantic_role::{NavigationType, SemanticRole};
 pub use settings::{ChartSetting, ChartSettings, SettingValue};
 pub use source_link::SourceLink;

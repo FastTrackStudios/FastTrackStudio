@@ -136,8 +136,24 @@ impl<'a> ChordCollisionContext<'a> {
             // Check for collision and compute offset
             let offset = self.collision_offset(&shape1, &shape2);
             if offset > 0.0 {
-                // Move the first chord left by half the offset (if there's room)
-                let left_shift = (offset / 2.0).min(positions[i] - measure_x);
+                // Strategy: prefer shifting the first chord left rather than stretching.
+                // The first chord of a measure can overhang into the clef/prefix area,
+                // which looks more natural than stretching the whole measure.
+
+                // For the first chord (i == 0), allow more aggressive left shift.
+                // It can overhang up to half its width past the measure start.
+                let max_left_overhang = if i == 0 {
+                    layout1.text_width * 0.5 // Allow 50% overhang for first chord
+                } else {
+                    0.0 // Other chords can't go past their segment start
+                };
+
+                // How much can we shift left?
+                let available_left = (positions[i] - measure_x) + max_left_overhang;
+
+                // Prefer shifting left more aggressively (up to 70% of offset)
+                let preferred_left_ratio = 0.7;
+                let left_shift = (offset * preferred_left_ratio).min(available_left);
                 positions[i] -= left_shift;
 
                 // Move the second chord right by the remaining offset

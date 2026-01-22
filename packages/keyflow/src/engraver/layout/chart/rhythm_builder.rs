@@ -17,7 +17,8 @@ use crate::chord::{ChordRhythm, LilySyntax, PushPullBase};
 use crate::engraver::model::DurationKind;
 use crate::engraver::notation::{Duration, RhythmEntry, TupletRatio, TupletSpec};
 
-use super::types::{MeasureMelodyData, PushSpillback};
+use super::types::MeasureMelodyData;
+use super::PushSpillback;
 
 // ============================================================================
 // Core Types
