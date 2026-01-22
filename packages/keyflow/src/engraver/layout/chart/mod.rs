@@ -6,6 +6,7 @@
 pub mod adapters;
 pub mod chord_layout;
 pub mod chord_renderer;
+pub mod collision;
 pub mod config;
 pub mod constants;
 pub mod layout_state;
@@ -32,9 +33,12 @@ pub use types::{
 
 // Re-export measurement pass types for multi-pass layout
 pub use measure_pass::{
-    ChartMeasurements, MeasureMeasurements, MeasurementCache, compute_measure_weight,
-    measure_chart, measure_measure,
+    CachedHarmonyLayout, ChartMeasurements, ChordLayoutData, HarmonyKey, MeasureMeasurements,
+    MeasurementCache, compute_measure_weight, measure_chart, measure_measure,
 };
+
+// Re-export collision detection types
+pub use collision::{ChordCollisionContext, resolve_chord_positions};
 
 use std::sync::Arc;
 
@@ -1058,6 +1062,10 @@ impl ChartLayoutEngine {
                         global_measure_index += 1;
 
                         // Render chord symbols using chord_renderer module
+                        // Look up pre-computed measurements for this measure
+                        let global_idx = global_section_measure_offset + measure_idx;
+                        let measure_measurements = chart_measurements.get(global_idx);
+
                         let chord_ctx = chord_renderer::ChordRenderContext {
                             measure_x,
                             measure_width: this_measure_width,
@@ -1075,6 +1083,7 @@ impl ChartLayoutEngine {
                             min_chord_symbol_gap: self.config.min_chord_symbol_gap,
                             push_alters_rhythm: self.config.push_alters_rhythm,
                             spatium: self.config.spatium,
+                            measure_measurements,
                         };
 
                         let chord_result = chord_renderer::render_chord_symbols(
@@ -1576,6 +1585,10 @@ impl ChartLayoutEngine {
                         }
 
                         // Render chord symbols using chord_renderer module
+                        // Look up pre-computed measurements for this measure
+                        let global_idx = global_section_measure_offset + measure_idx;
+                        let measure_measurements = chart_measurements.get(global_idx);
+
                         let chord_ctx = chord_renderer::ChordRenderContext {
                             measure_x,
                             measure_width: this_measure_width,
@@ -1593,6 +1606,7 @@ impl ChartLayoutEngine {
                             min_chord_symbol_gap: self.config.min_chord_symbol_gap,
                             push_alters_rhythm: self.config.push_alters_rhythm,
                             spatium: self.config.spatium,
+                            measure_measurements,
                         };
 
                         let chord_result = chord_renderer::render_chord_symbols(
@@ -2607,25 +2621,27 @@ impl ChartLayoutEngine {
         min_widths
     }
 
+    /// Calculate content weight for a measure (for spring-based spacing).
+    ///
+    /// Weight is based on the actual rhythm elements (after push/pull processing).
+    /// We call the real rhythm building functions to get accurate counts,
+    /// ensuring weight calculation matches rendering.
+    ///
+    /// Triplets receive extra weight because they require bracket notation
+    /// (└3┘) which needs horizontal space for visual clarity.
+    ///
+    /// # Note
+    ///
+    /// Chord collision handling is now done via `min_width` from the measurement
+    /// cache (Pass 1), which acts as a hard constraint in the spring system.
+    /// This eliminates the need for heuristic collision penalties in the weight
+    /// calculation.
     fn estimate_measure_content_weight(
         &self,
         measure: &crate::chart::types::Measure,
-        text_metrics: &TextFontMetrics,
+        _text_metrics: &TextFontMetrics,
     ) -> f64 {
-        // Weight is based on the ACTUAL rhythm elements (after push/pull processing).
-        // We call the real rhythm building functions to get accurate counts,
-        // not estimates. This ensures weight calculation matches rendering.
-        //
-        // Triplets receive extra weight because they require bracket notation
-        // (└3┘) which needs horizontal space for visual clarity.
-        //
-        // Chord collision penalty: When adjacent chord symbols would overlap,
-        // we add extra weight so the spring system allocates more space to this
-        // measure. This is half the solution - the other half is handled in
-        // resolve_chord_collisions() which moves the first chord left.
-
         const TRIPLET_BONUS: f64 = 0.15; // Extra weight per triplet element
-        const CHORD_COLLISION_BONUS: f64 = 0.25; // Extra weight per collision
 
         // Get the time signature to determine beats per measure
         let num_beats = measure.time_signature.0 as usize;
@@ -2664,77 +2680,15 @@ impl ChartLayoutEngine {
         // Add triplet complexity bonus - brackets need extra horizontal space
         let triplet_bonus = triplet_count as f64 * TRIPLET_BONUS;
 
-        // Calculate chord collision penalty using actual rendered widths
-        let collision_penalty =
-            self.estimate_chord_collision_penalty(measure, element_count, text_metrics);
+        // Collision penalty is no longer computed here - the measurement cache
+        // provides min_width which is used as a hard constraint in distribution.
+        // This is more accurate than the old heuristic (90pt/segment assumption).
 
-        // Use segment weight as primary factor, plus bonuses
-        let weight =
-            segment_weight.max(1.0) + triplet_bonus + collision_penalty * CHORD_COLLISION_BONUS;
+        // Use segment weight as primary factor, plus triplet bonus
+        let weight = segment_weight.max(1.0) + triplet_bonus;
 
         // Clamp to reasonable range
         weight.clamp(0.5, 4.0)
-    }
-
-    /// Estimate the chord collision penalty for a measure.
-    ///
-    /// This analyzes the chord symbols in the measure and estimates how many
-    /// would collide based on their beat positions and rendered widths.
-    /// Returns a count of expected collisions (0 = no collisions expected).
-    fn estimate_chord_collision_penalty(
-        &self,
-        measure: &crate::chart::types::Measure,
-        num_segments: usize,
-        text_metrics: &TextFontMetrics,
-    ) -> f64 {
-        // Filter to visible chords (not spaces/rests)
-        let visible_chords: Vec<_> = measure
-            .chords
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| {
-                !c.full_symbol.is_empty() && c.full_symbol != "s" && c.full_symbol != "r"
-            })
-            .collect();
-
-        if visible_chords.len() < 2 {
-            return 0.0; // No collision possible with 0 or 1 chord
-        }
-
-        // Estimate chord widths using text metrics
-        let base_font_size = self.config.harmony_style.root_size;
-        let min_gap = base_font_size * 0.5; // Minimum gap between chord symbols
-
-        // Estimate segment width assuming equal distribution
-        // We use an approximate measure width (90pt per segment is typical)
-        let estimated_segment_width = 90.0 / (num_segments.max(1) as f64);
-
-        let mut collision_count = 0.0;
-
-        for i in 0..visible_chords.len() - 1 {
-            let (idx1, chord1) = visible_chords[i];
-            let (idx2, _chord2) = visible_chords[i + 1];
-
-            // Calculate chord width using actual font metrics
-            let chord1_width = text_metrics.horizontal_advance(&chord1.full_symbol, base_font_size);
-            // Add minimum width floor
-            let chord1_width = chord1_width.max(base_font_size * 1.5);
-
-            // Estimate available space between chord positions
-            // Each chord is positioned at its segment start
-            let segment_gap = (idx2 - idx1) as f64 * estimated_segment_width;
-
-            // Check if chord + gap would exceed available space
-            let required_space = chord1_width + min_gap;
-            if required_space > segment_gap {
-                // Collision expected - add weight proportional to overlap
-                let overlap = required_space - segment_gap;
-                // Normalize overlap to a 0-1 scale (capped at 1.0)
-                collision_count += (overlap / estimated_segment_width).min(1.0);
-            }
-        }
-
-        collision_count
     }
 
     /// Distribute available width among measures using spring physics.

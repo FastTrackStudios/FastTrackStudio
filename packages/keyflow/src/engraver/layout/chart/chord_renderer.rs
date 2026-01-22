@@ -35,6 +35,7 @@ use crate::engraver::scene::paint::{PaintCommand, TextAnchor};
 use crate::time::TimeSignature;
 use crate::{ChartPosition, SourceLink};
 
+use super::measure_pass::MeasureMeasurements;
 use super::types::PushSpillback;
 
 /// Create push marker color (red for visibility)
@@ -84,6 +85,10 @@ pub struct ChordRenderContext<'a> {
     pub push_alters_rhythm: bool,
     /// Spatium (staff space) for sizing apostrophe markers.
     pub spatium: f64,
+    /// Pre-computed measurements for this measure (from measure pass).
+    /// When provided, collision detection uses cached chord layouts instead
+    /// of re-measuring during render.
+    pub measure_measurements: Option<&'a MeasureMeasurements>,
 }
 
 /// Result of chord symbol rendering.

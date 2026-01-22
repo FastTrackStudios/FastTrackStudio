@@ -21,10 +21,112 @@
 //! real measurements throughout layout and rendering.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+
+use kurbo::Rect;
 
 use crate::chart::types::Measure;
+use crate::engraver::layout::shape::Shape;
 use crate::engraver::layout::text_metrics::TextFontMetrics;
 use crate::engraver::layout::tlayout::HarmonyStyle;
+
+/// Cache key for harmony layout data.
+///
+/// This key uniquely identifies a chord symbol with its style parameters,
+/// enabling accurate cache lookups even when styles change.
+///
+/// # Style Hashing
+///
+/// The style_hash captures font size, superscript scale, and other layout-affecting
+/// parameters. This ensures cache invalidation when style changes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HarmonyKey {
+    /// The chord symbol string (e.g., "Cmaj7", "F#m7b5")
+    pub symbol: String,
+    /// Quantized font size (font_size * 10, preserving 0.1pt precision)
+    pub font_size_q10: i32,
+    /// Style hash combining superscript_scale, bass_scale, and notation type
+    pub style_hash: u64,
+}
+
+impl HarmonyKey {
+    /// Create a new harmony key from symbol and style.
+    #[must_use]
+    pub fn new(symbol: &str, style: &HarmonyStyle) -> Self {
+        Self {
+            symbol: symbol.to_string(),
+            font_size_q10: quantize_font_size(style.root_size),
+            style_hash: compute_style_hash(style),
+        }
+    }
+}
+
+/// Quantize font size for use as a hash key.
+/// Multiplies by 10 to preserve 0.1pt precision.
+#[inline]
+fn quantize_font_size(font_size: f64) -> i32 {
+    (font_size * 10.0).round() as i32
+}
+
+/// Compute a hash of style parameters that affect layout.
+fn compute_style_hash(style: &HarmonyStyle) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    // Quantize scale factors to avoid floating-point precision issues
+    let superscript_q = (style.superscript_scale * 1000.0).round() as i32;
+    let bass_q = (style.bass_scale * 1000.0).round() as i32;
+    let offset_q = (style.superscript_offset * 1000.0).round() as i32;
+    superscript_q.hash(&mut hasher);
+    bass_q.hash(&mut hasher);
+    offset_q.hash(&mut hasher);
+    std::mem::discriminant(&style.notation).hash(&mut hasher);
+    std::mem::discriminant(&style.symbol_set).hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Cached layout data for a chord symbol.
+///
+/// This stores the full layout result from `layout_harmony()`, enabling
+/// the rendering pass to reuse exact measurements without re-computing.
+#[derive(Debug, Clone)]
+pub struct CachedHarmonyLayout {
+    /// Bounding box of the chord symbol (in local coordinates, origin at baseline-left)
+    pub bounds: Rect,
+    /// Total width of the chord symbol
+    pub width: f64,
+    /// Height (from baseline to top of superscripts)
+    pub height: f64,
+    /// Baseline Y position (relative to local origin)
+    pub baseline: f64,
+    /// Collision shape for accurate collision detection
+    pub shape: Shape,
+}
+
+impl CachedHarmonyLayout {
+    /// Create a new cached layout from layout data.
+    #[must_use]
+    pub fn new(bounds: Rect, width: f64, height: f64, baseline: f64) -> Self {
+        // Create a simple rectangular shape from bounds for collision detection
+        Self {
+            bounds,
+            width,
+            height,
+            baseline,
+            shape: Shape::from_rect(bounds),
+        }
+    }
+
+    /// Create a cached layout with a custom collision shape.
+    #[must_use]
+    pub fn with_shape(bounds: Rect, width: f64, height: f64, baseline: f64, shape: Shape) -> Self {
+        Self {
+            bounds,
+            width,
+            height,
+            baseline,
+            shape,
+        }
+    }
+}
 
 /// Cache for measured element sizes.
 ///
@@ -34,11 +136,23 @@ use crate::engraver::layout::tlayout::HarmonyStyle;
 /// # Cache Keys
 ///
 /// - Chord widths: `(symbol, font_size_quantized)` → width in points
+/// - Harmony layouts: `HarmonyKey` → full `CachedHarmonyLayout` with bounds and shape
 /// - Font size is quantized to 0.1pt precision (multiply by 10, cast to i32)
+///
+/// # Usage Pattern
+///
+/// 1. **Measure pass**: Call `measure_harmony()` to populate the cache
+/// 2. **Layout pass**: Call `get_harmony_layout()` to retrieve cached data
+/// 3. **Render pass**: Use cached bounds for collision-free positioning
 #[derive(Debug, Default)]
 pub struct MeasurementCache {
     /// Chord symbol widths: (symbol, quantized_font_size) → width in points
+    /// This is the legacy cache, kept for backward compatibility
     chord_widths: HashMap<(String, i32), f64>,
+
+    /// Full harmony layout data: HarmonyKey → CachedHarmonyLayout
+    /// This is the new, richer cache that stores bounds and shapes
+    harmony_layouts: HashMap<HarmonyKey, CachedHarmonyLayout>,
 }
 
 impl MeasurementCache {
@@ -46,12 +160,6 @@ impl MeasurementCache {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Quantize font size for use as a hash key.
-    /// Multiplies by 10 to preserve 0.1pt precision.
-    fn quantize_font_size(font_size: f64) -> i32 {
-        (font_size * 10.0).round() as i32
     }
 
     /// Measure a chord symbol's width, returning cached value if available.
@@ -69,7 +177,7 @@ impl MeasurementCache {
         font_size: f64,
         metrics: &TextFontMetrics,
     ) -> f64 {
-        let quantized_size = Self::quantize_font_size(font_size);
+        let quantized_size = quantize_font_size(font_size);
         let key = (symbol.to_string(), quantized_size);
 
         *self
@@ -82,22 +190,105 @@ impl MeasurementCache {
     /// Returns None if not cached.
     #[must_use]
     pub fn get_chord_width(&self, symbol: &str, font_size: f64) -> Option<f64> {
-        let quantized_size = Self::quantize_font_size(font_size);
+        let quantized_size = quantize_font_size(font_size);
         let key = (symbol.to_string(), quantized_size);
         self.chord_widths.get(&key).copied()
     }
 
-    /// Number of cached entries (for debugging/stats).
+    /// Store a harmony layout in the cache.
+    ///
+    /// # Arguments
+    /// * `key` - The harmony key identifying this chord symbol + style
+    /// * `layout` - The cached layout data to store
+    pub fn store_harmony_layout(&mut self, key: HarmonyKey, layout: CachedHarmonyLayout) {
+        self.harmony_layouts.insert(key, layout);
+    }
+
+    /// Get a cached harmony layout.
+    ///
+    /// # Arguments
+    /// * `key` - The harmony key to look up
+    ///
+    /// # Returns
+    /// The cached layout if found, None otherwise
+    #[must_use]
+    pub fn get_harmony_layout(&self, key: &HarmonyKey) -> Option<&CachedHarmonyLayout> {
+        self.harmony_layouts.get(key)
+    }
+
+    /// Check if a harmony layout is cached.
+    #[must_use]
+    pub fn has_harmony_layout(&self, key: &HarmonyKey) -> bool {
+        self.harmony_layouts.contains_key(key)
+    }
+
+    /// Measure and cache a harmony layout, returning cached value if available.
+    ///
+    /// This is the primary entry point for measuring chord symbols during the
+    /// measure pass. It returns a reference to the cached layout.
+    ///
+    /// # Arguments
+    /// * `symbol` - The chord symbol string
+    /// * `style` - The harmony style (provides font size and other parameters)
+    /// * `measure_fn` - A closure that measures the chord and returns layout data
+    ///
+    /// # Returns
+    /// Reference to the cached layout data
+    pub fn measure_harmony<F>(&mut self, symbol: &str, style: &HarmonyStyle, measure_fn: F) -> &CachedHarmonyLayout
+    where
+        F: FnOnce() -> CachedHarmonyLayout,
+    {
+        let key = HarmonyKey::new(symbol, style);
+        self.harmony_layouts.entry(key).or_insert_with(measure_fn)
+    }
+
+    /// Number of cached chord width entries.
     #[must_use]
     pub fn len(&self) -> usize {
         self.chord_widths.len()
     }
 
+    /// Number of cached harmony layout entries.
+    #[must_use]
+    pub fn harmony_layout_count(&self) -> usize {
+        self.harmony_layouts.len()
+    }
+
     /// Whether the cache is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.chord_widths.is_empty()
+        self.chord_widths.is_empty() && self.harmony_layouts.is_empty()
     }
+
+    /// Clear all cached data.
+    ///
+    /// Call this when the layout context changes (e.g., style update).
+    pub fn clear(&mut self) {
+        self.chord_widths.clear();
+        self.harmony_layouts.clear();
+    }
+}
+
+/// Per-chord layout data for collision detection.
+///
+/// This stores the layout information for a single chord symbol,
+/// including its position, bounds, and collision shape.
+#[derive(Debug, Clone)]
+pub struct ChordLayoutData {
+    /// Position of the chord (in local measure coordinates)
+    pub position: kurbo::Point,
+    /// Bounding box of the chord symbol
+    pub bbox: Rect,
+    /// Collision shape for accurate collision detection
+    pub shape: Shape,
+    /// Text width of the chord symbol
+    pub text_width: f64,
+    /// Segment index where this chord is placed
+    pub segment_index: usize,
+    /// Whether this chord is visible (not a placeholder)
+    pub visible: bool,
+    /// Index in the original chord array
+    pub chord_index: usize,
 }
 
 /// Measurement data for a single measure.
@@ -121,6 +312,10 @@ pub struct MeasureMeasurements {
 
     /// Number of visible chords in this measure.
     pub visible_chord_count: usize,
+
+    /// Per-chord layout data for collision detection.
+    /// Indexed by chord position within the measure (only visible chords).
+    pub chord_layouts: Vec<ChordLayoutData>,
 }
 
 impl Default for MeasureMeasurements {
@@ -129,6 +324,7 @@ impl Default for MeasureMeasurements {
             chord_widths: Vec::new(),
             min_width: 0.0,
             visible_chord_count: 0,
+            chord_layouts: Vec::new(),
         }
     }
 }
@@ -208,17 +404,36 @@ pub fn measure_measure(
 
     let font_size = style.root_size;
     let min_gap = font_size * 0.5; // Minimum gap between chord symbols
+    let height = font_size * 1.2; // Approximate height including superscripts
 
-    // Collect visible chord widths
+    // Collect visible chord widths and layout data
     let mut chord_widths = Vec::new();
+    let mut chord_layouts = Vec::new();
     let mut visible_chord_count = 0;
 
-    for chord in &measure.chords {
-        if !is_placeholder(&chord.full_symbol) {
+    for (chord_idx, chord) in measure.chords.iter().enumerate() {
+        let is_visible = !is_placeholder(&chord.full_symbol);
+
+        if is_visible {
             let width = cache.measure_chord_width(&chord.full_symbol, font_size, text_metrics);
             // Apply minimum width floor (same as old code)
             let width = width.max(font_size * 1.5);
             chord_widths.push(width);
+
+            // Create local-coordinate bounding box (origin at baseline-left)
+            let bbox = Rect::new(0.0, -font_size, width, font_size * 0.2);
+            let shape = Shape::from_rect(bbox);
+
+            chord_layouts.push(ChordLayoutData {
+                position: kurbo::Point::ZERO, // Will be set during layout pass
+                bbox,
+                shape,
+                text_width: width,
+                segment_index: chord_idx, // Initial estimate, may be updated by rhythm builder
+                visible: true,
+                chord_index: chord_idx,
+            });
+
             visible_chord_count += 1;
         }
     }
@@ -239,6 +454,7 @@ pub fn measure_measure(
         chord_widths,
         min_width,
         visible_chord_count,
+        chord_layouts,
     }
 }
 
@@ -363,6 +579,7 @@ mod tests {
             chord_widths: vec![50.0],
             min_width: 0.0,
             visible_chord_count: 1,
+            chord_layouts: Vec::new(),
         };
         let weight = compute_measure_weight(&measurements, 4, 0);
         assert!((weight - 1.0).abs() < 0.01); // 4/4 = 1.0 base weight
@@ -372,6 +589,7 @@ mod tests {
             chord_widths: vec![50.0, 50.0],
             min_width: 100.0,
             visible_chord_count: 2,
+            chord_layouts: Vec::new(),
         };
         let weight_triplet = compute_measure_weight(&measurements_triplet, 6, 3);
         assert!(weight_triplet > weight); // Should have triplet bonus
