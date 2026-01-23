@@ -14,8 +14,14 @@ pub enum Command {
     /// Fermata - hold the note/chord longer
     Fermata,
 
-    /// Accent - emphasize the note/chord
+    /// Accent - emphasize the note/chord on the downbeat
+    /// Syntax: '>C (accent after push marker = accent on beat 1)
     Accent,
+
+    /// Accent on the pushed/anticipation beat
+    /// Syntax: >'C (accent before push marker = accent on the push, e.g., beat 4.66)
+    /// This renders the accent at the spillback position in the previous measure
+    AccentOnPush,
 }
 
 impl Command {
@@ -34,7 +40,7 @@ impl Command {
     pub fn symbol(&self) -> &'static str {
         match self {
             Command::Fermata => "𝄐", // Unicode fermata symbol
-            Command::Accent => ">",  // Accent symbol
+            Command::Accent | Command::AccentOnPush => ">", // Accent symbol
         }
     }
 
@@ -43,7 +49,13 @@ impl Command {
         match self {
             Command::Fermata => "fermata",
             Command::Accent => "accent",
+            Command::AccentOnPush => "accent_on_push",
         }
+    }
+
+    /// Check if this is any type of accent command
+    pub fn is_accent(&self) -> bool {
+        matches!(self, Command::Accent | Command::AccentOnPush)
     }
 }
 

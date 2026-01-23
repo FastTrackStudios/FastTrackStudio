@@ -605,6 +605,10 @@ impl ChartLayoutEngine {
             let systems = self.group_measures_into_systems(chart_section.measures(), content_width);
 
             for (sys_idx, measure_indices) in systems.iter().enumerate() {
+                // Reset chord tracking at line breaks (new systems)
+                // so repeated chords are always visible at the start of each line
+                previous_chord_symbol = None;
+
                 let system_height = staff_height + 30.0; // Staff + chord space
 
                 // Check for page overflow (don't include spacing - last system doesn't need it)
@@ -1347,6 +1351,10 @@ impl ChartLayoutEngine {
             let systems = self.group_measures_into_systems(chart_section.measures(), content_width);
 
             for (sys_idx, measure_indices) in systems.iter().enumerate() {
+                // Reset chord tracking at line breaks (new systems)
+                // so repeated chords are always visible at the start of each line
+                previous_chord_symbol = None;
+
                 let staff_y = total_height;
                 let system_height = staff_height + 30.0;
 

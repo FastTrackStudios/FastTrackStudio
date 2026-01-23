@@ -1709,27 +1709,43 @@ impl Chart {
         use crate::chart::commands::Command;
         use crate::chord::Chord;
 
-        // Check for one-time override (prefix !)
-        let (is_override, token_clean) = if token.starts_with('!') {
-            (true, token.strip_prefix('!').unwrap_or(token))
+        // Check for accent prefix (>) BEFORE push - indicates accent on the pushed beat
+        // Supports: >'C (accent on the anticipation beat 4.66)
+        let (accent_before_push, token_after_leading_accent) = if token.starts_with('>') {
+            (true, token.strip_prefix('>').unwrap_or(token))
         } else {
             (false, token)
         };
 
-        // Check for accent shorthand (->)
-        let (has_accent, token_no_accent) = if token_clean.contains("->") {
-            (true, token_clean.replace("->", ""))
+        // Check for one-time override (prefix !)
+        let (is_override, token_clean) = if token_after_leading_accent.starts_with('!') {
+            (true, token_after_leading_accent.strip_prefix('!').unwrap_or(token_after_leading_accent))
         } else {
-            (false, token_clean.to_string())
+            (false, token_after_leading_accent)
         };
-        let token_clean = token_no_accent.as_str();
 
         // Check for push notation (leading apostrophes with optional triplet/tuplet: 'C, ''Em, 'tC, ':5C)
         let (push_modifier, token_after_push) = Self::extract_leading_push_modifiers(token_clean);
 
+        // Check for accent AFTER push prefix - indicates accent on the downbeat
+        // Supports: '>C (accent on beat 1, the downbeat)
+        let (accent_after_push, token_after_post_accent) = if token_after_push.starts_with('>') {
+            (true, token_after_push.strip_prefix('>').unwrap_or(token_after_push))
+        } else {
+            (false, token_after_push)
+        };
+
+        // Check for accent shorthand (->) - legacy syntax, also supported (treated as regular accent)
+        let (has_accent_inline, token_no_accent) = if token_after_post_accent.contains("->") {
+            (true, token_after_post_accent.replace("->", ""))
+        } else {
+            (false, token_after_post_accent.to_string())
+        };
+        let token_after_post_accent = token_no_accent.as_str();
+
         // Check for pull notation (trailing apostrophes with optional triplet/tuplet: C', Em'', C't, C':5)
         let (token_after_pull, pull_modifier) =
-            Self::extract_trailing_pull_modifiers(token_after_push);
+            Self::extract_trailing_pull_modifiers(token_after_post_accent);
 
         // Check for slash chord (e.g., "1/3", "Cmaj7/E", "g/b")
         // But NOT rhythm slashes (e.g., "g//", "C///")
@@ -1834,7 +1850,15 @@ impl Chart {
         }
 
         // Add accent command if present
-        if has_accent {
+        // The order of > and ' determines which beat gets the accent:
+        // - >'C = accent before push = AccentOnPush (accent on the anticipation beat)
+        // - '>C = accent after push = Accent (accent on the downbeat)
+        let has_push = push_modifier.is_present();
+        if accent_before_push && has_push {
+            // Accent comes before push marker (>'C) - accent goes on the pushed/anticipation beat
+            instance = instance.add_command(Command::AccentOnPush);
+        } else if accent_before_push || accent_after_push || has_accent_inline {
+            // Regular accent - on the downbeat (or no push involved)
             instance = instance.add_command(Command::Accent);
         }
 
@@ -1924,6 +1948,245 @@ mod tests {
         assert_eq!(modifier.duration.unwrap(), LilySyntax::Quarter);
         assert!(modifier.duration_dotted);
         assert_eq!(chord, "C");
+    }
+
+    #[test]
+    fn test_accent_prefix_parsing() {
+        use crate::chart::commands::Command;
+        use crate::time::TimeSignature;
+        use crate::sections::SectionType;
+
+        // Test that >C parses as C with an accent command
+        let input = r#"
+Accent Test
+120bpm 4/4 #C
+
+VS
+>C
+"#;
+        let chart = Chart::parse(input).expect("Should parse");
+        let measures: Vec<_> = chart.sections.iter()
+            .filter(|s| !s.section.section_type.is_compact() && s.section.section_type != SectionType::End)
+            .flat_map(|s| s.measures())
+            .collect();
+
+        assert!(!measures.is_empty(), "Should have at least one measure");
+        let chords: Vec<_> = measures[0].chords.iter()
+            .filter(|c| c.full_symbol != "s")
+            .collect();
+        assert!(!chords.is_empty(), "Should have at least one non-space chord");
+
+        let chord = &chords[0];
+        assert_eq!(chord.full_symbol, "C", "Chord symbol should be C");
+        assert!(
+            chord.commands.iter().any(|c| matches!(c, Command::Accent)),
+            "Chord should have accent command"
+        );
+    }
+
+    #[test]
+    fn test_accent_on_push_and_downbeat_parsing() {
+        use crate::chart::commands::Command;
+        use crate::sections::SectionType;
+
+        // Test that >'C parses as AccentOnPush (accent on anticipation)
+        // and '>C parses as Accent (accent on downbeat)
+        // Based on real-world chart: Thriller - Dirty Loops
+        let input = r#"
+Thriller - Dirty Loops, Cory Wong
+Transcribed By: Cody Wright
+120bpm 4/4 #Ab
+/push = triplet
+
+COUNT 2
+
+IN
+r8t >Ab9_8t r8t r8t r8t >F9_8t r2 | s1
+
+VS
+>'F/C . Cm . 'F/C . Cm . 'F/C . Cm . 'F/C . Cm Cm9
+
+CH
+>Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A //// | 'Fm9  ////
+>Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A | r8t >Ab9_8t r8t r8t >'F9_8t r8t r4 Fm/Ab_4 | s1
+
+BR
+'_4F7 | . |  Abmaj9 //// | // r8t Abmaj9_8t r8t Bb_8t r8t Cm7_8t | Cm7 | Ebmaj7/Bb | Am7b5 | Abmaj7 | G7sus4 | 'G7
+
+VS
+'F/C . Cm . 'F/C . Cm . 'F/C . Cm . 'F/C . Cm Cm9
+"#;
+        let chart = Chart::parse(input).expect("Should parse");
+
+        // Find VS section (first one after COUNT and IN)
+        let verse_sections: Vec<_> = chart.sections.iter()
+            .filter(|s| s.section.section_type == SectionType::Verse)
+            .collect();
+        assert!(!verse_sections.is_empty(), "Should have VS sections");
+
+        // First VS measure should have >'F/C which is AccentOnPush
+        let vs_measures = verse_sections[0].measures();
+        let vs_chords: Vec<_> = vs_measures[0].chords.iter()
+            .filter(|c| c.full_symbol != "s")
+            .collect();
+        assert!(!vs_chords.is_empty(), "VS should have non-space chords");
+
+        let vs_chord = vs_chords[0];
+        assert_eq!(vs_chord.full_symbol, "F/C", "VS chord should be F/C");
+        assert!(
+            vs_chord.commands.iter().any(|c| matches!(c, Command::AccentOnPush)),
+            ">'F/C should have AccentOnPush command (accent on anticipation)"
+        );
+        assert!(vs_chord.push_pull.is_some(), "VS chord should have push_pull");
+
+        // Find CH section to test both accent types
+        let chorus_sections: Vec<_> = chart.sections.iter()
+            .filter(|s| s.section.section_type == SectionType::Chorus)
+            .collect();
+        assert!(!chorus_sections.is_empty(), "Should have CH sections");
+
+        // CH measure 7 (second-to-last) has >'F9 which is AccentOnPush
+        // Input: r8t >Ab9_8t r8t r8t >'F9_8t r8t r4 Fm/Ab_4
+        let ch_measures = chorus_sections[0].measures();
+        assert!(ch_measures.len() >= 8, "CH should have at least 8 measures");
+
+        let ch7_chords: Vec<_> = ch_measures[7].chords.iter()
+            .filter(|c| c.full_symbol != "s" && c.full_symbol != "r")
+            .collect();
+
+        // Should have Ab9, F9, and Fm/Ab
+        assert!(ch7_chords.len() >= 2, "CH measure 7 should have at least 2 chords");
+
+        // Ab9 has regular accent (>Ab9)
+        let ab9_chord = ch7_chords.iter().find(|c| c.full_symbol == "Ab9");
+        assert!(ab9_chord.is_some(), "Should have Ab9 chord");
+        let ab9 = ab9_chord.unwrap();
+        assert!(
+            ab9.commands.iter().any(|c| matches!(c, Command::Accent)),
+            ">Ab9 should have regular Accent (no push)"
+        );
+
+        // F9 has AccentOnPush (>'F9 with push)
+        let f9_chord = ch7_chords.iter().find(|c| c.full_symbol == "F9");
+        assert!(f9_chord.is_some(), "Should have F9 chord");
+        let f9 = f9_chord.unwrap();
+        assert!(
+            f9.commands.iter().any(|c| matches!(c, Command::AccentOnPush)),
+            ">'F9 should have AccentOnPush (accent before push marker)"
+        );
+        assert!(f9.push_pull.is_some(), "F9 should have push_pull");
+    }
+
+    #[test]
+    fn test_accent_not_in_chord_memory() {
+        use crate::chart::commands::Command;
+        use crate::sections::SectionType;
+
+        // Accents should NOT be contributed to chord memory.
+        // If we write >Cmaj7 in VS, then just "c" in CH (different section type),
+        // the recalled chord should NOT have an accent.
+        // Using different section types to test global chord memory (not templates).
+        let input = r#"
+Accent Memory Test
+120bpm 4/4 #C
+
+VS 1
+>Cmaj7
+
+CH 1
+c D E F
+"#;
+        let chart = Chart::parse(input).expect("Should parse");
+
+        // Get the verse and chorus sections (skip CountIn and End)
+        let verse_sections: Vec<_> = chart.sections.iter()
+            .filter(|s| s.section.section_type == SectionType::Verse)
+            .collect();
+        let chorus_sections: Vec<_> = chart.sections.iter()
+            .filter(|s| s.section.section_type == SectionType::Chorus)
+            .collect();
+
+        eprintln!("All sections: {:?}", chart.sections.iter().map(|s| format!("{:?}", s.section.section_type)).collect::<Vec<_>>());
+        eprintln!("Verse sections: {}", verse_sections.len());
+        eprintln!("Chorus sections: {}", chorus_sections.len());
+
+        assert!(!verse_sections.is_empty(), "Should have verse sections");
+        assert!(!chorus_sections.is_empty(), "Should have chorus sections");
+
+        // VS1: >Cmaj7 should have accent
+        let vs_measures = verse_sections[0].measures();
+        assert!(!vs_measures.is_empty(), "VS1 should have measures");
+        let vs1_chords: Vec<_> = vs_measures[0].chords.iter()
+            .filter(|c| c.full_symbol != "s")
+            .collect();
+        assert!(!vs1_chords.is_empty(), "VS1 should have non-space chords");
+        let vs1_chord = vs1_chords[0];
+        assert_eq!(vs1_chord.full_symbol, "Cmaj7");
+        assert!(
+            vs1_chord.commands.iter().any(|c| matches!(c, Command::Accent)),
+            "VS1 chord should have accent"
+        );
+
+        // CH1: c (recalled from global memory) should NOT have accent
+        let ch_measures = chorus_sections[0].measures();
+        assert!(!ch_measures.is_empty(), "CH1 should have measures");
+        let ch_chords: Vec<_> = ch_measures[0].chords.iter()
+            .filter(|c| c.full_symbol != "s")
+            .collect();
+        assert!(!ch_chords.is_empty(), "CH1 should have non-space chords");
+        let ch_chord = ch_chords[0];
+        // The chord symbol should be recalled from memory (Cmaj7)
+        assert_eq!(ch_chord.full_symbol, "Cmaj7", "Should recall Cmaj7 from global memory");
+        // But it should NOT have the accent command
+        assert!(
+            !ch_chord.commands.iter().any(|c| matches!(c, Command::Accent)),
+            "CH1 recalled chord should NOT have accent - accents don't go in chord memory. Commands: {:?}",
+            ch_chord.commands
+        );
+    }
+
+    #[test]
+    fn test_accent_preserved_in_section_template() {
+        use crate::chart::commands::Command;
+        use crate::sections::SectionType;
+
+        // Accents CAN be committed to section memory (templates).
+        // If we define VS with >C, then recall VS, the accent should be preserved.
+        let input = r#"
+Accent Template Test
+120bpm 4/4 #C
+
+VS
+>C D E F
+
+VS
+"#;
+        let chart = Chart::parse(input).expect("Should parse");
+        let verse_sections: Vec<_> = chart.sections.iter()
+            .filter(|s| s.section.section_type == SectionType::Verse)
+            .collect();
+
+        assert_eq!(verse_sections.len(), 2, "Should have 2 verse sections");
+
+        // VS1 (template definition): >C should have accent
+        let vs1_chords: Vec<_> = verse_sections[0].measures()[0].chords.iter()
+            .filter(|c| c.full_symbol != "s")
+            .collect();
+        assert!(!vs1_chords.is_empty());
+        assert!(
+            vs1_chords[0].commands.iter().any(|c| matches!(c, Command::Accent)),
+            "VS1 first chord should have accent"
+        );
+
+        // VS2 (recalled from template): should also have accent on first chord
+        let vs2_chords: Vec<_> = verse_sections[1].measures()[0].chords.iter()
+            .filter(|c| c.full_symbol != "s")
+            .collect();
+        assert!(!vs2_chords.is_empty());
+        assert!(
+            vs2_chords[0].commands.iter().any(|c| matches!(c, Command::Accent)),
+            "VS2 recalled chord should have accent - templates preserve commands"
+        );
     }
 }
 

@@ -25,6 +25,7 @@
 use kurbo::{Affine, Rect, Vec2};
 use vello::peniko::Color;
 
+use crate::chart::commands::Command;
 use crate::chart::types::{ChordInstance, Measure, RhythmElement};
 use crate::chord::ChordRhythm;
 use crate::engraver::layout::context::LayoutContext;
@@ -46,6 +47,11 @@ fn push_marker_color() -> Color {
 /// Create pull marker color (blue to distinguish from push)
 fn pull_marker_color() -> Color {
     Color::from_rgba8(0x00, 0x00, 0xCC, 0xFF)
+}
+
+/// Create accent marker color (red for visibility)
+fn accent_marker_color() -> Color {
+    Color::from_rgba8(0xCC, 0x00, 0x00, 0xFF)
 }
 
 /// Context for rendering chord symbols in a measure.
@@ -270,6 +276,61 @@ fn create_push_marker(
 
     let mut node = SceneNode::leaf(SemanticId::new(ElementType::Articulation, id), vec![paint]);
     node.set_element_type("push_marker");
+    node
+}
+
+/// Create an accent marker node for accented chords.
+///
+/// Renders the SMuFL accent articulation glyph (>) above the rhythm slash notehead.
+/// Following MuseScore's articulation positioning:
+/// - Accent placed just above the top staff line
+/// - Minimum distance of 0.4 spatiums from the notehead
+/// - Horizontally centered on the rhythm slash (segment position)
+///
+/// # Arguments
+/// * `segment_x` - X position of the rhythm segment (slash position) for horizontal centering
+/// * `chord_y` - Y position of chord symbol baseline (used to derive staff position)
+/// * `spatium` - Staff space for sizing and positioning
+/// * `id` - Unique ID for the node
+fn create_accent_marker(
+    segment_x: f64,
+    chord_y: f64,
+    spatium: f64,
+    id: u64,
+) -> SceneNode {
+    use super::constants::{ARTICULATION_MAG, ARTICULATION_MIN_DISTANCE_SPATIUMS, CHORD_Y_OFFSET};
+
+    // SMuFL articAccentAbove: U+E4A0
+    let accent_glyph = '\u{E4A0}';
+    let color = accent_marker_color();
+
+    // Size relative to spatium (with articulation magnification factor)
+    // Use 1.2x spatium for a more compact accent
+    let font_size = spatium * 1.2 * ARTICULATION_MAG;
+
+    // Calculate staff Y position from chord_y
+    // chord_y = staff_y + CHORD_Y_OFFSET (where CHORD_Y_OFFSET is -8.0)
+    // So staff_y = chord_y - CHORD_Y_OFFSET = chord_y + 8.0
+    let staff_y = chord_y - CHORD_Y_OFFSET;
+
+    // Position accent just above the top staff line
+    // Staff top line is at staff_y, we want the accent above that
+    // Use minimal distance for a tighter appearance
+    let accent_y = staff_y - ARTICULATION_MIN_DISTANCE_SPATIUMS * spatium;
+
+    // Horizontally center on the rhythm slash (segment position)
+    // The segment_x is the left edge of the segment, add half a spatium to center on the slash
+    let accent_x = segment_x + spatium * 0.5;
+
+    let paint = PaintCommand::glyph(
+        accent_glyph,
+        kurbo::Point::new(accent_x, accent_y),
+        font_size,
+        color,
+    );
+
+    let mut node = SceneNode::leaf(SemanticId::new(ElementType::Articulation, id), vec![paint]);
+    node.set_element_type("accent");
     node
 }
 
@@ -544,9 +605,22 @@ pub fn render_chord_symbols(
 
         let chord_x = ctx.measure_x + segment_x;
 
+        // Check if chord has regular accent (not AccentOnPush - that renders on spillback)
+        // Only Command::Accent renders here; AccentOnPush renders on the spillback chord
+        let has_regular_accent = chord
+            .commands
+            .iter()
+            .any(|c| matches!(c, Command::Accent));
+        let chord_y_offset = if has_regular_accent {
+            // Move chord up by 0.5 spatium to make room for accent below
+            -ctx.spatium * 0.5
+        } else {
+            0.0
+        };
+
         // Create harmony params
         let mut params = super::chord_layout::chord_to_harmony_params(chord, ctx.harmony_style);
-        params.position = kurbo::Point::new(chord_x, ctx.chord_y);
+        params.position = kurbo::Point::new(chord_x, ctx.chord_y + chord_y_offset);
         params.id = id_counter;
         id_counter += 1;
 
@@ -600,6 +674,19 @@ pub fn render_chord_symbols(
                 id_counter += 1;
                 nodes.push(marker_node);
             }
+        }
+
+        // Add accent marker for regular accents (rendered in red above the chord)
+        // AccentOnPush accents are rendered on the spillback chord instead
+        if has_regular_accent {
+            let accent_node = create_accent_marker(
+                chord_x,
+                ctx.chord_y,
+                ctx.spatium,
+                id_counter,
+            );
+            id_counter += 1;
+            nodes.push(accent_node);
         }
     }
 
@@ -695,9 +782,16 @@ pub fn render_spillback_chords(
 
         let chord_x = ctx.measure_x + segment_x;
 
+        // Offset chord Y if this spillback has an accent (AccentOnPush)
+        let chord_y_offset = if spillback.has_accent {
+            -ctx.spatium * 0.5
+        } else {
+            0.0
+        };
+
         let mut params = parse_chord(&spillback.chord_symbol);
         params.style = ctx.harmony_style.clone();
-        params.position = kurbo::Point::new(chord_x, ctx.chord_y);
+        params.position = kurbo::Point::new(chord_x, ctx.chord_y + chord_y_offset);
         params.id = id_counter;
         id_counter += 1;
 
@@ -719,6 +813,19 @@ pub fn render_spillback_chords(
         last_chord_symbol = Some(spillback.chord_symbol.clone());
 
         nodes.push(spillback_node);
+
+        // Render accent if this spillback chord has AccentOnPush (>' syntax)
+        // The accent appears on the pushed beat (previous measure)
+        if spillback.has_accent {
+            let accent_node = create_accent_marker(
+                chord_x,
+                ctx.chord_y,
+                ctx.spatium,
+                id_counter,
+            );
+            id_counter += 1;
+            nodes.push(accent_node);
+        }
     }
 
     ChordRenderResult {

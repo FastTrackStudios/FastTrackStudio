@@ -887,7 +887,9 @@ impl Chart {
                 super::commands::Command::Fermata => {
                     output.push_str(" /fermata");
                 }
-                super::commands::Command::Accent => {
+                super::commands::Command::Accent | super::commands::Command::AccentOnPush => {
+                    // Both accent types output the same inline syntax
+                    // The distinction is in parsing order (>'C vs '>C)
                     output.push_str("->");
                 }
             }

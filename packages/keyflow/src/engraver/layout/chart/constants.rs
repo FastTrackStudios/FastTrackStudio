@@ -67,6 +67,26 @@ pub const CHORD_Y_OFFSET: f64 = -8.0;
 pub const STAFF_MIDDLE_Y_SPATIUMS: f64 = 2.0;
 
 // ============================================================================
+// Articulation Layout (following MuseScore defaults)
+// ============================================================================
+
+/// Minimum distance from notehead to articulation (in spatiums).
+/// From MuseScore: articulationMinDistance = 0.4sp
+pub const ARTICULATION_MIN_DISTANCE_SPATIUMS: f64 = 0.4;
+
+/// Articulation scale factor (1.0 = normal size).
+/// From MuseScore: articulationMag = 1.0
+pub const ARTICULATION_MAG: f64 = 1.0;
+
+/// Accent glyph width in spatiums (from Bravura metadata).
+/// The bounding box width of articAccentAbove is 1.356 spatiums.
+pub const ACCENT_WIDTH_SPATIUMS: f64 = 1.356;
+
+/// Accent glyph height in spatiums (from Bravura metadata).
+/// The bounding box height of articAccentAbove is approximately 0.5 spatiums.
+pub const ACCENT_HEIGHT_SPATIUMS: f64 = 0.5;
+
+// ============================================================================
 // System Prefix (Clef and Time Signature)
 // ============================================================================
 

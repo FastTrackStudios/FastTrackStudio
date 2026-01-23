@@ -26,6 +26,7 @@ use std::collections::HashMap;
 
 use crate::chord::PushPullBase;
 
+use super::commands::Command;
 use super::types::{ChordInstance, Measure};
 
 // ============================================================================
@@ -47,6 +48,10 @@ pub struct Spillback {
     pub push_base: PushPullBase,
     /// Push level (1 = eighth, 2 = sixteenth triplet, etc.)
     pub push_level: u8,
+    /// Whether the chord has an accent on the pushed beat (AccentOnPush command).
+    /// When true, the accent symbol should be rendered at the spillback position.
+    /// This is set when the syntax is `>'C` (accent before push marker).
+    pub has_accent: bool,
 }
 
 /// Describes a single beat's structure in a resolved rhythm.
@@ -169,11 +174,17 @@ pub fn detect_section_start_spillback(section_measures: &[Measure]) -> Option<Sp
 
         if let Some((is_push, amount)) = &chord.push_pull {
             if *is_push {
+                // Check if this chord has AccentOnPush (>' syntax - accent before push)
+                let has_accent = chord
+                    .commands
+                    .iter()
+                    .any(|c| matches!(c, Command::AccentOnPush));
                 return Some(Spillback {
                     chord_symbol: chord.full_symbol.clone(),
                     beat_position: 3, // Last beat of 4/4, will be adjusted based on time sig
                     push_base: amount.base.clone(),
                     push_level: amount.level,
+                    has_accent,
                 });
             }
         }
@@ -208,11 +219,17 @@ pub fn detect_push_spillbacks(section_measures: &[Measure]) -> HashMap<usize, Ve
                             .unwrap_or((4, 4));
                         let last_beat = (prev_time_sig.0 as usize).saturating_sub(1);
 
+                        // Check if this chord has AccentOnPush (>' syntax - accent before push)
+                        let has_accent = first_chord
+                            .commands
+                            .iter()
+                            .any(|c| matches!(c, Command::AccentOnPush));
                         let spillback = Spillback {
                             chord_symbol: first_chord.full_symbol.clone(),
                             beat_position: last_beat,
                             push_base: amount.base.clone(),
                             push_level: amount.level,
+                            has_accent,
                         };
 
                         result.entry(prev_measure_idx).or_default().push(spillback);

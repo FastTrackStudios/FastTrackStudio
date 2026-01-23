@@ -248,6 +248,41 @@ opt-level = 2
 # WGPU is another large dependency
 opt-level = 2
 
+[profile.dev.package.parley]
+# Text layout generates many locals
+opt-level = 2
+
+[profile.dev.package.daw]
+# DAW module optimization
+opt-level = 1
+
+[profile.dev.package.facet]
+# Reflection framework optimization
+opt-level = 2
+
+[profile.dev.package.roam]
+# RPC framework optimization
+opt-level = 2
+
+# =============================================================================
+# Release profile for WASM (production) - maximum optimization
+# =============================================================================
+[profile.release]
+lto = true
+opt-level = "s"  # Optimize for size (alternatives: "z" for smallest, 3 for speed)
+codegen-units = 1
+strip = true  # Strip symbols for smaller binary
+
+# Custom profile for WASM development - balances speed with size
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 2  # Good optimization without long compile times
+debug = false  # Disable debug info to reduce WASM size
+
+[profile.wasm-dev.package."*"]
+# Apply opt-level 2 to all dependencies for WASM dev
+opt-level = 2
+
 [workspace.lints.clippy]
 # Core lints - treat as errors
 all = { level = "deny", priority = -1 }
