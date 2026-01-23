@@ -2175,8 +2175,12 @@ impl ChartLayoutEngine {
         };
 
         // Determine the rhythm source
-        // Use SlashNotation when there are triplet pushes (spillbacks OR internal) AND
-        // push_alters_rhythm is enabled, since SlashNotation properly handles triplet rhythm generation.
+        // PRIORITY ORDER:
+        // 1. ExplicitRhythm - when measure has explicit notation (r8t, _8t, etc.), always use it
+        //    even if there are triplet pushes (the explicit notation already encodes the rhythm)
+        // 2. SlashNotation with triplet rhythm - when triplet pushes need to alter the rhythm
+        // 3. MelodyData - when melody dictates the rhythm
+        // 4. SlashNotation (default) - simple slash notation
         let needs_triplet_rhythm =
             (has_triplet_spillbacks || has_internal_triplet_push) && self.config.push_alters_rhythm;
 
@@ -2189,13 +2193,15 @@ impl ChartLayoutEngine {
             has_explicit_chord_rhythm
         );
 
-        let source = if needs_triplet_rhythm {
+        let source = if has_explicit_chord_rhythm {
+            // Explicit rhythm takes priority - it already encodes the full rhythm including rests
+            RhythmSource::ExplicitRhythm(&measure.rhythm_elements)
+        } else if needs_triplet_rhythm {
+            // Use SlashNotation with triplet generation for measures without explicit rhythm
             RhythmSource::SlashNotation {
                 chords: &measure.chords,
                 spillbacks,
             }
-        } else if has_explicit_chord_rhythm {
-            RhythmSource::ExplicitRhythm(&measure.rhythm_elements)
         } else if let Some(data) = melody_data {
             RhythmSource::MelodyData(data)
         } else {

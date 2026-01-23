@@ -27,8 +27,11 @@ Transcribed By: Cody Wright
 
 COUNT 2
 
-IN
+HITS
 r8t >Ab9_8t r8t r8t r8t >F9_8t r2 | s1
+
+IN
+s1 * 4
 
 VS
 >'F/C . Cm . 'F/C . Cm . 'F/C . Cm . 'F/C . Cm Cm9
