@@ -227,28 +227,28 @@ impl Chart {
         }
 
         // If there are more words, they must be numbers, measure expressions,
-        // or a comma (which indicates inline chords follow)
+        // or a comma/colon (which indicates inline chords follow)
         // A title like "Chord Memory Test" would have non-numeric words after the first
         for word in &words[1..] {
-            // Allow numbers (possibly with trailing comma for inline chords)
-            let word_clean = word.trim_end_matches(',');
+            // Allow numbers (possibly with trailing comma/colon for inline chords)
+            let word_clean = word.trim_end_matches(&[',', ':'][..]);
             if word_clean.parse::<u32>().is_ok() {
-                // If it ends with comma, this is the last section marker word
+                // If it ends with comma or colon, this is the last section marker word
                 // Everything after is inline chords
-                if word.ends_with(',') {
+                if word.ends_with(',') || word.ends_with(':') {
                     return true;
                 }
                 continue;
             }
             // Allow measure expressions like "8+1", "4x2", "4-1", "+2", "-1"
             if Self::looks_like_measure_expression(word_clean) {
-                if word.ends_with(',') {
+                if word.ends_with(',') || word.ends_with(':') {
                     return true;
                 }
                 continue;
             }
-            // A standalone comma means inline chords follow
-            if *word == "," {
+            // A standalone comma or colon means inline chords follow
+            if *word == "," || *word == ":" {
                 return true;
             }
             // Any other word means this is not a section marker

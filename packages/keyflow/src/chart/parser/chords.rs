@@ -359,8 +359,9 @@ impl Chart {
             let chord_count = tokens
                 .iter()
                 .filter(|t| {
-                    // Count as chord if it's not a command, cue, dot repeat, or other special token
-                    !t.starts_with('/') && !t.starts_with('@') && !t.starts_with('"') && **t != "." // Don't count dot repeats
+                    // Count as chord if it's not a command, cue, or other special token
+                    // Dot repeats ARE counted - they occupy time in the measure
+                    !t.starts_with('/') && !t.starts_with('@') && !t.starts_with('"')
                 })
                 .count();
 
@@ -390,13 +391,10 @@ impl Chart {
                 beats_per_measure
             };
 
-            // Only apply auto-duration if:
-            // 1. There are chords that need it
-            // 2. This is NOT the last segment (after the final |)
-            // The last segment should have each chord take a full measure,
-            // not share a single measure.
-            let is_last_segment = i == segments.len() - 1;
-            let should_apply_auto_duration = chords_needing_duration > 0 && !is_last_segment;
+            // Apply auto-duration if there are chords that need it.
+            // For multi-chord segments (including the last one), chords should share
+            // the measure evenly. A single chord in the last segment takes a full measure.
+            let should_apply_auto_duration = chords_needing_duration > 0;
 
             // Convert beats to LilySyntax duration
             // beats_per_measure = 4 in 4/4, so:

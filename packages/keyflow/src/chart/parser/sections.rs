@@ -31,8 +31,19 @@ impl Chart {
                 continue;
             }
 
-            // Split potential inline content by comma
-            let (marker_part, inline_content) = if let Some(comma_idx) = line.find(',') {
+            // Split potential inline content by colon or comma
+            // Colon syntax: "VS 8: Cm | Fm |" - section with inline measures
+            // Comma syntax: "VS 8, Cm | Fm |" - alternative syntax
+            let (marker_part, inline_content) = if let Some(colon_idx) = line.find(':') {
+                let (marker, content) = line.split_at(colon_idx);
+                let content = content[1..].trim();
+                // Only treat as inline content if there's actual content after colon
+                if content.is_empty() {
+                    (line.trim(), None)
+                } else {
+                    (marker.trim(), Some(content))
+                }
+            } else if let Some(comma_idx) = line.find(',') {
                 let (marker, content) = line.split_at(comma_idx);
                 (marker.trim(), Some(content[1..].trim()))
             } else {
@@ -94,8 +105,16 @@ impl Chart {
                     } else {
                         // Has inline content - clear section memory and parse
                         self.chord_memory.clear_section(&section_type);
-                        let parsed_measures =
+                        let mut parsed_measures =
                             self.parse_section_measures(&[content], &section_type, measure_count)?;
+
+                        // Pad with empty measures if fewer than expected count
+                        // This ensures "Count 2: | |" creates 2 empty measures
+                        if let Some(count) = measure_count {
+                            while parsed_measures.len() < count {
+                                parsed_measures.push(Measure::new());
+                            }
+                        }
 
                         // Save as template if not Intro/Outro/Pre/Post
                         if !matches!(

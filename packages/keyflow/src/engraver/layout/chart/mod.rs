@@ -479,6 +479,7 @@ impl ChartLayoutEngine {
                 .unwrap_or(0)
         };
 
+
         // Calculate count-in duration in ticks and seconds
         // Count-in should have NEGATIVE time values so that:
         // - Count-in measures have negative time (before SONGSTART)
@@ -556,6 +557,16 @@ impl ChartLayoutEngine {
 
             // Detect push spillbacks (chords from next measure that push back)
             let mut push_spillback_map = detect_push_spillbacks(chart_section.measures());
+
+            #[cfg(debug_assertions)]
+            if !push_spillback_map.is_empty() {
+                eprintln!(
+                    "[spillback-detection] Section {} detected {} spillbacks: {:?}",
+                    chart_section.section.section_type.full_name(),
+                    push_spillback_map.values().map(|v| v.len()).sum::<usize>(),
+                    push_spillback_map.iter().map(|(k, v)| (k, v.iter().map(|s| (&s.chord_symbol, &s.push_base)).collect::<Vec<_>>())).collect::<Vec<_>>()
+                );
+            }
 
             // Check for cross-section spillback: if the NEXT section starts with a pushed chord,
             // it spills back to THIS section's last measure
@@ -679,8 +690,9 @@ impl ChartLayoutEngine {
                 let num_measures = measure_indices.len();
                 let max_measures = self.config.max_measures_per_system;
 
-                // Add count-in measures on the first system of the first section only
-                let num_count_in = if section_idx == 0 && sys_idx == 0 && !count_in_rendered {
+                // Add count-in measures on the first system of the first rendered section only
+                // Note: section_idx may not be 0 if CountIn section is skipped
+                let num_count_in = if sys_idx == 0 && !count_in_rendered {
                     count_in_rendered = true;
                     count_in_measures
                 } else {
@@ -1298,6 +1310,16 @@ impl ChartLayoutEngine {
             // Detect push spillbacks (chords from next measure that push back)
             let mut push_spillback_map = detect_push_spillbacks(chart_section.measures());
 
+            #[cfg(debug_assertions)]
+            if !push_spillback_map.is_empty() {
+                eprintln!(
+                    "[spillback-detection] Section {} detected {} spillbacks: {:?}",
+                    chart_section.section.section_type.full_name(),
+                    push_spillback_map.values().map(|v| v.len()).sum::<usize>(),
+                    push_spillback_map.iter().map(|(k, v)| (k, v.iter().map(|s| (&s.chord_symbol, &s.push_base)).collect::<Vec<_>>())).collect::<Vec<_>>()
+                );
+            }
+
             // Check for cross-section spillback: if the NEXT section starts with a pushed chord,
             // it spills back to THIS section's last measure
             let next_non_compact_section = chart.sections.iter().skip(section_idx + 1).find(|s| {
@@ -1354,8 +1376,9 @@ impl ChartLayoutEngine {
                 let num_measures = measure_indices.len();
                 let max_measures = self.config.max_measures_per_system;
 
-                // Add count-in measures on the first system of the first section only
-                let num_count_in = if section_idx == 0 && sys_idx == 0 && !count_in_rendered {
+                // Add count-in measures on the first system of the first rendered section only
+                // Note: section_idx may not be 0 if CountIn section is skipped
+                let num_count_in = if sys_idx == 0 && !count_in_rendered {
                     count_in_rendered = true;
                     count_in_measures
                 } else {
@@ -2099,8 +2122,22 @@ impl ChartLayoutEngine {
         // Check if the measure has explicit chord rhythms (Lily, Rest, Space notation)
         let has_explicit_chord_rhythm = rhythm_builder::measure_has_explicit_chord_rhythm(measure);
 
+        // Check if there are triplet spillbacks that need rhythmic processing
+        let has_triplet_spillbacks = spillbacks.map_or(false, |spills| {
+            spills
+                .iter()
+                .any(|s| s.push_base == crate::chord::PushPullBase::Triplet)
+        });
+
         // Determine the rhythm source
-        let source = if has_explicit_chord_rhythm {
+        // Use SlashNotation when there are triplet spillbacks AND push_alters_rhythm is enabled,
+        // since SlashNotation properly handles spillback-aware triplet rhythm generation.
+        let source = if has_triplet_spillbacks && self.config.push_alters_rhythm {
+            RhythmSource::SlashNotation {
+                chords: &measure.chords,
+                spillbacks,
+            }
+        } else if has_explicit_chord_rhythm {
             RhythmSource::ExplicitRhythm(&measure.rhythm_elements)
         } else if let Some(data) = melody_data {
             RhythmSource::MelodyData(data)
@@ -2115,6 +2152,7 @@ impl ChartLayoutEngine {
             time_signature,
             use_stems: self.config.use_stems,
             auto_rhythm_slashes: false, // Applied separately below for finer control
+            push_alters_rhythm: self.config.push_alters_rhythm,
         };
 
         // Build rhythm using the unified pipeline

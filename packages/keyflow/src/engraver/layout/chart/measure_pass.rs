@@ -493,6 +493,7 @@ pub fn measure_measure_with_config(
         time_signature: (measure.time_signature.0, 4),
         use_stems,
         auto_rhythm_slashes: false,
+        push_alters_rhythm: true, // Default to altering rhythm for triplet pushes
     };
 
     let rhythm_result = rhythm_builder::build_rhythm(source, &config);

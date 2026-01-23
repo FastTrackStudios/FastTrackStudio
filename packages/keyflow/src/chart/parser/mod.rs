@@ -470,9 +470,9 @@ cmaj7 dm7 x^
     }
 
     #[test]
-    fn test_dot_repeat_inherits_duration() {
-        // Dot repeat (.) should inherit the source chord's duration
-        // "F/C ." should be 2 full measures, not 2 beats in one measure
+    fn test_dot_repeat_with_bar_lines() {
+        // With explicit bar lines, each segment is ONE measure
+        // "F/C . | Cm ." should be 2 measures, each with 2 half-note chords
         let input = r#"
 Dot Repeat Test
 120bpm 4/4 #C
@@ -487,11 +487,66 @@ F/C . | Cm .
         let measures = section.measures();
         let time_sig = chart.time_signature.unwrap();
 
-        // Should have 4 measures: F/C, F/C repeat, Cm, Cm repeat
+        // Should have 2 measures: (F/C, F/C repeat), (Cm, Cm repeat)
         assert_eq!(
             measures.len(),
-            4,
-            "Expected 4 measures (F/C, ., Cm, .), got {}. Chords per measure: {:?}",
+            2,
+            "Expected 2 measures (F/C + dot, Cm + dot), got {}. Chords per measure: {:?}",
+            measures.len(),
+            measures.iter().map(|m| m.chords.len()).collect::<Vec<_>>()
+        );
+
+        // Each measure should have 2 chords of 2 beats each
+        for (i, measure) in measures.iter().enumerate() {
+            assert_eq!(
+                measure.chords.len(),
+                2,
+                "Measure {} should have 2 chords, got {}",
+                i,
+                measure.chords.len()
+            );
+            for (j, chord) in measure.chords.iter().enumerate() {
+                let beats = chord.duration.to_beats(time_sig);
+                assert!(
+                    (beats - 2.0).abs() < 0.001,
+                    "Measure {} chord {} should be 2 beats, got {}",
+                    i,
+                    j,
+                    beats
+                );
+            }
+        }
+
+        // Verify chord symbols
+        assert_eq!(measures[0].chords[0].full_symbol, "F/C");
+        assert_eq!(measures[0].chords[1].full_symbol, "F/C"); // repeat
+        assert_eq!(measures[1].chords[0].full_symbol, "Cm");
+        assert_eq!(measures[1].chords[1].full_symbol, "Cm"); // repeat
+    }
+
+    #[test]
+    fn test_dot_repeat_without_bar_lines() {
+        // Without explicit bar lines, each chord/dot takes a full measure
+        // "F/C ." should be 2 measures, each with 1 whole-note chord
+        let input = r#"
+Dot Repeat Test
+120bpm 4/4 #C
+
+VS
+F/C .
+"#;
+
+        let chart = Chart::parse(input).expect("Failed to parse chart");
+
+        let section = &chart.sections[0];
+        let measures = section.measures();
+        let time_sig = chart.time_signature.unwrap();
+
+        // Should have 2 measures: F/C, F/C repeat
+        assert_eq!(
+            measures.len(),
+            2,
+            "Expected 2 measures (F/C, then dot repeat), got {}. Chords per measure: {:?}",
             measures.len(),
             measures.iter().map(|m| m.chords.len()).collect::<Vec<_>>()
         );
@@ -517,8 +572,6 @@ F/C . | Cm .
         // Verify chord symbols
         assert_eq!(measures[0].chords[0].full_symbol, "F/C");
         assert_eq!(measures[1].chords[0].full_symbol, "F/C"); // repeat
-        assert_eq!(measures[2].chords[0].full_symbol, "Cm");
-        assert_eq!(measures[3].chords[0].full_symbol, "Cm"); // repeat
     }
 
     #[test]

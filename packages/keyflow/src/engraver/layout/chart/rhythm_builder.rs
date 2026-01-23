@@ -54,6 +54,10 @@ pub struct RhythmBuildConfig {
     pub use_stems: bool,
     /// Whether to expand whole/half notes to quarter slashes for master rhythm charts.
     pub auto_rhythm_slashes: bool,
+    /// Whether push/pull notation creates rhythmic subdivisions (triplet groups).
+    /// When true, triplet pushes generate quarter+eighth triplet groups.
+    /// When false, pushed chords show apostrophe markers instead.
+    pub push_alters_rhythm: bool,
 }
 
 impl Default for RhythmBuildConfig {
@@ -62,6 +66,7 @@ impl Default for RhythmBuildConfig {
             time_signature: (4, 4),
             use_stems: false,
             auto_rhythm_slashes: false,
+            push_alters_rhythm: true,
         }
     }
 }
@@ -175,9 +180,23 @@ pub fn build_rhythm(source: RhythmSource<'_>, config: &RhythmBuildConfig) -> Rhy
 /// Extract base rhythm from the given source.
 fn extract_base_rhythm(source: RhythmSource<'_>, config: &RhythmBuildConfig) -> RhythmBuildResult {
     match source {
-        RhythmSource::ExplicitRhythm(elements) => extract_from_explicit(elements),
-        RhythmSource::MelodyData(data) => extract_from_melody(data),
+        RhythmSource::ExplicitRhythm(elements) => {
+            #[cfg(debug_assertions)]
+            eprintln!("[rhythm-source] Using ExplicitRhythm ({} elements)", elements.len());
+            extract_from_explicit(elements)
+        }
+        RhythmSource::MelodyData(data) => {
+            #[cfg(debug_assertions)]
+            eprintln!("[rhythm-source] Using MelodyData");
+            extract_from_melody(data)
+        }
         RhythmSource::SlashNotation { chords, spillbacks } => {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[rhythm-source] Using SlashNotation ({} chords, {} spillbacks)",
+                chords.len(),
+                spillbacks.map_or(0, |s| s.len())
+            );
             extract_from_slash(chords, spillbacks, config)
         }
     }
@@ -320,12 +339,31 @@ fn extract_from_slash(
 
     // Check spillbacks from next measure
     if let Some(spills) = spillbacks {
+        #[cfg(debug_assertions)]
+        if !spills.is_empty() {
+            eprintln!(
+                "[rhythm-builder] Processing {} spillbacks, num_beats={}, push_alters_rhythm={}",
+                spills.len(),
+                num_beats,
+                config.push_alters_rhythm
+            );
+        }
         for spillback in spills {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[rhythm-builder] spillback: chord='{}' beat={} base={:?} level={}",
+                spillback.chord_symbol,
+                spillback.beat_position,
+                spillback.push_base,
+                spillback.push_level
+            );
             if spillback.push_base == PushPullBase::Triplet && spillback.push_level == 1 {
                 let target_beat = spillback.beat_position;
                 if target_beat < num_beats && !beats_with_triplets[target_beat].0 {
                     // Mark as triplet but no internal chord (it's from next measure)
                     beats_with_triplets[target_beat] = (true, None);
+                    #[cfg(debug_assertions)]
+                    eprintln!("[rhythm-builder] Marked beat {} as triplet from spillback", target_beat);
                 }
             }
         }
@@ -336,7 +374,7 @@ fn extract_from_slash(
     for (beat_idx, (has_triplet, pushed_chord_idx)) in
         beats_with_triplets.iter().enumerate().take(num_beats)
     {
-        if *has_triplet && config.use_stems {
+        if *has_triplet && config.push_alters_rhythm {
             // Triplet beat: [TripletQuarter, TripletEighth]
             let start_idx = rhythm_index;
             result
@@ -423,7 +461,8 @@ fn fill_to_measure(result: &mut RhythmBuildResult, config: &RhythmBuildConfig) {
 /// Expand whole/half notes to quarter slashes for master rhythm chart style.
 ///
 /// This converts sustained chord notation (diamonds) to rhythmic slashes.
-/// Rests are preserved as-is.
+/// Rests are preserved as-is. Triplet entries (eighths, etc.) are NOT expanded
+/// and their tuplet_specs are preserved with remapped indices.
 fn expand_to_quarters(result: &mut RhythmBuildResult) {
     let quarter_ticks = 480;
     let mut expanded = Vec::with_capacity(result.entries.len() * 4);
@@ -433,7 +472,14 @@ fn expand_to_quarters(result: &mut RhythmBuildResult) {
         Vec::with_capacity(result.entries.len() * 4)
     };
 
+    // Track index mapping: old_index -> new_start_index
+    // Used to remap tuplet_specs after expansion
+    let mut index_map: Vec<usize> = Vec::with_capacity(result.entries.len());
+
     for (i, entry) in result.entries.iter().enumerate() {
+        // Record the new index for this original entry
+        index_map.push(expanded.len());
+
         match entry {
             RhythmEntry::Note(dur) => {
                 let ticks = dur.ticks();
@@ -481,12 +527,21 @@ fn expand_to_quarters(result: &mut RhythmBuildResult) {
     result.head_type_overrides = expanded_overrides;
     result.total_ticks = result.entries.iter().map(|e| e.duration().ticks()).sum();
 
-    // Note: tuplet_specs indices may be invalidated by expansion
-    // For now, clear them since auto_rhythm_slashes typically doesn't use triplets
-    // If triplet support is needed with auto_rhythm_slashes, we'd need to remap indices
-    if !result.tuplet_specs.is_empty() {
-        // TODO: Remap tuplet indices if needed
-        result.tuplet_specs.clear();
+    // Remap tuplet_specs indices using the index mapping
+    // This preserves triplet brackets for entries that weren't expanded
+    for spec in &mut result.tuplet_specs {
+        // Remap start_idx
+        if spec.start_idx < index_map.len() {
+            spec.start_idx = index_map[spec.start_idx];
+        }
+        // Remap end_idx (exclusive) - use the mapped index of end_idx or expanded.len() if at end
+        if spec.end_idx <= index_map.len() {
+            spec.end_idx = if spec.end_idx == index_map.len() {
+                result.entries.len()
+            } else {
+                index_map[spec.end_idx]
+            };
+        }
     }
 }
 
@@ -715,6 +770,7 @@ pub fn build_rhythm_with_triplets(
         time_signature: (num_beats as u8, 4),
         use_stems: true,
         auto_rhythm_slashes: false,
+        push_alters_rhythm: true,
     };
     let source = RhythmSource::SlashNotation {
         chords: &measure.chords,
@@ -826,6 +882,7 @@ mod tests {
             time_signature: (4, 4),
             use_stems: false,
             auto_rhythm_slashes: false,
+            push_alters_rhythm: true,
         };
 
         // Start with 2 quarter notes (960 ticks)

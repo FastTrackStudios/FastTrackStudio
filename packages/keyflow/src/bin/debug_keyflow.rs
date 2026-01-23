@@ -412,6 +412,7 @@ fn print_rhythm_details(measure: &keyflow::chart::types::Measure, time_sig: (u8,
         time_signature: time_sig,
         use_stems: true,
         auto_rhythm_slashes: false,
+        push_alters_rhythm: true,
     };
 
     let result = build_rhythm(source, &config);
