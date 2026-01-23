@@ -20,11 +20,10 @@ C | G | Am | F
 
 /// Thriller - Dirty Loops, Cory Wong cover arrangement
 /// Demonstrates push/pull triplets and complex rhythm notation
-const EXAMPLE_THRILLER: &str = r#"Thriller
-Dirty Loops, Cory Wong
+const EXAMPLE_THRILLER: &str = r#"Thriller - Dirty Loops, Cory Wong
+Transcribed By: Cody Wright
 120bpm 4/4 #Ab
 /push = triplet
-/PUSH_ALTERS_RHYTHM=false
 
 COUNT 2
 
@@ -32,7 +31,7 @@ IN
 r8t Ab9_8t r8t r8t r8t F9_8t r2 | s1
 
 VS
-'F/C . | Cm . | 'F/C . | Cm . | 'F/C . | Cm . | 'F/C . | Cm Cm9
+'F/C . Cm . 'F/C . Cm . 'F/C . Cm . 'F/C . Cm Cm9
 
 CH
 Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A //// | 'Fm9  ////
@@ -42,7 +41,7 @@ BR
 '_4F7 | . |  Abmaj9 //// | // r8t Abmaj9_8t r8t Bb_8t r8t Cm7_8t | Cm7 | Ebmaj7/Bb | Am7b5 | Abmaj7 | G7sus4 | 'G7
 
 VS
-'F/C . | Cm . | 'F/C . | Cm . | 'F/C . | Cm . | 'F/C . | Cm Cm9
+'F/C . Cm . 'F/C . Cm . 'F/C . Cm . 'F/C . Cm Cm9
 "#;
 
 /// Default chart content - start with an example

@@ -575,6 +575,82 @@ F/C .
     }
 
     #[test]
+    fn test_dot_repeat_clears_push_modifier() {
+        // "'F/C ." should be 2 measures:
+        // - Measure 0: F/C with push
+        // - Measure 1: F/C WITHOUT push (dot repeat clears timing modifiers)
+        let input = r#"
+Dot Push Test
+120bpm 4/4 #C
+/push = triplet
+
+VS
+'F/C .
+"#;
+
+        let chart = Chart::parse(input).expect("Failed to parse chart");
+
+        let section = &chart.sections[0];
+        let measures = section.measures();
+
+        // Should have 2 measures
+        assert_eq!(
+            measures.len(),
+            2,
+            "Expected 2 measures, got {}. Chords per measure: {:?}",
+            measures.len(),
+            measures.iter().map(|m| m.chords.len()).collect::<Vec<_>>()
+        );
+
+        // Filter out space placeholders ("s" chords added by post-processor)
+        let m0_real_chords: Vec<_> = measures[0]
+            .chords
+            .iter()
+            .filter(|c| c.full_symbol != "s")
+            .collect();
+        let m1_real_chords: Vec<_> = measures[1]
+            .chords
+            .iter()
+            .filter(|c| c.full_symbol != "s")
+            .collect();
+
+        // Each measure should have 1 real chord (excluding "s" placeholders)
+        assert_eq!(
+            m0_real_chords.len(),
+            1,
+            "Measure 0 should have 1 real chord, got {}",
+            m0_real_chords.len()
+        );
+        assert_eq!(
+            m1_real_chords.len(),
+            1,
+            "Measure 1 should have 1 real chord, got {}",
+            m1_real_chords.len()
+        );
+
+        // Measure 0 chord SHOULD have push_pull set
+        let chord0 = m0_real_chords[0];
+        assert!(
+            chord0.push_pull.is_some(),
+            "Measure 0 chord should have push_pull set"
+        );
+        let (is_push, _) = chord0.push_pull.as_ref().unwrap();
+        assert!(*is_push, "Measure 0 chord should be a push");
+
+        // Measure 1 chord should NOT have push_pull (cleared by dot repeat)
+        let chord1 = m1_real_chords[0];
+        assert!(
+            chord1.push_pull.is_none(),
+            "Measure 1 chord (dot repeat) should NOT have push_pull, but got {:?}",
+            chord1.push_pull
+        );
+
+        // Both should have same symbol
+        assert_eq!(chord0.full_symbol, "F/C");
+        assert_eq!(chord1.full_symbol, "F/C");
+    }
+
+    #[test]
     fn test_slash_rhythm_same_measure() {
         // "Cm/Eb / Eb ///" should be ONE measure with:
         // - Cm/Eb taking 1 beat (from the / slash)

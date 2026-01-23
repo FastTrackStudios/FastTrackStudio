@@ -83,8 +83,8 @@ pub const TIME_SIG_WIDTH_SPATIUMS: f64 = 2.0;
 // Count-in and Compact Measures
 // ============================================================================
 
-/// Scale factor for count-in measures (40% of normal width).
-pub const COUNT_IN_COMPACT_SCALE: f64 = 0.4;
+/// Scale factor for count-in measures (45% of normal width - slightly relaxed for better spacing).
+pub const COUNT_IN_COMPACT_SCALE: f64 = 0.45;
 
 // ============================================================================
 // Tempo and Timing

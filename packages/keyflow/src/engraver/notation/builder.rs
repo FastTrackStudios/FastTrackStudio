@@ -807,6 +807,7 @@ impl MeasureBuilder {
             width: spacing_result.total_width,
             segments,
             internal_push_positions: Vec::new(), // Set by chart layout when needed
+            spillback_positions: Vec::new(),     // Set by chart layout when needed
         }
     }
 
@@ -1276,6 +1277,10 @@ pub struct MeasureScene {
     /// Internal push positions: maps chord_idx to segment_idx for pushed chords
     /// (for chords that push back within the same measure, not spillbacks)
     pub internal_push_positions: Vec<(usize, usize)>,
+    /// Spillback positions: maps (rhythm_idx, chord_symbol) for chords from next
+    /// measure that push back across the barline. Used to place spillback chord
+    /// symbols at correct triplet positions.
+    pub spillback_positions: Vec<(usize, String)>,
 }
 
 /// Builder for creating a system (line) of multiple measures.

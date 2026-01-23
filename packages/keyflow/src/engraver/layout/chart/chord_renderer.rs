@@ -89,6 +89,10 @@ pub struct ChordRenderContext<'a> {
     /// When provided, collision detection uses cached chord layouts instead
     /// of re-measuring during render.
     pub measure_measurements: Option<&'a MeasureMeasurements>,
+    /// Spillback positions computed by rhythm builder.
+    /// Maps (rhythm_index, chord_symbol) for chords from next measure pushing back.
+    /// Used to place spillback chords at correct triplet positions.
+    pub spillback_positions: &'a [(usize, String)],
 }
 
 /// Result of chord symbol rendering.
@@ -661,18 +665,26 @@ pub fn render_spillback_chords(
     let mut last_chord_symbol = previous_chord_symbol.map(String::from);
 
     for spillback in spillbacks {
-        // Spillback chords always land at the last segment
-        let segment_idx = ctx.segment_positions.len().saturating_sub(1);
+        // Look up the correct segment index from spillback_positions computed by rhythm builder.
+        // When push_alters_rhythm is enabled and we have a triplet push, the spillback chord
+        // goes on the triplet eighth (e.g., segment 4 in [Q,Q,Q,TQ,TE]) not just the last segment.
+        let segment_idx = ctx
+            .spillback_positions
+            .iter()
+            .find(|(_, symbol)| symbol == &spillback.chord_symbol)
+            .map(|(idx, _)| *idx)
+            .unwrap_or_else(|| ctx.segment_positions.len().saturating_sub(1));
 
         #[cfg(debug_assertions)]
         eprintln!(
-            "[spillback-render] section={} measure={} '{}' beat_pos={} segment_idx={} positions_len={}",
+            "[spillback-render] section={} measure={} '{}' beat_pos={} segment_idx={} positions_len={} spillback_positions={:?}",
             ctx.section_name,
             ctx.measure_idx,
             spillback.chord_symbol,
             spillback.beat_position,
             segment_idx,
-            ctx.segment_positions.len()
+            ctx.segment_positions.len(),
+            ctx.spillback_positions
         );
 
         let segment_x = ctx

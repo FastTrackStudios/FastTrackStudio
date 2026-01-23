@@ -1118,6 +1118,7 @@ impl ChartLayoutEngine {
                             push_alters_rhythm: self.config.push_alters_rhythm,
                             spatium: self.config.spatium,
                             measure_measurements,
+                            spillback_positions: &measure_result.spillback_positions,
                         };
 
                         let chord_result = chord_renderer::render_chord_symbols(
@@ -1666,6 +1667,7 @@ impl ChartLayoutEngine {
                             push_alters_rhythm: self.config.push_alters_rhythm,
                             spatium: self.config.spatium,
                             measure_measurements,
+                            spillback_positions: &measure_result.spillback_positions,
                         };
 
                         let chord_result = chord_renderer::render_chord_symbols(
@@ -2129,10 +2131,57 @@ impl ChartLayoutEngine {
                 .any(|s| s.push_base == crate::chord::PushPullBase::Triplet)
         });
 
+        // Check if there are internal triplet pushes (pushed chords within this measure
+        // that DON'T spill back to the previous measure). A push at beat 0 spills back,
+        // so we only count pushes that occur after beat 0.
+        // push_pull is Option<(bool, PushPullAmount)> where .1.base is the timing base
+        // NOTE: Skip "s" (space) placeholder chords added by post-processor - they don't
+        // represent actual musical content and shouldn't affect beat position calculation.
+        let has_internal_triplet_push = {
+            let mut cumulative_beats = 0usize;
+            let mut found_internal = false;
+            for chord in &measure.chords {
+                // Skip space placeholders - they're not real chords
+                if chord.full_symbol == "s" {
+                    continue;
+                }
+                let is_triplet_push = chord
+                    .push_pull
+                    .as_ref()
+                    .map_or(false, |(is_push, amount)| {
+                        *is_push && amount.base == crate::chord::PushPullBase::Triplet
+                    });
+                // Only count as internal if we've accumulated some beats (not at beat 0)
+                if is_triplet_push && cumulative_beats > 0 {
+                    found_internal = true;
+                    break;
+                }
+                // Add this chord's beat count
+                let chord_beats = match &chord.rhythm {
+                    crate::chord::ChordRhythm::Slashes { count, .. } => *count as usize,
+                    _ => 1,
+                };
+                cumulative_beats += chord_beats;
+            }
+            found_internal
+        };
+
         // Determine the rhythm source
-        // Use SlashNotation when there are triplet spillbacks AND push_alters_rhythm is enabled,
-        // since SlashNotation properly handles spillback-aware triplet rhythm generation.
-        let source = if has_triplet_spillbacks && self.config.push_alters_rhythm {
+        // Use SlashNotation when there are triplet pushes (spillbacks OR internal) AND
+        // push_alters_rhythm is enabled, since SlashNotation properly handles triplet rhythm generation.
+        let needs_triplet_rhythm =
+            (has_triplet_spillbacks || has_internal_triplet_push) && self.config.push_alters_rhythm;
+
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[rhythm-source-select] has_spillbacks={} has_internal={} needs_triplet={} has_explicit={}",
+            has_triplet_spillbacks,
+            has_internal_triplet_push,
+            needs_triplet_rhythm,
+            has_explicit_chord_rhythm
+        );
+
+        let source = if needs_triplet_rhythm {
             RhythmSource::SlashNotation {
                 chords: &measure.chords,
                 spillbacks,
@@ -2169,6 +2218,9 @@ impl ChartLayoutEngine {
                 })
             })
             .collect();
+
+        // Capture spillback positions from rhythm result for chord rendering
+        let spillback_positions = rhythm_result.spillback_positions.clone();
 
         // Convert RhythmBuildResult to the format expected by MeasureBuilder
         let (rhythm_entries, full_rhythm, rhythm_ticks, tuplet_specs, internal_push_positions) =
@@ -2297,6 +2349,8 @@ impl ChartLayoutEngine {
 
         // Set internal push positions for chord rendering
         result.internal_push_positions = internal_push_positions;
+        // Set spillback positions for placing spillback chords at correct triplet positions
+        result.spillback_positions = spillback_positions;
 
         // Add ties for cross-barline notes
         if let Some(data) = melody_data {
@@ -2448,6 +2502,7 @@ impl ChartLayoutEngine {
             width: width_spatiums,
             segments: SegmentList::new(), // Empty segment list for count-in
             internal_push_positions: Vec::new(),
+            spillback_positions: Vec::new(),
         }
     }
 
