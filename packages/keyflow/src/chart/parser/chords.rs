@@ -2188,6 +2188,68 @@ VS
             "VS2 recalled chord should have accent - templates preserve commands"
         );
     }
+
+    #[test]
+    fn test_push_duration_then_accent() {
+        use crate::chart::commands::Command;
+
+        // '_4>F7 = push with quarter duration, then accent (accent on downbeat)
+        // >'_4F7 = accent before push (accent on pushed beat)
+        let input = r#"
+Test
+120bpm 4/4
+
+BR
+'_4>F7 | >'_4G7 |
+"#;
+        let chart = Chart::parse(input).expect("Should parse");
+
+        // Find BR section
+        let br_sections: Vec<_> = chart.sections.iter()
+            .filter(|s| s.section.section_type == crate::sections::SectionType::Bridge)
+            .collect();
+        assert!(!br_sections.is_empty(), "Should have BR section");
+
+        let measures = br_sections[0].measures();
+
+        // Measure 0: '_4>F7 - accent AFTER push = regular Accent (downbeat)
+        let m0_chords: Vec<_> = measures[0].chords.iter()
+            .filter(|c| c.full_symbol != "s" && c.full_symbol != "r")
+            .collect();
+        assert!(!m0_chords.is_empty(), "Measure 0 should have chords");
+        let f7 = &m0_chords[0];
+        eprintln!("F7 chord: symbol='{}' commands={:?} push_pull={:?}",
+            f7.full_symbol, f7.commands, f7.push_pull);
+        assert_eq!(f7.full_symbol, "F7", "Should be F7");
+        assert!(f7.push_pull.is_some(), "F7 should have push");
+        assert!(
+            f7.commands.iter().any(|c| matches!(c, Command::Accent)),
+            "'_4>F7 should have Accent (accent after push = downbeat). Got: {:?}", f7.commands
+        );
+        assert!(
+            !f7.commands.iter().any(|c| matches!(c, Command::AccentOnPush)),
+            "'_4>F7 should NOT have AccentOnPush. Got: {:?}", f7.commands
+        );
+
+        // Measure 1: >'_4G7 - accent BEFORE push = AccentOnPush (pushed beat)
+        let m1_chords: Vec<_> = measures[1].chords.iter()
+            .filter(|c| c.full_symbol != "s" && c.full_symbol != "r")
+            .collect();
+        assert!(!m1_chords.is_empty(), "Measure 1 should have chords");
+        let g7 = &m1_chords[0];
+        eprintln!("G7 chord: symbol='{}' commands={:?} push_pull={:?}",
+            g7.full_symbol, g7.commands, g7.push_pull);
+        assert_eq!(g7.full_symbol, "G7", "Should be G7");
+        assert!(g7.push_pull.is_some(), "G7 should have push");
+        assert!(
+            g7.commands.iter().any(|c| matches!(c, Command::AccentOnPush)),
+            ">'_4G7 should have AccentOnPush (accent before push = pushed beat). Got: {:?}", g7.commands
+        );
+        assert!(
+            !g7.commands.iter().any(|c| matches!(c, Command::Accent)),
+            ">'_4G7 should NOT have regular Accent. Got: {:?}", g7.commands
+        );
+    }
 }
 
 // endregion: --- Tests
