@@ -31,20 +31,40 @@ HITS
 r8t >Ab9_8t r8t r8t r8t >F9_8t r2 | s1
 
 IN
-s1 x4
+>'Cm . . . 
 
 VS
 >'F/C . Cm . 'F/C . Cm . 'F/C . Cm . 'F/C . Cm Cm9
+
+
+CH
+>Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A //// | 'Fm9  ////
+>Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A | r8t >Ab9_8t r8t r8t >'F9_8t r8t r4 >Fm/Ab_4
+
+INST 4
+Cm . F6 // Abdim7 'Csus2 // 'C5 //
+
+VS
+F/C . Cm . 'F/C . Cm . 'F/C . 'Cm . 'F/C . Cm // Gm7 // 'Abmaj7 / Abmaj7#5 / 'Db7#11/G //
 
 CH
 >Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A //// | 'Fm9  ////
 >Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A | r8t >Ab9_8t r8t r8t >'F9_8t r8t r4 >Fm/Ab_4 | s1
 
+
 BR
 >'_4F7 | . |  Abmaj9 //// | // r8t >Abmaj9_8t r8t >Bb_8t r8t >Cm7_8t | Cm7 | Ebmaj7/Bb | Am7b5 | Abmaj7 | G7sus4 | 'G7
 
 VS
->'F/C . Cm . 'F/C . Cm . 'F/C . Cm . 'F/C . Cm Cm9
+>'F/C . Cm . 'F/C . Cm Db7#11 // 'Cmaj9 'F7 //// F7 // 'Fmaj7/C 'Cm7 . 
+'F 'Am // 'Dbmaj7 // 'Gmaj7 // 'Fm11 // 'Eb9 / Bbm/F / 'Gb7b9 //
+
+CH
+>'Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A //// | 'Fm9  ////
+>Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A | 
+r8t >Ab9_8t r8t r8t >'F9_8t r8t r4 r8t >Bb9_8t r8t 
+r8t r8t C7#11_8t r4 r8t Dbmaj7_8t r8t r4 
+'Bb11
 "#;
 
 /// Default chart content - start with an example
