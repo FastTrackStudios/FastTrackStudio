@@ -443,22 +443,19 @@ fn StaticChartCanvas(
                     html_canvas.set_width(buffer_width);
                     html_canvas.set_height(buffer_height);
 
-                    // Try to parse the chart - if it fails, just keep the canvas white
-                    // (the CSS background is white, so an empty render looks like a blank page)
-                    if let Ok(chart) = keyflow::Chart::parse(&source_text) {
-                        // Layout chart for export (no page offsets, positioned at origin)
-                        manager.layout_chart_for_export(&chart, css_width, is_snippet);
+                    // Try to parse the chart - if it fails, render an empty page structure
+                    let chart = keyflow::Chart::parse(&source_text).unwrap_or_else(|_| {
+                        // Fallback: minimal empty chart that renders as a blank page
+                        // This ensures we always show the page structure during typewriter animation
+                        keyflow::Chart::parse("Untitled\n120bpm 4/4\n").unwrap_or_default()
+                    });
 
-                        // Render with transparent background (page at origin, proper DPI + dpr scaling)
-                        if let Err(e) = manager.render_to_canvas_transparent(&html_canvas, dpr).await {
-                            tracing::error!("Failed to render static chart: {}", e);
-                        }
-                    } else {
-                        // Parse failed - render blank white page
-                        // This provides a smooth experience during typewriter animations
-                        if let Err(e) = manager.render_blank_white(&html_canvas, dpr).await {
-                            tracing::debug!("Failed to render blank page: {}", e);
-                        }
+                    // Layout chart for export (no page offsets, positioned at origin)
+                    manager.layout_chart_for_export(&chart, css_width, is_snippet);
+
+                    // Render with transparent background (page at origin, proper DPI + dpr scaling)
+                    if let Err(e) = manager.render_to_canvas_transparent(&html_canvas, dpr).await {
+                        tracing::error!("Failed to render static chart: {}", e);
                     }
                 }
             });
