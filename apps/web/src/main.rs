@@ -632,21 +632,14 @@ fn UnifiedSnippetsView(selected_id: String) -> Element {
     let prev_pattern = if current_index > 0 { patterns.get(current_index - 1) } else { None };
     let next_pattern = patterns.get(current_index + 1);
 
+    // Track the current pattern ID to detect changes
+    let mut last_pattern_id = use_signal(|| selected_id.clone());
+
     // Source state for editing
-    let mut source = use_signal(|| {
-        pattern.map(|p| p.source.to_string()).unwrap_or_default()
-    });
+    let mut source = use_signal(|| pattern.map(|p| p.source.to_string()).unwrap_or_default());
 
-    // Reset source when pattern changes
-    let pattern_id = selected_id.clone();
-    use_effect(move || {
-        if let Some(p) = find_pattern(&pattern_id) {
-            source.set(p.source.to_string());
-        }
-    });
-
-    // Preview mode - snippet for most, page for examples
-    let preview_mode = use_signal(|| {
+    // Preview mode state
+    let mut preview_mode = use_signal(|| {
         pattern.map(|p| {
             if p.category == PatternCategory::Examples {
                 PreviewMode::Page
@@ -655,6 +648,21 @@ fn UnifiedSnippetsView(selected_id: String) -> Element {
             }
         }).unwrap_or(PreviewMode::Snippet)
     });
+
+    // Reset source and preview mode when pattern changes
+    if *last_pattern_id.peek() != selected_id {
+        if let Some(p) = pattern {
+            source.set(p.source.to_string());
+            // Update preview mode based on new pattern
+            let new_mode = if p.category == PatternCategory::Examples {
+                PreviewMode::Page
+            } else {
+                PreviewMode::Snippet
+            };
+            preview_mode.set(new_mode);
+        }
+        last_pattern_id.set(selected_id.clone());
+    }
 
     // Show/hide source panel
     let mut show_source = use_signal(|| true);
