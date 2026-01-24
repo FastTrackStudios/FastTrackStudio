@@ -792,9 +792,12 @@ fn format_quality(quality: &str, notation: ChordNotation, symbol_set: SymbolSet)
         ("aug", ChordNotation::Jazz, SymbolSet::MuseJazz) => musejazz::PLUS.to_string(),
         ("dim", ChordNotation::Jazz, SymbolSet::Unicode) => unicode_fallback::CIRCLE.to_string(),
         ("aug", ChordNotation::Jazz, SymbolSet::Unicode) => unicode_fallback::PLUS.to_string(),
-        // Standard uses text for dim/aug
+        // Standard uses text for diminished, but "+" symbol for augmented (like MuseScore)
         ("dim", ChordNotation::Standard, _) => "dim".to_string(),
-        ("aug", ChordNotation::Standard, _) => "aug".to_string(),
+        // Augmented uses "+" symbol in both Standard and Jazz notation
+        ("aug", ChordNotation::Standard, SymbolSet::Smufl) => smufl::AUGMENTED.to_string(),
+        ("aug", ChordNotation::Standard, SymbolSet::MuseJazz) => musejazz::PLUS.to_string(),
+        ("aug", ChordNotation::Standard, SymbolSet::Unicode) => unicode_fallback::PLUS.to_string(),
         // Minor, power chord, suspended are the same in all styles
         ("m", _, _) => "m".to_string(),
         ("5", _, _) => "5".to_string(),
@@ -1201,6 +1204,41 @@ mod tests {
         assert_eq!(
             format_extension("Maj7", ChordNotation::Jazz, SymbolSet::MuseJazz),
             "\u{E18A}7"
+        );
+    }
+
+    #[test]
+    fn test_format_quality_standard_augmented_uses_plus_symbol() {
+        // Standard notation should render "aug" as "+" symbol, not text
+        // This matches MuseScore's behavior for better readability
+        assert_eq!(
+            format_quality("aug", ChordNotation::Standard, SymbolSet::Unicode),
+            "+"
+        );
+        assert_eq!(
+            format_quality("aug", ChordNotation::Standard, SymbolSet::Smufl),
+            "\u{E872}" // SMuFL csymAugmented
+        );
+        assert_eq!(
+            format_quality("aug", ChordNotation::Standard, SymbolSet::MuseJazz),
+            "\u{E186}" // MuseJazz PLUS
+        );
+    }
+
+    #[test]
+    fn test_format_quality_standard_diminished_uses_text() {
+        // Standard notation should still use "dim" text for diminished
+        assert_eq!(
+            format_quality("dim", ChordNotation::Standard, SymbolSet::Unicode),
+            "dim"
+        );
+        assert_eq!(
+            format_quality("dim", ChordNotation::Standard, SymbolSet::Smufl),
+            "dim"
+        );
+        assert_eq!(
+            format_quality("dim", ChordNotation::Standard, SymbolSet::MuseJazz),
+            "dim"
         );
     }
 }

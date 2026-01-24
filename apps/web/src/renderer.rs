@@ -43,6 +43,8 @@ pub struct ChartLayoutManager {
     text_font_data: Arc<Vec<u8>>,
     /// MuseJazz font data for chord symbols
     musejazz_font_data: Arc<Vec<u8>>,
+    /// Bravura font data for PDF export (SMuFL symbols)
+    bravura_font_data: Arc<Vec<u8>>,
     /// Layout engine
     layout_engine: ChartLayoutEngine,
     /// Cached layout result
@@ -73,10 +75,14 @@ impl ChartLayoutManager {
         // This ensures measurements match the rendered glyphs.
         let layout_engine = ChartLayoutEngine::new(style, musejazz_font_data.clone(), symbol_font_data);
 
+        // Store Bravura font data for PDF export
+        let bravura_font_data = Arc::new(BRAVURA_FONT.to_vec());
+
         Ok(Self {
             smufl_font,
             text_font_data,
             musejazz_font_data,
+            bravura_font_data,
             layout_engine,
             layout_result: None,
             last_chart_hash: 0,
@@ -343,6 +349,333 @@ impl ChartLayoutManager {
             Err("WebGPU renderer not initialized".to_string())
         }
     }
+
+    /// Render to a canvas element without background (WASM only).
+    ///
+    /// This renders ONLY the content (the white page) with no gray workspace background.
+    /// Ideal for showcases and embedded previews where the page should be edge-to-edge.
+    ///
+    /// # Arguments
+    /// * `canvas` - The HTML canvas element to render to
+    /// * `translate_x` - X translation in pixels (already scaled by DPR)
+    /// * `translate_y` - Y translation in pixels (already scaled by DPR)
+    /// * `scale` - Scale factor (already includes DPR)
+    #[cfg(target_arch = "wasm32")]
+    pub async fn render_to_canvas_transparent(
+        &mut self,
+        canvas: &web_sys::HtmlCanvasElement,
+        translate_x: f64,
+        translate_y: f64,
+        scale: f64,
+    ) -> Result<(), String> {
+        use wasm::WebGpuRenderer;
+
+        // Initialize renderer if needed
+        if self.wgpu_renderer.is_none() {
+            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
+            self.wgpu_renderer = Some(renderer);
+        }
+
+        // Get canvas dimensions first
+        let canvas_width = canvas.width();
+        let canvas_height = canvas.height();
+
+        // Resize if needed (access renderer mutably)
+        if let Some(renderer) = self.wgpu_renderer.as_mut() {
+            let (current_width, current_height) = renderer.dimensions();
+            if current_width != canvas_width || current_height != canvas_height {
+                renderer.resize(canvas_width, canvas_height);
+            }
+        }
+
+        // Create scene WITHOUT background fill
+        let mut scene = Scene::new();
+
+        // Build transform: translate then scale
+        let transform = Affine::translate((translate_x, translate_y)) * Affine::scale(scale);
+
+        // Render layout if available - NO background fill
+        if let Some(ref layout) = self.layout_result {
+            // Create scene renderer with fonts
+            let mut renderer = SceneRenderBuilder::new()
+                .spatium(5.0)
+                .build()
+                .with_font(&self.smufl_font)
+                .with_text_font_arc(self.text_font_data.clone())
+                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("section-note", self.text_font_data.clone())
+                .with_named_font_arc("title-bold", self.text_font_data.clone())
+                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+
+            // Set viewport for culling
+            let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
+            renderer.set_viewport(viewport_rect);
+
+            // Render with user's view transform
+            renderer.render_with_transform(&mut scene, &layout.scene, transform);
+        }
+
+        // Render to canvas with TRANSPARENT base color (only page content shows)
+        if let Some(wgpu_renderer) = self.wgpu_renderer.as_mut() {
+            wgpu_renderer.render_with_base_color(&scene, Color::TRANSPARENT)
+        } else {
+            Err("WebGPU renderer not initialized".to_string())
+        }
+    }
+
+    /// Render to a canvas element with white background for PDF export (WASM only).
+    ///
+    /// Similar to `render_to_canvas_transparent` but uses white background,
+    /// which is appropriate for PDF export where the canvas content becomes
+    /// the final document background.
+    ///
+    /// # Arguments
+    /// * `canvas` - The HTML canvas element to render to
+    /// * `translate_x` - X translation in pixels (already scaled)
+    /// * `translate_y` - Y translation in pixels (already scaled)
+    /// * `scale` - Scale factor for high-DPI export
+    #[cfg(target_arch = "wasm32")]
+    pub async fn render_to_canvas_for_export(
+        &mut self,
+        canvas: &web_sys::HtmlCanvasElement,
+        translate_x: f64,
+        translate_y: f64,
+        scale: f64,
+    ) -> Result<(), String> {
+        use wasm::WebGpuRenderer;
+
+        // Initialize renderer if needed
+        if self.wgpu_renderer.is_none() {
+            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
+            self.wgpu_renderer = Some(renderer);
+        }
+
+        // Get canvas dimensions first
+        let canvas_width = canvas.width();
+        let canvas_height = canvas.height();
+
+        // Resize if needed (access renderer mutably)
+        if let Some(renderer) = self.wgpu_renderer.as_mut() {
+            let (current_width, current_height) = renderer.dimensions();
+            if current_width != canvas_width || current_height != canvas_height {
+                renderer.resize(canvas_width, canvas_height);
+            }
+        }
+
+        // Create scene WITHOUT background fill (Vello will use base_color)
+        let mut scene = Scene::new();
+
+        // Build transform: translate then scale
+        let transform = Affine::translate((translate_x, translate_y)) * Affine::scale(scale);
+
+        // Render layout if available
+        if let Some(ref layout) = self.layout_result {
+            // Create scene renderer with fonts
+            let mut renderer = SceneRenderBuilder::new()
+                .spatium(5.0)
+                .build()
+                .with_font(&self.smufl_font)
+                .with_text_font_arc(self.text_font_data.clone())
+                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("section-note", self.text_font_data.clone())
+                .with_named_font_arc("title-bold", self.text_font_data.clone())
+                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+
+            // Set viewport for culling
+            let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
+            renderer.set_viewport(viewport_rect);
+
+            // Render with user's view transform
+            renderer.render_with_transform(&mut scene, &layout.scene, transform);
+        }
+
+        // Render to canvas with TRANSPARENT base color - scene already has white page backgrounds
+        if let Some(wgpu_renderer) = self.wgpu_renderer.as_mut() {
+            wgpu_renderer.render_with_base_color(&scene, Color::TRANSPARENT)
+        } else {
+            Err("WebGPU renderer not initialized".to_string())
+        }
+    }
+
+    /// Export the current layout to SVG.
+    ///
+    /// Returns the SVG string or an error if no layout is available.
+    pub fn export_to_svg(&self) -> Result<String, String> {
+        use keyflow::engraver::export::{SvgExportConfig, SvgSerializer};
+
+        let layout = self
+            .layout_result
+            .as_ref()
+            .ok_or_else(|| "No layout available for export".to_string())?;
+
+        // Get dimensions from the scene's computed bounds or use A4 defaults
+        let bounds = layout.scene.compute_bounds();
+        let (width, height) = if bounds.width() > 0.0 && bounds.height() > 0.0 {
+            // Add some padding
+            (bounds.x1 + 20.0, bounds.y1 + 20.0)
+        } else {
+            // A4 dimensions in points
+            (595.0, 842.0)
+        };
+
+        let config = SvgExportConfig {
+            width,
+            height,
+            include_semantic_ids: true,
+            embed_glyphs: false,
+            precision: 2,
+            pretty_print: true,
+            background: Some(vello::peniko::Color::WHITE),
+            default_stroke_width: 0.5,
+        };
+
+        let mut serializer = SvgSerializer::new(config);
+        Ok(serializer.serialize(&layout.scene))
+    }
+
+    /// Export the current layout to PDF (vector-based).
+    ///
+    /// Returns the PDF bytes or an error if no layout is available.
+    /// Note: For pixel-perfect output matching the screen render, use `export_to_pdf_rasterized` instead.
+    pub fn export_to_pdf(&self) -> Result<Vec<u8>, String> {
+        use keyflow::engraver::export::{PdfExportConfig, PdfSerializer};
+
+        let layout = self
+            .layout_result
+            .as_ref()
+            .ok_or_else(|| "No layout available for export".to_string())?;
+
+        // Get dimensions from the scene's computed bounds or use A4 defaults
+        let bounds = layout.scene.compute_bounds();
+        let (width, height) = if bounds.width() > 0.0 && bounds.height() > 0.0 {
+            // Add some padding
+            (bounds.x1 + 20.0, bounds.y1 + 20.0)
+        } else {
+            // A4 dimensions in points
+            (595.0, 842.0)
+        };
+
+        // Configure PDF export with embedded fonts
+        let config = PdfExportConfig {
+            width,
+            height,
+            title: "Chart Export".to_string(),
+            author: Some("FastTrackStudio".to_string()),
+            background: Some(vello::peniko::Color::WHITE),
+            default_stroke_width: 0.5,
+            // Use MuseJazz as the default text font
+            font_data: Some(self.musejazz_font_data.clone()),
+            // Use Bravura for SMuFL music symbols
+            smufl_font_data: Some(self.bravura_font_data.clone()),
+        };
+
+        let mut serializer = PdfSerializer::new(config);
+
+        // Add additional named fonts for font-family matching
+        if let Err(e) = serializer.add_named_font("MuseJazzText", &self.musejazz_font_data) {
+            tracing::warn!("Failed to add MuseJazzText font: {}", e);
+        }
+        if let Err(e) = serializer.add_named_font("MuseJazz", &self.musejazz_font_data) {
+            tracing::warn!("Failed to add MuseJazz font: {}", e);
+        }
+        if let Err(e) = serializer.add_named_font("FreeSans", &self.text_font_data) {
+            tracing::warn!("Failed to add FreeSans font: {}", e);
+        }
+
+        serializer
+            .serialize(&layout.scene)
+            .map_err(|e| format!("PDF export failed: {e}"))
+    }
+
+    /// Export the current layout to PDF using a rasterized image.
+    ///
+    /// This method creates a PDF by embedding a PNG image rendered from the canvas,
+    /// guaranteeing pixel-perfect output that matches the screen render exactly.
+    ///
+    /// # Arguments
+    /// * `png_bytes` - PNG-encoded image data from the canvas
+    /// * `dpi` - The DPI at which the image was rendered (typically screen DPI * device pixel ratio)
+    ///
+    /// # Returns
+    /// PDF bytes ready to be downloaded.
+    pub fn export_to_pdf_rasterized(&self, png_bytes: &[u8], dpi: f64) -> Result<Vec<u8>, String> {
+        use keyflow::engraver::export::{PdfExportConfig, PdfSerializer};
+
+        let layout = self
+            .layout_result
+            .as_ref()
+            .ok_or_else(|| "No layout available for export".to_string())?;
+
+        // Get dimensions from the scene's computed bounds or use A4 defaults
+        let bounds = layout.scene.compute_bounds();
+        let (width, height) = if bounds.width() > 0.0 && bounds.height() > 0.0 {
+            // Add some padding
+            (bounds.x1 + 20.0, bounds.y1 + 20.0)
+        } else {
+            // A4 dimensions in points
+            (595.0, 842.0)
+        };
+
+        // Configure PDF export (fonts not needed for rasterized export)
+        let config = PdfExportConfig {
+            width,
+            height,
+            title: "Chart Export".to_string(),
+            author: Some("FastTrackStudio".to_string()),
+            background: None, // Image already has background
+            default_stroke_width: 0.5,
+            font_data: None,
+            smufl_font_data: None,
+        };
+
+        let serializer = PdfSerializer::new(config);
+
+        serializer
+            .serialize_from_png(png_bytes, dpi)
+            .map_err(|e| format!("PDF export failed: {e}"))
+    }
+
+    /// Get the content dimensions in points for the current layout.
+    ///
+    /// Returns (width, height) in points, useful for determining render size.
+    /// Includes 20pt padding for comfortable viewing.
+    pub fn get_content_dimensions(&self) -> Option<(f64, f64)> {
+        self.layout_result.as_ref().map(|layout| {
+            let bounds = layout.scene.compute_bounds();
+            if bounds.width() > 0.0 && bounds.height() > 0.0 {
+                (bounds.x1 + 20.0, bounds.y1 + 20.0)
+            } else {
+                (595.0, 842.0)
+            }
+        })
+    }
+
+    /// Get the tight content dimensions in points (no padding).
+    ///
+    /// Returns (width, height) of just the content bounds, useful for PDF export.
+    pub fn get_content_dimensions_tight(&self) -> Option<(f64, f64)> {
+        self.layout_result.as_ref().map(|layout| {
+            let bounds = layout.scene.compute_bounds();
+            if bounds.width() > 0.0 && bounds.height() > 0.0 {
+                (bounds.width(), bounds.height())
+            } else {
+                (595.0, 842.0)
+            }
+        })
+    }
+
+    /// Get the content origin offset in points for the current layout.
+    ///
+    /// Returns (x, y) offset to the top-left of the actual content.
+    /// Use negative of these values to translate content to canvas origin.
+    pub fn get_content_origin(&self) -> Option<(f64, f64)> {
+        self.layout_result.as_ref().map(|layout| {
+            let bounds = layout.scene.compute_bounds();
+            (bounds.x0, bounds.y0)
+        })
+    }
 }
 
 impl Default for ChartLayoutManager {
@@ -488,6 +821,11 @@ pub mod wasm {
 
         /// Render a Vello scene to the canvas.
         pub fn render(&mut self, scene: &Scene) -> Result<(), String> {
+            self.render_with_base_color(scene, Color::from_rgb8(55, 65, 81))
+        }
+
+        /// Render a Vello scene to the canvas with a custom base color.
+        pub fn render_with_base_color(&mut self, scene: &Scene, base_color: Color) -> Result<(), String> {
             let surface_texture = self
                 .surface
                 .get_current_texture()
@@ -502,7 +840,7 @@ pub mod wasm {
                 .create_view(&TextureViewDescriptor::default());
 
             let render_params = vello::RenderParams {
-                base_color: Color::from_rgb8(55, 65, 81),
+                base_color,
                 width: self.width,
                 height: self.height,
                 antialiasing_method: vello::AaConfig::Msaa16,

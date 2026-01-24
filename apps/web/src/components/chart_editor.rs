@@ -12,10 +12,12 @@ use keyflow::highlighting::{HighlightKind, Highlighter};
 
 /// Empty chart template
 const EMPTY_CHART: &str = r#"New Song
-120bpm 4/4 #C
+120bpm 4/4 #A
 
 VS
-C | G | Am | F
+A D F#m // E // D
+
+
 "#;
 
 /// Thriller - Dirty Loops, Cory Wong cover arrangement
@@ -65,6 +67,36 @@ CH
 r8t >Ab9_8t r8t r8t >'F9_8t r8t r4 r8t >Bb9_8t r8t 
 r8t r8t C7#11_8t r4 r8t Dbmaj7_8t r8t r4 
 'Bb11
+
+CH
+>Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A //// | 'Fm9  ////
+>Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A | r8t >Ab9_8t r8t r8t >'F9_8t r8t r4 >Cm
+
+Interlude 8
+Cm . . . . . . .
+
+Interlude 8 "HORNS"
+/push 4
+'Cm . 'Cm7b5 . 'Cm Cm/maj7  'B/C . 
+
+Interlude 8 "WINDS"
+C C+ // C // Cm7b5 Cmaj7 
+'Cmaj7 . Fm/C Cdim7 
+
+Interlude 8 "TRUMPETS"
+Fm6 . 'Dbmaj7/F .  D/F . B7/F . 
+
+Outro 8
+Em7b5/D 'Dmaj9 x3
+Gm7/D 'D11 
+
+Outro 8
+'Gm7/D 'Dadd9 'Em7b5 'Dadd9 
+'Em7b5 'Dadd9 'Gm9/Bb 'Fmaj9/C 
+
+Hits 4
+'C#/G . . .  
+
 "#;
 
 /// Default chart content - start with an example
@@ -165,31 +197,39 @@ pub fn ChartEditor() -> Element {
                         }
                     }
 
-                    // Right side - mode toggle
+                    // Right side - mode toggle and export
                     div {
-                        class: "flex items-center gap-1 bg-muted rounded-lg p-1",
+                        class: "flex items-center gap-3",
 
-                        button {
-                            class: if is_snippet {
-                                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-background text-foreground shadow-sm"
-                            } else {
-                                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                            },
-                            onclick: move |_| preview_mode.set(PreviewMode::Snippet),
-                            lucide_dioxus::Scissors { class: "w-3.5 h-3.5" }
-                            "Snippet"
+                        // Mode toggle
+                        div {
+                            class: "flex items-center gap-1 bg-muted rounded-lg p-1",
+
+                            button {
+                                class: if is_snippet {
+                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-background text-foreground shadow-sm"
+                                } else {
+                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                                },
+                                onclick: move |_| preview_mode.set(PreviewMode::Snippet),
+                                lucide_dioxus::Scissors { class: "w-3.5 h-3.5" }
+                                "Snippet"
+                            }
+
+                            button {
+                                class: if !is_snippet {
+                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-background text-foreground shadow-sm"
+                                } else {
+                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                                },
+                                onclick: move |_| preview_mode.set(PreviewMode::Page),
+                                lucide_dioxus::FileText { class: "w-3.5 h-3.5" }
+                                "Page (A4)"
+                            }
                         }
 
-                        button {
-                            class: if !is_snippet {
-                                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-background text-foreground shadow-sm"
-                            } else {
-                                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                            },
-                            onclick: move |_| preview_mode.set(PreviewMode::Page),
-                            lucide_dioxus::FileText { class: "w-3.5 h-3.5" }
-                            "Page (A4)"
-                        }
+                        // Export button
+                        ExportButton { source: source }
                     }
                 }
 
@@ -203,6 +243,285 @@ pub fn ChartEditor() -> Element {
                         mode: preview_mode
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Static chart renderer for non-interactive display.
+/// Renders the chart as a clean page without pan/zoom controls or gray background.
+/// Ideal for showcases and embedded previews.
+#[component]
+pub fn StaticChartRenderer(
+    source: Signal<String>,
+    mode: Signal<PreviewMode>,
+    canvas_id: Option<String>,
+) -> Element {
+    // Read source to trigger re-render on changes and for validation
+    let source_value = source.read();
+
+    // Parse the chart to validate it
+    let parse_result = keyflow::Chart::parse(&source_value);
+
+    // Use provided canvas_id or default
+    let canvas_id = canvas_id.unwrap_or_else(|| "static-chart-canvas".to_string());
+
+    match parse_result {
+        Ok(_chart) => {
+            rsx! {
+                div {
+                    class: "w-full h-full relative",
+
+                    // Canvas for WebGPU rendering - fills entire container
+                    // Transparent background so only page content shows
+                    canvas {
+                        id: "{canvas_id}",
+                        class: "w-full h-full",
+                        style: "touch-action: none; background: transparent;",
+                    }
+
+                    // WebGPU rendering - static (no pan/zoom)
+                    StaticChartCanvas { source: source, mode: mode, canvas_id: canvas_id.clone() }
+                }
+            }
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            rsx! {
+                div {
+                    class: "w-full h-full flex items-center justify-center",
+
+                    div {
+                        class: "text-center p-6 max-w-md bg-white/90 rounded-lg",
+
+                        lucide_dioxus::CircleAlert { class: "w-12 h-12 mx-auto mb-3 text-red-400" }
+
+                        div {
+                            class: "text-lg font-semibold text-red-600 mb-2",
+                            "Parse Error"
+                        }
+
+                        div {
+                            class: "text-sm text-red-500 font-mono whitespace-pre-wrap text-left bg-red-50 p-3 rounded-lg",
+                            "{error_msg}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Static canvas component - renders chart without pan/zoom interactivity.
+#[component]
+fn StaticChartCanvas(
+    source: Signal<String>,
+    mode: Signal<PreviewMode>,
+    canvas_id: String,
+) -> Element {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use crate::renderer::ChartLayoutManager;
+        use wasm_bindgen::JsCast;
+        use wasm_bindgen::prelude::*;
+
+        // Create layout manager signal
+        let mut layout_manager = use_signal(|| None::<ChartLayoutManager>);
+        let mut error_state = use_signal(|| None::<String>);
+        let mut is_initialized = use_signal(|| false);
+
+        // Track the current render task so we can cancel it when a new one starts
+        let current_render_task = use_hook(|| std::cell::RefCell::new(None::<Task>));
+
+        // Trigger re-render for resize events
+        let mut render_trigger = use_signal(|| 0_u32);
+
+        // Initialize WebGPU on mount
+        use_effect(move || {
+            let mut render_trigger_clone = render_trigger.clone();
+            spawn(async move {
+                match ChartLayoutManager::new() {
+                    Ok(manager) => {
+                        layout_manager.set(Some(manager));
+                        is_initialized.set(true);
+                        tracing::info!("Static chart layout manager initialized");
+
+                        // Force initial render after a short delay to ensure canvas has proper size
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+                                if let Some(window) = web_sys::window() {
+                                    let _ = window
+                                        .set_timeout_with_callback_and_timeout_and_arguments_0(
+                                            &resolve, 50,
+                                        );
+                                }
+                            });
+                            let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+                        }
+
+                        // Trigger initial render
+                        let trigger = *render_trigger_clone.peek();
+                        render_trigger_clone.set(trigger.wrapping_add(1));
+                    }
+                    Err(e) => {
+                        error_state.set(Some(e));
+                        tracing::error!("Failed to initialize static chart layout manager");
+                    }
+                }
+            });
+        });
+
+        // Setup ResizeObserver (no mouse events for static renderer)
+        let events_setup = use_hook(|| std::cell::Cell::new(false));
+        let canvas_id_for_events = canvas_id.clone();
+        use_effect(move || {
+            if events_setup.get() {
+                return;
+            }
+
+            let window = match web_sys::window() {
+                Some(w) => w,
+                None => return,
+            };
+            let document = match window.document() {
+                Some(d) => d,
+                None => return,
+            };
+            let canvas = match document.get_element_by_id(&canvas_id_for_events) {
+                Some(c) => c,
+                None => return,
+            };
+
+            events_setup.set(true);
+
+            // Setup ResizeObserver to detect when canvas gets its proper size
+            let mut render_trigger_clone = render_trigger.clone();
+            let resize_callback = Closure::wrap(Box::new(
+                move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| {
+                    let trigger = *render_trigger_clone.read();
+                    render_trigger_clone.set(trigger.wrapping_add(1));
+                },
+            )
+                as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
+
+            if let Ok(observer) =
+                web_sys::ResizeObserver::new(resize_callback.as_ref().unchecked_ref())
+            {
+                observer.observe(&canvas);
+            }
+            resize_callback.forget();
+        });
+
+        // Layout and render when source changes or mode changes
+        let canvas_id_for_render = canvas_id.clone();
+        use_effect(move || {
+            let canvas_id_inner = canvas_id_for_render.clone();
+
+            // Read ALL reactive values FIRST
+            let initialized = *is_initialized.read();
+            let trigger = *render_trigger.read();
+            let source_text = source.read().clone();
+            let current_mode = *mode.read();
+            let is_snippet = current_mode == PreviewMode::Snippet;
+
+            // Silence unused variable warning
+            let _ = trigger;
+
+            if !initialized {
+                return;
+            }
+
+            // Cancel any previous render task
+            if let Some(previous_task) = current_render_task.borrow_mut().take() {
+                previous_task.cancel();
+            }
+
+            let task = spawn(async move {
+                let mut manager_guard = layout_manager.write();
+
+                let Some(ref mut manager) = *manager_guard else {
+                    return;
+                };
+
+                let Ok(chart) = keyflow::Chart::parse(&source_text) else {
+                    return;
+                };
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    use wasm_bindgen::JsCast;
+
+                    let Some(window) = web_sys::window() else {
+                        return;
+                    };
+                    let dpr = window.device_pixel_ratio();
+
+                    let Some(document) = window.document() else {
+                        return;
+                    };
+                    let Some(canvas) = document.get_element_by_id(&canvas_id_inner) else {
+                        return;
+                    };
+                    let Ok(html_canvas) = canvas.dyn_into::<web_sys::HtmlCanvasElement>() else {
+                        return;
+                    };
+
+                    let rect = html_canvas.get_bounding_client_rect();
+                    let css_width = rect.width();
+
+                    let buffer_width = (css_width * dpr) as u32;
+                    let buffer_height = (rect.height() * dpr) as u32;
+                    html_canvas.set_width(buffer_width);
+                    html_canvas.set_height(buffer_height);
+
+                    // Layout chart
+                    manager.layout_chart_with_mode(&chart, css_width, is_snippet);
+
+                    // Get content origin to offset render (so page starts at canvas origin)
+                    let (offset_x, offset_y) = manager.get_content_origin().unwrap_or((0.0, 0.0));
+
+                    // Render with transparent background, offsetting so page is at canvas origin
+                    // Negative offset because we want to move content left/up to the origin
+                    if let Err(e) = manager
+                        .render_to_canvas_transparent(&html_canvas, -offset_x * dpr, -offset_y * dpr, dpr)
+                        .await
+                    {
+                        tracing::error!("Failed to render static chart: {}", e);
+                    }
+                }
+            });
+
+            *current_render_task.borrow_mut() = Some(task);
+        });
+
+        if let Some(error) = error_state.read().as_ref() {
+            return rsx! {
+                div {
+                    class: "absolute inset-0 flex items-center justify-center text-yellow-400 text-sm",
+                    "WebGPU not available: {error}"
+                }
+            };
+        }
+
+        if !*is_initialized.read() {
+            return rsx! {
+                div {
+                    class: "absolute inset-0 flex items-center justify-center text-muted-foreground",
+                    "Initializing..."
+                }
+            };
+        }
+
+        rsx! {}
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        rsx! {
+            div {
+                class: "absolute inset-0 flex items-center justify-center text-muted-foreground",
+                "Chart rendering requires WebGPU (browser only)"
             }
         }
     }
@@ -816,6 +1135,262 @@ fn HighlightedLine(line: String) -> Element {
     rsx! {
         for segment in segments {
             {segment}
+        }
+    }
+}
+
+/// Export PDF using rasterization for pixel-perfect output.
+///
+/// This function:
+/// 1. Creates an off-screen canvas at high resolution
+/// 2. Renders the chart using Vello/WebGPU with white background
+/// 3. Extracts the canvas content as PNG via data URL
+/// 4. Creates a PDF with the embedded image
+#[cfg(target_arch = "wasm32")]
+async fn export_pdf_rasterized(
+    manager: &mut crate::renderer::ChartLayoutManager,
+) -> Result<Vec<u8>, String> {
+    use wasm_bindgen::JsCast;
+
+    // Get tight content dimensions (in points at 72 DPI, no padding)
+    let (width_pts, height_pts) = manager
+        .get_content_dimensions_tight()
+        .ok_or_else(|| "No layout available".to_string())?;
+
+    // Get content origin to offset the render (so content fills the canvas)
+    let (origin_x, origin_y) = manager.get_content_origin().unwrap_or((0.0, 0.0));
+
+    // Scale factor for print quality (300 DPI / 72 DPI ≈ 4.17)
+    // Use 3x for a good balance between quality and file size
+    let scale_factor = 3.0;
+    let export_dpi = 72.0 * scale_factor; // 216 DPI
+
+    // Calculate canvas dimensions in pixels
+    let canvas_width = (width_pts * scale_factor).ceil() as u32;
+    let canvas_height = (height_pts * scale_factor).ceil() as u32;
+
+    // Create off-screen canvas
+    let window = web_sys::window().ok_or("No window")?;
+    let document = window.document().ok_or("No document")?;
+    let canvas = document
+        .create_element("canvas")
+        .map_err(|_| "Failed to create canvas")?
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .map_err(|_| "Failed to cast to canvas")?;
+
+    canvas.set_width(canvas_width);
+    canvas.set_height(canvas_height);
+
+    // Render the chart to the off-screen canvas with WHITE background
+    // Offset by negative origin so content fills the canvas from (0,0)
+    manager
+        .render_to_canvas_for_export(
+            &canvas,
+            -origin_x * scale_factor,
+            -origin_y * scale_factor,
+            scale_factor,
+        )
+        .await?;
+
+    // Extract canvas content as PNG data URL
+    let data_url = canvas
+        .to_data_url_with_type("image/png")
+        .map_err(|_| "Failed to get data URL")?;
+
+    // Parse the data URL to extract base64 PNG data
+    // Format: "data:image/png;base64,<base64-encoded-data>"
+    let base64_prefix = "data:image/png;base64,";
+    let base64_data = data_url
+        .strip_prefix(base64_prefix)
+        .ok_or_else(|| "Invalid data URL format".to_string())?;
+
+    // Decode base64 to bytes using browser's atob
+    let decoded = window
+        .atob(base64_data)
+        .map_err(|_| "Failed to decode base64")?;
+
+    // Convert the decoded string (which is actually binary) to bytes
+    let png_bytes: Vec<u8> = decoded.chars().map(|c| c as u8).collect();
+
+    // Create PDF with embedded PNG image
+    manager.export_to_pdf_rasterized(&png_bytes, export_dpi)
+}
+
+/// Export button component for downloading chart as SVG or PDF.
+#[component]
+fn ExportButton(source: Signal<String>) -> Element {
+    let mut is_exporting = use_signal(|| false);
+    let mut show_dropdown = use_signal(|| false);
+
+    let mut do_export = move |format: &'static str| {
+        #[cfg(target_arch = "wasm32")]
+        {
+            use crate::renderer::ChartLayoutManager;
+            use wasm_bindgen::JsCast;
+
+            is_exporting.set(true);
+            show_dropdown.set(false);
+            let source_text = source.read().clone();
+
+            spawn(async move {
+                // Parse the chart
+                let chart = match keyflow::Chart::parse(&source_text) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!("Failed to parse chart for export: {}", e);
+                        is_exporting.set(false);
+                        return;
+                    }
+                };
+
+                // Create layout manager and layout the chart
+                let mut manager = match ChartLayoutManager::new() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::error!("Failed to create layout manager: {}", e);
+                        is_exporting.set(false);
+                        return;
+                    }
+                };
+
+                // Layout in page mode for export (A4)
+                manager.layout_chart_with_mode(&chart, 595.0, false);
+
+                // Export based on format
+                let (content, mime_type, extension): (Vec<u8>, &str, &str) = match format {
+                    "pdf" => {
+                        // Use rasterized PDF export for pixel-perfect output
+                        match export_pdf_rasterized(&mut manager).await {
+                            Ok(bytes) => (bytes, "application/pdf", "pdf"),
+                            Err(e) => {
+                                tracing::error!("Failed to export PDF: {}", e);
+                                is_exporting.set(false);
+                                return;
+                            }
+                        }
+                    }
+                    _ => {
+                        // Default to SVG
+                        match manager.export_to_svg() {
+                            Ok(svg) => (svg.into_bytes(), "image/svg+xml", "svg"),
+                            Err(e) => {
+                                tracing::error!("Failed to export SVG: {}", e);
+                                is_exporting.set(false);
+                                return;
+                            }
+                        }
+                    }
+                };
+
+                // Trigger download
+                if let Some(window) = web_sys::window() {
+                    if let Some(document) = window.document() {
+                        // Create blob from bytes
+                        let uint8_array = js_sys::Uint8Array::from(content.as_slice());
+                        let array = js_sys::Array::new();
+                        array.push(&uint8_array);
+
+                        let mut options = web_sys::BlobPropertyBag::new();
+                        options.set_type(mime_type);
+
+                        if let Ok(blob) =
+                            web_sys::Blob::new_with_u8_array_sequence_and_options(&array, &options)
+                        {
+                            if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) {
+                                // Create download link
+                                if let Ok(link) = document.create_element("a") {
+                                    let link = link.unchecked_into::<web_sys::HtmlAnchorElement>();
+                                    link.set_href(&url);
+
+                                    // Get chart title for filename
+                                    let title = chart.metadata.title.as_deref().unwrap_or("chart");
+                                    let filename =
+                                        format!("{}.{}", title.replace(' ', "_"), extension);
+                                    link.set_download(&filename);
+
+                                    // Trigger download
+                                    link.click();
+
+                                    // Cleanup
+                                    let _ = web_sys::Url::revoke_object_url(&url);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                is_exporting.set(false);
+            });
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = format;
+            tracing::warn!("Export is only available in the browser");
+        }
+    };
+
+    let export_svg = move |_| do_export("svg");
+    let export_pdf = move |_| do_export("pdf");
+
+    rsx! {
+        div {
+            class: "relative",
+
+            // Main button with dropdown
+            div {
+                class: "flex",
+
+                // Export button
+                button {
+                    class: "flex items-center gap-1.5 px-3 py-1.5 rounded-l-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50",
+                    disabled: *is_exporting.read(),
+                    onclick: export_pdf,  // Default to PDF
+
+                    if *is_exporting.read() {
+                        lucide_dioxus::LoaderCircle { class: "w-3.5 h-3.5 animate-spin" }
+                        "Exporting..."
+                    } else {
+                        lucide_dioxus::Download { class: "w-3.5 h-3.5" }
+                        "Export"
+                    }
+                }
+
+                // Dropdown toggle
+                button {
+                    class: "flex items-center px-1.5 py-1.5 rounded-r-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors border-l border-primary-foreground/20 disabled:opacity-50",
+                    disabled: *is_exporting.read(),
+                    onclick: move |_| {
+                        let current = *show_dropdown.read();
+                        show_dropdown.set(!current);
+                    },
+
+                    lucide_dioxus::ChevronDown { class: "w-3.5 h-3.5" }
+                }
+            }
+
+            // Dropdown menu
+            if *show_dropdown.read() {
+                div {
+                    class: "absolute top-full right-0 mt-1 bg-popover border border-border rounded-md shadow-lg z-50 min-w-[120px]",
+
+                    button {
+                        class: "w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-accent transition-colors rounded-t-md",
+                        onclick: export_pdf,
+
+                        lucide_dioxus::FileText { class: "w-3.5 h-3.5" }
+                        "PDF"
+                    }
+
+                    button {
+                        class: "w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-accent transition-colors rounded-b-md",
+                        onclick: export_svg,
+
+                        lucide_dioxus::FileCode { class: "w-3.5 h-3.5" }
+                        "SVG"
+                    }
+                }
+            }
         }
     }
 }
