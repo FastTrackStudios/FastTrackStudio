@@ -31,7 +31,7 @@ HITS
 r8t >Ab9_8t r8t r8t r8t >F9_8t r2 | s1
 
 IN
-s1 * 4
+s1 x4
 
 VS
 >'F/C . Cm . 'F/C . Cm . 'F/C . Cm . 'F/C . Cm Cm9
@@ -336,9 +336,18 @@ fn DynamicChartCanvas(
             });
         });
 
-        // Setup mouse event listeners
+        // Setup mouse event listeners (only once)
+        // Use a hook to track if we've already set up the listeners to avoid
+        // duplicate registrations and stale signal references
+        let events_setup = use_hook(|| std::cell::Cell::new(false));
         let canvas_id_for_events = canvas_id.clone();
         use_effect(move || {
+            // Only set up events once - the closures capture signal clones that
+            // would become stale if we set up multiple times
+            if events_setup.get() {
+                return;
+            }
+
             let window = match web_sys::window() {
                 Some(w) => w,
                 None => return,
@@ -351,6 +360,9 @@ fn DynamicChartCanvas(
                 Some(c) => c,
                 None => return,
             };
+
+            // Mark as set up before adding listeners
+            events_setup.set(true);
 
             // Mouse down - start dragging
             let mut is_dragging_clone = is_dragging.clone();
