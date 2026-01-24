@@ -428,7 +428,12 @@ impl ChartLayoutEngine {
     ) -> ChartLayoutResult {
         let ctx = LayoutContext::minimal(self.style);
         let text_metrics = TextFontMetrics::new(self.text_font_data.clone());
-        let symbol_metrics = TextFontMetrics::new(self.symbol_font_data.clone());
+        // Use text font for symbols when symbol_font_family is None (e.g., MuseJazz uses same font)
+        let symbol_metrics = if self.config.harmony_style.symbol_font_family.is_none() {
+            text_metrics.clone()
+        } else {
+            TextFontMetrics::new(self.symbol_font_data.clone())
+        };
 
         let harmony_style = self
             .config
@@ -1092,7 +1097,12 @@ impl ChartLayoutEngine {
     fn layout_continuous(&self, chart: &Chart, width: f64) -> ChartLayoutResult {
         let ctx = LayoutContext::minimal(self.style);
         let text_metrics = TextFontMetrics::new(self.text_font_data.clone());
-        let symbol_metrics = TextFontMetrics::new(self.symbol_font_data.clone());
+        // Use text font for symbols when symbol_font_family is None (e.g., MuseJazz uses same font)
+        let symbol_metrics = if self.config.harmony_style.symbol_font_family.is_none() {
+            text_metrics.clone()
+        } else {
+            TextFontMetrics::new(self.symbol_font_data.clone())
+        };
 
         let harmony_style = self
             .config
