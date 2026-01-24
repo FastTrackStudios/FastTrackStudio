@@ -44,7 +44,7 @@ BR
 >'_4F7 | . |  Abmaj9 //// | // r8t >Abmaj9_8t r8t >Bb_8t r8t >Cm7_8t | Cm7 | Ebmaj7/Bb | Am7b5 | Abmaj7 | G7sus4 | 'G7
 
 VS
-'F/C . Cm . 'F/C . Cm . 'F/C . Cm . 'F/C . Cm Cm9
+>'F/C . Cm . 'F/C . Cm . 'F/C . Cm . 'F/C . Cm Cm9
 "#;
 
 /// Default chart content - start with an example
