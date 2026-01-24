@@ -9,7 +9,10 @@ mod routes;
 mod state;
 
 use dioxus::prelude::*;
-use lucide_dioxus::{ArrowLeft, BookOpen, FileText, Github, Music, PenTool, Users};
+use lucide_dioxus::{
+    ArrowLeft, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Code, FileCode,
+    FileText, Github, Music, PenLine, PenTool, Users,
+};
 
 // Static assets
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -26,6 +29,12 @@ pub enum Route {
     DocsHome {},
     #[route("/keyflow/chart")]
     ChartEditor {},
+    // Unified snippets browser - optional pattern ID for deep linking
+    #[route("/docs/keyflow/snippets")]
+    SnippetsBrowser {},
+    #[route("/docs/keyflow/snippets/:id")]
+    SnippetsView { id: String },
+    // Legacy routes - redirect to new ones
     #[route("/docs/keyflow/chart/tests")]
     PatternBrowser {},
     #[route("/docs/keyflow/chart/tests/:id")]
@@ -111,7 +120,11 @@ fn Layout() -> Element {
                             let route = use_route::<Route>();
                             let section = match route {
                                 Route::ChartEditor {} => Some("Keyflow"),
-                                Route::DocsHome {} | Route::PatternBrowser {} | Route::PatternView { .. } => Some("Docs"),
+                                Route::DocsHome {}
+                                | Route::SnippetsBrowser {}
+                                | Route::SnippetsView { .. }
+                                | Route::PatternBrowser {}
+                                | Route::PatternView { .. } => Some("Docs"),
                                 _ => None,
                             };
                             if let Some(name) = section {
@@ -508,10 +521,10 @@ fn DocsHome() -> Element {
                 }
 
                 Link {
-                    to: Route::PatternBrowser {},
+                    to: Route::SnippetsBrowser {},
                     class: "inline-flex items-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 px-6 py-3 rounded-lg font-semibold transition-colors",
                     BookOpen { class: "w-5 h-5" }
-                    "Browse Patterns"
+                    "Browse Snippets"
                 }
             }
 
@@ -572,70 +585,347 @@ fn FeatureCard(title: &'static str, description: &'static str, icon: Element) ->
     }
 }
 
-/// Pattern browser page - lists all patterns by category
+// =============================================================================
+// Unified Snippets Browser - Better viewing experience with sidebar navigation
+// =============================================================================
+
+/// Unified snippets browser - shows all patterns with persistent sidebar
 #[component]
-fn PatternBrowser() -> Element {
-    use keyflow::patterns::{PatternCategory, patterns_by_category};
+fn SnippetsBrowser() -> Element {
+    // Default to first pattern
+    let patterns = keyflow::patterns::all_patterns();
+    let first_id = patterns.first().map(|p| p.id).unwrap_or("minimal-chart");
+
+    rsx! {
+        UnifiedSnippetsView { selected_id: first_id.to_string() }
+    }
+}
+
+/// Snippets view with specific pattern selected (for deep linking)
+#[component]
+fn SnippetsView(id: String) -> Element {
+    rsx! {
+        UnifiedSnippetsView { selected_id: id }
+    }
+}
+
+/// The unified snippets viewer component
+#[component]
+fn UnifiedSnippetsView(selected_id: String) -> Element {
+    use components::PreviewMode;
+    use keyflow::patterns::{PatternCategory, all_patterns, find_pattern, patterns_by_category};
+
+    // Get all patterns for navigation
+    let patterns = all_patterns();
+
+    // Find selected pattern
+    let pattern = find_pattern(&selected_id);
+
+    // Track expanded categories in sidebar
+    let mut expanded_categories = use_signal(|| {
+        // Start with all categories expanded
+        PatternCategory::all().iter().map(|c| (*c, true)).collect::<std::collections::HashMap<_, _>>()
+    });
+
+    // Find current pattern index for prev/next navigation
+    let current_index = patterns.iter().position(|p| p.id == selected_id).unwrap_or(0);
+    let prev_pattern = if current_index > 0 { patterns.get(current_index - 1) } else { None };
+    let next_pattern = patterns.get(current_index + 1);
+
+    // Source state for editing
+    let mut source = use_signal(|| {
+        pattern.map(|p| p.source.to_string()).unwrap_or_default()
+    });
+
+    // Reset source when pattern changes
+    let pattern_id = selected_id.clone();
+    use_effect(move || {
+        if let Some(p) = find_pattern(&pattern_id) {
+            source.set(p.source.to_string());
+        }
+    });
+
+    // Preview mode - snippet for most, page for examples
+    let preview_mode = use_signal(|| {
+        pattern.map(|p| {
+            if p.category == PatternCategory::Examples {
+                PreviewMode::Page
+            } else {
+                PreviewMode::Snippet
+            }
+        }).unwrap_or(PreviewMode::Snippet)
+    });
+
+    // Show/hide source panel
+    let mut show_source = use_signal(|| true);
 
     rsx! {
         div {
-            class: "flex min-h-[calc(100vh-8rem)]",
+            class: "flex h-[calc(100vh-4rem)]",
 
-            // Sidebar
+            // Sidebar - Pattern navigation
             aside {
-                class: "w-64 bg-sidebar border-r border-sidebar-border p-4 overflow-y-auto",
+                class: "w-72 bg-sidebar border-r border-sidebar-border flex flex-col",
 
-                h2 {
-                    class: "text-lg font-semibold text-sidebar-foreground mb-4",
-                    "Categories"
+                // Sidebar header
+                div {
+                    class: "p-4 border-b border-sidebar-border",
+                    h2 {
+                        class: "text-lg font-semibold text-sidebar-foreground",
+                        "Snippets"
+                    }
+                    p {
+                        class: "text-xs text-muted-foreground mt-1",
+                        "{patterns.len()} interactive examples"
+                    }
                 }
 
+                // Pattern list grouped by category
                 nav {
-                    class: "space-y-1",
+                    class: "flex-1 overflow-y-auto p-2",
 
                     for category in PatternCategory::all() {
-                        CategoryLink {
-                            category: *category
+                        {
+                            let category = *category;
+                            let cat_patterns = patterns_by_category(category);
+                            let is_expanded = expanded_categories.read().get(&category).copied().unwrap_or(true);
+                            let has_selected = cat_patterns.iter().any(|p| p.id == selected_id);
+
+                            rsx! {
+                                div {
+                                    class: "mb-2",
+
+                                    // Category header (collapsible)
+                                    button {
+                                        class: "w-full flex items-center justify-between px-3 py-2 rounded-md text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent transition-colors",
+                                        onclick: move |_| {
+                                            let mut cats = expanded_categories.write();
+                                            let current = cats.get(&category).copied().unwrap_or(true);
+                                            cats.insert(category, !current);
+                                        },
+
+                                        span {
+                                            class: if has_selected { "text-primary" } else { "" },
+                                            "{category.label()}"
+                                        }
+
+                                        span {
+                                            class: "text-xs text-muted-foreground",
+                                            if is_expanded {
+                                                lucide_dioxus::ChevronDown { class: "w-4 h-4" }
+                                            } else {
+                                                lucide_dioxus::ChevronRight { class: "w-4 h-4" }
+                                            }
+                                        }
+                                    }
+
+                                    // Pattern list (collapsible)
+                                    if is_expanded {
+                                        div {
+                                            class: "ml-2 mt-1 space-y-0.5",
+
+                                            for pattern in cat_patterns {
+                                                {
+                                                    let is_selected = pattern.id == selected_id;
+                                                    rsx! {
+                                                        Link {
+                                                            to: Route::SnippetsView { id: pattern.id.to_string() },
+                                                            class: if is_selected {
+                                                                "block px-3 py-1.5 rounded-md text-sm bg-primary/10 text-primary font-medium border-l-2 border-primary"
+                                                            } else {
+                                                                "block px-3 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-colors border-l-2 border-transparent"
+                                                            },
+                                                            "{pattern.title}"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
+                    }
+                }
+
+                // Sidebar footer with link to full editor
+                div {
+                    class: "p-4 border-t border-sidebar-border",
+                    Link {
+                        to: Route::ChartEditor {},
+                        class: "flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors",
+                        lucide_dioxus::PenLine { class: "w-4 h-4" }
+                        "Open Full Editor"
                     }
                 }
             }
 
-            // Main content
+            // Main content area
             div {
-                class: "flex-1 p-8 overflow-y-auto",
+                class: "flex-1 flex flex-col min-w-0",
 
-                h1 {
-                    class: "text-3xl font-bold text-foreground mb-2",
-                    "Pattern Library"
-                }
+                match pattern {
+                    Some(pattern) => rsx! {
+                        // Header with pattern info and navigation
+                        header {
+                            class: "px-6 py-4 border-b border-border flex items-center justify-between shrink-0 bg-card/50",
 
-                p {
-                    class: "text-muted-foreground mb-8",
-                    "Interactive examples demonstrating keyflow chart syntax and notation features."
-                }
+                            // Pattern info
+                            div {
+                                class: "min-w-0",
+                                div {
+                                    class: "flex items-center gap-3",
+                                    span {
+                                        class: "text-xs font-medium text-primary bg-primary/10 px-2 py-0.5 rounded",
+                                        "{pattern.category.label()}"
+                                    }
+                                    h1 {
+                                        class: "text-xl font-semibold text-foreground truncate",
+                                        "{pattern.title}"
+                                    }
+                                }
+                                p {
+                                    class: "text-sm text-muted-foreground mt-1 line-clamp-1",
+                                    "{pattern.description}"
+                                }
+                            }
 
-                // Pattern grid grouped by category
-                for category in PatternCategory::all() {
-                    div {
-                        class: "mb-10",
+                            // Navigation and controls
+                            div {
+                                class: "flex items-center gap-2 shrink-0 ml-4",
 
-                        h2 {
-                            class: "text-xl font-semibold text-foreground mb-4 flex items-center gap-2",
-                            id: category.slug(),
-                            span { "{category.label()}" }
-                            span {
-                                class: "text-sm font-normal text-muted-foreground",
-                                "({patterns_by_category(*category).len()} patterns)"
+                                // Prev/Next navigation
+                                div {
+                                    class: "flex items-center gap-1",
+
+                                    if let Some(prev) = prev_pattern {
+                                        Link {
+                                            to: Route::SnippetsView { id: prev.id.to_string() },
+                                            class: "p-2 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors",
+                                            title: "Previous: {prev.title}",
+                                            lucide_dioxus::ChevronLeft { class: "w-4 h-4" }
+                                        }
+                                    } else {
+                                        span {
+                                            class: "p-2 text-muted-foreground/30",
+                                            lucide_dioxus::ChevronLeft { class: "w-4 h-4" }
+                                        }
+                                    }
+
+                                    span {
+                                        class: "text-xs text-muted-foreground px-2",
+                                        "{current_index + 1} / {patterns.len()}"
+                                    }
+
+                                    if let Some(next) = next_pattern {
+                                        Link {
+                                            to: Route::SnippetsView { id: next.id.to_string() },
+                                            class: "p-2 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors",
+                                            title: "Next: {next.title}",
+                                            lucide_dioxus::ChevronRight { class: "w-4 h-4" }
+                                        }
+                                    } else {
+                                        span {
+                                            class: "p-2 text-muted-foreground/30",
+                                            lucide_dioxus::ChevronRight { class: "w-4 h-4" }
+                                        }
+                                    }
+                                }
+
+                                // Divider
+                                div { class: "w-px h-6 bg-border mx-2" }
+
+                                // Toggle source button
+                                button {
+                                    class: if *show_source.read() {
+                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-primary/10 text-primary"
+                                    } else {
+                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
+                                    },
+                                    onclick: move |_| {
+                                        let current = *show_source.peek();
+                                        show_source.set(!current);
+                                    },
+                                    Code { class: "w-3.5 h-3.5" }
+                                    "Source"
+                                }
                             }
                         }
 
+                        // Content area with chart and optional source panel
                         div {
-                            class: "grid md:grid-cols-2 lg:grid-cols-3 gap-4",
+                            class: "flex-1 flex overflow-hidden",
 
-                            for pattern in patterns_by_category(*category) {
-                                PatternCard {
-                                    pattern: pattern
+                            // Chart preview - takes remaining space
+                            div {
+                                class: "flex-1 overflow-hidden bg-muted/30",
+                                components::DynamicChartRenderer {
+                                    source: source,
+                                    mode: preview_mode,
+                                    canvas_id: Some(format!("snippet-canvas-{}", pattern.id))
+                                }
+                            }
+
+                            // Source panel (collapsible)
+                            if *show_source.read() {
+                                div {
+                                    class: "w-96 border-l border-border flex flex-col bg-card shrink-0",
+
+                                    // Source header
+                                    div {
+                                        class: "px-4 py-3 border-b border-border flex items-center justify-between shrink-0",
+
+                                        div {
+                                            class: "flex items-center gap-2",
+                                            lucide_dioxus::FileCode { class: "w-4 h-4 text-muted-foreground" }
+                                            span {
+                                                class: "text-sm font-medium text-foreground",
+                                                "Source"
+                                            }
+                                        }
+
+                                        // Reset button if modified
+                                        if source.read().as_str() != pattern.source {
+                                            button {
+                                                class: "text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-accent transition-colors",
+                                                onclick: move |_| source.set(pattern.source.to_string()),
+                                                "Reset"
+                                            }
+                                        }
+                                    }
+
+                                    // Editable source
+                                    div {
+                                        class: "flex-1 overflow-hidden",
+                                        components::HighlightedEditor {
+                                            value: source(),
+                                            on_change: move |v: String| source.set(v),
+                                            placeholder: "Enter keyflow notation...",
+                                            textarea_id: Some(format!("snippet-editor-{}", pattern.id))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    None => {
+                        // Pattern not found
+                        rsx! {
+                            div {
+                                class: "flex-1 flex flex-col items-center justify-center text-center p-8",
+                                lucide_dioxus::CircleAlert { class: "w-16 h-16 text-muted-foreground/50 mb-4" }
+                                h2 {
+                                    class: "text-xl font-semibold text-foreground mb-2",
+                                    "Pattern Not Found"
+                                }
+                                p {
+                                    class: "text-muted-foreground mb-6",
+                                    "The pattern \"{selected_id}\" doesn't exist."
+                                }
+                                Link {
+                                    to: Route::SnippetsBrowser {},
+                                    class: "inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors",
+                                    "Browse All Snippets"
                                 }
                             }
                         }
@@ -646,39 +936,20 @@ fn PatternBrowser() -> Element {
     }
 }
 
+// =============================================================================
+// Legacy Routes - Redirect to new snippets browser
+// =============================================================================
+
+/// Legacy pattern browser - redirects to new snippets browser
 #[component]
-fn CategoryLink(category: keyflow::patterns::PatternCategory) -> Element {
+fn PatternBrowser() -> Element {
+    // Use navigator for redirect
+    let nav = use_navigator();
+    use_effect(move || {
+        nav.push(Route::SnippetsBrowser {});
+    });
     rsx! {
-        a {
-            href: "#{category.slug()}",
-            class: "block px-3 py-2 rounded text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors",
-            "{category.label()}"
-        }
-    }
-}
-
-#[component]
-fn PatternCard(pattern: &'static keyflow::patterns::Pattern) -> Element {
-    rsx! {
-        Link {
-            to: Route::PatternView { id: pattern.id.to_string() },
-            class: "block bg-card border border-border rounded-lg p-4 hover:border-primary transition-colors group",
-
-            h3 {
-                class: "font-semibold text-card-foreground group-hover:text-primary mb-2",
-                "{pattern.title}"
-            }
-
-            p {
-                class: "text-sm text-muted-foreground line-clamp-2",
-                "{pattern.description}"
-            }
-
-            div {
-                class: "mt-3 text-xs text-muted-foreground",
-                "{pattern.category.label()}"
-            }
-        }
+        div { class: "flex items-center justify-center h-64 text-muted-foreground", "Redirecting..." }
     }
 }
 
@@ -690,173 +961,17 @@ fn ChartEditor() -> Element {
     }
 }
 
-/// Individual pattern view with chart rendering
+/// Legacy pattern view - redirects to new snippets view
 #[component]
 fn PatternView(id: String) -> Element {
-    use components::PreviewMode;
-    use keyflow::patterns::{PatternCategory, find_pattern};
-
-    let pattern = find_pattern(&id);
-
-    match pattern {
-        Some(pattern) => {
-            // Editable source state - initialized from the pattern
-            let mut source = use_signal(|| pattern.source.to_string());
-            // Track if source has been modified
-            let is_modified = source.read().as_str() != pattern.source;
-
-            // Preview mode - use Page for Examples, Snippet for others
-            let mut preview_mode = use_signal(|| {
-                if pattern.category == PatternCategory::Examples {
-                    PreviewMode::Page
-                } else {
-                    PreviewMode::Snippet
-                }
-            });
-
-            // Create unique IDs for this pattern to avoid conflicts
-            let canvas_id = format!("pattern-canvas-{}", pattern.id);
-            let textarea_id = format!("pattern-editor-{}", pattern.id);
-
-            rsx! {
-                div {
-                    class: "flex min-h-[calc(100vh-8rem)]",
-
-                    // Sidebar with navigation
-                    aside {
-                        class: "w-64 bg-sidebar border-r border-sidebar-border p-4 overflow-y-auto",
-
-                        Link {
-                            to: Route::PatternBrowser {},
-                            class: "flex items-center gap-2 text-muted-foreground hover:text-foreground mb-6 transition-colors",
-                            ArrowLeft { class: "w-4 h-4" }
-                            span { "All Patterns" }
-                        }
-
-                        h3 {
-                            class: "text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2",
-                            "Current Pattern"
-                        }
-
-                        div {
-                            class: "text-sidebar-foreground font-semibold mb-4",
-                            "{pattern.title}"
-                        }
-
-                        div {
-                            class: "text-xs text-muted-foreground mb-6",
-                            "{pattern.category.label()}"
-                        }
-                    }
-
-                    // Main content
-                    div {
-                        class: "flex-1 flex flex-col",
-
-                        // Header
-                        header {
-                            class: "px-8 py-6 border-b border-border",
-
-                            h1 {
-                                class: "text-2xl font-bold text-foreground mb-2",
-                                "{pattern.title}"
-                            }
-
-                            p {
-                                class: "text-muted-foreground",
-                                "{pattern.description}"
-                            }
-                        }
-
-                        // Content area
-                        div {
-                            class: "flex-1 flex",
-
-                            // Chart rendering area - fills entire pane
-                            div {
-                                class: "flex-1 overflow-hidden",
-
-                                // Use dynamic renderer for live updates
-                                components::DynamicChartRenderer {
-                                    source: source,
-                                    mode: preview_mode,
-                                    canvas_id: Some(canvas_id)
-                                }
-                            }
-
-                            // Editable source code panel
-                            div {
-                                class: "w-96 border-l border-border flex flex-col bg-card/50",
-
-                                // Source panel header with controls
-                                div {
-                                    class: "px-4 py-3 border-b border-border flex items-center justify-between shrink-0",
-
-                                    div {
-                                        class: "flex items-center gap-2",
-                                        lucide_dioxus::Code { class: "w-4 h-4 text-primary" }
-                                        h3 {
-                                            class: "text-sm font-semibold text-foreground",
-                                            "Source Code"
-                                        }
-                                        if is_modified {
-                                            span {
-                                                class: "text-xs text-amber-500 ml-2",
-                                                "(modified)"
-                                            }
-                                        }
-                                    }
-
-                                    if is_modified {
-                                        button {
-                                            class: "text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-accent transition-colors",
-                                            onclick: move |_| source.set(pattern.source.to_string()),
-                                            "Reset"
-                                        }
-                                    }
-                                }
-
-                                // Editable code area
-                                div {
-                                    class: "flex-1 overflow-hidden",
-
-                                    components::HighlightedEditor {
-                                        value: source(),
-                                        on_change: move |new_value: String| source.set(new_value),
-                                        placeholder: "Enter keyflow chart notation...",
-                                        textarea_id: Some(textarea_id)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        None => {
-            rsx! {
-                div {
-                    class: "flex flex-col items-center justify-center min-h-[50vh]",
-
-                    h1 {
-                        class: "text-2xl font-bold text-foreground mb-4",
-                        "Pattern Not Found"
-                    }
-
-                    p {
-                        class: "text-muted-foreground mb-8",
-                        "The pattern \"{id}\" does not exist."
-                    }
-
-                    Link {
-                        to: Route::PatternBrowser {},
-                        class: "inline-flex items-center gap-2 border border-border text-foreground hover:bg-accent hover:text-accent-foreground px-4 py-2 rounded-md transition-colors",
-                        ArrowLeft { class: "w-4 h-4" }
-                        "Browse all patterns"
-                    }
-                }
-            }
-        }
+    // Use navigator for redirect
+    let nav = use_navigator();
+    let id_clone = id.clone();
+    use_effect(move || {
+        nav.push(Route::SnippetsView { id: id_clone.clone() });
+    });
+    rsx! {
+        div { class: "flex items-center justify-center h-64 text-muted-foreground", "Redirecting..." }
     }
 }
 
