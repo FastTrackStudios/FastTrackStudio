@@ -9,6 +9,7 @@ pub mod chord_renderer;
 pub mod collision;
 pub mod config;
 pub mod constants;
+pub mod count_in_renderer;
 pub mod layout_state;
 pub mod measure_layout;
 pub mod measure_pass;
@@ -498,9 +499,6 @@ impl ChartLayoutEngine {
         let page_offset_y = 20.0;
         let page_gap = 40.0;
 
-        // Track whether we've rendered count-in (only on first system of first section)
-        let mut count_in_rendered = false;
-
         // Pre-compute section letters for consecutive repeats
         let section_letters = self.compute_section_letters(&chart.sections);
 
@@ -650,6 +648,7 @@ impl ChartLayoutEngine {
                     );
 
                     // Add title header on first page only
+                    // Include count-in snippet in header instead of on first system
                     if !title_header_added {
                         let header_height = self.add_title_header(
                             &mut root,
@@ -658,6 +657,8 @@ impl ChartLayoutEngine {
                             page_width,
                             &chart.metadata,
                             chart.tempo.as_ref(),
+                            count_in_measures,
+                            time_signature,
                         );
                         page_y += header_height;
                         title_header_added = true;
@@ -694,15 +695,8 @@ impl ChartLayoutEngine {
                 let num_measures = measure_indices.len();
                 let max_measures = self.config.max_measures_per_system;
 
-                // Add count-in measures on the first system of the first rendered section only
-                // Note: section_idx may not be 0 if CountIn section is skipped
-                let num_count_in = if sys_idx == 0 && !count_in_rendered {
-                    count_in_rendered = true;
-                    count_in_measures
-                } else {
-                    0
-                };
-                let compact_scale = 0.4; // Count-in measures at 40% width
+                // Count-in is now rendered in the header, not on the first system.
+                // We no longer need to account for count-in measures in width distribution.
 
                 // Calculate content weights for spring-based distribution
                 // Also check for spillbacks from the next measure (triplet pushes that affect current measure width)
@@ -746,9 +740,8 @@ impl ChartLayoutEngine {
                     measures_area_width / max_measures as f64
                 };
 
-                // For width calculation, count-in measures count as fractional
-                let effective_measure_count =
-                    num_count_in as f64 * compact_scale + num_measures as f64;
+                // For width calculation, just use the regular measure count
+                let effective_measure_count = num_measures as f64;
                 // Snippet mode always treated as short system (no stretching)
                 let is_short_system =
                     self.config.snippet_mode || effective_measure_count < max_measures as f64;
@@ -762,34 +755,22 @@ impl ChartLayoutEngine {
                     // Collision detection enforces minimum spacing as needed
                     let weight_sum: f64 = measure_weights.iter().sum();
                     let ideal_width_per_weight = 90.0;
-                    num_count_in as f64 * base_measure_width * compact_scale
-                        + weight_sum * ideal_width_per_weight
+                    weight_sum * ideal_width_per_weight
                 } else if is_short_system {
                     // Short system: only use width proportional to measure count
-                    num_count_in as f64 * base_measure_width * compact_scale
-                        + num_measures as f64 * base_measure_width
+                    num_measures as f64 * base_measure_width
                 } else {
                     measures_area_width
                 };
 
                 let distributed_widths = self.distribute_measure_widths(
                     &measure_weights,
-                    num_count_in,
+                    0, // No count-in measures in first system (now rendered in header)
                     total_width_to_distribute,
-                    compact_scale,
+                    0.4, // compact_scale (not used when num_count_in=0)
                     base_measure_width,
                     &measure_min_widths,
                 );
-
-                // Count-in measure width (compact) - from distribution
-                let count_in_width = if num_count_in > 0 {
-                    distributed_widths
-                        .first()
-                        .copied()
-                        .unwrap_or(base_measure_width * compact_scale)
-                } else {
-                    base_measure_width * compact_scale
-                };
 
                 // Calculate actual system width.
                 // For short systems, use the sum of distributed_widths (not total_width_to_distribute)
@@ -865,131 +846,18 @@ impl ChartLayoutEngine {
                     .map(|ts| (ts.numerator as u8, ts.denominator as u8))
                     .unwrap_or((4u8, 4u8));
 
-                // Render count-in measures with quarter note slashes
-                for count_in_idx in 0..num_count_in {
-                    // Create a synthetic empty measure for count-in (compact mode for minimal margins)
-                    let count_in_measure = Measure::new().with_time_signature(time_signature);
-                    let count_in_result = self.layout_measure_compact(
-                        &count_in_measure,
-                        None, // no melody
-                        None, // no spillbacks for count-in
-                        count_in_width,
-                        false, // clef rendered separately
-                        false, // time sig rendered separately
-                        time_signature,
-                        &ctx,
-                        id_counter,
-                    );
-                    id_counter += 10;
-
-                    let mut count_in_container =
-                        SceneNode::group(SemanticId::new(ElementType::Measure, id_counter));
-                    id_counter += 1;
-                    count_in_container.transform =
-                        Affine::translate((measure_x, staff_y + 2.0 * self.config.spatium));
-                    count_in_container
-                        .metadata
-                        .insert("page".to_string(), page_number.to_string());
-                    count_in_container
-                        .metadata
-                        .insert("count_in".to_string(), "true".to_string());
-                    count_in_container.add_child(count_in_result.scene);
-                    root.add_child(count_in_container);
-
-                    // Only show measure number for the first count-in measure
-                    // Position above the clef (at content_x) rather than the measure start
-                    let count_in_display_num = (1 - num_count_in as i32) + count_in_idx as i32;
-                    if self.config.show_measure_numbers && count_in_idx == 0 {
-                        let measure_num_node = self.create_measure_number(
-                            count_in_display_num,
-                            content_x, // Position above clef at start of line
-                            staff_y,
-                            id_counter,
-                        );
-                        id_counter += 1;
-                        root.add_child(measure_num_node);
-                    }
-
-                    // Add beat positions and count text for count-in measures
-                    let num_beats = time_signature.0 as usize;
-                    let count_in_measure_time_start = cumulative_time;
-                    let count_in_measure_tick_start = cumulative_ticks;
-
-                    for (beat_idx, segment) in count_in_result
-                        .segments
-                        .iter_type(SegmentType::CHORD_REST)
-                        .enumerate()
-                    {
-                        let time_start =
-                            count_in_measure_time_start + (segment.tick as f64 * seconds_per_tick);
-                        let time_end = count_in_measure_time_start
-                            + ((segment.tick + segment.ticks) as f64 * seconds_per_tick);
-                        let absolute_tick = count_in_measure_tick_start + segment.tick as i64;
-
-                        beat_positions.push(BeatPosition {
-                            page: page_number,
-                            system: global_system_index,
-                            measure: global_measure_index,
-                            beat: beat_idx,
-                            tick: segment.tick,
-                            duration_ticks: segment.ticks,
-                            absolute_tick,
-                            x: measure_x + segment.x,
-                            width: segment.width,
-                            staff_y,
-                            staff_height,
-                            time_start,
-                            time_end,
-                            glyph_codepoint: Some(slash_glyph_for_ticks(segment.ticks)),
-                            glyph_size: self.config.spatium,
-                            glyph_y: staff_y + staff_height / 2.0, // Center on staff
-                            has_stem: false,                       // Count-in uses stemless slashes
-                            stem_up: true,
-                            flag_count: 0,
-                        });
-
-                        // Render count text below slashes
-                        if let Some(count_text) =
-                            self.get_count_in_text(count_in_display_num, beat_idx, num_beats, count_in_measures)
-                        {
-                            let count_node = self.create_count_text(
-                                &count_text,
-                                measure_x + segment.x,
-                                staff_y,
-                                staff_height,
-                                id_counter,
-                            );
-                            id_counter += 1;
-                            root.add_child(count_node);
-                        }
-                    }
-
-                    // Update cumulative time/ticks for count-in measures
-                    let measure_duration_ticks =
-                        time_signature.0 as i32 * (1920 / time_signature.1 as i32);
-                    cumulative_time += measure_duration_ticks as f64 * seconds_per_tick;
-                    cumulative_ticks += measure_duration_ticks as i64;
-                    global_measure_index += 1;
-
-                    measure_x += count_in_width;
-
-                    // Barline after count-in measure
-                    let mut barline =
-                        self.draw_barline(measure_x, staff_y, staff_height, BarlineType::Single);
-                    barline
-                        .metadata
-                        .insert("page".to_string(), page_number.to_string());
-                    root.add_child(barline);
-                }
+                // Count-in is now rendered in the header (via add_title_header_with_count_in),
+                // so we no longer render count-in measures inline on the first system.
+                // Measures now start directly at measure 1.
 
                 for (local_measure_idx, &measure_idx) in measure_indices.iter().enumerate() {
                     if let Some(measure) = chart_section.measures().get(measure_idx) {
                         // Get preprocessed melody data for this measure (handles spillover)
                         let melody_data = melody_data_map.get(&measure_idx);
 
-                        // Get distributed width for this measure (skip count-in widths)
+                        // Get distributed width for this measure
                         let this_measure_width = distributed_widths
-                            .get(num_count_in + local_measure_idx)
+                            .get(local_measure_idx)
                             .copied()
                             .unwrap_or(base_measure_width);
 
@@ -1026,28 +894,13 @@ impl ChartLayoutEngine {
                         root.add_child(measure_container);
 
                         // Add measure number on first measure of each system
-                        // Real measures start at 1, after count-in measures
-                        // Position: measure 1 always at measure_x (its actual position),
-                        // other first-of-system measures at content_x (above clef)
-                        // Also ALWAYS show measure 1 (the downbeat) to make it easy to find
-                        let display_measure_num = (global_measure_index as i32)
-                            - count_in_measures as i32
-                            + 1;
-                        let is_measure_one = display_measure_num == 1;
+                        // Count-in is now in header, so measure 1 uses standard positioning
+                        let display_measure_num = (global_measure_index as i32) + 1;
                         let is_first_of_system = local_measure_idx == 0;
-                        if self.config.show_measure_numbers
-                            && (is_first_of_system || is_measure_one)
-                        {
-                            // Measure 1 always uses measure_x (its actual position)
-                            // Other measures use content_x when first of system
-                            let num_x = if is_measure_one {
-                                measure_x
-                            } else {
-                                content_x
-                            };
+                        if self.config.show_measure_numbers && is_first_of_system {
                             let measure_num_node = self.create_measure_number(
                                 display_measure_num,
-                                num_x,
+                                content_x,
                                 staff_y,
                                 id_counter,
                             );
@@ -1261,9 +1114,6 @@ impl ChartLayoutEngine {
         // Track previous chord to hide duplicates
         let mut previous_chord_symbol: Option<String> = None;
 
-        // Track whether we've rendered count-in (only on first system of first section)
-        let mut count_in_rendered = false;
-
         // Pre-compute section letters for consecutive repeats
         let section_letters = self.compute_section_letters(&chart.sections);
 
@@ -1398,22 +1248,14 @@ impl ChartLayoutEngine {
                 let num_measures = measure_indices.len();
                 let max_measures = self.config.max_measures_per_system;
 
-                // Add count-in measures on the first system of the first rendered section only
-                // Note: section_idx may not be 0 if CountIn section is skipped
-                let num_count_in = if sys_idx == 0 && !count_in_rendered {
-                    count_in_rendered = true;
-                    count_in_measures
-                } else {
-                    0
-                };
-                let compact_scale = 0.4; // Count-in measures at 40% width
+                // Count-in is now rendered in the header, not on the first system.
+                // We no longer need to account for count-in measures in width distribution.
 
                 // Calculate base measure width (what a normal measure would be)
                 let base_measure_width = measures_area_width / max_measures as f64;
 
-                // For width calculation, count-in measures count as fractional
-                let effective_measure_count =
-                    num_count_in as f64 * compact_scale + num_measures as f64;
+                // For width calculation, just use the regular measure count
+                let effective_measure_count = num_measures as f64;
                 let is_short_system = effective_measure_count < max_measures as f64;
 
                 // Calculate content weights for spring-based distribution
@@ -1443,30 +1285,19 @@ impl ChartLayoutEngine {
 
                 // Distribute width proportionally using spring physics
                 let total_width_to_distribute = if is_short_system {
-                    num_count_in as f64 * base_measure_width * compact_scale
-                        + num_measures as f64 * base_measure_width
+                    num_measures as f64 * base_measure_width
                 } else {
                     measures_area_width
                 };
 
                 let distributed_widths = self.distribute_measure_widths(
                     &measure_weights,
-                    num_count_in,
+                    0, // No count-in measures in first system (now rendered in header)
                     total_width_to_distribute,
-                    compact_scale,
+                    0.4, // compact_scale (not used when num_count_in=0)
                     base_measure_width,
                     &measure_min_widths,
                 );
-
-                // Count-in measure width (compact) - from distribution
-                let count_in_width = if num_count_in > 0 {
-                    distributed_widths
-                        .first()
-                        .copied()
-                        .unwrap_or(base_measure_width * compact_scale)
-                } else {
-                    base_measure_width * compact_scale
-                };
 
                 // Calculate actual system width.
                 // For short systems, use the sum of distributed_widths (not total_width_to_distribute)
@@ -1539,86 +1370,17 @@ impl ChartLayoutEngine {
                     .map(|ts| (ts.numerator as u8, ts.denominator as u8))
                     .unwrap_or((4u8, 4u8));
 
-                // Render count-in measures with quarter note slashes (continuous layout)
-                for count_in_idx in 0..num_count_in {
-                    // Create a synthetic empty measure for count-in (compact mode for minimal margins)
-                    let count_in_measure = Measure::new().with_time_signature(time_signature);
-                    let count_in_result = self.layout_measure_compact(
-                        &count_in_measure,
-                        None, // no melody
-                        None, // no spillbacks for count-in
-                        count_in_width,
-                        false, // clef rendered separately
-                        false, // time sig rendered separately
-                        time_signature,
-                        &ctx,
-                        id_counter,
-                    );
-                    id_counter += 10;
-
-                    let mut count_in_container =
-                        SceneNode::group(SemanticId::new(ElementType::Measure, id_counter));
-                    id_counter += 1;
-                    count_in_container.transform =
-                        Affine::translate((measure_x, staff_y + 2.0 * self.config.spatium));
-                    count_in_container
-                        .metadata
-                        .insert("count_in".to_string(), "true".to_string());
-                    count_in_container.add_child(count_in_result.scene);
-                    root.add_child(count_in_container);
-
-                    // Only show measure number for the first count-in measure
-                    // Position above the clef (at content_x) rather than the measure start
-                    let count_in_display_num = (1 - num_count_in as i32) + count_in_idx as i32;
-                    if self.config.show_measure_numbers && count_in_idx == 0 {
-                        let measure_num_node = self.create_measure_number(
-                            count_in_display_num,
-                            content_x, // Position above clef at start of line
-                            staff_y,
-                            id_counter,
-                        );
-                        id_counter += 1;
-                        root.add_child(measure_num_node);
-                    }
-
-                    // Add count text for count-in measures
-                    let num_beats = time_signature.0 as usize;
-                    for (beat_idx, segment) in count_in_result
-                        .segments
-                        .iter_type(SegmentType::CHORD_REST)
-                        .enumerate()
-                    {
-                        if let Some(count_text) =
-                            self.get_count_in_text(count_in_display_num, beat_idx, num_beats, count_in_measures)
-                        {
-                            let count_node = self.create_count_text(
-                                &count_text,
-                                measure_x + segment.x,
-                                staff_y,
-                                staff_height,
-                                id_counter,
-                            );
-                            id_counter += 1;
-                            root.add_child(count_node);
-                        }
-                    }
-
-                    global_measure_index += 1;
-                    measure_x += count_in_width;
-
-                    // Barline after count-in measure
-                    let mut barline =
-                        self.draw_barline(measure_x, staff_y, staff_height, BarlineType::Single);
-                    root.add_child(barline);
-                }
+                // Count-in is now rendered in the header (via add_title_header_with_count_in),
+                // so we no longer render count-in measures inline on the first system.
+                // Measures now start directly at measure 1.
 
                 for (local_measure_idx, &measure_idx) in measure_indices.iter().enumerate() {
                     if let Some(measure) = chart_section.measures().get(measure_idx) {
                         let melody_data = melody_data_map.get(&measure_idx);
 
-                        // Get distributed width for this measure (skip count-in widths)
+                        // Get distributed width for this measure
                         let this_measure_width = distributed_widths
-                            .get(num_count_in + local_measure_idx)
+                            .get(local_measure_idx)
                             .copied()
                             .unwrap_or(base_measure_width);
 
@@ -1649,28 +1411,14 @@ impl ChartLayoutEngine {
                         measure_container.add_child(measure_result.scene);
                         root.add_child(measure_container);
 
-                        // Add measure number on first measure of each system (real measures start at 1)
-                        // Position: measure 1 always at measure_x (its actual position),
-                        // other first-of-system measures at content_x (above clef)
-                        // Also ALWAYS show measure 1 (the downbeat) to make it easy to find
-                        let display_measure_num = (global_measure_index as i32)
-                            - count_in_measures as i32
-                            + 1;
-                        let is_measure_one = display_measure_num == 1;
+                        // Add measure number on first measure of each system
+                        // Count-in is now in header, so measure 1 uses standard positioning
+                        let display_measure_num = (global_measure_index as i32) + 1;
                         let is_first_of_system = local_measure_idx == 0;
-                        if self.config.show_measure_numbers
-                            && (is_first_of_system || is_measure_one)
-                        {
-                            // Measure 1 always uses measure_x (its actual position)
-                            // Other measures use content_x when first of system
-                            let num_x = if is_measure_one {
-                                measure_x
-                            } else {
-                                content_x
-                            };
+                        if self.config.show_measure_numbers && is_first_of_system {
                             let measure_num_node = self.create_measure_number(
                                 display_measure_num,
-                                num_x,
+                                content_x,
                                 staff_y,
                                 id_counter,
                             );
@@ -2044,7 +1792,10 @@ impl ChartLayoutEngine {
     /// Add title header section on first page (Title, Subtitle, Composer, etc.)
     ///
     /// Returns the height consumed by the header for layout adjustment.
-    /// Delegates to [`page_rendering::add_title_header`].
+    /// Delegates to [`page_rendering::add_title_header_with_count_in`].
+    ///
+    /// If `count_in_measures` > 0, a compact count-in snippet is rendered
+    /// next to the tempo indicator instead of on the first system.
     fn add_title_header(
         &self,
         root: &mut SceneNode,
@@ -2053,8 +1804,21 @@ impl ChartLayoutEngine {
         page_width: f64,
         metadata: &crate::SongMetadata,
         tempo: Option<&crate::time::Tempo>,
+        count_in_measures: usize,
+        time_signature: (u8, u8),
     ) -> f64 {
-        page_rendering::add_title_header(
+        let count_in_config = if count_in_measures > 0 {
+            Some(page_rendering::CountInHeaderConfig {
+                num_measures: count_in_measures,
+                beats_per_measure: time_signature.0,
+                beat_unit: time_signature.1,
+                has_pushed_chord: false, // TODO: detect pushed chord on beat 1
+            })
+        } else {
+            None
+        };
+
+        page_rendering::add_title_header_with_count_in(
             root,
             page_x,
             page_y,
@@ -2063,6 +1827,7 @@ impl ChartLayoutEngine {
             self.config.spatium,
             metadata,
             tempo,
+            count_in_config.as_ref(),
         )
     }
 
@@ -3934,7 +3699,10 @@ Em7 Am7 D7 Gmaj7
     #[test]
     fn test_hide_repeated_chords() {
         // Chart with repeated chords: C C C G G C
-        // With hide_repeated_chords=true, should show: C _ _ G _ C
+        // With max_measures_per_system=4, this creates 2 systems:
+        //   System 1 (measures 0-3): C C C G → shows C, G (hiding repeated Cs)
+        //   System 2 (measures 4-5): G C → shows G, C (chord tracking resets at system boundary)
+        // Total visible: 4 chord symbols
         let chart_text = r#"
 Test - Artist
 120bpm 4/4 #C
@@ -3957,10 +3725,13 @@ C C C G G C
             chord_count_hidden
         );
 
-        // With hiding, we should see: C, G, C = 3 unique chord changes
+        // With hiding enabled and system boundary reset, we see:
+        // System 1: C, G (2 chords)
+        // System 2: G, C (2 chords, G re-shown due to system reset)
+        // Total: 4 chord symbols
         assert_eq!(
-            chord_count_hidden, 3,
-            "Expected 3 chord symbols with hiding enabled (C, G, C), got {}",
+            chord_count_hidden, 4,
+            "Expected 4 chord symbols with hiding enabled (C, G on system 1; G, C on system 2), got {}",
             chord_count_hidden
         );
 
