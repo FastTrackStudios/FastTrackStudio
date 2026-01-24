@@ -11,20 +11,45 @@ use crate::engraver::layout::tlayout::{RehearsalMarkStyle, rehearsal_themes};
 /// Get theme for section type.
 ///
 /// Maps section types to visual styles (colors, borders) for rehearsal marks.
+/// Uses pastel colors for better visual distinction:
+/// - Intro/Instrumental: Pastel Orange
+/// - Verse: Pastel Green
+/// - Chorus: Pastel Blue
+/// - Bridge: Pastel Purple
+/// - Outro: Light Pastel Orange
+/// - Interlude: Pastel Yellow
+/// - Pre-*: Lighter version of the parent section color
+/// - Post-*: Lighter version of the parent section color
 #[must_use]
 pub fn get_section_theme(section_type: &SectionType) -> RehearsalMarkStyle {
     match section_type {
-        SectionType::Intro | SectionType::Outro => rehearsal_themes::blue(),
-        SectionType::Verse => rehearsal_themes::green(),
-        SectionType::Chorus => rehearsal_themes::purple(),
-        SectionType::Bridge => rehearsal_themes::light(),
-        SectionType::Instrumental => rehearsal_themes::outline(),
+        // Main sections - vibrant pastel colors
+        SectionType::Intro => rehearsal_themes::pastel_orange(),
+        SectionType::Verse => rehearsal_themes::pastel_green(),
+        SectionType::Chorus => rehearsal_themes::pastel_blue(),
+        SectionType::Bridge => rehearsal_themes::pastel_purple(),
+        SectionType::Outro => rehearsal_themes::pastel_orange_light(),
+        SectionType::Instrumental => rehearsal_themes::pastel_orange(),
+        SectionType::Interlude => rehearsal_themes::pastel_yellow(),
+
+        // Pre/Post sections - lighter versions of their parent section
+        SectionType::Pre(inner) | SectionType::Post(inner) => {
+            match inner.as_ref() {
+                SectionType::Verse => rehearsal_themes::pastel_green_light(),
+                SectionType::Chorus => rehearsal_themes::pastel_blue_light(),
+                SectionType::Bridge => rehearsal_themes::pastel_purple_light(),
+                // Default to light gray for other Pre/Post combinations
+                _ => rehearsal_themes::light(),
+            }
+        }
+
+        // Utility sections - neutral colors
         SectionType::CountIn | SectionType::End => rehearsal_themes::outline(),
-        SectionType::Hits => rehearsal_themes::dark(),
-        SectionType::Interlude => rehearsal_themes::light(),
-        SectionType::Breakdown => rehearsal_themes::dark(),
-        SectionType::Pre(_) | SectionType::Post(_) => rehearsal_themes::purple(),
-        SectionType::Custom(_) => rehearsal_themes::dark(),
+        SectionType::Hits => rehearsal_themes::gray(),
+        SectionType::Breakdown => rehearsal_themes::gray(),
+
+        // Custom sections (including SOLO) - gray
+        SectionType::Custom(_) => rehearsal_themes::gray(),
     }
 }
 

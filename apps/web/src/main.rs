@@ -175,6 +175,26 @@ fn Layout() -> Element {
 /// Chart examples for the typewriter animation on the landing page.
 /// Each showcases different keyflow features.
 const DEMO_CHARTS: &[&str] = &[
+    // Complex funk/jazz example - Thriller cover by Dirty Loops
+    r#"Thriller
+120bpm 4/4 #Ab
+
+HITS
+r8t >Ab9_8t r8t r8t r8t >F9_8t r2 | s1
+
+IN
+>'Cm . . .
+
+VS
+>'F/C . Cm .
+
+CH
+>Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm //
+'F/A //// | 'Fm9 ////
+
+INST
+Cm . F6 // Abdim7 'Csus2
+"#,
     // Pop ballad in A major
     r#"Midnight Dreams
 72bpm 4/4 #A
@@ -206,24 +226,6 @@ Cm7 F7 Bbmaj7 //
 
 OUT
 Gm
-"#,
-    // Rock anthem in E
-    r#"Electric Thunder
-130bpm 4/4 #E
-
-INT
-E5 // // //
-
-VS
-E5 A5 B5 A5
-E5 A5 B5 //
-
-CH
-A5 B5 C#m B5
-A5 B5 E5 //
-
-OUT
-E5
 "#,
     // R&B groove in C minor
     r#"City Lights

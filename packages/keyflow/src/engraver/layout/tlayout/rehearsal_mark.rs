@@ -529,6 +529,120 @@ pub mod themes {
             ..Default::default()
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Pastel color themes for section labels
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Pastel orange - for Intro, Instrumental sections.
+    #[must_use]
+    pub fn pastel_orange() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: Color::from_rgb8(255, 179, 128), // Soft orange
+            text_color: Color::from_rgb8(80, 50, 20),          // Dark brown text
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Light pastel orange - for Outro sections.
+    #[must_use]
+    pub fn pastel_orange_light() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: Color::from_rgb8(255, 218, 185), // Peach
+            text_color: Color::from_rgb8(100, 60, 30),         // Brown text
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Pastel green - for Verse sections.
+    #[must_use]
+    pub fn pastel_green() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: Color::from_rgb8(144, 238, 144), // Light green
+            text_color: Color::from_rgb8(30, 80, 30),          // Dark green text
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Light pastel green - for Pre-Verse sections.
+    #[must_use]
+    pub fn pastel_green_light() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: Color::from_rgb8(200, 255, 200), // Very light green
+            text_color: Color::from_rgb8(40, 100, 40),         // Green text
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Pastel blue - for Chorus sections.
+    #[must_use]
+    pub fn pastel_blue() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: Color::from_rgb8(135, 171, 255), // Soft blue
+            text_color: Color::WHITE,
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Light pastel blue - for Pre-Chorus, Post-Chorus sections.
+    #[must_use]
+    pub fn pastel_blue_light() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: Color::from_rgb8(189, 213, 255), // Very light blue
+            text_color: Color::from_rgb8(40, 60, 120),         // Dark blue text
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Pastel purple - for Bridge sections.
+    #[must_use]
+    pub fn pastel_purple() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: Color::from_rgb8(186, 149, 219), // Lavender
+            text_color: Color::WHITE,
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Light pastel purple - for Pre-Bridge, Post-Bridge sections.
+    #[must_use]
+    pub fn pastel_purple_light() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: Color::from_rgb8(220, 200, 235), // Very light lavender
+            text_color: Color::from_rgb8(80, 50, 100),         // Dark purple text
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Pastel yellow - for Interlude sections.
+    #[must_use]
+    pub fn pastel_yellow() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: Color::from_rgb8(255, 245, 157), // Soft yellow
+            text_color: Color::from_rgb8(100, 80, 20),         // Dark gold text
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Gray - for Breakdown, Hits, custom sections.
+    #[must_use]
+    pub fn gray() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: Color::from_rgb8(180, 180, 180), // Medium gray
+            text_color: Color::from_rgb8(40, 40, 40),          // Dark gray text
+            border_color: None,
+            ..Default::default()
+        }
+    }
 }
 
 #[cfg(test)]
