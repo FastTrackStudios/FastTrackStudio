@@ -1027,14 +1027,26 @@ impl ChartLayoutEngine {
 
                         // Add measure number on first measure of each system
                         // Real measures start at 1, after count-in measures
-                        // Position above the clef (at content_x) rather than the measure start
-                        if self.config.show_measure_numbers && local_measure_idx == 0 {
-                            let display_measure_num = (global_measure_index as i32)
-                                - count_in_measures as i32
-                                + 1;
+                        // Position above the clef (at content_x) for first measure of system,
+                        // or above the measure start (measure_x) for measure 1 mid-line
+                        // Also ALWAYS show measure 1 (the downbeat) to make it easy to find
+                        let display_measure_num = (global_measure_index as i32)
+                            - count_in_measures as i32
+                            + 1;
+                        let is_measure_one = display_measure_num == 1;
+                        let is_first_of_system = local_measure_idx == 0;
+                        if self.config.show_measure_numbers
+                            && (is_first_of_system || is_measure_one)
+                        {
+                            // Position: content_x for first measure of system, measure_x for measure 1 mid-line
+                            let num_x = if is_first_of_system {
+                                content_x
+                            } else {
+                                measure_x
+                            };
                             let measure_num_node = self.create_measure_number(
                                 display_measure_num,
-                                content_x, // Position above clef at start of line
+                                num_x,
                                 staff_y,
                                 id_counter,
                             );
@@ -1637,14 +1649,26 @@ impl ChartLayoutEngine {
                         root.add_child(measure_container);
 
                         // Add measure number on first measure of each system (real measures start at 1)
-                        // Position above the clef (at content_x) rather than the measure start
-                        if self.config.show_measure_numbers && local_measure_idx == 0 {
-                            let display_measure_num = (global_measure_index as i32)
-                                - count_in_measures as i32
-                                + 1;
+                        // Position above the clef (at content_x) for first measure of system,
+                        // or above the measure start (measure_x) for measure 1 mid-line
+                        // Also ALWAYS show measure 1 (the downbeat) to make it easy to find
+                        let display_measure_num = (global_measure_index as i32)
+                            - count_in_measures as i32
+                            + 1;
+                        let is_measure_one = display_measure_num == 1;
+                        let is_first_of_system = local_measure_idx == 0;
+                        if self.config.show_measure_numbers
+                            && (is_first_of_system || is_measure_one)
+                        {
+                            // Position: content_x for first measure of system, measure_x for measure 1 mid-line
+                            let num_x = if is_first_of_system {
+                                content_x
+                            } else {
+                                measure_x
+                            };
                             let measure_num_node = self.create_measure_number(
                                 display_measure_num,
-                                content_x, // Position above clef at start of line
+                                num_x,
                                 staff_y,
                                 id_counter,
                             );
