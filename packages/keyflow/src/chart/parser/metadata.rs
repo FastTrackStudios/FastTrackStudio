@@ -100,9 +100,12 @@ impl Chart {
                     self.metadata.subtitle = Some(format!("Transcribed By {}", name));
                 }
                 idx += 1;
-            } else if !Self::looks_like_metadata_line(line) && !line.is_empty() {
+            } else if !Self::looks_like_metadata_line(line)
+                && !line.is_empty()
+                && !Self::looks_like_chord_content(line)
+            {
                 // If the line doesn't look like metadata (no bpm, time sig, key),
-                // treat it as a subtitle/transcriber line
+                // and doesn't look like chord content, treat it as a subtitle/transcriber line
                 if self.metadata.subtitle.is_none() {
                     self.metadata.subtitle = Some(line.to_string());
                     idx += 1;
@@ -119,7 +122,7 @@ impl Chart {
             }
         }
 
-        // Skip empty lines and parse settings after metadata line
+        // Skip empty lines and parse settings/chord assignments after metadata line
         while idx < lines.len() {
             if lines[idx].is_empty() {
                 idx += 1;
@@ -129,6 +132,13 @@ impl Chart {
             // Check for settings (lines starting with /)
             if lines[idx].starts_with('/') {
                 self.parse_setting(lines[idx])?;
+                idx += 1;
+                continue;
+            }
+
+            // Check for global chord assignments (e.g., "Cm = Cm7b5")
+            if let Some((basic, full)) = Self::parse_chord_assignment(lines[idx]) {
+                self.chord_memory.add_global_assignment(&basic, &full);
                 idx += 1;
                 continue;
             }
@@ -145,8 +155,11 @@ impl Chart {
             if let Some(version) = Self::parse_version_string(&line_upper) {
                 self.metadata.version = Some(version);
                 idx += 1;
-            } else if !line.is_empty() && !Self::looks_like_section_marker(line) {
-                // If it's not a section marker, treat it as part name
+            } else if !line.is_empty()
+                && !Self::looks_like_section_marker(line)
+                && !Self::looks_like_chord_content(line)
+            {
+                // If it's not a section marker or chord content, treat it as part name
                 self.metadata.part_name = Some(line.to_string());
                 idx += 1;
 
@@ -326,6 +339,45 @@ impl Chart {
         self.settings.parse_setting_line(line)
     }
 
+    /// Parse a global chord assignment line (e.g., "Cm = Cm7b5", "C = Cmaj7")
+    ///
+    /// These assignments define chord memory that applies to all sections.
+    /// Format: `BasicChord = FullChord` where both must look like chord symbols.
+    ///
+    /// Returns `Some((basic_chord, full_chord))` if valid, `None` otherwise.
+    pub(super) fn parse_chord_assignment(line: &str) -> Option<(String, String)> {
+        // Must contain '=' to be an assignment
+        if !line.contains('=') {
+            return None;
+        }
+
+        let parts: Vec<&str> = line.split('=').map(|s| s.trim()).collect();
+        if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+            return None;
+        }
+
+        let basic = parts[0];
+        let full = parts[1];
+
+        // Validate both look like chord symbols (start with A-G, optionally with accidental)
+        let first_char = basic.chars().next()?;
+        if !first_char.is_ascii_uppercase() || !('A'..='G').contains(&first_char) {
+            return None;
+        }
+
+        let full_first_char = full.chars().next()?;
+        if !full_first_char.is_ascii_uppercase() || !('A'..='G').contains(&full_first_char) {
+            return None;
+        }
+
+        // Make sure this isn't a setting line (those start with /)
+        if basic.starts_with('/') {
+            return None;
+        }
+
+        Some((basic.to_string(), full.to_string()))
+    }
+
     /// Check if a line is a pure metadata line (only time sig, key, and/or tempo - no title text)
     /// Examples: "4/4 #G", "120bpm 4/4", "#C"
     pub(super) fn looks_like_pure_metadata_line(line: &str) -> bool {
@@ -375,13 +427,14 @@ impl Chart {
             // Could be a chord like "C", "Am", "Cmaj7"
             // But also could be a word in a title - check if it has chord-like modifiers
             let rest = &first_token[1..];
-            // Common chord modifiers: m, maj, min, 7, 9, sus, dim, aug, #, b, /
+            // Common chord modifiers: m, maj, min, 7, 9, sus, dim, aug, +, #, b, /
             if rest.is_empty()
                 || rest.starts_with('m')
                 || rest.starts_with("maj")
                 || rest.starts_with("min")
                 || rest.starts_with("dim")
                 || rest.starts_with("aug")
+                || rest.starts_with('+')
                 || rest.starts_with("sus")
                 || rest.starts_with('7')
                 || rest.starts_with('9')

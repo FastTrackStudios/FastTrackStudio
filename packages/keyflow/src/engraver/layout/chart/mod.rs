@@ -2685,50 +2685,15 @@ impl ChartLayoutEngine {
         measure: &crate::chart::types::Measure,
         _text_metrics: &TextFontMetrics,
     ) -> f64 {
-        use crate::chart::types::RhythmElement;
-
-        // Get the time signature to determine beats per measure
+        // Weight is based ONLY on time signature (beats per measure).
+        // All 4/4 measures have equal weight = 1.0, regardless of rhythm complexity.
+        // Rhythm notation (triplets, rests, etc.) compresses to fit the allocated space.
+        // Chord collision prevention is handled by min_width, not weight.
         let num_beats = measure.time_signature.0 as usize;
+        let weight = num_beats as f64 / 4.0;
 
-        // Check if this measure has explicit rhythm notation
-        let has_explicit_rhythm =
-            rhythm_builder::measure_has_explicit_chord_rhythm(measure);
-
-        // Count actual rhythm elements for explicit rhythm measures
-        let rhythm_element_count = measure.rhythm_elements.len();
-
-        // Base weight calculation:
-        // - For slash notation: use beats (4/4 = 1.0)
-        // - For explicit rhythm: use rhythm element count / 4
-        //   (so 8 elements = 2.0 weight, giving it double the space of a simple 4-beat measure)
-        let base_weight = if has_explicit_rhythm && rhythm_element_count > num_beats {
-            // Explicit rhythm with more elements than beats needs proportionally more space
-            rhythm_element_count as f64 / 4.0
-        } else {
-            // Normal slash notation: weight from beats
-            num_beats as f64 / 4.0
-        };
-
-        // Small bonus for visible chord count (more chords = slightly more width needed)
-        // This is much smaller than before since min_width handles collision space.
-        let visible_chords = measure
-            .chords
-            .iter()
-            .filter(|c| !c.full_symbol.is_empty() && c.full_symbol != "s" && c.full_symbol != "r")
-            .count();
-        let chord_bonus = if visible_chords > 2 {
-            (visible_chords - 2) as f64 * 0.05
-        } else {
-            0.0
-        };
-
-        // Collision space is handled by min_width from measurement cache.
-        // Weight only affects proportional distribution, not minimums.
-
-        let weight = base_weight.max(1.0) + chord_bonus;
-
-        // Clamp to reasonable range
-        weight.clamp(0.5, 4.0)
+        // Clamp to reasonable range (handles unusual time signatures)
+        weight.clamp(0.5, 2.0)
     }
 
     /// Distribute available width among measures using spring physics.

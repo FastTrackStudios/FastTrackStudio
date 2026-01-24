@@ -352,6 +352,26 @@ vs 4, cmaj7 dm7 g7 cmaj7
     }
 
     #[test]
+    fn test_sectionless_chord_content() {
+        // Content without a section header should still be parsed as an Intro section
+        let input = r#"
+Sectionless Test
+
+120bpm 4/4 #C
+
+Cm | Fm | Gm | Cm
+"#;
+        let chart = Chart::parse(input).expect("Failed to parse chart");
+
+        assert_eq!(chart.sections.len(), 1);
+        let section = &chart.sections[0];
+        assert_eq!(section.section.section_type, SectionType::Intro);
+        assert_eq!(section.measures().len(), 4);
+        assert_eq!(section.measures()[0].chords[0].full_symbol, "Cm");
+        assert_eq!(section.measures()[1].chords[0].full_symbol, "Fm");
+    }
+
+    #[test]
     fn test_measure_separator() {
         let input = r#"
 Measure Separator Test

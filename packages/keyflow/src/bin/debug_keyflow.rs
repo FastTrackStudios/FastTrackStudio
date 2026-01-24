@@ -400,7 +400,10 @@ fn print_rhythm_details(measure: &keyflow::chart::types::Measure, time_sig: (u8,
     println!("    Rhythm: explicit={}", has_explicit);
 
     let source = if has_explicit {
-        RhythmSource::ExplicitRhythm(&measure.rhythm_elements)
+        RhythmSource::ExplicitRhythm {
+            elements: &measure.rhythm_elements,
+            spillbacks: None,
+        }
     } else {
         RhythmSource::SlashNotation {
             chords: &measure.chords,

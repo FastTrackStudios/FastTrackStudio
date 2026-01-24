@@ -1,126 +1,120 @@
 use keyflow::chart::Chart;
 use keyflow::sections::SectionType;
 
-/// Test 1: Basic chord memory with explicit definitions
+// ═══════════════════════════════════════════════════════════════════════════
+// Section-Scoped Chord Memory Tests
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Memory Architecture:
+// 1. Global memory - populated from:
+//    - Explicit metadata assignments (e.g., `Cm = Cm7b5`)
+//    - First section chord definitions
+// 2. Section memory - cleared at the start of each new section
+//
+// Lookup order: Section-local → Global → Key inference
+//
+// Key behaviors:
+// - First section definitions become global (available in all sections)
+// - Subsequent sections start fresh (section-scoped)
+// - Basic chords (C, Cm) can RECALL but don't STORE
+// - Extended chords (Cmaj7) STORE to memory
+// - `!` prefix bypasses ALL memory
+
+/// Test 1: First section definitions become global
 /// Tests that:
-/// - Chords with explicit quality are remembered in both global and section memory
-/// - Just root notes recall from memory hierarchy: section → global → key inference
-/// - Template recall works for repeated sections
+/// - Extended chords in the first section are stored to global memory
+/// - Subsequent sections can recall from global memory
+/// - Template recall works independently of chord memory
 #[test]
-fn test_chord_memory_explicit_definitions() {
-    let input = r#"Chord Memory Test - Demo
+fn test_first_section_becomes_global() {
+    let input = r#"First Section Global - Demo
 120bpm 4/4 #G
 
-intro 2
-g c
 vs 4
 Gmaj13 C9 Gmaj13 C9
+
 ch 4
-e d G6 C5
+G C G C
+
 vs
-br 2
-G C
 "#;
 
     let chart = Chart::parse(input).unwrap();
 
     // Test metadata
-    assert_eq!(chart.metadata.title, Some("Chord Memory Test".to_string()));
+    assert_eq!(chart.metadata.title, Some("First Section Global".to_string()));
     assert_eq!(chart.metadata.artist, Some("Demo".to_string()));
 
     // Test sections
-    assert_eq!(chart.sections.len(), 5);
+    assert_eq!(chart.sections.len(), 3);
 
-    // Test Intro section - should infer from key (G major: I=G, IV=C)
-    let intro_section = &chart.sections[0];
-    assert_eq!(intro_section.section.section_type, SectionType::Intro);
-    assert_eq!(intro_section.measures().len(), 2);
-
-    // Intro: g c = G C (inferred from G major scale, triads)
-    let intro_chord1 = &intro_section.measures()[0].chords[0];
-    assert_eq!(format!("{}", intro_chord1.root), "G");
-    assert_eq!(intro_chord1.full_symbol, "G");
-
-    let intro_chord2 = &intro_section.measures()[1].chords[0];
-    assert_eq!(format!("{}", intro_chord2.root), "C");
-    assert_eq!(intro_chord2.full_symbol, "C");
-
-    // Test Verse 1 section - explicit qualities update global memory
-    let verse1_section = &chart.sections[1];
+    // Verse 1 (FIRST section): Gmaj13 C9 - extended chords stored to global
+    let verse1_section = &chart.sections[0];
     assert_eq!(verse1_section.section.section_type, SectionType::Verse);
     assert_eq!(verse1_section.measures().len(), 4);
+    assert_eq!(verse1_section.measures()[0].chords[0].full_symbol, "Gmaj13");
+    assert_eq!(verse1_section.measures()[1].chords[0].full_symbol, "C9");
 
-    // Verse 1: Gmaj13 C9 Gmaj13 C9 (explicit definitions)
-    let verse1_chord1 = &verse1_section.measures()[0].chords[0];
-    assert_eq!(format!("{}", verse1_chord1.root), "G");
-    assert_eq!(verse1_chord1.full_symbol, "Gmaj13");
-
-    let verse1_chord2 = &verse1_section.measures()[1].chords[0];
-    assert_eq!(format!("{}", verse1_chord2.root), "C");
-    assert_eq!(verse1_chord2.full_symbol, "C9");
-
-    let verse1_chord3 = &verse1_section.measures()[2].chords[0];
-    assert_eq!(format!("{}", verse1_chord3.root), "G");
-    assert_eq!(verse1_chord3.full_symbol, "Gmaj13");
-
-    let verse1_chord4 = &verse1_section.measures()[3].chords[0];
-    assert_eq!(format!("{}", verse1_chord4.root), "C");
-    assert_eq!(verse1_chord4.full_symbol, "C9");
-
-    // Test Chorus section - clears section memory, infers e/d from key, then sets Gmaj6/C5
-    let chorus_section = &chart.sections[2];
+    // Chorus (second section): G C - basic chords recall from global family memory
+    let chorus_section = &chart.sections[1];
     assert_eq!(chorus_section.section.section_type, SectionType::Chorus);
     assert_eq!(chorus_section.measures().len(), 4);
+    // Basic G recalls Gmaj13 from global major family memory
+    assert_eq!(chorus_section.measures()[0].chords[0].full_symbol, "Gmaj13");
+    // Basic C recalls C9 from global major family memory
+    assert_eq!(chorus_section.measures()[1].chords[0].full_symbol, "C9");
 
-    // Chorus: e d Gmaj6 C5
-    // e and d should infer from key: vi=Em, V=D
-    // Gmaj6 and C5 are explicit and update global memory
-    let chorus_chord1 = &chorus_section.measures()[0].chords[0];
-    assert_eq!(format!("{}", chorus_chord1.root), "E");
-    assert_eq!(chorus_chord1.full_symbol, "Em");
-
-    let chorus_chord2 = &chorus_section.measures()[1].chords[0];
-    assert_eq!(format!("{}", chorus_chord2.root), "D");
-    assert_eq!(chorus_chord2.full_symbol, "D");
-
-    let chorus_chord3 = &chorus_section.measures()[2].chords[0];
-    assert_eq!(format!("{}", chorus_chord3.root), "G");
-    assert_eq!(chorus_chord3.full_symbol, "G6");
-
-    let chorus_chord4 = &chorus_section.measures()[3].chords[0];
-    assert_eq!(format!("{}", chorus_chord4.root), "C");
-    assert_eq!(chorus_chord4.full_symbol, "C5");
-
-    // Test Verse 2 section - uses template recall from Verse 1
-    let verse2_section = &chart.sections[3];
+    // Verse 2: template recall from Verse 1
+    let verse2_section = &chart.sections[2];
     assert_eq!(verse2_section.section.section_type, SectionType::Verse);
     assert_eq!(verse2_section.measures().len(), 4);
-
-    // Verse 2: template recall from Verse 1 (Gmaj13, C9, Gmaj13, C9)
-    let verse2_chord1 = &verse2_section.measures()[0].chords[0];
-    assert_eq!(format!("{}", verse2_chord1.root), "G");
-    assert_eq!(verse2_chord1.full_symbol, "Gmaj13");
-
-    let verse2_chord2 = &verse2_section.measures()[1].chords[0];
-    assert_eq!(format!("{}", verse2_chord2.root), "C");
-    assert_eq!(verse2_chord2.full_symbol, "C9");
-
-    // Test Bridge section - uses global memory (Gmaj6, C5 from Chorus)
-    let bridge_section = &chart.sections[4];
-    assert_eq!(bridge_section.section.section_type, SectionType::Bridge);
-    assert_eq!(bridge_section.measures().len(), 2);
-
-    // Bridge: G C (uses global memory from Chorus: G6, C5)
-    let bridge_chord1 = &bridge_section.measures()[0].chords[0];
-    assert_eq!(format!("{}", bridge_chord1.root), "G");
-    assert_eq!(bridge_chord1.full_symbol, "G6");
-
-    let bridge_chord2 = &bridge_section.measures()[1].chords[0];
-    assert_eq!(format!("{}", bridge_chord2.root), "C");
-    assert_eq!(bridge_chord2.full_symbol, "C5");
+    assert_eq!(verse2_section.measures()[0].chords[0].full_symbol, "Gmaj13");
 }
 
-/// Test 2: One-time overrides with ! prefix
+/// Test 2: Section-scoped memory (non-first sections don't affect global)
+/// Tests that:
+/// - Extended chords in non-first sections only store to section-local memory
+/// - Subsequent sections don't inherit from non-first sections
+#[test]
+fn test_section_scoped_memory() {
+    let input = r#"Section Scoped - Demo
+120bpm 4/4 #G
+
+intro 2
+G C
+
+vs 4
+Gmaj13 C9 Gmaj13 C9
+
+ch 4
+G C G C
+"#;
+
+    let chart = Chart::parse(input).unwrap();
+
+    // Test sections
+    assert_eq!(chart.sections.len(), 3);
+
+    // Intro (FIRST section): G C - basic chords, no extended stored to global
+    let intro_section = &chart.sections[0];
+    assert_eq!(intro_section.measures()[0].chords[0].full_symbol, "G");
+    assert_eq!(intro_section.measures()[1].chords[0].full_symbol, "C");
+
+    // Verse 1 (second section): Gmaj13 C9 - extended, but NOT first section
+    // Stores to section-local only, NOT global
+    let verse1_section = &chart.sections[1];
+    assert_eq!(verse1_section.measures()[0].chords[0].full_symbol, "Gmaj13");
+    assert_eq!(verse1_section.measures()[1].chords[0].full_symbol, "C9");
+
+    // Chorus (third section): G C - basic chords
+    // Global memory is empty (intro had basic chords only)
+    // Outputs basic chords
+    let chorus_section = &chart.sections[2];
+    assert_eq!(chorus_section.measures()[0].chords[0].full_symbol, "G");
+    assert_eq!(chorus_section.measures()[1].chords[0].full_symbol, "C");
+}
+
+/// Test 3: One-time overrides with ! prefix
 /// Tests that:
 /// - !chord uses the quality but doesn't update memory
 /// - Subsequent chords recall the original memory
@@ -129,9 +123,10 @@ fn test_chord_memory_one_time_overrides() {
     let input = r#"Chord Override Test - Demo
 120bpm 4/4 #G
 
-intro 2
-Gmaj7 Gmaj7
 vs 2
+Gmaj7 Gmaj7
+
+ch 2
 !G7 G
 "#;
 
@@ -147,147 +142,93 @@ vs 2
     // Test sections
     assert_eq!(chart.sections.len(), 2);
 
-    // Test Intro section - sets Gmaj7 in memory
-    let intro_section = &chart.sections[0];
-    assert_eq!(intro_section.section.section_type, SectionType::Intro);
-    assert_eq!(intro_section.measures().len(), 2);
-
-    let intro_chord1 = &intro_section.measures()[0].chords[0];
-    assert_eq!(intro_chord1.full_symbol, "Gmaj7");
-
-    // Test Verse section - first chord is override, second recalls original
-    let verse_section = &chart.sections[1];
+    // Verse (first section): sets Gmaj7 in global memory
+    let verse_section = &chart.sections[0];
     assert_eq!(verse_section.section.section_type, SectionType::Verse);
-    assert_eq!(verse_section.measures().len(), 2);
+    assert_eq!(verse_section.measures()[0].chords[0].full_symbol, "Gmaj7");
 
+    // Chorus (second section):
     // First chord: !G7 - uses G7 but doesn't update memory
-    let verse_chord1 = &verse_section.measures()[0].chords[0];
-    assert_eq!(verse_chord1.full_symbol, "G7");
-
-    // Second chord: G - recalls original Gmaj7 from global memory
-    let verse_chord2 = &verse_section.measures()[1].chords[0];
-    assert_eq!(verse_chord2.full_symbol, "Gmaj7");
+    // Second chord: G - basic major recalls from global family memory (Gmaj7)
+    let chorus_section = &chart.sections[1];
+    assert_eq!(chorus_section.section.section_type, SectionType::Chorus);
+    assert_eq!(chorus_section.measures()[0].chords[0].full_symbol, "G7");
+    assert_eq!(chorus_section.measures()[1].chords[0].full_symbol, "Gmaj7");
 }
 
-/// Test 3: Section-specific memory priority
+/// Test 4: Global chord assignments in metadata
 /// Tests that:
-/// - Each section type has its own memory
-/// - Section memory takes priority over global memory
-/// - Global memory is copied to section memory when accessed
+/// - `Cm = Cm7b5` syntax works in metadata area
+/// - Global assignments take precedence over section definitions
 #[test]
-fn test_chord_memory_section_priority() {
-    let input = r#"Section Priority Test - Demo
+fn test_global_chord_assignments() {
+    let input = r#"Global Assignment Test - Demo
 120bpm 4/4 #G
+Cm = Cm7b5
+G = Gmaj13
 
-intro 2
-Gmaj7 Cmaj7
-vs 2
-Gmaj13 C9
-ch 2
-G6 C5
-vs
-br 2
-G C
+vs 4
+C G Cm Em
+
+ch 4
+C G Cm Em
 "#;
 
     let chart = Chart::parse(input).unwrap();
 
     // Test sections
-    assert_eq!(chart.sections.len(), 5);
+    assert_eq!(chart.sections.len(), 2);
 
-    // Intro: Gmaj7 Cmaj7 (sets global memory)
-    let intro_section = &chart.sections[0];
-    let intro_chord1 = &intro_section.measures()[0].chords[0];
-    assert_eq!(intro_chord1.full_symbol, "Gmaj7");
+    // Verse (first section):
+    // C - basic major, no global assignment for C major
+    // G - basic major, recalls Gmaj13 from global assignment
+    // Cm - basic minor, recalls Cm7b5 from global assignment
+    // Em - basic minor, no global assignment for Em
+    let verse_section = &chart.sections[0];
+    assert_eq!(verse_section.measures()[0].chords[0].full_symbol, "C");
+    assert_eq!(verse_section.measures()[1].chords[0].full_symbol, "Gmaj13");
+    assert_eq!(verse_section.measures()[2].chords[0].full_symbol, "Cm7b5");
+    assert_eq!(verse_section.measures()[3].chords[0].full_symbol, "Em");
 
-    // Verse 1: Gmaj13 C9 (updates global memory)
-    let verse1_section = &chart.sections[1];
-    let verse1_chord1 = &verse1_section.measures()[0].chords[0];
-    assert_eq!(verse1_chord1.full_symbol, "Gmaj13");
-
-    // Chorus: G6 C5 (updates global memory again)
-    let chorus_section = &chart.sections[2];
-    let chorus_chord1 = &chorus_section.measures()[0].chords[0];
-    assert_eq!(chorus_chord1.full_symbol, "G6");
-
-    // Verse 2: uses template from Verse 1 (Gmaj13, C9)
-    let verse2_section = &chart.sections[3];
-    let verse2_chord1 = &verse2_section.measures()[0].chords[0];
-    assert_eq!(verse2_chord1.full_symbol, "Gmaj13");
-
-    // Bridge: G C uses global memory (G6, C5 from Chorus)
-    let bridge_section = &chart.sections[4];
-    let bridge_chord1 = &bridge_section.measures()[0].chords[0];
-    assert_eq!(bridge_chord1.full_symbol, "G6");
+    // Chorus (second section): same behavior (global assignments persist)
+    let chorus_section = &chart.sections[1];
+    assert_eq!(chorus_section.measures()[0].chords[0].full_symbol, "C");
+    assert_eq!(chorus_section.measures()[1].chords[0].full_symbol, "Gmaj13");
+    assert_eq!(chorus_section.measures()[2].chords[0].full_symbol, "Cm7b5");
+    assert_eq!(chorus_section.measures()[3].chords[0].full_symbol, "Em");
 }
 
-/// Test 4: Complex memory scenario with multiple updates
-/// Tests various combinations of explicit chords, recalls, and key inference
+/// Test 5: Override global assignment with !
+/// Tests that:
+/// - `!` prefix bypasses global assignments
+/// - `!Cm` outputs plain `Cm` even with `Cm = Cm7b5` global assignment
 #[test]
-fn test_chord_memory_complex_scenario() {
-    let input = r#"Complex Memory Test - Demo
+fn test_override_global_assignment() {
+    let input = r#"Override Global - Demo
 120bpm 4/4 #G
+Cm = Cm7b5
 
-intro 2
-g c
-vs 2
-Gmaj13 C9
-ch 2
-e d
-vs
-br 2
-G C
-outro 2
-!Gmaj7 !Cmaj7
+vs 4
+Cm !Cm Cm !Cm
 "#;
 
     let chart = Chart::parse(input).unwrap();
 
-    assert_eq!(chart.sections.len(), 6);
-
-    // Intro: g c infers from key = G, C (triads)
-    let intro_section = &chart.sections[0];
-    let intro_chord1 = &intro_section.measures()[0].chords[0];
-    assert_eq!(intro_chord1.full_symbol, "G");
-    let intro_chord2 = &intro_section.measures()[1].chords[0];
-    assert_eq!(intro_chord2.full_symbol, "C");
-
-    // Verse 1: Gmaj13 C9 (updates global memory)
-    let verse1_section = &chart.sections[1];
-    let verse1_chord1 = &verse1_section.measures()[0].chords[0];
-    assert_eq!(verse1_chord1.full_symbol, "Gmaj13");
-
-    // Chorus: e d infers from key = Em, D
-    let chorus_section = &chart.sections[2];
-    let chorus_chord1 = &chorus_section.measures()[0].chords[0];
-    assert_eq!(chorus_chord1.full_symbol, "Em");
-    let chorus_chord2 = &chorus_section.measures()[1].chords[0];
-    assert_eq!(chorus_chord2.full_symbol, "D");
-
-    // Verse 2: uses template from Verse 1 (Gmaj13, C9)
-    let verse2_section = &chart.sections[3];
-    let verse2_chord1 = &verse2_section.measures()[0].chords[0];
-    assert_eq!(verse2_chord1.full_symbol, "Gmaj13");
-
-    // Bridge: G C uses global memory (Gmaj13, C9 from Verse)
-    let bridge_section = &chart.sections[4];
-    let bridge_chord1 = &bridge_section.measures()[0].chords[0];
-    assert_eq!(bridge_chord1.full_symbol, "Gmaj13");
-    let bridge_chord2 = &bridge_section.measures()[1].chords[0];
-    assert_eq!(bridge_chord2.full_symbol, "C9");
-
-    // Outro: !Gmaj7 !Cmaj7 (one-time overrides, don't change memory)
-    let outro_section = &chart.sections[5];
-    let outro_chord1 = &outro_section.measures()[0].chords[0];
-    assert_eq!(outro_chord1.full_symbol, "Gmaj7");
-    let outro_chord2 = &outro_section.measures()[1].chords[0];
-    assert_eq!(outro_chord2.full_symbol, "Cmaj7");
+    let verse_section = &chart.sections[0];
+    // Cm - recalls Cm7b5 from global assignment
+    assert_eq!(verse_section.measures()[0].chords[0].full_symbol, "Cm7b5");
+    // !Cm - bypasses all memory, outputs plain Cm
+    assert_eq!(verse_section.measures()[1].chords[0].full_symbol, "Cm");
+    // Cm - still recalls Cm7b5 (! didn't change memory)
+    assert_eq!(verse_section.measures()[2].chords[0].full_symbol, "Cm7b5");
+    // !Cm - bypasses again
+    assert_eq!(verse_section.measures()[3].chords[0].full_symbol, "Cm");
 }
 
-/// Test 5: Template recall for repeated sections
+/// Test 6: Template recall for repeated sections
 /// Tests that:
 /// - Sections without content recall templates from previous definitions
-/// - Templates preserve chord progressions
+/// - Templates preserve chord progressions independently of memory
 #[test]
 fn test_template_recall() {
     let input = r#"Template Test - Demo
@@ -311,48 +252,8 @@ vs
     assert_eq!(verse2_section.measures().len(), 4);
 
     // Verify template was recalled
-    let verse2_chord1 = &verse2_section.measures()[0].chords[0];
-    assert_eq!(verse2_chord1.full_symbol, "Gmaj13");
-
-    let verse2_chord2 = &verse2_section.measures()[1].chords[0];
-    assert_eq!(verse2_chord2.full_symbol, "C9");
-}
-
-/// Test 6: Global memory with explicit redefinition
-/// Tests that:
-/// - When a section is explicitly redefined with just roots, it uses global memory
-/// - Global memory is copied to the section's memory
-#[test]
-fn test_global_memory_with_explicit_redefinition() {
-    let input = r#"Global Memory Test - Demo
-120bpm 4/4 #G
-
-vs
-g
-ch
-G6
-vs
-g
-"#;
-
-    let chart = Chart::parse(input).unwrap();
-
-    assert_eq!(chart.sections.len(), 3);
-
-    // Verse 1: g infers from key = G
-    let verse1_section = &chart.sections[0];
-    let verse1_chord1 = &verse1_section.measures()[0].chords[0];
-    assert_eq!(verse1_chord1.full_symbol, "G");
-
-    // Chorus: G6 updates global memory
-    let chorus_section = &chart.sections[1];
-    let chorus_chord1 = &chorus_section.measures()[0].chords[0];
-    assert_eq!(chorus_chord1.full_symbol, "G6");
-
-    // Verse 2: g explicitly redefined, uses global memory = G6
-    let verse2_section = &chart.sections[2];
-    let verse2_chord1 = &verse2_section.measures()[0].chords[0];
-    assert_eq!(verse2_chord1.full_symbol, "G6");
+    assert_eq!(verse2_section.measures()[0].chords[0].full_symbol, "Gmaj13");
+    assert_eq!(verse2_section.measures()[1].chords[0].full_symbol, "C9");
 }
 
 /// Test 7: Template length and inline chord notation
@@ -382,21 +283,20 @@ vs
     assert_eq!(verse2_section.measures().len(), 4);
 
     // Verify chords were recalled correctly
-    let verse2_chord1 = &verse2_section.measures()[0].chords[0];
-    assert_eq!(verse2_chord1.full_symbol, "Gmaj7");
+    assert_eq!(verse2_section.measures()[0].chords[0].full_symbol, "Gmaj7");
 }
 
-/// Test 8: Key-based chord quality inference
+/// Test 8: Explicit chord qualities
 /// Tests that:
-/// - Chords without explicit quality infer from the current key
-/// - Inference works for note names, scale degrees, and Roman numerals
+/// - Chords are parsed with explicit quality
+/// - Scale degrees and Roman numerals are preserved as-is
 #[test]
-fn test_key_based_quality_inference() {
-    let input = r#"Key Inference Test - Demo
+fn test_explicit_chord_qualities() {
+    let input = r#"Explicit Quality Test - Demo
 120bpm 4/4 #G
 
 intro 4
-g c e d
+G C Em D
 vs 4
 1 4 6 5
 ch 4
@@ -407,24 +307,79 @@ I IV vi V
 
     assert_eq!(chart.sections.len(), 3);
 
-    // Intro: note names (lowercase) infer from G major
+    // Intro: explicit chord symbols
     let intro_section = &chart.sections[0];
-    assert_eq!(intro_section.measures()[0].chords[0].full_symbol, "G"); // I = major
-    assert_eq!(intro_section.measures()[1].chords[0].full_symbol, "C"); // IV = major
-    assert_eq!(intro_section.measures()[2].chords[0].full_symbol, "Em"); // vi = minor
-    assert_eq!(intro_section.measures()[3].chords[0].full_symbol, "D"); // V = major
+    assert_eq!(intro_section.measures()[0].chords[0].full_symbol, "G");
+    assert_eq!(intro_section.measures()[1].chords[0].full_symbol, "C");
+    assert_eq!(intro_section.measures()[2].chords[0].full_symbol, "Em");
+    assert_eq!(intro_section.measures()[3].chords[0].full_symbol, "D");
 
-    // Verse: scale degrees infer from G major
+    // Verse: scale degrees (preserved as-is)
     let verse_section = &chart.sections[1];
-    assert_eq!(verse_section.measures()[0].chords[0].full_symbol, "1"); // 1 (quality implied by key)
-    assert_eq!(verse_section.measures()[1].chords[0].full_symbol, "4"); // 4 (quality implied by key)
-    assert_eq!(verse_section.measures()[2].chords[0].full_symbol, "6"); // 6 (quality implied by key)
-    assert_eq!(verse_section.measures()[3].chords[0].full_symbol, "5"); // 5 (quality implied by key)
+    assert_eq!(verse_section.measures()[0].chords[0].full_symbol, "1");
+    assert_eq!(verse_section.measures()[1].chords[0].full_symbol, "4");
+    assert_eq!(verse_section.measures()[2].chords[0].full_symbol, "6");
+    assert_eq!(verse_section.measures()[3].chords[0].full_symbol, "5");
 
-    // Chorus: Roman numerals infer from G major
+    // Chorus: Roman numerals (lowercase vi gets 'm' for minor)
     let chorus_section = &chart.sections[2];
-    assert_eq!(chorus_section.measures()[0].chords[0].full_symbol, "I"); // I (quality implied by key)
-    assert_eq!(chorus_section.measures()[1].chords[0].full_symbol, "IV"); // IV (quality implied by key)
-    assert_eq!(chorus_section.measures()[2].chords[0].full_symbol, "vi"); // vi (quality implied by key)
-    assert_eq!(chorus_section.measures()[3].chords[0].full_symbol, "V"); // V (quality implied by key)
+    assert_eq!(chorus_section.measures()[0].chords[0].full_symbol, "I");
+    assert_eq!(chorus_section.measures()[1].chords[0].full_symbol, "IV");
+    assert_eq!(chorus_section.measures()[2].chords[0].full_symbol, "vim"); // lowercase = minor
+    assert_eq!(chorus_section.measures()[3].chords[0].full_symbol, "V");
+}
+
+/// Test 9: Section-local memory within a section
+/// Tests that:
+/// - Extended chords within a section can be recalled by basic chords later in the same section
+/// - This works regardless of whether it's the first section
+#[test]
+fn test_section_local_recall() {
+    let input = r#"Section Local - Demo
+120bpm 4/4 #G
+
+intro 2
+G C
+
+vs 4
+Gmaj13 C9 G C
+"#;
+
+    let chart = Chart::parse(input).unwrap();
+
+    // Verse: Gmaj13 and C9 are stored to section-local memory
+    // G and C (basic) recall from section-local memory within the same section
+    let verse_section = &chart.sections[1];
+    assert_eq!(verse_section.measures()[0].chords[0].full_symbol, "Gmaj13");
+    assert_eq!(verse_section.measures()[1].chords[0].full_symbol, "C9");
+    // G recalls Gmaj13 from section-local memory
+    assert_eq!(verse_section.measures()[2].chords[0].full_symbol, "Gmaj13");
+    // C recalls C9 from section-local memory
+    assert_eq!(verse_section.measures()[3].chords[0].full_symbol, "C9");
+}
+
+/// Test 10: Split family memory (major vs minor)
+/// Tests that:
+/// - Major family chords (C, Cmaj7) and minor family chords (Cm, Cm7) have separate memory
+/// - Basic C recalls from major family, Cm recalls from minor family
+#[test]
+fn test_split_family_memory() {
+    let input = r#"Split Family - Demo
+120bpm 4/4 #G
+
+vs 4
+Cmaj7 Cm7 C Cm
+"#;
+
+    let chart = Chart::parse(input).unwrap();
+
+    let verse_section = &chart.sections[0];
+    // Cmaj7 stores to major family
+    assert_eq!(verse_section.measures()[0].chords[0].full_symbol, "Cmaj7");
+    // Cm7 stores to minor family
+    assert_eq!(verse_section.measures()[1].chords[0].full_symbol, "Cm7");
+    // C (basic major) recalls Cmaj7 from major family
+    assert_eq!(verse_section.measures()[2].chords[0].full_symbol, "Cmaj7");
+    // Cm (basic minor) recalls Cm7 from minor family
+    assert_eq!(verse_section.measures()[3].chords[0].full_symbol, "Cm7");
 }

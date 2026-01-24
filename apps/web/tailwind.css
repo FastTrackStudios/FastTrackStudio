@@ -8,8 +8,36 @@
 @import "tailwindcss";
 
 body {
-    background-color: var(--background);
+    background-color: #09090b;
     color: var(--foreground);
+    min-height: 100vh;
+}
+
+/* Hero section utilities */
+.mask-linear-gradient-b {
+    mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+}
+
+.mask-linear-gradient-r {
+    mask-image: linear-gradient(to right, black 50%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, black 50%, transparent 100%);
+}
+
+.perspective-1200 {
+    perspective: 1200px;
+}
+
+.text-balance {
+    text-wrap: balance;
+}
+
+.transform-gpu {
+    transform: translateZ(0);
+}
+
+.skew-x-\[-20deg\] {
+    transform: skewX(-20deg);
 }
 
 /*

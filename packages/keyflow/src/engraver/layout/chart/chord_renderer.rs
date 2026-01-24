@@ -544,6 +544,18 @@ pub fn render_chord_symbols(
 
     let is_boundary = is_at_boundary(ctx.measure_idx, ctx.local_measure_idx);
 
+    #[cfg(debug_assertions)]
+    if ctx.measure_idx == 0 {
+        eprintln!(
+            "[chord-render-start] section={} measure={} is_boundary={} chord_count={} chords={:?}",
+            ctx.section_name,
+            ctx.measure_idx,
+            is_boundary,
+            measure.chords.len(),
+            measure.chords.iter().map(|c| (&c.full_symbol, c.push_pull.as_ref().map(|(p, _)| *p))).collect::<Vec<_>>()
+        );
+    }
+
     for (chord_idx, chord) in measure.chords.iter().enumerate() {
         let current_symbol = &chord.full_symbol;
 
@@ -595,6 +607,24 @@ pub fn render_chord_symbols(
             is_first_real,
             is_boundary,
         );
+
+        #[cfg(debug_assertions)]
+        {
+            let is_pushed = chord.push_pull.as_ref().map_or(false, |(is_push, _)| *is_push);
+            eprintln!(
+                "[chord-render] section={} measure={} chord_idx={} '{}' is_pushed={} is_first_real={} is_boundary={} is_pushed_at_boundary={} segment_idx={} internal_push_positions={:?}",
+                ctx.section_name,
+                ctx.measure_idx,
+                chord_idx,
+                current_symbol,
+                is_pushed,
+                is_first_real,
+                is_boundary,
+                is_pushed_at_boundary,
+                segment_idx,
+                ctx.internal_push_positions
+            );
+        }
 
         // Get segment x position
         let segment_x = ctx
@@ -764,13 +794,14 @@ pub fn render_spillback_chords(
 
         #[cfg(debug_assertions)]
         eprintln!(
-            "[spillback-render] section={} measure={} '{}' beat_pos={} segment_idx={} positions_len={} spillback_positions={:?}",
+            "[spillback-render] section={} measure={} '{}' beat_pos={} segment_idx={} positions_len={} segment_x={:.2} spillback_positions={:?}",
             ctx.section_name,
             ctx.measure_idx,
             spillback.chord_symbol,
             spillback.beat_position,
             segment_idx,
             ctx.segment_positions.len(),
+            ctx.segment_positions.get(segment_idx).copied().unwrap_or(0.0),
             ctx.spillback_positions
         );
 

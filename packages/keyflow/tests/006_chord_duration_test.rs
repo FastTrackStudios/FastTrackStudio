@@ -15,7 +15,7 @@ fn test_chord_duration_all_root_formats() {
 120bpm 4/4 #G
 
 intro
-g//// e// d//
+G//// Em// D//
 vs
 1// 4// 6// 5//
 ch
@@ -43,12 +43,12 @@ I/// IV/ vi////
     assert_eq!(intro_section.section.section_type, SectionType::Intro);
     assert_eq!(intro_section.measures().len(), 2);
 
-    // Measure 1: g//// (4 beats fills the measure)
+    // Measure 1: G//// (4 beats fills the measure)
     let measure1 = &intro_section.measures()[0];
     assert_eq!(measure1.chords.len(), 1);
     let chord1 = &measure1.chords[0];
     assert_eq!(format!("{}", chord1.root), "G");
-    assert_eq!(chord1.full_symbol, "G"); // Infers from key: I = major triad
+    assert_eq!(chord1.full_symbol, "G");
     match &chord1.rhythm {
         ChordRhythm::Slashes { count, .. } => {
             assert_eq!(*count, 4);
@@ -57,13 +57,13 @@ I/// IV/ vi////
         _ => panic!("Expected Slashes rhythm for g////"),
     }
 
-    // Measure 2: e// (2 beats) + d// (2 beats) = 4 beats
+    // Measure 2: Em// (2 beats) + D// (2 beats) = 4 beats
     let measure2 = &intro_section.measures()[1];
     assert_eq!(measure2.chords.len(), 2);
 
-    let chord2 = &measure2.chords[0]; // e//
+    let chord2 = &measure2.chords[0]; // Em//
     assert_eq!(format!("{}", chord2.root), "E");
-    assert_eq!(chord2.full_symbol, "Em"); // Infers from key: vi = minor triad
+    assert_eq!(chord2.full_symbol, "Em");
     match &chord2.rhythm {
         ChordRhythm::Slashes { count, .. } => {
             assert_eq!(*count, 2);
@@ -72,9 +72,9 @@ I/// IV/ vi////
         _ => panic!("Expected Slashes rhythm for e//"),
     }
 
-    let chord3 = &measure2.chords[1]; // d//
+    let chord3 = &measure2.chords[1]; // D//
     assert_eq!(format!("{}", chord3.root), "D");
-    assert_eq!(chord3.full_symbol, "D"); // Infers from key: V = major triad
+    assert_eq!(chord3.full_symbol, "D");
     match &chord3.rhythm {
         ChordRhythm::Slashes { count, .. } => {
             assert_eq!(*count, 2);
@@ -179,7 +179,7 @@ I/// IV/ vi////
 
     let chord10 = &chorus_measure2.chords[0]; // vi////
     assert_eq!(format!("{}", chord10.root), "vi");
-    assert_eq!(chord10.full_symbol, "vi"); // Roman numeral quality is implied by key
+    assert_eq!(chord10.full_symbol, "vim"); // lowercase vi = minor
     match &chord10.rhythm {
         ChordRhythm::Slashes { count, .. } => {
             assert_eq!(*count, 4);
@@ -202,7 +202,7 @@ fn test_chord_duration_underscore_all_formats() {
 120bpm 4/4 #G
 
 intro
-g_4 e_2 d_4 c////
+G_4 Em_2 D_4 C////
 vs
 1_4 4_2 6_4 5////
 ch
@@ -278,7 +278,7 @@ I_2 IV_2 vi_2 V_2
     assert_eq!(chord9.duration.to_beats(chart.time_signature.unwrap()), 2.0);
 
     let chord10 = &chorus.measures()[1].chords[0];
-    assert_eq!(chord10.full_symbol, "vi"); // Roman numerals shouldn't have quality suffix
+    assert_eq!(chord10.full_symbol, "vim"); // lowercase vi = minor
     assert_eq!(
         chord10.duration.to_beats(chart.time_signature.unwrap()),
         2.0
@@ -455,8 +455,9 @@ Gmaj7//// Em7_2 D7_2 Cmaj7////
 
 /// Test 5: Duration with chord memory across sections
 /// Tests that:
-/// - Duration notation works with chord memory recall
-/// - Memory is preserved across sections with different durations
+/// - Duration notation works correctly
+/// - Global memory only inherits for FIRST-TIME roots (new behavior)
+/// - Once a root is seen, new sections don't inherit from global
 #[test]
 fn test_chord_duration_with_memory() {
     let input = r#"Duration Memory Test - Demo
@@ -483,34 +484,33 @@ G_2 C_2 D////
     assert_eq!(intro.measures()[1].chords[0].full_symbol, "C9");
     assert_eq!(intro.measures()[1].chords[1].full_symbol, "D");
 
-    // Verse recalls qualities with underscore notation
-    // g_4 (1) + c_4 (1) + d_4 (1) + g_4 (1) = measure 0
+    // Verse: g_4 c_4 d_4 g_4
+    // Basic chords recall from major family memory (Gmaj13, C9 set in intro)
     let verse = &chart.sections[1];
     assert_eq!(verse.measures().len(), 1);
-    assert_eq!(verse.measures()[0].chords[0].full_symbol, "Gmaj13");
+    assert_eq!(verse.measures()[0].chords[0].full_symbol, "Gmaj13"); // Recalls from family
     assert!(
         verse.measures()[0].chords[0].rhythm.has_lily_duration(),
         "Expected Lily duration"
     );
-    assert_eq!(verse.measures()[0].chords[1].full_symbol, "C9");
+    assert_eq!(verse.measures()[0].chords[1].full_symbol, "C9"); // Recalls from family
     assert!(
         verse.measures()[0].chords[1].rhythm.has_lily_duration(),
         "Expected Lily duration"
     );
     assert_eq!(verse.measures()[0].chords[2].full_symbol, "D");
-    assert_eq!(verse.measures()[0].chords[3].full_symbol, "Gmaj13");
+    assert_eq!(verse.measures()[0].chords[3].full_symbol, "Gmaj13"); // Recalls from family
 
-    // Chorus recalls qualities with different notation
-    // G_2 (2) + C_2 (2) = measure 0
-    // D//// (4) = measure 1
+    // Chorus: G_2 C_2 D////
+    // Basic chords recall from major family memory
     let chorus = &chart.sections[2];
     assert_eq!(chorus.measures().len(), 2);
-    assert_eq!(chorus.measures()[0].chords[0].full_symbol, "Gmaj13");
+    assert_eq!(chorus.measures()[0].chords[0].full_symbol, "Gmaj13"); // Recalls from family
     assert!(
         chorus.measures()[0].chords[0].rhythm.has_lily_duration(),
         "Expected Lily duration"
     );
-    assert_eq!(chorus.measures()[0].chords[1].full_symbol, "C9");
+    assert_eq!(chorus.measures()[0].chords[1].full_symbol, "C9"); // Recalls from family
     assert!(
         chorus.measures()[0].chords[1].rhythm.has_lily_duration(),
         "Expected Lily duration"

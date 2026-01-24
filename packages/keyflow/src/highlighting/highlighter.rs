@@ -658,11 +658,19 @@ impl Highlighter {
                     let start_pos = token.pos;
 
                     // Check if this could be a chord root (A-G, uppercase or lowercase)
-                    if c.to_ascii_uppercase().is_ascii_alphabetic()
+                    // IMPORTANT: Only match at word boundaries to avoid highlighting
+                    // letters inside words like "Midnight" or "Dreams"
+                    let is_potential_root = c.to_ascii_uppercase().is_ascii_alphabetic()
                         && matches!(
                             c.to_ascii_uppercase(),
                             'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G'
-                        )
+                        );
+
+                    // Must be at chord position AND not followed by word continuation
+                    // This prevents "Dreams" from having "D" highlighted as a chord root
+                    if is_potential_root
+                        && Self::is_chord_position(&tokens, i)
+                        && !Self::is_followed_by_word_continuation(&tokens, i)
                     {
                         // This looks like a chord root
                         spans.push(HighlightSpan::from_range(start_pos, 1, HighlightKind::Root));
@@ -696,8 +704,8 @@ impl Highlighter {
 
                         // Look for extensions (7, 9, 11, 13)
                         i = Self::highlight_chord_extension(&tokens, i, &mut spans);
-                    } else if *c == 'r' || *c == 's' {
-                        // Rest or space notation
+                    } else if (*c == 'r' || *c == 's') && Self::is_chord_position(&tokens, i) {
+                        // Rest or space notation (only at word boundaries)
                         let kind = if *c == 'r' {
                             HighlightKind::Rest
                         } else {
@@ -722,22 +730,22 @@ impl Highlighter {
                         }
 
                         spans.push(HighlightSpan::from_range(start_pos, rest_len, kind));
-                    } else if *c == 'm' {
-                        // Quality marker (minor)
+                    } else if *c == 'm' && Self::is_after_root(&tokens, i) {
+                        // Quality marker (minor) - only after a chord root
                         spans.push(HighlightSpan::from_range(
                             start_pos,
                             1,
                             HighlightKind::Quality,
                         ));
-                    } else if *c == 't' {
-                        // Triplet marker
+                    } else if *c == 't' && Self::is_after_number(&tokens, i) {
+                        // Triplet marker - only after a number (like 8t, 4t)
                         spans.push(HighlightSpan::from_range(
                             start_pos,
                             1,
                             HighlightKind::Triplet,
                         ));
-                    } else if ['I', 'V', 'i', 'v'].contains(c) {
-                        // Roman numeral - highlight the whole numeral
+                    } else if ['I', 'V', 'i', 'v'].contains(c) && Self::is_chord_position(&tokens, i) {
+                        // Roman numeral - highlight the whole numeral (only at word boundaries)
                         let (len, kind) = Self::parse_roman_numeral(&tokens, i);
                         spans.push(HighlightSpan::from_range(start_pos, len, kind));
                         i += len.saturating_sub(1).max(0);
@@ -939,17 +947,74 @@ impl Highlighter {
         spans
     }
 
-    /// Check if current position is where a chord would start.
+    /// Check if current position is where a chord or notation would start.
+    /// This is used to avoid highlighting letters inside regular words.
     fn is_chord_position(tokens: &[Token], idx: usize) -> bool {
         if idx == 0 {
             return true;
         }
 
-        // Chord starts after: space, measure separator, or line start
+        // Chord/notation starts after: space, measure separator, push/accent, or line start
+        // This prevents highlighting letters like 'D' in "Midnight" or 'r' in "verse"
         matches!(
             tokens[idx - 1].token_type,
-            TokenType::Space | TokenType::Slash | TokenType::Eof
+            TokenType::Space
+                | TokenType::Slash
+                | TokenType::Eof
+                | TokenType::Apostrophe  // Push notation: 'G, 'Cm
+                | TokenType::GreaterThan // Accent notation: >Cm
         )
+    }
+
+    /// Check if the previous token is a chord root (A-G).
+    fn is_after_root(tokens: &[Token], idx: usize) -> bool {
+        if idx == 0 {
+            return false;
+        }
+
+        matches!(
+            tokens[idx - 1].token_type,
+            TokenType::Letter('A')
+                | TokenType::Letter('B')
+                | TokenType::Letter('C')
+                | TokenType::Letter('D')
+                | TokenType::Letter('E')
+                | TokenType::Letter('F')
+                | TokenType::Letter('G')
+        )
+    }
+
+    /// Check if the previous token is a number (for triplet markers like 8t, 4t).
+    fn is_after_number(tokens: &[Token], idx: usize) -> bool {
+        if idx == 0 {
+            return false;
+        }
+
+        matches!(tokens[idx - 1].token_type, TokenType::Number(_))
+    }
+
+    /// Check if what follows looks like a regular word (not a chord).
+    /// Returns true if the next token is a letter that is NOT a valid chord modifier.
+    /// For example: "Dreams" - after 'D' comes 'r', which is not a valid chord modifier,
+    /// so 'D' should not be highlighted as a chord root.
+    fn is_followed_by_word_continuation(tokens: &[Token], idx: usize) -> bool {
+        if idx + 1 >= tokens.len() {
+            return false; // End of tokens, not a word continuation
+        }
+
+        match &tokens[idx + 1].token_type {
+            // These letters are valid after a chord root
+            TokenType::Letter('m') => false, // minor
+            TokenType::Letter('b') => false, // flat
+            TokenType::Letter('a') => false, // aug, add
+            TokenType::Letter('d') => false, // dim
+            TokenType::Letter('s') => false, // sus
+            TokenType::Letter('M') => false, // Maj
+            // These are NOT valid chord modifiers - it's a regular word
+            TokenType::Letter(_) => true,
+            // Anything else (numbers, symbols, space, etc.) is fine for chord
+            _ => false,
+        }
     }
 
     /// Highlight chord quality markers and advance the token index.
@@ -1272,5 +1337,36 @@ mod tests {
         );
         assert!(spans.iter().any(|s| s.kind == HighlightKind::Section));
         assert!(spans.iter().any(|s| s.kind == HighlightKind::MeasureCount));
+    }
+
+    #[test]
+    fn test_no_chord_roots_in_words() {
+        // Letters A-G inside words should NOT be highlighted as chord roots
+        // "Midnight Dreams" has D in both words, but neither should be highlighted
+        let spans = Highlighter::highlight_line("Midnight Dreams");
+        let root_count = spans
+            .iter()
+            .filter(|s| s.kind == HighlightKind::Root)
+            .count();
+        assert_eq!(
+            root_count, 0,
+            "Should not highlight letters inside words as roots, found {} roots",
+            root_count
+        );
+    }
+
+    #[test]
+    fn test_chord_roots_at_word_start() {
+        // Standalone letters A-G at word boundaries SHOULD be highlighted
+        let spans = Highlighter::highlight_line("A D F#m");
+        let root_count = spans
+            .iter()
+            .filter(|s| s.kind == HighlightKind::Root)
+            .count();
+        assert_eq!(
+            root_count, 3,
+            "Should highlight standalone chord letters, found {} roots",
+            root_count
+        );
     }
 }

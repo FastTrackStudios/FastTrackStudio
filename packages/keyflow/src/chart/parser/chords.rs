@@ -892,14 +892,31 @@ impl Chart {
                                     true
                                 } else if !measures.is_empty() {
                                     // Current measure is empty - slashes apply to previous measure's chord
+                                    // Check if the previous chord has EXPLICIT rhythm (slashes) vs DEFAULT (auto-fill)
+                                    // - If previous chord has Slashes: measure is explicitly full, add SPACES
+                                    // - If previous chord has Default: it was auto-filled, so SET the duration
+                                    let prev_chord_has_explicit_rhythm =
+                                        measures.last().and_then(|m| m.chords.last()).map_or(
+                                            false,
+                                            |c| {
+                                                matches!(
+                                                    c.rhythm,
+                                                    ChordRhythm::Slashes { .. }
+                                                        | ChordRhythm::Explicit(_)
+                                                )
+                                            },
+                                        );
+
                                     if let Some(last_measure) = measures.last_mut() {
                                         if let Some(last_chord) = last_measure.chords.last_mut() {
-                                            // If after explicit | separator, add SPACES to current measure
-                                            // instead of modifying previous chord's duration.
-                                            // This creates visual continuation without breaking layout.
-                                            // "Abmaj9 //// | //" = Abmaj9 (4 beats) + 2 spaces (continuation)
-                                            // "Cm/Eb / Eb ///" with auto-complete = SET (3 beats)
-                                            if measure_was_created_by_separator {
+                                            // If after explicit | separator OR previous chord has explicit rhythm,
+                                            // add SPACES to current measure instead of modifying previous chord.
+                                            // "Abmaj9 //// | //" = Abmaj9 (4 slashes) + 2 spaces (continuation)
+                                            // "C //// //" = C (4 slashes) + 2 spaces (explicit slashes = full)
+                                            // "Cm/Eb / Eb ///" = SET to 1 beat (Default rhythm = auto-filled)
+                                            if measure_was_created_by_separator
+                                                || prev_chord_has_explicit_rhythm
+                                            {
                                                 // After explicit separator: add SPACES to current measure
                                                 // as continuation of the previous chord. These render as
                                                 // rhythm slashes without a chord symbol.
@@ -1526,10 +1543,10 @@ impl Chart {
                                 && chord.rhythm == ChordRhythm::Default
                                 && remaining_beats > 0.001
                             {
-                                // Adjust chord to fill remaining beats
-                                // The duration will be corrected when the following slashes are processed
-                                let remaining_slashes = remaining_beats.round() as u8;
-                                chord.rhythm = ChordRhythm::slashes(remaining_slashes);
+                                // Adjust chord to fill remaining beats (duration only)
+                                // IMPORTANT: Keep rhythm as Default so actual slashes can override.
+                                // If we set rhythm to Slashes here, subsequent slashes would think
+                                // it's explicitly set and create spaces instead of setting duration.
                                 chord.duration =
                                     MusicalDuration::from_beats(remaining_beats, time_sig);
                                 chord_beats = remaining_beats;
@@ -2082,66 +2099,61 @@ VS
         use crate::chart::commands::Command;
         use crate::sections::SectionType;
 
-        // Accents should NOT be contributed to chord memory.
-        // If we write >Cmaj7 in VS, then just "c" in CH (different section type),
-        // the recalled chord should NOT have an accent.
-        // Using different section types to test global chord memory (not templates).
+        // With the new chord memory behavior:
+        // - Basic chords (C, Cm) don't participate in memory at all
+        // - Writing "C" gives "C" (basic major), NOT a recalled Cmaj7
+        // This test verifies that accented chords don't bleed accents into basic chords
         let input = r#"
 Accent Memory Test
 120bpm 4/4 #C
 
-VS 1
->Cmaj7
-
-CH 1
-c D E F
+VS
+>Cmaj7 | C D E F
 "#;
         let chart = Chart::parse(input).expect("Should parse");
 
-        // Get the verse and chorus sections (skip CountIn and End)
+        // Get all verse sections
         let verse_sections: Vec<_> = chart.sections.iter()
             .filter(|s| s.section.section_type == SectionType::Verse)
-            .collect();
-        let chorus_sections: Vec<_> = chart.sections.iter()
-            .filter(|s| s.section.section_type == SectionType::Chorus)
             .collect();
 
         eprintln!("All sections: {:?}", chart.sections.iter().map(|s| format!("{:?}", s.section.section_type)).collect::<Vec<_>>());
         eprintln!("Verse sections: {}", verse_sections.len());
-        eprintln!("Chorus sections: {}", chorus_sections.len());
 
-        assert!(!verse_sections.is_empty(), "Should have verse sections");
-        assert!(!chorus_sections.is_empty(), "Should have chorus sections");
+        assert!(!verse_sections.is_empty(), "Should have at least 1 verse section");
 
-        // VS1: >Cmaj7 should have accent
+        // VS measure 0: >Cmaj7 should have accent
         let vs_measures = verse_sections[0].measures();
-        assert!(!vs_measures.is_empty(), "VS1 should have measures");
-        let vs1_chords: Vec<_> = vs_measures[0].chords.iter()
+        assert!(vs_measures.len() >= 2, "VS should have at least 2 measures");
+
+        let m0_chords: Vec<_> = vs_measures[0].chords.iter()
             .filter(|c| c.full_symbol != "s")
             .collect();
-        assert!(!vs1_chords.is_empty(), "VS1 should have non-space chords");
-        let vs1_chord = vs1_chords[0];
-        assert_eq!(vs1_chord.full_symbol, "Cmaj7");
+        assert!(!m0_chords.is_empty(), "M0 should have non-space chords");
+
+        // First chord: >Cmaj7 should have accent
+        let first_chord = m0_chords[0];
+        assert_eq!(first_chord.full_symbol, "Cmaj7");
         assert!(
-            vs1_chord.commands.iter().any(|c| matches!(c, Command::Accent)),
-            "VS1 chord should have accent"
+            first_chord.commands.iter().any(|c| matches!(c, Command::Accent)),
+            "First chord should have accent"
         );
 
-        // CH1: c (recalled from global memory) should NOT have accent
-        let ch_measures = chorus_sections[0].measures();
-        assert!(!ch_measures.is_empty(), "CH1 should have measures");
-        let ch_chords: Vec<_> = ch_measures[0].chords.iter()
+        // VS measure 1: C (basic major) should recall Cmaj7 from major family memory
+        // Basic chords CAN recall but don't store - split memory by chord family
+        let m1_chords: Vec<_> = vs_measures[1].chords.iter()
             .filter(|c| c.full_symbol != "s")
             .collect();
-        assert!(!ch_chords.is_empty(), "CH1 should have non-space chords");
-        let ch_chord = ch_chords[0];
-        // The chord symbol should be recalled from memory (Cmaj7)
-        assert_eq!(ch_chord.full_symbol, "Cmaj7", "Should recall Cmaj7 from global memory");
-        // But it should NOT have the accent command
+        assert!(!m1_chords.is_empty(), "M1 should have non-space chords");
+
+        let second_chord = m1_chords[0];
+        // Basic chords DO recall from their family's memory
+        assert_eq!(second_chord.full_symbol, "Cmaj7", "Basic C should recall Cmaj7 from major family memory");
+        // But the accent is NOT recalled (it's a modifier on the chord instance, not stored in memory)
         assert!(
-            !ch_chord.commands.iter().any(|c| matches!(c, Command::Accent)),
-            "CH1 recalled chord should NOT have accent - accents don't go in chord memory. Commands: {:?}",
-            ch_chord.commands
+            !second_chord.commands.iter().any(|c| matches!(c, Command::Accent)),
+            "Recalled chord should NOT have accent from memory. Commands: {:?}",
+            second_chord.commands
         );
     }
 

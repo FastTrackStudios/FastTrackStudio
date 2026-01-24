@@ -73,7 +73,7 @@ impl ChordQuality {
             ChordQuality::Major => "", // Major is implied
             ChordQuality::Minor => "m",
             ChordQuality::Diminished => "dim",
-            ChordQuality::Augmented => "aug",
+            ChordQuality::Augmented => "+",
             ChordQuality::Suspended(sus_type) => match sus_type {
                 SuspendedType::Second => "sus2",
                 SuspendedType::Fourth => "sus4",
@@ -140,6 +140,7 @@ mod tests {
         assert_eq!(ChordQuality::Major.symbol(), "");
         assert_eq!(ChordQuality::Minor.symbol(), "m");
         assert_eq!(ChordQuality::Diminished.symbol(), "dim");
+        assert_eq!(ChordQuality::Augmented.symbol(), "+");
         assert_eq!(ChordQuality::Power.symbol(), "5");
         assert_eq!(ChordQuality::sus4().symbol(), "sus4");
         assert_eq!(ChordQuality::sus2().symbol(), "sus2");

@@ -2,7 +2,7 @@
 //!
 //! Configuration options for chart parsing and display
 
-use crate::chord::PushPullBase;
+use crate::chord::{LilySyntax, PushPullBase};
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -60,22 +60,33 @@ impl ChartSettings {
         }
     }
 
-    /// Parse a setting line (e.g., "/SMART_REPEATS=true")
+    /// Parse a setting line (e.g., "/SMART_REPEATS=true" or "/push 4")
+    ///
+    /// Supports two syntaxes:
+    /// - `/SETTING=value` - standard key=value format
+    /// - `/push 4` - space-separated format for push mode specifically
     pub fn parse_setting_line(&mut self, line: &str) -> Result<(), String> {
         // Remove leading slash and trim
         let line = line.trim().trim_start_matches('/').trim();
 
-        // Split by '='
-        let parts: Vec<&str> = line.splitn(2, '=').collect();
-        if parts.len() != 2 {
-            return Err(format!(
-                "Invalid setting format: '{}'. Expected /SETTING=value",
-                line
-            ));
-        }
+        // Try splitting by '=' first (standard format)
+        let (key, value): (String, String) = if let Some(eq_pos) = line.find('=') {
+            let (k, v) = line.split_at(eq_pos);
+            (k.trim().to_uppercase(), v[1..].trim().to_string())
+        } else {
+            // No '=' found - try space-separated format for PUSH
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 && parts[0].to_uppercase() == "PUSH" {
+                ("PUSH".to_string(), parts[1..].join(" "))
+            } else {
+                return Err(format!(
+                    "Invalid setting format: '{}'. Expected /SETTING=value or /push <mode>",
+                    line
+                ));
+            }
+        };
 
-        let key = parts[0].trim().to_uppercase();
-        let value = parts[1].trim();
+        let value = value.as_str();
 
         match key.as_str() {
             "SMART_REPEATS" => {
@@ -107,29 +118,59 @@ impl ChartSettings {
         }
     }
 
-    /// Parse push mode value: "standard", "triplet", or a number for tuplet
+    /// Parse push mode value: "standard", "triplet", a tuplet number, or duration syntax
+    ///
+    /// Duration syntax examples:
+    /// - "4" → quarter note push
+    /// - "8" → eighth note push
+    /// - "8t" → triplet eighth push
+    /// - "4." → dotted quarter push
+    /// - "16" → sixteenth note push
     fn parse_push_mode(value: &str) -> Result<PushPullBase, String> {
         let value_lower = value.to_lowercase();
         match value_lower.as_str() {
             "standard" | "normal" | "binary" => Ok(PushPullBase::Standard),
-            "triplet" | "3" => Ok(PushPullBase::Triplet),
+            "triplet" => Ok(PushPullBase::Triplet),
             _ => {
-                // Try to parse as a tuplet number (5, 7, 9, etc.)
-                if let Ok(n) = value.parse::<u8>() {
-                    if n >= 3 {
-                        Ok(PushPullBase::Tuplet(n))
-                    } else {
-                        Err(format!(
-                            "Invalid tuplet value: '{}'. Must be 3 or greater",
-                            value
-                        ))
-                    }
+                // Check for duration syntax: number followed by optional 't' (triplet) or '.' (dotted)
+                let trimmed = value.trim();
+                let (num_part, suffix) = if trimmed.ends_with('t') {
+                    (&trimmed[..trimmed.len() - 1], Some('t'))
+                } else if trimmed.ends_with('.') {
+                    (&trimmed[..trimmed.len() - 1], Some('.'))
                 } else {
-                    Err(format!(
-                        "Invalid push mode: '{}'. Expected 'standard', 'triplet', or a number",
-                        value
-                    ))
+                    (trimmed, None)
+                };
+
+                // Try to parse as a LilySyntax duration first (1, 2, 4, 8, 16, 32)
+                if let Some(duration) = LilySyntax::from_number(num_part) {
+                    let dotted = suffix == Some('.');
+                    let triplet = suffix == Some('t');
+                    return Ok(PushPullBase::Duration {
+                        duration,
+                        dotted,
+                        triplet,
+                    });
                 }
+
+                // Try to parse as a tuplet number (3, 5, 7, 9, etc.)
+                // Only if there's no suffix (otherwise it would have matched duration)
+                if suffix.is_none() {
+                    if let Ok(n) = num_part.parse::<u8>() {
+                        if n == 3 {
+                            return Ok(PushPullBase::Triplet);
+                        }
+                        if n >= 4 {
+                            // Numbers >= 4 that aren't valid LilySyntax (handled above) are tuplets
+                            return Ok(PushPullBase::Tuplet(n));
+                        }
+                    }
+                }
+
+                Err(format!(
+                    "Invalid push mode: '{}'. Expected 'standard', 'triplet', duration (4, 8t, 16.), or tuplet number",
+                    value
+                ))
             }
         }
     }
@@ -222,6 +263,33 @@ impl Default for ChartSettings {
     fn default() -> Self {
         Self::new()
     }
+}
+
+impl ChartSettings {
+    /// Create a checkpoint of the current settings state.
+    /// This is used for section-scoped settings - settings declared inside a section
+    /// are temporary and reset after the section ends.
+    pub fn checkpoint(&self) -> ChartSettingsCheckpoint {
+        ChartSettingsCheckpoint {
+            settings: self.settings.clone(),
+            push_mode: self.push_mode.clone(),
+        }
+    }
+
+    /// Restore settings from a checkpoint.
+    /// Any settings changed since the checkpoint was created are reverted.
+    pub fn restore(&mut self, checkpoint: ChartSettingsCheckpoint) {
+        self.settings = checkpoint.settings;
+        self.push_mode = checkpoint.push_mode;
+    }
+}
+
+/// A checkpoint of chart settings state.
+/// Used to implement section-scoped settings that reset after the section ends.
+#[derive(Debug, Clone)]
+pub struct ChartSettingsCheckpoint {
+    settings: HashMap<ChartSetting, SettingValue>,
+    push_mode: PushPullBase,
 }
 
 impl ChartSetting {
@@ -319,6 +387,153 @@ mod tests {
         settings
             .parse_setting_line("  /  SMART_REPEATS  =  true  ")
             .unwrap();
+        assert!(settings.smart_repeats());
+    }
+
+    #[test]
+    fn test_push_mode_standard() {
+        let mut settings = ChartSettings::new();
+        settings.parse_setting_line("/push=standard").unwrap();
+        assert!(matches!(settings.push_mode, PushPullBase::Standard));
+    }
+
+    #[test]
+    fn test_push_mode_triplet() {
+        let mut settings = ChartSettings::new();
+        settings.parse_setting_line("/push=triplet").unwrap();
+        assert!(matches!(settings.push_mode, PushPullBase::Triplet));
+    }
+
+    #[test]
+    fn test_push_mode_duration_quarter() {
+        let mut settings = ChartSettings::new();
+        settings.parse_setting_line("/push=4").unwrap();
+        match settings.push_mode {
+            PushPullBase::Duration {
+                duration,
+                dotted,
+                triplet,
+            } => {
+                assert_eq!(duration, LilySyntax::Quarter);
+                assert!(!dotted);
+                assert!(!triplet);
+            }
+            _ => panic!("Expected Duration variant"),
+        }
+    }
+
+    #[test]
+    fn test_push_mode_duration_eighth_triplet() {
+        let mut settings = ChartSettings::new();
+        settings.parse_setting_line("/push=8t").unwrap();
+        match settings.push_mode {
+            PushPullBase::Duration {
+                duration,
+                dotted,
+                triplet,
+            } => {
+                assert_eq!(duration, LilySyntax::Eighth);
+                assert!(!dotted);
+                assert!(triplet);
+            }
+            _ => panic!("Expected Duration variant"),
+        }
+    }
+
+    #[test]
+    fn test_push_mode_duration_dotted() {
+        let mut settings = ChartSettings::new();
+        settings.parse_setting_line("/push=4.").unwrap();
+        match settings.push_mode {
+            PushPullBase::Duration {
+                duration,
+                dotted,
+                triplet,
+            } => {
+                assert_eq!(duration, LilySyntax::Quarter);
+                assert!(dotted);
+                assert!(!triplet);
+            }
+            _ => panic!("Expected Duration variant"),
+        }
+    }
+
+    #[test]
+    fn test_push_mode_sixteenth() {
+        let mut settings = ChartSettings::new();
+        settings.parse_setting_line("/push=16").unwrap();
+        match settings.push_mode {
+            PushPullBase::Duration {
+                duration,
+                dotted,
+                triplet,
+            } => {
+                assert_eq!(duration, LilySyntax::Sixteenth);
+                assert!(!dotted);
+                assert!(!triplet);
+            }
+            _ => panic!("Expected Duration variant"),
+        }
+    }
+
+    #[test]
+    fn test_push_mode_space_separated() {
+        // Test that "/push 4" works without equals sign
+        let mut settings = ChartSettings::new();
+        settings.parse_setting_line("/push 4").unwrap();
+        match settings.push_mode {
+            PushPullBase::Duration {
+                duration,
+                dotted,
+                triplet,
+            } => {
+                assert_eq!(duration, LilySyntax::Quarter);
+                assert!(!dotted);
+                assert!(!triplet);
+            }
+            _ => panic!("Expected Duration variant"),
+        }
+
+        // Also test with triplet modifier
+        settings.parse_setting_line("/push 8t").unwrap();
+        match settings.push_mode {
+            PushPullBase::Duration {
+                duration,
+                dotted,
+                triplet,
+            } => {
+                assert_eq!(duration, LilySyntax::Eighth);
+                assert!(!dotted);
+                assert!(triplet);
+            }
+            _ => panic!("Expected Duration variant with triplet"),
+        }
+    }
+
+    #[test]
+    fn test_settings_checkpoint_restore() {
+        let mut settings = ChartSettings::new();
+
+        // Set to triplet mode
+        settings.parse_setting_line("/push=triplet").unwrap();
+        settings.parse_setting_line("/smart_repeats=true").unwrap();
+
+        // Create checkpoint
+        let checkpoint = settings.checkpoint();
+
+        // Change settings
+        settings.parse_setting_line("/push=standard").unwrap();
+        settings.parse_setting_line("/smart_repeats=false").unwrap();
+
+        // Verify changes took effect
+        assert!(matches!(settings.push_mode, PushPullBase::Standard));
+        assert!(!settings.smart_repeats());
+
+        // Restore from checkpoint
+        settings.restore(checkpoint);
+
+        // Verify restoration
+        assert!(matches!(settings.push_mode, PushPullBase::Triplet));
         assert!(settings.smart_repeats());
     }
 }

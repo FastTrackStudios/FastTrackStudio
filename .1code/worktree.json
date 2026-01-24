@@ -1,0 +1,6 @@
+{
+  "setup-worktree": [
+    "git submodule update --init --recursive",
+    "cp $ROOT_WORKTREE_PATH/.env .env"
+  ]
+}

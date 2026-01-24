@@ -79,6 +79,11 @@ web-sys = { version = "0.3", features = [
     "ResizeObserverEntry",
     "ResizeObserverOptions",
     "ResizeObserverBoxOptions",
+    # File download
+    "Blob",
+    "BlobPropertyBag",
+    "Url",
+    "HtmlAnchorElement",
 ] }
 
 # Graphics rendering (WASM) - version must match vello 0.6's wgpu dependency

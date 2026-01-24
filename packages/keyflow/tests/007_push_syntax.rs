@@ -24,7 +24,7 @@ fn test_push_syntax_anticipation() {
 120bpm 4/4 #C
 
 vs
-'C D 'Em F
+'C Dm 'Em F
 "#;
 
     let chart = Chart::parse(input).unwrap();
@@ -54,7 +54,7 @@ vs
         _ => panic!("Expected Push for 'C, got {:?}", chord_c.push_pull),
     }
 
-    // Check normal D (no push) - infers Dm from C major
+    // Check normal Dm (no push)
     let chord_dm = find_chord_by_symbol(verse_section, "Dm").expect("Should find Dm chord");
     assert_eq!(chord_dm.full_symbol, "Dm");
     assert_eq!(chord_dm.rhythm, ChordRhythm::Default);
@@ -82,7 +82,7 @@ fn test_pull_syntax_delay() {
 120bpm 4/4 #C
 
 vs
-C' D Em' F
+C' Dm Em' F
 "#;
 
     let chart = Chart::parse(input).unwrap();
@@ -105,7 +105,7 @@ C' D Em' F
         _ => panic!("Expected Pull for C', got {:?}", chord1.push_pull),
     }
 
-    // Check normal D (no pull) - infers Dm from C major
+    // Check normal Dm (no pull)
     let chord2 = &verse_section.measures()[1].chords[0];
     assert_eq!(chord2.full_symbol, "Dm");
     assert_eq!(chord2.rhythm, ChordRhythm::Default);
@@ -225,7 +225,7 @@ fn test_mixed_push_pull() {
 120bpm 4/4 #C
 
 vs
-'C D' ''Em F'''
+'C Dm' ''Em F'''
 "#;
 
     let chart = Chart::parse(input).unwrap();
@@ -247,9 +247,9 @@ vs
         _ => panic!("Expected Push(Eighth) for 'C"),
     }
 
-    // Check pull on D' (eighth note late)
+    // Check pull on Dm' (eighth note late)
     let chord_dm = find_chord_by_symbol(verse_section, "Dm").expect("Should find Dm chord");
-    assert_eq!(chord_dm.full_symbol, "Dm"); // Should infer Dm from C major
+    assert_eq!(chord_dm.full_symbol, "Dm");
     match chord_dm.push_pull {
         Some((false, amount)) => {
             use keyflow::chord::PushPullAmount;

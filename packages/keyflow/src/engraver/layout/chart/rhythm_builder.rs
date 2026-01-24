@@ -31,7 +31,11 @@ use super::PushSpillback;
 pub enum RhythmSource<'a> {
     /// Explicit chord rhythms (r8t Ab9_8t r8t...)
     /// These have LilyPond-style duration notation attached to each element.
-    ExplicitRhythm(&'a [RhythmElement]),
+    /// Now includes optional spillbacks for pushed chords from the next measure.
+    ExplicitRhythm {
+        elements: &'a [RhythmElement],
+        spillbacks: Option<&'a [PushSpillback]>,
+    },
 
     /// Preprocessed melody segments from cross-barline expansion.
     /// These come from `expand_melodies_across_measures()`.
@@ -180,10 +184,14 @@ pub fn build_rhythm(source: RhythmSource<'_>, config: &RhythmBuildConfig) -> Rhy
 /// Extract base rhythm from the given source.
 fn extract_base_rhythm(source: RhythmSource<'_>, config: &RhythmBuildConfig) -> RhythmBuildResult {
     match source {
-        RhythmSource::ExplicitRhythm(elements) => {
+        RhythmSource::ExplicitRhythm { elements, spillbacks } => {
             #[cfg(debug_assertions)]
-            eprintln!("[rhythm-source] Using ExplicitRhythm ({} elements)", elements.len());
-            extract_from_explicit(elements)
+            eprintln!(
+                "[rhythm-source] Using ExplicitRhythm ({} elements, {} spillbacks)",
+                elements.len(),
+                spillbacks.map_or(0, |s| s.len())
+            );
+            extract_from_explicit(elements, spillbacks, config)
         }
         RhythmSource::MelodyData(data) => {
             #[cfg(debug_assertions)]
@@ -205,7 +213,12 @@ fn extract_base_rhythm(source: RhythmSource<'_>, config: &RhythmBuildConfig) -> 
 /// Extract rhythm from explicit chord rhythms (r8t Ab9_8t r8t...).
 ///
 /// These have LilyPond-style duration notation attached to each element.
-fn extract_from_explicit(elements: &[RhythmElement]) -> RhythmBuildResult {
+/// Now handles spillbacks from pushed chords in the next measure.
+fn extract_from_explicit(
+    elements: &[RhythmElement],
+    spillbacks: Option<&[PushSpillback]>,
+    config: &RhythmBuildConfig,
+) -> RhythmBuildResult {
     let mut result = RhythmBuildResult::default();
     let mut triplet_group_start: Option<usize> = None;
     let mut triplet_group_ticks: i32 = 0;
@@ -257,6 +270,59 @@ fn extract_from_explicit(elements: &[RhythmElement]) -> RhythmBuildResult {
     }
 
     result.total_ticks = result.entries.iter().map(|e| e.duration().ticks()).sum();
+
+    // Handle triplet spillbacks from the next measure
+    // If there are triplet spillbacks and push_alters_rhythm is enabled,
+    // we need to modify the end of the measure to accommodate the pushed chord
+    if config.push_alters_rhythm {
+        if let Some(spillbacks) = spillbacks {
+            for spillback in spillbacks {
+                if spillback.push_base == PushPullBase::Triplet && spillback.push_level == 1 {
+                    // Check if the measure ends with a quarter rest that we can split
+                    // The spillback should create: triplet quarter rest + triplet eighth (for the pushed chord)
+                    if let Some(last_entry) = result.entries.last() {
+                        let last_ticks = last_entry.duration().ticks();
+                        // Quarter note = 480 ticks
+                        if last_ticks == 480 {
+                            // Remove the last entry
+                            let was_rest = matches!(result.entries.pop(), Some(RhythmEntry::Rest(_)));
+
+                            // Create triplet quarter (rest or note) + triplet eighth (for spillback)
+                            let triplet_quarter = Duration::triplet(DurationKind::Quarter);
+                            let triplet_eighth = Duration::triplet(DurationKind::Eighth);
+
+                            let start_idx = result.entries.len();
+
+                            if was_rest {
+                                result.entries.push(RhythmEntry::Rest(triplet_quarter));
+                            } else {
+                                result.entries.push(RhythmEntry::Note(triplet_quarter));
+                            }
+                            // Spillback chord position (this is where the pushed chord renders)
+                            result.entries.push(RhythmEntry::Note(triplet_eighth));
+
+                            // Add spillback position mapping
+                            let spillback_segment_idx = result.entries.len() - 1;
+                            result.spillback_positions.push((
+                                spillback_segment_idx,
+                                spillback.chord_symbol.clone(),
+                            ));
+
+                            // Add triplet spec for the new group
+                            result
+                                .tuplet_specs
+                                .push(TupletSpec::triplet(start_idx, result.entries.len()));
+
+                            // Update total ticks (should remain the same since triplet quarter + triplet eighth = quarter)
+                            result.total_ticks =
+                                result.entries.iter().map(|e| e.duration().ticks()).sum();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     result
 }
 
@@ -739,7 +805,8 @@ pub fn estimate_expanded_rhythm_counts(measure: &Measure, num_beats: usize) -> (
 pub fn build_rhythm_from_chord_rhythms(
     measure: &Measure,
 ) -> (Vec<RhythmEntry>, i32, Vec<TupletSpec>) {
-    let result = extract_from_explicit(&measure.rhythm_elements);
+    let config = RhythmBuildConfig::default();
+    let result = extract_from_explicit(&measure.rhythm_elements, None, &config);
     (result.entries, result.total_ticks, result.tuplet_specs)
 }
 

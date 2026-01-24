@@ -35,7 +35,7 @@ pub use rhythm::{
     detect_section_start_spillback, resolve_measure_rhythm, resolve_section_rhythms,
 };
 pub use semantic_role::{NavigationType, SemanticRole};
-pub use settings::{ChartSetting, ChartSettings, SettingValue};
+pub use settings::{ChartSetting, ChartSettings, ChartSettingsCheckpoint, SettingValue};
 pub use source_link::SourceLink;
 pub use structure::Chart;
 pub use templates::TemplateManager;

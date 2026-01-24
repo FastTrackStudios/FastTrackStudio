@@ -1,35 +1,172 @@
 //! Chord Memory System
 //!
-//! Manages global and section-specific chord memory for chord quality recall
+//! Manages global and section-scoped chord memory for chord quality recall.
+//!
+//! ## Section-Scoped Memory Architecture
+//!
+//! Memory is organized in two tiers:
+//! 1. **Global memory** - populated from:
+//!    - Explicit metadata assignments (e.g., `Cm = Cm7b5`)
+//!    - First section chord definitions
+//! 2. **Section memory** - cleared at the start of each new section
+//!
+//! Lookup order: Section-local → Global → Key inference
+//!
+//! ## Split Memory for Major/Minor Families
+//!
+//! Memory is split between "major family" and "minor family" chords:
+//! - Major family: C, Cmaj7, C7, C9, Caug, etc. (no "m" modifier)
+//! - Minor family: Cm, Cm7, Cm9, etc. (has "m" modifier)
+//!
+//! **Basic chords** (just triads like `C` or `Cm`) can RECALL from memory
+//! but don't STORE to memory. This means:
+//! - `C` after `Cmaj7` → recalls `Cmaj7` (from major family)
+//! - `Cm` after `Cm7` → recalls `Cm7` (from minor family)
+//! - `C` alone → stays `C` (no memory to recall from)
 
 use crate::sections::SectionType;
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Chord family for split memory
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChordFamily {
+    /// Major family: C, Cmaj7, C7, C9, Caug, Csus, etc.
+    Major,
+    /// Minor family: Cm, Cm7, Cm9, Cdim, etc.
+    Minor,
+}
+
 /// Manages chord memory for quality recall
 ///
 /// Memory hierarchy:
-/// 1. One-time overrides (prefix `!`) - highest priority (handled by parser)
-/// 2. Section-specific memory - middle priority
-/// 3. Global memory - low priority
-/// 4. Default qualities from key - lowest priority (future feature)
+/// 1. One-time overrides (prefix `!`) - highest priority (bypasses ALL memory)
+/// 2. Section-local memory - middle priority
+/// 3. Global memory - fallback (from metadata + first section)
+/// 4. Default qualities from key - lowest priority
+///
+/// Section lifecycle:
+/// - `enter_section()` - clears section memory for non-first sections
+/// - `complete_first_section()` - copies first section memory to global
+/// - First section definitions automatically populate global memory
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ChordMemory {
-    /// Global chord memory (root -> full symbol)
+    /// Global chord memory using family-aware keys (e.g., "c:major" -> "Cmaj7")
+    /// Populated from metadata assignments and first section definitions
+    global_family: HashMap<String, String>,
+
+    /// Section-local chord memory using family-aware keys
+    /// Cleared on each new section (except first section)
+    section_family: HashMap<String, String>,
+
+    /// Legacy global memory (root -> full symbol) - kept for compatibility
     global: HashMap<String, String>,
 
-    /// Section-specific chord memory (section type -> (root -> full symbol))
+    /// Legacy section-specific memory - kept for compatibility
     section_specific: HashMap<String, HashMap<String, String>>,
+
+    /// Roots that have been used at least once in any section.
+    seen_roots: std::collections::HashSet<String>,
+
+    /// Whether we're currently in the first section
+    is_first_section: bool,
+
+    /// Whether the first section has been completed
+    first_section_complete: bool,
+
+    /// Number of sections that have been entered
+    section_count: usize,
 }
 
 impl ChordMemory {
     pub fn new() -> Self {
         Self {
+            global_family: HashMap::new(),
+            section_family: HashMap::new(),
             global: HashMap::new(),
             section_specific: HashMap::new(),
+            seen_roots: std::collections::HashSet::new(),
+            is_first_section: true,
+            first_section_complete: false,
+            section_count: 0,
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Section Lifecycle Methods
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Called when entering a new section.
+    ///
+    /// For the first section: memory starts empty, definitions will populate global.
+    /// For subsequent sections: clears section-local memory, global remains for fallback.
+    pub fn enter_section(&mut self) {
+        self.section_count += 1;
+
+        if self.first_section_complete {
+            // Not the first section - clear section-local memory
+            self.section_family.clear();
+            self.is_first_section = false;
+        } else {
+            // First section - keep is_first_section = true
+            self.is_first_section = true;
+        }
+    }
+
+    /// Called when the first section is complete.
+    ///
+    /// Copies all first section memory to global memory for fallback in later sections.
+    pub fn complete_first_section(&mut self) {
+        if !self.first_section_complete {
+            // First section memory is already in global_family (stored during processing)
+            // Just mark as complete
+            self.first_section_complete = true;
+            self.is_first_section = false;
+        }
+    }
+
+    /// Add an explicit global assignment from metadata (e.g., `Cm = Cm7b5`).
+    ///
+    /// These assignments take precedence and are available in all sections.
+    pub fn add_global_assignment(&mut self, basic_chord: &str, full_chord: &str) {
+        // Extract the root from the basic chord (first letter + optional accidental)
+        let root = Self::extract_root(basic_chord);
+
+        // Determine the family from the basic chord
+        let family = Self::get_chord_family(basic_chord, &root);
+        let family_key = Self::memory_key(&root, family);
+        self.global_family.insert(family_key, full_chord.to_string());
+    }
+
+    /// Extract the root note from a chord symbol (e.g., "Cm" -> "C", "F#m7" -> "F#")
+    fn extract_root(symbol: &str) -> String {
+        let mut chars = symbol.chars();
+        let mut root = String::new();
+
+        // First character is the note name
+        if let Some(c) = chars.next() {
+            root.push(c);
+        }
+
+        // Second character might be an accidental (# or b)
+        if let Some(c) = chars.next() {
+            if c == '#' || c == 'b' {
+                root.push(c);
+            }
+        }
+
+        root
+    }
+
+    /// Check if we're currently in the first section
+    pub fn in_first_section(&self) -> bool {
+        self.is_first_section
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Legacy API (kept for compatibility)
+    // ─────────────────────────────────────────────────────────────────────────
 
     /// Remember a chord in global memory
     pub fn remember_global(&mut self, root: &str, full_symbol: &str) {
@@ -44,6 +181,61 @@ impl ChordMemory {
             .entry(section_key)
             .or_default()
             .insert(root.to_lowercase(), full_symbol.to_string());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Family-Aware Memory Operations
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Store a chord in section-local family memory.
+    /// If in first section, also stores to global family memory.
+    fn store_to_family_memory(&mut self, family_key: &str, full_symbol: &str) {
+        // Always store to section-local memory
+        self.section_family.insert(family_key.to_string(), full_symbol.to_string());
+
+        // If first section, also store to global memory
+        if self.is_first_section {
+            self.global_family.insert(family_key.to_string(), full_symbol.to_string());
+        }
+    }
+
+    /// Recall a chord from family memory.
+    /// Checks section-local first, then falls back to global.
+    fn recall_from_family_memory(&self, family_key: &str) -> Option<String> {
+        // Check section-local first
+        if let Some(symbol) = self.section_family.get(family_key) {
+            return Some(symbol.clone());
+        }
+
+        // Fall back to global
+        self.global_family.get(family_key).cloned()
+    }
+
+    /// Remember a chord in global memory using family-aware key (legacy compatibility)
+    fn remember_global_family(&mut self, family_key: &str, full_symbol: &str) {
+        self.global_family.insert(family_key.to_string(), full_symbol.to_string());
+    }
+
+    /// Remember a chord in section-specific memory using family-aware key (legacy compatibility)
+    fn remember_section_family(
+        &mut self,
+        _section_type: &SectionType,
+        family_key: &str,
+        full_symbol: &str,
+    ) {
+        // Store to section-local family memory instead of legacy section_specific
+        self.section_family.insert(family_key.to_string(), full_symbol.to_string());
+    }
+
+    /// Recall a chord from global memory using family-aware key
+    fn recall_global_family(&self, family_key: &str) -> Option<String> {
+        self.global_family.get(family_key).cloned()
+    }
+
+    /// Recall a chord from section-specific memory using family-aware key
+    fn recall_section_family(&self, _section_type: &SectionType, family_key: &str) -> Option<String> {
+        // Use section-local family memory instead of legacy section_specific
+        self.section_family.get(family_key).cloned()
     }
 
     /// Process a chord token and return the full symbol to use
@@ -74,6 +266,11 @@ impl ChordMemory {
         is_override: bool,
         current_key: Option<&crate::key::Key>,
     ) -> String {
+        // Determine the chord family (major or minor)
+        let family = Self::get_chord_family(parsed_symbol, root);
+        let family_key = Self::memory_key(root, family);
+        let is_basic = Self::is_basic_chord(parsed_symbol, root);
+
         // Determine if this chord has explicit quality information
         // Strip rhythm notation (/, _, ') from token before checking length
         let token_chord_part = if let Some(pos) = token.find(['/', '_', '\'']) {
@@ -84,43 +281,118 @@ impl ChordMemory {
         let has_quality = token_chord_part.len() > root.len();
 
         if is_override {
-            // Override: use parsed quality but DON'T update any memory
+            // Override with `!` prefix: use parsed quality but DON'T update any memory
+            // This bypasses ALL memory including global
             parsed_symbol.to_string()
+        } else if is_basic {
+            // Basic chord (C or Cm) - CAN recall from family memory, but DON'T store
+            // Lookup order: section-local → global
+            if let Some(remembered) = self.recall_from_family_memory(&family_key) {
+                // Found in memory (section-local or global fallback)
+                self.seen_roots.insert(root.to_lowercase());
+                remembered
+            } else {
+                // No memory for this family - return basic chord as-is
+                self.seen_roots.insert(root.to_lowercase());
+                parsed_symbol.to_string()
+            }
         } else if has_quality {
-            // Has explicit quality - remember in BOTH global AND section memory
-            // For scale degrees with explicit quality (e.g., "2maj"), we need to preserve
-            // the quality in the output even if normalized symbol doesn't include it
+            // Extended chord with explicit quality - store to family memory
+            // For scale degrees with explicit quality (e.g., "2maj"), preserve the quality
             let output_symbol = if parsed_symbol == root && token_chord_part.len() > root.len() {
-                // The normalized symbol doesn't include quality (e.g., "2" for "2maj")
-                // Use the token's chord part to preserve the quality
                 token_chord_part.to_string()
             } else {
                 parsed_symbol.to_string()
             };
-            self.remember_global(root, &output_symbol);
-            self.remember_section(section_type, root, &output_symbol);
+
+            // Store to section-local memory (and global if in first section)
+            self.store_to_family_memory(&family_key, &output_symbol);
+            self.seen_roots.insert(root.to_lowercase());
             output_symbol
         } else {
-            // Just root - lookup hierarchy: section → global → key inference
-            if let Some(section_remembered) = self.recall_section(section_type, root) {
-                // Found in section memory - use it directly
-                section_remembered
-            } else if let Some(global_remembered) = self.recall_global(root) {
-                // Found in global but not in section - copy to section memory AND use it
-                self.remember_section(section_type, root, &global_remembered);
-                global_remembered
-            } else if let Some(key_default) = Self::infer_from_key(root, current_key) {
-                // Infer quality from key (works for scale degrees, Roman numerals, and note names)
-                self.remember_global(root, &key_default);
-                self.remember_section(section_type, root, &key_default);
+            // Just root - lookup hierarchy: section-local → global → key inference
+            let root_lower = root.to_lowercase();
+
+            // Try to recall from family memory first
+            if let Some(remembered) = self.recall_from_family_memory(&family_key) {
+                self.seen_roots.insert(root_lower);
+                return remembered;
+            }
+
+            // No memory - try key inference
+            let result = if let Some(key_default) = Self::infer_from_key(root, current_key) {
                 key_default
             } else {
-                // No key or couldn't infer - use parsed as-is and remember it
-                self.remember_global(root, parsed_symbol);
-                self.remember_section(section_type, root, parsed_symbol);
+                // No key or couldn't infer - use parsed as-is
                 parsed_symbol.to_string()
+            };
+
+            // Store result for future recall within this section
+            self.store_to_family_memory(&family_key, &result);
+            self.seen_roots.insert(root_lower);
+            result
+        }
+    }
+
+    /// Check if a chord is a "basic" major or minor triad without extensions.
+    ///
+    /// Basic chords CAN RECALL from memory but DON'T STORE:
+    /// - Basic major: just the root (e.g., "C", "G", "Bb")
+    /// - Basic minor: root + "m" only (e.g., "Cm", "Gm", "Bbm")
+    ///
+    /// NOT basic (has extensions, alterations, or non-standard quality):
+    /// - `C7`, `Cm7`, `Cmaj7` (7ths)
+    /// - `C9`, `Cm9`, `Cmaj9` (9ths)
+    /// - `Cdim`, `Cdim7` (diminished)
+    /// - `Caug`, `C+` (augmented)
+    /// - `Csus`, `Csus2`, `Csus4` (suspended)
+    /// - `C5` (power chord)
+    /// - `C6`, `Cm6` (6th chords)
+    /// - `Cadd9`, `Cadd11` (add chords)
+    fn is_basic_chord(parsed_symbol: &str, root: &str) -> bool {
+        // Basic major: symbol is exactly the root
+        if parsed_symbol == root {
+            return true;
+        }
+
+        // Basic minor: symbol is root + "m" (case insensitive for the "m")
+        // But NOT if there's more after the "m" (like "maj", "m7", etc.)
+        if let Some(rest) = parsed_symbol.strip_prefix(root) {
+            // Check if rest is exactly "m" (minor)
+            if rest == "m" {
+                return true;
             }
         }
+
+        false
+    }
+
+    /// Determine the chord family (major or minor) from the parsed symbol.
+    ///
+    /// Minor family: contains "m" after the root (Cm, Cm7, Cdim, etc.)
+    /// Major family: everything else (C, Cmaj7, C7, Caug, Csus, etc.)
+    fn get_chord_family(parsed_symbol: &str, root: &str) -> ChordFamily {
+        if let Some(rest) = parsed_symbol.strip_prefix(root) {
+            // Check if the quality starts with "m" (minor, but not "maj")
+            if rest.starts_with('m') && !rest.starts_with("maj") {
+                return ChordFamily::Minor;
+            }
+            // Also check for "dim" as minor family (debatable, but commonly used in minor contexts)
+            if rest.starts_with("dim") {
+                return ChordFamily::Minor;
+            }
+        }
+        ChordFamily::Major
+    }
+
+    /// Create a memory key that includes root and family.
+    /// Format: "root:major" or "root:minor"
+    fn memory_key(root: &str, family: ChordFamily) -> String {
+        let family_str = match family {
+            ChordFamily::Major => "major",
+            ChordFamily::Minor => "minor",
+        };
+        format!("{}:{}", root.to_lowercase(), family_str)
     }
 
     /// Check if a root is an explicit note name (A-G with optional accidental)
@@ -306,19 +578,26 @@ impl ChordMemory {
             .unwrap_or(false)
     }
 
-    /// Clear all memory
+    /// Clear all memory (full reset)
     pub fn clear(&mut self) {
+        self.global_family.clear();
+        self.section_family.clear();
         self.global.clear();
         self.section_specific.clear();
+        self.seen_roots.clear();
+        self.is_first_section = true;
+        self.first_section_complete = false;
+        self.section_count = 0;
     }
 
-    /// Clear section-specific memory for a particular section type
+    /// Clear section-local memory.
     ///
-    /// This is called when a section is explicitly redefined with new content,
-    /// allowing it to build its own memory from scratch or inherit from global.
-    pub fn clear_section(&mut self, section_type: &SectionType) {
-        let section_key = section_type.full_name();
-        self.section_specific.remove(&section_key);
+    /// This is called when entering a section with explicit content,
+    /// allowing it to build its own memory from scratch.
+    /// Global memory is preserved for fallback.
+    pub fn clear_section(&mut self, _section_type: &SectionType) {
+        // Clear section-local family memory
+        self.section_family.clear();
     }
 
     // Note: Scale-derived defaults have been removed from ChordMemory.
@@ -386,15 +665,13 @@ mod tests {
         let mut memory = ChordMemory::new();
         let verse = SectionType::Verse;
 
-        // Process a chord with explicit quality
+        // Process a chord with explicit quality - stores in family memory
         let result = memory.process_chord("C", "Cmaj7", "Cmaj7", &verse, false, None);
-
         assert_eq!(result, "Cmaj7");
-        assert_eq!(memory.recall_global("C"), Some("Cmaj7".to_string()));
-        assert_eq!(
-            memory.recall_section(&verse, "C"),
-            Some("Cmaj7".to_string())
-        );
+
+        // Verify by recalling with a basic chord
+        let result2 = memory.process_chord("C", "C", "C", &verse, false, None);
+        assert_eq!(result2, "Cmaj7"); // Basic chord recalls from family memory
     }
 
     #[test]
@@ -402,13 +679,39 @@ mod tests {
         let mut memory = ChordMemory::new();
         let verse = SectionType::Verse;
 
-        // First, define the quality
+        // Define a quality with an extended chord - stores in major family memory
         memory.process_chord("C", "Cmaj7", "Cmaj7", &verse, false, None);
 
-        // Then recall with just the root
+        // Basic major chord RECALLS from major family memory
         let result = memory.process_chord("C", "c", "C", &verse, false, None);
+        assert_eq!(result, "Cmaj7"); // Recalls from major family
 
+        // Basic minor chord has no memory yet (minor family is separate)
+        let result = memory.process_chord("C", "Cm", "Cm", &verse, false, None);
+        assert_eq!(result, "Cm"); // No minor family memory yet
+    }
+
+    #[test]
+    fn test_basic_chords_recall_from_family() {
+        let mut memory = ChordMemory::new();
+        let verse = SectionType::Verse;
+
+        // Store Cmaj7 in major family memory
+        memory.process_chord("C", "Cmaj7", "Cmaj7", &verse, false, None);
+
+        // Basic major chord RECALLS Cmaj7 from major family
+        let result = memory.process_chord("C", "C", "C", &verse, false, None);
         assert_eq!(result, "Cmaj7");
+
+        // Basic minor chord has no memory (minor family is separate)
+        let result = memory.process_chord("C", "Cm", "Cm", &verse, false, None);
+        assert_eq!(result, "Cm");
+
+        // Extended chords with explicit quality store their own quality
+        memory.process_chord("D", "Dmaj9", "Dmaj9", &verse, false, None);
+        let result = memory.process_chord("D", "D7", "D7", &verse, false, None);
+        // D7 has explicit quality, so it stores D7 (overwrites Dmaj9)
+        assert_eq!(result, "D7");
     }
 
     #[test]
@@ -417,17 +720,40 @@ mod tests {
         let verse = SectionType::Verse;
         let chorus = SectionType::Chorus;
 
-        // Define in verse
+        // Define in verse - stores Cmaj7 in major family memory
         memory.process_chord("C", "Cmaj7", "Cmaj7", &verse, false, None);
 
-        // Recall in chorus (should copy from global to chorus section memory)
+        // Basic chord in chorus recalls from global major family memory
         let result = memory.process_chord("C", "c", "C", &chorus, false, None);
 
+        // Basic chords recall from their family's global memory
         assert_eq!(result, "Cmaj7");
-        assert_eq!(
-            memory.recall_section(&chorus, "C"),
-            Some("Cmaj7".to_string())
-        );
+    }
+
+    #[test]
+    fn test_split_family_memory() {
+        let mut memory = ChordMemory::new();
+        let verse = SectionType::Verse;
+
+        // Store Cmaj7 in major family memory
+        memory.process_chord("C", "Cmaj7", "Cmaj7", &verse, false, None);
+
+        // Store Cm7 in minor family memory
+        memory.process_chord("C", "Cm7", "Cm7", &verse, false, None);
+
+        // Basic major C recalls from major family
+        let result = memory.process_chord("C", "C", "C", &verse, false, None);
+        assert_eq!(result, "Cmaj7");
+
+        // Basic minor Cm recalls from minor family
+        let result = memory.process_chord("C", "Cm", "Cm", &verse, false, None);
+        assert_eq!(result, "Cm7");
+
+        // Families are separate: major doesn't affect minor
+        memory.process_chord("D", "Dmaj9", "Dmaj9", &verse, false, None);
+        // Basic Dm has no minor family memory for D
+        let result = memory.process_chord("D", "Dm", "Dm", &verse, false, None);
+        assert_eq!(result, "Dm"); // No minor family memory
     }
 
     #[test]
@@ -435,15 +761,16 @@ mod tests {
         let mut memory = ChordMemory::new();
         let verse = SectionType::Verse;
 
-        // Define default quality
+        // Define default quality in family memory
         memory.process_chord("C", "Cmaj7", "Cmaj7", &verse, false, None);
 
         // Override without remembering
         let result = memory.process_chord("C", "Cmaj9", "Cmaj9", &verse, true, None);
-
         assert_eq!(result, "Cmaj9");
-        // Memory should still have maj7
-        assert_eq!(memory.recall_global("C"), Some("Cmaj7".to_string()));
+
+        // Verify family memory still has maj7 by recalling with basic chord
+        let result2 = memory.process_chord("C", "C", "C", &verse, false, None);
+        assert_eq!(result2, "Cmaj7"); // Override didn't change memory
     }
 
     #[test]
@@ -451,13 +778,19 @@ mod tests {
         let mut memory = ChordMemory::new();
         let verse = SectionType::Verse;
 
-        // Define chord in verse
-        memory.remember_section(&verse, "C", "Cmaj7");
-        assert!(memory.has_section(&verse, "C"));
+        // Enter section and store a chord
+        memory.enter_section();
+        let result = memory.process_chord("C", "Cmaj7", "Cmaj7", &verse, false, None);
+        assert_eq!(result, "Cmaj7");
 
-        // Clear verse memory
+        // Clear section memory
         memory.clear_section(&verse);
-        assert!(!memory.has_section(&verse, "C"));
+
+        // After clearing, there's no section-local memory (but global may exist)
+        // Since this was the first section, it also stored to global
+        // A new basic C should still recall from global
+        let result2 = memory.process_chord("C", "c", "C", &verse, false, None);
+        assert_eq!(result2, "Cmaj7"); // Still recalls from global
     }
 
     #[test]
@@ -465,23 +798,15 @@ mod tests {
         let mut memory = ChordMemory::new();
         let verse = SectionType::Verse;
 
-        // First verse: define Cmaj7
+        // First verse: define Cmaj7 - stores in major family memory
         memory.process_chord("C", "Cmaj7", "Cmaj7", &verse, false, None);
-        assert_eq!(
-            memory.recall_section(&verse, "C"),
-            Some("Cmaj7".to_string())
-        );
 
         // Clear section memory (simulating explicit redefinition)
         memory.clear_section(&verse);
 
-        // Process just root - should get from global
+        // Basic chord recalls from global major family memory
         let result = memory.process_chord("C", "c", "C", &verse, false, None);
-        assert_eq!(result, "Cmaj7"); // Gets from global
-        assert_eq!(
-            memory.recall_section(&verse, "C"),
-            Some("Cmaj7".to_string())
-        ); // Copied to section
+        assert_eq!(result, "Cmaj7"); // Recalls from global major family
     }
 
     #[test]
@@ -490,16 +815,37 @@ mod tests {
         let verse = SectionType::Verse;
         let chorus = SectionType::Chorus;
 
-        // Define different qualities in different sections
+        // Define Cmaj7 in verse
         memory.process_chord("C", "Cmaj7", "Cmaj7", &verse, false, None);
-        memory.clear_section(&chorus); // Chorus starts fresh
+
+        // Define Cmaj9 in chorus (overwrites global family memory)
         memory.process_chord("C", "Cmaj9", "Cmaj9", &chorus, false, None);
 
-        // Clear verse and recall - should get maj9 from global (most recent)
+        // Clear verse and recall - basic chord recalls from global major family
+        // Global now has Cmaj9 (most recent)
         memory.clear_section(&verse);
         let result = memory.process_chord("C", "c", "C", &verse, false, None);
 
-        assert_eq!(result, "Cmaj9"); // Gets the most recent global value
+        // Recalls from global major family (most recent = Cmaj9)
+        assert_eq!(result, "Cmaj9");
+    }
+
+    #[test]
+    fn test_explicit_quality_always_works() {
+        let mut memory = ChordMemory::new();
+        let verse = SectionType::Verse;
+        let chorus = SectionType::Chorus;
+
+        // Define Cmaj7 in verse
+        memory.process_chord("C", "Cmaj7", "Cmaj7", &verse, false, None);
+
+        // Explicit quality in chorus should still work and update memory
+        let result = memory.process_chord("C", "Cmaj9", "Cmaj9", &chorus, false, None);
+        assert_eq!(result, "Cmaj9");
+
+        // Basic chord recalls from family memory (now Cmaj9)
+        let result2 = memory.process_chord("C", "c", "C", &chorus, false, None);
+        assert_eq!(result2, "Cmaj9"); // Recalls from major family
     }
 
     #[test]
@@ -525,12 +871,21 @@ mod tests {
             );
         }
 
-        // Test inferring A# (6th degree)
+        // Test that basic chords (like A#) don't use key inference
+        // Key inference only applies to scale degrees and Roman numerals
         let mut memory = ChordMemory::new();
         let verse = SectionType::Verse;
 
+        // Writing "a#" (basic major) gives A# major, NOT A#m from key inference
+        // This is intentional: explicit note names with no quality suffix = major
         let result = memory.process_chord("A#", "a#", "A#", &verse, false, Some(&key));
-        println!("\nInferred A# in C# major: {}", result);
-        assert_eq!(result, "A#m", "A# in C# major should be A#m (vi is minor)");
+        println!("\nA# written in C# major context: {}", result);
+        assert_eq!(
+            result, "A#",
+            "A# (basic major) stays A# - basic chords don't use key inference"
+        );
+
+        // Scale degrees WOULD use key inference, but note names don't
+        // For scale degree 6 in C# major: "6" -> would infer minor
     }
 }

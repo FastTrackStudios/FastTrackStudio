@@ -22,6 +22,9 @@ engraver = [
     "dep:serde_json",
     "dep:thiserror",
     "dep:macro_rules_attribute",
+    "dep:printpdf",
+    "dep:svg2pdf",
+    "dep:usvg",
 ]
 # Example feature: adds windowing for running examples
 engraver-example = ["engraver", "dep:winit", "dep:pollster", "dep:env_logger", "dep:log"]
@@ -62,6 +65,15 @@ thiserror = { workspace = true, optional = true }
 
 # Derive macros for engraver
 macro_rules_attribute = { version = "0.2", optional = true }
+
+# PDF export (optional, WASM compatible)
+# Enable png feature for image embedding
+printpdf = { version = "0.8", optional = true, features = ["png"] }
+
+# SVG to PDF conversion (WASM compatible with proper features)
+# Use usvg's re-exported fontdb to avoid version conflicts
+svg2pdf = { version = "0.13", optional = true }
+usvg = { version = "0.45", optional = true, default-features = false, features = ["text"] }
 
 # MIDI file parsing (optional)
 midly = { version = "0.5", optional = true }

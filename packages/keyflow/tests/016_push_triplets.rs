@@ -395,7 +395,7 @@ Mixed Standard and Triplet Test - Artist
 120bpm 4/4 #C
 
 VS 4
-'C 'tD Em't F'
+'C 'tDm Em't F'
 "#;
 
     let chart = Chart::parse(input).unwrap();
@@ -417,7 +417,7 @@ VS 4
         panic!("Expected standard push for 'C");
     }
 
-    // 'tD should be triplet eighth push (Dm from key of C)
+    // 'tDm should be triplet eighth push
     // When chord has push, a space is inserted before it
     let chord_dm = section.measures()[1]
         .chords

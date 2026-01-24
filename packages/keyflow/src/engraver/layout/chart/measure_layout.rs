@@ -180,6 +180,57 @@ pub fn group_measures_into_systems(
     systems
 }
 
+/// Group measures into systems based on available width and minimum widths.
+///
+/// This improves on count-based grouping by ensuring measures fit within
+/// the available width. If a measure's minimum width would cause overflow,
+/// it starts a new system.
+///
+/// # Arguments
+/// * `min_widths` - Minimum width required for each measure
+/// * `available_width` - Total width available for measures on a system
+/// * `max_measures_per_system` - Maximum measures allowed per system (upper bound)
+///
+/// # Returns
+/// Vector of systems, each containing measure indices
+#[must_use]
+pub fn group_measures_into_systems_by_width(
+    min_widths: &[f64],
+    available_width: f64,
+    max_measures_per_system: usize,
+) -> Vec<Vec<usize>> {
+    if min_widths.is_empty() {
+        return Vec::new();
+    }
+
+    let mut systems = Vec::new();
+    let mut current_system = Vec::new();
+    let mut current_width = 0.0;
+
+    for (i, &min_w) in min_widths.iter().enumerate() {
+        // Would adding this measure exceed available width?
+        let would_overflow = current_width + min_w > available_width && !current_system.is_empty();
+
+        // Would adding this measure exceed max measures?
+        let would_exceed_max = current_system.len() >= max_measures_per_system;
+
+        if would_overflow || would_exceed_max {
+            // Start a new system
+            systems.push(std::mem::take(&mut current_system));
+            current_width = 0.0;
+        }
+
+        current_system.push(i);
+        current_width += min_w;
+    }
+
+    if !current_system.is_empty() {
+        systems.push(current_system);
+    }
+
+    systems
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,6 +318,69 @@ mod tests {
     #[test]
     fn test_group_measures_into_systems_empty() {
         let systems = group_measures_into_systems(0, 4);
+
+        assert!(systems.is_empty());
+    }
+
+    #[test]
+    fn test_group_measures_by_width_basic() {
+        // 4 measures of 100pt each, 400pt available, max 4 per system
+        let min_widths = vec![100.0, 100.0, 100.0, 100.0];
+        let systems = group_measures_into_systems_by_width(&min_widths, 400.0, 4);
+
+        // All 4 fit in one system
+        assert_eq!(systems.len(), 1);
+        assert_eq!(systems[0], vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn test_group_measures_by_width_overflow() {
+        // 4 measures, one is very wide (200pt), available width 300pt
+        let min_widths = vec![80.0, 80.0, 200.0, 80.0];
+        let systems = group_measures_into_systems_by_width(&min_widths, 300.0, 4);
+
+        // Measures 0+1 = 160pt (fits in 300pt)
+        // Adding measure 2 (200pt) would be 360pt > 300pt, so new system
+        // Measure 2 alone = 200pt (fits)
+        // Adding measure 3 (80pt) would be 280pt < 300pt (fits)
+        assert_eq!(systems.len(), 2);
+        assert_eq!(systems[0], vec![0, 1]);
+        assert_eq!(systems[1], vec![2, 3]);
+    }
+
+    #[test]
+    fn test_group_measures_by_width_respects_max() {
+        // 8 measures of 50pt each, 400pt available, but max 4 per system
+        let min_widths = vec![50.0; 8];
+        let systems = group_measures_into_systems_by_width(&min_widths, 400.0, 4);
+
+        // Should respect max_measures_per_system even though width allows more
+        assert_eq!(systems.len(), 2);
+        assert_eq!(systems[0], vec![0, 1, 2, 3]);
+        assert_eq!(systems[1], vec![4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn test_group_measures_by_width_wide_measure_alone() {
+        // One very wide measure that exceeds available width by itself
+        // It should still be placed (can't split a measure)
+        let min_widths = vec![100.0, 500.0, 100.0];
+        let systems = group_measures_into_systems_by_width(&min_widths, 300.0, 4);
+
+        // Measure 0 = 100pt (fits)
+        // Adding measure 1 (500pt) would be 600pt > 300pt, so new system
+        // Measure 1 alone = 500pt (exceeds 300pt, but must be placed)
+        // Adding measure 2 (100pt) would be 600pt > 300pt, so new system
+        assert_eq!(systems.len(), 3);
+        assert_eq!(systems[0], vec![0]);
+        assert_eq!(systems[1], vec![1]);
+        assert_eq!(systems[2], vec![2]);
+    }
+
+    #[test]
+    fn test_group_measures_by_width_empty() {
+        let min_widths: Vec<f64> = vec![];
+        let systems = group_measures_into_systems_by_width(&min_widths, 400.0, 4);
 
         assert!(systems.is_empty());
     }

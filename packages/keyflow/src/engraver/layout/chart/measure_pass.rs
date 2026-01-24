@@ -407,7 +407,9 @@ pub fn measure_measure(
     });
 
     // Use the extended version with detected use_stems (no spillbacks at this stage)
-    measure_measure_with_config(measure, style, cache, has_triplet_push, None)
+    // Default to not being at a section boundary - caller should use measure_measure_with_config
+    // directly if they need boundary-aware behavior.
+    measure_measure_with_config(measure, style, cache, has_triplet_push, None, false)
 }
 
 /// Measure a single measure's content with full configuration.
@@ -421,6 +423,7 @@ pub fn measure_measure(
 /// * `cache` - Measurement cache to use/populate
 /// * `use_stems` - Whether stemmed notation is used (affects triplet segment count)
 /// * `spillbacks` - Optional spillback chords from next measure
+/// * `is_section_boundary` - Whether this is the first measure in a section (affects spillback handling)
 ///
 /// # Returns
 /// Measurement data for the measure
@@ -430,6 +433,7 @@ pub fn measure_measure_with_config(
     cache: &mut MeasurementCache,
     use_stems: bool,
     spillbacks: Option<&[super::PushSpillback]>,
+    is_section_boundary: bool,
 ) -> MeasureMeasurements {
     let text_metrics = match style.text_font_metrics.as_ref() {
         Some(m) => m,
@@ -450,8 +454,39 @@ pub fn measure_measure_with_config(
     let mut chord_layouts = Vec::new();
     let mut visible_chord_count = 0;
 
+    // Track if we've seen a real (non-placeholder) chord yet
+    let mut seen_real_chord = false;
+
     for (chord_idx, chord) in measure.chords.iter().enumerate() {
         let is_visible = !is_placeholder(&chord.full_symbol);
+
+        // Check if this is a pushed chord that will spill back to the previous measure.
+        // Pushed chords that are the first real chord in a measure render as spillbacks
+        // in the PREVIOUS measure. However, at section boundaries, they ALSO render in
+        // the current measure (at segment 0) to avoid confusion, so we need to reserve width.
+        let is_pushed = is_visible
+            && !seen_real_chord
+            && chord
+                .push_pull
+                .as_ref()
+                .map_or(false, |(is_push, _)| *is_push);
+
+        // Only skip if pushed AND not at a boundary (at boundaries, chord renders in both places)
+        let should_skip_for_spillback = is_pushed && !is_section_boundary;
+
+        if is_visible {
+            seen_real_chord = true;
+        }
+
+        // Skip pushed spillback chords that don't render in this measure
+        if should_skip_for_spillback {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[measure-pass] Skipping pushed spillback chord '{}' - renders in previous measure",
+                chord.full_symbol
+            );
+            continue;
+        }
 
         if is_visible {
             let width = cache.measure_chord_width(&chord.full_symbol, font_size, text_metrics);
@@ -481,7 +516,10 @@ pub fn measure_measure_with_config(
     // This is critical because triplet beats create 2 segments instead of 1.
     let has_explicit = rhythm_builder::measure_has_explicit_chord_rhythm(measure);
     let source = if has_explicit {
-        RhythmSource::ExplicitRhythm(&measure.rhythm_elements)
+        RhythmSource::ExplicitRhythm {
+            elements: &measure.rhythm_elements,
+            spillbacks,
+        }
     } else {
         RhythmSource::SlashNotation {
             chords: &measure.chords,
@@ -502,9 +540,22 @@ pub fn measure_measure_with_config(
     // Calculate minimum width from actual measurements using segment-based layout.
     // This accounts for the fact that chords are placed at specific segments,
     // so a wide chord might need more than its "fair share" of segment space.
-    let min_width = if chord_layouts.len() < 2 || num_segments == 0 {
-        // No collision possible with 0 or 1 visible chord
+    //
+    // IMPORTANT: Minimum width is ONLY about preventing chord symbol collision.
+    // Rhythm notation (rests, noteheads, triplet brackets) can compress to fit
+    // whatever space is allocated. The spring distribution handles proportional
+    // spacing - min_width is just the floor below which chords would overlap.
+    let min_width = if num_segments == 0 {
+        // No segments at all - shouldn't happen, but handle gracefully
         0.0
+    } else if chord_layouts.is_empty() {
+        // No visible chords - rhythm notation can compress to any width
+        // Use a small baseline to avoid zero-width measures
+        font_size * 0.5
+    } else if chord_layouts.len() == 1 {
+        // Single chord - just need space for that chord symbol, no collision possible
+        // Chord can overhang into adjacent space, so minimal padding needed
+        chord_layouts[0].text_width + font_size * 0.3
     } else {
         // Compute per-segment minimum widths.
         // For slash notation, chord index typically maps directly to beat, and each beat
@@ -636,8 +687,27 @@ where
     let mut measurements = ChartMeasurements::new();
 
     for section_measures in sections {
-        for measure in section_measures.as_ref() {
-            let measure_data = measure_measure(measure, style, cache);
+        for (measure_idx, measure) in section_measures.as_ref().iter().enumerate() {
+            // First measure of a section is at a section boundary
+            let is_section_boundary = measure_idx == 0;
+
+            // Detect if this measure has triplet pushes
+            let has_triplet_push = measure.chords.iter().any(|c| {
+                c.push_pull.as_ref().is_some_and(|(is_push, amount)| {
+                    *is_push
+                        && amount.base == crate::chord::PushPullBase::Triplet
+                        && amount.level == 1
+                })
+            });
+
+            let measure_data = measure_measure_with_config(
+                measure,
+                style,
+                cache,
+                has_triplet_push,
+                None,
+                is_section_boundary,
+            );
             measurements.push(measure_data);
         }
     }

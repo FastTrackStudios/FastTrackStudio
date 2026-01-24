@@ -86,7 +86,7 @@ ui = { path = "modules/ui" }
 
 # Roam RPC framework (facet must match roam's version exactly)
 roam = { git = "https://github.com/bearcove/roam.git" }
-facet = { version = "0.42.0", git = "https://github.com/facet-rs/facet", branch = "main", features = ["camino", "reflect", "uuid"] }
+facet = { version = "0.43.2", git = "https://github.com/facet-rs/facet", branch = "main", features = ["camino", "reflect", "uuid"] }
 microservice = { path = "modules/microservice" }
 
 [workspace.dependencies.chrono]
@@ -167,7 +167,8 @@ version = "1.0"
 version = "1.0"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# Use deny instead of forbid to allow specific crates (like daw with roam) to override
+unsafe_code = "deny"
 # Allow unused code for now - will clean up later
 # This allows unused variables, imports, functions, etc. without causing build failures
 unused = { level = "allow", priority = -1 }

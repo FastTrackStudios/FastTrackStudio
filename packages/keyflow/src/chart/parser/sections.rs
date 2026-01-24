@@ -13,6 +13,92 @@ use crate::time::{AbsolutePosition, MusicalDuration, MusicalPosition, TimeSignat
 
 // region:    --- Section Parsing
 
+/// Check if a line looks like chord content (bars, chords, slashes, rests, etc.)
+/// This helps detect section-less content that should still be parsed.
+///
+/// This function is conservative to avoid false positives:
+/// - Requires bar delimiter (|) OR valid chord-like first token
+/// - Won't match titles (multi-word text), metadata lines (bpm, time sig, key)
+fn looks_like_chord_content(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Starts with pushed chord marker - definitely chord content
+    if trimmed.starts_with('\'') || trimmed.starts_with('>') {
+        return true;
+    }
+
+    // Has measure bar delimiter - definitely chord content
+    // But not if it's a time signature like "120bpm 4/4 #C"
+    if trimmed.contains('|') {
+        return true;
+    }
+
+    // Get first token to analyze
+    let first_token = trimmed.split_whitespace().next().unwrap_or("");
+    if first_token.is_empty() {
+        return false;
+    }
+
+    // Check if this looks like metadata (has bpm, time signature pattern, or key)
+    if first_token.ends_with("bpm")
+        || first_token.parse::<u32>().is_ok()
+        || first_token.contains('/')
+        || first_token.starts_with('#')
+        || first_token.starts_with('b')
+    {
+        return false;
+    }
+
+    // Multi-word lines that start with A-G are likely titles, not chord content
+    // e.g., "Empty Section Test" or "Every Breath You Take"
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    if words.len() > 2 {
+        // If there are multiple words that are NOT chord-like, it's probably a title
+        // Chord lines with multiple words usually have chord symbols with modifiers
+        let non_chord_words = words
+            .iter()
+            .filter(|w| {
+                let c = w.chars().next().unwrap_or(' ');
+                // Not A-G, not a slash, not a period (continuation)
+                !matches!(c, 'A'..='G' | '/' | '.' | '\'' | '>')
+            })
+            .count();
+        if non_chord_words > 1 {
+            return false; // Too many non-chord words, likely a title
+        }
+    }
+
+    // Check if first character is a chord root (A-G)
+    let first_char = first_token.chars().next().unwrap_or(' ');
+    if matches!(first_char, 'A'..='G') {
+        // Make sure it looks like a chord, not just a word starting with A-G
+        // Single letter or has chord-like suffix
+        if first_token.len() == 1 {
+            return true; // Single letter chord like "C", "G"
+        }
+        let rest = &first_token[1..];
+        // Check for chord modifiers
+        if rest.starts_with('m')
+            || rest.starts_with('#')
+            || rest.starts_with('b')
+            || rest.starts_with('/')
+            || rest.starts_with('+')
+            || rest.starts_with("maj")
+            || rest.starts_with("dim")
+            || rest.starts_with("aug")
+            || rest.starts_with("sus")
+            || rest.chars().next().is_some_and(|c| c.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 impl Chart {
     /// Phase 2: Parse sections and content
     pub(super) fn parse_sections(
@@ -103,8 +189,9 @@ impl Chart {
                                 .unwrap_or_default()
                         }
                     } else {
-                        // Has inline content - clear section memory and parse
-                        self.chord_memory.clear_section(&section_type);
+                        // Has inline content - enter section (clears section memory for non-first sections)
+                        let was_first_section = self.chord_memory.in_first_section();
+                        self.chord_memory.enter_section();
                         let mut parsed_measures =
                             self.parse_section_measures(&[content], &section_type, measure_count)?;
 
@@ -131,6 +218,11 @@ impl Chart {
                             );
                         }
 
+                        // Complete first section if this was the first section
+                        if was_first_section {
+                            self.chord_memory.complete_first_section();
+                        }
+
                         parsed_measures
                     };
 
@@ -148,8 +240,65 @@ impl Chart {
                         section_comment,
                     )?;
                 }
+            } else if looks_like_chord_content(line) {
+                // Content without a section header - create an unnamed section
+                // This allows charts like "Cm | Fm |" without requiring "IN" or "VS" prefix
+
+                // Collect consecutive chord content lines
+                let mut content_lines = Vec::new();
+                while idx < lines.len() {
+                    let content_line = lines[idx];
+
+                    // Stop if empty line or new section marker
+                    if content_line.is_empty() {
+                        idx += 1;
+                        break;
+                    }
+
+                    // Check if this is a new section marker
+                    let (marker_part, _) = if let Some(comma_idx) = content_line.find(',') {
+                        let (marker, content) = content_line.split_at(comma_idx);
+                        (marker.trim(), Some(content[1..].trim()))
+                    } else {
+                        (content_line.trim(), None)
+                    };
+                    if SectionType::parse_with_measure_count(marker_part).is_some() {
+                        break;
+                    }
+
+                    let line_lower = content_line.to_lowercase();
+                    if line_lower == "pre"
+                        || line_lower.starts_with("pre ")
+                        || line_lower == "post"
+                        || line_lower.starts_with("post ")
+                    {
+                        break;
+                    }
+
+                    // Collect this line as content
+                    content_lines.push(content_line);
+                    idx += 1;
+                }
+
+                // Parse the collected content as an Intro section
+                if !content_lines.is_empty() {
+                    let section_type = SectionType::Intro;
+                    let was_first_section = self.chord_memory.in_first_section();
+                    self.chord_memory.enter_section();
+
+                    let measures = self.parse_section_measures(&content_lines, &section_type, None)?;
+
+                    // Complete first section if this was the first section
+                    if was_first_section {
+                        self.chord_memory.complete_first_section();
+                    }
+
+                    let section = Section::new(section_type);
+                    let chart_section = ChartSection::new(section).with_measures(measures);
+                    self.sections.push(chart_section);
+                }
             } else {
-                // Not a recognized line, skip it
+                // Not a recognized line or chord content, skip it
                 idx += 1;
             }
         }
@@ -275,8 +424,35 @@ impl Chart {
             idx += 1;
         }
 
-        // Group content lines by track type
-        let track_groups = self.group_lines_by_track(&content_lines);
+        // Extract and apply section-scoped settings
+        // Settings inside a section are temporary - they reset after the section ends
+        let settings_checkpoint = self.settings.checkpoint();
+        let mut actual_content_lines = Vec::new();
+        let mut has_section_settings = false;
+
+        for line in &content_lines {
+            let trimmed = line.trim();
+            // Check if this looks like a settings line:
+            // - Starts with '/' and contains '=' (e.g., "/PUSH=8t")
+            // - Starts with '/push ' (space-separated syntax, e.g., "/push 4")
+            let is_setting_line = trimmed.starts_with('/')
+                && (trimmed.contains('=')
+                    || trimmed.to_lowercase().starts_with("/push "));
+
+            if is_setting_line {
+                // This is a settings line - apply it temporarily
+                if let Err(e) = self.settings.parse_setting_line(line) {
+                    eprintln!("Warning: Failed to parse section setting '{}': {}", line, e);
+                } else {
+                    has_section_settings = true;
+                }
+            } else {
+                actual_content_lines.push(*line);
+            }
+        }
+
+        // Group content lines by track type (excluding settings lines)
+        let track_groups = self.group_lines_by_track(&actual_content_lines);
 
         // Parse each track group into tracks
         let mut tracks: Vec<Track> = Vec::new();
@@ -306,8 +482,9 @@ impl Chart {
                 tracks.push(Track::chords(measures));
             }
         } else {
-            // Has explicit content - clear section memory
-            self.chord_memory.clear_section(&section_type);
+            // Has explicit content - enter section (clears section memory for non-first sections)
+            let was_first_section = self.chord_memory.in_first_section();
+            self.chord_memory.enter_section();
 
             for (track_type, track_name, track_lines) in track_groups {
                 match track_type {
@@ -414,12 +591,23 @@ impl Chart {
                     }
                 }
             }
+
+            // Complete first section if this was the first section
+            if was_first_section {
+                self.chord_memory.complete_first_section();
+            }
         }
 
         // Create chart section with tracks
         let mut chart_section = ChartSection::new(section);
         chart_section.tracks = tracks;
         self.sections.push(chart_section);
+
+        // Restore settings to pre-section state if any section settings were applied
+        // This ensures settings like /push=4 inside a section don't leak to subsequent sections
+        if has_section_settings {
+            self.settings.restore(settings_checkpoint);
+        }
 
         Ok(idx)
     }

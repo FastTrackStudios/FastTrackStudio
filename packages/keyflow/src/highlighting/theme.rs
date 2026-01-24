@@ -284,48 +284,49 @@ impl Theme {
 
     /// Create a dark theme optimized for dark backgrounds.
     ///
-    /// Uses colors inspired by popular dark editor themes (VS Code Dark+, Dracula).
+    /// Uses a refined color palette inspired by professional music notation
+    /// and modern code editors, with careful attention to harmony and readability.
     #[must_use]
     pub fn default_dark() -> Self {
         Self {
             name: "Keyflow Dark".to_string(),
-            background: Color::rgb(30, 30, 30),
-            foreground: Color::rgb(212, 212, 212),
+            background: Color::rgb(24, 24, 28),
+            foreground: Color::rgb(200, 200, 205),
 
-            // Chord components - warm colors for harmony
-            root: Style::bold(Color::rgb(255, 198, 109)), // Golden orange
-            scale_degree: Style::bold(Color::rgb(255, 198, 109)), // Same as root
-            roman_numeral: Style::bold(Color::rgb(255, 198, 109)), // Same as root
-            accidental: Style::color(Color::rgb(255, 138, 128)), // Coral
-            quality: Style::color(Color::rgb(152, 195, 121)), // Soft green
-            extension: Style::color(Color::rgb(97, 175, 239)), // Sky blue
-            modifier: Style::color(Color::rgb(198, 120, 221)), // Purple
-            bass: Style::color(Color::rgb(224, 108, 117)), // Salmon
+            // Chord components - warm amber/gold palette for harmony elements
+            root: Style::bold(Color::rgb(240, 180, 100)),       // Warm amber - primary chord element
+            scale_degree: Style::bold(Color::rgb(240, 180, 100)), // Same as root
+            roman_numeral: Style::bold(Color::rgb(240, 180, 100)), // Same as root
+            accidental: Style::color(Color::rgb(220, 140, 95)),  // Burnt orange - stands out but harmonizes
+            quality: Style::color(Color::rgb(130, 190, 140)),    // Sage green - soft contrast
+            extension: Style::color(Color::rgb(140, 180, 220)),  // Soft blue - complements amber
+            modifier: Style::color(Color::rgb(180, 140, 200)),   // Soft lavender
+            bass: Style::color(Color::rgb(200, 150, 120)),       // Warm tan
 
-            // Rhythm - cool colors
-            duration: Style::color(Color::rgb(86, 182, 194)), // Cyan
-            slash_rhythm: Style::color(Color::rgb(140, 140, 140)), // Gray
-            rest: Style::italic(Color::rgb(140, 140, 140)),   // Gray italic
-            push_pull: Style::color(Color::rgb(209, 154, 102)), // Tan
+            // Rhythm - cooler, more subdued tones
+            duration: Style::color(Color::rgb(120, 180, 190)),   // Muted teal
+            slash_rhythm: Style::color(Color::rgb(120, 120, 125)), // Subtle gray
+            rest: Style::italic(Color::rgb(110, 110, 115)),      // Quieter gray italic
+            push_pull: Style::color(Color::rgb(180, 150, 110)),  // Muted gold
 
-            // Structure - distinct colors
-            section: Style::bold(Color::rgb(198, 120, 221)), // Purple bold
-            measure_count: Style::color(Color::rgb(209, 154, 102)), // Tan
-            section_comment: Style::italic(Color::rgb(106, 153, 85)), // Green italic
-            measure_separator: Style::color(Color::rgb(100, 100, 100)), // Dark gray
+            // Structure - accent colors for navigation
+            section: Style::bold(Color::rgb(130, 200, 170)),     // Seafoam green - eye-catching but calm
+            measure_count: Style::color(Color::rgb(170, 160, 140)), // Warm gray
+            section_comment: Style::italic(Color::rgb(140, 160, 130)), // Olive italic
+            measure_separator: Style::color(Color::rgb(80, 80, 85)),   // Subtle separator
 
-            // Metadata
-            title: Style::bold(Color::rgb(229, 192, 123)), // Warm yellow
-            tempo: Style::color(Color::rgb(97, 175, 239)), // Blue
-            time_signature: Style::color(Color::rgb(97, 175, 239)), // Blue
-            key: Style::color(Color::rgb(152, 195, 121)),  // Green
+            // Metadata - distinctive but not distracting
+            title: Style::bold(Color::rgb(220, 200, 160)),       // Cream/gold
+            tempo: Style::color(Color::rgb(150, 180, 200)),      // Steel blue
+            time_signature: Style::color(Color::rgb(150, 180, 200)), // Steel blue
+            key: Style::color(Color::rgb(160, 190, 150)),        // Sage
 
             // Other
-            comment: Style::italic(Color::rgb(106, 153, 85)), // Muted green
-            command: Style::color(Color::rgb(198, 120, 221)), // Purple
-            dynamic: Style::bold(Color::rgb(224, 108, 117)),  // Salmon bold
-            memory_recall: Style::color(Color::rgb(86, 182, 194)), // Cyan
-            unknown: Style::color(Color::rgb(244, 71, 71)),   // Error red
+            comment: Style::italic(Color::rgb(100, 130, 100)),   // Muted forest green
+            command: Style::color(Color::rgb(170, 140, 190)),    // Soft purple
+            dynamic: Style::bold(Color::rgb(200, 130, 120)),     // Muted coral
+            memory_recall: Style::color(Color::rgb(140, 180, 180)), // Muted cyan
+            unknown: Style::color(Color::rgb(200, 90, 90)),      // Muted error red
         }
     }
 
