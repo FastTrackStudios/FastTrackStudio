@@ -1027,8 +1027,8 @@ impl ChartLayoutEngine {
 
                         // Add measure number on first measure of each system
                         // Real measures start at 1, after count-in measures
-                        // Position above the clef (at content_x) for first measure of system,
-                        // or above the measure start (measure_x) for measure 1 mid-line
+                        // Position: measure 1 always at measure_x (its actual position),
+                        // other first-of-system measures at content_x (above clef)
                         // Also ALWAYS show measure 1 (the downbeat) to make it easy to find
                         let display_measure_num = (global_measure_index as i32)
                             - count_in_measures as i32
@@ -1038,11 +1038,12 @@ impl ChartLayoutEngine {
                         if self.config.show_measure_numbers
                             && (is_first_of_system || is_measure_one)
                         {
-                            // Position: content_x for first measure of system, measure_x for measure 1 mid-line
-                            let num_x = if is_first_of_system {
-                                content_x
-                            } else {
+                            // Measure 1 always uses measure_x (its actual position)
+                            // Other measures use content_x when first of system
+                            let num_x = if is_measure_one {
                                 measure_x
+                            } else {
+                                content_x
                             };
                             let measure_num_node = self.create_measure_number(
                                 display_measure_num,
@@ -1649,8 +1650,8 @@ impl ChartLayoutEngine {
                         root.add_child(measure_container);
 
                         // Add measure number on first measure of each system (real measures start at 1)
-                        // Position above the clef (at content_x) for first measure of system,
-                        // or above the measure start (measure_x) for measure 1 mid-line
+                        // Position: measure 1 always at measure_x (its actual position),
+                        // other first-of-system measures at content_x (above clef)
                         // Also ALWAYS show measure 1 (the downbeat) to make it easy to find
                         let display_measure_num = (global_measure_index as i32)
                             - count_in_measures as i32
@@ -1660,11 +1661,12 @@ impl ChartLayoutEngine {
                         if self.config.show_measure_numbers
                             && (is_first_of_system || is_measure_one)
                         {
-                            // Position: content_x for first measure of system, measure_x for measure 1 mid-line
-                            let num_x = if is_first_of_system {
-                                content_x
-                            } else {
+                            // Measure 1 always uses measure_x (its actual position)
+                            // Other measures use content_x when first of system
+                            let num_x = if is_measure_one {
                                 measure_x
+                            } else {
+                                content_x
                             };
                             let measure_num_node = self.create_measure_number(
                                 display_measure_num,
