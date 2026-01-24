@@ -178,10 +178,11 @@ const DEMO_CHARTS: &[&str] = &[
     // Complex funk/jazz - Thriller (Dirty Loops)
     r#"Thriller
 120bpm 4/4 #Ab
+/push = triplet
 
 HITS
-r8t >Ab9_8t r8t r8t
-r8t >F9_8t r2 | s1
+r8t >Ab9_8t r8t r8t r8t >F9_8t r2
+s1
 
 IN
 >'Cm . . .
@@ -190,14 +191,13 @@ VS
 >'F/C . Cm .
 
 CH
->Cm/Eb / 'Eb ///
-'Eb / 'F/C / 'Cm //
-'F/A ////
-'Fm9 ////
+>Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // |
+'F/A //// | 'Fm9  ////
+>Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A |
+r8t >Ab9_8t r8t r8t >'F9_8t r8t r4 >Fm/Ab_4
 
 INST
-Cm . F6 //
-Abdim7 'Csus2
+Cm . F6 // Abdim7 'Csus2
 "#,
     // Pop ballad in A major
     r#"Midnight Dreams
@@ -320,7 +320,7 @@ fn Home() -> Element {
 
                         h1 {
                             class: "text-balance text-4xl font-semibold md:text-5xl lg:text-6xl text-foreground",
-                            "Music production tools reimagined"
+                            "Fast-Efficient Workflow"
                         }
 
                         p {
@@ -394,7 +394,7 @@ fn Home() -> Element {
 
                                         // Left side - Text editor (fixed width, read-only animation)
                                         div {
-                                            class: "w-48 border-r border-border overflow-hidden shrink-0",
+                                            class: "w-72 border-r border-border overflow-hidden shrink-0",
 
                                             components::HighlightedEditor {
                                                 value: source(),
