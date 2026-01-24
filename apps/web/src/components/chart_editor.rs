@@ -251,64 +251,35 @@ pub fn ChartEditor() -> Element {
 /// Static chart renderer for non-interactive display.
 /// Renders the chart as a clean page without pan/zoom controls or gray background.
 /// Ideal for showcases and embedded previews.
+///
+/// Gracefully handles invalid/incomplete source by keeping the last valid render
+/// or showing a blank white page. This allows smooth typewriter animations without
+/// flashing error states.
 #[component]
 pub fn StaticChartRenderer(
     source: Signal<String>,
     mode: Signal<PreviewMode>,
     canvas_id: Option<String>,
 ) -> Element {
-    // Read source to trigger re-render on changes and for validation
-    let source_value = source.read();
-
-    // Parse the chart to validate it
-    let parse_result = keyflow::Chart::parse(&source_value);
-
     // Use provided canvas_id or default
     let canvas_id = canvas_id.unwrap_or_else(|| "static-chart-canvas".to_string());
 
-    match parse_result {
-        Ok(_chart) => {
-            // Container fills parent, chart scales to fit width
-            rsx! {
-                div {
-                    class: "relative w-full h-full",
+    // Always render the canvas - StaticChartCanvas handles invalid source gracefully
+    rsx! {
+        div {
+            class: "relative w-full h-full",
 
-                    // Canvas for WebGPU rendering - fills container, chart scales to fit
-                    // White background to match page
-                    canvas {
-                        id: "{canvas_id}",
-                        class: "w-full h-full",
-                        style: "touch-action: none; background: white;",
-                    }
-
-                    // WebGPU rendering - static (no pan/zoom)
-                    StaticChartCanvas { source: source, mode: mode, canvas_id: canvas_id.clone() }
-                }
+            // Canvas for WebGPU rendering - fills container, chart scales to fit
+            // White background ensures blank page when content is invalid
+            canvas {
+                id: "{canvas_id}",
+                class: "w-full h-full",
+                style: "touch-action: none; background: white;",
             }
-        }
-        Err(e) => {
-            let error_msg = e.to_string();
-            rsx! {
-                div {
-                    class: "w-full h-full flex items-center justify-center",
 
-                    div {
-                        class: "text-center p-6 max-w-md bg-white/90 rounded-lg",
-
-                        lucide_dioxus::CircleAlert { class: "w-12 h-12 mx-auto mb-3 text-red-400" }
-
-                        div {
-                            class: "text-lg font-semibold text-red-600 mb-2",
-                            "Parse Error"
-                        }
-
-                        div {
-                            class: "text-sm text-red-500 font-mono whitespace-pre-wrap text-left bg-red-50 p-3 rounded-lg",
-                            "{error_msg}"
-                        }
-                    }
-                }
-            }
+            // WebGPU rendering - static (no pan/zoom)
+            // Handles parse errors gracefully without reinitializing
+            StaticChartCanvas { source: source, mode: mode, canvas_id: canvas_id.clone() }
         }
     }
 }
@@ -445,10 +416,6 @@ fn StaticChartCanvas(
                     return;
                 };
 
-                let Ok(chart) = keyflow::Chart::parse(&source_text) else {
-                    return;
-                };
-
                 #[cfg(target_arch = "wasm32")]
                 {
                     use wasm_bindgen::JsCast;
@@ -476,12 +443,22 @@ fn StaticChartCanvas(
                     html_canvas.set_width(buffer_width);
                     html_canvas.set_height(buffer_height);
 
-                    // Layout chart for export (no page offsets, positioned at origin)
-                    manager.layout_chart_for_export(&chart, css_width, is_snippet);
+                    // Try to parse the chart - if it fails, just keep the canvas white
+                    // (the CSS background is white, so an empty render looks like a blank page)
+                    if let Ok(chart) = keyflow::Chart::parse(&source_text) {
+                        // Layout chart for export (no page offsets, positioned at origin)
+                        manager.layout_chart_for_export(&chart, css_width, is_snippet);
 
-                    // Render with transparent background (page at origin, proper DPI + dpr scaling)
-                    if let Err(e) = manager.render_to_canvas_transparent(&html_canvas, dpr).await {
-                        tracing::error!("Failed to render static chart: {}", e);
+                        // Render with transparent background (page at origin, proper DPI + dpr scaling)
+                        if let Err(e) = manager.render_to_canvas_transparent(&html_canvas, dpr).await {
+                            tracing::error!("Failed to render static chart: {}", e);
+                        }
+                    } else {
+                        // Parse failed - render blank white page
+                        // This provides a smooth experience during typewriter animations
+                        if let Err(e) = manager.render_blank_white(&html_canvas, dpr).await {
+                            tracing::debug!("Failed to render blank page: {}", e);
+                        }
                     }
                 }
             });

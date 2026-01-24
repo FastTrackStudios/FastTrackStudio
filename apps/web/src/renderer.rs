@@ -488,6 +488,51 @@ impl ChartLayoutManager {
         }
     }
 
+    /// Render a blank white page to the canvas (WASM only).
+    ///
+    /// Used when the chart source is invalid/incomplete (e.g., during typewriter animation).
+    /// This provides a smooth visual experience instead of showing errors or stale content.
+    ///
+    /// # Arguments
+    /// * `canvas` - The HTML canvas element to render to
+    /// * `dpr` - Device pixel ratio for high-DPI displays
+    #[cfg(target_arch = "wasm32")]
+    pub async fn render_blank_white(
+        &mut self,
+        canvas: &web_sys::HtmlCanvasElement,
+        dpr: f64,
+    ) -> Result<(), String> {
+        use wasm::WebGpuRenderer;
+
+        // Initialize renderer if needed
+        if self.wgpu_renderer.is_none() {
+            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
+            self.wgpu_renderer = Some(renderer);
+        }
+
+        // Get canvas dimensions
+        let canvas_width = canvas.width();
+        let canvas_height = canvas.height();
+
+        // Resize if needed
+        if let Some(renderer) = self.wgpu_renderer.as_mut() {
+            let (current_width, current_height) = renderer.dimensions();
+            if current_width != canvas_width || current_height != canvas_height {
+                renderer.resize(canvas_width, canvas_height);
+            }
+        }
+
+        // Create empty scene - just renders the base color
+        let scene = Scene::new();
+
+        // Render with WHITE base color for a blank page
+        if let Some(wgpu_renderer) = self.wgpu_renderer.as_mut() {
+            wgpu_renderer.render_with_base_color(&scene, Color::WHITE)
+        } else {
+            Err("WebGPU renderer not initialized".to_string())
+        }
+    }
+
     /// Render to a canvas element with white background for PDF export (WASM only).
     ///
     /// Similar to `render_to_canvas_transparent` but uses white background,
