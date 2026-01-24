@@ -172,30 +172,89 @@ fn Layout() -> Element {
     }
 }
 
-/// Default source for the landing page demo
-const LANDING_DEMO_SOURCE: &str = r#"Song Title
-120bpm 4/4 #A
+/// Chart examples for the typewriter animation on the landing page.
+/// Each showcases different keyflow features.
+const DEMO_CHARTS: &[&str] = &[
+    // Pop ballad in A major
+    r#"Midnight Dreams
+72bpm 4/4 #A
 
 VS
-A D F#m // E // D
+A D F#m E
 
 CH
-D F#m E11 A/C#
+D E A F#m
+D E C#m F#m
 
 BR
-F#m // E // D A/C#
+F#m E D A/C#
 
 OUT
 A
-"#;
+"#,
+    // Jazz standard in Bb
+    r#"Autumn Leaves
+140bpm 4/4 #Bb
+
+VS
+Cm7 F7 Bbmaj7 Ebmaj7
+Am7b5 D7 Gm //
+
+CH
+Am7b5 D7 Gm //
+Cm7 F7 Bbmaj7 //
+
+OUT
+Gm
+"#,
+    // Rock anthem in E
+    r#"Electric Thunder
+130bpm 4/4 #E
+
+INT
+E5 // // //
+
+VS
+E5 A5 B5 A5
+E5 A5 B5 //
+
+CH
+A5 B5 C#m B5
+A5 B5 E5 //
+
+OUT
+E5
+"#,
+    // R&B groove in C minor
+    r#"City Lights
+95bpm 4/4 #Cm
+
+VS
+Cm9 Fm9 Bb13 Ebmaj7
+Abmaj7 G7#9 Cm9 //
+
+CH
+Fm9 G7 Cm9 //
+Abmaj7 Bb9 Cm9 //
+
+BR
+Abmaj7 G7 Cm //
+
+OUT
+Cm9
+"#,
+];
 
 /// Landing page for FastTrackStudio
 #[component]
 fn Home() -> Element {
-    // Source text state for live demo
-    let mut source = use_signal(|| LANDING_DEMO_SOURCE.to_string());
-    // Use Page mode for proper A4 document appearance (content gets clipped at edges)
+    // Source text state driven by typewriter animation
+    let source = use_signal(|| DEMO_CHARTS[0].to_string());
+    // Use Page mode for proper A4 document appearance
     let preview_mode = use_signal(|| components::PreviewMode::Page);
+
+    // Create the list of charts for the typewriter
+    let charts: Vec<String> = DEMO_CHARTS.iter().map(|s| s.to_string()).collect();
 
     rsx! {
         div {
@@ -315,18 +374,26 @@ fn Home() -> Element {
                                         }
                                     }
 
+                                    // Typewriter animation drives the source signal
+                                    components::ChartTypewriter {
+                                        output: source,
+                                        charts: charts.clone(),
+                                        speed_ms: 35,
+                                        delay_between_charts_ms: 4000
+                                    }
+
                                     // Split view: Editor on left, Page preview on right (sized to A4 width)
                                     div {
                                         class: "flex h-[calc(100%-3rem)]",
 
-                                        // Left side - Text editor (fixed width)
+                                        // Left side - Text editor (fixed width, read-only animation)
                                         div {
                                             class: "w-48 border-r border-border overflow-hidden shrink-0",
 
                                             components::HighlightedEditor {
                                                 value: source(),
-                                                on_change: move |new_value: String| source.set(new_value),
-                                                placeholder: "Enter keyflow chart notation...",
+                                                on_change: move |_: String| {}, // Read-only for demo
+                                                placeholder: "",
                                                 textarea_id: Some("landing-editor".to_string())
                                             }
                                         }
@@ -791,7 +858,7 @@ fn PatternView(id: String) -> Element {
 #[component]
 fn TestRender() -> Element {
     // Source text state
-    let mut source = use_signal(|| LANDING_DEMO_SOURCE.to_string());
+    let mut source = use_signal(|| DEMO_CHARTS[0].to_string());
     // Use Page mode to see the full A4 page layout
     let preview_mode = use_signal(|| components::PreviewMode::Page);
 
