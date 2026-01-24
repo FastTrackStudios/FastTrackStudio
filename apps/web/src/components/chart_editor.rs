@@ -443,19 +443,35 @@ fn StaticChartCanvas(
                     html_canvas.set_width(buffer_width);
                     html_canvas.set_height(buffer_height);
 
-                    // Try to parse the chart - if it fails, render an empty page structure
-                    let chart = keyflow::Chart::parse(&source_text).unwrap_or_else(|_| {
-                        // Fallback: minimal empty chart that renders as a blank page
-                        // This ensures we always show the page structure during typewriter animation
-                        keyflow::Chart::parse("Untitled\n120bpm 4/4\n").unwrap_or_default()
-                    });
+                    // Try to parse the chart
+                    let chart_result = if source_text.trim().is_empty() {
+                        None
+                    } else {
+                        keyflow::Chart::parse(&source_text).ok()
+                    };
 
-                    // Layout chart for export (no page offsets, positioned at origin)
-                    manager.layout_chart_for_export(&chart, css_width, is_snippet);
+                    // Check if we have a valid chart with actual content (sections)
+                    let has_content = chart_result
+                        .as_ref()
+                        .map(|c| !c.sections.is_empty())
+                        .unwrap_or(false);
 
-                    // Render with transparent background (page at origin, proper DPI + dpr scaling)
-                    if let Err(e) = manager.render_to_canvas_transparent(&html_canvas, dpr).await {
-                        tracing::error!("Failed to render static chart: {}", e);
+                    if has_content {
+                        // Parse succeeded and has sections - layout and render
+                        let chart = chart_result.unwrap();
+
+                        // Layout chart for export (no page offsets, positioned at origin)
+                        manager.layout_chart_for_export(&chart, css_width, is_snippet);
+
+                        // Render with WHITE base color to prevent flashing during transitions
+                        if let Err(e) = manager.render_to_canvas_white(&html_canvas, dpr).await {
+                            tracing::error!("Failed to render static chart: {}", e);
+                        }
+                    } else {
+                        // Empty, invalid, or no sections - render blank white page
+                        if let Err(e) = manager.render_blank_white(&html_canvas, dpr).await {
+                            tracing::error!("Failed to render blank page: {}", e);
+                        }
                     }
                 }
             });
@@ -515,11 +531,18 @@ pub fn DynamicChartRenderer(
         first_line
     );
 
-    // Parse the chart to validate it
-    let parse_result = keyflow::Chart::parse(&source_value);
-
     // Use provided canvas_id or default
     let canvas_id = canvas_id.unwrap_or_else(|| "editor-chart-canvas".to_string());
+
+    // For empty input, render canvas (DynamicChartCanvas handles empty gracefully)
+    // For valid charts, render canvas
+    // Only show error UI for non-empty invalid input
+    let is_empty = source_value.trim().is_empty();
+    let parse_result = if is_empty {
+        Ok(keyflow::Chart::default())
+    } else {
+        keyflow::Chart::parse(&source_value)
+    };
 
     match parse_result {
         Ok(_chart) => {
@@ -850,13 +873,6 @@ fn DynamicChartCanvas(
                     return;
                 };
 
-                let Ok(chart) = keyflow::Chart::parse(&source_text) else {
-                    tracing::debug!("[ChartCanvas] Skipping render - parse failed");
-                    return;
-                };
-
-                tracing::debug!("[ChartCanvas] Chart parsed, rendering to canvas");
-
                 #[cfg(target_arch = "wasm32")]
                 {
                     use wasm_bindgen::JsCast;
@@ -884,14 +900,46 @@ fn DynamicChartCanvas(
                     html_canvas.set_width(buffer_width);
                     html_canvas.set_height(buffer_height);
 
-                    // Use appropriate layout mode based on preview setting
-                    manager.layout_chart_with_mode(&chart, css_width, is_snippet);
+                    // Try to parse the chart
+                    let chart_result = if source_text.trim().is_empty() {
+                        None
+                    } else {
+                        keyflow::Chart::parse(&source_text).ok()
+                    };
 
-                    if let Err(e) = manager
-                        .render_to_canvas_with_transform(&html_canvas, tx * dpr, ty * dpr, s * dpr)
-                        .await
-                    {
-                        tracing::error!("Failed to render chart: {}", e);
+                    // Check if we have a valid chart with actual content (sections)
+                    let has_content = chart_result
+                        .as_ref()
+                        .map(|c| !c.sections.is_empty())
+                        .unwrap_or(false);
+
+                    if has_content {
+                        // Parse succeeded and has sections - render normally
+                        let chart = chart_result.unwrap();
+
+                        // Use appropriate layout mode based on preview setting
+                        manager.layout_chart_with_mode(&chart, css_width, is_snippet);
+
+                        if let Err(e) = manager
+                            .render_to_canvas_with_transform(&html_canvas, tx * dpr, ty * dpr, s * dpr)
+                            .await
+                        {
+                            tracing::error!("Failed to render chart: {}", e);
+                        }
+                    } else {
+                        // Empty, invalid, or no sections - render blank page
+                        if let Err(e) = manager
+                            .render_blank_page_with_transform(
+                                &html_canvas,
+                                tx * dpr,
+                                ty * dpr,
+                                s * dpr,
+                                is_snippet,
+                            )
+                            .await
+                        {
+                            tracing::error!("Failed to render blank page: {}", e);
+                        }
                     }
                 }
             });

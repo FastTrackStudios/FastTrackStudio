@@ -488,6 +488,94 @@ impl ChartLayoutManager {
         }
     }
 
+    /// Render to a canvas element with white base color (WASM only).
+    ///
+    /// Similar to `render_to_canvas_transparent` but uses white background.
+    /// This prevents flashing during transitions (e.g., typewriter animation)
+    /// by ensuring the base is always white, matching the page color.
+    ///
+    /// # Arguments
+    /// * `canvas` - The HTML canvas element to render to
+    /// * `dpr` - Device pixel ratio for high-DPI displays
+    #[cfg(target_arch = "wasm32")]
+    pub async fn render_to_canvas_white(
+        &mut self,
+        canvas: &web_sys::HtmlCanvasElement,
+        dpr: f64,
+    ) -> Result<(), String> {
+        use wasm::WebGpuRenderer;
+
+        // Initialize renderer if needed
+        if self.wgpu_renderer.is_none() {
+            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
+            self.wgpu_renderer = Some(renderer);
+        }
+
+        // Get canvas dimensions first
+        let canvas_width = canvas.width();
+        let canvas_height = canvas.height();
+
+        // Resize if needed
+        if let Some(renderer) = self.wgpu_renderer.as_mut() {
+            let (current_width, current_height) = renderer.dimensions();
+            if current_width != canvas_width || current_height != canvas_height {
+                renderer.resize(canvas_width, canvas_height);
+            }
+        }
+
+        // Create scene WITHOUT background fill
+        let mut scene = Scene::new();
+
+        // Get page dimensions from layout to calculate fit-to-width scale
+        let (page_width_pt, content_x, content_y) = self
+            .layout_result
+            .as_ref()
+            .map(|layout| {
+                let bounds = layout.scene.compute_bounds();
+                let page_width = layout.total_width;
+                (page_width, bounds.x0.max(0.0), bounds.y0.max(0.0))
+            })
+            .unwrap_or((595.0, 0.0, 0.0));
+
+        // Calculate scale to fit page width to canvas width
+        let canvas_css_width = canvas_width as f64 / dpr;
+        let page_css_width = page_width_pt * DPI_SCALE;
+        let fit_scale = canvas_css_width / page_css_width;
+
+        // Combined scale
+        let total_scale = fit_scale * DPI_SCALE * dpr;
+
+        // Build transform
+        let transform = Affine::translate((-content_x * total_scale, -content_y * total_scale))
+            * Affine::scale(total_scale);
+
+        // Render layout if available
+        if let Some(ref layout) = self.layout_result {
+            let mut renderer = SceneRenderBuilder::new()
+                .spatium(5.0)
+                .build()
+                .with_font(&self.smufl_font)
+                .with_text_font_arc(self.text_font_data.clone())
+                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("section-note", self.text_font_data.clone())
+                .with_named_font_arc("title-bold", self.text_font_data.clone())
+                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+
+            let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
+            renderer.set_viewport(viewport_rect);
+
+            renderer.render_with_transform(&mut scene, &layout.scene, transform);
+        }
+
+        // Render with WHITE base color to prevent flashing
+        if let Some(wgpu_renderer) = self.wgpu_renderer.as_mut() {
+            wgpu_renderer.render_with_base_color(&scene, Color::WHITE)
+        } else {
+            Err("WebGPU renderer not initialized".to_string())
+        }
+    }
+
     /// Render a blank white page to the canvas (WASM only).
     ///
     /// Used when the chart source is invalid/incomplete (e.g., during typewriter animation).
@@ -528,6 +616,90 @@ impl ChartLayoutManager {
         // Render with WHITE base color for a blank page
         if let Some(wgpu_renderer) = self.wgpu_renderer.as_mut() {
             wgpu_renderer.render_with_base_color(&scene, Color::WHITE)
+        } else {
+            Err("WebGPU renderer not initialized".to_string())
+        }
+    }
+
+    /// Render a blank A4 page with transform (for editor view with gray workspace).
+    ///
+    /// Used when the chart source is empty or invalid. Shows a white A4 page
+    /// at the specified position against the gray workspace background.
+    ///
+    /// # Arguments
+    /// * `canvas` - The HTML canvas element to render to
+    /// * `translate_x` - X translation in pixels (already scaled by DPR)
+    /// * `translate_y` - Y translation in pixels (already scaled by DPR)
+    /// * `scale` - Scale factor (already includes DPR)
+    /// * `is_snippet` - If true, use snippet dimensions; if false, use A4
+    #[cfg(target_arch = "wasm32")]
+    pub async fn render_blank_page_with_transform(
+        &mut self,
+        canvas: &web_sys::HtmlCanvasElement,
+        translate_x: f64,
+        translate_y: f64,
+        scale: f64,
+        is_snippet: bool,
+    ) -> Result<(), String> {
+        use wasm::WebGpuRenderer;
+
+        // A4 dimensions in points
+        const A4_WIDTH: f64 = 595.0;
+        const A4_HEIGHT: f64 = 842.0;
+
+        // Initialize renderer if needed
+        if self.wgpu_renderer.is_none() {
+            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
+            self.wgpu_renderer = Some(renderer);
+        }
+
+        // Get canvas dimensions
+        let canvas_width = canvas.width();
+        let canvas_height = canvas.height();
+
+        // Resize if needed
+        if let Some(renderer) = self.wgpu_renderer.as_mut() {
+            let (current_width, current_height) = renderer.dimensions();
+            if current_width != canvas_width || current_height != canvas_height {
+                renderer.resize(canvas_width, canvas_height);
+            }
+        }
+
+        // Create scene with gray background and white page
+        let mut scene = Scene::new();
+
+        // Build transform
+        let transform = Affine::translate((translate_x, translate_y)) * Affine::scale(scale);
+
+        // Fill gray workspace background
+        scene.fill(
+            vello::peniko::Fill::NonZero,
+            Affine::IDENTITY,
+            Color::from_rgb8(55, 65, 81),
+            None,
+            &Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64),
+        );
+
+        // Draw white page rectangle
+        let (page_width, page_height) = if is_snippet {
+            // For snippet mode, use a reasonable default size
+            (400.0, 300.0)
+        } else {
+            // A4 page
+            (A4_WIDTH, A4_HEIGHT)
+        };
+
+        scene.fill(
+            vello::peniko::Fill::NonZero,
+            transform,
+            Color::WHITE,
+            None,
+            &Rect::new(0.0, 0.0, page_width, page_height),
+        );
+
+        // Render to canvas
+        if let Some(wgpu_renderer) = self.wgpu_renderer.as_mut() {
+            wgpu_renderer.render(&scene)
         } else {
             Err("WebGPU renderer not initialized".to_string())
         }
