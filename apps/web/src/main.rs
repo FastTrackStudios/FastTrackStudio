@@ -9,7 +9,7 @@ mod routes;
 mod state;
 
 use dioxus::prelude::*;
-use lucide_dioxus::{ArrowLeft, BookOpen, Github, PenTool};
+use lucide_dioxus::{ArrowLeft, BookOpen, FileText, Github, Music, PenTool, Users};
 
 // Static assets
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -22,12 +22,16 @@ pub enum Route {
     #[layout(Layout)]
     #[route("/")]
     Home {},
+    #[route("/docs")]
+    DocsHome {},
     #[route("/keyflow/chart")]
     ChartEditor {},
     #[route("/docs/keyflow/chart/tests")]
     PatternBrowser {},
     #[route("/docs/keyflow/chart/tests/:id")]
     PatternView { id: String },
+    #[route("/test/render")]
+    TestRender {},
 }
 
 fn main() {
@@ -88,7 +92,7 @@ fn App() -> Element {
 fn Layout() -> Element {
     rsx! {
         div {
-            class: "min-h-screen flex flex-col bg-background text-foreground",
+            class: "min-h-screen flex flex-col text-foreground",
 
             // Navigation header
             nav {
@@ -101,8 +105,23 @@ fn Layout() -> Element {
                     Link {
                         to: Route::Home {},
                         class: "flex items-center gap-2 text-foreground text-xl font-bold hover:text-primary transition-colors",
-                        span { "FastTrack" }
-                        span { class: "text-muted-foreground font-normal", "Docs" }
+                        span { "FastTrackStudio" }
+                        {
+                            // Show section name based on current route
+                            let route = use_route::<Route>();
+                            let section = match route {
+                                Route::ChartEditor {} => Some("Keyflow"),
+                                Route::DocsHome {} | Route::PatternBrowser {} | Route::PatternView { .. } => Some("Docs"),
+                                _ => None,
+                            };
+                            if let Some(name) = section {
+                                rsx! {
+                                    span { class: "text-muted-foreground font-normal", "{name}" }
+                                }
+                            } else {
+                                rsx! {}
+                            }
+                        }
                     }
 
                     // Navigation links
@@ -110,17 +129,17 @@ fn Layout() -> Element {
                         class: "flex items-center gap-4",
 
                         Link {
+                            to: Route::DocsHome {},
+                            class: "flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-md hover:bg-accent",
+                            BookOpen { class: "w-4 h-4" }
+                            span { "Docs" }
+                        }
+
+                        Link {
                             to: Route::ChartEditor {},
                             class: "flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-md hover:bg-accent",
                             PenTool { class: "w-4 h-4" }
                             span { "Editor" }
-                        }
-
-                        Link {
-                            to: Route::PatternBrowser {},
-                            class: "flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-md hover:bg-accent",
-                            BookOpen { class: "w-4 h-4" }
-                            span { "Patterns" }
                         }
 
                         a {
@@ -153,9 +172,250 @@ fn Layout() -> Element {
     }
 }
 
-/// Home page component
+/// Default source for the landing page demo
+const LANDING_DEMO_SOURCE: &str = r#"Song Title
+120bpm 4/4 #A
+
+VS
+A D F#m // E // D
+
+CH
+D F#m E11 A/C#
+
+BR
+F#m // E // D A/C#
+
+OUT
+A
+"#;
+
+/// Landing page for FastTrackStudio
 #[component]
 fn Home() -> Element {
+    // Source text state for live demo
+    let mut source = use_signal(|| LANDING_DEMO_SOURCE.to_string());
+    // Use Page mode for proper A4 document appearance (content gets clipped at edges)
+    let preview_mode = use_signal(|| components::PreviewMode::Page);
+
+    rsx! {
+        div {
+            class: "relative",
+
+            // Decorative gradient overlays - diagonal beams like reference
+            div {
+                aria_hidden: "true",
+                class: "z-[2] absolute inset-0 pointer-events-none isolate hidden lg:block overflow-hidden",
+
+                // Main beam - upper left
+                div {
+                    class: "absolute left-0 top-0 rounded-full",
+                    style: "width: 35rem; height: 80rem; transform: translateY(-87.5%) rotate(-45deg); background: radial-gradient(68.54% 68.72% at 55.02% 31.46%, hsla(0,0%,85%,.04) 0, hsla(0,0%,55%,.01) 50%, hsla(0,0%,45%,0) 80%);"
+                }
+
+                // Secondary beam
+                div {
+                    class: "absolute left-0 top-0 rounded-full",
+                    style: "width: 14rem; height: 80rem; transform: translate(5%, -50%) rotate(-45deg); background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,.03) 0, hsla(0,0%,45%,.01) 80%, transparent 100%);"
+                }
+
+                // Third beam
+                div {
+                    class: "absolute left-0 top-0 rounded-full",
+                    style: "width: 14rem; height: 80rem; transform: translateY(-87.5%) rotate(-45deg); background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,.02) 0, hsla(0,0%,45%,.01) 80%, transparent 100%);"
+                }
+
+                // Additional beam - center
+                div {
+                    class: "absolute rounded-full",
+                    style: "width: 20rem; height: 60rem; left: 30%; top: 0; transform: translateY(-60%) rotate(-45deg); background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,.025) 0, hsla(0,0%,45%,.008) 80%, transparent 100%);"
+                }
+
+                // Additional beam - right side
+                div {
+                    class: "absolute rounded-full",
+                    style: "width: 18rem; height: 50rem; right: 10%; top: 0; transform: translateY(-40%) rotate(-45deg); background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,.02) 0, hsla(0,0%,45%,.006) 80%, transparent 100%);"
+                }
+
+                // Subtle beam - lower
+                div {
+                    class: "absolute rounded-full",
+                    style: "width: 12rem; height: 40rem; left: 50%; top: 30%; transform: rotate(-45deg); background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,.015) 0, transparent 80%);"
+                }
+            }
+
+            // Hero section
+            section {
+                class: "overflow-hidden",
+
+                div {
+                    class: "relative mx-auto max-w-5xl px-6 py-28 lg:py-24",
+
+                    div {
+                        class: "relative z-10 mx-auto max-w-2xl text-center",
+
+                        h1 {
+                            class: "text-balance text-4xl font-semibold md:text-5xl lg:text-6xl text-foreground",
+                            "Music production tools reimagined"
+                        }
+
+                        p {
+                            class: "mx-auto my-8 max-w-2xl text-lg md:text-xl text-muted-foreground",
+                            "A complete music production toolset built in Rust. Seamless REAPER integration, powerful chart notation, and real-time P2P collaboration."
+                        }
+
+                        div {
+                            class: "flex flex-col sm:flex-row items-center justify-center gap-3",
+
+                            Link {
+                                to: Route::ChartEditor {},
+                                class: "inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-8 rounded-md font-medium transition-colors",
+                                "Try the Editor"
+                            }
+
+                            Link {
+                                to: Route::DocsHome {},
+                                class: "inline-flex items-center justify-center gap-2 border border-border bg-background hover:bg-accent hover:text-accent-foreground h-11 px-8 rounded-md font-medium transition-colors",
+                                "Read the Docs"
+                            }
+                        }
+                    }
+                }
+
+                // Showcase section with perspective transform - live editor demo
+                div {
+                    class: "mx-auto -mt-16 max-w-7xl",
+                    style: "-webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%); mask-image: linear-gradient(to bottom, black 50%, transparent 100%);",
+
+                    div {
+                        class: "-mr-16 pl-16 lg:-mr-56 lg:pl-56",
+                        style: "perspective: 1200px; -webkit-mask-image: linear-gradient(to right, black 50%, transparent 100%); mask-image: linear-gradient(to right, black 50%, transparent 100%);",
+
+                        div {
+                            style: "transform: rotateX(20deg);",
+
+                            // Live editor card with skew (sized to content)
+                            div {
+                                class: "lg:h-[44rem] relative inline-block",
+                                style: "transform: skewX(0.36rad);",
+
+                                div {
+                                    class: "rounded-lg z-[2] relative border border-border bg-card overflow-hidden h-full w-fit",
+
+                                    // Editor header
+                                    div {
+                                        class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
+
+                                        div { class: "w-3 h-3 rounded-full bg-red-500/80" }
+                                        div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
+                                        div { class: "w-3 h-3 rounded-full bg-green-500/80" }
+
+                                        span {
+                                            class: "ml-4 text-sm text-muted-foreground",
+                                            "song_title.kf"
+                                        }
+                                    }
+
+                                    // Split view: Editor on left, Page preview on right (sized to A4 width)
+                                    div {
+                                        class: "flex h-[calc(100%-3rem)]",
+
+                                        // Left side - Text editor (fixed width)
+                                        div {
+                                            class: "w-48 border-r border-border overflow-hidden shrink-0",
+
+                                            components::HighlightedEditor {
+                                                value: source(),
+                                                on_change: move |new_value: String| source.set(new_value),
+                                                placeholder: "Enter keyflow chart notation...",
+                                                textarea_id: Some("landing-editor".to_string())
+                                            }
+                                        }
+
+                                        // Right side - Live chart preview (matches rendered page width)
+                                        div {
+                                            class: "overflow-hidden shrink-0",
+                                            style: "width: 480px;",
+
+                                            components::StaticChartRenderer {
+                                                source: source,
+                                                mode: preview_mode,
+                                                canvas_id: Some("landing-chart-canvas".to_string())
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Features section
+            section {
+                class: "relative z-10 py-24",
+
+                div {
+                    class: "mx-auto max-w-5xl px-6",
+
+                    h2 {
+                        class: "text-center text-lg font-medium text-muted-foreground mb-16",
+                        "Everything you need for modern music production"
+                    }
+
+                    div {
+                        class: "grid md:grid-cols-3 gap-8",
+
+                        HomeFeature {
+                            title: "REAPER Integration",
+                            description: "Deep DAW integration for transport control, MIDI routing, and real-time state synchronization.",
+                            icon: rsx! { Music { class: "w-8 h-8" } }
+                        }
+
+                        HomeFeature {
+                            title: "Keyflow Notation",
+                            description: "Intuitive chart syntax with smart chord memory, section numbering, and GPU-accelerated rendering.",
+                            icon: rsx! { FileText { class: "w-8 h-8" } }
+                        }
+
+                        HomeFeature {
+                            title: "P2P Collaboration",
+                            description: "Real-time collaboration powered by iroh for seamless peer-to-peer networking.",
+                            icon: rsx! { Users { class: "w-8 h-8" } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn HomeFeature(title: &'static str, description: &'static str, icon: Element) -> Element {
+    rsx! {
+        div {
+            class: "group relative rounded-2xl border border-border/50 bg-card/30 p-8 transition-all hover:border-primary/30 hover:bg-card/50",
+
+            div {
+                class: "mb-4 inline-flex rounded-lg bg-primary/10 p-3 text-primary",
+                {icon}
+            }
+
+            h3 {
+                class: "text-lg font-semibold text-foreground mb-2",
+                "{title}"
+            }
+
+            p {
+                class: "text-muted-foreground leading-relaxed",
+                "{description}"
+            }
+        }
+    }
+}
+
+/// Docs home page - Keyflow documentation
+#[component]
+fn DocsHome() -> Element {
     rsx! {
         div {
             class: "max-w-4xl mx-auto px-4 py-16",
@@ -520,6 +780,60 @@ fn PatternView(id: String) -> Element {
                         class: "inline-flex items-center gap-2 border border-border text-foreground hover:bg-accent hover:text-accent-foreground px-4 py-2 rounded-md transition-colors",
                         ArrowLeft { class: "w-4 h-4" }
                         "Browse all patterns"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Test page for debugging chart rendering - no transforms, just raw output
+#[component]
+fn TestRender() -> Element {
+    // Source text state
+    let mut source = use_signal(|| LANDING_DEMO_SOURCE.to_string());
+    // Use Page mode to see the full A4 page layout
+    let preview_mode = use_signal(|| components::PreviewMode::Page);
+
+    rsx! {
+        div {
+            class: "flex h-[calc(100vh-8rem)]",
+
+            // Left side - Text editor
+            div {
+                class: "w-96 border-r border-border overflow-hidden",
+
+                div {
+                    class: "px-4 py-3 border-b border-border bg-card",
+                    h3 {
+                        class: "text-sm font-semibold",
+                        "Source Code"
+                    }
+                }
+
+                div {
+                    class: "h-[calc(100%-3rem)]",
+                    components::HighlightedEditor {
+                        value: source(),
+                        on_change: move |new_value: String| source.set(new_value),
+                        placeholder: "Enter keyflow chart notation...",
+                        textarea_id: Some("test-render-editor".to_string())
+                    }
+                }
+            }
+
+            // Right side - Chart preview (no transforms)
+            div {
+                class: "flex-1 bg-zinc-800 overflow-auto p-8",
+
+                div {
+                    class: "inline-block",
+                    style: "border: 1px solid red;",
+
+                    components::StaticChartRenderer {
+                        source: source,
+                        mode: preview_mode,
+                        canvas_id: Some("test-render-canvas".to_string())
                     }
                 }
             }

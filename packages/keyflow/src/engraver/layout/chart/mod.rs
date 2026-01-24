@@ -130,6 +130,10 @@ pub struct ChartLayoutConfig {
     /// When true (default), pushed chords create triplet/syncopated notation.
     /// When false, pushed chords show apostrophe markers on chord symbols.
     pub push_alters_rhythm: bool,
+    /// Whether to add page offsets for multi-page viewing.
+    /// When true (default), pages are positioned at (20, 20) with gaps for multi-page layouts.
+    /// When false, the page is positioned at (0, 0) for single-page PDF export or edge-to-edge rendering.
+    pub use_page_offsets: bool,
 }
 
 impl Default for ChartLayoutConfig {
@@ -176,6 +180,7 @@ impl ChartLayoutConfig {
             snippet_mode: false,        // Full page mode with shadow
             min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
             push_alters_rhythm: true, // Show accurate rhythm notation for pushes
+            use_page_offsets: true,   // Add offsets for multi-page viewing
         }
     }
 
@@ -206,6 +211,7 @@ impl ChartLayoutConfig {
             snippet_mode: true, // Simple white background
             min_chord_symbol_gap: DEFAULT_MIN_CHORD_SYMBOL_GAP,
             push_alters_rhythm: true, // Show accurate rhythm notation for pushes
+            use_page_offsets: true,   // Keep offsets for interactive viewing
         }
     }
 
@@ -218,6 +224,23 @@ impl ChartLayoutConfig {
     pub fn with_chart_settings(mut self, settings: &crate::chart::ChartSettings) -> Self {
         self.auto_rhythm_slashes = settings.auto_rhythm_slashes();
         self.push_alters_rhythm = settings.push_alters_rhythm();
+        self
+    }
+
+    /// Disable page offsets for single-page export.
+    ///
+    /// When disabled, the page is positioned at (0, 0) instead of (20, 20),
+    /// suitable for PDF export or edge-to-edge rendering.
+    #[must_use]
+    pub fn for_export(mut self) -> Self {
+        self.use_page_offsets = false;
+        self
+    }
+
+    /// Set whether to use page offsets for multi-page viewing.
+    #[must_use]
+    pub fn with_page_offsets(mut self, use_offsets: bool) -> Self {
+        self.use_page_offsets = use_offsets;
         self
     }
 }
@@ -500,9 +523,10 @@ impl ChartLayoutEngine {
         let mut cumulative_ticks: i64 = -count_in_ticks;
 
         // Calculate page offset for multi-page rendering
-        let page_offset_x = 20.0;
-        let page_offset_y = 20.0;
-        let page_gap = 40.0;
+        // When use_page_offsets is false, render at origin for single-page export
+        let page_offset_x = if self.config.use_page_offsets { 20.0 } else { 0.0 };
+        let page_offset_y = if self.config.use_page_offsets { 20.0 } else { 0.0 };
+        let page_gap = if self.config.use_page_offsets { 40.0 } else { 0.0 };
 
         // Pre-compute section letters for consecutive repeats
         let section_letters = self.compute_section_letters(&chart.sections);
@@ -604,7 +628,7 @@ impl ChartLayoutEngine {
                 }
             }
 
-            // Group measures into systems
+            // Group measures into systems (count-based for consistent layout)
             let systems = self.group_measures_into_systems(chart_section.measures(), content_width);
 
             for (sys_idx, measure_indices) in systems.iter().enumerate() {
@@ -870,6 +894,9 @@ impl ChartLayoutEngine {
                         let spillbacks = push_spillback_map.get(&measure_idx).map(|v| v.as_slice());
 
                         // Layout measure content (rhythm slashes) - no clef/time sig inside measure
+                        // is_boundary: first measure of section needs width for pushed chords
+                        // that render both here AND spill back to previous section
+                        let is_section_boundary = measure_idx == 0;
                         let measure_result = self.layout_measure(
                             measure,
                             melody_data,
@@ -880,6 +907,7 @@ impl ChartLayoutEngine {
                             time_signature,
                             &ctx,
                             id_counter,
+                            is_section_boundary,
                         );
                         id_counter += 10;
 
@@ -1220,7 +1248,7 @@ impl ChartLayoutEngine {
                 }
             }
 
-            // Group measures into systems
+            // Group measures into systems (count-based for consistent layout)
             let systems = self.group_measures_into_systems(chart_section.measures(), content_width);
 
             for (sys_idx, measure_indices) in systems.iter().enumerate() {
@@ -1397,6 +1425,8 @@ impl ChartLayoutEngine {
                         // Get spillback chords for this measure (from next measure pushing back)
                         let spillbacks = push_spillback_map.get(&measure_idx).map(|v| v.as_slice());
 
+                        // is_boundary: first measure of section needs width for pushed chords
+                        let is_section_boundary = measure_idx == 0;
                         let measure_result = self.layout_measure(
                             measure,
                             melody_data,
@@ -1407,6 +1437,7 @@ impl ChartLayoutEngine {
                             time_signature,
                             &ctx,
                             id_counter,
+                            is_section_boundary,
                         );
                         id_counter += 10;
 
@@ -1525,9 +1556,10 @@ impl ChartLayoutEngine {
         }
     }
 
-    /// Group measures into systems based on available width.
+    /// Group measures into systems based on maximum measures per system.
     ///
-    /// Delegates to [`measure_layout::group_measures_into_systems`].
+    /// Always uses count-based grouping to maintain consistent layout.
+    /// Rhythm compression handles fitting content within the allocated width.
     fn group_measures_into_systems(
         &self,
         measures: &[crate::chart::types::Measure],
@@ -1768,11 +1800,11 @@ impl ChartLayoutEngine {
         page_width: f64,
         page_height: f64,
     ) {
-        if self.config.snippet_mode {
-            // Simple white background for snippets (no shadow)
+        if self.config.snippet_mode || !self.config.use_page_offsets {
+            // Simple white background for snippets or export mode (no shadow)
             page_rendering::add_snippet_background(root, page_x, page_y, page_width, page_height);
         } else {
-            // Full page background with shadow
+            // Full page background with shadow for multi-page viewing
             page_rendering::add_page_background(root, page_x, page_y, page_width, page_height);
         }
     }
@@ -1860,6 +1892,7 @@ impl ChartLayoutEngine {
         time_signature: (u8, u8),
         ctx: &LayoutContext<'_>,
         id_base: u64,
+        is_boundary: bool,
     ) -> MeasureScene {
         self.layout_measure_inner(
             measure,
@@ -1872,6 +1905,7 @@ impl ChartLayoutEngine {
             ctx,
             id_base,
             false,
+            is_boundary,
         )
     }
 
@@ -1887,6 +1921,7 @@ impl ChartLayoutEngine {
         time_signature: (u8, u8),
         ctx: &LayoutContext<'_>,
         id_base: u64,
+        is_boundary: bool,
     ) -> MeasureScene {
         self.layout_measure_inner(
             measure,
@@ -1899,6 +1934,7 @@ impl ChartLayoutEngine {
             ctx,
             id_base,
             true,
+            is_boundary,
         )
     }
 
@@ -1914,6 +1950,7 @@ impl ChartLayoutEngine {
         ctx: &LayoutContext<'_>,
         id_base: u64,
         compact: bool,
+        is_boundary: bool,
     ) -> MeasureScene {
         // Check if this measure has melodies (from preprocessed data or raw measure)
         let has_melodies =
@@ -1996,7 +2033,10 @@ impl ChartLayoutEngine {
 
         let source = if has_explicit_chord_rhythm {
             // Explicit rhythm takes priority - it already encodes the full rhythm including rests
-            RhythmSource::ExplicitRhythm(&measure.rhythm_elements)
+            RhythmSource::ExplicitRhythm {
+                elements: &measure.rhythm_elements,
+                spillbacks,
+            }
         } else if needs_triplet_rhythm {
             // Use SlashNotation with triplet generation for measures without explicit rhythm
             RhythmSource::SlashNotation {
@@ -2077,7 +2117,7 @@ impl ChartLayoutEngine {
         // Compute minimum segment widths based on actual chord symbol layout bounds
         // This ensures segments are wide enough to prevent chord symbol collisions
         let chord_min_widths =
-            self.compute_chord_min_widths(measure, num_segments, measure_width, ctx);
+            self.compute_chord_min_widths(measure, num_segments, measure_width, ctx, is_boundary);
 
         // Apply auto_rhythm_slashes: expand whole/half notes to quarter slashes
         // This makes master rhythm charts easier to read by showing consistent quarter slashes
@@ -2475,6 +2515,7 @@ impl ChartLayoutEngine {
         num_segments: usize,
         measure_width: f64,
         ctx: &LayoutContext<'_>,
+        is_boundary: bool,
     ) -> Vec<f64> {
         use crate::chart::types::RhythmElement;
 
@@ -2483,6 +2524,8 @@ impl ChartLayoutEngine {
 
         // Build list of (segment_index, chord) by iterating rhythm_elements.
         // This gets the ACTUAL segment position of each chord, not just the chord index.
+        // We track whether we've seen a real chord to identify spillback chords.
+        let mut seen_real_chord = false;
         let visible_chords: Vec<_> = measure
             .rhythm_elements
             .iter()
@@ -2490,12 +2533,39 @@ impl ChartLayoutEngine {
             .filter_map(|(seg_idx, elem)| {
                 if let RhythmElement::Chord(chord) = elem {
                     // Skip invisible chords (spaces, rests represented as chords)
-                    if !chord.full_symbol.is_empty()
+                    let is_visible = !chord.full_symbol.is_empty()
                         && chord.full_symbol != "s"
-                        && chord.full_symbol != "r"
-                    {
-                        return Some((seg_idx, chord));
+                        && chord.full_symbol != "r";
+
+                    if !is_visible {
+                        return None;
                     }
+
+                    // Check if this is a pushed spillback chord (first real chord that's pushed).
+                    // Spillback chords render in the PREVIOUS measure. However, at boundaries
+                    // (first measure of section/system), they ALSO render in the current measure
+                    // to avoid confusion, so we still need to reserve width.
+                    let is_pushed = !seen_real_chord
+                        && chord
+                            .push_pull
+                            .as_ref()
+                            .map_or(false, |(is_push, _)| *is_push);
+
+                    // Only skip if pushed AND not at a boundary
+                    let should_skip_for_spillback = is_pushed && !is_boundary;
+
+                    seen_real_chord = true;
+
+                    if should_skip_for_spillback {
+                        #[cfg(debug_assertions)]
+                        eprintln!(
+                            "[chord-min-width] Skipping pushed spillback '{}' - renders in previous measure",
+                            chord.full_symbol
+                        );
+                        return None;
+                    }
+
+                    return Some((seg_idx, chord));
                 }
                 None
             })
@@ -2615,13 +2685,29 @@ impl ChartLayoutEngine {
         measure: &crate::chart::types::Measure,
         _text_metrics: &TextFontMetrics,
     ) -> f64 {
+        use crate::chart::types::RhythmElement;
+
         // Get the time signature to determine beats per measure
         let num_beats = measure.time_signature.0 as usize;
 
-        // Base weight from beats, NOT segments.
-        // Triplets subdivide beats but shouldn't make the measure wider.
-        // A 4/4 measure with triplets should have the same width as one without.
-        let beat_weight = num_beats as f64 / 4.0;
+        // Check if this measure has explicit rhythm notation
+        let has_explicit_rhythm =
+            rhythm_builder::measure_has_explicit_chord_rhythm(measure);
+
+        // Count actual rhythm elements for explicit rhythm measures
+        let rhythm_element_count = measure.rhythm_elements.len();
+
+        // Base weight calculation:
+        // - For slash notation: use beats (4/4 = 1.0)
+        // - For explicit rhythm: use rhythm element count / 4
+        //   (so 8 elements = 2.0 weight, giving it double the space of a simple 4-beat measure)
+        let base_weight = if has_explicit_rhythm && rhythm_element_count > num_beats {
+            // Explicit rhythm with more elements than beats needs proportionally more space
+            rhythm_element_count as f64 / 4.0
+        } else {
+            // Normal slash notation: weight from beats
+            num_beats as f64 / 4.0
+        };
 
         // Small bonus for visible chord count (more chords = slightly more width needed)
         // This is much smaller than before since min_width handles collision space.
@@ -2639,10 +2725,10 @@ impl ChartLayoutEngine {
         // Collision space is handled by min_width from measurement cache.
         // Weight only affects proportional distribution, not minimums.
 
-        let weight = beat_weight.max(1.0) + chord_bonus;
+        let weight = base_weight.max(1.0) + chord_bonus;
 
         // Clamp to reasonable range
-        weight.clamp(0.5, 3.0)
+        weight.clamp(0.5, 4.0)
     }
 
     /// Distribute available width among measures using spring physics.

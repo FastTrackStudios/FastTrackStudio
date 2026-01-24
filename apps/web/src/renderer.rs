@@ -108,8 +108,40 @@ impl ChartLayoutManager {
         viewport_width: f64,
         snippet_mode: bool,
     ) {
-        // Simple hash based on chart data and mode
-        let chart_hash = self.compute_chart_hash_with_mode(chart, snippet_mode);
+        self.layout_chart_with_options(chart, viewport_width, snippet_mode, true);
+    }
+
+    /// Layout a chart for export (no page offsets, positioned at origin).
+    ///
+    /// # Arguments
+    /// * `chart` - The parsed chart to layout
+    /// * `viewport_width` - Width of the viewport in CSS pixels
+    /// * `snippet_mode` - If true, use snippet mode (content-sized). If false, use A4 paginated mode.
+    pub fn layout_chart_for_export(
+        &mut self,
+        chart: &Chart,
+        viewport_width: f64,
+        snippet_mode: bool,
+    ) {
+        self.layout_chart_with_options(chart, viewport_width, snippet_mode, false);
+    }
+
+    /// Layout a chart with full control over options.
+    ///
+    /// # Arguments
+    /// * `chart` - The parsed chart to layout
+    /// * `viewport_width` - Width of the viewport in CSS pixels
+    /// * `snippet_mode` - If true, use snippet mode (content-sized). If false, use A4 paginated mode.
+    /// * `use_page_offsets` - If true, add 20pt offset for multi-page viewing. If false, position at origin.
+    fn layout_chart_with_options(
+        &mut self,
+        chart: &Chart,
+        viewport_width: f64,
+        snippet_mode: bool,
+        use_page_offsets: bool,
+    ) {
+        // Simple hash based on chart data, mode, and offset setting
+        let chart_hash = self.compute_chart_hash_with_options(chart, snippet_mode, use_page_offsets);
 
         // Skip if already laid out
         if self.layout_result.is_some() && chart_hash == self.last_chart_hash {
@@ -122,14 +154,14 @@ impl ChartLayoutManager {
 
         let (mode, config) = if snippet_mode {
             // Snippet mode: content-sized, minimal margins
-            let config = ChartLayoutConfig::snippet();
+            let config = ChartLayoutConfig::snippet().with_page_offsets(use_page_offsets);
             let mode = ChartLayoutMode::Snippet {
                 page_width: viewport_width / DPI_SCALE,
             };
             (mode, config)
         } else {
             // Page mode: A4 paginated with Master Rhythm preset
-            let config = ChartLayoutConfig::master_rhythm();
+            let config = ChartLayoutConfig::master_rhythm().with_page_offsets(use_page_offsets);
             let mode = ChartLayoutMode::Paginated {
                 page_width: A4_WIDTH,
                 page_height: A4_HEIGHT,
@@ -146,11 +178,22 @@ impl ChartLayoutManager {
         self.last_chart_hash = chart_hash;
     }
 
-    /// Compute a hash of the chart including layout mode.
+    /// Compute a hash of the chart including layout mode (legacy, for backward compatibility).
+    #[allow(dead_code)]
+    fn compute_chart_hash_with_mode(&self, chart: &Chart, snippet_mode: bool) -> u64 {
+        self.compute_chart_hash_with_options(chart, snippet_mode, true)
+    }
+
+    /// Compute a hash of the chart including all layout options.
     ///
     /// This hash is used for cache invalidation - if the hash changes, we re-layout.
     /// We hash the debug representation of the chart which includes all content.
-    fn compute_chart_hash_with_mode(&self, chart: &Chart, snippet_mode: bool) -> u64 {
+    fn compute_chart_hash_with_options(
+        &self,
+        chart: &Chart,
+        snippet_mode: bool,
+        use_page_offsets: bool,
+    ) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
 
@@ -158,6 +201,7 @@ impl ChartLayoutManager {
         // This ensures ANY change to the chart content invalidates the cache
         format!("{:?}", chart).hash(&mut hasher);
         snippet_mode.hash(&mut hasher);
+        use_page_offsets.hash(&mut hasher);
 
         hasher.finish()
     }
@@ -354,19 +398,16 @@ impl ChartLayoutManager {
     ///
     /// This renders ONLY the content (the white page) with no gray workspace background.
     /// Ideal for showcases and embedded previews where the page should be edge-to-edge.
+    /// The page is rendered at canvas origin (0,0) with proper DPI and device pixel ratio scaling.
     ///
     /// # Arguments
     /// * `canvas` - The HTML canvas element to render to
-    /// * `translate_x` - X translation in pixels (already scaled by DPR)
-    /// * `translate_y` - Y translation in pixels (already scaled by DPR)
-    /// * `scale` - Scale factor (already includes DPR)
+    /// * `dpr` - Device pixel ratio for high-DPI displays
     #[cfg(target_arch = "wasm32")]
     pub async fn render_to_canvas_transparent(
         &mut self,
         canvas: &web_sys::HtmlCanvasElement,
-        translate_x: f64,
-        translate_y: f64,
-        scale: f64,
+        dpr: f64,
     ) -> Result<(), String> {
         use wasm::WebGpuRenderer;
 
@@ -391,8 +432,31 @@ impl ChartLayoutManager {
         // Create scene WITHOUT background fill
         let mut scene = Scene::new();
 
-        // Build transform: translate then scale
-        let transform = Affine::translate((translate_x, translate_y)) * Affine::scale(scale);
+        // Get page dimensions from layout to calculate fit-to-width scale
+        let (page_width_pt, content_x, content_y) = self
+            .layout_result
+            .as_ref()
+            .map(|layout| {
+                let bounds = layout.scene.compute_bounds();
+                // Page width is the total width from the layout
+                let page_width = layout.total_width;
+                // Use max with 0 to ignore negative bounds (elements extending outside page)
+                (page_width, bounds.x0.max(0.0), bounds.y0.max(0.0))
+            })
+            .unwrap_or((595.0, 0.0, 0.0)); // Default to A4 width
+
+        // Calculate scale to fit page width to canvas width
+        // canvas_width is in buffer pixels, so divide by dpr to get CSS pixels
+        let canvas_css_width = canvas_width as f64 / dpr;
+        let page_css_width = page_width_pt * DPI_SCALE;
+        let fit_scale = canvas_css_width / page_css_width;
+
+        // Combined scale: fit_scale (to fill container) * DPI_SCALE (points to CSS) * dpr (CSS to buffer)
+        let total_scale = fit_scale * DPI_SCALE * dpr;
+
+        // Build transform: offset to bring page to origin, then scale
+        let transform = Affine::translate((-content_x * total_scale, -content_y * total_scale))
+            * Affine::scale(total_scale);
 
         // Render layout if available - NO background fill
         if let Some(ref layout) = self.layout_result {
@@ -412,7 +476,7 @@ impl ChartLayoutManager {
             let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
             renderer.set_viewport(viewport_rect);
 
-            // Render with user's view transform
+            // Render with transform
             renderer.render_with_transform(&mut scene, &layout.scene, transform);
         }
 
@@ -596,32 +660,25 @@ impl ChartLayoutManager {
     ///
     /// # Arguments
     /// * `png_bytes` - PNG-encoded image data from the canvas
-    /// * `dpi` - The DPI at which the image was rendered (typically screen DPI * device pixel ratio)
+    /// * `dpi` - The DPI at which the image was rendered
+    /// * `page_width` - PDF page width in points
+    /// * `page_height` - PDF page height in points
     ///
     /// # Returns
     /// PDF bytes ready to be downloaded.
-    pub fn export_to_pdf_rasterized(&self, png_bytes: &[u8], dpi: f64) -> Result<Vec<u8>, String> {
+    pub fn export_to_pdf_rasterized(
+        &self,
+        png_bytes: &[u8],
+        dpi: f64,
+        page_width: f64,
+        page_height: f64,
+    ) -> Result<Vec<u8>, String> {
         use keyflow::engraver::export::{PdfExportConfig, PdfSerializer};
 
-        let layout = self
-            .layout_result
-            .as_ref()
-            .ok_or_else(|| "No layout available for export".to_string())?;
-
-        // Get dimensions from the scene's computed bounds or use A4 defaults
-        let bounds = layout.scene.compute_bounds();
-        let (width, height) = if bounds.width() > 0.0 && bounds.height() > 0.0 {
-            // Add some padding
-            (bounds.x1 + 20.0, bounds.y1 + 20.0)
-        } else {
-            // A4 dimensions in points
-            (595.0, 842.0)
-        };
-
-        // Configure PDF export (fonts not needed for rasterized export)
+        // Configure PDF export with specified page dimensions
         let config = PdfExportConfig {
-            width,
-            height,
+            width: page_width,
+            height: page_height,
             title: "Chart Export".to_string(),
             author: Some("FastTrackStudio".to_string()),
             background: None, // Image already has background
@@ -675,6 +732,291 @@ impl ChartLayoutManager {
             let bounds = layout.scene.compute_bounds();
             (bounds.x0, bounds.y0)
         })
+    }
+
+    /// Get page information for multi-page PDF export.
+    ///
+    /// Returns a vector of (page_number, x_offset, width, height) for each page.
+    /// Pages are laid out side-by-side in the scene with a gap between them.
+    pub fn get_page_info(&self) -> Vec<(u32, f64, f64, f64)> {
+        const PAGE_GAP: f64 = 20.0; // Gap between pages in the scene
+
+        self.layout_result
+            .as_ref()
+            .map(|layout| {
+                let mut pages = Vec::new();
+                let mut x_offset = 0.0;
+
+                // Get the content origin to offset all pages
+                let bounds = layout.scene.compute_bounds();
+                let origin_x = bounds.x0;
+
+                for page in &layout.pages {
+                    pages.push((
+                        page.number,
+                        origin_x + x_offset,
+                        page.width,
+                        page.height,
+                    ));
+                    x_offset += page.width + PAGE_GAP;
+                }
+                pages
+            })
+            .unwrap_or_default()
+    }
+
+    /// Render a specific page to a canvas for PDF export (WASM only).
+    ///
+    /// # Arguments
+    /// * `canvas` - The HTML canvas element to render to
+    /// * `page_x_offset` - X offset of the page in the scene (in points)
+    /// * `page_y_offset` - Y offset of the page in the scene (in points)
+    /// * `scale` - Scale factor for high-DPI export
+    #[cfg(target_arch = "wasm32")]
+    pub async fn render_page_to_canvas(
+        &mut self,
+        canvas: &web_sys::HtmlCanvasElement,
+        page_x_offset: f64,
+        page_y_offset: f64,
+        scale: f64,
+    ) -> Result<(), String> {
+        use wasm::WebGpuRenderer;
+
+        // Initialize renderer if needed
+        if self.wgpu_renderer.is_none() {
+            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
+            self.wgpu_renderer = Some(renderer);
+        }
+
+        // Get canvas dimensions
+        let canvas_width = canvas.width();
+        let canvas_height = canvas.height();
+
+        // Resize if needed
+        if let Some(renderer) = self.wgpu_renderer.as_mut() {
+            let (current_width, current_height) = renderer.dimensions();
+            if current_width != canvas_width || current_height != canvas_height {
+                renderer.resize(canvas_width, canvas_height);
+            }
+        }
+
+        // Create scene
+        let mut scene = Scene::new();
+
+        // Transform: offset to bring this page to origin, then scale
+        let transform = Affine::translate((-page_x_offset * scale, -page_y_offset * scale))
+            * Affine::scale(scale);
+
+        // Render layout if available
+        if let Some(ref layout) = self.layout_result {
+            let mut renderer = SceneRenderBuilder::new()
+                .spatium(5.0)
+                .build()
+                .with_font(&self.smufl_font)
+                .with_text_font_arc(self.text_font_data.clone())
+                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("section-note", self.text_font_data.clone())
+                .with_named_font_arc("title-bold", self.text_font_data.clone())
+                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+
+            // Set viewport for culling
+            let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
+            renderer.set_viewport(viewport_rect);
+
+            renderer.render_with_transform(&mut scene, &layout.scene, transform);
+        }
+
+        // Render with transparent base (scene has white page backgrounds)
+        if let Some(wgpu_renderer) = self.wgpu_renderer.as_mut() {
+            wgpu_renderer.render_with_base_color(&scene, Color::TRANSPARENT)
+        } else {
+            Err("WebGPU renderer not initialized".to_string())
+        }
+    }
+
+    /// Create a multi-page PDF from rendered PNG images.
+    ///
+    /// # Arguments
+    /// * `pages` - Vector of (png_bytes, width, height) for each page
+    ///
+    /// # Returns
+    /// PDF bytes ready to be downloaded.
+    pub fn export_multi_page_pdf(
+        &self,
+        pages: Vec<(Vec<u8>, f64, f64)>,
+    ) -> Result<Vec<u8>, String> {
+        use keyflow::engraver::export::PdfSerializer;
+
+        PdfSerializer::serialize_multi_page_from_png(&pages)
+            .map_err(|e| format!("PDF export failed: {e}"))
+    }
+
+    /// Export to PDF using SVG as an intermediate format (vector-based).
+    ///
+    /// This approach converts the scene graph to SVG, then uses svg2pdf to
+    /// convert the SVG to PDF. This preserves vector quality and ensures
+    /// fonts are properly embedded.
+    ///
+    /// # Returns
+    /// PDF bytes ready to be downloaded.
+    pub fn export_to_pdf_via_svg(&self) -> Result<Vec<u8>, String> {
+        use keyflow::engraver::export::{PdfSerializer, SvgExportConfig, SvgSerializer};
+
+        let layout = self
+            .layout_result
+            .as_ref()
+            .ok_or_else(|| "No layout available for export".to_string())?;
+
+        // Generate SVG for each page
+        let mut svg_pages = Vec::new();
+        let page_info = self.get_page_info();
+
+        if page_info.is_empty() {
+            // Single page - export entire scene
+            let bounds = layout.scene.compute_bounds();
+            let (width, height) = if bounds.width() > 0.0 && bounds.height() > 0.0 {
+                (bounds.width(), bounds.height())
+            } else {
+                (595.0, 842.0)
+            };
+
+            let config = SvgExportConfig {
+                width,
+                height,
+                include_semantic_ids: false,
+                embed_glyphs: false,
+                precision: 2,
+                pretty_print: false,
+                background: Some(vello::peniko::Color::WHITE),
+                default_stroke_width: 0.5,
+            };
+
+            let mut serializer = SvgSerializer::new(config);
+            let svg = serializer.serialize(&layout.scene);
+            svg_pages.push(svg);
+        } else {
+            // Multi-page - extract and export each page separately
+            // For now, we export the entire scene and let svg2pdf handle pagination
+            // A proper implementation would create separate scene nodes per page
+            let bounds = layout.scene.compute_bounds();
+            let config = SvgExportConfig {
+                width: bounds.width(),
+                height: bounds.height(),
+                include_semantic_ids: false,
+                embed_glyphs: false,
+                precision: 2,
+                pretty_print: false,
+                background: Some(vello::peniko::Color::WHITE),
+                default_stroke_width: 0.5,
+            };
+
+            let mut serializer = SvgSerializer::new(config);
+            let svg = serializer.serialize(&layout.scene);
+            svg_pages.push(svg);
+        }
+
+        // Build font data for svg2pdf
+        let fonts: Vec<(&str, &[u8])> = vec![
+            ("Bravura", self.bravura_font_data.as_slice()),
+            ("MuseJazzText", self.musejazz_font_data.as_slice()),
+            ("MuseJazz", self.musejazz_font_data.as_slice()),
+            ("FreeSans", self.text_font_data.as_slice()),
+        ];
+
+        PdfSerializer::serialize_from_svg(&svg_pages, &fonts)
+            .map_err(|e| format!("SVG to PDF export failed: {e}"))
+    }
+
+    /// Export to multi-page PDF using SVG as an intermediate format.
+    ///
+    /// For each page in the layout:
+    /// 1. Extracts the page's scene content
+    /// 2. Converts to SVG
+    /// 3. Combines all SVGs into a multi-page PDF
+    ///
+    /// # Returns
+    /// PDF bytes ready to be downloaded.
+    pub fn export_multi_page_pdf_via_svg(&self) -> Result<Vec<u8>, String> {
+        use keyflow::engraver::export::{PdfSerializer, SvgExportConfig, SvgSerializer};
+
+        let layout = self
+            .layout_result
+            .as_ref()
+            .ok_or_else(|| "No layout available for export".to_string())?;
+
+        let page_info = self.get_page_info();
+
+        if page_info.is_empty() {
+            // Fall back to single-page export
+            return self.export_to_pdf_via_svg();
+        }
+
+        // For multi-page export, we need to extract each page's scene content
+        // Currently the scene has all pages side-by-side
+        // We'll generate SVGs with viewport transforms for each page
+
+        let mut svg_pages = Vec::new();
+        let bounds = layout.scene.compute_bounds();
+        let origin_y = bounds.y0;
+
+        for (_page_num, page_x, page_width, page_height) in &page_info {
+            // Create SVG with viewBox set to this page's area
+            let config = SvgExportConfig {
+                width: *page_width,
+                height: *page_height,
+                include_semantic_ids: false,
+                embed_glyphs: false,
+                precision: 2,
+                pretty_print: false,
+                background: Some(vello::peniko::Color::WHITE),
+                default_stroke_width: 0.5,
+            };
+
+            // Create a translated view of the scene for this page
+            // The SVG serializer will output the full scene, but we set the viewBox
+            // to show only this page's content
+            let svg_content = {
+                let mut serializer = SvgSerializer::new(config);
+                let base_svg = serializer.serialize(&layout.scene);
+
+                // Modify the SVG's viewBox to show only this page
+                // Replace the viewBox in the SVG header
+                let viewbox = format!(
+                    "viewBox=\"{:.2} {:.2} {:.2} {:.2}\"",
+                    page_x, origin_y, page_width, page_height
+                );
+
+                // Find and replace the viewBox attribute
+                if let Some(start) = base_svg.find("viewBox=\"") {
+                    if let Some(end) = base_svg[start..].find('"').and_then(|s| {
+                        base_svg[start + s + 1..].find('"').map(|e| start + s + 1 + e + 1)
+                    }) {
+                        let mut modified = base_svg[..start].to_string();
+                        modified.push_str(&viewbox);
+                        modified.push_str(&base_svg[end..]);
+                        modified
+                    } else {
+                        base_svg
+                    }
+                } else {
+                    base_svg
+                }
+            };
+
+            svg_pages.push(svg_content);
+        }
+
+        // Build font data for svg2pdf
+        let fonts: Vec<(&str, &[u8])> = vec![
+            ("Bravura", self.bravura_font_data.as_slice()),
+            ("MuseJazzText", self.musejazz_font_data.as_slice()),
+            ("MuseJazz", self.musejazz_font_data.as_slice()),
+            ("FreeSans", self.text_font_data.as_slice()),
+        ];
+
+        PdfSerializer::serialize_from_svg(&svg_pages, &fonts)
+            .map_err(|e| format!("SVG to PDF export failed: {e}"))
     }
 }
 

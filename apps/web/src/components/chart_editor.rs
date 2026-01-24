@@ -268,16 +268,17 @@ pub fn StaticChartRenderer(
 
     match parse_result {
         Ok(_chart) => {
+            // Container fills parent, chart scales to fit width
             rsx! {
                 div {
-                    class: "w-full h-full relative",
+                    class: "relative w-full h-full",
 
-                    // Canvas for WebGPU rendering - fills entire container
-                    // Transparent background so only page content shows
+                    // Canvas for WebGPU rendering - fills container, chart scales to fit
+                    // White background to match page
                     canvas {
                         id: "{canvas_id}",
                         class: "w-full h-full",
-                        style: "touch-action: none; background: transparent;",
+                        style: "touch-action: none; background: white;",
                     }
 
                     // WebGPU rendering - static (no pan/zoom)
@@ -475,18 +476,11 @@ fn StaticChartCanvas(
                     html_canvas.set_width(buffer_width);
                     html_canvas.set_height(buffer_height);
 
-                    // Layout chart
-                    manager.layout_chart_with_mode(&chart, css_width, is_snippet);
+                    // Layout chart for export (no page offsets, positioned at origin)
+                    manager.layout_chart_for_export(&chart, css_width, is_snippet);
 
-                    // Get content origin to offset render (so page starts at canvas origin)
-                    let (offset_x, offset_y) = manager.get_content_origin().unwrap_or((0.0, 0.0));
-
-                    // Render with transparent background, offsetting so page is at canvas origin
-                    // Negative offset because we want to move content left/up to the origin
-                    if let Err(e) = manager
-                        .render_to_canvas_transparent(&html_canvas, -offset_x * dpr, -offset_y * dpr, dpr)
-                        .await
-                    {
+                    // Render with transparent background (page at origin, proper DPI + dpr scaling)
+                    if let Err(e) = manager.render_to_canvas_transparent(&html_canvas, dpr).await {
                         tracing::error!("Failed to render static chart: {}", e);
                     }
                 }
@@ -1142,34 +1136,30 @@ fn HighlightedLine(line: String) -> Element {
 /// Export PDF using rasterization for pixel-perfect output.
 ///
 /// This function:
-/// 1. Creates an off-screen canvas at high resolution
-/// 2. Renders the chart using Vello/WebGPU with white background
-/// 3. Extracts the canvas content as PNG via data URL
-/// 4. Creates a PDF with the embedded image
+/// 1. Gets page information from the layout
+/// 2. For each page, renders to an off-screen canvas at high resolution
+/// 3. Extracts each page as PNG via data URL
+/// 4. Creates a multi-page PDF with all pages
 #[cfg(target_arch = "wasm32")]
 async fn export_pdf_rasterized(
     manager: &mut crate::renderer::ChartLayoutManager,
 ) -> Result<Vec<u8>, String> {
     use wasm_bindgen::JsCast;
 
-    // Get tight content dimensions (in points at 72 DPI, no padding)
-    let (width_pts, height_pts) = manager
-        .get_content_dimensions_tight()
-        .ok_or_else(|| "No layout available".to_string())?;
+    // Get page information (page_number, x_offset, width, height)
+    let page_info = manager.get_page_info();
 
-    // Get content origin to offset the render (so content fills the canvas)
-    let (origin_x, origin_y) = manager.get_content_origin().unwrap_or((0.0, 0.0));
+    if page_info.is_empty() {
+        return Err("No pages to export".to_string());
+    }
 
-    // Scale factor for print quality (300 DPI / 72 DPI ≈ 4.17)
-    // Use 3x for a good balance between quality and file size
+    // Scale factor for print quality (216 DPI)
     let scale_factor = 3.0;
-    let export_dpi = 72.0 * scale_factor; // 216 DPI
 
-    // Calculate canvas dimensions in pixels
-    let canvas_width = (width_pts * scale_factor).ceil() as u32;
-    let canvas_height = (height_pts * scale_factor).ceil() as u32;
+    // Get content origin Y (all pages share the same Y origin)
+    let (_, origin_y) = manager.get_content_origin().unwrap_or((0.0, 0.0));
 
-    // Create off-screen canvas
+    // Create off-screen canvas (will be resized for each page)
     let window = web_sys::window().ok_or("No window")?;
     let document = window.document().ok_or("No document")?;
     let canvas = document
@@ -1178,42 +1168,43 @@ async fn export_pdf_rasterized(
         .dyn_into::<web_sys::HtmlCanvasElement>()
         .map_err(|_| "Failed to cast to canvas")?;
 
-    canvas.set_width(canvas_width);
-    canvas.set_height(canvas_height);
+    // Render each page and collect PNG data
+    let mut pages_data: Vec<(Vec<u8>, f64, f64)> = Vec::new();
 
-    // Render the chart to the off-screen canvas with WHITE background
-    // Offset by negative origin so content fills the canvas from (0,0)
-    manager
-        .render_to_canvas_for_export(
-            &canvas,
-            -origin_x * scale_factor,
-            -origin_y * scale_factor,
-            scale_factor,
-        )
-        .await?;
+    for (_page_num, page_x, page_width, page_height) in &page_info {
+        // Set canvas size for this page
+        let canvas_width = (*page_width * scale_factor).ceil() as u32;
+        let canvas_height = (*page_height * scale_factor).ceil() as u32;
+        canvas.set_width(canvas_width);
+        canvas.set_height(canvas_height);
 
-    // Extract canvas content as PNG data URL
-    let data_url = canvas
-        .to_data_url_with_type("image/png")
-        .map_err(|_| "Failed to get data URL")?;
+        // Render this page to the canvas
+        // Offset so this specific page fills the canvas
+        manager
+            .render_page_to_canvas(&canvas, *page_x, origin_y, scale_factor)
+            .await?;
 
-    // Parse the data URL to extract base64 PNG data
-    // Format: "data:image/png;base64,<base64-encoded-data>"
-    let base64_prefix = "data:image/png;base64,";
-    let base64_data = data_url
-        .strip_prefix(base64_prefix)
-        .ok_or_else(|| "Invalid data URL format".to_string())?;
+        // Extract canvas content as PNG
+        let data_url = canvas
+            .to_data_url_with_type("image/png")
+            .map_err(|_| "Failed to get data URL")?;
 
-    // Decode base64 to bytes using browser's atob
-    let decoded = window
-        .atob(base64_data)
-        .map_err(|_| "Failed to decode base64")?;
+        let base64_prefix = "data:image/png;base64,";
+        let base64_data = data_url
+            .strip_prefix(base64_prefix)
+            .ok_or_else(|| "Invalid data URL format".to_string())?;
 
-    // Convert the decoded string (which is actually binary) to bytes
-    let png_bytes: Vec<u8> = decoded.chars().map(|c| c as u8).collect();
+        let decoded = window
+            .atob(base64_data)
+            .map_err(|_| "Failed to decode base64")?;
 
-    // Create PDF with embedded PNG image
-    manager.export_to_pdf_rasterized(&png_bytes, export_dpi)
+        let png_bytes: Vec<u8> = decoded.chars().map(|c| c as u8).collect();
+
+        pages_data.push((png_bytes, *page_width, *page_height));
+    }
+
+    // Create multi-page PDF
+    manager.export_multi_page_pdf(pages_data)
 }
 
 /// Export button component for downloading chart as SVG or PDF.
@@ -1259,6 +1250,24 @@ fn ExportButton(source: Signal<String>) -> Element {
                 // Export based on format
                 let (content, mime_type, extension): (Vec<u8>, &str, &str) = match format {
                     "pdf" => {
+                        // Use SVG-based PDF export for vector quality
+                        match manager.export_multi_page_pdf_via_svg() {
+                            Ok(bytes) => (bytes, "application/pdf", "pdf"),
+                            Err(e) => {
+                                tracing::warn!("SVG-based PDF export failed: {}, falling back to rasterized", e);
+                                // Fall back to rasterized PDF export
+                                match export_pdf_rasterized(&mut manager).await {
+                                    Ok(bytes) => (bytes, "application/pdf", "pdf"),
+                                    Err(e) => {
+                                        tracing::error!("Failed to export PDF: {}", e);
+                                        is_exporting.set(false);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "pdf-raster" => {
                         // Use rasterized PDF export for pixel-perfect output
                         match export_pdf_rasterized(&mut manager).await {
                             Ok(bytes) => (bytes, "application/pdf", "pdf"),
