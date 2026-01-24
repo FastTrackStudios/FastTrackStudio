@@ -69,7 +69,9 @@ impl ChartLayoutManager {
         // Create layout engine with fonts
         // Leak the style for 'static lifetime (web app runs for session duration)
         let style = Box::leak(Box::new(MStyle::new()));
-        let layout_engine = ChartLayoutEngine::new(style, text_font_data.clone(), symbol_font_data);
+        // Use MuseJazz for text metrics since the default harmony style uses MuseJazzText font.
+        // This ensures measurements match the rendered glyphs.
+        let layout_engine = ChartLayoutEngine::new(style, musejazz_font_data.clone(), symbol_font_data);
 
         Ok(Self {
             smufl_font,

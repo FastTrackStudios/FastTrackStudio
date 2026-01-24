@@ -406,19 +406,18 @@ pub fn layout_harmony(
         metrics.horizontal_advance(text, font_size)
     };
 
-    // MuseScore spacing parameters in cap-height units
-    // Cap-height is approximately 0.7 × font size for most fonts
-    // We convert to font-size units by multiplying by CAP_HEIGHT_RATIO
-    const CAP_HEIGHT_RATIO: f64 = 0.7;
+    // Get ACTUAL cap-height from font metrics (like MuseScore does)
+    // MuseScore: harmonyCtx.pos += moveValue * FontMetrics::capHeight(font) * scale
+    let cap_height = text_metrics.cap_height(style.root_size);
 
-    // From chords_std.xml:
-    // - renderRoot: `:n :a m:0.036:0` (root, accidental, then 0.036 cap-height spacing)
-    // - accidental token: `ms:0.1:0 b ms:0.1:0` (0.1 scaled cap-height padding each side)
-    // - renderBass: `m:-0.014:0 / m:0.014:0 :n :a` (negative before slash, positive after)
-    let space_after_root_acc = 0.036 * CAP_HEIGHT_RATIO; // After root+accidental
-    let accidental_padding = 0.1 * CAP_HEIGHT_RATIO; // Padding around accidentals
-    let space_before_slash = -0.014 * CAP_HEIGHT_RATIO; // Negative! Move left before slash
-    let space_after_slash = 0.014 * CAP_HEIGHT_RATIO; // Small space after slash
+    // MuseScore spacing from chords_jazz.xml (exact values in cap-height units):
+    // - renderRoot: `:n :a m:0.036:0` (root, accidental, then move right)
+    // - accidental token: `ms:0.1:0 b ms:0.1:0` (scaled padding each side)
+    // - renderBass: `m:-0.014:0 / m:0.014:0 :n :a` (NEGATIVE tightens before slash)
+    let space_after_root_acc = 0.036 * cap_height;
+    let accidental_padding = 0.1 * cap_height;
+    let space_before_slash = -0.014 * cap_height; // NEGATIVE moves left (tightens)
+    let space_after_slash = 0.014 * cap_height;
 
     // Font to use for symbol glyphs (accidentals, special chars)
     let symbol_font = style
@@ -429,26 +428,27 @@ pub fn layout_harmony(
     // Track previous character for kerning
     let mut prev_char: Option<char> = None;
 
-    // Helper for kerning adjustments
+    // Helper for kerning adjustments (values from MuseScore harmonylayout.cpp KERNED_CHARACTERS)
+    // Returns kerning in cap-height units, caller multiplies by cap_height
     let get_kerning = |prev: Option<char>, next_text: &str, notation: ChordNotation| -> f64 {
         let next = next_text.chars().next();
         match (prev, next, notation) {
             // A followed by dim/half-dim symbols needs tightening
-            (Some('A'), Some('\u{E870}'), _) => -0.4 * CAP_HEIGHT_RATIO, // A + dim (SMuFL)
-            (Some('A'), Some('\u{E871}'), _) => -0.3 * CAP_HEIGHT_RATIO, // A + half-dim (SMuFL)
-            (Some('A'), Some('\u{E18E}'), _) => -0.15 * CAP_HEIGHT_RATIO, // A + dim (MuseJazz)
-            (Some('A'), Some('\u{E18F}'), _) => -0.15 * CAP_HEIGHT_RATIO, // A + half-dim (MuseJazz)
+            (Some('A'), Some('\u{E870}'), _) => -0.4, // A + dim (SMuFL)
+            (Some('A'), Some('\u{E871}'), _) => -0.3, // A + half-dim (SMuFL)
+            (Some('A'), Some('\u{E18E}'), _) => -0.15, // A + dim (MuseJazz)
+            (Some('A'), Some('\u{E18F}'), _) => -0.15, // A + half-dim (MuseJazz)
             // Triangle followed by dim/half-dim
-            (Some('\u{E873}'), Some('\u{E870}'), _) => -0.4 * CAP_HEIGHT_RATIO,
-            (Some('\u{E873}'), Some('\u{E871}'), _) => -0.3 * CAP_HEIGHT_RATIO,
-            (Some('\u{E18A}'), Some('\u{E18E}'), _) => -0.15 * CAP_HEIGHT_RATIO,
-            (Some('\u{E18A}'), Some('\u{E18F}'), _) => -0.15 * CAP_HEIGHT_RATIO,
+            (Some('\u{E873}'), Some('\u{E870}'), _) => -0.4,
+            (Some('\u{E873}'), Some('\u{E871}'), _) => -0.3,
+            (Some('\u{E18A}'), Some('\u{E18E}'), _) => -0.15,
+            (Some('\u{E18A}'), Some('\u{E18F}'), _) => -0.15,
             // A followed by slash needs slight expansion
-            (Some('A'), Some('/'), _) => 0.1 * CAP_HEIGHT_RATIO,
+            (Some('A'), Some('/'), _) => 0.1,
             // Jazz accidentals need tightening with following characters
-            (Some('\u{266D}'), _, ChordNotation::Jazz) => -0.15 * CAP_HEIGHT_RATIO, // ♭
-            (Some('\u{266F}'), _, ChordNotation::Jazz) => -0.15 * CAP_HEIGHT_RATIO, // ♯
-            (Some('\u{266E}'), _, ChordNotation::Jazz) => -0.15 * CAP_HEIGHT_RATIO, // ♮
+            (Some('\u{266D}'), _, ChordNotation::Jazz) => -0.15, // ♭
+            (Some('\u{266F}'), _, ChordNotation::Jazz) => -0.15, // ♯
+            (Some('\u{266E}'), _, ChordNotation::Jazz) => -0.15, // ♮
             _ => 0.0,
         }
     };
@@ -470,8 +470,8 @@ pub fn layout_harmony(
     if !params.root_accidental.is_empty() {
         let acc_text = format_accidental(&params.root_accidental, style.symbol_set);
 
-        // Padding before accidental (scaled by font size)
-        cursor_x += style.root_size * accidental_padding;
+        // Padding before accidental (already in absolute units from cap_height)
+        cursor_x += accidental_padding;
 
         let acc_width = measure_text_width(&acc_text, style.root_size, true);
         commands.push(PaintCommand::text(
@@ -484,20 +484,20 @@ pub fn layout_harmony(
         cursor_x += acc_width;
 
         // Padding after accidental
-        cursor_x += style.root_size * accidental_padding;
+        cursor_x += accidental_padding;
         prev_char = acc_text.chars().last();
     }
 
     // Add minimal spacing after root+accidental (m:0.036:0 in MuseScore)
-    cursor_x += style.root_size * space_after_root_acc;
+    cursor_x += space_after_root_acc;
 
     // 2. Quality (m, dim, aug, or jazz symbols)
     let quality_text = format_quality(&params.quality, style.notation, style.symbol_set);
     let has_quality = !quality_text.is_empty();
     if has_quality {
-        // Apply kerning adjustment
+        // Apply kerning adjustment (kern value * cap_height, matching MuseScore)
         let kern = get_kerning(prev_char, &quality_text, style.notation);
-        cursor_x += style.root_size * kern;
+        cursor_x += kern * cap_height;
 
         // Use symbol font for special characters (°, +, etc.), text font for letters
         let is_symbol = quality_text.chars().all(|c| !c.is_ascii_alphabetic());
@@ -526,11 +526,11 @@ pub fn layout_harmony(
         let ext_text = format_extension(&params.extension, style.notation, style.symbol_set);
         let ext_size = style.root_size * style.superscript_scale;
         // Superscript offset: -0.36 cap-height (negative = up)
-        let ext_y = baseline_y + style.root_size * style.superscript_offset * CAP_HEIGHT_RATIO;
+        let ext_y = baseline_y + style.superscript_offset * cap_height;
 
         // Apply kerning adjustment
         let kern = get_kerning(prev_char, &ext_text, style.notation);
-        cursor_x += style.root_size * kern;
+        cursor_x += kern * cap_height;
 
         // Use symbol font if text contains special symbols (triangle, oslash)
         let has_symbols = ext_text.chars().any(|c| !c.is_ascii_alphanumeric());
@@ -554,14 +554,14 @@ pub fn layout_harmony(
     // 4. Alterations (b5, #9, etc.) - superscript position with 0.75 scale
     if has_alterations {
         let alt_size = style.root_size * style.superscript_scale;
-        let alt_y = baseline_y + style.root_size * style.superscript_offset * CAP_HEIGHT_RATIO;
+        let alt_y = baseline_y + style.superscript_offset * cap_height;
 
         for alt in &params.alterations {
             let alt_text = format_alteration(alt, style.symbol_set);
 
-            // Apply kerning adjustment
+            // Apply kerning adjustment (scaled for smaller text)
             let kern = get_kerning(prev_char, &alt_text, style.notation);
-            cursor_x += alt_size * kern;
+            cursor_x += kern * cap_height * style.superscript_scale;
 
             let alt_width = measure_text_width(&alt_text, alt_size, true);
             commands.push(PaintCommand::text(
@@ -580,8 +580,8 @@ pub fn layout_harmony(
     if let Some(bass) = &params.bass {
         let bass_size = style.root_size * style.bass_scale;
 
-        // Move slightly left before slash (m:-0.014:0 in MuseScore)
-        cursor_x += bass_size * space_before_slash;
+        // Move slightly left before slash (m:-0.014:0 in MuseScore - unscaled)
+        cursor_x += space_before_slash;
 
         // Slash - use text font
         let slash_width = measure_text_width("/", bass_size, false);
@@ -594,8 +594,8 @@ pub fn layout_harmony(
         ));
         cursor_x += slash_width;
 
-        // Small space after slash (m:0.014:0 in MuseScore)
-        cursor_x += bass_size * space_after_slash;
+        // Small space after slash (m:0.014:0 in MuseScore - unscaled)
+        cursor_x += space_after_slash;
 
         // Bass note letter
         let bass_width = measure_text_width(bass, bass_size, false);
@@ -612,8 +612,8 @@ pub fn layout_harmony(
         if !params.bass_accidental.is_empty() {
             let bass_acc_text = format_accidental(&params.bass_accidental, style.symbol_set);
 
-            // Padding before bass accidental
-            cursor_x += bass_size * accidental_padding;
+            // Padding before bass accidental (scaled for bass size)
+            cursor_x += accidental_padding * style.bass_scale;
 
             let bass_acc_width = measure_text_width(&bass_acc_text, bass_size, true);
             commands.push(PaintCommand::text(
