@@ -463,57 +463,199 @@ pub mod themes {
     use super::RehearsalMarkStyle;
     use vello::peniko::Color;
 
-    /// Dark theme with white text on dark background (default).
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Tailwind Color Palette
+    // These follow Tailwind CSS color naming (50-950 shades)
+    // https://tailwindcss.com/docs/customizing-colors
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    pub mod tailwind {
+        use vello::peniko::Color;
+
+        // Slate (neutral cool gray)
+        pub const SLATE_200: Color = Color::from_rgb8(0xe2, 0xe8, 0xf0);
+        pub const SLATE_400: Color = Color::from_rgb8(0x94, 0xa3, 0xb8);
+        pub const SLATE_600: Color = Color::from_rgb8(0x47, 0x55, 0x69);
+        pub const SLATE_800: Color = Color::from_rgb8(0x1e, 0x29, 0x3b);
+
+        // Orange
+        pub const ORANGE_200: Color = Color::from_rgb8(0xfe, 0xd7, 0xaa);
+        pub const ORANGE_400: Color = Color::from_rgb8(0xfb, 0x92, 0x3c);
+        pub const ORANGE_600: Color = Color::from_rgb8(0xea, 0x58, 0x0c);
+        pub const ORANGE_800: Color = Color::from_rgb8(0x9a, 0x34, 0x12);
+
+        // Amber
+        pub const AMBER_200: Color = Color::from_rgb8(0xfd, 0xe6, 0x8a);
+        pub const AMBER_400: Color = Color::from_rgb8(0xfb, 0xbf, 0x24);
+        pub const AMBER_600: Color = Color::from_rgb8(0xd9, 0x77, 0x06);
+        pub const AMBER_800: Color = Color::from_rgb8(0x92, 0x40, 0x0e);
+
+        // Yellow
+        pub const YELLOW_200: Color = Color::from_rgb8(0xfe, 0xf0, 0x8a);
+        pub const YELLOW_400: Color = Color::from_rgb8(0xfa, 0xcc, 0x15);
+        pub const YELLOW_600: Color = Color::from_rgb8(0xca, 0x8a, 0x04);
+        pub const YELLOW_800: Color = Color::from_rgb8(0x85, 0x4d, 0x0e);
+
+        // Emerald
+        pub const EMERALD_200: Color = Color::from_rgb8(0xa7, 0xf3, 0xd0);
+        pub const EMERALD_400: Color = Color::from_rgb8(0x34, 0xd3, 0x99);
+        pub const EMERALD_600: Color = Color::from_rgb8(0x05, 0x96, 0x69);
+        pub const EMERALD_800: Color = Color::from_rgb8(0x06, 0x5f, 0x46);
+
+        // Blue
+        pub const BLUE_200: Color = Color::from_rgb8(0xbf, 0xdb, 0xfe);
+        pub const BLUE_400: Color = Color::from_rgb8(0x60, 0xa5, 0xfa);
+        pub const BLUE_500: Color = Color::from_rgb8(0x3b, 0x82, 0xf6);
+        pub const BLUE_600: Color = Color::from_rgb8(0x25, 0x63, 0xeb);
+        pub const BLUE_800: Color = Color::from_rgb8(0x1e, 0x40, 0xaf);
+
+        // Violet
+        pub const VIOLET_200: Color = Color::from_rgb8(0xdd, 0xd6, 0xfe);
+        pub const VIOLET_400: Color = Color::from_rgb8(0xa7, 0x8b, 0xfa);
+        pub const VIOLET_600: Color = Color::from_rgb8(0x7c, 0x3a, 0xed);
+        pub const VIOLET_800: Color = Color::from_rgb8(0x5b, 0x21, 0xb6);
+
+        // Rose
+        pub const ROSE_200: Color = Color::from_rgb8(0xfe, 0xcd, 0xd3);
+        pub const ROSE_400: Color = Color::from_rgb8(0xfb, 0x71, 0x85);
+        pub const ROSE_600: Color = Color::from_rgb8(0xe1, 0x1d, 0x48);
+        pub const ROSE_800: Color = Color::from_rgb8(0x9f, 0x12, 0x39);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Section Color Palette (using Tailwind colors)
+    // Designed for clear visual hierarchy and accessibility
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Intro section - Orange 400 (warm, welcoming start)
     #[must_use]
-    pub fn dark() -> RehearsalMarkStyle {
+    pub fn intro() -> RehearsalMarkStyle {
         RehearsalMarkStyle {
-            background_color: Color::from_rgb8(66, 66, 66),
+            background_color: tailwind::ORANGE_400,
             text_color: Color::WHITE,
             border_color: None,
             ..Default::default()
         }
     }
 
-    /// Light theme with dark text on light background.
+    /// Verse section - Emerald 400 (fresh, natural progression)
     #[must_use]
-    pub fn light() -> RehearsalMarkStyle {
+    pub fn verse() -> RehearsalMarkStyle {
         RehearsalMarkStyle {
-            background_color: Color::from_rgb8(230, 230, 230),
-            text_color: Color::from_rgb8(33, 33, 33),
-            border_color: Some(Color::from_rgb8(180, 180, 180)),
-            ..Default::default()
-        }
-    }
-
-    /// Blue accent theme.
-    #[must_use]
-    pub fn blue() -> RehearsalMarkStyle {
-        RehearsalMarkStyle {
-            background_color: Color::from_rgb8(41, 98, 255),
+            background_color: tailwind::EMERALD_400,
             text_color: Color::WHITE,
             border_color: None,
             ..Default::default()
         }
     }
 
-    /// Green accent theme.
+    /// Pre-Verse section - Emerald 200 (lighter verse)
     #[must_use]
-    pub fn green() -> RehearsalMarkStyle {
+    pub fn pre_verse() -> RehearsalMarkStyle {
         RehearsalMarkStyle {
-            background_color: Color::from_rgb8(46, 125, 50),
+            background_color: tailwind::EMERALD_200,
+            text_color: tailwind::EMERALD_800,
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Chorus section - Blue 500 (strong, memorable hook)
+    #[must_use]
+    pub fn chorus() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: tailwind::BLUE_500,
             text_color: Color::WHITE,
             border_color: None,
             ..Default::default()
         }
     }
 
-    /// Purple accent theme.
+    /// Pre-Chorus / Post-Chorus - Blue 200 (lighter chorus)
     #[must_use]
-    pub fn purple() -> RehearsalMarkStyle {
+    pub fn pre_chorus() -> RehearsalMarkStyle {
         RehearsalMarkStyle {
-            background_color: Color::from_rgb8(106, 27, 154),
+            background_color: tailwind::BLUE_200,
+            text_color: tailwind::BLUE_800,
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Bridge section - Violet 400 (contrast, transitional)
+    #[must_use]
+    pub fn bridge() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: tailwind::VIOLET_400,
             text_color: Color::WHITE,
             border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Pre-Bridge / Post-Bridge - Violet 200 (lighter bridge)
+    #[must_use]
+    pub fn pre_bridge() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: tailwind::VIOLET_200,
+            text_color: tailwind::VIOLET_800,
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Outro section - Amber 400 (warm conclusion)
+    #[must_use]
+    pub fn outro() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: tailwind::AMBER_400,
+            text_color: tailwind::AMBER_800,
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Instrumental section - Orange 200 (related to intro, lighter)
+    #[must_use]
+    pub fn instrumental() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: tailwind::ORANGE_200,
+            text_color: tailwind::ORANGE_800,
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Interlude section - Yellow 400 (bright pause/break)
+    #[must_use]
+    pub fn interlude() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: tailwind::YELLOW_400,
+            text_color: tailwind::YELLOW_800,
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Breakdown / Hits - Slate 400 (neutral, rhythmic sections)
+    #[must_use]
+    pub fn breakdown() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: tailwind::SLATE_400,
+            text_color: Color::WHITE,
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
+    /// Custom sections (Solo, etc.) - Slate 200 with border
+    #[must_use]
+    pub fn custom() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: tailwind::SLATE_200,
+            text_color: tailwind::SLATE_800,
+            border_color: Some(tailwind::SLATE_400),
+            border_width: 1.0,
             ..Default::default()
         }
     }
@@ -531,117 +673,91 @@ pub mod themes {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Pastel color themes for section labels
+    // Legacy themes (for backwards compatibility)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// Pastel orange - for Intro, Instrumental sections.
+    /// Dark theme with white text on dark background.
     #[must_use]
-    pub fn pastel_orange() -> RehearsalMarkStyle {
+    pub fn dark() -> RehearsalMarkStyle {
         RehearsalMarkStyle {
-            background_color: Color::from_rgb8(255, 179, 128), // Soft orange
-            text_color: Color::from_rgb8(80, 50, 20),          // Dark brown text
-            border_color: None,
-            ..Default::default()
-        }
-    }
-
-    /// Light pastel orange - for Outro sections.
-    #[must_use]
-    pub fn pastel_orange_light() -> RehearsalMarkStyle {
-        RehearsalMarkStyle {
-            background_color: Color::from_rgb8(255, 218, 185), // Peach
-            text_color: Color::from_rgb8(100, 60, 30),         // Brown text
-            border_color: None,
-            ..Default::default()
-        }
-    }
-
-    /// Pastel green - for Verse sections.
-    #[must_use]
-    pub fn pastel_green() -> RehearsalMarkStyle {
-        RehearsalMarkStyle {
-            background_color: Color::from_rgb8(144, 238, 144), // Light green
-            text_color: Color::from_rgb8(30, 80, 30),          // Dark green text
-            border_color: None,
-            ..Default::default()
-        }
-    }
-
-    /// Light pastel green - for Pre-Verse sections.
-    #[must_use]
-    pub fn pastel_green_light() -> RehearsalMarkStyle {
-        RehearsalMarkStyle {
-            background_color: Color::from_rgb8(200, 255, 200), // Very light green
-            text_color: Color::from_rgb8(40, 100, 40),         // Green text
-            border_color: None,
-            ..Default::default()
-        }
-    }
-
-    /// Pastel blue - for Chorus sections.
-    #[must_use]
-    pub fn pastel_blue() -> RehearsalMarkStyle {
-        RehearsalMarkStyle {
-            background_color: Color::from_rgb8(135, 171, 255), // Soft blue
+            background_color: tailwind::SLATE_800,
             text_color: Color::WHITE,
             border_color: None,
             ..Default::default()
         }
     }
 
-    /// Light pastel blue - for Pre-Chorus, Post-Chorus sections.
+    /// Light theme with dark text on light background.
     #[must_use]
-    pub fn pastel_blue_light() -> RehearsalMarkStyle {
+    pub fn light() -> RehearsalMarkStyle {
         RehearsalMarkStyle {
-            background_color: Color::from_rgb8(189, 213, 255), // Very light blue
-            text_color: Color::from_rgb8(40, 60, 120),         // Dark blue text
-            border_color: None,
+            background_color: tailwind::SLATE_200,
+            text_color: tailwind::SLATE_800,
+            border_color: Some(tailwind::SLATE_400),
             ..Default::default()
         }
     }
 
-    /// Pastel purple - for Bridge sections.
+    /// Blue accent theme (legacy).
     #[must_use]
-    pub fn pastel_purple() -> RehearsalMarkStyle {
-        RehearsalMarkStyle {
-            background_color: Color::from_rgb8(186, 149, 219), // Lavender
-            text_color: Color::WHITE,
-            border_color: None,
-            ..Default::default()
-        }
+    pub fn blue() -> RehearsalMarkStyle {
+        chorus()
     }
 
-    /// Light pastel purple - for Pre-Bridge, Post-Bridge sections.
+    /// Green accent theme (legacy).
     #[must_use]
-    pub fn pastel_purple_light() -> RehearsalMarkStyle {
-        RehearsalMarkStyle {
-            background_color: Color::from_rgb8(220, 200, 235), // Very light lavender
-            text_color: Color::from_rgb8(80, 50, 100),         // Dark purple text
-            border_color: None,
-            ..Default::default()
-        }
+    pub fn green() -> RehearsalMarkStyle {
+        verse()
     }
 
-    /// Pastel yellow - for Interlude sections.
+    /// Purple accent theme (legacy).
     #[must_use]
-    pub fn pastel_yellow() -> RehearsalMarkStyle {
-        RehearsalMarkStyle {
-            background_color: Color::from_rgb8(255, 245, 157), // Soft yellow
-            text_color: Color::from_rgb8(100, 80, 20),         // Dark gold text
-            border_color: None,
-            ..Default::default()
-        }
+    pub fn purple() -> RehearsalMarkStyle {
+        bridge()
     }
 
-    /// Gray - for Breakdown, Hits, custom sections.
+    /// Gray theme (legacy alias for breakdown).
     #[must_use]
     pub fn gray() -> RehearsalMarkStyle {
-        RehearsalMarkStyle {
-            background_color: Color::from_rgb8(180, 180, 180), // Medium gray
-            text_color: Color::from_rgb8(40, 40, 40),          // Dark gray text
-            border_color: None,
-            ..Default::default()
-        }
+        breakdown()
+    }
+
+    // Legacy pastel aliases (deprecated, use semantic names instead)
+    #[must_use]
+    pub fn pastel_orange() -> RehearsalMarkStyle {
+        intro()
+    }
+    #[must_use]
+    pub fn pastel_orange_light() -> RehearsalMarkStyle {
+        outro()
+    }
+    #[must_use]
+    pub fn pastel_green() -> RehearsalMarkStyle {
+        verse()
+    }
+    #[must_use]
+    pub fn pastel_green_light() -> RehearsalMarkStyle {
+        pre_verse()
+    }
+    #[must_use]
+    pub fn pastel_blue() -> RehearsalMarkStyle {
+        chorus()
+    }
+    #[must_use]
+    pub fn pastel_blue_light() -> RehearsalMarkStyle {
+        pre_chorus()
+    }
+    #[must_use]
+    pub fn pastel_purple() -> RehearsalMarkStyle {
+        bridge()
+    }
+    #[must_use]
+    pub fn pastel_purple_light() -> RehearsalMarkStyle {
+        pre_bridge()
+    }
+    #[must_use]
+    pub fn pastel_yellow() -> RehearsalMarkStyle {
+        interlude()
     }
 }
 
