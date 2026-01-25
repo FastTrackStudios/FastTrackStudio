@@ -17,6 +17,13 @@ lucide-dioxus = "2"
 # Chart parsing and layout
 keyflow = { path = "../../packages/keyflow", features = ["engraver", "highlighting"] }
 
+# FastTrackStudio modules
+fts = { path = "../../modules/fts", features = ["dioxus"] }
+ui = { path = "../../modules/ui" }
+
+# Roam context (for MockSetlist service calls)
+roam = { workspace = true }
+
 # Geometry (match engraver version)
 kurbo = "0.12"
 

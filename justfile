@@ -880,9 +880,138 @@ help:
     echo "  just ralphy-dry     Dry-run to see what would happen"
     echo "  just ralphy-config  Show Ralphy configuration"
     echo ""
+    echo "Git Worktrees:"
+    echo "  worktree-setup      Setup submodule symlinks for a git worktree"
+    echo "  worktree-check      Verify worktree submodule symlinks"
+    echo ""
     echo "Configuration:"
     echo "  .env file           Create .env from .env.example and customize paths"
     echo "  Environment vars    Can override .env: REAPER_PATH=/path just <command>"
+
+# ============================================================================
+# Git Worktree Setup
+# ============================================================================
+
+# Setup submodule symlinks for a git worktree
+# Git worktrees don't automatically get submodule contents, so we symlink from main repo
+worktree-setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Find the main repo (first worktree in the list, usually the original clone)
+    MAIN_REPO=$(git worktree list | head -1 | awk '{print $1}')
+    CURRENT_DIR=$(pwd)
+
+    if [[ "$MAIN_REPO" == "$CURRENT_DIR" ]]; then
+        echo "⚠️  You're in the main repo, not a worktree. No symlinks needed."
+        exit 0
+    fi
+
+    echo "🔗 Setting up worktree symlinks..."
+    echo "   Main repo: $MAIN_REPO"
+    echo "   Worktree:  $CURRENT_DIR"
+    echo ""
+
+    # List of submodules/directories to symlink
+    # These are paths relative to the repo root
+    SUBMODULES=(
+        "libs/nih-plug"
+        "libs/lumen-blocks"
+        "libs/vendor/anyrender"
+        "libs/vendor/baseview"
+        "libs/vendor/blitz"
+        "libs/vendor/reaper-rs"
+        "libs/vendor/stylo"
+        "libs/reference/sheet-music/musescore"
+    )
+
+    for submodule in "${SUBMODULES[@]}"; do
+        SOURCE="$MAIN_REPO/$submodule"
+        TARGET="$CURRENT_DIR/$submodule"
+
+        # Check if source exists in main repo
+        if [[ ! -d "$SOURCE" ]]; then
+            echo "⚠️  Skipping $submodule (not found in main repo)"
+            continue
+        fi
+
+        # Create parent directory if needed
+        mkdir -p "$(dirname "$TARGET")"
+
+        # Remove existing directory/symlink
+        if [[ -L "$TARGET" ]]; then
+            echo "   Updating symlink: $submodule"
+            rm "$TARGET"
+        elif [[ -d "$TARGET" ]]; then
+            # Check if it's empty (git submodule placeholder)
+            if [[ -z "$(ls -A "$TARGET" 2>/dev/null)" ]]; then
+                echo "   Replacing empty dir: $submodule"
+                rmdir "$TARGET"
+            else
+                echo "⚠️  Skipping $submodule (directory not empty)"
+                continue
+            fi
+        else
+            echo "   Creating symlink: $submodule"
+        fi
+
+        # Create symlink
+        ln -s "$SOURCE" "$TARGET"
+    done
+
+    echo ""
+    echo "✅ Worktree setup complete!"
+    echo ""
+    echo "You can now run:"
+    echo "   cargo check -p web"
+    echo "   dx serve --platform web"
+
+# Verify worktree submodule symlinks are working
+worktree-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "🔍 Checking worktree submodule symlinks..."
+    echo ""
+
+    SUBMODULES=(
+        "libs/nih-plug"
+        "libs/lumen-blocks"
+        "libs/vendor/anyrender"
+        "libs/vendor/baseview"
+        "libs/vendor/blitz"
+        "libs/vendor/reaper-rs"
+        "libs/vendor/stylo"
+        "libs/reference/sheet-music/musescore"
+    )
+
+    ALL_OK=true
+    for submodule in "${SUBMODULES[@]}"; do
+        if [[ -L "$submodule" ]]; then
+            if [[ -d "$submodule" ]]; then
+                echo "✅ $submodule (symlink, valid)"
+            else
+                echo "❌ $submodule (symlink, broken)"
+                ALL_OK=false
+            fi
+        elif [[ -d "$submodule" ]]; then
+            if [[ -f "$submodule/Cargo.toml" ]] || [[ -d "$submodule/fonts" ]]; then
+                echo "✅ $submodule (directory, has content)"
+            else
+                echo "⚠️  $submodule (directory, possibly empty)"
+            fi
+        else
+            echo "❌ $submodule (missing)"
+            ALL_OK=false
+        fi
+    done
+
+    echo ""
+    if [[ "$ALL_OK" == "true" ]]; then
+        echo "✅ All submodules look good!"
+    else
+        echo "⚠️  Some submodules need attention. Run 'just worktree-setup' to fix."
+    fi
 
 # ============================================================================
 # Web App Development

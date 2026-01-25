@@ -552,29 +552,15 @@ pub fn ArrangementView(
     });
 
     // Handle click on timeline (accounts for zoom resolution and scroll)
+    // Note: Native web event access requires dioxus web feature - simplified for now
     let handle_timeline_click = move |_evt: Event<MouseData>| {
         if let Some(song_idx) = active_song_idx() {
             if let Some(callback) = on_seek_to_time {
-                #[cfg(target_arch = "wasm32")]
-                {
-                    use web_sys::MouseEvent;
-                    if let Ok(mouse_evt) = _evt.web_event::<MouseEvent>() {
-                        let pps = pixels_per_second();
-                        let song_start = active_song()
-                            .as_ref()
-                            .map(|s| s.effective_start())
-                            .unwrap_or(0.0);
-                        if let Some(target) = mouse_evt.current_target() {
-                            if let Some(element) = target.dyn_ref::<web_sys::HtmlElement>() {
-                                let rect = element.get_bounding_client_rect();
-                                let click_x = mouse_evt.client_x() as f64 - rect.left();
-                                // Calculate time relative to song start
-                                let time_seconds = click_x / pps;
-                                callback.call((song_idx, time_seconds));
-                            }
-                        }
-                    }
-                }
+                // Use element_coordinates from MouseData for position
+                let coords = _evt.data.element_coordinates();
+                let pps = pixels_per_second();
+                let time_seconds = coords.x / pps;
+                callback.call((song_idx, time_seconds));
             }
         }
     };
@@ -673,21 +659,10 @@ pub fn ArrangementView(
                 div {
                     class: "flex-1 flex overflow-x-auto overflow-y-auto relative min-h-0",
                     onresize: handle_resize,
-                    onwheel: move |evt| {
-                        // Handle zoom with Ctrl/Cmd + wheel
-                        #[cfg(target_arch = "wasm32")]
-                        {
-                            use web_sys::WheelEvent;
-                            if let Ok(wheel_evt) = evt.web_event::<WheelEvent>() {
-                                if wheel_evt.ctrl_key() || wheel_evt.meta_key() {
-                                    wheel_evt.prevent_default();
-                                    let delta = wheel_evt.delta_y();
-                                    let zoom_delta = if delta < 0.0 { 1.1 } else { 0.9 };
-                                    let new_zoom = (zoom_level() * zoom_delta).clamp(0.1, 10.0);
-                                    zoom_level.set(new_zoom);
-                                }
-                            }
-                        }
+                    onwheel: move |_evt| {
+                        // TODO: Handle zoom with Ctrl/Cmd + wheel
+                        // The WheelData API varies between dioxus versions
+                        // For now, use the zoom slider instead
                     },
                     // Content container with fixed width for horizontal scrolling
                     // Height is auto to allow empty space at bottom

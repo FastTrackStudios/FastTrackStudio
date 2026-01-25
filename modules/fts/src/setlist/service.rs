@@ -64,6 +64,23 @@ pub struct SectionInfo {
     pub duration: f64,
     /// Section number (e.g., 1 for "Verse 1")
     pub number: Option<u32>,
+    /// Start measure number (0-based)
+    pub start_measure: Option<i32>,
+    /// End measure number (0-based)
+    pub end_measure: Option<i32>,
+}
+
+/// Measure position information for RPC communication.
+#[derive(Debug, Clone, Facet)]
+pub struct MeasureInfo {
+    /// Measure number (0-based internally, display as 1-based)
+    pub measure: i32,
+    /// Time position in seconds (relative to song start)
+    pub time_seconds: f64,
+    /// Time signature numerator
+    pub time_sig_numerator: i32,
+    /// Time signature denominator
+    pub time_sig_denominator: i32,
 }
 
 /// Active indices for current position in setlist
@@ -79,6 +96,8 @@ pub struct ActiveIndices {
     pub song_progress: Option<f64>,
     /// Progress through the current section (0.0 to 1.0)
     pub section_progress: Option<f64>,
+    /// Whether playback is currently active
+    pub is_playing: bool,
 }
 
 /// Commands that can be executed on the setlist
@@ -103,6 +122,8 @@ pub enum SetlistCommand {
     ToggleSongLoop,
     /// Toggle loop for the current section
     ToggleSectionLoop,
+    /// Toggle playback (play/pause)
+    TogglePlayback,
 }
 
 // endregion: --- RPC Types
@@ -164,6 +185,9 @@ pub trait SetlistService {
     /// Get a specific section
     async fn get_section(&self, song_index: usize, section_index: usize) -> Option<SectionInfo>;
 
+    /// Get measure positions for a specific song
+    async fn get_measures(&self, song_index: usize) -> Vec<MeasureInfo>;
+
     /// Get the current active indices
     async fn get_active_indices(&self) -> ActiveIndices;
 
@@ -190,3 +214,202 @@ pub trait SetlistService {
 }
 
 // endregion: --- Service Trait
+
+// region:    --- Type Conversions
+
+use super::core::{Section, Setlist, Song};
+
+impl SetlistInfo {
+    /// Convert from domain Setlist to RPC SetlistInfo
+    pub fn from_setlist(s: &Setlist) -> Self {
+        Self {
+            name: s.name.clone(),
+            song_count: s.songs.len(),
+            total_duration: s.total_duration(),
+        }
+    }
+}
+
+impl SongInfo {
+    /// Convert from domain Song to RPC SongInfo
+    pub fn from_song(index: usize, song: &Song) -> Self {
+        Self {
+            index,
+            name: song.name.clone(),
+            start: song.effective_start(),
+            end: song.effective_end(),
+            duration: song.duration(),
+            tempo: song.starting_tempo,
+            time_signature: song
+                .starting_time_signature
+                .map(|ts| format!("{}/{}", ts.numerator, ts.denominator)),
+            section_count: song.sections.len(),
+            has_lyrics: song.lyrics.is_some(),
+            has_chart: song.chart.is_some(),
+        }
+    }
+}
+
+impl SectionInfo {
+    /// Convert from domain Section to RPC SectionInfo
+    pub fn from_section(index: usize, section: &Section) -> Self {
+        Self {
+            index,
+            section_type: section.section_type.full_name(),
+            name: section.display_name(),
+            start: section.start_seconds().unwrap_or(0.0),
+            end: section.end_seconds().unwrap_or(0.0),
+            duration: section.duration_seconds().unwrap_or(0.0),
+            number: section.number,
+            start_measure: section.start_position.as_ref().map(|p| p.musical.measure),
+            end_measure: section.end_position.as_ref().map(|p| p.musical.measure),
+        }
+    }
+}
+
+// endregion: --- Type Conversions
+
+// region:    --- Local Client
+
+use roam::Context;
+use std::sync::Arc;
+
+/// Create a dummy context for local/in-process calls.
+///
+/// This creates a minimal Context suitable for calling service methods
+/// directly without going through the network transport. The context
+/// values are placeholders since there's no actual RPC request.
+fn local_context() -> Context {
+    use roam::wire::{ConnectionId, MethodId, RequestId};
+    Context::new(
+        ConnectionId(0), // conn_id: no connection
+        RequestId(0),    // request_id: no request
+        MethodId(0),     // method_id: varies per call, but not used by handlers
+        vec![],          // metadata: empty
+        vec![],          // channels: no streams for simple calls
+    )
+}
+
+/// A local client for in-process SetlistService calls.
+///
+/// This wraps any `SetlistService` implementation and provides a convenient
+/// interface for calling service methods without needing a transport layer.
+/// Use this for local/in-process usage (e.g., web app with MockSetlist).
+///
+/// # Why this exists
+///
+/// ROAM is designed for RPC communication over various transports (TCP, WebSocket,
+/// shared memory). The `#[roam::service]` macro generates a `SetlistServiceClient<C>`
+/// that works with any `Caller` implementation.
+///
+/// For **in-process** calls (like using MockSetlist in the web app), going through
+/// ROAM's full serialization/deserialization pipeline is unnecessary overhead.
+/// This `LocalSetlistClient` provides the same API as `SetlistServiceClient` but
+/// calls the service implementation directly.
+///
+/// # Swappability
+///
+/// For remote calls (e.g., to REAPER via IPC), use:
+/// ```ignore
+/// let client = SetlistServiceClient::new(connection_handle);
+/// ```
+///
+/// For local calls (e.g., mock in web app), use:
+/// ```ignore
+/// let client = LocalSetlistClient::new(Arc::new(MockSetlist::with_sample_data()));
+/// ```
+///
+/// Both expose the same method signatures, enabling swappable service implementations.
+#[derive(Clone)]
+pub struct LocalSetlistClient<S: SetlistService + Send + Sync + 'static> {
+    service: Arc<S>,
+}
+
+impl<S: SetlistService + Send + Sync + 'static> LocalSetlistClient<S> {
+    /// Create a new local client wrapping the given service.
+    pub fn new(service: Arc<S>) -> Self {
+        Self { service }
+    }
+
+    /// Get the current setlist info
+    pub async fn get_setlist(&self) -> Option<SetlistInfo> {
+        self.service.get_setlist(&local_context()).await
+    }
+
+    /// Get all songs in the setlist
+    pub async fn get_songs(&self) -> Vec<SongInfo> {
+        self.service.get_songs(&local_context()).await
+    }
+
+    /// Get a specific song by index
+    pub async fn get_song(&self, index: usize) -> Option<SongInfo> {
+        self.service.get_song(&local_context(), index).await
+    }
+
+    /// Get sections for a specific song
+    pub async fn get_sections(&self, song_index: usize) -> Vec<SectionInfo> {
+        self.service.get_sections(&local_context(), song_index).await
+    }
+
+    /// Get a specific section
+    pub async fn get_section(&self, song_index: usize, section_index: usize) -> Option<SectionInfo> {
+        self.service
+            .get_section(&local_context(), song_index, section_index)
+            .await
+    }
+
+    /// Get measure positions for a specific song
+    pub async fn get_measures(&self, song_index: usize) -> Vec<MeasureInfo> {
+        self.service.get_measures(&local_context(), song_index).await
+    }
+
+    /// Get the current active indices
+    pub async fn get_active_indices(&self) -> ActiveIndices {
+        self.service.get_active_indices(&local_context()).await
+    }
+
+    /// Get the currently active song (if any)
+    pub async fn get_active_song(&self) -> Option<SongInfo> {
+        self.service.get_active_song(&local_context()).await
+    }
+
+    /// Get the currently active section (if any)
+    pub async fn get_active_section(&self) -> Option<SectionInfo> {
+        self.service.get_active_section(&local_context()).await
+    }
+
+    /// Get the song at a specific time position
+    pub async fn get_song_at(&self, seconds: f64) -> Option<SongInfo> {
+        self.service.get_song_at(&local_context(), seconds).await
+    }
+
+    /// Get the section at a specific time position within a song
+    pub async fn get_section_at(&self, seconds: f64) -> Option<SectionInfo> {
+        self.service.get_section_at(&local_context(), seconds).await
+    }
+
+    /// Execute a setlist command
+    pub async fn execute(&self, cmd: SetlistCommand) {
+        self.service.execute(&local_context(), cmd).await;
+    }
+
+    /// Subscribe to setlist events
+    pub async fn subscribe(&self, events: Tx<SetlistEvent>) {
+        self.service.subscribe(&local_context(), events).await;
+    }
+
+    /// Subscribe to active indices changes (position updates)
+    pub async fn subscribe_active(&self, indices: Tx<ActiveIndices>) {
+        self.service.subscribe_active(&local_context(), indices).await;
+    }
+}
+
+// Implement PartialEq for Dioxus component props
+impl<S: SetlistService + Send + Sync + 'static> PartialEq for LocalSetlistClient<S> {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare by Arc pointer - same service instance means equal
+        Arc::ptr_eq(&self.service, &other.service)
+    }
+}
+
+// endregion: --- Local Client

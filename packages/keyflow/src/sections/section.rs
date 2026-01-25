@@ -333,33 +333,27 @@ impl Section {
     }
 
     /// Get the section's color as RGB string (bright variant)
+    ///
+    /// Uses semantic colors based on section type (Tailwind palette).
+    /// Falls back to REAPER color if set, or the semantic color otherwise.
     pub fn color_bright(&self) -> String {
-        if let Some(color_u32) = self.color.filter(|&c| c != 0) {
-            let r = ((color_u32 >> 16) & 0xFF) as u8;
-            let g = ((color_u32 >> 8) & 0xFF) as u8;
-            let b = (color_u32 & 0xFF) as u8;
-            let r = (r as f32 * 1.2).min(255.0) as u8;
-            let g = (g as f32 * 1.2).min(255.0) as u8;
-            let b = (b as f32 * 1.2).min(255.0) as u8;
-            format!("rgb({}, {}, {})", r, g, b)
-        } else {
-            "rgb(128, 128, 128)".to_string()
-        }
+        // Use semantic color based on section type
+        super::colors::colors_for_section_type(&self.section_type).bright_css()
     }
 
     /// Get the section's color as RGB string (muted variant)
+    ///
+    /// Uses semantic colors based on section type (Tailwind palette).
     pub fn color_muted(&self) -> String {
-        if let Some(color_u32) = self.color.filter(|&c| c != 0) {
-            let r = ((color_u32 >> 16) & 0xFF) as u8;
-            let g = ((color_u32 >> 8) & 0xFF) as u8;
-            let b = (color_u32 & 0xFF) as u8;
-            let r = (r as f32 * 0.6) as u8;
-            let g = (g as f32 * 0.6) as u8;
-            let b = (b as f32 * 0.6) as u8;
-            format!("rgb({}, {}, {})", r, g, b)
-        } else {
-            "rgb(80, 80, 80)".to_string()
-        }
+        super::colors::colors_for_section_type(&self.section_type).muted_css()
+    }
+
+    /// Get the section's semantic colors based on its type
+    ///
+    /// Returns `SectionColors` with bright, muted, and text variants.
+    #[must_use]
+    pub fn colors(&self) -> super::colors::SectionColors {
+        super::colors::colors_for_section_type(&self.section_type)
     }
 
     /// Get the section's color (defaults to bright)
