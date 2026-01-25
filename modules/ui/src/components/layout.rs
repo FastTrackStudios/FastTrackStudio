@@ -144,16 +144,17 @@ pub fn Sidebar(
     on_section_click: Callback<(usize, usize)>,
 ) -> Element {
     // Convert setlist to sidebar items using methods on Song and Section
-    // Read from SETLIST_STRUCTURE (structure only) and SONG_TRANSPORT (per-song transport)
-    // This only rerenders when structure changes or transport for a specific song changes
-    // For the active song, use reactive signals from SETLIST; for others, calculate from transport
+    // Read from SETLIST (full API with progress) for reactive updates
+    // This rerenders when SETLIST changes (which includes progress updates)
     let sidebar_items = use_memo(move || {
+        // Read SETLIST to get reactive progress updates
+        let setlist_api = SETLIST.read();
         let setlist_structure = SETLIST_STRUCTURE.read();
         let song_transport = SONG_TRANSPORT.read();
         let current_song_idx = current_song_index();
 
         // Get progress values from SETLIST for the active song
-        let active_song_progress = SETLIST.read().as_ref().and_then(|api| {
+        let active_song_progress = setlist_api.as_ref().and_then(|api| {
             if api.active_song_index() == current_song_idx {
                 api.song_progress.map(|p| p * 100.0) // Convert 0.0-1.0 to 0-100
             } else {
@@ -161,13 +162,16 @@ pub fn Sidebar(
             }
         });
 
-        let active_section_progress = SETLIST.read().as_ref().and_then(|api| {
+        let active_section_progress = setlist_api.as_ref().and_then(|api| {
             if api.active_song_index() == current_song_idx {
                 api.section_progress.map(|p| p * 100.0) // Convert 0.0-1.0 to 0-100
             } else {
                 None
             }
         });
+
+        // Get active section index for matching
+        let active_section_idx = setlist_api.as_ref().and_then(|api| api.active_section_index());
 
         setlist_structure
             .as_ref()
@@ -194,27 +198,36 @@ pub fn Sidebar(
                         };
 
                         // Calculate section progress - use reactive signal for active song's active section
+                        // Sections before the current one show 100%, current shows actual progress,
+                        // sections after show 0%
                         let sections: Vec<_> = song
                             .sections
                             .iter()
                             .enumerate()
                             .map(|(sec_idx, section)| {
                                 let section_progress = if Some(idx) == current_song_idx {
-                                    // Check if this is the active section
-                                    let is_active_section = SETLIST
-                                        .read()
-                                        .as_ref()
-                                        .and_then(|api| api.active_section_index())
-                                        .map(|active_sec_idx| active_sec_idx == sec_idx)
-                                        .unwrap_or(false);
-
-                                    if is_active_section {
-                                        active_section_progress
-                                            .unwrap_or_else(|| section.progress(position))
-                                    } else {
-                                        section.progress(position)
+                                    // For the active song, determine progress based on section position
+                                    match active_section_idx {
+                                        Some(active_sec_idx) if sec_idx < active_sec_idx => {
+                                            // Section is before current - show 100%
+                                            100.0
+                                        }
+                                        Some(active_sec_idx) if sec_idx == active_sec_idx => {
+                                            // This is the active section - show actual progress
+                                            active_section_progress
+                                                .unwrap_or_else(|| section.progress(position))
+                                        }
+                                        Some(_) => {
+                                            // Section is after current - show 0%
+                                            0.0
+                                        }
+                                        None => {
+                                            // No active section, use position-based calculation
+                                            section.progress(position)
+                                        }
                                     }
                                 } else {
+                                    // Not the active song - use position-based calculation
                                     section.progress(position)
                                 };
 
@@ -1076,13 +1089,22 @@ pub fn MainContent(
         let song_idx = current_song_index()?;
         let setlist_structure = SETLIST_STRUCTURE.read();
         let song_transport = SONG_TRANSPORT.read();
+        let setlist_api = SETLIST.read();
 
         let song = setlist_structure.as_ref()?.songs.get(song_idx)?;
-        let transport = song_transport.get(&song_idx)?;
-        let current_pos = transport.playhead_position.time.to_seconds();
 
-        // Find the current section
-        let (section_idx, section) = song.section_at_position_with_index(current_pos)?;
+        // Try to get section from SONG_TRANSPORT (REAPER live data), fall back to SETLIST API
+        let (section_idx, section) = if let Some(transport) = song_transport.get(&song_idx) {
+            let current_pos = transport.playhead_position.time.to_seconds();
+            song.section_at_position_with_index(current_pos)?
+        } else if let Some(api) = setlist_api.as_ref() {
+            // Fall back to SETLIST API's active_section_index (mock service)
+            let sec_idx = api.active_section_index()?;
+            let sec = song.sections.get(sec_idx)?;
+            (sec_idx, sec)
+        } else {
+            return None;
+        };
         let section_start = section.start_seconds()?;
         let section_end = section.end_seconds()?;
         let section_duration = section_end - section_start;
@@ -1587,7 +1609,7 @@ pub fn MainContent(
 
     // Get section progress from SetlistApi (computed on server side)
     // Convert from 0.0-1.0 to 0-100 for display
-    // Use reactive signal that directly reads from SETLIST
+    // Use reactive signal that directly reads from SETLIST (same pattern as song_progress)
     let mut section_progress = use_signal(|| {
         SETLIST
             .read()
@@ -1597,109 +1619,117 @@ pub fn MainContent(
             .unwrap_or(0.0)
     });
 
-    // Update section_progress signal reactively when SETLIST changes
+    // Sync section_progress with SETLIST changes
+    // Reading SETLIST here makes this effect reactive to SETLIST changes
     use_effect(move || {
         // Reading SETLIST here makes this effect reactive to SETLIST changes
         let _ = SETLIST.read();
-        let progress_value = SETLIST.read().as_ref().and_then(|api| api.section_progress);
-
-        // Log the raw progress value (0.0-1.0) for debugging
-        if let Some(p) = progress_value {
-            static LAST_SECTION_PROGRESS: std::sync::Mutex<Option<f64>> =
-                std::sync::Mutex::new(None);
-            let mut last = LAST_SECTION_PROGRESS.lock().unwrap();
-            if *last != Some(p) {
-                info!("section_progress: {:.4} (0.0-1.0)", p);
-                *last = Some(p);
-            }
-        }
-
-        let new_progress = progress_value.map(|p| p * 100.0).unwrap_or(0.0);
-        section_progress.set(new_progress);
+        let progress_value = SETLIST
+            .read()
+            .as_ref()
+            .and_then(|api| api.section_progress)
+            .map(|p| p * 100.0)
+            .unwrap_or(0.0);
+        section_progress.set(progress_value);
     });
 
-    // Compute detail badges using transport info from the song itself
-    // Only show badges when we have actual transport info (not defaults)
-    // Reactive signal for detail badges - reads from SONG_TRANSPORT to get real-time updates
+    // Compute detail badges using transport info
+    // First try SONG_TRANSPORT (REAPER live data), fall back to song metadata + SETLIST progress
     let detail_badges = use_memo(move || {
         let song_idx = current_song_index()?;
         let setlist_structure = SETLIST_STRUCTURE.read();
-        let song_transport = SONG_TRANSPORT.read(); // This read makes it reactive to SONG_TRANSPORT changes
+        let setlist_api = SETLIST.read();
+        let song_transport = SONG_TRANSPORT.read();
 
         let song = setlist_structure.as_ref()?.songs.get(song_idx)?;
-        let transport = song_transport.get(&song_idx)?;
 
-        // Use musical position directly from REAPER (which uses TimeMap2_timeToBeats internally)
-        // This correctly accounts for tempo and time signature changes
-        let musical_pos = transport.playhead_position.musical.clone();
+        // Try to get live transport data from SONG_TRANSPORT (REAPER)
+        if let Some(transport) = song_transport.get(&song_idx) {
+            // Use REAPER live data
+            let musical_pos = transport.playhead_position.musical.clone();
+            let musical_str = format!(
+                "{}.{}.{:03}",
+                musical_pos.measure + 1,
+                musical_pos.beat + 1,
+                musical_pos.subdivision
+            );
 
-        // Format the values
-        let musical_str = format!(
-            "{}.{}.{:03}",
-            musical_pos.measure + 1,
-            musical_pos.beat + 1,
-            musical_pos.subdivision
+            let song_start = song.effective_start().max(
+                song.sections.first().and_then(|s| s.start_seconds()).unwrap_or(0.0)
+            );
+            let current_pos = transport.playhead_position.time.to_seconds();
+            let song_relative_position = (current_pos - song_start).max(0.0);
+            let time_pos = TimePosition::from_seconds(song_relative_position);
+
+            let tempo_str = format!("{:.2}", transport.tempo.bpm);
+            let time_sig_str = format!("{}/{}", transport.time_signature.numerator, transport.time_signature.denominator);
+            let time_str = format!(
+                "{}:{:02}.{:03}",
+                time_pos.minutes, time_pos.seconds, time_pos.milliseconds
+            );
+
+            return Some(vec![
+                DetailBadge { label: "Measure".to_string(), value: musical_str },
+                DetailBadge { label: "Time".to_string(), value: time_str },
+                DetailBadge { label: "BPM".to_string(), value: tempo_str },
+                DetailBadge { label: "Time Sig".to_string(), value: time_sig_str },
+            ]);
+        }
+
+        // Fall back to mock/computed data from song metadata and SETLIST progress
+        let api = setlist_api.as_ref()?;
+
+        // Get starting tempo and time signature from song
+        let tempo = song.starting_tempo.unwrap_or(120.0);
+        let time_sig = song.starting_time_signature.clone().unwrap_or(
+            daw::primitives::TimeSignature { numerator: 4, denominator: 4 }
         );
 
-        // Calculate song-relative time position for time display
-        let song_start = if song.effective_start() > 0.0 {
-            song.effective_start()
-        } else {
-            song.sections
-                .first()
-                .and_then(|s| s.start_seconds())
-                .unwrap_or(0.0)
+        // Calculate position from song progress
+        let song_start = song.effective_start().max(
+            song.sections.first().and_then(|s| s.start_seconds()).unwrap_or(0.0)
+        );
+        let song_end = {
+            let end = song.effective_end();
+            if end > song_start { end } else {
+                song.sections.last().and_then(|s| s.end_seconds()).unwrap_or(song_start + 180.0)
+            }
         };
-        let current_pos = transport.playhead_position.time.to_seconds();
-        let song_relative_position = (current_pos - song_start).max(0.0);
+        let song_duration = song_end - song_start;
+        let song_progress = api.song_progress.unwrap_or(0.0);
+        let song_relative_position = song_progress * song_duration;
         let time_pos = TimePosition::from_seconds(song_relative_position);
 
-        // Use transport info from SONG_TRANSPORT (bpm, time sig) for display - reactive!
-        // Show BPM rounded to 2 decimal places
-        let tempo = transport.tempo.bpm;
-        let time_sig = transport.time_signature.clone();
+        // Calculate approximate measure from position and tempo
+        let beats_per_measure = time_sig.numerator as f64;
+        let seconds_per_beat = 60.0 / tempo;
+        let seconds_per_measure = seconds_per_beat * beats_per_measure;
+        let total_beats = song_relative_position / seconds_per_beat;
+        let measure = (total_beats / beats_per_measure).floor() as i32;
+        let beat_in_measure = (total_beats % beats_per_measure).floor() as i32;
+        let subdivision = ((total_beats % 1.0) * 1000.0) as i32;
+
+        let musical_str = format!("{}.{}.{:03}", measure + 1, beat_in_measure + 1, subdivision);
+        let tempo_str = format!("{:.0}", tempo);
+        let time_sig_str = format!("{}/{}", time_sig.numerator, time_sig.denominator);
         let time_str = format!(
             "{}:{:02}.{:03}",
             time_pos.minutes, time_pos.seconds, time_pos.milliseconds
         );
-        let tempo_str = format!("{:.2}", tempo); // Round to 2 decimal places
-        let time_sig_str = format!("{}/{}", time_sig.numerator, time_sig.denominator);
 
         Some(vec![
-            DetailBadge {
-                label: "Measure".to_string(),
-                value: musical_str,
-            },
-            DetailBadge {
-                label: "Time".to_string(),
-                value: time_str,
-            },
-            DetailBadge {
-                label: "BPM".to_string(),
-                value: tempo_str,
-            },
-            DetailBadge {
-                label: "Time Sig".to_string(),
-                value: time_sig_str,
-            },
+            DetailBadge { label: "Measure".to_string(), value: musical_str },
+            DetailBadge { label: "Time".to_string(), value: time_str },
+            DetailBadge { label: "BPM".to_string(), value: tempo_str },
+            DetailBadge { label: "Time Sig".to_string(), value: time_sig_str },
         ])
     });
 
-    // Get transport state for the current song for transport controls
+    // Get transport state for the current song for looping control
     // Read from SONG_TRANSPORT - only rerenders when transport for current song changes
+    // Note: is_playing comes from the prop (which is synced with global IS_PLAYING signal)
     let song_transport = SONG_TRANSPORT.read();
-    let is_playing = current_song_index()
-        .and_then(|idx| {
-            song_transport.get(&idx).map(|transport| {
-                matches!(
-                    transport.play_state,
-                    PlayState::Playing | PlayState::Recording
-                )
-            })
-        })
-        .unwrap_or(false);
-
-    let is_looping = current_song_index()
+    let is_looping_from_transport = current_song_index()
         .and_then(|idx| song_transport.get(&idx).map(|transport| transport.looping))
         .unwrap_or(false);
 
@@ -1866,10 +1896,10 @@ pub fn MainContent(
                     }
                 }
             }
-            // Transport control bar at bottom - use transport state from song's project
+            // Transport control bar at bottom - use is_playing from prop (global signal)
             TransportControlBar {
-                is_playing: is_playing,
-                is_looping: is_looping,
+                is_playing: is_playing(),
+                is_looping: is_looping(),
                 on_play_pause: on_play_pause.clone(),
                 on_loop_toggle: on_loop_toggle.clone(),
                 on_back: on_back.clone(),

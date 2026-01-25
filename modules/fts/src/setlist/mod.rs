@@ -5,6 +5,7 @@
 pub mod application;
 pub mod core;
 pub mod infra;
+pub mod mock;
 pub mod order;
 pub mod service;
 
@@ -25,8 +26,9 @@ pub use infra::stream::{
 
 #[cfg(feature = "dioxus")]
 pub use infra::dioxus::{
-    ACTIVE_INDICES, ACTIVE_SLIDE_INDEX, CURRENT_POSITION_SECONDS, ProjectTransportInfo, SETLIST,
-    SETLIST_STRUCTURE, SONG_TRACKS, SONG_TRANSPORT, TRANSPORT_INFO,
+    ACTIVE_INDICES, ACTIVE_SLIDE_INDEX, CURRENT_POSITION_SECONDS, IS_PLAYING, PLAYBACK_POSITION,
+    ProjectTransportInfo, SECTION_PROGRESS, SETLIST, SETLIST_STRUCTURE, SONG_PROGRESS, SONG_TRACKS,
+    SONG_TRANSPORT, TRANSPORT_INFO,
 };
 
 pub use core::{
@@ -36,9 +38,12 @@ pub use core::{
 
 // Roam service exports
 pub use service::{
-    ActiveIndices, SectionInfo, SetlistCommand, SetlistEvent, SetlistInfo,
+    ActiveIndices, LocalSetlistClient, SectionInfo, SetlistCommand, SetlistEvent, SetlistInfo,
     SetlistService as RoamSetlistService, SongInfo,
 };
+
+// Mock implementation
+pub use mock::MockSetlist;
 
 #[cfg(all(feature = "iroh", not(target_arch = "wasm32")))]
 pub use reactive::{

@@ -75,6 +75,7 @@ pub enum SetlistUpdateMessage {
         active_slide_index: Option<usize>,
         song_progress: Option<f64>, // 0.0 to 1.0, linear time-based progress through active song
         section_progress: Option<f64>, // 0.0 to 1.0, linear time-based progress through active section
+        is_playing: bool,            // Whether playback is currently active
     },
 
     /// Update song metadata (name, sections, lyrics structure, etc.)
@@ -483,6 +484,7 @@ impl SetlistStreamActor {
                     active_slide_index: setlist_api.active_slide_index(),
                     song_progress: setlist_api.song_progress,
                     section_progress: setlist_api.section_progress,
+                    is_playing: false, // Will be set properly when transport state is integrated
                 }
             }
             Err(e) => {
@@ -496,6 +498,7 @@ impl SetlistStreamActor {
                     active_slide_index: None,
                     song_progress: None,
                     section_progress: None,
+                    is_playing: false,
                 }
             }
         };
@@ -1271,12 +1274,20 @@ impl SetlistStreamActor {
 
                     if indices_changed || song_progress_changed || section_progress_changed {
                         // Get progress from current setlist API (we already have it from the match above)
+                        // Determine is_playing from transport state of active song
+                        let is_playing = current_active_indices.0.and_then(|song_idx| {
+                            setlist.songs.get(song_idx).and_then(|song| {
+                                song.project.as_ref().map(|p| p.transport().is_playing())
+                            })
+                        }).unwrap_or(false);
+
                         let update = SetlistUpdateMessage::ActiveIndices {
                             active_song_index: current_active_indices.0,
                             active_section_index: current_active_indices.1,
                             active_slide_index: current_active_indices.2,
                             song_progress: setlist_api.song_progress,
                             section_progress: setlist_api.section_progress,
+                            is_playing,
                         };
                         if broadcast_tx.send(update).is_ok() {
                             SEND_COUNT.fetch_add(1, Ordering::Relaxed);

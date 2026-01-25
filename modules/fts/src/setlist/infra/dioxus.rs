@@ -114,6 +114,21 @@ mod dioxus_impl {
         Signal::global(|| (None, None, None));
 
     // ============================================================================
+    // Progress Signals - Updated by ROAM service subscription
+    // ============================================================================
+
+    /// Current song progress (0.0 to 1.0) - updates frequently during playback
+    pub static SONG_PROGRESS: GlobalSignal<Option<f64>> = Signal::global(|| None);
+
+    /// Current section progress (0.0 to 1.0) - updates frequently during playback
+    pub static SECTION_PROGRESS: GlobalSignal<Option<f64>> = Signal::global(|| None);
+
+    /// Current playback position in seconds - updates frequently during playback
+    pub static PLAYBACK_POSITION: GlobalSignal<f64> = Signal::global(|| 0.0);
+
+    // Note: IS_PLAYING is defined above in Transport State section
+
+    // ============================================================================
     // App State - Application state like counting in, loop, etc.
     // ============================================================================
 

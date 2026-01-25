@@ -50,6 +50,9 @@ pub fn TransportControlBar(
     on_back: Callback<()>,
     on_forward: Callback<()>,
 ) -> Element {
+    let playing = is_playing;
+    let looping = is_looping;
+
     rsx! {
         div {
             class: "h-36 flex-shrink-0 border-t border-border bg-card grid grid-cols-4 divide-x divide-border",
@@ -58,7 +61,7 @@ pub fn TransportControlBar(
             div {
                 class: "flex items-center justify-center gap-2 cursor-pointer hover:bg-accent transition-colors",
                 onclick: move |_| {
-                    if !is_playing {
+                    if !playing {
                         on_back.call(());
                     }
                 },
@@ -71,7 +74,7 @@ pub fn TransportControlBar(
 
             // Play/Pause Button
             div {
-                class: if is_playing {
+                class: if playing {
                     "flex items-center justify-center gap-2 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
                 } else {
                     "flex items-center justify-center gap-2 cursor-pointer border border-border hover:bg-accent transition-colors"
@@ -79,7 +82,7 @@ pub fn TransportControlBar(
                 onclick: move |_| {
                     on_play_pause.call(());
                 },
-                if is_playing {
+                if playing {
                     Pause {
                         size: 20,
                         color: "currentColor",
@@ -90,12 +93,12 @@ pub fn TransportControlBar(
                         color: "currentColor",
                     }
                 }
-                if is_playing { "Pause" } else { "Play" }
+                if playing { "Pause" } else { "Play" }
             }
 
             // Loop Button
             div {
-                class: if is_looping {
+                class: if looping {
                     "flex items-center justify-center gap-2 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
                 } else {
                     "flex items-center justify-center gap-2 cursor-pointer border border-border hover:bg-accent transition-colors"
@@ -114,7 +117,7 @@ pub fn TransportControlBar(
             div {
                 class: "flex items-center justify-center gap-2 cursor-pointer hover:bg-accent transition-colors",
                 onclick: move |_| {
-                    if !is_playing {
+                    if !playing {
                         on_forward.call(());
                     }
                 },

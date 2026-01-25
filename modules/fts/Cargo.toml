@@ -31,8 +31,8 @@ facet = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-# Native-only: tokio with full features
-tokio = { version = "1.0", features = ["full"], optional = true }
+# Native-only: tokio with rt for spawn (optional full features for iroh)
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread"] }
 
 # IROH/IRPC dependencies (optional)
 irpc = { workspace = true, optional = true }
@@ -40,9 +40,11 @@ irpc-iroh = { version = "0.11.0", optional = true }
 iroh = { version = "0.95", features = ["discovery-local-network"], optional = true }
 rxrust = { workspace = true, optional = true }
 
-# WASM: tokio with minimal features (no runtime)
+# WASM: tokio with minimal features (no runtime) + async-channel for broadcast + gloo-timers for sleep
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { version = "1.0", default-features = false, features = ["sync"], optional = true }
+async-channel = "2.0"
+gloo-timers = { version = "0.3", features = ["futures"] }
 
 # Dioxus integration (optional)
 [dependencies.dioxus]
@@ -56,7 +58,7 @@ default = []
 reaper = ["dep:reaper-high", "dep:reaper-medium", "dep:reaper-low", "dep:enumflags2", "dep:fragile"]
 rpp = ["dep:rpp-parser"]
 dioxus = ["dep:dioxus"]
-iroh = ["daw/iroh", "dep:irpc", "dep:irpc-iroh", "dep:iroh", "dep:tokio", "dep:rxrust"]
+iroh = ["daw/iroh", "dep:irpc", "dep:irpc-iroh", "dep:iroh", "dep:rxrust"]
 full = ["reaper", "rpp", "iroh"]
 
 [dependencies.rpp-parser]

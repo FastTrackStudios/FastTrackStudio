@@ -5,6 +5,11 @@ use dioxus::prelude::*;
 use fts::lyrics::core::{LyricLine, LyricSection, Lyrics, Syllable, Word, split_line_into_words};
 use lucide_dioxus::{Pause, Play, Square};
 
+#[cfg(target_arch = "wasm32")]
+use js_sys;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures;
+
 /// Props for the syllable editor
 #[derive(Props, Clone, PartialEq)]
 pub struct SyllableEditorProps {

@@ -11,9 +11,14 @@ mod state;
 use dioxus::prelude::*;
 use lucide_dioxus::{
     ArrowLeft, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Circle, Code, ExternalLink,
-    FileCode, FileText, Github, Music, PenLine, PenTool, Play, SkipBack, SkipForward, Square, User,
-    Users,
+    FileCode, FileText, Github, ListMusic, Music, PenLine, PenTool, Play, SkipBack, SkipForward,
+    Square, User, Users,
 };
+
+// Setlist components
+use std::sync::Arc;
+use fts::setlist::{LocalSetlistClient, MockSetlist};
+use ui::{PerformanceView, SetlistServiceProvider};
 
 // Static assets
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -51,6 +56,9 @@ pub enum Route {
     PatternView { id: String },
     #[route("/test/render")]
     TestRender {},
+    // Setlist control view (demo with mock data)
+    #[route("/control/setlist")]
+    ControlSetlist {},
 }
 
 fn main() {
@@ -64,11 +72,13 @@ fn main() {
 
         // Configure tracing with filtering:
         // - Our app (web) at debug level
+        // - fts (mock setlist) at debug level
+        // - ui hooks at debug level
         // - keyflow at info level (filter out trace/debug spam from parsing)
         // - dioxus at warn level (filter out signal tracing)
         // - Everything else at warn level
         let filter = tracing_subscriber::EnvFilter::new(
-            "warn,web=debug,keyflow=info,keyflow::engraver=debug",
+            "warn,web=debug,fts=debug,ui=debug,keyflow=info,keyflow::engraver=debug",
         );
 
         tracing_subscriber::registry()
@@ -256,6 +266,12 @@ fn Layout() -> Element {
 
                         div {
                             class: "flex items-center gap-4",
+
+                            Link {
+                                to: Route::ControlSetlist {},
+                                class: "text-muted-foreground hover:text-foreground transition-colors text-sm",
+                                "Control"
+                            }
 
                             a {
                                 href: "https://github.com/codywright/FastTrackStudio",
@@ -563,6 +579,80 @@ fn Home() -> Element {
                             icon: rsx! { Users { class: "w-8 h-8" } }
                         }
                     }
+                }
+            }
+
+            // Setlist Control Preview section
+            section {
+                class: "relative z-10 py-24 bg-card/30",
+
+                div {
+                    class: "mx-auto max-w-5xl px-6",
+
+                    div {
+                        class: "text-center mb-12",
+                        h2 {
+                            class: "text-3xl font-bold text-foreground mb-4",
+                            "Live Performance Control"
+                        }
+                        p {
+                            class: "text-lg text-muted-foreground max-w-2xl mx-auto",
+                            "Navigate your setlist with ease. Real-time section tracking, song navigation, and transport controls all in one unified view."
+                        }
+                    }
+
+                    SetlistPreviewCard {}
+                }
+            }
+        }
+    }
+}
+
+/// Preview card for the setlist control feature on the landing page
+#[component]
+fn SetlistPreviewCard() -> Element {
+    // Create mock service with local client wrapper for in-process ROAM calls
+    let client = use_hook(|| {
+        let service = Arc::new(MockSetlist::with_sample_data());
+        LocalSetlistClient::new(service)
+    });
+
+    rsx! {
+        div {
+            class: "relative rounded-2xl border border-border/50 bg-card overflow-hidden",
+
+            // Mock window chrome
+            div {
+                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
+
+                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
+
+                span {
+                    class: "ml-4 text-sm text-muted-foreground",
+                    "Setlist Control"
+                }
+            }
+
+            // Preview of the setlist view (constrained height)
+            div {
+                class: "h-96 overflow-hidden",
+
+                SetlistServiceProvider { client,
+                    PerformanceView {}
+                }
+            }
+
+            // Overlay with CTA
+            div {
+                class: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-card via-card/95 to-transparent pt-16 pb-6 px-6 text-center",
+
+                Link {
+                    to: Route::ControlSetlist {},
+                    class: "inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-8 rounded-md font-medium transition-colors",
+                    ListMusic { class: "w-5 h-5" }
+                    "Try the Demo"
                 }
             }
         }
@@ -2345,6 +2435,32 @@ fn PatternView(id: String) -> Element {
     });
     rsx! {
         div { class: "flex items-center justify-center h-64 text-muted-foreground", "Redirecting..." }
+    }
+}
+
+// =============================================================================
+// Setlist Control View - Demo with mock data
+// =============================================================================
+
+/// Setlist control view with mock service
+///
+/// This demonstrates the shared PerformanceView component working in a web context
+/// with the MockSetlist service providing sample data.
+#[component]
+fn ControlSetlist() -> Element {
+    // Create mock service with local client wrapper for in-process ROAM calls
+    let client = use_hook(|| {
+        let service = Arc::new(MockSetlist::with_sample_data());
+        LocalSetlistClient::new(service)
+    });
+
+    rsx! {
+        SetlistServiceProvider { client,
+            div {
+                class: "h-[calc(100vh-4rem)] w-full flex flex-col overflow-hidden bg-background",
+                PerformanceView {}
+            }
+        }
     }
 }
 

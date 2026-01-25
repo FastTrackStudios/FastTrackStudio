@@ -284,7 +284,7 @@ pub fn LyricsEditView() -> Element {
 
     // Pre-compute section color map from setlist (for actual colors)
     let section_color_map = use_memo(move || {
-        let mut map = HashMap::new();
+        let mut map: HashMap<String, String> = HashMap::new();
         #[cfg(not(target_arch = "wasm32"))]
         {
             let setlist_structure = SETLIST_STRUCTURE.read();

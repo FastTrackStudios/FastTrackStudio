@@ -12,8 +12,8 @@ use crate::iroh_connection_manager::{
 use anyhow::Result;
 use dioxus::prelude::*;
 use fts::setlist::{
-    ACTIVE_INDICES, ACTIVE_SLIDE_INDEX, SETLIST, SETLIST_STRUCTURE, SONG_TRACKS, SONG_TRANSPORT,
-    SetlistStreamApi, SetlistUpdateMessage,
+    ACTIVE_INDICES, ACTIVE_SLIDE_INDEX, IS_PLAYING, SETLIST, SETLIST_STRUCTURE, SONG_TRACKS,
+    SONG_TRANSPORT, SetlistStreamApi, SetlistUpdateMessage,
 };
 use std::sync::OnceLock;
 use tracing::{debug, error, info, warn};
@@ -492,6 +492,7 @@ async fn handle_message(
             active_slide_index,
             song_progress,
             section_progress,
+            is_playing,
         } => {
             // Update active indices - frequent updates during playback
             UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -499,6 +500,9 @@ async fn handle_message(
 
             // Also update legacy signals for backward compatibility
             *ACTIVE_SLIDE_INDEX.write() = active_slide_index;
+
+            // Update is_playing signal
+            *IS_PLAYING.write() = is_playing;
 
             // Update SETLIST signal's active indices and progress if it exists
             // Clone the value first, then drop the read guard before writing

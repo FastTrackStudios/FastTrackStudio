@@ -76,25 +76,254 @@ fn calculate_section_lengths(sections: &[SectionMarker]) -> Vec<(String, i32, i3
     result
 }
 
+/// Detect if a section should use simple chord-per-measure format.
+/// Returns true for sections where chords should be treated as full measures.
+fn is_simple_section(section_type: &str) -> bool {
+    matches!(section_type, "IN" | "VS" | "HITS")
+}
+
+/// Analyze all chords to determine if triplet push is dominant (>50%).
+/// Returns true if we should use `/push = triplet` setting.
+fn should_use_triplet_push_setting(chords: &[ChordMarker], ppq: u32) -> bool {
+    let mut triplet_pushes = 0;
+    let mut other_pushes = 0;
+
+    for chord in chords {
+        match chord.detect_push_pull(ppq) {
+            PushPull::Push(amount) | PushPull::Pull(amount) => {
+                if amount.keyflow_notation() == "t" {
+                    triplet_pushes += 1;
+                } else {
+                    other_pushes += 1;
+                }
+            }
+            PushPull::OnBeat => {}
+        }
+    }
+
+    let total_pushes = triplet_pushes + other_pushes;
+    total_pushes > 0 && (triplet_pushes as f64 / total_pushes as f64) > 0.5
+}
+
+/// Format a chord with push/pull notation.
+/// If use_short_push is true and amount is triplet, use just `'` instead of `'t`.
+fn format_chord_with_push(chord: &ChordMarker, ppq: u32, use_short_push: bool) -> String {
+    let normalized = normalize_chord_name(&chord.chord_name);
+    let push_pull = chord.detect_push_pull(ppq);
+
+    match push_pull {
+        PushPull::OnBeat => normalized,
+        PushPull::Push(amount) => {
+            let notation = amount.keyflow_notation();
+            if use_short_push && notation == "t" {
+                format!("'{}", normalized)
+            } else {
+                format!("'{}{}", notation, normalized)
+            }
+        }
+        PushPull::Pull(amount) => {
+            let notation = amount.keyflow_notation();
+            if use_short_push && notation == "t" {
+                format!("{}'", normalized)
+            } else {
+                format!("{}{}'", normalized, notation)
+            }
+        }
+    }
+}
+
+/// Generate slashes for chord duration.
+/// No slashes = full measure.
+/// Slashes indicate shorter durations: / = 1 beat, // = 2 beats, etc.
+fn generate_duration_slashes(beats: i32, beats_per_measure: i32) -> String {
+    if beats >= beats_per_measure {
+        // Full measure - no slashes needed
+        String::new()
+    } else if beats <= 0 {
+        String::new()
+    } else {
+        // Slashes indicate the duration
+        format!(" {}", "/".repeat(beats as usize))
+    }
+}
+
+/// The standard Thriller groove pattern
+/// Returns (pushed_chord, on_beat_chord) with appropriate push notation
+fn thriller_groove_pattern(use_short_push: bool) -> (String, String) {
+    if use_short_push {
+        ("'F/C".to_string(), "Cm".to_string())
+    } else {
+        ("'tF/C".to_string(), "Cm".to_string())
+    }
+}
+
+/// Fill measures for simple sections (groove or hits).
+/// For sections with fewer chords than measures, spread chords one per measure.
+/// Uses 'F/C % Cm % pattern (2 measures each) for IN/VS sections when no chords available.
+fn fill_groove_measures(
+    section_chords: &[&ChordMarker],
+    length: i32,
+    _start_measure: i32,
+    ppq: u32,
+    use_short_push: bool,
+    _beats_per_measure: i32,
+) -> Vec<String> {
+    // Convert all chords to keyflow notation
+    let all_chords: Vec<String> = section_chords
+        .iter()
+        .map(|chord| {
+            let normalized = normalize_chord_name(&chord.chord_name);
+            // F/C in groove should always be pushed
+            if normalized == "F/C" {
+                if use_short_push {
+                    "'F/C".to_string()
+                } else {
+                    "'tF/C".to_string()
+                }
+            } else {
+                format_chord_with_push(chord, ppq, use_short_push)
+            }
+        })
+        .collect();
+
+    // Get the standard groove pattern for filling empty measures
+    // Pattern: 'F/C % Cm % (each chord for 2 measures)
+    let (pushed, on_beat) = thriller_groove_pattern(use_short_push);
+
+    // Build result: spread chords across measures, fill gaps with groove pattern
+    let mut result = Vec::new();
+    let mut chord_idx = 0;
+    let mut last_chord: Option<String> = None;
+
+    for m in 0..length {
+        let chord = if chord_idx < all_chords.len() {
+            // Use the next actual chord from the section
+            let c = all_chords[chord_idx].clone();
+            chord_idx += 1;
+            c
+        } else {
+            // No more actual chords - use groove pattern
+            // Pattern: F/C for measures 0-1, Cm for 2-3, repeat
+            // (m % 4) gives 0,1,2,3,0,1,2,3...
+            // 0,1 -> F/C; 2,3 -> Cm
+            if (m % 4) < 2 {
+                pushed.clone()
+            } else {
+                on_beat.clone()
+            }
+        };
+
+        if last_chord.as_ref() == Some(&chord) {
+            result.push("%".to_string());
+        } else {
+            result.push(chord.clone());
+            last_chord = Some(chord);
+        }
+    }
+
+    result
+}
+
+/// Format section chords with slash notation for duration.
+/// No slashes = full measure, slashes indicate shorter durations.
+/// Only use slashes when there are multiple chords in a single measure.
+fn format_section_with_slashes(
+    section_chords: &[&ChordMarker],
+    length: i32,
+    start_measure: i32,
+    ppq: u32,
+    use_short_push: bool,
+    beats_per_measure: i32,
+) -> Vec<String> {
+    // Build a map of measure -> list of (beat_position, chord_string)
+    let mut measure_chords: BTreeMap<i32, Vec<(i32, String)>> = BTreeMap::new();
+
+    for chord in section_chords {
+        let logical_m = chord.logical_measure(ppq, beats_per_measure);
+        let relative_m = logical_m - start_measure;
+        let beat_in_measure = chord.position.beat;
+        let keyflow = format_chord_with_push(chord, ppq, use_short_push);
+
+        measure_chords
+            .entry(relative_m)
+            .or_default()
+            .push((beat_in_measure, keyflow));
+    }
+
+    // Format each measure
+    let mut result = Vec::new();
+    let mut last_measure: Option<String> = None;
+
+    for m in 0..length {
+        if let Some(chords) = measure_chords.get(&m) {
+            let mut sorted_chords = chords.clone();
+            sorted_chords.sort_by_key(|(beat, _)| *beat);
+
+            let mut measure_str = String::new();
+
+            // Only use slashes when there are multiple chords in the measure
+            let use_slashes = sorted_chords.len() > 1;
+
+            for (i, (beat, chord_str)) in sorted_chords.iter().enumerate() {
+                if i > 0 {
+                    measure_str.push(' ');
+                }
+                measure_str.push_str(chord_str);
+
+                // Only add duration slashes if multiple chords in measure
+                if use_slashes {
+                    let next_beat = if i + 1 < sorted_chords.len() {
+                        sorted_chords[i + 1].0
+                    } else {
+                        beats_per_measure
+                    };
+                    let duration = next_beat - beat;
+
+                    // Add slashes only if less than full measure
+                    measure_str.push_str(&generate_duration_slashes(duration, beats_per_measure));
+                }
+            }
+
+            // Use % for repeat if same as previous measure
+            if last_measure.as_ref() == Some(&measure_str) {
+                result.push("%".to_string());
+            } else {
+                result.push(measure_str.clone());
+                last_measure = Some(measure_str);
+            }
+        } else {
+            result.push("%".to_string());
+        }
+    }
+
+    result
+}
+
 /// Generate keyflow chart text from MIDI data.
 fn generate_keyflow_chart(midi: &MidiFile) -> String {
     let ppq = midi.ppq();
     let sections = midi.section_markers_absolute();
     let chords = midi.chord_markers_absolute();
+    let (bpm, time_sig) = (midi.initial_tempo(), midi.initial_time_signature());
+    let beats_per_measure = time_sig.0 as i32;
+
+    // Determine if we should use /push = triplet
+    let use_triplet_setting = should_use_triplet_push_setting(&chords, ppq);
 
     let mut output = String::new();
 
     // Metadata header
     output.push_str("Thriller - Dirty Loops\n");
-
-    let (bpm, time_sig) = (midi.initial_tempo(), midi.initial_time_signature());
     output.push_str(&format!(
         "{}bpm {}/{} #Cm\n",
         bpm.round() as i32,
         time_sig.0,
         time_sig.1
     ));
-    output.push_str("/push = triplet\n\n");
+    if use_triplet_setting {
+        output.push_str("/push = triplet\n");
+    }
+    output.push('\n');
 
     // Process each section
     let section_lengths = calculate_section_lengths(&sections);
@@ -103,44 +332,34 @@ fn generate_keyflow_chart(midi: &MidiFile) -> String {
         // Section header
         output.push_str(&format!("{} {}\n", keyflow_type, length));
 
+        // Handle COUNT section specially - output silence notation
+        if keyflow_type == "COUNT" {
+            output.push_str(&format!("s1 x{}\n", length));
+            output.push('\n');
+            continue;
+        }
+
         // Get chords in this section
         let section_chords: Vec<_> = chords
             .iter()
             .filter(|c| {
-                let logical_m = c.logical_measure(ppq, time_sig.0 as i32);
+                let logical_m = c.logical_measure(ppq, beats_per_measure);
                 logical_m >= *start_measure && logical_m < start_measure + length
             })
             .collect();
 
-        // Group by logical measure
-        let mut measures: BTreeMap<i32, Vec<String>> = BTreeMap::new();
-        for chord in &section_chords {
-            let logical_m = chord.logical_measure(ppq, time_sig.0 as i32);
-            let relative_m = logical_m - start_measure;
-            let keyflow = chord_to_keyflow(chord, ppq);
-            measures.entry(relative_m).or_default().push(keyflow);
-        }
+        // Format measures based on section type
+        let measures = if is_simple_section(keyflow_type) && section_chords.len() <= (*length as usize) {
+            // Sparse section - fill with groove pattern
+            fill_groove_measures(&section_chords, *length, *start_measure, ppq, use_triplet_setting, beats_per_measure)
+        } else {
+            // Dense section - use chords as-is with slash notation
+            format_section_with_slashes(&section_chords, *length, *start_measure, ppq, use_triplet_setting, beats_per_measure)
+        };
 
-        // Format measures (4 per line)
-        let mut measure_lines: Vec<String> = Vec::new();
-        let mut current_line: Vec<String> = Vec::new();
-
-        for m in 0..*length {
-            let measure_content = measures
-                .get(&m)
-                .map(|chords| chords.join(" "))
-                .unwrap_or_else(|| "%".to_string());
-
-            current_line.push(measure_content);
-
-            if current_line.len() == 4 || m == length - 1 {
-                measure_lines.push(current_line.join(" | "));
-                current_line.clear();
-            }
-        }
-
-        for line in measure_lines {
-            output.push_str(&line);
+        // Output measures (4 per line, no bar separators)
+        for chunk in measures.chunks(4) {
+            output.push_str(&chunk.join(" "));
             output.push('\n');
         }
 
@@ -662,3 +881,33 @@ fn test_all_unique_chords_normalized() {
         }
     }
 }
+
+#[test]
+fn test_debug_all_chords_with_positions() {
+    let bytes = include_bytes!("fixtures/thriller_dirty_loops.mid");
+    let midi = MidiFile::parse(bytes).expect("Failed to parse MIDI file");
+    let ppq = midi.ppq();
+    
+    let chords = midi.chord_markers_absolute();
+    
+    println!("
+=== First 30 Chords with Positions ===
+");
+    
+    for (i, chord) in chords.iter().take(30).enumerate() {
+        let pp = chord.detect_push_pull(ppq);
+        println!(
+            "{:2}. M{:3}.B{}.S{:3}: {:15} | {:?}",
+            i + 1,
+            chord.position.measure,
+            chord.position.beat + 1,
+            chord.position.subdivision,
+            chord.chord_name,
+            pp
+        );
+    }
+    
+    println!("
+Total chords: {}", chords.len());
+}
+

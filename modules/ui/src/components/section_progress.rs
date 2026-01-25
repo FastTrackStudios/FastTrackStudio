@@ -181,6 +181,9 @@ pub fn SectionProgressBar(
         result
     };
 
+    // Check if we have measure indicators to render
+    let has_measures = !measure_sections.is_empty();
+
     rsx! {
         div {
             class: "relative flex flex-col items-center justify-center w-full",
@@ -210,82 +213,107 @@ pub fn SectionProgressBar(
                         left_align: marker.position_percent < 0.5, // Left-align first marker at 0%
                     }
                 }
-                // Tempo/Time signature marker lines (positioned relative to outer container, responsive to card size)
-                // Lines extend FROM progress bar UP TO bottom of cards - thinner lines
-                // Using calc to ensure lines meet exactly at card bottom: card is at -2rem, card height ~1.75rem, so bottom at -0.25rem
-                // Line height = 2rem - 1.75rem = 0.25rem (distance from progress bar to card bottom)
-                for (index, marker) in tempo_markers.iter().enumerate() {
-                    div {
-                        key: "section-tempo-marker-{index}",
-                        class: "absolute pointer-events-none z-40",
-                        style: format!(
-                            "left: {}%; width: 1px; bottom: 0; height: calc(2rem - {}rem); background-color: rgba(255, 255, 255, 0.7); transform: translateX(-50%);",
-                            marker.position_percent,
-                            card_height_rem
-                        ),
-                    }
-                }
             }
             // Progress bar content (with padding to align with cards)
             div {
-                class: "relative w-full h-4 rounded-lg overflow-visible bg-secondary px-4",
-                // Measure sections (clickable and highlightable)
-                for (measure_idx, measure_start, _measure_end, measure_width, measure, filled_percent) in measure_sections.iter() {
-                    div {
-                        key: "measure-section-{measure_idx}",
-                        class: if on_measure_click.is_some() {
-                            "absolute h-full z-10 cursor-pointer transition-all duration-200 hover:brightness-110 hover:ring-2 hover:ring-white hover:ring-opacity-50"
-                        } else {
-                            "absolute h-full z-0"
-                        },
-                        style: format!(
-                            "left: {}%; width: {}%;",
-                            measure_start,
-                            measure_width
-                        ),
-                        onclick: {
-                            let callback_opt = on_measure_click.clone();
-                            let musical_pos = measure.musical_position.clone();
-                            move |_| {
-                                if let Some(callback) = &callback_opt {
-                                    callback.call(musical_pos.clone());
-                                }
-                            }
-                        },
-                        // Measure background (full color, will be brightened by progress overlay)
+                class: "relative w-full h-4 rounded-lg overflow-hidden bg-secondary",
+                // Tempo/Time signature marker lines (inside progress bar for proper positioning)
+                // Lines extend from top of progress bar upwards
+                if !tempo_markers.is_empty() {
+                    for (index, marker) in tempo_markers.iter().enumerate() {
                         div {
-                            class: "absolute inset-0 h-full transition-all duration-200",
+                            key: "section-tempo-marker-{index}",
+                            class: "absolute pointer-events-none z-40",
                             style: format!(
-                                "background-color: {}; opacity: 0.3;",
-                                base_color
-                            ),
-                        }
-                        // Filled portion within this measure
-                        div {
-                            class: if should_animate() {
-                                "absolute left-0 top-0 h-full transition-all duration-100 ease-linear"
-                            } else {
-                                "absolute left-0 top-0 h-full"
-                            },
-                            style: format!(
-                                "width: {}%; background-color: {}; opacity: 0.8;",
-                                filled_percent,
-                                base_color
+                                "left: {}%; width: 1px; top: -2rem; bottom: 0; background-color: rgba(255, 255, 255, 0.5); transform: translateX(-50%);",
+                                marker.position_percent
                             ),
                         }
                     }
                 }
-                // Measure boundary lines (subtle vertical lines at measure boundaries)
-                for (index, measure) in measure_indicators.iter().enumerate() {
-                    if measure.position_percent > 0.0 {
+                // Render measure sections if we have them
+                if has_measures {
+                    // Measure sections (clickable and highlightable)
+                    for (measure_idx, measure_start, _measure_end, measure_width, measure, filled_percent) in measure_sections.iter() {
                         div {
-                            key: "measure-boundary-{index}",
-                            class: "absolute pointer-events-none z-30",
+                            key: "measure-section-{measure_idx}",
+                            class: if on_measure_click.is_some() {
+                                "absolute h-full z-10 cursor-pointer transition-all duration-200 hover:brightness-110 hover:ring-2 hover:ring-white hover:ring-opacity-50"
+                            } else {
+                                "absolute h-full z-0"
+                            },
                             style: format!(
-                                "left: {}%; width: 1px; top: 0; bottom: 0; background-color: rgba(255, 255, 255, 0.3); transform: translateX(-50%);",
-                                measure.position_percent
+                                "left: {}%; width: {}%;",
+                                measure_start,
+                                measure_width
                             ),
+                            onclick: {
+                                let callback_opt = on_measure_click.clone();
+                                let musical_pos = measure.musical_position.clone();
+                                move |_| {
+                                    if let Some(callback) = &callback_opt {
+                                        callback.call(musical_pos.clone());
+                                    }
+                                }
+                            },
+                            // Measure background (full color, will be brightened by progress overlay)
+                            div {
+                                class: "absolute inset-0 h-full transition-all duration-200",
+                                style: format!(
+                                    "background-color: {}; opacity: 0.3;",
+                                    base_color
+                                ),
+                            }
+                            // Filled portion within this measure
+                            div {
+                                class: if should_animate() {
+                                    "absolute left-0 top-0 h-full transition-all duration-100 ease-linear"
+                                } else {
+                                    "absolute left-0 top-0 h-full"
+                                },
+                                style: format!(
+                                    "width: {}%; background-color: {}; opacity: 0.8;",
+                                    filled_percent,
+                                    base_color
+                                ),
+                            }
                         }
+                    }
+                    // Measure boundary lines (subtle vertical lines at measure boundaries)
+                    for (index, measure) in measure_indicators.iter().enumerate() {
+                        if measure.position_percent > 0.0 {
+                            div {
+                                key: "measure-boundary-{index}",
+                                class: "absolute pointer-events-none z-30",
+                                style: format!(
+                                    "left: {}%; width: 1px; top: 0; bottom: 0; background-color: rgba(255, 255, 255, 0.3); transform: translateX(-50%);",
+                                    measure.position_percent
+                                ),
+                            }
+                        }
+                    }
+                } else {
+                    // Simple progress bar when no measure indicators
+                    // Background (muted color)
+                    div {
+                        class: "absolute inset-0 h-full",
+                        style: format!(
+                            "background-color: {}; opacity: 0.3;",
+                            base_color
+                        ),
+                    }
+                    // Filled progress portion
+                    div {
+                        class: if should_animate() {
+                            "absolute left-0 top-0 h-full transition-all duration-100 ease-linear"
+                        } else {
+                            "absolute left-0 top-0 h-full"
+                        },
+                        style: format!(
+                            "width: {}%; background-color: {}; opacity: 0.8;",
+                            current_progress,
+                            base_color
+                        ),
                     }
                 }
             }
