@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --package xtask --"
+
+# WASM target configuration
+# Required for getrandom 0.3 (used by lopdf via rand) to compile for WASM
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

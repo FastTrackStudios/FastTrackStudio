@@ -85,7 +85,7 @@ lucide-dioxus = "2"
 ui = { path = "modules/ui" }
 
 # Roam RPC framework (facet must match roam's version exactly)
-roam = { git = "https://github.com/bearcove/roam.git" }
+roam = { git = "https://github.com/bearcove/roam.git", rev = "1407c929" }
 facet = { version = "0.43.2", git = "https://github.com/facet-rs/facet", branch = "main", features = ["camino", "reflect", "uuid"] }
 microservice = { path = "modules/microservice" }
 
