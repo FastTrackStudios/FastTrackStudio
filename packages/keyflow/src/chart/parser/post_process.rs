@@ -3,7 +3,7 @@
 //! Handles section numbering, push/pull adjustments, and position calculation.
 
 use crate::chart::Chart;
-use crate::chart::types::ChordInstance;
+use crate::chart::types::{ChordInstance, RhythmElement};
 use crate::chord::{ChordRhythm, PushPullAmount};
 use crate::primitives::RootNotation;
 use crate::sections::SectionNumberer;
@@ -152,6 +152,24 @@ impl Chart {
                     }
                 }
                 i += 1;
+            }
+
+            // Sync rhythm_elements with updated chord durations
+            // We update the chord durations in rhythm_elements while preserving Space and Rest elements
+            // Match by chord symbol since space insertions can shift indices
+            for measure in section.measures_mut() {
+                for element in &mut measure.rhythm_elements {
+                    if let RhythmElement::Chord(chord_el) = element {
+                        // Find the matching chord by symbol (skip spaces which have symbol "s")
+                        if let Some(matching_chord) = measure
+                            .chords
+                            .iter()
+                            .find(|c| c.full_symbol == chord_el.full_symbol)
+                        {
+                            chord_el.duration = matching_chord.duration.clone();
+                        }
+                    }
+                }
             }
         }
     }

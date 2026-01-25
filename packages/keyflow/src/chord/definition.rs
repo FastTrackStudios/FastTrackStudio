@@ -519,6 +519,8 @@ impl Chord {
             TokenType::Triangle => Ok((ChordQuality::Major, 1)),
 
             // Diminished: "dim", "o", "°"
+            // Note: 'd' could also be part of "add" in other contexts.
+            // We only consume as Diminished if we see "dim", otherwise return Major with 0 consumed.
             TokenType::Letter('d') => {
                 if consumed + 2 < tokens.len() {
                     if let TokenType::Letter('i') = tokens[1].token_type {
@@ -527,14 +529,16 @@ impl Chord {
                         }
                     }
                 }
-                Err(ParseError::NoValidParser {
-                    context: "Expected 'dim' for diminished".to_string(),
-                })
+                // Not "dim" - don't consume, let other parsers handle it
+                Ok((ChordQuality::Major, 0))
             }
 
             TokenType::Letter('o') | TokenType::Circle => Ok((ChordQuality::Diminished, 1)),
 
             // Augmented: "aug", "+"
+            // Note: 'a' could also be the start of "add" (additions) which isn't a quality.
+            // We only consume as Augmented if we see "aug", otherwise return Major with 0 consumed
+            // to let additions parser handle "add9", "add11", etc.
             TokenType::Letter('a') => {
                 if consumed + 2 < tokens.len() {
                     if let TokenType::Letter('u') = tokens[1].token_type {
@@ -543,14 +547,15 @@ impl Chord {
                         }
                     }
                 }
-                Err(ParseError::NoValidParser {
-                    context: "Expected 'aug' for augmented".to_string(),
-                })
+                // Not "aug" - don't consume, let additions parser handle it
+                Ok((ChordQuality::Major, 0))
             }
 
             TokenType::Plus => Ok((ChordQuality::Augmented, 1)),
 
             // Suspended: "sus", "sus2", "sus4"
+            // Note: 's' could also be a space token or other syntax.
+            // We only consume as Suspended if we see "sus", otherwise return Major with 0 consumed.
             TokenType::Letter('s') => {
                 if consumed + 2 < tokens.len() {
                     if let TokenType::Letter('u') = tokens[1].token_type {
@@ -581,9 +586,8 @@ impl Chord {
                         }
                     }
                 }
-                Err(ParseError::NoValidParser {
-                    context: "Expected 'sus' for suspended".to_string(),
-                })
+                // Not "sus" - don't consume, let other parsers handle it
+                Ok((ChordQuality::Major, 0))
             }
 
             // Power chord: "5"

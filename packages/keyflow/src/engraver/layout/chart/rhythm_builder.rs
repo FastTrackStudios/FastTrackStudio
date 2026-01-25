@@ -229,16 +229,21 @@ fn extract_from_explicit(
     for (idx, element) in elements.iter().enumerate() {
         let (duration, is_rest, is_triplet) = extract_rhythm_parts(element);
 
+        // Skip 0-duration elements (like space markers for push)
+        if duration.ticks() <= 0 {
+            continue;
+        }
+
         // Track triplet groups for bracket rendering
         if is_triplet {
             if triplet_group_start.is_none() {
-                triplet_group_start = Some(idx);
+                triplet_group_start = Some(result.entries.len());
                 triplet_group_ticks = 0;
             }
             triplet_group_ticks += duration.ticks();
         } else if let Some(start) = triplet_group_start {
             // Non-triplet closes the group
-            result.tuplet_specs.push(TupletSpec::triplet(start, idx));
+            result.tuplet_specs.push(TupletSpec::triplet(start, result.entries.len()));
             triplet_group_start = None;
             triplet_group_ticks = 0;
         }
@@ -255,7 +260,7 @@ fn extract_from_explicit(
             if let Some(start) = triplet_group_start {
                 result
                     .tuplet_specs
-                    .push(TupletSpec::triplet(start, idx + 1));
+                    .push(TupletSpec::triplet(start, result.entries.len()));
                 triplet_group_start = None;
                 triplet_group_ticks = 0;
             }
@@ -276,16 +281,51 @@ fn extract_from_explicit(
     // we need to modify the end of the measure to accommodate the pushed chord
     if config.push_alters_rhythm {
         if let Some(spillbacks) = spillbacks {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[explicit-spillback] Processing {} spillbacks in extract_from_explicit",
+                spillbacks.len()
+            );
             for spillback in spillbacks {
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "[explicit-spillback] spillback: '{}' base={:?} level={}",
+                    spillback.chord_symbol, spillback.push_base, spillback.push_level
+                );
                 if spillback.push_base == PushPullBase::Triplet && spillback.push_level == 1 {
-                    // Check if the measure ends with a quarter rest that we can split
-                    // The spillback should create: triplet quarter rest + triplet eighth (for the pushed chord)
+                    // Check if the measure has room for the spillback
+                    // We need to carve out a quarter note's worth (480 ticks) from the end
+                    // and split it into triplet quarter + triplet eighth
                     if let Some(last_entry) = result.entries.last() {
                         let last_ticks = last_entry.duration().ticks();
-                        // Quarter note = 480 ticks
-                        if last_ticks == 480 {
+                        const QUARTER_TICKS: i32 = 480;
+
+                        #[cfg(debug_assertions)]
+                        eprintln!(
+                            "[explicit-spillback] last_ticks={} QUARTER_TICKS={}",
+                            last_ticks, QUARTER_TICKS
+                        );
+
+                        // We can handle any duration >= quarter note
+                        if last_ticks >= QUARTER_TICKS {
+                            #[cfg(debug_assertions)]
+                            eprintln!("[explicit-spillback] Expanding rhythm for spillback '{}'", spillback.chord_symbol);
+                            let was_rest = matches!(last_entry, RhythmEntry::Rest(_));
+                            let remaining_ticks = last_ticks - QUARTER_TICKS;
+
                             // Remove the last entry
-                            let was_rest = matches!(result.entries.pop(), Some(RhythmEntry::Rest(_)));
+                            result.entries.pop();
+
+                            // If there's remaining time before the triplet, add it back as quarters
+                            // (for proper beat-based segment positioning)
+                            let num_remaining_quarters = remaining_ticks / QUARTER_TICKS;
+                            for _ in 0..num_remaining_quarters {
+                                if was_rest {
+                                    result.entries.push(RhythmEntry::Rest(Duration::Quarter));
+                                } else {
+                                    result.entries.push(RhythmEntry::Note(Duration::Quarter));
+                                }
+                            }
 
                             // Create triplet quarter (rest or note) + triplet eighth (for spillback)
                             let triplet_quarter = Duration::triplet(DurationKind::Quarter);
@@ -313,7 +353,7 @@ fn extract_from_explicit(
                                 .tuplet_specs
                                 .push(TupletSpec::triplet(start_idx, result.entries.len()));
 
-                            // Update total ticks (should remain the same since triplet quarter + triplet eighth = quarter)
+                            // Update total ticks (should remain the same)
                             result.total_ticks =
                                 result.entries.iter().map(|e| e.duration().ticks()).sum();
                         }
@@ -665,7 +705,10 @@ fn extract_rhythm_parts(element: &RhythmElement) -> (Duration, bool, bool) {
                 let dur = lily_syntax_to_duration(lily, dotted, triplet);
                 (dur, false, triplet)
             } else {
-                (Duration::Quarter, false, false)
+                // For Default/Slashes rhythm, use the chord's actual duration
+                // Convert from MusicalDuration to notation Duration
+                let dur = duration_from_musical(&chord.duration);
+                (dur, false, false)
             }
         }
         RhythmElement::Rest(rest) => {
@@ -673,10 +716,53 @@ fn extract_rhythm_parts(element: &RhythmElement) -> (Duration, bool, bool) {
                 let dur = lily_syntax_to_duration(lily, dotted, triplet);
                 (dur, true, triplet)
             } else {
-                (Duration::Quarter, true, false)
+                // For Default rhythm, use the rest's actual duration
+                let dur = duration_from_musical(&rest.duration);
+                (dur, true, false)
             }
         }
-        RhythmElement::Space(_) => (Duration::Quarter, true, false),
+        RhythmElement::Space(space) => {
+            // For spaces, use the actual duration
+            // A space with 0 duration is just a marker and shouldn't add to rhythm
+            let dur = duration_from_musical(&space.duration);
+            // Check if this is a zero-duration space marker
+            let is_zero = space.duration.measure == 0
+                && space.duration.beat == 0
+                && space.duration.subdivision == 0;
+            if is_zero {
+                // Zero-duration space - use a minimal duration that won't affect layout
+                (Duration::new(DurationKind::SixtyFourth), true, false)
+            } else {
+                (dur, true, false)
+            }
+        }
+    }
+}
+
+/// Convert a MusicalDuration to notation Duration.
+///
+/// This maps the musical duration (measures.beats.subdivisions) to the closest
+/// notation Duration constant. Uses 4/4 time as default (480 ticks per beat).
+fn duration_from_musical(md: &crate::time::MusicalDuration) -> Duration {
+    use crate::time::TimeSignature;
+
+    // Calculate total ticks: 480 ticks per beat in 4/4
+    let time_sig = TimeSignature::common_time();
+    let beats = md.to_beats(time_sig);
+    let ticks = (beats * 480.0).round() as i32;
+
+    // Map to Duration constants (480 = quarter, 960 = half, 1920 = whole)
+    match ticks {
+        0 => Duration::Quarter, // Fallback for zero-duration (shouldn't happen normally)
+        t if t >= 1920 => Duration::Whole,
+        t if t >= 1440 => Duration::DottedHalf,
+        t if t >= 960 => Duration::Half,
+        t if t >= 720 => Duration::DottedQuarter,
+        t if t >= 480 => Duration::Quarter,
+        t if t >= 360 => Duration::DottedEighth,
+        t if t >= 240 => Duration::Eighth,
+        t if t >= 120 => Duration::Sixteenth,
+        _ => Duration::ThirtySecond,
     }
 }
 
