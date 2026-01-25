@@ -232,6 +232,7 @@ impl ChartLayoutManager {
                 .with_text_font_arc(self.text_font_data.clone())
                 .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
                 .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
                 .with_named_font_arc("section-note", self.text_font_data.clone())
                 .with_named_font_arc("title-bold", self.text_font_data.clone())
                 .with_named_font_arc("part-name-bold", self.text_font_data.clone());
@@ -294,6 +295,7 @@ impl ChartLayoutManager {
                 .with_text_font_arc(self.text_font_data.clone())
                 .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
                 .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
                 .with_named_font_arc("section-note", self.text_font_data.clone())
                 .with_named_font_arc("title-bold", self.text_font_data.clone())
                 .with_named_font_arc("part-name-bold", self.text_font_data.clone());
@@ -374,6 +376,7 @@ impl ChartLayoutManager {
                 .with_text_font_arc(self.text_font_data.clone())
                 .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
                 .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
                 .with_named_font_arc("section-note", self.text_font_data.clone())
                 .with_named_font_arc("title-bold", self.text_font_data.clone())
                 .with_named_font_arc("part-name-bold", self.text_font_data.clone());
@@ -468,6 +471,7 @@ impl ChartLayoutManager {
                 .with_text_font_arc(self.text_font_data.clone())
                 .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
                 .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
                 .with_named_font_arc("section-note", self.text_font_data.clone())
                 .with_named_font_arc("title-bold", self.text_font_data.clone())
                 .with_named_font_arc("part-name-bold", self.text_font_data.clone());
@@ -558,6 +562,7 @@ impl ChartLayoutManager {
                 .with_text_font_arc(self.text_font_data.clone())
                 .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
                 .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
                 .with_named_font_arc("section-note", self.text_font_data.clone())
                 .with_named_font_arc("title-bold", self.text_font_data.clone())
                 .with_named_font_arc("part-name-bold", self.text_font_data.clone());
@@ -569,6 +574,90 @@ impl ChartLayoutManager {
         }
 
         // Render with WHITE base color to prevent flashing
+        if let Some(wgpu_renderer) = self.wgpu_renderer.as_mut() {
+            wgpu_renderer.render_with_base_color(&scene, Color::WHITE)
+        } else {
+            Err("WebGPU renderer not initialized".to_string())
+        }
+    }
+
+    /// Render to a canvas element with fixed scale (no fit-to-width) (WASM only).
+    ///
+    /// Unlike `render_to_canvas_white`, this method does NOT scale the chart to
+    /// fill the container width. It renders at 1:1 scale (with DPI adjustment).
+    /// Useful when the container has CSS transforms (like skew) that distort
+    /// bounding rect measurements.
+    ///
+    /// # Arguments
+    /// * `canvas` - The HTML canvas element to render to
+    /// * `dpr` - Device pixel ratio for high-DPI displays
+    #[cfg(target_arch = "wasm32")]
+    pub async fn render_to_canvas_fixed_scale(
+        &mut self,
+        canvas: &web_sys::HtmlCanvasElement,
+        dpr: f64,
+    ) -> Result<(), String> {
+        use wasm::WebGpuRenderer;
+
+        // Initialize renderer if needed
+        if self.wgpu_renderer.is_none() {
+            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
+            self.wgpu_renderer = Some(renderer);
+        }
+
+        // Get canvas dimensions first
+        let canvas_width = canvas.width();
+        let canvas_height = canvas.height();
+
+        // Resize if needed
+        if let Some(renderer) = self.wgpu_renderer.as_mut() {
+            let (current_width, current_height) = renderer.dimensions();
+            if current_width != canvas_width || current_height != canvas_height {
+                renderer.resize(canvas_width, canvas_height);
+            }
+        }
+
+        // Create scene WITHOUT background fill
+        let mut scene = Scene::new();
+
+        // Get content offset from layout (to position at origin)
+        let (content_x, content_y) = self
+            .layout_result
+            .as_ref()
+            .map(|layout| {
+                let bounds = layout.scene.compute_bounds();
+                (bounds.x0.max(0.0), bounds.y0.max(0.0))
+            })
+            .unwrap_or((0.0, 0.0));
+
+        // Fixed scale: just DPI_SCALE * dpr (no fit-to-width scaling)
+        let total_scale = DPI_SCALE * dpr;
+
+        // Build transform: offset content to origin, then scale
+        let transform = Affine::translate((-content_x * total_scale, -content_y * total_scale))
+            * Affine::scale(total_scale);
+
+        // Render layout if available
+        if let Some(ref layout) = self.layout_result {
+            let mut renderer = SceneRenderBuilder::new()
+                .spatium(5.0)
+                .build()
+                .with_font(&self.smufl_font)
+                .with_text_font_arc(self.text_font_data.clone())
+                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
+                .with_named_font_arc("section-note", self.text_font_data.clone())
+                .with_named_font_arc("title-bold", self.text_font_data.clone())
+                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+
+            let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
+            renderer.set_viewport(viewport_rect);
+
+            renderer.render_with_transform(&mut scene, &layout.scene, transform);
+        }
+
+        // Render with WHITE base color
         if let Some(wgpu_renderer) = self.wgpu_renderer.as_mut() {
             wgpu_renderer.render_with_base_color(&scene, Color::WHITE)
         } else {
@@ -760,6 +849,7 @@ impl ChartLayoutManager {
                 .with_text_font_arc(self.text_font_data.clone())
                 .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
                 .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
                 .with_named_font_arc("section-note", self.text_font_data.clone())
                 .with_named_font_arc("title-bold", self.text_font_data.clone())
                 .with_named_font_arc("part-name-bold", self.text_font_data.clone());
@@ -804,16 +894,78 @@ impl ChartLayoutManager {
         let config = SvgExportConfig {
             width,
             height,
+            view_box: None, // Default viewBox
             include_semantic_ids: true,
             embed_glyphs: false,
             precision: 2,
             pretty_print: true,
             background: Some(vello::peniko::Color::WHITE),
             default_stroke_width: 0.5,
+            embedded_fonts: vec![
+                // SMuFL music symbol font
+                ("Bravura".to_string(), self.bravura_font_data.as_ref().clone()),
+                // Chord symbol fonts
+                ("MuseJazzText".to_string(), self.musejazz_font_data.as_ref().clone()),
+                ("MuseJazz".to_string(), self.musejazz_font_data.as_ref().clone()),
+                // Text fonts - FreeSans with all aliases used in the chart
+                ("FreeSans".to_string(), self.text_font_data.as_ref().clone()),
+                ("title-bold".to_string(), self.text_font_data.as_ref().clone()),
+                ("part-name-bold".to_string(), self.text_font_data.as_ref().clone()),
+                ("sans-serif".to_string(), self.text_font_data.as_ref().clone()),
+            ],
         };
 
         let mut serializer = SvgSerializer::new(config);
         Ok(serializer.serialize(&layout.scene))
+    }
+
+    /// Export each page as a separate SVG string (LilyPond-style).
+    ///
+    /// Returns a vector of SVG strings, one per page. Each SVG has:
+    /// - Proper dimensions matching the page size
+    /// - viewBox set to show only that page's content
+    /// - Semantic IDs on elements for editability
+    ///
+    /// This is the recommended export format for high-quality vector output
+    /// that can be edited in vector graphics software or converted to PDF.
+    pub fn export_pages_to_svg(&self) -> Result<Vec<String>, String> {
+        use keyflow::engraver::export::{SvgExportConfig, SvgSerializer};
+
+        let layout = self
+            .layout_result
+            .as_ref()
+            .ok_or_else(|| "No layout available for export".to_string())?;
+
+        let page_info = self.get_page_info();
+
+        if page_info.is_empty() {
+            // Single page / snippet mode - export the whole scene
+            return self.export_to_svg().map(|svg| vec![svg]);
+        }
+
+        let mut svg_pages = Vec::with_capacity(page_info.len());
+
+        for (_page_num, page_x, page_y, page_width, page_height) in page_info {
+            // Create config for this page with viewBox set to clip to this page's area
+            // Include embedded fonts so SVGs are self-contained
+            let config = SvgExportConfig::for_page(page_x, page_y, page_width, page_height)
+                // SMuFL music symbol font
+                .with_embedded_font("Bravura", self.bravura_font_data.as_ref().clone())
+                // Chord symbol fonts
+                .with_embedded_font("MuseJazzText", self.musejazz_font_data.as_ref().clone())
+                .with_embedded_font("MuseJazz", self.musejazz_font_data.as_ref().clone())
+                // Text fonts - FreeSans with all aliases used in the chart
+                .with_embedded_font("FreeSans", self.text_font_data.as_ref().clone())
+                .with_embedded_font("title-bold", self.text_font_data.as_ref().clone())
+                .with_embedded_font("part-name-bold", self.text_font_data.as_ref().clone())
+                .with_embedded_font("sans-serif", self.text_font_data.as_ref().clone());
+
+            let mut serializer = SvgSerializer::new(config);
+            let svg = serializer.serialize(&layout.scene);
+            svg_pages.push(svg);
+        }
+
+        Ok(svg_pages)
     }
 
     /// Export the current layout to PDF (vector-based).
@@ -953,31 +1105,26 @@ impl ChartLayoutManager {
 
     /// Get page information for multi-page PDF export.
     ///
-    /// Returns a vector of (page_number, x_offset, width, height) for each page.
-    /// Pages are laid out side-by-side in the scene with a gap between them.
-    pub fn get_page_info(&self) -> Vec<(u32, f64, f64, f64)> {
-        const PAGE_GAP: f64 = 20.0; // Gap between pages in the scene
-
+    /// Returns a vector of (page_number, x_offset, y_offset, width, height) for each page.
+    /// Uses the offsets stored in each PageLayout, which were calculated during layout
+    /// using the correct page gap and offset values.
+    pub fn get_page_info(&self) -> Vec<(u32, f64, f64, f64, f64)> {
         self.layout_result
             .as_ref()
             .map(|layout| {
-                let mut pages = Vec::new();
-                let mut x_offset = 0.0;
-
-                // Get the content origin to offset all pages
-                let bounds = layout.scene.compute_bounds();
-                let origin_x = bounds.x0;
-
-                for page in &layout.pages {
-                    pages.push((
-                        page.number,
-                        origin_x + x_offset,
-                        page.width,
-                        page.height,
-                    ));
-                    x_offset += page.width + PAGE_GAP;
-                }
-                pages
+                layout
+                    .pages
+                    .iter()
+                    .map(|page| {
+                        (
+                            page.number,
+                            page.x_offset,
+                            page.y_offset,
+                            page.width,
+                            page.height,
+                        )
+                    })
+                    .collect()
             })
             .unwrap_or_default()
     }
@@ -1033,6 +1180,7 @@ impl ChartLayoutManager {
                 .with_text_font_arc(self.text_font_data.clone())
                 .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
                 .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
+                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
                 .with_named_font_arc("section-note", self.text_font_data.clone())
                 .with_named_font_arc("title-bold", self.text_font_data.clone())
                 .with_named_font_arc("part-name-bold", self.text_font_data.clone());
@@ -1101,12 +1249,14 @@ impl ChartLayoutManager {
             let config = SvgExportConfig {
                 width,
                 height,
+                view_box: None,
                 include_semantic_ids: false,
                 embed_glyphs: false,
                 precision: 2,
                 pretty_print: false,
                 background: Some(vello::peniko::Color::WHITE),
                 default_stroke_width: 0.5,
+                embedded_fonts: Vec::new(),
             };
 
             let mut serializer = SvgSerializer::new(config);
@@ -1120,12 +1270,14 @@ impl ChartLayoutManager {
             let config = SvgExportConfig {
                 width: bounds.width(),
                 height: bounds.height(),
+                view_box: None,
                 include_semantic_ids: false,
                 embed_glyphs: false,
                 precision: 2,
                 pretty_print: false,
                 background: Some(vello::peniko::Color::WHITE),
                 default_stroke_width: 0.5,
+                embedded_fonts: Vec::new(),
             };
 
             let mut serializer = SvgSerializer::new(config);
@@ -1134,10 +1286,12 @@ impl ChartLayoutManager {
         }
 
         // Build font data for svg2pdf
+        // Note: Font names here are for logging - fontdb extracts actual family names from font files
+        // The important thing is that all required font data is loaded
         let fonts: Vec<(&str, &[u8])> = vec![
             ("Bravura", self.bravura_font_data.as_slice()),
-            ("MuseJazzText", self.musejazz_font_data.as_slice()),
-            ("MuseJazz", self.musejazz_font_data.as_slice()),
+            // MuseJazz font file has internal family name "MuseJazz Text" (with space)
+            ("MuseJazz Text", self.musejazz_font_data.as_slice()),
             ("FreeSans", self.text_font_data.as_slice()),
         ];
 
@@ -1174,21 +1328,10 @@ impl ChartLayoutManager {
         // We'll generate SVGs with viewport transforms for each page
 
         let mut svg_pages = Vec::new();
-        let bounds = layout.scene.compute_bounds();
-        let origin_y = bounds.y0;
 
-        for (_page_num, page_x, page_width, page_height) in &page_info {
+        for (_page_num, page_x, page_y, page_width, page_height) in &page_info {
             // Create SVG with viewBox set to this page's area
-            let config = SvgExportConfig {
-                width: *page_width,
-                height: *page_height,
-                include_semantic_ids: false,
-                embed_glyphs: false,
-                precision: 2,
-                pretty_print: false,
-                background: Some(vello::peniko::Color::WHITE),
-                default_stroke_width: 0.5,
-            };
+            let config = SvgExportConfig::for_page(*page_x, *page_y, *page_width, *page_height);
 
             // Create a translated view of the scene for this page
             // The SVG serializer will output the full scene, but we set the viewBox
@@ -1201,7 +1344,7 @@ impl ChartLayoutManager {
                 // Replace the viewBox in the SVG header
                 let viewbox = format!(
                     "viewBox=\"{:.2} {:.2} {:.2} {:.2}\"",
-                    page_x, origin_y, page_width, page_height
+                    page_x, page_y, page_width, page_height
                 );
 
                 // Find and replace the viewBox attribute
@@ -1225,10 +1368,12 @@ impl ChartLayoutManager {
         }
 
         // Build font data for svg2pdf
+        // Note: Font names here are for logging - fontdb extracts actual family names from font files
+        // The important thing is that all required font data is loaded
         let fonts: Vec<(&str, &[u8])> = vec![
             ("Bravura", self.bravura_font_data.as_slice()),
-            ("MuseJazzText", self.musejazz_font_data.as_slice()),
-            ("MuseJazz", self.musejazz_font_data.as_slice()),
+            // MuseJazz font file has internal family name "MuseJazz Text" (with space)
+            ("MuseJazz Text", self.musejazz_font_data.as_slice()),
             ("FreeSans", self.text_font_data.as_slice()),
         ];
 

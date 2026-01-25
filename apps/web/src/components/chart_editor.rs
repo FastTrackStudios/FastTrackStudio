@@ -260,6 +260,9 @@ pub fn StaticChartRenderer(
     source: Signal<String>,
     mode: Signal<PreviewMode>,
     canvas_id: Option<String>,
+    /// Fixed width for layout calculations (ignores container width from CSS).
+    /// Useful when container is transformed (skewed) and bounding rect is distorted.
+    fixed_layout_width: Option<f64>,
 ) -> Element {
     // Use provided canvas_id or default
     let canvas_id = canvas_id.unwrap_or_else(|| "static-chart-canvas".to_string());
@@ -279,7 +282,12 @@ pub fn StaticChartRenderer(
 
             // WebGPU rendering - static (no pan/zoom)
             // Handles parse errors gracefully without reinitializing
-            StaticChartCanvas { source: source, mode: mode, canvas_id: canvas_id.clone() }
+            StaticChartCanvas {
+                source: source,
+                mode: mode,
+                canvas_id: canvas_id.clone(),
+                fixed_layout_width: fixed_layout_width
+            }
         }
     }
 }
@@ -290,6 +298,8 @@ fn StaticChartCanvas(
     source: Signal<String>,
     mode: Signal<PreviewMode>,
     canvas_id: String,
+    /// Fixed width for layout calculations (ignores container width from CSS).
+    fixed_layout_width: Option<f64>,
 ) -> Element {
     #[cfg(target_arch = "wasm32")]
     {
@@ -332,9 +342,10 @@ fn StaticChartCanvas(
                             let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
                         }
 
-                        // Trigger initial render
-                        let trigger = *render_trigger_clone.peek();
-                        render_trigger_clone.set(trigger.wrapping_add(1));
+                        // Trigger initial render (safely handle if signal was dropped)
+                        if let Some(trigger) = render_trigger_clone.try_peek().ok().map(|r| *r) {
+                            render_trigger_clone.set(trigger.wrapping_add(1));
+                        }
                     }
                     Err(e) => {
                         error_state.set(Some(e));
@@ -371,8 +382,11 @@ fn StaticChartCanvas(
             let mut render_trigger_clone = render_trigger.clone();
             let resize_callback = Closure::wrap(Box::new(
                 move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| {
-                    let trigger = *render_trigger_clone.read();
-                    render_trigger_clone.set(trigger.wrapping_add(1));
+                    // Use try_peek() to safely handle dropped signals
+                    // (can happen if component unmounts while ResizeObserver is still active)
+                    if let Some(trigger) = render_trigger_clone.try_peek().ok().map(|r| *r) {
+                        render_trigger_clone.set(trigger.wrapping_add(1));
+                    }
                 },
             )
                 as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
@@ -435,13 +449,20 @@ fn StaticChartCanvas(
                         return;
                     };
 
-                    let rect = html_canvas.get_bounding_client_rect();
-                    let css_width = rect.width();
+                    // Use offsetWidth/offsetHeight instead of getBoundingClientRect
+                    // because offset dimensions are NOT affected by CSS transforms (like skew).
+                    // This gives us the true CSS layout size regardless of parent transforms.
+                    let css_width = html_canvas.offset_width() as f64;
+                    let css_height = html_canvas.offset_height() as f64;
 
                     let buffer_width = (css_width * dpr) as u32;
-                    let buffer_height = (rect.height() * dpr) as u32;
+                    let buffer_height = (css_height * dpr) as u32;
                     html_canvas.set_width(buffer_width);
                     html_canvas.set_height(buffer_height);
+
+                    // Use fixed layout width if provided (controls chart "density"/wrapping),
+                    // otherwise use the actual CSS width
+                    let layout_width = fixed_layout_width.unwrap_or(css_width);
 
                     // Try to parse the chart
                     let chart_result = if source_text.trim().is_empty() {
@@ -461,9 +482,12 @@ fn StaticChartCanvas(
                         let chart = chart_result.unwrap();
 
                         // Layout chart for export (no page offsets, positioned at origin)
-                        manager.layout_chart_for_export(&chart, css_width, is_snippet);
+                        // Use layout_width which controls chart "density" (how much content per line)
+                        manager.layout_chart_for_export(&chart, layout_width, is_snippet);
 
-                        // Render with WHITE base color to prevent flashing during transitions
+                        // Render with fit-to-width scaling - the chart will scale to fill
+                        // the container width. Since we're using offsetWidth (unaffected by
+                        // transforms), this works correctly even with skewed containers.
                         if let Err(e) = manager.render_to_canvas_white(&html_canvas, dpr).await {
                             tracing::error!("Failed to render static chart: {}", e);
                         }
@@ -654,9 +678,10 @@ fn DynamicChartCanvas(
                             let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
                         }
 
-                        // Trigger initial render
-                        let trigger = *render_trigger_clone.peek();
-                        render_trigger_clone.set(trigger.wrapping_add(1));
+                        // Trigger initial render (safely handle if signal was dropped)
+                        if let Some(trigger) = render_trigger_clone.try_peek().ok().map(|r| *r) {
+                            render_trigger_clone.set(trigger.wrapping_add(1));
+                        }
                     }
                     Err(e) => {
                         error_state.set(Some(e));
@@ -699,9 +724,12 @@ fn DynamicChartCanvas(
             let mut last_mouse_x_clone = last_mouse_x.clone();
             let mut last_mouse_y_clone = last_mouse_y.clone();
             let mousedown_closure = Closure::wrap(Box::new(move |event: web_sys::MouseEvent| {
-                is_dragging_clone.set(true);
-                last_mouse_x_clone.set(event.client_x() as f64);
-                last_mouse_y_clone.set(event.client_y() as f64);
+                // Safely handle dropped signals (component may have unmounted)
+                if is_dragging_clone.try_peek().is_ok() {
+                    is_dragging_clone.set(true);
+                    last_mouse_x_clone.set(event.client_x() as f64);
+                    last_mouse_y_clone.set(event.client_y() as f64);
+                }
             }) as Box<dyn FnMut(_)>);
             canvas
                 .add_event_listener_with_callback(
@@ -719,19 +747,32 @@ fn DynamicChartCanvas(
             let mut transform_y_clone = transform_y.clone();
             let mut render_trigger_clone = render_trigger.clone();
             let mousemove_closure = Closure::wrap(Box::new(move |event: web_sys::MouseEvent| {
-                if *is_dragging_clone.read() {
-                    let last_x = *last_mouse_x_clone.read();
-                    let last_y = *last_mouse_y_clone.read();
+                // Safely handle dropped signals (component may have unmounted)
+                let Some(is_dragging) = is_dragging_clone.try_read().ok().map(|r| *r) else {
+                    return;
+                };
+                if is_dragging {
+                    let Some(last_x) = last_mouse_x_clone.try_read().ok().map(|r| *r) else {
+                        return;
+                    };
+                    let Some(last_y) = last_mouse_y_clone.try_read().ok().map(|r| *r) else {
+                        return;
+                    };
                     let dx = event.client_x() as f64 - last_x;
                     let dy = event.client_y() as f64 - last_y;
-                    let cur_tx = *transform_x_clone.read();
-                    let cur_ty = *transform_y_clone.read();
+                    let Some(cur_tx) = transform_x_clone.try_read().ok().map(|r| *r) else {
+                        return;
+                    };
+                    let Some(cur_ty) = transform_y_clone.try_read().ok().map(|r| *r) else {
+                        return;
+                    };
                     transform_x_clone.set(cur_tx + dx);
                     transform_y_clone.set(cur_ty + dy);
                     last_mouse_x_clone.set(event.client_x() as f64);
                     last_mouse_y_clone.set(event.client_y() as f64);
-                    let trigger = *render_trigger_clone.read();
-                    render_trigger_clone.set(trigger.wrapping_add(1));
+                    if let Some(trigger) = render_trigger_clone.try_read().ok().map(|r| *r) {
+                        render_trigger_clone.set(trigger.wrapping_add(1));
+                    }
                 }
             }) as Box<dyn FnMut(_)>);
             canvas
@@ -745,7 +786,10 @@ fn DynamicChartCanvas(
             // Mouse up - stop dragging
             let mut is_dragging_clone = is_dragging.clone();
             let mouseup_closure = Closure::wrap(Box::new(move |_event: web_sys::MouseEvent| {
-                is_dragging_clone.set(false);
+                // Safely handle dropped signals (component may have unmounted)
+                if is_dragging_clone.try_peek().is_ok() {
+                    is_dragging_clone.set(false);
+                }
             }) as Box<dyn FnMut(_)>);
             window
                 .add_event_listener_with_callback(
@@ -763,8 +807,12 @@ fn DynamicChartCanvas(
             let wheel_closure = Closure::wrap(Box::new(move |event: web_sys::WheelEvent| {
                 event.prevent_default();
 
+                // Safely handle dropped signals (component may have unmounted)
+                let Some(old_scale) = scale_clone.try_read().ok().map(|r| *r) else {
+                    return;
+                };
+
                 let delta = -event.delta_y() / 500.0;
-                let old_scale = *scale_clone.read();
                 let new_scale = (old_scale * (1.0 + delta)).clamp(0.25, 4.0);
 
                 // Zoom towards mouse position
@@ -778,8 +826,12 @@ fn DynamicChartCanvas(
                     let mouse_y = event.client_y() as f64 - rect.top();
 
                     let scale_change = new_scale / old_scale;
-                    let cur_tx = *transform_x_clone.read();
-                    let cur_ty = *transform_y_clone.read();
+                    let Some(cur_tx) = transform_x_clone.try_read().ok().map(|r| *r) else {
+                        return;
+                    };
+                    let Some(cur_ty) = transform_y_clone.try_read().ok().map(|r| *r) else {
+                        return;
+                    };
                     let new_tx = mouse_x - (mouse_x - cur_tx) * scale_change;
                     let new_ty = mouse_y - (mouse_y - cur_ty) * scale_change;
 
@@ -788,8 +840,9 @@ fn DynamicChartCanvas(
                 }
 
                 scale_clone.set(new_scale);
-                let trigger = *render_trigger_clone.read();
-                render_trigger_clone.set(trigger.wrapping_add(1));
+                if let Some(trigger) = render_trigger_clone.try_read().ok().map(|r| *r) {
+                    render_trigger_clone.set(trigger.wrapping_add(1));
+                }
             }) as Box<dyn FnMut(_)>);
             let mut wheel_options = web_sys::AddEventListenerOptions::new();
             wheel_options.set_passive(false);
@@ -806,9 +859,10 @@ fn DynamicChartCanvas(
             let mut render_trigger_clone = render_trigger.clone();
             let resize_callback = Closure::wrap(Box::new(
                 move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| {
-                    // Trigger a re-render when size changes
-                    let trigger = *render_trigger_clone.read();
-                    render_trigger_clone.set(trigger.wrapping_add(1));
+                    // Safely handle dropped signals (component may have unmounted)
+                    if let Some(trigger) = render_trigger_clone.try_read().ok().map(|r| *r) {
+                        render_trigger_clone.set(trigger.wrapping_add(1));
+                    }
                 },
             )
                 as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
@@ -1168,7 +1222,7 @@ async fn export_pdf_rasterized(
 ) -> Result<Vec<u8>, String> {
     use wasm_bindgen::JsCast;
 
-    // Get page information (page_number, x_offset, width, height)
+    // Get page information (page_number, x_offset, y_offset, width, height)
     let page_info = manager.get_page_info();
 
     if page_info.is_empty() {
@@ -1177,9 +1231,6 @@ async fn export_pdf_rasterized(
 
     // Scale factor for print quality (216 DPI)
     let scale_factor = 3.0;
-
-    // Get content origin Y (all pages share the same Y origin)
-    let (_, origin_y) = manager.get_content_origin().unwrap_or((0.0, 0.0));
 
     // Create off-screen canvas (will be resized for each page)
     let window = web_sys::window().ok_or("No window")?;
@@ -1193,7 +1244,7 @@ async fn export_pdf_rasterized(
     // Render each page and collect PNG data
     let mut pages_data: Vec<(Vec<u8>, f64, f64)> = Vec::new();
 
-    for (_page_num, page_x, page_width, page_height) in &page_info {
+    for (_page_num, page_x, page_y, page_width, page_height) in &page_info {
         // Set canvas size for this page
         let canvas_width = (*page_width * scale_factor).ceil() as u32;
         let canvas_height = (*page_height * scale_factor).ceil() as u32;
@@ -1203,7 +1254,7 @@ async fn export_pdf_rasterized(
         // Render this page to the canvas
         // Offset so this specific page fills the canvas
         manager
-            .render_page_to_canvas(&canvas, *page_x, origin_y, scale_factor)
+            .render_page_to_canvas(&canvas, *page_x, *page_y, scale_factor)
             .await?;
 
         // Extract canvas content as PNG
@@ -1266,32 +1317,17 @@ fn ExportButton(source: Signal<String>) -> Element {
                     }
                 };
 
-                // Layout in page mode for export (A4)
-                manager.layout_chart_with_mode(&chart, 595.0, false);
+                // Layout in page mode for export (A4, no page offsets for clean export)
+                manager.layout_chart_for_export(&chart, 595.0, false);
 
                 // Export based on format
+                let title = chart.metadata.title.as_deref().unwrap_or("chart");
+                let base_filename = title.replace(' ', "_");
+
                 let (content, mime_type, extension): (Vec<u8>, &str, &str) = match format {
                     "pdf" => {
-                        // Use SVG-based PDF export for vector quality
+                        // Use SVG-to-PDF conversion for vector output
                         match manager.export_multi_page_pdf_via_svg() {
-                            Ok(bytes) => (bytes, "application/pdf", "pdf"),
-                            Err(e) => {
-                                tracing::warn!("SVG-based PDF export failed: {}, falling back to rasterized", e);
-                                // Fall back to rasterized PDF export
-                                match export_pdf_rasterized(&mut manager).await {
-                                    Ok(bytes) => (bytes, "application/pdf", "pdf"),
-                                    Err(e) => {
-                                        tracing::error!("Failed to export PDF: {}", e);
-                                        is_exporting.set(false);
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    "pdf-raster" => {
-                        // Use rasterized PDF export for pixel-perfect output
-                        match export_pdf_rasterized(&mut manager).await {
                             Ok(bytes) => (bytes, "application/pdf", "pdf"),
                             Err(e) => {
                                 tracing::error!("Failed to export PDF: {}", e);
@@ -1301,9 +1337,24 @@ fn ExportButton(source: Signal<String>) -> Element {
                         }
                     }
                     _ => {
-                        // Default to SVG
-                        match manager.export_to_svg() {
-                            Ok(svg) => (svg.into_bytes(), "image/svg+xml", "svg"),
+                        // SVG export - use per-page export for LilyPond-style output
+                        match manager.export_pages_to_svg() {
+                            Ok(pages) => {
+                                if pages.len() == 1 {
+                                    // Single page - export directly
+                                    (pages.into_iter().next().unwrap().into_bytes(), "image/svg+xml", "svg")
+                                } else {
+                                    // Multi-page - create a zip file containing all pages
+                                    match create_svg_zip(&pages, &base_filename) {
+                                        Ok(zip_bytes) => (zip_bytes, "application/zip", "zip"),
+                                        Err(e) => {
+                                            tracing::error!("Failed to create zip: {}", e);
+                                            is_exporting.set(false);
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
                             Err(e) => {
                                 tracing::error!("Failed to export SVG: {}", e);
                                 is_exporting.set(false);
@@ -1333,10 +1384,8 @@ fn ExportButton(source: Signal<String>) -> Element {
                                     let link = link.unchecked_into::<web_sys::HtmlAnchorElement>();
                                     link.set_href(&url);
 
-                                    // Get chart title for filename
-                                    let title = chart.metadata.title.as_deref().unwrap_or("chart");
-                                    let filename =
-                                        format!("{}.{}", title.replace(' ', "_"), extension);
+                                    // Use pre-computed filename
+                                    let filename = format!("{}.{}", base_filename, extension);
                                     link.set_download(&filename);
 
                                     // Trigger download
@@ -1496,4 +1545,34 @@ fn highlight_class(kind: HighlightKind) -> &'static str {
         HighlightKind::Whitespace => "",
         HighlightKind::Unknown => "text-gray-500", // Muted instead of red
     }
+}
+
+/// Create a zip file containing multiple SVG pages.
+///
+/// Each SVG is stored as `{base_filename}_page{N}.svg` where N is 1-indexed.
+#[cfg(target_arch = "wasm32")]
+fn create_svg_zip(pages: &[String], base_filename: &str) -> Result<Vec<u8>, String> {
+    use std::io::{Cursor, Write};
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+
+    let mut buffer = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(&mut buffer);
+
+    let options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .compression_level(Some(6));
+
+    for (i, svg_content) in pages.iter().enumerate() {
+        let filename = format!("{}_page{}.svg", base_filename, i + 1);
+        zip.start_file(&filename, options)
+            .map_err(|e| format!("Failed to create zip entry: {e}"))?;
+        zip.write_all(svg_content.as_bytes())
+            .map_err(|e| format!("Failed to write SVG to zip: {e}"))?;
+    }
+
+    zip.finish()
+        .map_err(|e| format!("Failed to finalize zip: {e}"))?;
+
+    Ok(buffer.into_inner())
 }

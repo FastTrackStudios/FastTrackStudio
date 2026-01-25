@@ -10,8 +10,9 @@ mod state;
 
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    ArrowLeft, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Code, FileCode,
-    FileText, Github, Music, PenLine, PenTool, Users,
+    ArrowLeft, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Circle, Code, ExternalLink,
+    FileCode, FileText, Github, Music, PenLine, PenTool, Play, SkipBack, SkipForward, Square, User,
+    Users,
 };
 
 // Static assets
@@ -29,11 +30,20 @@ pub enum Route {
     DocsHome {},
     #[route("/keyflow/chart")]
     ChartEditor {},
-    // Unified snippets browser - optional pattern ID for deep linking
+    // Keyflow docs
+    #[route("/docs/keyflow")]
+    DocsKeyflow {},
     #[route("/docs/keyflow/snippets")]
     SnippetsBrowser {},
     #[route("/docs/keyflow/snippets/:id")]
     SnippetsView { id: String },
+    // Other docs sections
+    #[route("/docs/reaper")]
+    DocsReaper {},
+    #[route("/docs/desktop")]
+    DocsDesktop {},
+    #[route("/docs/plugins")]
+    DocsPlugins {},
     // Legacy routes - redirect to new ones
     #[route("/docs/keyflow/chart/tests")]
     PatternBrowser {},
@@ -99,88 +109,190 @@ fn App() -> Element {
 /// Main layout with navigation
 #[component]
 fn Layout() -> Element {
+    let route = use_route::<Route>();
+    let is_home = matches!(route, Route::Home {});
+
     rsx! {
         div {
             class: "min-h-screen flex flex-col text-foreground",
 
-            // Navigation header
+            // Floating glass navbar
             nav {
-                class: "bg-card border-b border-border sticky top-0 z-50",
+                class: if is_home {
+                    "fixed top-0 left-0 right-0 z-50"
+                } else {
+                    "sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border/50"
+                },
 
                 div {
-                    class: "max-w-7xl mx-auto px-4 py-3 flex items-center justify-between",
+                    class: "max-w-7xl mx-auto px-4 lg:px-8",
 
-                    // Logo and title
-                    Link {
-                        to: Route::Home {},
-                        class: "flex items-center gap-2 text-foreground text-xl font-bold hover:text-primary transition-colors",
-                        span { "FastTrackStudio" }
-                        {
-                            // Show section name based on current route
-                            let route = use_route::<Route>();
-                            let section = match route {
-                                Route::ChartEditor {} => Some("Keyflow"),
-                                Route::DocsHome {}
-                                | Route::SnippetsBrowser {}
-                                | Route::SnippetsView { .. }
-                                | Route::PatternBrowser {}
-                                | Route::PatternView { .. } => Some("Docs"),
-                                _ => None,
-                            };
-                            if let Some(name) = section {
-                                rsx! {
-                                    span { class: "text-muted-foreground font-normal", "{name}" }
+                    div {
+                        class: if is_home {
+                            "flex items-center justify-between py-4 px-6 my-4 rounded-2xl bg-card/60 backdrop-blur-xl border border-white/[0.08] shadow-lg shadow-black/5"
+                        } else {
+                            "flex items-center justify-between py-3"
+                        },
+
+                        // Logo with icon
+                        Link {
+                            to: Route::Home {},
+                            class: "flex items-center gap-3 group",
+
+                            // Logo icon - stylized "F" with music note aesthetic
+                            div {
+                                class: "w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-lg shadow-primary/20 group-hover:shadow-primary/40 transition-shadow",
+                                span {
+                                    class: "text-primary-foreground font-black text-sm",
+                                    "F"
                                 }
-                            } else {
-                                rsx! {}
+                            }
+
+                            div {
+                                class: "flex flex-col",
+                                span {
+                                    class: "text-foreground font-semibold text-sm leading-tight group-hover:text-primary transition-colors",
+                                    "FastTrackStudio"
+                                }
+                                // Show section name based on current route
+                                {
+                                    let section = match route {
+                                        Route::ChartEditor {} => Some("Keyflow Editor"),
+                                        Route::DocsHome {}
+                                        | Route::DocsKeyflow {}
+                                        | Route::DocsReaper {}
+                                        | Route::DocsDesktop {}
+                                        | Route::DocsPlugins {}
+                                        | Route::SnippetsBrowser {}
+                                        | Route::SnippetsView { .. }
+                                        | Route::PatternBrowser {}
+                                        | Route::PatternView { .. } => Some("Documentation"),
+                                        _ => None,
+                                    };
+                                    if let Some(name) = section {
+                                        rsx! {
+                                            span {
+                                                class: "text-muted-foreground text-xs leading-tight",
+                                                "{name}"
+                                            }
+                                        }
+                                    } else {
+                                        rsx! {}
+                                    }
+                                }
+                            }
+                        }
+
+                        // Center navigation (hidden on mobile)
+                        div {
+                            class: "hidden md:flex items-center gap-1 px-1.5 py-1.5 rounded-xl bg-muted/50",
+
+                            NavLink {
+                                to: Route::DocsHome {},
+                                icon: rsx! { BookOpen { class: "w-4 h-4" } },
+                                label: "Docs"
+                            }
+
+                            NavLink {
+                                to: Route::ChartEditor {},
+                                icon: rsx! { PenTool { class: "w-4 h-4" } },
+                                label: "Editor"
+                            }
+
+                            NavLink {
+                                to: Route::SnippetsBrowser {},
+                                icon: rsx! { FileCode { class: "w-4 h-4" } },
+                                label: "Snippets"
+                            }
+                        }
+
+                        // Right side actions
+                        div {
+                            class: "flex items-center gap-2",
+
+                            // GitHub link
+                            a {
+                                href: "https://github.com/codywright/FastTrackStudio",
+                                target: "_blank",
+                                class: "p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all",
+                                title: "View on GitHub",
+                                Github { class: "w-5 h-5" }
+                            }
+
+                            // Primary CTA button
+                            Link {
+                                to: Route::ChartEditor {},
+                                class: "hidden sm:flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 hover:shadow-primary/30",
+                                PenTool { class: "w-4 h-4" }
+                                span { "Try Editor" }
                             }
                         }
                     }
+                }
+            }
 
-                    // Navigation links
+            // Main content area - add top padding on home to account for fixed nav
+            main {
+                class: if is_home { "flex-1" } else { "flex-1" },
+                Outlet::<Route> {}
+            }
+
+            // Minimal footer
+            footer {
+                class: "border-t border-border/50 py-8 bg-card/30",
+
+                div {
+                    class: "max-w-7xl mx-auto px-4 lg:px-8",
+
                     div {
-                        class: "flex items-center gap-4",
+                        class: "flex flex-col sm:flex-row items-center justify-between gap-4",
 
-                        Link {
-                            to: Route::DocsHome {},
-                            class: "flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-md hover:bg-accent",
-                            BookOpen { class: "w-4 h-4" }
-                            span { "Docs" }
+                        div {
+                            class: "flex items-center gap-2 text-muted-foreground text-sm",
+                            span { "© 2024 FastTrackStudio" }
+                            span { class: "text-border", "•" }
+                            span { "Built with Rust & Dioxus" }
                         }
 
-                        Link {
-                            to: Route::ChartEditor {},
-                            class: "flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-md hover:bg-accent",
-                            PenTool { class: "w-4 h-4" }
-                            span { "Editor" }
-                        }
+                        div {
+                            class: "flex items-center gap-4",
 
-                        a {
-                            href: "https://github.com/codywright/FastTrackStudio",
-                            target: "_blank",
-                            class: "flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-md hover:bg-accent",
-                            Github { class: "w-4 h-4" }
-                            span { "GitHub" }
+                            a {
+                                href: "https://github.com/codywright/FastTrackStudio",
+                                target: "_blank",
+                                class: "text-muted-foreground hover:text-foreground transition-colors text-sm",
+                                "GitHub"
+                            }
+
+                            Link {
+                                to: Route::DocsHome {},
+                                class: "text-muted-foreground hover:text-foreground transition-colors text-sm",
+                                "Documentation"
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
 
-            // Main content area
-            main {
-                class: "flex-1",
-                Outlet::<Route> {}
-            }
+/// Navigation link component with active state
+#[component]
+fn NavLink(to: Route, icon: Element, label: &'static str) -> Element {
+    let current_route = use_route::<Route>();
+    let is_active = std::mem::discriminant(&current_route) == std::mem::discriminant(&to);
 
-            // Footer
-            footer {
-                class: "bg-card border-t border-border py-4",
-
-                div {
-                    class: "max-w-7xl mx-auto px-4 text-center text-muted-foreground text-sm",
-                    "FastTrackStudio Documentation"
-                }
-            }
+    rsx! {
+        Link {
+            to: to,
+            class: if is_active {
+                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-foreground bg-background shadow-sm text-sm font-medium transition-all"
+            } else {
+                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-background/50 text-sm transition-all"
+            },
+            {icon}
+            span { "{label}" }
         }
     }
 }
@@ -190,7 +302,7 @@ fn Layout() -> Element {
 const DEMO_CHARTS: &[&str] = &[
     // Complex funk/jazz - Thriller (Dirty Loops)
     r#"Thriller
-120bpm 4/4 #Ab
+120bpm 4/4 #Eb
 /push = triplet
 
 HITS
@@ -277,7 +389,7 @@ fn Home() -> Element {
 
     rsx! {
         div {
-            class: "relative",
+            class: "relative pt-24",
 
             // Decorative gradient overlays - diagonal beams like reference
             div {
@@ -359,84 +471,15 @@ fn Home() -> Element {
                     }
                 }
 
-                // Showcase section with perspective transform - live editor demo
-                div {
-                    class: "mx-auto -mt-16 max-w-7xl",
-                    style: "-webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%); mask-image: linear-gradient(to bottom, black 50%, transparent 100%);",
-
-                    div {
-                        class: "-mr-16 pl-16 lg:-mr-56 lg:pl-56",
-                        style: "perspective: 1200px; -webkit-mask-image: linear-gradient(to right, black 50%, transparent 100%); mask-image: linear-gradient(to right, black 50%, transparent 100%);",
-
-                        div {
-                            style: "transform: rotateX(20deg);",
-
-                            // Live editor card with skew (sized to content)
-                            div {
-                                class: "lg:h-[44rem] relative inline-block",
-                                style: "transform: skewX(0.36rad);",
-
-                                div {
-                                    class: "rounded-lg z-[2] relative border border-border bg-card overflow-hidden h-full w-fit",
-
-                                    // Editor header
-                                    div {
-                                        class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
-
-                                        div { class: "w-3 h-3 rounded-full bg-red-500/80" }
-                                        div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
-                                        div { class: "w-3 h-3 rounded-full bg-green-500/80" }
-
-                                        span {
-                                            class: "ml-4 text-sm text-muted-foreground",
-                                            "song_title.kf"
-                                        }
-                                    }
-
-                                    // Typewriter animation drives the source signal
-                                    components::ChartTypewriter {
-                                        output: source,
-                                        charts: charts.clone(),
-                                        speed_ms: 35,
-                                        delay_between_charts_ms: 4000
-                                    }
-
-                                    // Split view: Editor on left, Page preview on right (sized to A4 width)
-                                    div {
-                                        class: "flex h-[calc(100%-3rem)]",
-
-                                        // Left side - Text editor (fixed width, read-only animation)
-                                        div {
-                                            class: "w-72 border-r border-border overflow-hidden shrink-0",
-
-                                            components::HighlightedEditor {
-                                                value: source(),
-                                                on_change: move |_: String| {}, // Read-only for demo
-                                                placeholder: "",
-                                                textarea_id: Some("landing-editor".to_string())
-                                            }
-                                        }
-
-                                        // Right side - Live chart preview (matches rendered page width)
-                                        div {
-                                            class: "overflow-hidden shrink-0",
-                                            style: "width: 480px;",
-
-                                            components::StaticChartRenderer {
-                                                source: source,
-                                                mode: preview_mode,
-                                                canvas_id: Some("landing-chart-canvas".to_string())
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                // 3D Carousel showcase section
+                ShowcaseCarousel {
+                    source: source,
+                    preview_mode: preview_mode,
+                    charts: charts.clone()
                 }
             }
 
-            // Features section
+            // Documentation sections
             section {
                 class: "relative z-10 py-24",
 
@@ -444,9 +487,60 @@ fn Home() -> Element {
                     class: "mx-auto max-w-5xl px-6",
 
                     h2 {
-                        class: "text-center text-lg font-medium text-muted-foreground mb-16",
+                        class: "text-center text-lg font-medium text-muted-foreground mb-4",
                         "Everything you need for modern music production"
                     }
+
+                    p {
+                        class: "text-center text-3xl font-semibold text-foreground mb-12",
+                        "Explore the Toolkit"
+                    }
+
+                    // 4 main documentation sections
+                    div {
+                        class: "grid md:grid-cols-2 gap-6",
+
+                        LandingDocsCard {
+                            to: Route::DocsKeyflow {},
+                            title: "Keyflow",
+                            description: "Chart notation language with GPU rendering",
+                            icon: rsx! { FileText { class: "w-6 h-6" } },
+                            color: "emerald"
+                        }
+
+                        LandingDocsCard {
+                            to: Route::DocsReaper {},
+                            title: "REAPER Extension",
+                            description: "Deep DAW integration and transport sync",
+                            icon: rsx! { Music { class: "w-6 h-6" } },
+                            color: "violet"
+                        }
+
+                        LandingDocsCard {
+                            to: Route::DocsDesktop {},
+                            title: "Desktop App",
+                            description: "Setlists, lyrics, and live performance",
+                            icon: rsx! { lucide_dioxus::Monitor { class: "w-6 h-6" } },
+                            color: "blue"
+                        }
+
+                        LandingDocsCard {
+                            to: Route::DocsPlugins {},
+                            title: "Audio Plugins",
+                            description: "CLAP and VST3 with nih-plug",
+                            icon: rsx! { lucide_dioxus::SlidersHorizontal { class: "w-6 h-6" } },
+                            color: "amber"
+                        }
+                    }
+                }
+            }
+
+            // Features highlights section
+            section {
+                class: "relative z-10 py-16 border-t border-border/30",
+
+                div {
+                    class: "mx-auto max-w-5xl px-6",
 
                     div {
                         class: "grid md:grid-cols-3 gap-8",
@@ -499,12 +593,770 @@ fn HomeFeature(title: &'static str, description: &'static str, icon: Element) ->
     }
 }
 
-/// Docs home page - Keyflow documentation
+/// Landing page docs section card with colored accent
+#[component]
+fn LandingDocsCard(
+    to: Route,
+    title: &'static str,
+    description: &'static str,
+    icon: Element,
+    color: &'static str,
+) -> Element {
+    let (bg_color, border_color, text_color) = match color {
+        "emerald" => (
+            "bg-emerald-500/10",
+            "hover:border-emerald-500/50 hover:shadow-emerald-500/5",
+            "text-emerald-500",
+        ),
+        "violet" => (
+            "bg-violet-500/10",
+            "hover:border-violet-500/50 hover:shadow-violet-500/5",
+            "text-violet-500",
+        ),
+        "blue" => (
+            "bg-blue-500/10",
+            "hover:border-blue-500/50 hover:shadow-blue-500/5",
+            "text-blue-500",
+        ),
+        "amber" => (
+            "bg-amber-500/10",
+            "hover:border-amber-500/50 hover:shadow-amber-500/5",
+            "text-amber-500",
+        ),
+        _ => ("bg-primary/10", "hover:border-primary/50", "text-primary"),
+    };
+
+    rsx! {
+        Link {
+            to: to,
+            class: "group flex items-center gap-4 p-5 rounded-xl border border-border/50 bg-card/30 transition-all {border_color} hover:shadow-lg hover:bg-card/50",
+
+            div {
+                class: "shrink-0 rounded-lg p-2.5 {bg_color} {text_color}",
+                {icon}
+            }
+
+            div {
+                class: "min-w-0",
+                h3 {
+                    class: "font-semibold text-foreground group-hover:{text_color} transition-colors",
+                    "{title}"
+                }
+                p {
+                    class: "text-sm text-muted-foreground truncate",
+                    "{description}"
+                }
+            }
+
+            ChevronRight {
+                class: "w-5 h-5 text-muted-foreground/50 group-hover:text-muted-foreground ml-auto shrink-0 transition-colors"
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Horizontal Showcase Strip with Perspective
+// =============================================================================
+
+/// Number of cards in the showcase
+const SHOWCASE_CARD_COUNT: usize = 5;
+
+/// Individual card widths in pixels (Keyflow, Desktop, REAPER, Plugins, Collaboration)
+/// Keyflow: editor (224px/w-56) + preview (500px) = 724px
+const CARD_WIDTHS: [i32; 5] = [724, 480, 480, 480, 480];
+
+/// Gap between cards in pixels
+const CARD_GAP: i32 = 24;
+
+/// Horizontal showcase strip with skewed perspective
+#[component]
+fn ShowcaseCarousel(
+    source: Signal<String>,
+    preview_mode: Signal<components::PreviewMode>,
+    charts: Vec<String>,
+) -> Element {
+    let n = SHOWCASE_CARD_COUNT;
+
+    // Current card index for dot indicators
+    let mut current_index = use_signal(|| 0_usize);
+
+    // Scroll offset for smooth animation
+    let mut scroll_offset = use_signal(|| 0_i32);
+
+    let current_card = *current_index.read();
+    let offset = *scroll_offset.read();
+
+    rsx! {
+        div {
+            class: "-mt-8 relative w-full",
+
+            // Navigation controls at top
+            div {
+                class: "flex items-center justify-center gap-4 mb-6 relative z-20",
+
+                // Previous button
+                button {
+                    class: "p-2.5 rounded-full bg-card/80 border border-border hover:bg-card hover:border-primary/50 transition-all text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed",
+                    disabled: current_card == 0,
+                    onclick: move |_| {
+                        let idx = *current_index.peek();
+                        if idx > 0 {
+                            let prev_idx = idx - 1;
+                            current_index.set(prev_idx);
+
+                            let current = *scroll_offset.peek();
+                            let step = CARD_WIDTHS[prev_idx] + CARD_GAP;
+                            scroll_offset.set(current + step);
+                        }
+                    },
+                    ChevronLeft { class: "w-4 h-4" }
+                }
+
+                // Dot indicators
+                div {
+                    class: "flex items-center gap-2",
+
+                    for i in 0..n {
+                        {
+                            let is_active = i == current_card;
+                            rsx! {
+                                button {
+                                    key: "{i}",
+                                    class: if is_active {
+                                        "w-2 h-2 rounded-full bg-primary transition-all"
+                                    } else {
+                                        "w-1.5 h-1.5 rounded-full bg-muted-foreground/30 hover:bg-muted-foreground/50 transition-all"
+                                    },
+                                    onclick: move |_| {
+                                        let current_idx = *current_index.peek();
+                                        current_index.set(i);
+
+                                        // Calculate step from current to target
+                                        let current_pos: i32 = (0..current_idx).map(|j| CARD_WIDTHS[j] + CARD_GAP).sum();
+                                        let target_pos: i32 = (0..i).map(|j| CARD_WIDTHS[j] + CARD_GAP).sum();
+                                        let delta = current_pos - target_pos;
+
+                                        let current_offset = *scroll_offset.peek();
+                                        scroll_offset.set(current_offset + delta);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Next button
+                button {
+                    class: "p-2.5 rounded-full bg-card/80 border border-border hover:bg-card hover:border-primary/50 transition-all text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed",
+                    disabled: current_card == n - 1,
+                    onclick: move |_| {
+                        let idx = *current_index.peek();
+                        if idx < n - 1 {
+                            let next_idx = idx + 1;
+                            current_index.set(next_idx);
+
+                            let current = *scroll_offset.peek();
+                            let step = CARD_WIDTHS[idx] + CARD_GAP;
+                            scroll_offset.set(current - step);
+                        }
+                    },
+                    ChevronRight { class: "w-4 h-4" }
+                }
+            }
+
+            // Cards container with bottom fade - full width
+            div {
+                class: "w-full",
+                style: "-webkit-mask-image: linear-gradient(to bottom, black 40%, transparent 100%); mask-image: linear-gradient(to bottom, black 40%, transparent 100%);",
+
+                // Perspective and skew container - full viewport width
+                div {
+                    style: "perspective: 1200px; -webkit-mask-image: linear-gradient(to right, black 50%, transparent 100%); mask-image: linear-gradient(to right, black 50%, transparent 100%);",
+
+                    // Rotated and skewed plane with left padding for first card
+                    div {
+                        class: "pl-8 md:pl-16 lg:pl-32",
+                        style: "transform: rotateX(20deg) skewX(0.36rad);",
+
+                        // Card strip container
+                        div {
+                            class: "h-[44rem] lg:h-[52rem]",
+
+                            // Sliding track
+                            div {
+                                class: "flex",
+                                style: "gap: {CARD_GAP}px; transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1); transform: translateX({offset}px);",
+
+                                // Render cards once
+                                for i in 0..n {
+                                    {
+                                        let card_width = CARD_WIDTHS[i];
+                                        rsx! {
+                                            div {
+                                                key: "{i}",
+                                                class: "shrink-0",
+                                                style: "width: {card_width}px;",
+
+                                                match i {
+                                                    0 => rsx! {
+                                                        KeyflowShowcaseCard {
+                                                            source: source,
+                                                            preview_mode: preview_mode,
+                                                            charts: charts.clone()
+                                                        }
+                                                    },
+                                                    1 => rsx! { DesktopShowcaseCard {} },
+                                                    2 => rsx! { ReaperShowcaseCard {} },
+                                                    3 => rsx! { PluginsShowcaseCard {} },
+                                                    _ => rsx! { CollaborationShowcaseCard {} },
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Keyflow Editor showcase card
+#[component]
+fn KeyflowShowcaseCard(
+    source: Signal<String>,
+    preview_mode: Signal<components::PreviewMode>,
+    charts: Vec<String>,
+) -> Element {
+    rsx! {
+        div {
+            // Width controlled by parent carousel container (CARD_WIDTHS[0] = 660px)
+            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full",
+            style: "height: 600px;",
+
+            // Window header
+            div {
+                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
+
+                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
+
+                span {
+                    class: "ml-4 text-sm text-muted-foreground",
+                    "song_title.kf"
+                }
+
+                span {
+                    class: "ml-auto text-xs text-emerald-500 font-medium px-2 py-0.5 rounded bg-emerald-500/10",
+                    "Keyflow"
+                }
+            }
+
+            // Typewriter animation (hidden, drives source signal)
+            components::ChartTypewriter {
+                output: source,
+                charts: charts,
+                speed_ms: 35,
+                delay_between_charts_ms: 4000
+            }
+
+            // Split view content
+            div {
+                class: "flex h-[calc(100%-3rem)]",
+
+                // Editor side
+                div {
+                    class: "w-56 border-r border-border overflow-hidden shrink-0",
+
+                    components::HighlightedEditor {
+                        value: source(),
+                        on_change: move |_: String| {},
+                        placeholder: "",
+                        textarea_id: Some("carousel-editor".to_string())
+                    }
+                }
+
+                // Preview side - fills remaining space after editor
+                div {
+                    class: "overflow-hidden flex-1",
+
+                    components::StaticChartRenderer {
+                        source: source,
+                        mode: preview_mode,
+                        canvas_id: Some("carousel-chart-canvas".to_string()),
+                        // Use smaller layout width to show more content vertically
+                        // (narrower layout = more lines = more vertical content visible)
+                        fixed_layout_width: Some(180.0)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Desktop App showcase card with tempo UI
+#[component]
+fn DesktopShowcaseCard() -> Element {
+    let tempo = 120;
+
+    rsx! {
+        div {
+            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full",
+            style: "height: 600px;",
+
+            // Window header
+            div {
+                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
+
+                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
+
+                span {
+                    class: "ml-4 text-sm text-muted-foreground",
+                    "FastTrackStudio"
+                }
+
+                span {
+                    class: "ml-auto text-xs text-blue-500 font-medium px-2 py-0.5 rounded bg-blue-500/10",
+                    "Desktop"
+                }
+            }
+
+            // Tempo UI content
+            div {
+                class: "relative h-[calc(100%-3rem)] bg-zinc-900 flex flex-col items-center justify-center",
+
+                span {
+                    class: "text-xs uppercase tracking-wider text-muted-foreground mb-3",
+                    "Tempo"
+                }
+
+                div {
+                    class: "flex items-baseline",
+
+                    span {
+                        class: "text-9xl font-bold tabular-nums text-foreground",
+                        "{tempo}"
+                    }
+
+                    span {
+                        class: "text-3xl font-medium text-muted-foreground ml-3",
+                        "BPM"
+                    }
+                }
+
+                // Beat dots
+                div {
+                    class: "flex items-center gap-4 mt-10",
+
+                    for i in 0..4 {
+                        div {
+                            key: "{i}",
+                            class: if i == 0 { "w-5 h-5 rounded-full bg-primary animate-pulse" } else { "w-4 h-4 rounded-full bg-muted-foreground/30" }
+                        }
+                    }
+                }
+
+                // Transport
+                div {
+                    class: "absolute bottom-8 flex items-center gap-10 text-muted-foreground/50",
+
+                    SkipBack { class: "w-7 h-7" }
+                    div {
+                        class: "p-4 rounded-full bg-primary/20 text-primary",
+                        Play { class: "w-10 h-10" }
+                    }
+                    SkipForward { class: "w-7 h-7" }
+                }
+            }
+        }
+    }
+}
+
+/// REAPER Extension showcase card
+#[component]
+fn ReaperShowcaseCard() -> Element {
+    rsx! {
+        div {
+            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full",
+            style: "height: 600px;",
+
+            // Window header
+            div {
+                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
+
+                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
+
+                span {
+                    class: "ml-4 text-sm text-muted-foreground",
+                    "REAPER"
+                }
+
+                span {
+                    class: "ml-auto text-xs text-violet-500 font-medium px-2 py-0.5 rounded bg-violet-500/10",
+                    "Extension"
+                }
+            }
+
+            // DAW-like interface mockup
+            div {
+                class: "relative h-[calc(100%-3rem)] bg-zinc-900 p-5",
+
+                // Transport bar
+                div {
+                    class: "flex items-center gap-4 mb-5 p-4 rounded-lg bg-zinc-800/50 border border-border/50",
+
+                    div {
+                        class: "flex items-center gap-2",
+                        div { class: "w-10 h-10 rounded bg-red-500/20 flex items-center justify-center text-red-500",
+                            Circle { class: "w-5 h-5 fill-current" }
+                        }
+                        div { class: "w-10 h-10 rounded bg-primary/20 flex items-center justify-center text-primary",
+                            Play { class: "w-5 h-5" }
+                        }
+                        div { class: "w-10 h-10 rounded bg-zinc-700 flex items-center justify-center text-muted-foreground",
+                            Square { class: "w-5 h-5" }
+                        }
+                    }
+
+                    div {
+                        class: "ml-4 font-mono text-xl text-foreground tabular-nums",
+                        "00:01:24.15"
+                    }
+
+                    div {
+                        class: "ml-auto text-sm text-muted-foreground",
+                        "4/4 • 120 BPM"
+                    }
+                }
+
+                // Track lanes mockup
+                div {
+                    class: "space-y-3 flex-1",
+
+                    for i in 0..6 {
+                        div {
+                            key: "{i}",
+                            class: "flex items-center gap-3 p-3 rounded bg-zinc-800/30 border border-border/30",
+
+                            div {
+                                class: "w-20 text-xs text-muted-foreground truncate",
+                                { match i {
+                                    0 => "Drums",
+                                    1 => "Bass",
+                                    2 => "Keys",
+                                    3 => "Guitar",
+                                    4 => "Synth",
+                                    _ => "Vocals"
+                                }}
+                            }
+
+                            // Waveform placeholder
+                            div {
+                                class: "flex-1 h-10 rounded bg-zinc-700/50 overflow-hidden flex items-center gap-px px-1",
+
+                                for j in 0..50 {
+                                    div {
+                                        key: "{j}",
+                                        class: "w-1 bg-violet-500/40 rounded-full",
+                                        style: "height: {((j * 7 + i * 13) % 24 + 6)}px;"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Audio Plugins showcase card
+#[component]
+fn PluginsShowcaseCard() -> Element {
+    rsx! {
+        div {
+            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full",
+            style: "height: 600px;",
+
+            // Window header
+            div {
+                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
+
+                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
+
+                span {
+                    class: "ml-4 text-sm text-muted-foreground",
+                    "fts-gain"
+                }
+
+                span {
+                    class: "ml-auto text-xs text-amber-500 font-medium px-2 py-0.5 rounded bg-amber-500/10",
+                    "VST3 / CLAP"
+                }
+            }
+
+            // Plugin UI mockup
+            div {
+                class: "relative h-[calc(100%-3rem)] bg-gradient-to-b from-zinc-900 to-zinc-950 flex flex-col items-center justify-center p-6",
+
+                // Gain knob
+                div {
+                    class: "relative w-32 h-32 rounded-full border-4 border-zinc-700 bg-zinc-800 flex items-center justify-center",
+
+                    // Knob indicator
+                    div {
+                        class: "absolute w-2 h-8 bg-amber-500 rounded-full",
+                        style: "top: 8px; transform-origin: bottom center; transform: rotate(-45deg);"
+                    }
+
+                    // Center value
+                    div {
+                        class: "text-center",
+                        div { class: "text-2xl font-bold text-foreground", "+3.2" }
+                        div { class: "text-xs text-muted-foreground", "dB" }
+                    }
+                }
+
+                // Label
+                div {
+                    class: "mt-4 text-sm font-medium text-muted-foreground uppercase tracking-wider",
+                    "Gain"
+                }
+
+                // Meter
+                div {
+                    class: "absolute right-8 top-1/2 -translate-y-1/2 flex gap-2",
+
+                    for channel in ["L", "R"] {
+                        div {
+                            key: "{channel}",
+                            class: "flex flex-col items-center gap-1",
+
+                            div {
+                                class: "w-4 h-48 bg-zinc-800 rounded overflow-hidden flex flex-col-reverse",
+
+                                div {
+                                    class: "w-full bg-gradient-to-t from-green-500 via-yellow-500 to-red-500",
+                                    style: "height: 65%;"
+                                }
+                            }
+
+                            span { class: "text-xs text-muted-foreground", "{channel}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// P2P Collaboration showcase card
+#[component]
+fn CollaborationShowcaseCard() -> Element {
+    rsx! {
+        div {
+            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full",
+            style: "height: 600px;",
+
+            // Window header
+            div {
+                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
+
+                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
+
+                span {
+                    class: "ml-4 text-sm text-muted-foreground",
+                    "Session"
+                }
+
+                span {
+                    class: "ml-auto text-xs text-cyan-500 font-medium px-2 py-0.5 rounded bg-cyan-500/10",
+                    "P2P Sync"
+                }
+            }
+
+            // Collaboration UI mockup
+            div {
+                class: "relative h-[calc(100%-3rem)] bg-zinc-900 p-6",
+
+                // Connected peers
+                div {
+                    class: "flex items-center justify-center gap-8 mb-8",
+
+                    // Peer nodes in a circle
+                    div {
+                        class: "relative w-64 h-64",
+
+                        // Center node (you)
+                        div {
+                            class: "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center",
+                            lucide_dioxus::User { class: "w-8 h-8 text-primary" }
+                        }
+
+                        // Peer 1
+                        div {
+                            class: "absolute left-1/2 top-0 -translate-x-1/2 w-12 h-12 rounded-full bg-emerald-500/20 border-2 border-emerald-500 flex items-center justify-center",
+                            lucide_dioxus::User { class: "w-6 h-6 text-emerald-500" }
+                        }
+
+                        // Peer 2
+                        div {
+                            class: "absolute right-0 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-violet-500/20 border-2 border-violet-500 flex items-center justify-center",
+                            lucide_dioxus::User { class: "w-6 h-6 text-violet-500" }
+                        }
+
+                        // Peer 3
+                        div {
+                            class: "absolute left-0 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-amber-500/20 border-2 border-amber-500 flex items-center justify-center",
+                            lucide_dioxus::User { class: "w-6 h-6 text-amber-500" }
+                        }
+
+                        // Connection lines (decorative)
+                        svg {
+                            class: "absolute inset-0 w-full h-full",
+                            view_box: "0 0 256 256",
+
+                            // Lines from center to peers
+                            line { x1: "128", y1: "128", x2: "128", y2: "48", stroke: "currentColor", stroke_opacity: "0.2", stroke_width: "2", stroke_dasharray: "4 4", class: "text-emerald-500" }
+                            line { x1: "128", y1: "128", x2: "208", y2: "128", stroke: "currentColor", stroke_opacity: "0.2", stroke_width: "2", stroke_dasharray: "4 4", class: "text-violet-500" }
+                            line { x1: "128", y1: "128", x2: "48", y2: "128", stroke: "currentColor", stroke_opacity: "0.2", stroke_width: "2", stroke_dasharray: "4 4", class: "text-amber-500" }
+                        }
+                    }
+                }
+
+                // Status bar
+                div {
+                    class: "absolute bottom-4 left-4 right-4 flex items-center justify-between text-sm",
+
+                    div {
+                        class: "flex items-center gap-2 text-emerald-500",
+                        div { class: "w-2 h-2 rounded-full bg-emerald-500 animate-pulse" }
+                        "3 peers connected"
+                    }
+
+                    div {
+                        class: "text-muted-foreground",
+                        "iroh • encrypted"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Desktop app showcase with tempo UI (16:9 aspect ratio) - Legacy, kept for reference
+#[component]
+fn DesktopShowcase() -> Element {
+    let tempo = 120;
+
+    rsx! {
+        div {
+            class: "rounded-lg z-[2] relative border border-border bg-card overflow-hidden",
+            style: "width: 400px;",
+
+            // Window header (same as Keyflow showcase)
+            div {
+                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
+
+                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
+                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
+
+                span {
+                    class: "ml-4 text-sm text-muted-foreground",
+                    "FastTrackStudio"
+                }
+            }
+
+            // 16:9 content area with tempo UI
+            div {
+                class: "relative bg-zinc-900",
+                style: "aspect-ratio: 16 / 9;",
+
+                // Centered tempo display
+                div {
+                    class: "absolute inset-0 flex flex-col items-center justify-center",
+
+                    // Tempo label
+                    span {
+                        class: "text-xs uppercase tracking-wider text-muted-foreground mb-2",
+                        "Tempo"
+                    }
+
+                    // Large tempo number
+                    div {
+                        class: "relative",
+
+                        span {
+                            class: "text-7xl font-bold tabular-nums text-foreground",
+                            "{tempo}"
+                        }
+
+                        span {
+                            class: "text-2xl font-medium text-muted-foreground ml-2",
+                            "BPM"
+                        }
+                    }
+
+                    // Beat indicator dots
+                    div {
+                        class: "flex items-center gap-3 mt-6",
+
+                        for i in 0..4 {
+                            div {
+                                key: "{i}",
+                                class: if i == 0 { "w-3 h-3 rounded-full bg-primary animate-pulse" } else { "w-2 h-2 rounded-full bg-muted-foreground/30" }
+                            }
+                        }
+                    }
+
+                    // Transport controls
+                    div {
+                        class: "absolute bottom-4 left-0 right-0 flex justify-center gap-6 text-muted-foreground/50",
+
+                        div {
+                            class: "flex items-center gap-2",
+                            SkipBack { class: "w-5 h-5" }
+                        }
+                        div {
+                            class: "flex items-center gap-2 text-primary/60",
+                            Play { class: "w-6 h-6" }
+                        }
+                        div {
+                            class: "flex items-center gap-2",
+                            SkipForward { class: "w-5 h-5" }
+                        }
+                    }
+                }
+
+                // Subtle grid pattern overlay
+                div {
+                    class: "absolute inset-0 opacity-5 pointer-events-none",
+                    style: "background-image: radial-gradient(circle at 1px 1px, currentColor 1px, transparent 0); background-size: 20px 20px;"
+                }
+            }
+        }
+    }
+}
+
+/// Docs home page - shows all documentation sections
 #[component]
 fn DocsHome() -> Element {
     rsx! {
         div {
-            class: "max-w-4xl mx-auto px-4 py-16",
+            class: "max-w-5xl mx-auto px-6 py-16",
 
             // Hero section
             div {
@@ -512,19 +1364,400 @@ fn DocsHome() -> Element {
 
                 h1 {
                     class: "text-5xl font-bold text-foreground mb-4",
-                    "Keyflow Documentation"
+                    "Documentation"
                 }
 
                 p {
-                    class: "text-xl text-muted-foreground mb-8",
-                    "Music notation parser with GPU-accelerated rendering"
+                    class: "text-xl text-muted-foreground",
+                    "Everything you need to build with FastTrackStudio"
                 }
+            }
+
+            // Main sections grid
+            div {
+                class: "grid md:grid-cols-2 gap-6",
+
+                // Keyflow
+                DocsSection {
+                    to: Route::DocsKeyflow {},
+                    title: "Keyflow",
+                    description: "Chart notation language with GPU-accelerated rendering. Write chord charts with intuitive syntax.",
+                    icon: rsx! { FileText { class: "w-8 h-8" } },
+                    color: "emerald"
+                }
+
+                // REAPER Extension
+                DocsSection {
+                    to: Route::DocsReaper {},
+                    title: "REAPER Extension",
+                    description: "Deep DAW integration for transport control, MIDI routing, and real-time state synchronization.",
+                    icon: rsx! { Music { class: "w-8 h-8" } },
+                    color: "violet"
+                }
+
+                // Desktop App
+                DocsSection {
+                    to: Route::DocsDesktop {},
+                    title: "Desktop App",
+                    description: "Cross-platform application built with Dioxus for setlist management, lyrics, and live performance.",
+                    icon: rsx! { lucide_dioxus::Monitor { class: "w-8 h-8" } },
+                    color: "blue"
+                }
+
+                // Audio Plugins
+                DocsSection {
+                    to: Route::DocsPlugins {},
+                    title: "Audio Plugins",
+                    description: "CLAP and VST3 plugins built with nih-plug for audio processing and instrument control.",
+                    icon: rsx! { lucide_dioxus::SlidersHorizontal { class: "w-8 h-8" } },
+                    color: "amber"
+                }
+            }
+        }
+    }
+}
+
+/// Documentation section card with colored accent
+#[component]
+fn DocsSection(
+    to: Route,
+    title: &'static str,
+    description: &'static str,
+    icon: Element,
+    color: &'static str,
+) -> Element {
+    let (bg_color, border_color, text_color) = match color {
+        "emerald" => (
+            "bg-emerald-500/10",
+            "hover:border-emerald-500/50",
+            "text-emerald-500",
+        ),
+        "violet" => (
+            "bg-violet-500/10",
+            "hover:border-violet-500/50",
+            "text-violet-500",
+        ),
+        "blue" => (
+            "bg-blue-500/10",
+            "hover:border-blue-500/50",
+            "text-blue-500",
+        ),
+        "amber" => (
+            "bg-amber-500/10",
+            "hover:border-amber-500/50",
+            "text-amber-500",
+        ),
+        _ => ("bg-primary/10", "hover:border-primary/50", "text-primary"),
+    };
+
+    rsx! {
+        Link {
+            to: to,
+            class: "group block rounded-xl border border-border bg-card p-6 transition-all {border_color} hover:shadow-lg",
+
+            div {
+                class: "flex items-start gap-4",
+
+                div {
+                    class: "shrink-0 rounded-lg p-3 {bg_color} {text_color}",
+                    {icon}
+                }
+
+                div {
+                    h3 {
+                        class: "text-xl font-semibold text-foreground mb-2 group-hover:text-primary transition-colors",
+                        "{title}"
+                    }
+
+                    p {
+                        class: "text-muted-foreground leading-relaxed",
+                        "{description}"
+                    }
+
+                    div {
+                        class: "mt-4 flex items-center gap-1 text-sm font-medium {text_color}",
+                        "Learn more"
+                        ChevronRight { class: "w-4 h-4" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Individual Documentation Section Pages
+// =============================================================================
+
+/// Keyflow documentation landing page
+#[component]
+fn DocsKeyflow() -> Element {
+    rsx! {
+        div {
+            class: "max-w-5xl mx-auto px-6 py-12",
+
+            // Back link
+            Link {
+                to: Route::DocsHome {},
+                class: "inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors",
+                ArrowLeft { class: "w-4 h-4" }
+                "Back to Docs"
+            }
+
+            // Header
+            div {
+                class: "mb-12",
+                div {
+                    class: "inline-flex items-center gap-3 mb-4",
+                    div {
+                        class: "rounded-lg p-3 bg-emerald-500/10 text-emerald-500",
+                        FileText { class: "w-8 h-8" }
+                    }
+                    h1 {
+                        class: "text-4xl font-bold text-foreground",
+                        "Keyflow"
+                    }
+                }
+                p {
+                    class: "text-xl text-muted-foreground max-w-2xl",
+                    "A domain-specific language for writing chord charts with GPU-accelerated rendering."
+                }
+            }
+
+            // Quick links
+            div {
+                class: "grid md:grid-cols-2 gap-6 mb-12",
 
                 Link {
                     to: Route::SnippetsBrowser {},
-                    class: "inline-flex items-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 px-6 py-3 rounded-lg font-semibold transition-colors",
-                    BookOpen { class: "w-5 h-5" }
-                    "Browse Snippets"
+                    class: "group flex items-center gap-4 p-6 rounded-xl border border-border bg-card hover:border-emerald-500/50 transition-all",
+                    div {
+                        class: "rounded-lg p-3 bg-emerald-500/10 text-emerald-500",
+                        FileCode { class: "w-6 h-6" }
+                    }
+                    div {
+                        h3 {
+                            class: "font-semibold text-foreground group-hover:text-emerald-500 transition-colors",
+                            "Interactive Snippets"
+                        }
+                        p {
+                            class: "text-sm text-muted-foreground",
+                            "Browse and edit example charts"
+                        }
+                    }
+                    ChevronRight { class: "w-5 h-5 text-muted-foreground ml-auto" }
+                }
+
+                Link {
+                    to: Route::ChartEditor {},
+                    class: "group flex items-center gap-4 p-6 rounded-xl border border-border bg-card hover:border-emerald-500/50 transition-all",
+                    div {
+                        class: "rounded-lg p-3 bg-emerald-500/10 text-emerald-500",
+                        PenLine { class: "w-6 h-6" }
+                    }
+                    div {
+                        h3 {
+                            class: "font-semibold text-foreground group-hover:text-emerald-500 transition-colors",
+                            "Chart Editor"
+                        }
+                        p {
+                            class: "text-sm text-muted-foreground",
+                            "Write and export your own charts"
+                        }
+                    }
+                    ChevronRight { class: "w-5 h-5 text-muted-foreground ml-auto" }
+                }
+            }
+
+            // Feature overview
+            div {
+                class: "prose prose-invert max-w-none",
+
+                h2 {
+                    class: "text-2xl font-semibold text-foreground mb-6",
+                    "Features"
+                }
+
+                div {
+                    class: "grid md:grid-cols-3 gap-6",
+
+                    KeyflowFeatureCard {
+                        title: "Intuitive Syntax",
+                        description: "Write chord charts as naturally as you'd read them. No complex markup required."
+                    }
+
+                    KeyflowFeatureCard {
+                        title: "Smart Memory",
+                        description: "Automatically remembers chord voicings within sections for consistent playback."
+                    }
+
+                    KeyflowFeatureCard {
+                        title: "Section Structure",
+                        description: "Verse, Chorus, Bridge, and more - with automatic numbering and theming."
+                    }
+
+                    KeyflowFeatureCard {
+                        title: "Complex Rhythms",
+                        description: "Triplet pushes, syncopation, and explicit durations for any rhythmic pattern."
+                    }
+
+                    KeyflowFeatureCard {
+                        title: "GPU Rendering",
+                        description: "WebGPU-accelerated rendering for crisp, publication-quality output."
+                    }
+
+                    KeyflowFeatureCard {
+                        title: "PDF Export",
+                        description: "Export charts as print-ready PDFs with customizable settings."
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn KeyflowFeatureCard(title: &'static str, description: &'static str) -> Element {
+    rsx! {
+        div {
+            class: "p-4 rounded-lg border border-border/50 bg-card/30",
+            h4 {
+                class: "font-medium text-foreground mb-1",
+                "{title}"
+            }
+            p {
+                class: "text-sm text-muted-foreground",
+                "{description}"
+            }
+        }
+    }
+}
+
+/// REAPER Extension documentation page
+#[component]
+fn DocsReaper() -> Element {
+    rsx! {
+        div {
+            class: "max-w-5xl mx-auto px-6 py-12",
+
+            // Back link
+            Link {
+                to: Route::DocsHome {},
+                class: "inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors",
+                ArrowLeft { class: "w-4 h-4" }
+                "Back to Docs"
+            }
+
+            // Header
+            div {
+                class: "mb-12",
+                div {
+                    class: "inline-flex items-center gap-3 mb-4",
+                    div {
+                        class: "rounded-lg p-3 bg-violet-500/10 text-violet-500",
+                        Music { class: "w-8 h-8" }
+                    }
+                    h1 {
+                        class: "text-4xl font-bold text-foreground",
+                        "REAPER Extension"
+                    }
+                }
+                p {
+                    class: "text-xl text-muted-foreground max-w-2xl",
+                    "Deep DAW integration for transport control, MIDI routing, and real-time state synchronization."
+                }
+            }
+
+            // Feature list
+            div {
+                class: "space-y-6",
+
+                ReaperFeatureSection {
+                    title: "Transport Sync",
+                    description: "Real-time synchronization with REAPER's transport for play/pause/stop controls, timeline position, and tempo changes."
+                }
+
+                ReaperFeatureSection {
+                    title: "MIDI Routing",
+                    description: "Flexible MIDI routing between tracks, virtual instruments, and external hardware."
+                }
+
+                ReaperFeatureSection {
+                    title: "Key Input",
+                    description: "Intercept and redirect keyboard input for custom shortcuts and live performance controls."
+                }
+
+                ReaperFeatureSection {
+                    title: "IPC Communication",
+                    description: "Bidirectional communication with the desktop app via iroh for seamless integration."
+                }
+            }
+
+            // Coming soon notice
+            div {
+                class: "mt-12 p-6 rounded-xl border border-violet-500/30 bg-violet-500/5",
+                h3 {
+                    class: "font-semibold text-foreground mb-2",
+                    "Documentation Coming Soon"
+                }
+                p {
+                    class: "text-muted-foreground",
+                    "Detailed installation guides, API reference, and usage examples are being written."
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ReaperFeatureSection(title: &'static str, description: &'static str) -> Element {
+    rsx! {
+        div {
+            class: "p-6 rounded-xl border border-border bg-card",
+            h3 {
+                class: "font-semibold text-foreground mb-2",
+                "{title}"
+            }
+            p {
+                class: "text-muted-foreground",
+                "{description}"
+            }
+        }
+    }
+}
+
+/// Desktop App documentation page
+#[component]
+fn DocsDesktop() -> Element {
+    rsx! {
+        div {
+            class: "max-w-5xl mx-auto px-6 py-12",
+
+            // Back link
+            Link {
+                to: Route::DocsHome {},
+                class: "inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors",
+                ArrowLeft { class: "w-4 h-4" }
+                "Back to Docs"
+            }
+
+            // Header
+            div {
+                class: "mb-12",
+                div {
+                    class: "inline-flex items-center gap-3 mb-4",
+                    div {
+                        class: "rounded-lg p-3 bg-blue-500/10 text-blue-500",
+                        lucide_dioxus::Monitor { class: "w-8 h-8" }
+                    }
+                    h1 {
+                        class: "text-4xl font-bold text-foreground",
+                        "Desktop App"
+                    }
+                }
+                p {
+                    class: "text-xl text-muted-foreground max-w-2xl",
+                    "Cross-platform application for setlist management, lyrics display, and live performance."
                 }
             }
 
@@ -532,30 +1765,148 @@ fn DocsHome() -> Element {
             div {
                 class: "grid md:grid-cols-2 gap-6",
 
-                // Feature cards
-                FeatureCard {
-                    title: "Pattern Library",
-                    description: "Browse interactive examples of chart syntax and notation features.",
-                    icon: rsx! { lucide_dioxus::Library { class: "w-8 h-8 text-primary" } }
+                DesktopFeatureCard {
+                    title: "Setlist Management",
+                    description: "Organize songs into setlists with drag-and-drop ordering and quick access."
                 }
 
-                FeatureCard {
-                    title: "Live Rendering",
-                    description: "See charts rendered in real-time using WebGPU.",
-                    icon: rsx! { lucide_dioxus::Palette { class: "w-8 h-8 text-primary" } }
+                DesktopFeatureCard {
+                    title: "Lyrics Display",
+                    description: "Full-screen lyrics view with auto-scroll synced to transport position."
                 }
 
-                FeatureCard {
-                    title: "Source Code",
-                    description: "View the keyflow source alongside the rendered output.",
-                    icon: rsx! { lucide_dioxus::Code { class: "w-8 h-8 text-primary" } }
+                DesktopFeatureCard {
+                    title: "Chart Viewer",
+                    description: "View and edit Keyflow charts with real-time preview and PDF export."
                 }
 
-                FeatureCard {
-                    title: "Test Coverage",
-                    description: "Patterns serve as both documentation and regression tests.",
-                    icon: rsx! { lucide_dioxus::CircleCheck { class: "w-8 h-8 text-primary" } }
+                DesktopFeatureCard {
+                    title: "P2P Sync",
+                    description: "Share setlists and charts with bandmates in real-time over peer-to-peer connections."
                 }
+            }
+
+            // Coming soon notice
+            div {
+                class: "mt-12 p-6 rounded-xl border border-blue-500/30 bg-blue-500/5",
+                h3 {
+                    class: "font-semibold text-foreground mb-2",
+                    "Documentation Coming Soon"
+                }
+                p {
+                    class: "text-muted-foreground",
+                    "Installation guides, feature walkthroughs, and configuration options are being written."
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn DesktopFeatureCard(title: &'static str, description: &'static str) -> Element {
+    rsx! {
+        div {
+            class: "p-6 rounded-xl border border-border bg-card",
+            h3 {
+                class: "font-semibold text-foreground mb-2",
+                "{title}"
+            }
+            p {
+                class: "text-muted-foreground",
+                "{description}"
+            }
+        }
+    }
+}
+
+/// Audio Plugins documentation page
+#[component]
+fn DocsPlugins() -> Element {
+    rsx! {
+        div {
+            class: "max-w-5xl mx-auto px-6 py-12",
+
+            // Back link
+            Link {
+                to: Route::DocsHome {},
+                class: "inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors",
+                ArrowLeft { class: "w-4 h-4" }
+                "Back to Docs"
+            }
+
+            // Header
+            div {
+                class: "mb-12",
+                div {
+                    class: "inline-flex items-center gap-3 mb-4",
+                    div {
+                        class: "rounded-lg p-3 bg-amber-500/10 text-amber-500",
+                        lucide_dioxus::SlidersHorizontal { class: "w-8 h-8" }
+                    }
+                    h1 {
+                        class: "text-4xl font-bold text-foreground",
+                        "Audio Plugins"
+                    }
+                }
+                p {
+                    class: "text-xl text-muted-foreground max-w-2xl",
+                    "CLAP and VST3 plugins built with nih-plug for audio processing and instrument control."
+                }
+            }
+
+            // Plugin list
+            div {
+                class: "space-y-6",
+
+                PluginCard {
+                    name: "fts-midi",
+                    description: "MIDI utility plugin for routing, filtering, and transforming MIDI data between tracks."
+                }
+
+                PluginCard {
+                    name: "fts-gain",
+                    description: "Simple gain utility with precise dB control and visual metering."
+                }
+            }
+
+            // Tech stack info
+            div {
+                class: "mt-12 p-6 rounded-xl border border-amber-500/30 bg-amber-500/5",
+                h3 {
+                    class: "font-semibold text-foreground mb-2",
+                    "Built with nih-plug"
+                }
+                p {
+                    class: "text-muted-foreground mb-4",
+                    "All plugins are built using nih-plug, a Rust framework for creating CLAP and VST3 plugins with minimal boilerplate."
+                }
+                a {
+                    href: "https://github.com/robbert-vdh/nih-plug",
+                    target: "_blank",
+                    class: "inline-flex items-center gap-2 text-amber-500 hover:text-amber-400 transition-colors",
+                    "Learn more about nih-plug"
+                    lucide_dioxus::ExternalLink { class: "w-4 h-4" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn PluginCard(name: &'static str, description: &'static str) -> Element {
+    rsx! {
+        div {
+            class: "p-6 rounded-xl border border-border bg-card",
+            div {
+                class: "flex items-center gap-3 mb-2",
+                code {
+                    class: "px-2 py-1 rounded bg-amber-500/10 text-amber-500 text-sm font-mono",
+                    "{name}"
+                }
+            }
+            p {
+                class: "text-muted-foreground",
+                "{description}"
             }
         }
     }
@@ -624,12 +1975,22 @@ fn UnifiedSnippetsView(selected_id: String) -> Element {
     // Track expanded categories in sidebar
     let mut expanded_categories = use_signal(|| {
         // Start with all categories expanded
-        PatternCategory::all().iter().map(|c| (*c, true)).collect::<std::collections::HashMap<_, _>>()
+        PatternCategory::all()
+            .iter()
+            .map(|c| (*c, true))
+            .collect::<std::collections::HashMap<_, _>>()
     });
 
     // Find current pattern index for prev/next navigation
-    let current_index = patterns.iter().position(|p| p.id == selected_id).unwrap_or(0);
-    let prev_pattern = if current_index > 0 { patterns.get(current_index - 1) } else { None };
+    let current_index = patterns
+        .iter()
+        .position(|p| p.id == selected_id)
+        .unwrap_or(0);
+    let prev_pattern = if current_index > 0 {
+        patterns.get(current_index - 1)
+    } else {
+        None
+    };
     let next_pattern = patterns.get(current_index + 1);
 
     // Track the current pattern ID to detect changes
@@ -640,13 +2001,15 @@ fn UnifiedSnippetsView(selected_id: String) -> Element {
 
     // Preview mode state
     let mut preview_mode = use_signal(|| {
-        pattern.map(|p| {
-            if p.category == PatternCategory::Examples {
-                PreviewMode::Page
-            } else {
-                PreviewMode::Snippet
-            }
-        }).unwrap_or(PreviewMode::Snippet)
+        pattern
+            .map(|p| {
+                if p.category == PatternCategory::Examples {
+                    PreviewMode::Page
+                } else {
+                    PreviewMode::Snippet
+                }
+            })
+            .unwrap_or(PreviewMode::Snippet)
     });
 
     // Reset source and preview mode when pattern changes
@@ -976,7 +2339,9 @@ fn PatternView(id: String) -> Element {
     let nav = use_navigator();
     let id_clone = id.clone();
     use_effect(move || {
-        nav.push(Route::SnippetsView { id: id_clone.clone() });
+        nav.push(Route::SnippetsView {
+            id: id_clone.clone(),
+        });
     });
     rsx! {
         div { class: "flex items-center justify-center h-64 text-muted-foreground", "Redirecting..." }

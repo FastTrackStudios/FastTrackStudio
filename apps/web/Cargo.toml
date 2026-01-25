@@ -31,6 +31,9 @@ serde_json = "1.0"
 # Error handling
 anyhow = "1.0"
 
+# Archive creation for multi-file exports
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
 # Logging
 tracing = "0.1"
 
@@ -52,6 +55,9 @@ js-sys = "0.3"
 console_error_panic_hook = "0.1"
 tracing-wasm = "0.2"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "registry"] }
+
+# Async timers for WASM
+gloo-timers = "0.3"
 
 # Web APIs
 web-sys = { version = "0.3", features = [
@@ -94,6 +100,8 @@ tokio = { version = "1.0", default-features = false, features = ["sync"] }
 
 # Random number generation for WASM (needed for getrandom 0.2 used by uuid)
 getrandom = { version = "0.2", features = ["js"] }
+# getrandom 0.3 pulled in by iroh/pkarr - need wasm_js feature for wasm32
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Desktop/server dependencies - features added to base dioxus dependency
