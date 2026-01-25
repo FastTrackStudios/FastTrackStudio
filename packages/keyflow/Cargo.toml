@@ -25,6 +25,8 @@ engraver = [
     "dep:printpdf",
     "dep:svg2pdf",
     "dep:usvg",
+    "dep:pdf-writer",
+    "dep:lopdf",
 ]
 # Example feature: adds windowing for running examples
 engraver-example = ["engraver", "dep:winit", "dep:pollster", "dep:env_logger", "dep:log"]
@@ -74,6 +76,10 @@ printpdf = { version = "0.8", optional = true, features = ["png"] }
 # Use usvg's re-exported fontdb to avoid version conflicts
 svg2pdf = { version = "0.13", optional = true }
 usvg = { version = "0.45", optional = true, default-features = false, features = ["text"] }
+# PDF writing (used for multi-page PDF merging, matches svg2pdf's version)
+pdf-writer = { version = "0.12", optional = true }
+# PDF parsing and merging (for combining multiple PDFs into one)
+lopdf = { version = "0.36", optional = true }
 
 # MIDI file parsing (optional)
 midly = { version = "0.5", optional = true }

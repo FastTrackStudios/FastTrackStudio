@@ -20,6 +20,9 @@ pub struct SvgExportConfig {
     pub width: f64,
     /// SVG height in points
     pub height: f64,
+    /// Custom viewBox (minX, minY, width, height). If None, uses (0, 0, width, height).
+    /// Use this to export a specific region of the scene (e.g., a single page).
+    pub view_box: Option<(f64, f64, f64, f64)>,
     /// Whether to include semantic `data-*` attributes
     pub include_semantic_ids: bool,
     /// Whether to embed SMuFL glyph definitions
@@ -32,6 +35,9 @@ pub struct SvgExportConfig {
     pub background: Option<vello::peniko::Color>,
     /// Default stroke width
     pub default_stroke_width: f64,
+    /// Embedded fonts: (font_family_name, font_data_bytes)
+    /// These will be embedded as base64 @font-face declarations
+    pub embedded_fonts: Vec<(String, Vec<u8>)>,
 }
 
 impl Default for SvgExportConfig {
@@ -39,13 +45,50 @@ impl Default for SvgExportConfig {
         Self {
             width: 612.0,  // US Letter width in points (8.5" × 72)
             height: 792.0, // US Letter height in points (11" × 72)
+            view_box: None, // Default: (0, 0, width, height)
             include_semantic_ids: true,
             embed_glyphs: false,
             precision: 2,
             pretty_print: true,
             background: None,
             default_stroke_width: 0.5,
+            embedded_fonts: Vec::new(),
         }
+    }
+}
+
+impl SvgExportConfig {
+    /// Create a config for exporting a specific page region.
+    ///
+    /// # Arguments
+    /// * `page_x` - X offset of the page in the scene
+    /// * `page_y` - Y offset of the page in the scene
+    /// * `page_width` - Width of the page
+    /// * `page_height` - Height of the page
+    #[must_use]
+    pub fn for_page(page_x: f64, page_y: f64, page_width: f64, page_height: f64) -> Self {
+        Self {
+            width: page_width,
+            height: page_height,
+            view_box: Some((page_x, page_y, page_width, page_height)),
+            include_semantic_ids: true,
+            embed_glyphs: false,
+            precision: 2,
+            pretty_print: false,
+            background: Some(vello::peniko::Color::WHITE),
+            default_stroke_width: 0.5,
+            embedded_fonts: Vec::new(),
+        }
+    }
+
+    /// Add an embedded font to the SVG.
+    ///
+    /// The font will be included as a base64-encoded @font-face declaration,
+    /// ensuring the SVG renders correctly without requiring the font to be installed.
+    #[must_use]
+    pub fn with_embedded_font(mut self, font_family: &str, font_data: Vec<u8>) -> Self {
+        self.embedded_fonts.push((font_family.to_string(), font_data));
+        self
     }
 }
 
@@ -118,15 +161,68 @@ impl SvgSerializer {
         let width = self.format_coord(self.config.width);
         let height = self.format_coord(self.config.height);
 
+        // Use custom viewBox if specified, otherwise default to (0, 0, width, height)
+        let (vb_x, vb_y, vb_w, vb_h) = self.config.view_box.unwrap_or((0.0, 0.0, self.config.width, self.config.height));
+        let vb_x = self.format_coord(vb_x);
+        let vb_y = self.format_coord(vb_y);
+        let vb_w = self.format_coord(vb_w);
+        let vb_h = self.format_coord(vb_h);
+
         writeln!(self.output, r#"<?xml version="1.0" encoding="UTF-8"?>"#).unwrap();
 
+        // Add overflow="hidden" to clip content outside the viewBox (important for per-page export)
         writeln!(
             self.output,
-            r#"<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="{width}" height="{height}" viewBox="0 0 {width} {height}">"#
+            r#"<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="{width}" height="{height}" viewBox="{vb_x} {vb_y} {vb_w} {vb_h}" overflow="hidden">"#
         )
         .unwrap();
 
         self.indent_level += 1;
+
+        // Embed fonts if provided
+        if !self.config.embedded_fonts.is_empty() {
+            self.write_embedded_fonts();
+        }
+    }
+
+    /// Write embedded fonts as @font-face declarations.
+    fn write_embedded_fonts(&mut self) {
+        use std::io::Write as IoWrite;
+
+        self.write_indent();
+        writeln!(self.output, "<defs>").unwrap();
+        self.indent_level += 1;
+
+        self.write_indent();
+        writeln!(self.output, "<style type=\"text/css\">").unwrap();
+        writeln!(self.output, "<![CDATA[").unwrap();
+
+        for (font_family, font_data) in &self.config.embedded_fonts {
+            // Determine font format from data (check for WOFF2/WOFF/OTF/TTF magic bytes)
+            let (format, mime) = detect_font_format(font_data);
+
+            // Encode font as base64
+            let base64_data = base64_encode(font_data);
+
+            writeln!(
+                self.output,
+                r#"@font-face {{
+  font-family: '{font_family}';
+  src: url('data:{mime};base64,{base64_data}') format('{format}');
+  font-weight: normal;
+  font-style: normal;
+}}"#
+            )
+            .unwrap();
+        }
+
+        writeln!(self.output, "]]>").unwrap();
+        self.write_indent();
+        writeln!(self.output, "</style>").unwrap();
+
+        self.indent_level -= 1;
+        self.write_indent();
+        writeln!(self.output, "</defs>").unwrap();
     }
 
     /// Write the SVG footer.
@@ -136,16 +232,31 @@ impl SvgSerializer {
     }
 
     /// Write background rectangle.
+    ///
+    /// When a custom viewBox is set (e.g., for per-page export), the background
+    /// is positioned at the viewBox origin so it fills the visible area.
     fn write_background(&mut self, color: vello::peniko::Color) {
         self.write_indent();
         let width = self.format_coord(self.config.width);
         let height = self.format_coord(self.config.height);
         let color_str = color_to_svg(color);
-        writeln!(
-            self.output,
-            r#"<rect width="{width}" height="{height}" fill="{color_str}"/>"#
-        )
-        .unwrap();
+
+        // When using a custom viewBox, position the background at the viewBox origin
+        if let Some((vb_x, vb_y, _, _)) = self.config.view_box {
+            let x = self.format_coord(vb_x);
+            let y = self.format_coord(vb_y);
+            writeln!(
+                self.output,
+                r#"<rect x="{x}" y="{y}" width="{width}" height="{height}" fill="{color_str}"/>"#
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                self.output,
+                r#"<rect width="{width}" height="{height}" fill="{color_str}"/>"#
+            )
+            .unwrap();
+        }
     }
 
     /// Write glyph definitions for SMuFL characters.
@@ -220,9 +331,10 @@ impl SvgSerializer {
             }
         }
 
-        // Add metadata attributes
+        // Add metadata attributes (escape values for XML safety)
         for (key, value) in &node.metadata {
-            write!(self.output, r#" data-{key}="{value}""#).unwrap();
+            let escaped_value = escape_xml(value);
+            write!(self.output, r#" data-{key}="{escaped_value}""#).unwrap();
         }
 
         // Add transform if non-identity
@@ -247,7 +359,8 @@ impl SvgSerializer {
     /// Write semantic ID as data attributes.
     fn write_semantic_attrs(&mut self, id: &SemanticId) {
         for (attr, value) in id.to_svg_attributes() {
-            write!(self.output, r#" {attr}="{value}""#).unwrap();
+            let escaped_value = escape_xml(&value);
+            write!(self.output, r#" {attr}="{escaped_value}""#).unwrap();
         }
     }
 
@@ -283,7 +396,8 @@ impl SvgSerializer {
             } => {
                 let x = self.format_coord(position.x);
                 let y = self.format_coord(position.y);
-                let font_size = self.format_coord(*size);
+                // SMuFL: 1 em = 4 staff spaces, so font_size = spatium * 4
+                let font_size = self.format_coord(*size * 4.0);
                 let fill = color_to_svg(*color);
                 writeln!(
                     self.output,
@@ -311,9 +425,10 @@ impl SvgSerializer {
                 let weight_str = font_weight_to_svg(*weight);
                 let style_str = font_style_to_svg(*style);
 
+                let escaped_font = escape_xml(font_family);
                 write!(
                     self.output,
-                    r#"<text x="{x}" y="{y}" font-size="{size}" font-family="{font_family}""#
+                    r#"<text x="{x}" y="{y}" font-size="{size}" font-family="{escaped_font}""#
                 )
                 .unwrap();
                 write!(self.output, r#" fill="{fill}""#).unwrap();
@@ -573,6 +688,58 @@ fn escape_xml(text: &str) -> String {
         }
     }
     escaped
+}
+
+/// Detect font format from magic bytes.
+/// Returns (format_name, mime_type).
+fn detect_font_format(data: &[u8]) -> (&'static str, &'static str) {
+    if data.len() < 4 {
+        return ("opentype", "font/otf");
+    }
+
+    match &data[0..4] {
+        // WOFF2
+        [0x77, 0x4F, 0x46, 0x32] => ("woff2", "font/woff2"),
+        // WOFF
+        [0x77, 0x4F, 0x46, 0x46] => ("woff", "font/woff"),
+        // OTF/CFF
+        [0x4F, 0x54, 0x54, 0x4F] => ("opentype", "font/otf"),
+        // TTF
+        [0x00, 0x01, 0x00, 0x00] => ("truetype", "font/ttf"),
+        // TTF (also common)
+        [0x74, 0x72, 0x75, 0x65] => ("truetype", "font/ttf"),
+        _ => ("opentype", "font/otf"),
+    }
+}
+
+/// Encode bytes as base64 string.
+fn base64_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as usize;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
+
+        result.push(ALPHABET[b0 >> 2] as char);
+        result.push(ALPHABET[((b0 & 0x03) << 4) | (b1 >> 4)] as char);
+
+        if chunk.len() > 1 {
+            result.push(ALPHABET[((b1 & 0x0F) << 2) | (b2 >> 6)] as char);
+        } else {
+            result.push('=');
+        }
+
+        if chunk.len() > 2 {
+            result.push(ALPHABET[b2 & 0x3F] as char);
+        } else {
+            result.push('=');
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]

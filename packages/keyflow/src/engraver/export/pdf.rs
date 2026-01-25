@@ -476,69 +476,190 @@ impl PdfSerializer {
 
     /// Combine multiple SVG documents into a single multi-page PDF.
     ///
-    /// Uses printpdf's SVG feature to embed each SVG as a vector XObject.
+    /// Uses svg2pdf's to_pdf to create complete PDFs for each page,
+    /// then merges them using lopdf.
     fn combine_svg_pdfs_to_multipage(
         svg_pages: &[String],
         fonts: &[(&str, &[u8])],
     ) -> Result<Vec<u8>, PdfExportError> {
-        use printpdf::Svg;
+        use lopdf::{dictionary, Document, Object, ObjectId};
+        use std::collections::BTreeMap;
+        use svg2pdf::{ConversionOptions, PageOptions};
 
-        let mut doc = PdfDocument::new("Chart Export");
-        let mut pdf_pages = Vec::new();
-        let mut warnings: Vec<PdfWarnMsg> = Vec::new();
+        tracing::debug!("combine_svg_pdfs_to_multipage: starting with {} pages", svg_pages.len());
 
         // Build font database using usvg's re-exported fontdb
         let mut fontdb = usvg::fontdb::Database::new();
-        for (_name, data) in fonts {
+        for (name, data) in fonts {
             fontdb.load_font_data(data.to_vec());
+            tracing::debug!("Loaded font '{}' ({} bytes)", name, data.len());
         }
 
-        for svg_str in svg_pages {
-            // Parse SVG dimensions from the SVG string
-            let (width_pt, height_pt) = parse_svg_dimensions(svg_str).unwrap_or((612.0, 792.0));
+        // Log all font families in the database
+        let mut families: Vec<String> = Vec::new();
+        for face in fontdb.faces() {
+            for family in face.families.iter() {
+                if !families.contains(&family.0) {
+                    families.push(family.0.clone());
+                }
+            }
+        }
+        tracing::debug!("Font database contains families: {:?}", families);
 
-            // Parse SVG with usvg first to get proper text rendering
+        // Configure generic font family fallbacks
+        // Map generic family names to actual loaded fonts
+        let text_font = if families.contains(&"FreeSans".to_string()) {
+            "FreeSans"
+        } else if families.contains(&"Free Sans".to_string()) {
+            "Free Sans"
+        } else {
+            families.first().map(|s| s.as_str()).unwrap_or("FreeSans")
+        };
+
+        fontdb.set_sans_serif_family(text_font);
+        fontdb.set_serif_family(text_font); // Use same font since we don't have a serif
+        tracing::debug!("Set sans-serif and serif fallback to '{}'", text_font);
+
+        // Step 1: Generate a complete PDF for each SVG page using to_pdf
+        let mut pdf_documents: Vec<Document> = Vec::new();
+
+        for (page_idx, svg_str) in svg_pages.iter().enumerate() {
+            tracing::debug!("Processing SVG page {}", page_idx + 1);
+
+            if svg_str.is_empty() {
+                return Err(PdfExportError::SvgParseError(format!(
+                    "Page {} has empty SVG content",
+                    page_idx + 1
+                )));
+            }
+
+            // Log font-family references in the SVG (first page only for brevity)
+            if page_idx == 0 {
+                let mut svg_fonts: Vec<String> = Vec::new();
+                for cap in regex::Regex::new(r#"font-family="([^"]+)""#)
+                    .unwrap()
+                    .captures_iter(svg_str)
+                {
+                    let font = cap.get(1).unwrap().as_str().to_string();
+                    if !svg_fonts.contains(&font) {
+                        svg_fonts.push(font);
+                    }
+                }
+                tracing::debug!("SVG references font families: {:?}", svg_fonts);
+            }
+
             let mut options = usvg::Options::default();
             *options.fontdb_mut() = fontdb.clone();
 
+            tracing::debug!("Parsing SVG with usvg...");
             let tree = usvg::Tree::from_str(svg_str, &options)
-                .map_err(|e| PdfExportError::SvgParseError(e.to_string()))?;
+                .map_err(|e| PdfExportError::SvgParseError(format!("Page {}: {}", page_idx + 1, e)))?;
 
-            // Convert tree back to SVG string with text converted to paths
-            // This ensures fonts are rendered correctly in PDF
-            let rendered_svg = tree.to_string(&usvg::WriteOptions::default());
+            let size = tree.size();
+            tracing::debug!(
+                "PDF export page {}: usvg tree size {}x{}",
+                page_idx + 1, size.width(), size.height()
+            );
 
-            // Parse with printpdf's Svg
-            let svg_xobject = Svg::parse(&rendered_svg, &mut warnings)
-                .map_err(|e| PdfExportError::SvgParseError(e))?;
+            // Convert to complete PDF using to_pdf
+            tracing::debug!("Converting to PDF...");
+            let pdf_bytes = svg2pdf::to_pdf(&tree, ConversionOptions::default(), PageOptions::default())
+                .map_err(|e| PdfExportError::SaveError(format!("SVG to PDF failed: {e}")))?;
 
-            // Add SVG as XObject
-            let svg_id = doc.add_xobject(&svg_xobject);
+            // Parse the PDF with lopdf
+            let doc = Document::load_mem(&pdf_bytes)
+                .map_err(|e| PdfExportError::SaveError(format!("Failed to parse PDF: {e}")))?;
 
-            // Create page with the SVG
-            let width_mm = Mm((width_pt * 0.352778) as f32);
-            let height_mm = Mm((height_pt * 0.352778) as f32);
-
-            let ops = vec![printpdf::Op::UseXobject {
-                id: svg_id,
-                transform: printpdf::XObjectTransform {
-                    translate_x: Some(Pt(0.0)),
-                    translate_y: Some(Pt(0.0)),
-                    scale_x: Some(1.0),
-                    scale_y: Some(1.0),
-                    ..Default::default()
-                },
-            }];
-
-            pdf_pages.push(PdfPage::new(width_mm, height_mm, ops));
+            pdf_documents.push(doc);
+            tracing::debug!("Page {} PDF created ({} bytes)", page_idx + 1, pdf_bytes.len());
         }
 
-        // Save to bytes
-        let save_options = PdfSaveOptions::default();
-        let mut save_warnings = Vec::<PdfWarnMsg>::new();
-        let bytes = doc.with_pages(pdf_pages).save(&save_options, &mut save_warnings);
+        // Step 2: Merge all PDFs using lopdf pattern
+        tracing::debug!("Merging {} PDFs...", pdf_documents.len());
 
-        Ok(bytes)
+        if pdf_documents.is_empty() {
+            return Err(PdfExportError::SaveError("No pages to merge".to_string()));
+        }
+
+        // Renumber objects in each document to avoid ID conflicts
+        let mut max_id = 1u32;
+        let mut all_pages: Vec<ObjectId> = Vec::new();
+        let mut all_objects: BTreeMap<ObjectId, Object> = BTreeMap::new();
+
+        for mut doc in pdf_documents {
+            // Renumber all objects in this document
+            doc.renumber_objects_with(max_id);
+            max_id = doc.max_id + 1;
+
+            // Extract pages from this document
+            let pages = doc.get_pages();
+            for (_, page_id) in pages {
+                all_pages.push(page_id);
+            }
+
+            // Collect all objects (excluding Catalog, Pages, and Outlines)
+            for (id, object) in doc.objects {
+                if let Ok(type_name) = object.type_name() {
+                    if type_name == b"Catalog" || type_name == b"Outlines" {
+                        continue; // Skip catalog and outlines, we'll create our own
+                    }
+                }
+                all_objects.insert(id, object);
+            }
+        }
+
+        tracing::debug!("Collected {} pages and {} objects", all_pages.len(), all_objects.len());
+
+        // Build merged document
+        let mut merged_doc = Document::with_version("1.5");
+
+        // Add all collected objects
+        for (id, object) in all_objects {
+            merged_doc.objects.insert(id, object);
+        }
+
+        // Create Pages object
+        let pages_id = (max_id, 0);
+        max_id += 1;
+
+        // Update each page's Parent to point to our new Pages object
+        for page_id in &all_pages {
+            if let Ok(page_obj) = merged_doc.get_object_mut(*page_id) {
+                if let Object::Dictionary(dict) = page_obj {
+                    dict.set("Parent", Object::Reference(pages_id));
+                }
+            }
+        }
+
+        // Create Pages dictionary
+        let kids: Vec<Object> = all_pages.iter().map(|id| Object::Reference(*id)).collect();
+        let pages_dict = dictionary! {
+            "Type" => "Pages",
+            "Count" => all_pages.len() as i64,
+            "Kids" => kids,
+        };
+        merged_doc.objects.insert(pages_id, Object::Dictionary(pages_dict));
+
+        // Create Catalog
+        let catalog_id = (max_id, 0);
+        let catalog_dict = dictionary! {
+            "Type" => "Catalog",
+            "Pages" => Object::Reference(pages_id),
+        };
+        merged_doc.objects.insert(catalog_id, Object::Dictionary(catalog_dict));
+
+        // Set trailer
+        merged_doc.trailer.set("Root", Object::Reference(catalog_id));
+        merged_doc.max_id = max_id;
+
+        // Save merged document to bytes
+        tracing::debug!("Saving merged PDF...");
+        let mut output = Vec::new();
+        merged_doc.save_to(&mut output)
+            .map_err(|e| PdfExportError::SaveError(format!("Failed to save PDF: {e}")))?;
+
+        tracing::debug!("Merged PDF complete: {} bytes", output.len());
+        Ok(output)
     }
 
     /// Serialize a scene graph and save directly to a file.

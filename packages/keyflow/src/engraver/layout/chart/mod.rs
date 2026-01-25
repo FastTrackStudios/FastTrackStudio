@@ -528,6 +528,9 @@ impl ChartLayoutEngine {
         let page_offset_y = if self.config.use_page_offsets { 20.0 } else { 0.0 };
         let page_gap = if self.config.use_page_offsets { 40.0 } else { 0.0 };
 
+        // Track the X offset for the current page (updated when a new page starts)
+        let mut current_page_x = page_offset_x;
+
         // Pre-compute section letters for consecutive repeats
         let section_letters = self.compute_section_letters(&chart.sections);
 
@@ -644,6 +647,8 @@ impl ChartLayoutEngine {
                     if !current_page_systems.is_empty() {
                         pages.push(PageLayout {
                             number: page_number,
+                            x_offset: current_page_x,
+                            y_offset: page_offset_y,
                             width: page_width,
                             height: page_height,
                             systems: std::mem::take(&mut current_page_systems),
@@ -660,6 +665,8 @@ impl ChartLayoutEngine {
 
                 // Add page background if this is first system on page
                 if current_page_systems.is_empty() {
+                    // Track the page X offset for this page
+                    current_page_x = page_x;
                     self.add_page_background(
                         &mut root,
                         page_x,
@@ -1088,6 +1095,8 @@ impl ChartLayoutEngine {
         if !current_page_systems.is_empty() {
             pages.push(PageLayout {
                 number: page_number,
+                x_offset: current_page_x,
+                y_offset: page_offset_y,
                 width: page_width,
                 height: page_height,
                 systems: current_page_systems,
@@ -2685,15 +2694,45 @@ impl ChartLayoutEngine {
         measure: &crate::chart::types::Measure,
         _text_metrics: &TextFontMetrics,
     ) -> f64 {
-        // Weight is based ONLY on time signature (beats per measure).
-        // All 4/4 measures have equal weight = 1.0, regardless of rhythm complexity.
-        // Rhythm notation (triplets, rests, etc.) compresses to fit the allocated space.
-        // Chord collision prevention is handled by min_width, not weight.
+        // Base weight from time signature (beats per measure).
+        // 4/4 measures get weight 1.0 as baseline.
         let num_beats = measure.time_signature.0 as usize;
-        let weight = num_beats as f64 / 4.0;
+        let base_weight = num_beats as f64 / 4.0;
 
-        // Clamp to reasonable range (handles unusual time signatures)
-        weight.clamp(0.5, 2.0)
+        // Build rhythm to count triplets
+        let config = rhythm_builder::RhythmBuildConfig {
+            time_signature: measure.time_signature,
+            ..Default::default()
+        };
+        let source = if measure.has_explicit_rhythm() {
+            rhythm_builder::RhythmSource::ExplicitRhythm {
+                elements: &measure.rhythm_elements,
+                spillbacks: None,
+            }
+        } else {
+            rhythm_builder::RhythmSource::SlashNotation {
+                chords: &measure.chords,
+                spillbacks: None,
+            }
+        };
+        let rhythm_result = rhythm_builder::build_rhythm(source, &config);
+
+        // Count triplet elements (each TupletSpec covers multiple entries)
+        let triplet_count: usize = rhythm_result
+            .tuplet_specs
+            .iter()
+            .map(|spec| spec.end_idx.saturating_sub(spec.start_idx))
+            .sum();
+
+        // Small triplet bonus - triplet brackets need extra breathing room.
+        // 0.08 per triplet element gives enough space without stealing too much
+        // from adjacent measures.
+        const TRIPLET_BONUS: f64 = 0.08;
+        let triplet_bonus = triplet_count as f64 * TRIPLET_BONUS;
+
+        // Combine and clamp to reasonable range
+        let weight = base_weight + triplet_bonus;
+        weight.clamp(0.5, 2.5)
     }
 
     /// Distribute available width among measures using spring physics.

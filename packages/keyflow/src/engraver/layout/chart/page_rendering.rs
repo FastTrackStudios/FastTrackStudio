@@ -233,7 +233,7 @@ pub fn add_title_header(
 
     // Title (large, bold, centered) - at the very top of the header
     // Title is wrapped in quotes like "Thriller"
-    // Using "title-bold" font family for bold rendering
+    // Using FreeSans with bold weight for title
     let title_font_size = 34.0;
     let title_y = frame_top_y + header_top_padding + title_font_size; // Baseline position
 
@@ -241,7 +241,7 @@ pub fn add_title_header(
         let quoted_title = format!("\"{}\"", title);
         commands.push(PaintCommand::Text {
             text: quoted_title,
-            font_family: "title-bold".to_string(),
+            font_family: "FreeSans".to_string(),
             font_size: title_font_size,
             position: kurbo::Point::new(center_x, title_y),
             color: Color::BLACK,
@@ -274,7 +274,7 @@ pub fn add_title_header(
         let line_y = part_start_y + (i as f64 * (small_font_size + 2.0));
         commands.push(PaintCommand::Text {
             text: line.clone(),
-            font_family: "part-name-bold".to_string(),
+            font_family: "FreeSans".to_string(),
             font_size: small_font_size,
             position: kurbo::Point::new(left_x, line_y),
             color: Color::BLACK,
@@ -446,7 +446,7 @@ pub fn add_title_header_with_count_in(
         let quoted_title = format!("\"{}\"", title);
         commands.push(PaintCommand::Text {
             text: quoted_title,
-            font_family: "title-bold".to_string(),
+            font_family: "FreeSans".to_string(),
             font_size: title_font_size,
             position: kurbo::Point::new(center_x, title_y),
             color: Color::BLACK,
@@ -479,7 +479,7 @@ pub fn add_title_header_with_count_in(
         let line_y = part_start_y + (i as f64 * (small_font_size + 2.0));
         commands.push(PaintCommand::Text {
             text: line.clone(),
-            font_family: "part-name-bold".to_string(),
+            font_family: "FreeSans".to_string(),
             font_size: small_font_size,
             position: kurbo::Point::new(left_x, line_y),
             color: Color::BLACK,

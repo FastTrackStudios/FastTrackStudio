@@ -489,9 +489,22 @@ pub fn measure_measure_with_config(
         }
 
         if is_visible {
-            let width = cache.measure_chord_width(&chord.full_symbol, font_size, text_metrics);
-            // Apply minimum width floor (same as old code)
-            let width = width.max(font_size * 1.5);
+            let base_width = cache.measure_chord_width(&chord.full_symbol, font_size, text_metrics);
+
+            // Adjust width for rendered chord components that are wider than plain text:
+            // - Accidentals (b, #) render as ♭, ♯ symbols which are wider
+            // - Extensions (7, 9, 11, 13) and alterations (#5, b9) need space
+            // - Quality markers (maj, dim, aug) have specific widths
+            let symbol = &chord.full_symbol;
+            let has_flat = symbol.contains('b') && symbol.len() > 1; // 'b' as flat, not 'B' root
+            let has_sharp = symbol.contains('#');
+            let has_extension = symbol.chars().any(|c| c.is_ascii_digit());
+
+            // Add padding for each component that renders wider than text
+            let accidental_padding = if has_flat || has_sharp { font_size * 0.3 } else { 0.0 };
+            let extension_padding = if has_extension { font_size * 0.2 } else { 0.0 };
+
+            let width = (base_width + accidental_padding + extension_padding).max(font_size * 1.5);
             chord_widths.push(width);
 
             // Create local-coordinate bounding box (origin at baseline-left)
@@ -640,17 +653,19 @@ pub fn measure_measure_with_config(
         }
 
         // Sum segment minimums to get total min_width.
-        // Segments with a minimum use that value; others use baseline.
-        let baseline_segment_width = font_size * 1.2; // Reasonable minimum per segment
+        // ONLY segments with chord collisions contribute to min_width.
+        // Segments without chords (rests, spaces) contribute NOTHING because
+        // rhythm notation compresses to fit whatever space is allocated.
+        //
+        // Previous bug: baseline_segment_width was applied to ALL segments,
+        // causing triplet-heavy measures (r8t >Cm_8t r8t ...) to get huge
+        // min_widths even though most segments are just rests.
 
-        // Add trailing padding to prevent noteheads from overflowing into barline.
-        // This accounts for the last notehead width plus some breathing room.
-        let trailing_padding = font_size * 0.8;
+        // Add minimal trailing padding for visual breathing room
+        let trailing_padding = font_size * 0.3;
 
-        let segment_total: f64 = segment_mins
-            .iter()
-            .map(|&m| if m > 0.0 { m } else { baseline_segment_width })
-            .sum();
+        // Only sum segments that have actual chord collision requirements
+        let segment_total: f64 = segment_mins.iter().filter(|&&m| m > 0.0).sum();
 
         segment_total + trailing_padding
     };
@@ -733,26 +748,21 @@ pub fn compute_measure_weight(
     segment_count: usize,
     triplet_count: usize,
 ) -> f64 {
-    const TRIPLET_BONUS: f64 = 0.15; // Extra weight per triplet element
-    const CHORD_COLLISION_BONUS: f64 = 0.25; // Extra weight when chords might collide
-
-    // Base weight from segment count (4 segments = 1.0 weight for standard 4/4)
+    // Base weight from segment count (time signature).
+    // 4/4 measures get weight 1.0 as baseline.
     let segment_weight = segment_count as f64 / 4.0;
 
-    // Triplet complexity bonus
+    // Small triplet bonus - triplet brackets need a little extra breathing room,
+    // but not much. The old value (0.15 per triplet) was too aggressive
+    // and caused measures to overflow. This bonus (0.08 per triplet)
+    // gives enough extra space for the bracket notation without
+    // stealing too much from adjacent measures.
+    const TRIPLET_BONUS: f64 = 0.08;
     let triplet_bonus = triplet_count as f64 * TRIPLET_BONUS;
 
-    // Collision potential bonus (when 2+ visible chords exist)
-    let collision_bonus = if measurements.visible_chord_count >= 2 {
-        // More chords = more potential for collisions
-        (measurements.visible_chord_count - 1) as f64 * CHORD_COLLISION_BONUS * 0.5
-    } else {
-        0.0
-    };
-
-    // Combine weights and clamp to reasonable range
-    let weight = segment_weight.max(1.0) + triplet_bonus + collision_bonus;
-    weight.clamp(0.5, 4.0)
+    // Combine and clamp to reasonable range
+    let weight = segment_weight + triplet_bonus;
+    weight.clamp(0.5, 2.0)
 }
 
 #[cfg(test)]
@@ -798,7 +808,7 @@ mod tests {
 
     #[test]
     fn test_compute_measure_weight() {
-        // Simple measure with 4 segments
+        // Simple measure with 4 segments (4/4 time)
         let measurements = MeasureMeasurements {
             chord_widths: vec![50.0],
             min_width: 0.0,
@@ -808,15 +818,21 @@ mod tests {
         let weight = compute_measure_weight(&measurements, 4, 0);
         assert!((weight - 1.0).abs() < 0.01); // 4/4 = 1.0 base weight
 
-        // Measure with triplets
+        // Measure with triplets gets a small bonus (0.12 per triplet)
         let measurements_triplet = MeasureMeasurements {
             chord_widths: vec![50.0, 50.0],
             min_width: 100.0,
             visible_chord_count: 2,
             chord_layouts: Vec::new(),
         };
-        let weight_triplet = compute_measure_weight(&measurements_triplet, 6, 3);
-        assert!(weight_triplet > weight); // Should have triplet bonus
+        let weight_with_triplets = compute_measure_weight(&measurements_triplet, 4, 3);
+        // 1.0 base + 3 * 0.12 = 1.36
+        assert!((weight_with_triplets - 1.36).abs() < 0.01);
+        assert!(weight_with_triplets > weight); // Slightly more than no triplets
+
+        // 6/8 measure with 6 segments
+        let weight_6_segments = compute_measure_weight(&measurements_triplet, 6, 0);
+        assert!((weight_6_segments - 1.5).abs() < 0.01); // 6/4 = 1.5 weight
     }
 
     #[test]

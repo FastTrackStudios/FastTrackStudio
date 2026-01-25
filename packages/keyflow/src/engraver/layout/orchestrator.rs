@@ -65,6 +65,10 @@ pub struct LayoutResult {
 pub struct PageLayout {
     /// Page number (1-indexed)
     pub number: u32,
+    /// X offset in the scene (for multi-page layouts)
+    pub x_offset: f64,
+    /// Y offset in the scene (for multi-page layouts)
+    pub y_offset: f64,
     /// Page dimensions
     pub width: f64,
     pub height: f64,
@@ -357,6 +361,8 @@ impl<'a> LayoutEngine<'a> {
                 // Finalize current page
                 let page = PageLayout {
                     number: page_number,
+                    x_offset: 0.0,
+                    y_offset: 0.0,
                     width: self.config.page_width,
                     height: self.config.page_height,
                     systems: std::mem::take(&mut current_page_systems),
@@ -390,6 +396,8 @@ impl<'a> LayoutEngine<'a> {
                 // Finalize current page due to explicit page break
                 let page = PageLayout {
                     number: page_number,
+                    x_offset: 0.0,
+                    y_offset: 0.0,
                     width: self.config.page_width,
                     height: self.config.page_height,
                     systems: std::mem::take(&mut current_page_systems),
@@ -405,6 +413,8 @@ impl<'a> LayoutEngine<'a> {
         if !current_page_systems.is_empty() {
             let page = PageLayout {
                 number: page_number,
+                x_offset: 0.0,
+                y_offset: 0.0,
                 width: self.config.page_width,
                 height: self.config.page_height,
                 systems: current_page_systems,
@@ -486,6 +496,8 @@ impl<'a> LayoutEngine<'a> {
         // Create single "page" representing the endless horizontal strip
         let page = PageLayout {
             number: 1,
+            x_offset: 0.0,
+            y_offset: 0.0,
             width: total_width,
             height: total_height,
             systems: vec![system_layout],
@@ -560,6 +572,8 @@ impl<'a> LayoutEngine<'a> {
         // Create single "page" representing the endless vertical strip
         let page = PageLayout {
             number: 1,
+            x_offset: 0.0,
+            y_offset: 0.0,
             width: self.config.page_width,
             height: total_height,
             systems: all_systems,

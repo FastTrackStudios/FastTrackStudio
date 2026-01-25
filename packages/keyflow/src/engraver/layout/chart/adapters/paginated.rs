@@ -72,9 +72,15 @@ impl PaginatedAdapter {
 
     /// Finish the current page and add it to the pages list.
     fn finish_current_page(&mut self, state: &mut LayoutState) {
+        // Calculate page position (pages are stacked vertically in this adapter)
+        let page_index = state.page_number.saturating_sub(1);
+        let y_offset = self.page_y_offset(page_index);
+
         // Create page layout record
         let page_layout = PageLayout {
             number: state.page_number,
+            x_offset: self.page_offset_x,
+            y_offset,
             width: self.page_width,
             height: self.page_height,
             systems: std::mem::take(&mut state.current_page_systems),

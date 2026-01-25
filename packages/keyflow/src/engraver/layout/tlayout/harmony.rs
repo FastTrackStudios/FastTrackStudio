@@ -163,14 +163,15 @@ impl HarmonyStyle {
     }
 
     /// Create style using MuseJazz font (handwritten jazz style).
-    /// Uses MuseJazzText for text and its PUA symbols for chord symbols.
+    /// Uses MuseJazz Text for text and its PUA symbols for chord symbols.
     /// MuseJazz has its own Private Use Area codepoints for triangle, circle, etc.
+    /// Note: Font family is "MuseJazz Text" (with space) to match the font's internal name.
     #[must_use]
     pub fn musejazz() -> Self {
         Self {
-            // MuseJazzText has handwritten-style ASCII characters
-            font_family: "MuseJazzText".to_string(),
-            // Same font for symbols - MuseJazzText has PUA symbols
+            // Font internal name is "MuseJazz Text" (with space)
+            font_family: "MuseJazz Text".to_string(),
+            // Same font for symbols - MuseJazz Text has PUA symbols
             symbol_font_family: None,
             // Use MuseJazz-specific PUA codepoints
             symbol_set: SymbolSet::MuseJazz,
@@ -179,12 +180,13 @@ impl HarmonyStyle {
     }
 
     /// Create jazz notation style using MuseJazz font.
+    /// Note: Font family is "MuseJazz Text" (with space) to match the font's internal name.
     #[must_use]
     pub fn musejazz_jazz() -> Self {
         Self {
             notation: ChordNotation::Jazz,
-            // MuseJazzText has handwritten-style ASCII characters
-            font_family: "MuseJazzText".to_string(),
+            // Font internal name is "MuseJazz Text" (with space)
+            font_family: "MuseJazz Text".to_string(),
             // Same font for symbols
             symbol_font_family: None,
             // Use MuseJazz-specific PUA codepoints

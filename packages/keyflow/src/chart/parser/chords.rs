@@ -161,6 +161,59 @@ impl Chart {
     ///           "C'_4." -> ("C", modifier with duration=Quarter, dotted=true)
     ///           "D'//  -> ("D//", modifier with count=1) - stops at rhythm notation
     ///           "C" -> ("C", empty modifier)
+    ///
+    /// Find where rhythm notation starts in a token, distinguishing slash chords from rhythm slashes.
+    ///
+    /// Rhythm notation is:
+    /// - "//" (multiple slashes for duration continuation)
+    /// - "/" at end of token (standalone continuation)
+    /// - "/" followed by '_' or '\'' (rhythm with duration/pull)
+    ///
+    /// Slash chord (NOT rhythm) is:
+    /// - "/" followed by a letter (the bass note, e.g., "Gm7/D")
+    /// - "/" followed by a digit (Nashville number bass, e.g., "1/3")
+    ///
+    /// Returns the position where rhythm notation starts, or token.len() if no rhythm notation.
+    fn find_rhythm_slash_position(token: &str) -> usize {
+        let bytes = token.as_bytes();
+        let mut i = 0;
+
+        while i < bytes.len() {
+            if bytes[i] == b'/' {
+                // Check what follows the slash
+                if i + 1 >= bytes.len() {
+                    // Slash at end - this is rhythm notation
+                    return i;
+                }
+
+                let next_char = bytes[i + 1];
+                if next_char == b'/' {
+                    // Another slash follows - this is rhythm notation (e.g., "//")
+                    return i;
+                } else if next_char == b'_' || next_char == b'\'' {
+                    // Duration or pull modifier follows - this is rhythm notation
+                    return i;
+                } else if next_char.is_ascii_alphabetic() || next_char.is_ascii_digit() {
+                    // A letter or digit follows - this is a slash chord bass note
+                    // Skip past the bass note to continue looking for rhythm
+                    i += 1;
+                    // Skip the bass note (letters, digits, accidentals)
+                    while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'#' || bytes[i] == b'b') {
+                        i += 1;
+                    }
+                    continue;
+                } else {
+                    // Something unexpected follows - treat as rhythm notation
+                    return i;
+                }
+            }
+            i += 1;
+        }
+
+        // No rhythm notation found
+        token.len()
+    }
+
     pub(super) fn extract_trailing_pull_modifiers(token: &str) -> (String, PushPullModifier) {
         // First, find where the chord part ends and rhythm notation begins
         // Rhythm notation: / (but NOT '_4 style duration which is part of pull notation)
@@ -168,7 +221,11 @@ impl Chart {
         // - "C'_4" = pull by quarter note (the _4 is part of the pull modifier)
         // - "C_4" = chord with quarter note duration (the _4 is rhythm notation)
         // So we only split on '/' for standalone slash rhythm
-        let rhythm_start = token.find('/').unwrap_or(token.len());
+        //
+        // IMPORTANT: We must NOT split at slash chords like "Gm7/D" where "/D" is the bass note.
+        // Rhythm notation is: "//" (multiple slashes), "/" at end, or "/" followed by '_' or '\''
+        // Slash chord is: "/" followed by a letter (the bass note)
+        let rhythm_start = Self::find_rhythm_slash_position(token);
 
         // Only extract modifiers between chord and rhythm
         let chord_and_modifiers = &token[..rhythm_start];
