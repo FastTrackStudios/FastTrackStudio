@@ -7,11 +7,13 @@
 //! - [`VSlider`] - Vertical slider
 //! - [`XYPad`] - Two-dimensional control pad
 //! - [`EqGraph`] - Parametric EQ visualization with draggable bands
+//! - [`CompressorGraph`] - Compressor transfer curve with interactive controls
 //! - [`BlockView`] - Adaptive block rendering with LOD support
 //! - [`Pedalboard`] - Pedalboard container for arranging pedals
 //! - [`Rack`] - Rack container for arranging rack units
 
 pub mod block_view;
+pub mod compressor_graph;
 pub mod eq_graph;
 pub mod hslider;
 pub mod knob;
@@ -19,6 +21,10 @@ pub mod vslider;
 pub mod xy_pad;
 
 pub use block_view::{BlockView, Pedalboard, Rack};
+pub use compressor_graph::{
+    CompressorGraph, CompressorMetering, CompressorMode, CompressorParams, DbRange, DetectionMode,
+    StereoLink,
+};
 pub use eq_graph::{EqBand, EqBandShape, EqGraph};
 pub use hslider::{HSlider, SliderVariant};
 pub use knob::{Knob, KnobVariant};

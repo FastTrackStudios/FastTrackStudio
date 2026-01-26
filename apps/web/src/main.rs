@@ -22,7 +22,10 @@ use fts::rig::{LocalRigClient, MockRig};
 use ui::{PerformanceView, RigControlView, RigServiceProvider, SetlistServiceProvider};
 
 // Audio controls
-use audio_controls::widgets::{EqBand, EqBandShape, EqGraph};
+use audio_controls::widgets::{
+    CompressorGraph, CompressorMetering, CompressorMode, CompressorParams, DbRange,
+    EqBand, EqBandShape, EqGraph,
+};
 
 // Static assets
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -63,6 +66,8 @@ pub enum Route {
     TestRender {},
     #[route("/test/eq")]
     TestEq {},
+    #[route("/test/compressor")]
+    TestCompressor {},
     // Setlist control view (demo with mock data)
     #[route("/control/setlist")]
     ControlSetlist {},
@@ -3262,4 +3267,559 @@ fn preset_smiley() -> Vec<EqBand> {
             ..Default::default()
         },
     ]
+}
+
+// =============================================================================
+// Compressor Test Page
+// =============================================================================
+
+/// Test page for the compressor graph component
+#[component]
+fn TestCompressor() -> Element {
+    // Compressor parameters state
+    let mut params = use_signal(CompressorParams::default);
+
+    // Simulated metering (in a real app, this would come from the DSP)
+    let mut metering = use_signal(CompressorMetering::default);
+
+    // Simulated input level animation
+    let mut sim_time = use_signal(|| 0.0_f64);
+
+    // Animation effect for simulated levels
+    use_effect(move || {
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::prelude::*;
+
+            let closure = Closure::wrap(Box::new(move || {
+                let t = *sim_time.peek();
+                sim_time.set(t + 0.05);
+
+                // Simulate varying input level
+                let input = -24.0 + 18.0 * (t * 0.7).sin() as f32 + 6.0 * (t * 2.3).sin() as f32;
+                let input_clamped = input.clamp(-60.0, 0.0);
+
+                // Compute output based on current params
+                let p = params.peek();
+                let threshold = p.threshold;
+                let ratio = p.ratio;
+                let knee_w = p.knee / 2.0;
+
+                let output = if input_clamped <= threshold - knee_w {
+                    input_clamped
+                } else if input_clamped < threshold + knee_w {
+                    let a0 = (1.0 / ratio - 1.0) / (4.0 * knee_w);
+                    let x_offset = input_clamped - (threshold - knee_w);
+                    input_clamped + a0 * x_offset * x_offset
+                } else {
+                    threshold + (input_clamped - threshold) / ratio
+                };
+
+                let gr = output - input_clamped;
+
+                metering.set(CompressorMetering {
+                    input_level: input_clamped,
+                    output_level: output,
+                    gain_reduction: gr,
+                    input_peak: input_clamped.max(metering.peek().input_peak * 0.99),
+                    output_peak: output.max(metering.peek().output_peak * 0.99),
+                    gr_peak: gr.min(metering.peek().gr_peak * 0.99),
+                });
+            }) as Box<dyn FnMut()>);
+
+            let window = web_sys::window().unwrap();
+            let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
+                closure.as_ref().unchecked_ref(),
+                50,
+            );
+
+            closure.forget();
+        }
+    });
+
+    // DB range selection
+    let mut db_range = use_signal(|| DbRange::Range48);
+
+    rsx! {
+        div {
+            class: "min-h-screen bg-background p-8",
+
+            // Header
+            div {
+                class: "max-w-6xl mx-auto mb-8",
+                h1 {
+                    class: "text-2xl font-bold text-foreground mb-2",
+                    "Compressor Graph Test"
+                }
+                p {
+                    class: "text-muted-foreground",
+                    "Interactive compressor transfer curve. Drag the threshold point to adjust threshold. Drag above threshold to adjust ratio. Mouse wheel to adjust knee width."
+                }
+            }
+
+            // Main content
+            div {
+                class: "max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8",
+
+                // Compressor Graph (2 columns on large screens)
+                div {
+                    class: "lg:col-span-2 bg-card rounded-xl border border-border p-4",
+
+                    h2 {
+                        class: "text-lg font-semibold text-foreground mb-4",
+                        "Transfer Curve"
+                    }
+
+                    // Graph container with aspect ratio
+                    div {
+                        class: "w-full",
+                        style: "aspect-ratio: 1 / 1; max-width: 500px; margin: 0 auto;",
+
+                        CompressorGraph {
+                            params: params.read().clone(),
+                            metering: metering.read().clone(),
+                            db_range: *db_range.read(),
+                            show_grid: true,
+                            show_gr_meter: true,
+                            show_levels: true,
+                            interactive: true,
+                            on_threshold_change: move |v: f32| {
+                                params.write().threshold = v;
+                            },
+                            on_ratio_change: move |v: f32| {
+                                params.write().ratio = v;
+                            },
+                            on_knee_change: move |v: f32| {
+                                params.write().knee = v;
+                            },
+                        }
+                    }
+                }
+
+                // Control Panel
+                div {
+                    class: "bg-card rounded-xl border border-border p-4 space-y-6",
+
+                    // Display Options
+                    div {
+                        h3 {
+                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
+                            "Display Options"
+                        }
+
+                        div {
+                            class: "space-y-3",
+
+                            // dB Range
+                            div {
+                                class: "space-y-1",
+                                label { class: "text-sm text-muted-foreground", "dB Range" }
+                                select {
+                                    class: "w-full px-3 py-2 rounded-lg bg-muted border border-border text-foreground text-sm",
+                                    value: match *db_range.read() {
+                                        DbRange::Range30 => "30",
+                                        DbRange::Range48 => "48",
+                                        DbRange::Range60 => "60",
+                                        DbRange::Range72 => "72",
+                                    },
+                                    onchange: move |evt: Event<FormData>| {
+                                        db_range.set(match evt.value().as_str() {
+                                            "30" => DbRange::Range30,
+                                            "48" => DbRange::Range48,
+                                            "60" => DbRange::Range60,
+                                            "72" => DbRange::Range72,
+                                            _ => DbRange::Range48,
+                                        });
+                                    },
+                                    option { value: "30", "30 dB" }
+                                    option { value: "48", "48 dB" }
+                                    option { value: "60", "60 dB" }
+                                    option { value: "72", "72 dB" }
+                                }
+                            }
+                        }
+                    }
+
+                    // Compressor Parameters
+                    div {
+                        h3 {
+                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
+                            "Compressor Parameters"
+                        }
+
+                        div {
+                            class: "space-y-4",
+
+                            // Mode selector
+                            div {
+                                class: "space-y-1",
+                                label { class: "text-sm text-muted-foreground", "Mode" }
+                                select {
+                                    class: "w-full px-3 py-2 rounded-lg bg-muted border border-border text-foreground text-sm",
+                                    value: match params.read().mode {
+                                        CompressorMode::Compress => "compress",
+                                        CompressorMode::Expand => "expand",
+                                        CompressorMode::Inflate => "inflate",
+                                        CompressorMode::Shape => "shape",
+                                    },
+                                    onchange: move |evt: Event<FormData>| {
+                                        params.write().mode = match evt.value().as_str() {
+                                            "compress" => CompressorMode::Compress,
+                                            "expand" => CompressorMode::Expand,
+                                            "inflate" => CompressorMode::Inflate,
+                                            "shape" => CompressorMode::Shape,
+                                            _ => CompressorMode::Compress,
+                                        };
+                                    },
+                                    option { value: "compress", "Compress" }
+                                    option { value: "expand", "Expand" }
+                                    option { value: "inflate", "Inflate" }
+                                    option { value: "shape", "Shape" }
+                                }
+                            }
+
+                            // Threshold
+                            div {
+                                class: "space-y-1",
+                                label {
+                                    class: "text-sm text-muted-foreground",
+                                    "Threshold: {params.read().threshold:.1} dB"
+                                }
+                                input {
+                                    r#type: "range",
+                                    min: "-60",
+                                    max: "0",
+                                    step: "0.5",
+                                    value: "{params.read().threshold}",
+                                    class: "w-full",
+                                    oninput: move |evt: Event<FormData>| {
+                                        if let Ok(v) = evt.value().parse::<f32>() {
+                                            params.write().threshold = v;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Ratio
+                            div {
+                                class: "space-y-1",
+                                label {
+                                    class: "text-sm text-muted-foreground",
+                                    "Ratio: {params.read().ratio:.1}:1"
+                                }
+                                input {
+                                    r#type: "range",
+                                    min: "1",
+                                    max: "20",
+                                    step: "0.1",
+                                    value: "{params.read().ratio}",
+                                    class: "w-full",
+                                    oninput: move |evt: Event<FormData>| {
+                                        if let Ok(v) = evt.value().parse::<f32>() {
+                                            params.write().ratio = v;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Knee
+                            div {
+                                class: "space-y-1",
+                                label {
+                                    class: "text-sm text-muted-foreground",
+                                    "Knee: {params.read().knee:.1} dB"
+                                }
+                                input {
+                                    r#type: "range",
+                                    min: "0",
+                                    max: "24",
+                                    step: "0.5",
+                                    value: "{params.read().knee}",
+                                    class: "w-full",
+                                    oninput: move |evt: Event<FormData>| {
+                                        if let Ok(v) = evt.value().parse::<f32>() {
+                                            params.write().knee = v;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Attack
+                            div {
+                                class: "space-y-1",
+                                label {
+                                    class: "text-sm text-muted-foreground",
+                                    "Attack: {params.read().attack:.1} ms"
+                                }
+                                input {
+                                    r#type: "range",
+                                    min: "0.1",
+                                    max: "100",
+                                    step: "0.1",
+                                    value: "{params.read().attack}",
+                                    class: "w-full",
+                                    oninput: move |evt: Event<FormData>| {
+                                        if let Ok(v) = evt.value().parse::<f32>() {
+                                            params.write().attack = v;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Release
+                            div {
+                                class: "space-y-1",
+                                label {
+                                    class: "text-sm text-muted-foreground",
+                                    "Release: {params.read().release:.0} ms"
+                                }
+                                input {
+                                    r#type: "range",
+                                    min: "10",
+                                    max: "1000",
+                                    step: "10",
+                                    value: "{params.read().release}",
+                                    class: "w-full",
+                                    oninput: move |evt: Event<FormData>| {
+                                        if let Ok(v) = evt.value().parse::<f32>() {
+                                            params.write().release = v;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Curve
+                            div {
+                                class: "space-y-1",
+                                label {
+                                    class: "text-sm text-muted-foreground",
+                                    "Curve: {params.read().curve:.2}"
+                                }
+                                input {
+                                    r#type: "range",
+                                    min: "-1",
+                                    max: "1",
+                                    step: "0.05",
+                                    value: "{params.read().curve}",
+                                    class: "w-full",
+                                    oninput: move |evt: Event<FormData>| {
+                                        if let Ok(v) = evt.value().parse::<f32>() {
+                                            params.write().curve = v;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Makeup Gain
+                            div {
+                                class: "space-y-1",
+                                label {
+                                    class: "text-sm text-muted-foreground",
+                                    "Makeup: {params.read().makeup:.1} dB"
+                                }
+                                input {
+                                    r#type: "range",
+                                    min: "0",
+                                    max: "24",
+                                    step: "0.5",
+                                    value: "{params.read().makeup}",
+                                    class: "w-full",
+                                    oninput: move |evt: Event<FormData>| {
+                                        if let Ok(v) = evt.value().parse::<f32>() {
+                                            params.write().makeup = v;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Mix
+                            div {
+                                class: "space-y-1",
+                                label {
+                                    class: "text-sm text-muted-foreground",
+                                    "Mix: {(params.read().mix * 100.0):.0}%"
+                                }
+                                input {
+                                    r#type: "range",
+                                    min: "0",
+                                    max: "1",
+                                    step: "0.01",
+                                    value: "{params.read().mix}",
+                                    class: "w-full",
+                                    oninput: move |evt: Event<FormData>| {
+                                        if let Ok(v) = evt.value().parse::<f32>() {
+                                            params.write().mix = v;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Presets
+                    div {
+                        h3 {
+                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
+                            "Presets"
+                        }
+
+                        div {
+                            class: "grid grid-cols-2 gap-2",
+
+                            button {
+                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
+                                onclick: move |_| {
+                                    params.set(CompressorParams::default());
+                                },
+                                "Default"
+                            }
+
+                            button {
+                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
+                                onclick: move |_| {
+                                    params.set(CompressorParams {
+                                        threshold: -12.0,
+                                        ratio: 2.0,
+                                        knee: 12.0,
+                                        attack: 30.0,
+                                        release: 200.0,
+                                        ..Default::default()
+                                    });
+                                },
+                                "Gentle"
+                            }
+
+                            button {
+                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
+                                onclick: move |_| {
+                                    params.set(CompressorParams {
+                                        threshold: -24.0,
+                                        ratio: 8.0,
+                                        knee: 0.0,
+                                        attack: 1.0,
+                                        release: 50.0,
+                                        ..Default::default()
+                                    });
+                                },
+                                "Aggressive"
+                            }
+
+                            button {
+                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
+                                onclick: move |_| {
+                                    params.set(CompressorParams {
+                                        threshold: -30.0,
+                                        ratio: 20.0,
+                                        knee: 0.0,
+                                        attack: 0.5,
+                                        release: 30.0,
+                                        ..Default::default()
+                                    });
+                                },
+                                "Limiter"
+                            }
+
+                            button {
+                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
+                                onclick: move |_| {
+                                    params.set(CompressorParams {
+                                        mode: CompressorMode::Expand,
+                                        threshold: -40.0,
+                                        ratio: 4.0,
+                                        knee: 6.0,
+                                        attack: 5.0,
+                                        release: 100.0,
+                                        range: -80.0,
+                                        ..Default::default()
+                                    });
+                                },
+                                "Gate"
+                            }
+
+                            button {
+                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
+                                onclick: move |_| {
+                                    params.set(CompressorParams {
+                                        mode: CompressorMode::Inflate,
+                                        threshold: -24.0,
+                                        ratio: 3.0,
+                                        knee: 12.0,
+                                        attack: 20.0,
+                                        release: 150.0,
+                                        ..Default::default()
+                                    });
+                                },
+                                "Upward"
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Metering Display
+            div {
+                class: "max-w-6xl mx-auto mt-8 bg-card rounded-xl border border-border p-4",
+
+                h2 {
+                    class: "text-lg font-semibold text-foreground mb-4",
+                    "Real-time Metering"
+                }
+
+                div {
+                    class: "grid grid-cols-3 gap-8",
+
+                    // Input Level
+                    div {
+                        class: "text-center",
+                        div {
+                            class: "text-sm text-muted-foreground mb-1",
+                            "Input"
+                        }
+                        div {
+                            class: "text-2xl font-mono text-foreground",
+                            "{metering.read().input_level:.1} dB"
+                        }
+                        div {
+                            class: "text-xs text-muted-foreground mt-1",
+                            "Peak: {metering.read().input_peak:.1} dB"
+                        }
+                    }
+
+                    // Gain Reduction
+                    div {
+                        class: "text-center",
+                        div {
+                            class: "text-sm text-muted-foreground mb-1",
+                            "Gain Reduction"
+                        }
+                        div {
+                            class: "text-2xl font-mono text-red-500",
+                            "{metering.read().gain_reduction:.1} dB"
+                        }
+                        div {
+                            class: "text-xs text-muted-foreground mt-1",
+                            "Peak: {metering.read().gr_peak:.1} dB"
+                        }
+                    }
+
+                    // Output Level
+                    div {
+                        class: "text-center",
+                        div {
+                            class: "text-sm text-muted-foreground mb-1",
+                            "Output"
+                        }
+                        div {
+                            class: "text-2xl font-mono text-foreground",
+                            "{metering.read().output_level:.1} dB"
+                        }
+                        div {
+                            class: "text-xs text-muted-foreground mt-1",
+                            "Peak: {metering.read().output_peak:.1} dB"
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

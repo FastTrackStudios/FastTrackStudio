@@ -83,6 +83,11 @@ pub mod prelude {
     // Widgets
     pub use crate::widgets::{
         block_view::{BlockView, Pedalboard, Rack},
+        compressor_graph::{
+            CompressorGraph, CompressorMetering, CompressorMode, CompressorParams, DbRange,
+            DetectionMode, StereoLink,
+        },
+        eq_graph::{EqBand, EqBandShape, EqGraph, StereoMode},
         hslider::{HSlider, SliderVariant},
         knob::{Knob, KnobVariant},
         vslider::VSlider,
