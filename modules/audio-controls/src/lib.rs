@@ -84,8 +84,8 @@ pub mod prelude {
     pub use crate::widgets::{
         block_view::{BlockView, Pedalboard, Rack},
         compressor_graph::{
-            CompressorGraph, CompressorMetering, CompressorMode, CompressorParams, DbRange,
-            DetectionMode, StereoLink,
+            CompressorGraph, CompressorMetering, CompressorMode, CompressorParams, CompressorWidget,
+            DbRange, DetectionMode, StereoLink,
         },
         eq_graph::{EqBand, EqBandShape, EqGraph, StereoMode},
         gate_graph::{GateDbRange, GateGraph, GateMetering, GateMode, GateParams},

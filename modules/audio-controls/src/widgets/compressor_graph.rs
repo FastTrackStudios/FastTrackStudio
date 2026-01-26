@@ -990,3 +990,274 @@ pub fn CompressorGraph(props: CompressorGraphProps) -> Element {
         }
     }
 }
+
+// =============================================================================
+// CompressorWidget - Full compressor UI with knobs (Pro-C style)
+// =============================================================================
+
+use crate::widgets::knob::Knob;
+use crate::theming::{ThemeContext, ThemeProvider};
+
+/// Props for the CompressorWidget component.
+#[derive(Props, Clone, PartialEq)]
+pub struct CompressorWidgetProps {
+    /// Signal for compressor parameters (allows two-way binding).
+    pub params: Signal<CompressorParams>,
+    /// Real-time metering data.
+    #[props(default)]
+    pub metering: CompressorMetering,
+    /// dB range for the graph.
+    #[props(default)]
+    pub db_range: DbRange,
+    /// Size of the graph in pixels.
+    #[props(default = 200)]
+    pub graph_size: u32,
+    /// Whether to show the grid.
+    #[props(default = true)]
+    pub show_grid: bool,
+    /// Whether to show gain reduction meter.
+    #[props(default = true)]
+    pub show_gr_meter: bool,
+    /// Whether to show input/output level visualization.
+    #[props(default = true)]
+    pub show_levels: bool,
+    /// Whether to show the GR history trace.
+    #[props(default = true)]
+    pub show_gr_trace: bool,
+    /// Whether to show the knob controls panel.
+    #[props(default = true)]
+    pub show_controls: bool,
+    /// Whether interaction is enabled.
+    #[props(default = true)]
+    pub interactive: bool,
+}
+
+/// Compressor widget with integrated knob controls.
+///
+/// A complete compressor UI inspired by Pro-C with:
+/// - Transfer curve graph
+/// - Large threshold knob with smaller ratio/knee knobs
+/// - Envelope controls (attack, release, makeup)
+/// - Cyan/teal color theme
+#[component]
+pub fn CompressorWidget(props: CompressorWidgetProps) -> Element {
+    let mut params = props.params;
+
+    // Create local signals bound to params
+    let mut threshold_sig = use_signal(|| params.read().threshold);
+    let mut ratio_sig = use_signal(|| params.read().ratio);
+    let mut knee_sig = use_signal(|| params.read().knee);
+    let mut attack_sig = use_signal(|| params.read().attack);
+    let mut release_sig = use_signal(|| params.read().release);
+    let mut makeup_sig = use_signal(|| params.read().makeup);
+
+    // Sync from params to signals when params change externally
+    let params_clone = params.read().clone();
+    use_effect(move || {
+        threshold_sig.set(params_clone.threshold);
+        ratio_sig.set(params_clone.ratio);
+        knee_sig.set(params_clone.knee);
+        attack_sig.set(params_clone.attack);
+        release_sig.set(params_clone.release);
+        makeup_sig.set(params_clone.makeup);
+    });
+
+    // Value formatters
+    let format_db = |v: f32| format!("{v:.0}dB");
+    let format_ratio = |v: f32| if v >= 100.0 { "∞:1".to_string() } else { format!("{v:.1}:1") };
+    let format_ms = |v: f32| if v >= 1000.0 { format!("{:.1}s", v / 1000.0) } else { format!("{v:.0}ms") };
+
+    // Knob sizes
+    let large_knob = 56_u32;
+    let small_knob = 36_u32;
+    let tiny_knob = 32_u32;
+
+    // Build current params for the graph
+    let current_params = CompressorParams {
+        threshold: threshold_sig(),
+        ratio: ratio_sig(),
+        knee: knee_sig(),
+        attack: attack_sig(),
+        release: release_sig(),
+        makeup: makeup_sig(),
+        ..params.read().clone()
+    };
+
+    rsx! {
+        ThemeProvider { theme: ThemeContext::new(),
+            div {
+                class: "compressor-widget flex gap-3 items-start",
+                style: "background: linear-gradient(180deg, #111111 0%, #1a1a1a 100%); border-radius: 8px; padding: 12px;",
+
+                // Left: Threshold + Ratio/Knee knobs
+                if props.show_controls {
+                    div {
+                        class: "flex flex-col items-center gap-2",
+                        style: "min-width: 70px;",
+
+                        // Large threshold knob
+                        Knob {
+                            value: threshold_sig,
+                            min: -60.0,
+                            max: 0.0,
+                            size: large_knob,
+                            label: Some("THRESH".to_string()),
+                            value_display: Some(format_db(threshold_sig())),
+                            disabled: !props.interactive,
+                            on_change: move |v: f32| {
+                                threshold_sig.set(v);
+                                params.write().threshold = v;
+                            },
+                        }
+
+                        // Ratio and Knee row
+                        div {
+                            class: "flex gap-1",
+
+                            Knob {
+                                value: ratio_sig,
+                                min: 1.0,
+                                max: 20.0,
+                                size: small_knob,
+                                label: Some("RATIO".to_string()),
+                                value_display: Some(format_ratio(ratio_sig())),
+                                disabled: !props.interactive,
+                                on_change: move |v: f32| {
+                                    ratio_sig.set(v);
+                                    params.write().ratio = v;
+                                },
+                            }
+
+                            Knob {
+                                value: knee_sig,
+                                min: 0.0,
+                                max: 24.0,
+                                size: small_knob,
+                                label: Some("KNEE".to_string()),
+                                value_display: Some(format_db(knee_sig())),
+                                disabled: !props.interactive,
+                                on_change: move |v: f32| {
+                                    knee_sig.set(v);
+                                    params.write().knee = v;
+                                },
+                            }
+                        }
+                    }
+                }
+
+                // Center: Transfer curve graph
+                div {
+                    class: "compressor-graph-area",
+                    style: "width: {props.graph_size}px; height: {props.graph_size}px;",
+
+                    CompressorGraph {
+                        params: current_params,
+                        metering: props.metering.clone(),
+                        db_range: props.db_range,
+                        show_grid: props.show_grid,
+                        show_gr_meter: props.show_gr_meter,
+                        show_levels: props.show_levels,
+                        show_gr_trace: props.show_gr_trace,
+                        show_input_trace: false,
+                        interactive: false, // Disable graph drag, use knobs instead
+                    }
+                }
+
+                // Right: Envelope controls (compact horizontal rows)
+                if props.show_controls {
+                    div {
+                        class: "flex flex-col gap-0",
+                        style: "padding-left: 8px; border-left: 1px solid rgba(255,255,255,0.08);",
+
+                        // Attack row
+                        div {
+                            class: "flex items-center gap-1",
+                            Knob {
+                                value: attack_sig,
+                                min: 0.1,
+                                max: 250.0,
+                                size: tiny_knob,
+                                disabled: !props.interactive,
+                                on_change: move |v: f32| {
+                                    attack_sig.set(v);
+                                    params.write().attack = v;
+                                },
+                            }
+                            div {
+                                class: "flex flex-col",
+                                style: "min-width: 44px;",
+                                span { class: "text-[9px] text-gray-500 leading-none", "ATK" }
+                                span { class: "text-[10px] text-gray-300 leading-tight font-mono", "{format_ms(attack_sig())}" }
+                            }
+                        }
+
+                        // Release row
+                        div {
+                            class: "flex items-center gap-1",
+                            Knob {
+                                value: release_sig,
+                                min: 10.0,
+                                max: 2000.0,
+                                size: tiny_knob,
+                                disabled: !props.interactive,
+                                on_change: move |v: f32| {
+                                    release_sig.set(v);
+                                    params.write().release = v;
+                                },
+                            }
+                            div {
+                                class: "flex flex-col",
+                                style: "min-width: 44px;",
+                                span { class: "text-[9px] text-gray-500 leading-none", "REL" }
+                                span { class: "text-[10px] text-gray-300 leading-tight font-mono", "{format_ms(release_sig())}" }
+                            }
+                        }
+
+                        // Makeup row
+                        div {
+                            class: "flex items-center gap-1",
+                            Knob {
+                                value: makeup_sig,
+                                min: 0.0,
+                                max: 24.0,
+                                size: tiny_knob,
+                                disabled: !props.interactive,
+                                on_change: move |v: f32| {
+                                    makeup_sig.set(v);
+                                    params.write().makeup = v;
+                                },
+                            }
+                            div {
+                                class: "flex flex-col",
+                                style: "min-width: 44px;",
+                                span { class: "text-[9px] text-gray-500 leading-none", "GAIN" }
+                                span { class: "text-[10px] text-gray-300 leading-tight font-mono", "{format_db(makeup_sig())}" }
+                            }
+                        }
+
+                        // GR meter display
+                        div {
+                            class: "flex items-center gap-1 mt-1 pt-1",
+                            style: "border-top: 1px solid rgba(255,255,255,0.05);",
+                            div {
+                                class: "w-8 h-8 rounded flex items-center justify-center",
+                                style: "background: rgba(255, 59, 48, 0.15);",
+                                span {
+                                    class: "text-[10px] font-mono",
+                                    style: "color: #ff3b30;",
+                                    "{props.metering.gain_reduction:.1}"
+                                }
+                            }
+                            div {
+                                class: "flex flex-col",
+                                style: "min-width: 44px;",
+                                span { class: "text-[9px] text-gray-500 leading-none", "GR" }
+                                span { class: "text-[10px] text-gray-400 leading-tight", "dB" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -24,8 +24,8 @@ pub mod xy_pad;
 
 pub use block_view::{BlockView, Pedalboard, Rack};
 pub use compressor_graph::{
-    CompressorGraph, CompressorMetering, CompressorMode, CompressorParams, DbRange, DetectionMode,
-    StereoLink,
+    CompressorGraph, CompressorMetering, CompressorMode, CompressorParams, CompressorWidget,
+    DbRange, DetectionMode, StereoLink,
 };
 pub use eq_graph::{EqBand, EqBandShape, EqGraph};
 pub use gate_graph::{GateDbRange, GateGraph, GateMetering, GateMode, GateParams};

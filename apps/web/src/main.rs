@@ -23,7 +23,7 @@ use ui::{PerformanceView, RigControlView, RigServiceProvider, SetlistServiceProv
 
 // Audio controls
 use audio_controls::widgets::{
-    CompressorGraph, CompressorMetering, CompressorMode, CompressorParams, DbRange,
+    CompressorGraph, CompressorMetering, CompressorMode, CompressorParams, CompressorWidget, DbRange,
     EqBand, EqBandShape, EqGraph,
     GateDbRange, GateGraph, GateMetering, GateMode, GateParams,
 };
@@ -2822,215 +2822,34 @@ fn TestFxUi() -> Element {
                             class: "text-lg font-semibold text-foreground",
                             "Compressor"
                         }
-                        div {
-                            class: "flex items-center gap-2",
-                            label { class: "text-xs text-muted-foreground", "Range:" }
-                            select {
-                                class: "px-2 py-1 rounded bg-muted border border-border text-foreground text-xs",
-                                value: match *comp_db_range.read() {
-                                    DbRange::Range30 => "30",
-                                    DbRange::Range48 => "48",
-                                    DbRange::Range60 => "60",
-                                    DbRange::Range72 => "72",
-                                },
-                                onchange: move |evt: Event<FormData>| {
-                                    comp_db_range.set(match evt.value().as_str() {
-                                        "30" => DbRange::Range30,
-                                        "48" => DbRange::Range48,
-                                        "60" => DbRange::Range60,
-                                        "72" => DbRange::Range72,
-                                        _ => DbRange::Range48,
-                                    });
-                                },
-                                option { value: "30", "30 dB" }
-                                option { value: "48", "48 dB" }
-                                option { value: "60", "60 dB" }
-                                option { value: "72", "72 dB" }
-                            }
+                        span {
+                            class: "text-xs text-muted-foreground",
+                            "Pro-C Style"
                         }
                     }
 
-                    // Compressor Graph
+                    // Compressor Widget with integrated knobs
                     div {
-                        class: "w-full mb-4 flex justify-center",
-                        div {
-                            style: "width: 320px; height: 320px;",
+                        class: "flex justify-center",
 
-                            CompressorGraph {
-                                params: params.read().clone(),
-                                metering: metering.read().clone(),
-                                db_range: *comp_db_range.read(),
-                                show_grid: true,
-                                show_gr_meter: true,
-                                show_levels: true,
-                                interactive: true,
-                                on_threshold_change: move |v: f32| {
-                                    params.write().threshold = v;
-                                },
-                                on_ratio_change: move |v: f32| {
-                                    params.write().ratio = v;
-                                },
-                                on_knee_change: move |v: f32| {
-                                    params.write().knee = v;
-                                },
-                            }
-                        }
-                    }
-
-                    // Compressor controls
-                    div {
-                        class: "grid grid-cols-4 gap-3 text-xs",
-
-                        // Threshold
-                        div {
-                            class: "space-y-1",
-                            label { class: "text-muted-foreground", "Threshold" }
-                            input {
-                                r#type: "range",
-                                min: "-60",
-                                max: "0",
-                                step: "0.5",
-                                value: "{params.read().threshold}",
-                                class: "w-full h-1",
-                                oninput: move |evt: Event<FormData>| {
-                                    if let Ok(v) = evt.value().parse::<f32>() {
-                                        params.write().threshold = v;
-                                    }
-                                }
-                            }
-                            div { class: "text-foreground font-mono", "{params.read().threshold:.1} dB" }
-                        }
-
-                        // Ratio
-                        div {
-                            class: "space-y-1",
-                            label { class: "text-muted-foreground", "Ratio" }
-                            input {
-                                r#type: "range",
-                                min: "1",
-                                max: "20",
-                                step: "0.1",
-                                value: "{params.read().ratio}",
-                                class: "w-full h-1",
-                                oninput: move |evt: Event<FormData>| {
-                                    if let Ok(v) = evt.value().parse::<f32>() {
-                                        params.write().ratio = v;
-                                    }
-                                }
-                            }
-                            div { class: "text-foreground font-mono", "{params.read().ratio:.1}:1" }
-                        }
-
-                        // Knee
-                        div {
-                            class: "space-y-1",
-                            label { class: "text-muted-foreground", "Knee" }
-                            input {
-                                r#type: "range",
-                                min: "0",
-                                max: "24",
-                                step: "0.5",
-                                value: "{params.read().knee}",
-                                class: "w-full h-1",
-                                oninput: move |evt: Event<FormData>| {
-                                    if let Ok(v) = evt.value().parse::<f32>() {
-                                        params.write().knee = v;
-                                    }
-                                }
-                            }
-                            div { class: "text-foreground font-mono", "{params.read().knee:.1} dB" }
-                        }
-
-                        // GR Display
-                        div {
-                            class: "space-y-1",
-                            label { class: "text-muted-foreground", "Gain Reduction" }
-                            div {
-                                class: "h-4 bg-muted rounded overflow-hidden",
-                                div {
-                                    class: "h-full bg-red-500 transition-all",
-                                    style: "width: {(-metering.read().gain_reduction / 24.0 * 100.0).clamp(0.0, 100.0)}%",
-                                }
-                            }
-                            div { class: "text-red-500 font-mono", "{metering.read().gain_reduction:.1} dB" }
-                        }
-                    }
-
-                    // Presets
-                    div {
-                        class: "flex flex-wrap gap-2 mt-4",
-                        button {
-                            class: "px-2 py-1 rounded text-xs bg-muted text-foreground hover:bg-muted/80",
-                            onclick: move |_| params.set(CompressorParams::default()),
-                            "Default"
-                        }
-                        button {
-                            class: "px-2 py-1 rounded text-xs bg-muted text-foreground hover:bg-muted/80",
-                            onclick: move |_| params.set(CompressorParams {
-                                threshold: -12.0,
-                                ratio: 2.0,
-                                knee: 12.0,
-                                ..Default::default()
-                            }),
-                            "Gentle"
-                        }
-                        button {
-                            class: "px-2 py-1 rounded text-xs bg-muted text-foreground hover:bg-muted/80",
-                            onclick: move |_| params.set(CompressorParams {
-                                threshold: -24.0,
-                                ratio: 8.0,
-                                knee: 0.0,
-                                ..Default::default()
-                            }),
-                            "Aggressive"
-                        }
-                        button {
-                            class: "px-2 py-1 rounded text-xs bg-muted text-foreground hover:bg-muted/80",
-                            onclick: move |_| params.set(CompressorParams {
-                                threshold: -30.0,
-                                ratio: 20.0,
-                                knee: 0.0,
-                                ..Default::default()
-                            }),
-                            "Limiter"
+                        CompressorWidget {
+                            params: params,
+                            metering: metering.read().clone(),
+                            db_range: *comp_db_range.read(),
+                            graph_size: 200,
+                            show_grid: true,
+                            show_gr_meter: true,
+                            show_levels: true,
+                            show_gr_trace: true,
+                            show_controls: true,
+                            interactive: true,
                         }
                     }
                 }
             }
 
             // === Gate Section (Full Width) ===
-            div {
-                class: "max-w-7xl mx-auto mt-6 bg-card rounded-xl border border-border p-4",
-
-                div {
-                    class: "flex items-center justify-between mb-4",
-                    h2 {
-                        class: "text-lg font-semibold text-foreground",
-                        "Noise Gate"
-                    }
-                    span {
-                        class: "text-xs text-muted-foreground",
-                        "Pro-G Style"
-                    }
-                }
-
-                // Gate Graph with integrated knobs
-                div {
-                    class: "flex justify-center",
-
-                    GateGraph {
-                        params: GateParams::default(),
-                        metering: GateMetering::default(),
-                        db_range: GateDbRange::Range60,
-                        show_grid: true,
-                        show_gr_meter: true,
-                        show_levels: true,
-                        show_gr_trace: false,
-                        show_controls: true,
-                        interactive: true,
-                    }
-                }
-            }
+            GateSection {}
 
             // Instructions
             div {
@@ -3072,6 +2891,51 @@ fn TestFxUi() -> Element {
                             li { "Right panel for envelope controls" }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Gate Section Component
+// =============================================================================
+
+#[component]
+fn GateSection() -> Element {
+    let gate_params = use_signal(GateParams::default);
+
+    rsx! {
+        div {
+            class: "max-w-7xl mx-auto mt-6 bg-card rounded-xl border border-border p-4",
+
+            div {
+                class: "flex items-center justify-between mb-4",
+                h2 {
+                    class: "text-lg font-semibold text-foreground",
+                    "Noise Gate"
+                }
+                span {
+                    class: "text-xs text-muted-foreground",
+                    "Pro-G Style"
+                }
+            }
+
+            // Gate Graph with integrated knobs
+            div {
+                class: "flex justify-center",
+
+                GateGraph {
+                    params: gate_params,
+                    metering: GateMetering::default(),
+                    db_range: GateDbRange::Range60,
+                    graph_size: 200,
+                    show_grid: true,
+                    show_gr_meter: true,
+                    show_levels: false,
+                    show_gr_trace: false,
+                    show_controls: true,
+                    interactive: true,
                 }
             }
         }

@@ -3,18 +3,15 @@
 //! A Dioxus component that renders a noise gate transfer curve with interactive controls,
 //! inspired by FabFilter Pro-G. Features:
 //! - Transfer curve visualization (input dB vs output dB)
-//! - Large draggable threshold knob (top-left)
-//! - Smaller ratio and range knobs (below threshold)
-//! - Envelope controls panel (attack, release, hold, knee, lookahead)
+//! - Compact knob layout with threshold, ratio, range
+//! - Envelope controls (attack, release, hold, knee, lookahead)
 //! - Real-time gain reduction meter
-//! - Input/output level visualization
 //! - Blue-themed color scheme
 
 use dioxus::prelude::*;
 
-use crate::theming::context::ThemeContext;
 use crate::widgets::knob::{Knob, KnobVariant};
-use crate::theming::ThemeProvider;
+use crate::theming::{ThemeContext, ThemeProvider};
 
 /// Gate operating mode.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -51,23 +48,20 @@ pub struct GateParams {
     pub mode: GateMode,
     /// Threshold in dB (-60 to 0).
     pub threshold: f32,
-    /// Expansion ratio (1:1 to infinity:1, stored as ratio value).
-    /// For gates, higher ratio = harder gate. 1:1 = no gating, inf:1 = hard gate.
+    /// Expansion ratio (1:1 to infinity:1).
     pub ratio: f32,
-    /// Range/floor in dB (how much to attenuate when closed, e.g. -80dB).
+    /// Range/floor in dB (how much to attenuate when closed).
     pub range: f32,
-    /// Knee width in dB (0 = hard knee, up to ~24 dB soft knee).
+    /// Knee width in dB (0 = hard knee).
     pub knee: f32,
-    /// Attack time in milliseconds (how fast the gate opens).
+    /// Attack time in milliseconds.
     pub attack: f32,
-    /// Hold time in milliseconds (how long to stay open after signal drops).
+    /// Hold time in milliseconds.
     pub hold: f32,
-    /// Release time in milliseconds (how fast the gate closes).
+    /// Release time in milliseconds.
     pub release: f32,
     /// Lookahead in milliseconds.
     pub lookahead: f32,
-    /// Hysteresis in dB (difference between open and close thresholds).
-    pub hysteresis: f32,
     /// Bypass state.
     pub bypass: bool,
 }
@@ -77,14 +71,13 @@ impl Default for GateParams {
         Self {
             mode: GateMode::Gate,
             threshold: -30.0,
-            ratio: 10.0, // 10:1 expansion ratio
+            ratio: 10.0,
             range: -80.0,
             knee: 6.0,
-            attack: 0.5, // Fast attack
+            attack: 0.5,
             hold: 50.0,
             release: 100.0,
             lookahead: 0.0,
-            hysteresis: 0.0,
             bypass: false,
         }
     }
@@ -99,17 +92,17 @@ pub struct GateMetering {
     pub output_level: f32,
     /// Current gain reduction in dB (negative value).
     pub gain_reduction: f32,
-    /// Peak input level (with hold).
+    /// Peak input level.
     pub input_peak: f32,
-    /// Peak output level (with hold).
+    /// Peak output level.
     pub output_peak: f32,
     /// Peak gain reduction.
     pub gr_peak: f32,
-    /// Gate state: 0.0 = closed, 1.0 = open (for animation).
+    /// Gate state: 0.0 = closed, 1.0 = open.
     pub gate_state: f32,
     /// History of gain reduction values for waveform display.
     pub gr_history: Vec<f32>,
-    /// History of input level values for waveform display.
+    /// History of input level values.
     pub input_history: Vec<f32>,
 }
 
@@ -162,14 +155,12 @@ struct GraphLayout {
 }
 
 impl GraphLayout {
-    fn new(min_db: f32) -> Self {
-        let width = 300.0;
-        let height = 300.0;
-        let padding = 32.0;
-        let graph_size = width - 2.0 * padding;
+    fn new(min_db: f32, size: f64) -> Self {
+        let padding = 24.0;
+        let graph_size = size - 2.0 * padding;
         Self {
-            width,
-            height,
+            width: size,
+            height: size,
             padding,
             graph_size,
             min_db: min_db as f64,
@@ -200,35 +191,27 @@ fn compute_gate_transfer(
 
     match mode {
         GateMode::Gate | GateMode::Expander => {
-            // Below threshold: attenuate (expand downward)
             if input_db >= high_th {
-                // Above knee: unity gain
                 input_db
-            } else if input_db > low_th {
-                // In knee region: smooth transition
+            } else if input_db > low_th && knee > 0.0 {
                 let knee_factor = (high_th - input_db) / knee;
                 let knee_factor_sq = knee_factor * knee_factor;
                 let gain_reduction = knee_factor_sq * (ratio - 1.0) * (input_db - threshold) / ratio;
                 (input_db + gain_reduction).max(range)
             } else {
-                // Below threshold: expansion
                 let expanded = threshold + (input_db - threshold) * ratio;
                 expanded.max(range)
             }
         }
         GateMode::Ducker => {
-            // Ducker: attenuate ABOVE threshold (inverse gate for ducking)
             if input_db <= low_th {
-                // Below threshold: unity gain
                 input_db
-            } else if input_db < high_th {
-                // In knee region
+            } else if input_db < high_th && knee > 0.0 {
                 let knee_factor = (input_db - low_th) / knee;
                 let knee_factor_sq = knee_factor * knee_factor;
                 let gain_reduction = knee_factor_sq * (1.0 - 1.0 / ratio) * (threshold - input_db);
                 (input_db + gain_reduction).max(range)
             } else {
-                // Above threshold: compress/duck
                 let ducked = threshold + (input_db - threshold) / ratio;
                 ducked.max(range)
             }
@@ -239,25 +222,28 @@ fn compute_gate_transfer(
 /// Props for the GateGraph component.
 #[derive(Props, Clone, PartialEq)]
 pub struct GateGraphProps {
-    /// Current gate parameters.
-    pub params: GateParams,
+    /// Signal for gate parameters (allows two-way binding).
+    pub params: Signal<GateParams>,
     /// Real-time metering data.
     #[props(default)]
     pub metering: GateMetering,
     /// dB range for the graph.
     #[props(default)]
     pub db_range: GateDbRange,
+    /// Size of the graph in pixels.
+    #[props(default = 200)]
+    pub graph_size: u32,
     /// Whether to show the grid.
     #[props(default = true)]
     pub show_grid: bool,
     /// Whether to show gain reduction meter.
     #[props(default = true)]
     pub show_gr_meter: bool,
-    /// Whether to show input/output level visualization on curve.
+    /// Whether to show input/output level visualization.
     #[props(default = true)]
     pub show_levels: bool,
-    /// Whether to show the GR history trace (scrolling waveform).
-    #[props(default = true)]
+    /// Whether to show the GR history trace.
+    #[props(default = false)]
     pub show_gr_trace: bool,
     /// Whether to show the knob controls panel.
     #[props(default = true)]
@@ -265,80 +251,51 @@ pub struct GateGraphProps {
     /// Whether interaction is enabled.
     #[props(default = true)]
     pub interactive: bool,
-    /// Callback when threshold changes.
-    #[props(default)]
-    pub on_threshold_change: Option<EventHandler<f32>>,
-    /// Callback when ratio changes.
-    #[props(default)]
-    pub on_ratio_change: Option<EventHandler<f32>>,
-    /// Callback when range changes.
-    #[props(default)]
-    pub on_range_change: Option<EventHandler<f32>>,
-    /// Callback when knee changes.
-    #[props(default)]
-    pub on_knee_change: Option<EventHandler<f32>>,
-    /// Callback when attack changes.
-    #[props(default)]
-    pub on_attack_change: Option<EventHandler<f32>>,
-    /// Callback when hold changes.
-    #[props(default)]
-    pub on_hold_change: Option<EventHandler<f32>>,
-    /// Callback when release changes.
-    #[props(default)]
-    pub on_release_change: Option<EventHandler<f32>>,
-    /// Callback when lookahead changes.
-    #[props(default)]
-    pub on_lookahead_change: Option<EventHandler<f32>>,
-    /// Callback when any parameter changes.
-    #[props(default)]
-    pub on_params_change: Option<EventHandler<GateParams>>,
 }
 
 /// Gate graph component.
 ///
-/// Renders a noise gate interface inspired by FabFilter Pro-G with:
-/// - Transfer curve graph
-/// - Large threshold knob with smaller ratio/range knobs
-/// - Envelope controls (attack, hold, release, knee, lookahead)
-/// - Blue color theme
+/// Renders a noise gate interface inspired by FabFilter Pro-G.
 #[component]
 pub fn GateGraph(props: GateGraphProps) -> Element {
-    let layout = GraphLayout::new(props.db_range.min_db());
+    let layout = GraphLayout::new(props.db_range.min_db(), props.graph_size as f64);
+    let mut params = props.params;
 
-    // Create signals for knob controls
-    let mut threshold_sig = use_signal(|| props.params.threshold);
-    let mut ratio_sig = use_signal(|| props.params.ratio);
-    let mut range_sig = use_signal(|| props.params.range);
-    let mut knee_sig = use_signal(|| props.params.knee);
-    let mut attack_sig = use_signal(|| props.params.attack);
-    let mut hold_sig = use_signal(|| props.params.hold);
-    let mut release_sig = use_signal(|| props.params.release);
-    let mut lookahead_sig = use_signal(|| props.params.lookahead);
+    // Create local signals bound to params
+    let mut threshold_sig = use_signal(|| params.read().threshold);
+    let mut ratio_sig = use_signal(|| params.read().ratio);
+    let mut range_sig = use_signal(|| params.read().range);
+    let mut knee_sig = use_signal(|| params.read().knee);
+    let mut attack_sig = use_signal(|| params.read().attack);
+    let mut hold_sig = use_signal(|| params.read().hold);
+    let mut release_sig = use_signal(|| params.read().release);
+    let mut lookahead_sig = use_signal(|| params.read().lookahead);
 
-    // Sync signals with props
+    // Sync from params to signals when params change externally
+    let params_clone = params.read().clone();
     use_effect(move || {
-        threshold_sig.set(props.params.threshold);
-        ratio_sig.set(props.params.ratio);
-        range_sig.set(props.params.range);
-        knee_sig.set(props.params.knee);
-        attack_sig.set(props.params.attack);
-        hold_sig.set(props.params.hold);
-        release_sig.set(props.params.release);
-        lookahead_sig.set(props.params.lookahead);
+        threshold_sig.set(params_clone.threshold);
+        ratio_sig.set(params_clone.ratio);
+        range_sig.set(params_clone.range);
+        knee_sig.set(params_clone.knee);
+        attack_sig.set(params_clone.attack);
+        hold_sig.set(params_clone.hold);
+        release_sig.set(params_clone.release);
+        lookahead_sig.set(params_clone.lookahead);
     });
 
-    // Pre-compute values
-    let threshold = props.params.threshold as f64;
-    let ratio = props.params.ratio as f64;
-    let knee = props.params.knee as f64;
-    let range = props.params.range as f64;
-    let mode = props.params.mode;
+    // Use signal values for rendering (reactive)
+    let threshold = threshold_sig() as f64;
+    let ratio = ratio_sig() as f64;
+    let knee = knee_sig() as f64;
+    let range = range_sig() as f64;
+    let mode = params.read().mode;
     let min_db = layout.min_db;
 
     // Generate transfer curve path
     let curve_path = {
         let mut path = String::new();
-        let num_points = 200;
+        let num_points = 100;
         for i in 0..=num_points {
             let input_db = min_db + (i as f64 / num_points as f64) * -min_db;
             let output_db = compute_gate_transfer(input_db, mode, threshold, ratio, knee, range);
@@ -353,7 +310,7 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
         path
     };
 
-    // Unity gain reference line (diagonal)
+    // Unity gain reference line
     let unity_path = format!(
         "M {:.1} {:.1} L {:.1} {:.1}",
         layout.padding,
@@ -369,7 +326,7 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
     // Range floor line
     let range_y = layout.db_to_y(range.max(min_db));
 
-    // Current input/output positions for level visualization
+    // Current input/output for level visualization
     let input_level = props.metering.input_level.clamp(min_db as f32, 0.0) as f64;
     let input_x = layout.db_to_x(input_level);
     let input_y = layout.db_to_y(input_level);
@@ -377,12 +334,12 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
     let output_y = layout.db_to_y(output_db.clamp(min_db, 0.0));
 
     // GR meter dimensions
-    let gr_meter_width = 10.0;
-    let gr_meter_x = layout.width - layout.padding + 6.0;
+    let gr_meter_width = 8.0;
+    let gr_meter_x = layout.width - layout.padding + 4.0;
 
     // Grid lines
     let grid_lines = if props.show_grid {
-        let step = if min_db <= -80.0 { 12.0 } else { 6.0 };
+        let step = 12.0;
         let mut lines = Vec::new();
         let mut db = 0.0;
         while db > min_db {
@@ -391,18 +348,12 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
                 let pos = layout.db_to_x(db);
                 lines.push(format!(
                     "M {:.1} {:.1} L {:.1} {:.1}",
-                    pos,
-                    layout.padding,
-                    pos,
-                    layout.padding + layout.graph_size
+                    pos, layout.padding, pos, layout.padding + layout.graph_size
                 ));
                 let ypos = layout.db_to_y(db);
                 lines.push(format!(
                     "M {:.1} {:.1} L {:.1} {:.1}",
-                    layout.padding,
-                    ypos,
-                    layout.padding + layout.graph_size,
-                    ypos
+                    layout.padding, ypos, layout.padding + layout.graph_size, ypos
                 ));
             }
         }
@@ -410,25 +361,6 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
     } else {
         String::new()
     };
-
-    // dB scale markers
-    let db_markers: Vec<f64> = {
-        let step = if min_db <= -80.0 { 12.0 } else { 6.0 };
-        let mut m = vec![0.0];
-        let mut db = 0.0;
-        while db > min_db {
-            db -= step;
-            if db >= min_db {
-                m.push(db);
-            }
-        }
-        m
-    };
-
-    let marker_positions: Vec<(f64, f64, i32)> = db_markers
-        .iter()
-        .map(|&db| (layout.db_to_x(db), layout.db_to_y(db), db as i32))
-        .collect();
 
     // GR history trace
     let gr_trace_path = if props.show_gr_trace && !props.metering.gr_history.is_empty() {
@@ -443,12 +375,10 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
         let unity_y = layout.db_to_y(0.0);
 
         path.push_str(&format!("M {:.1} {:.1}", right_x, unity_y));
-
         for i in 0..samples_to_show {
             let x = right_x - (i as f64) * x_step;
             path.push_str(&format!(" L {:.1} {:.1}", x, unity_y));
         }
-
         for i in (0..samples_to_show).rev() {
             let sample_idx = start_idx + (samples_to_show - 1 - i);
             let gr = history.get(sample_idx).copied().unwrap_or(0.0);
@@ -457,99 +387,86 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
             let y = layout.db_to_y(output_db);
             path.push_str(&format!(" L {:.1} {:.1}", x, y));
         }
-
         path.push_str(" Z");
         path
     } else {
         String::new()
     };
 
-    // Gate state indicator (open/closed)
+    // Gate state indicator
     let gate_state = props.metering.gate_state;
     let gate_indicator_color = if gate_state > 0.5 {
-        "rgba(59, 130, 246, 0.8)" // Blue when open
+        "rgba(59, 130, 246, 0.9)"
     } else {
-        "rgba(59, 130, 246, 0.2)" // Dim blue when closed
+        "rgba(59, 130, 246, 0.2)"
     };
 
-    // GR meter fill height
+    // GR meter fill
     let gr_db = props.metering.gain_reduction.abs().min(-min_db as f32);
     let gr_height = (gr_db as f64 / -min_db) * layout.graph_size;
 
     // Blue theme colors
-    let curve_color = "#3b82f6"; // Blue-500
-    let unity_color = "rgba(255, 255, 255, 0.15)";
-    let grid_color = "rgba(255, 255, 255, 0.06)";
-    let threshold_color = "#60a5fa"; // Blue-400
-    let range_color = "rgba(96, 165, 250, 0.3)";
-    let gr_color = "#2563eb"; // Blue-600
-    let level_color = "#93c5fd"; // Blue-300
-    let text_color = "rgba(255, 255, 255, 0.5)";
+    let curve_color = "#3b82f6";
+    let unity_color = "rgba(255, 255, 255, 0.12)";
+    let grid_color = "rgba(255, 255, 255, 0.05)";
+    let threshold_color = "#60a5fa";
+    let range_color = "rgba(96, 165, 250, 0.2)";
+    let gr_color = "#2563eb";
+    let level_color = "#93c5fd";
+    let text_color = "rgba(255, 255, 255, 0.4)";
 
     // Value formatters
-    let format_db = |v: f32| format!("{v:.1} dB");
-    let format_ratio = |v: f32| {
-        if v >= 100.0 {
-            "∞:1".to_string()
-        } else {
-            format!("{v:.1}:1")
-        }
-    };
-    let format_ms = |v: f32| {
-        if v >= 1000.0 {
-            format!("{:.2}s", v / 1000.0)
-        } else {
-            format!("{v:.1}ms")
-        }
-    };
+    let format_db = |v: f32| format!("{v:.0}dB");
+    let format_ratio = |v: f32| if v >= 100.0 { "∞:1".to_string() } else { format!("{v:.0}:1") };
+    let format_ms = |v: f32| if v >= 1000.0 { format!("{:.1}s", v / 1000.0) } else { format!("{v:.0}ms") };
+
+    // Knob sizes
+    let large_knob = 56_u32;
+    let small_knob = 36_u32;
+    let tiny_knob = 32_u32;
 
     rsx! {
         ThemeProvider { theme: ThemeContext::new(),
             div {
-                class: "gate-graph flex gap-4",
-                style: "background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%); border-radius: 12px; padding: 16px;",
+                class: "gate-graph flex gap-3 items-start",
+                style: "background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%); border-radius: 8px; padding: 12px;",
 
-                // Left side: Knob controls
+                // Left: Threshold + Ratio/Range knobs
                 if props.show_controls {
                     div {
-                        class: "gate-controls flex flex-col gap-4",
-                        style: "min-width: 120px;",
+                        class: "flex flex-col items-center gap-2",
+                        style: "min-width: 70px;",
 
                         // Large threshold knob
-                        div {
-                            class: "threshold-section",
-                            Knob {
-                                value: threshold_sig,
-                                min: -60.0,
-                                max: 0.0,
-                                size: 72,
-                                label: Some("THRESHOLD".to_string()),
-                                value_display: Some(format_db(threshold_sig())),
-                                disabled: !props.interactive,
-                                on_change: move |v: f32| {
-                                    if let Some(cb) = &props.on_threshold_change {
-                                        cb.call(v);
-                                    }
-                                },
-                            }
+                        Knob {
+                            value: threshold_sig,
+                            min: -60.0,
+                            max: 0.0,
+                            size: large_knob,
+                            label: Some("THRESH".to_string()),
+                            value_display: Some(format_db(threshold_sig())),
+                            disabled: !props.interactive,
+                            on_change: move |v: f32| {
+                                threshold_sig.set(v);
+                                params.write().threshold = v;
+                            },
                         }
 
-                        // Smaller ratio and range knobs
+                        // Ratio and Range row
                         div {
-                            class: "flex gap-2 justify-center",
+                            class: "flex gap-1",
 
                             Knob {
                                 value: ratio_sig,
                                 min: 1.0,
                                 max: 100.0,
-                                size: 48,
+                                size: small_knob,
                                 label: Some("RATIO".to_string()),
                                 value_display: Some(format_ratio(ratio_sig())),
                                 disabled: !props.interactive,
                                 on_change: move |v: f32| {
-                                    if let Some(cb) = &props.on_ratio_change {
-                                        cb.call(v);
-                                    }
+                                    ratio_sig.set(v);
+                                    params.write().ratio = v;
                                 },
                             }
 
@@ -557,14 +474,13 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
                                 value: range_sig,
                                 min: -96.0,
                                 max: 0.0,
-                                size: 48,
+                                size: small_knob,
                                 label: Some("RANGE".to_string()),
                                 value_display: Some(format_db(range_sig())),
                                 disabled: !props.interactive,
                                 on_change: move |v: f32| {
-                                    if let Some(cb) = &props.on_range_change {
-                                        cb.call(v);
-                                    }
+                                    range_sig.set(v);
+                                    params.write().range = v;
                                 },
                             }
                         }
@@ -573,14 +489,15 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
 
                 // Center: Transfer curve graph
                 div {
-                    class: "gate-graph-area flex-1",
+                    class: "gate-graph-svg",
+                    style: "width: {props.graph_size}px; height: {props.graph_size}px;",
 
                     svg {
                         width: "100%",
                         height: "100%",
                         view_box: "0 0 {layout.width} {layout.height}",
                         preserve_aspect_ratio: "xMidYMid meet",
-                        style: "background: #0d1117; border-radius: 8px;",
+                        style: "background: #080c14; border-radius: 6px;",
 
                         // Background
                         rect {
@@ -588,11 +505,11 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
                             y: "{layout.padding}",
                             width: "{layout.graph_size}",
                             height: "{layout.graph_size}",
-                            fill: "#080c14",
-                            rx: "4",
+                            fill: "#050810",
+                            rx: "3",
                         }
 
-                        // Grid lines
+                        // Grid
                         if props.show_grid && !grid_lines.is_empty() {
                             path {
                                 d: "{grid_lines}",
@@ -602,30 +519,30 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
                             }
                         }
 
-                        // Range floor region (shaded area below range)
+                        // Range floor region
                         rect {
                             x: "{layout.padding}",
                             y: "{range_y}",
                             width: "{layout.graph_size}",
-                            height: "{layout.padding + layout.graph_size - range_y}",
+                            height: "{(layout.padding + layout.graph_size - range_y).max(0.0)}",
                             fill: "{range_color}",
                         }
 
-                        // GR history trace
+                        // GR trace
                         if props.show_gr_trace && !gr_trace_path.is_empty() {
                             path {
                                 d: "{gr_trace_path}",
-                                fill: "rgba(37, 99, 235, 0.25)",
+                                fill: "rgba(37, 99, 235, 0.2)",
                                 stroke: "none",
                             }
                         }
 
-                        // Unity gain line (diagonal)
+                        // Unity line
                         path {
                             d: "{unity_path}",
                             stroke: "{unity_color}",
                             stroke_width: "1",
-                            stroke_dasharray: "4,4",
+                            stroke_dasharray: "3,3",
                             fill: "none",
                         }
 
@@ -633,13 +550,12 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
                         path {
                             d: "{curve_path}",
                             stroke: "{curve_color}",
-                            stroke_width: "2.5",
+                            stroke_width: "2",
                             stroke_linecap: "round",
-                            stroke_linejoin: "round",
                             fill: "none",
                         }
 
-                        // Threshold vertical line
+                        // Threshold line
                         line {
                             x1: "{threshold_x}",
                             y1: "{layout.padding}",
@@ -647,71 +563,64 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
                             y2: "{layout.padding + layout.graph_size}",
                             stroke: "{threshold_color}",
                             stroke_width: "1",
-                            stroke_dasharray: "4,2",
+                            stroke_dasharray: "3,2",
                         }
 
-                        // Threshold point
+                        // Threshold point with gate state glow
                         circle {
                             cx: "{threshold_x}",
                             cy: "{threshold_y}",
-                            r: "6",
-                            fill: "{threshold_color}",
-                            stroke: "#fff",
-                            stroke_width: "2",
-                        }
-
-                        // Gate state indicator (glow around threshold point)
-                        circle {
-                            cx: "{threshold_x}",
-                            cy: "{threshold_y}",
-                            r: "12",
+                            r: "10",
                             fill: "none",
                             stroke: "{gate_indicator_color}",
                             stroke_width: "2",
                         }
+                        circle {
+                            cx: "{threshold_x}",
+                            cy: "{threshold_y}",
+                            r: "5",
+                            fill: "{threshold_color}",
+                            stroke: "#fff",
+                            stroke_width: "1.5",
+                        }
 
-                        // Input level indicator
+                        // Level indicator
                         if props.show_levels && props.metering.input_level > min_db as f32 {
-                            // Vertical line from input to curve
                             line {
                                 x1: "{input_x}",
                                 y1: "{input_y}",
                                 x2: "{input_x}",
                                 y2: "{output_y}",
                                 stroke: "{level_color}",
-                                stroke_width: "2",
-                                opacity: "0.7",
+                                stroke_width: "1.5",
+                                opacity: "0.6",
                             }
-                            // Input point
                             circle {
                                 cx: "{input_x}",
                                 cy: "{input_y}",
-                                r: "3",
+                                r: "2.5",
                                 fill: "{level_color}",
                             }
-                            // Output point on curve
                             circle {
                                 cx: "{input_x}",
                                 cy: "{output_y}",
-                                r: "4",
+                                r: "3.5",
                                 fill: "{curve_color}",
                                 stroke: "#fff",
-                                stroke_width: "1.5",
+                                stroke_width: "1",
                             }
                         }
 
                         // GR meter
                         if props.show_gr_meter {
-                            // GR meter background
                             rect {
                                 x: "{gr_meter_x}",
                                 y: "{layout.padding}",
                                 width: "{gr_meter_width}",
                                 height: "{layout.graph_size}",
-                                fill: "#080c14",
+                                fill: "#050810",
                                 rx: "2",
                             }
-                            // GR meter fill (from top, grows downward)
                             rect {
                                 x: "{gr_meter_x}",
                                 y: "{layout.padding}",
@@ -722,152 +631,132 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
                             }
                         }
 
-                        // dB scale markers (X and Y axis)
-                        for (x_pos, y_pos, db_int) in marker_positions.iter().cloned() {
-                            text {
-                                x: "{x_pos}",
-                                y: "{layout.padding + layout.graph_size + 12.0}",
-                                text_anchor: "middle",
-                                fill: "{text_color}",
-                                font_size: "8",
-                                font_family: "system-ui, -apple-system, sans-serif",
-                                "{db_int}"
-                            }
-                            text {
-                                x: "{layout.padding - 4.0}",
-                                y: "{y_pos + 3.0}",
-                                text_anchor: "end",
-                                fill: "{text_color}",
-                                font_size: "8",
-                                font_family: "system-ui, -apple-system, sans-serif",
-                                "{db_int}"
-                            }
-                        }
-
                         // Threshold label
                         text {
                             x: "{threshold_x}",
-                            y: "{layout.padding - 6.0}",
+                            y: "{layout.padding - 4.0}",
                             text_anchor: "middle",
                             fill: "{threshold_color}",
-                            font_size: "9",
-                            font_family: "system-ui, -apple-system, sans-serif",
-                            "{props.params.threshold:.1} dB"
-                        }
-
-                        // GR label
-                        if props.show_gr_meter {
-                            text {
-                                x: "{gr_meter_x + gr_meter_width / 2.0}",
-                                y: "{layout.padding - 6.0}",
-                                text_anchor: "middle",
-                                fill: "{gr_color}",
-                                font_size: "8",
-                                font_family: "system-ui, -apple-system, sans-serif",
-                                "GR"
-                            }
+                            font_size: "8",
+                            font_family: "system-ui",
+                            "{threshold_sig():.0}dB"
                         }
                     }
                 }
 
-                // Right side: Envelope controls
+                // Right: Envelope controls (compact horizontal rows)
                 if props.show_controls {
                     div {
-                        class: "envelope-controls flex flex-col gap-3",
-                        style: "min-width: 100px; padding-left: 8px; border-left: 1px solid rgba(255,255,255,0.1);",
+                        class: "flex flex-col gap-0",
+                        style: "padding-left: 8px; border-left: 1px solid rgba(255,255,255,0.08);",
 
-                        // Attack
+                        // Attack row
                         div {
-                            class: "flex flex-col items-center",
+                            class: "flex items-center gap-1",
                             Knob {
                                 value: attack_sig,
                                 min: 0.01,
                                 max: 250.0,
-                                size: 40,
-                                label: Some("ATTACK".to_string()),
-                                value_display: Some(format_ms(attack_sig())),
+                                size: tiny_knob,
                                 disabled: !props.interactive,
                                 on_change: move |v: f32| {
-                                    if let Some(cb) = &props.on_attack_change {
-                                        cb.call(v);
-                                    }
+                                    attack_sig.set(v);
+                                    params.write().attack = v;
                                 },
+                            }
+                            div {
+                                class: "flex flex-col",
+                                style: "min-width: 44px;",
+                                span { class: "text-[9px] text-gray-500 leading-none", "ATK" }
+                                span { class: "text-[10px] text-gray-300 leading-tight font-mono", "{format_ms(attack_sig())}" }
                             }
                         }
 
-                        // Hold
+                        // Hold row
                         div {
-                            class: "flex flex-col items-center",
+                            class: "flex items-center gap-1",
                             Knob {
                                 value: hold_sig,
                                 min: 0.0,
                                 max: 500.0,
-                                size: 40,
-                                label: Some("HOLD".to_string()),
-                                value_display: Some(format_ms(hold_sig())),
+                                size: tiny_knob,
                                 disabled: !props.interactive,
                                 on_change: move |v: f32| {
-                                    if let Some(cb) = &props.on_hold_change {
-                                        cb.call(v);
-                                    }
+                                    hold_sig.set(v);
+                                    params.write().hold = v;
                                 },
+                            }
+                            div {
+                                class: "flex flex-col",
+                                style: "min-width: 44px;",
+                                span { class: "text-[9px] text-gray-500 leading-none", "HOLD" }
+                                span { class: "text-[10px] text-gray-300 leading-tight font-mono", "{format_ms(hold_sig())}" }
                             }
                         }
 
-                        // Release
+                        // Release row
                         div {
-                            class: "flex flex-col items-center",
+                            class: "flex items-center gap-1",
                             Knob {
                                 value: release_sig,
                                 min: 1.0,
                                 max: 2000.0,
-                                size: 40,
-                                label: Some("RELEASE".to_string()),
-                                value_display: Some(format_ms(release_sig())),
+                                size: tiny_knob,
                                 disabled: !props.interactive,
                                 on_change: move |v: f32| {
-                                    if let Some(cb) = &props.on_release_change {
-                                        cb.call(v);
-                                    }
+                                    release_sig.set(v);
+                                    params.write().release = v;
                                 },
+                            }
+                            div {
+                                class: "flex flex-col",
+                                style: "min-width: 44px;",
+                                span { class: "text-[9px] text-gray-500 leading-none", "REL" }
+                                span { class: "text-[10px] text-gray-300 leading-tight font-mono", "{format_ms(release_sig())}" }
                             }
                         }
 
-                        // Knee
+                        // Knee row
                         div {
-                            class: "flex flex-col items-center",
+                            class: "flex items-center gap-1",
                             Knob {
                                 value: knee_sig,
                                 min: 0.0,
-                                max: 30.0,
-                                size: 40,
-                                label: Some("KNEE".to_string()),
-                                value_display: Some(format_db(knee_sig())),
+                                max: 24.0,
+                                size: tiny_knob,
                                 disabled: !props.interactive,
                                 on_change: move |v: f32| {
-                                    if let Some(cb) = &props.on_knee_change {
-                                        cb.call(v);
-                                    }
+                                    knee_sig.set(v);
+                                    params.write().knee = v;
                                 },
+                            }
+                            div {
+                                class: "flex flex-col",
+                                style: "min-width: 44px;",
+                                span { class: "text-[9px] text-gray-500 leading-none", "KNEE" }
+                                span { class: "text-[10px] text-gray-300 leading-tight font-mono", "{format_db(knee_sig())}" }
                             }
                         }
 
-                        // Lookahead
+                        // Lookahead row
                         div {
-                            class: "flex flex-col items-center",
+                            class: "flex items-center gap-1",
                             Knob {
                                 value: lookahead_sig,
                                 min: 0.0,
                                 max: 10.0,
-                                size: 40,
-                                label: Some("LOOK".to_string()),
-                                value_display: Some(format_ms(lookahead_sig())),
+                                size: tiny_knob,
                                 disabled: !props.interactive,
                                 on_change: move |v: f32| {
-                                    if let Some(cb) = &props.on_lookahead_change {
-                                        cb.call(v);
-                                    }
+                                    lookahead_sig.set(v);
+                                    params.write().lookahead = v;
                                 },
+                            }
+                            div {
+                                class: "flex flex-col",
+                                style: "min-width: 44px;",
+                                span { class: "text-[9px] text-gray-500 leading-none", "LOOK" }
+                                span { class: "text-[10px] text-gray-300 leading-tight font-mono", "{format_ms(lookahead_sig())}" }
                             }
                         }
                     }
