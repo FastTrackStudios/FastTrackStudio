@@ -64,10 +64,8 @@ pub enum Route {
     PatternView { id: String },
     #[route("/test/render")]
     TestRender {},
-    #[route("/test/eq")]
-    TestEq {},
-    #[route("/test/compressor")]
-    TestCompressor {},
+    #[route("/test/fx-ui")]
+    TestFxUi {},
     // Setlist control view (demo with mock data)
     #[route("/control/setlist")]
     ControlSetlist {},
@@ -2560,14 +2558,15 @@ fn TestRender() -> Element {
     }
 }
 
+
 // =============================================================================
-// EQ Test Page
+// FX UI Test Page - Combined EQ and Compressor
 // =============================================================================
 
-/// Test page for the parametric EQ graph component
+/// Combined test page for EQ and Compressor graph components
 #[component]
-fn TestEq() -> Element {
-    // EQ bands state - start with some demo bands
+fn TestFxUi() -> Element {
+    // === EQ State ===
     let mut bands = use_signal(|| {
         vec![
             EqBand {
@@ -2622,670 +2621,16 @@ fn TestEq() -> Element {
             },
         ]
     });
-
-    // Currently selected band for editing
     let mut selected_band = use_signal(|| 0_usize);
+    let mut eq_db_range = use_signal(|| 24.0_f64);
 
-    // Graph display options
-    let mut show_grid = use_signal(|| true);
-    let mut fill_curve = use_signal(|| true);
-    let mut db_range = use_signal(|| 24.0_f64);
-
-    let sel = *selected_band.read();
-    let bands_vec = bands.read();
-    let current_band = bands_vec.get(sel).cloned();
-
-    rsx! {
-        div {
-            class: "min-h-screen bg-background p-8",
-
-            // Header
-            div {
-                class: "max-w-6xl mx-auto mb-8",
-                h1 {
-                    class: "text-2xl font-bold text-foreground mb-2",
-                    "Parametric EQ Test"
-                }
-                p {
-                    class: "text-muted-foreground",
-                    "Pro-Q style EQ: Drag bands to adjust freq/gain. Mouse wheel to adjust Q. Double-click to add bands (smart filter type). Drag outside to remove."
-                }
-            }
-
-            // Main content
-            div {
-                class: "max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8",
-
-                // EQ Graph (2 columns on large screens)
-                div {
-                    class: "lg:col-span-2 bg-card rounded-xl border border-border p-4",
-
-                    h2 {
-                        class: "text-lg font-semibold text-foreground mb-4",
-                        "EQ Curve"
-                    }
-
-                    // EQ Graph container with aspect ratio
-                    div {
-                        class: "w-full",
-                        style: "aspect-ratio: 800 / 350;",
-
-                        EqGraph {
-                            bands: bands,
-                            db_range: *db_range.read(),
-                            show_grid: *show_grid.read(),
-                            fill_curve: *fill_curve.read(),
-                            on_band_change: move |(idx, band): (usize, EqBand)| {
-                                let mut b = bands.write();
-                                if idx < b.len() {
-                                    b[idx] = band;
-                                }
-                            },
-                            on_band_add: move |band: EqBand| {
-                                bands.write().push(band);
-                            },
-                            on_band_remove: move |idx: usize| {
-                                let mut b = bands.write();
-                                if idx < b.len() {
-                                    b.remove(idx);
-                                    // Update selected band if needed
-                                    let sel_idx = *selected_band.peek();
-                                    if sel_idx >= b.len() && !b.is_empty() {
-                                        selected_band.set(b.len() - 1);
-                                    }
-                                }
-                            },
-                            on_begin: move |idx: usize| {
-                                selected_band.set(idx);
-                            },
-                        }
-                    }
-                }
-
-                // Debug Panel (1 column)
-                div {
-                    class: "bg-card rounded-xl border border-border p-4 space-y-6",
-
-                    // Display Options
-                    div {
-                        h3 {
-                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
-                            "Display Options"
-                        }
-
-                        div {
-                            class: "space-y-3",
-
-                            // Show Grid toggle
-                            label {
-                                class: "flex items-center gap-3 cursor-pointer",
-                                input {
-                                    r#type: "checkbox",
-                                    checked: *show_grid.read(),
-                                    class: "w-4 h-4 rounded border-border",
-                                    onchange: move |evt: Event<FormData>| {
-                                        show_grid.set(evt.checked());
-                                    }
-                                }
-                                span { class: "text-sm text-foreground", "Show Grid" }
-                            }
-
-                            // Fill Curve toggle
-                            label {
-                                class: "flex items-center gap-3 cursor-pointer",
-                                input {
-                                    r#type: "checkbox",
-                                    checked: *fill_curve.read(),
-                                    class: "w-4 h-4 rounded border-border",
-                                    onchange: move |evt: Event<FormData>| {
-                                        fill_curve.set(evt.checked());
-                                    }
-                                }
-                                span { class: "text-sm text-foreground", "Fill Under Curve" }
-                            }
-
-                            // dB Range
-                            div {
-                                class: "space-y-1",
-                                label {
-                                    class: "text-sm text-muted-foreground",
-                                    "dB Range: {db_range:.0} dB"
-                                }
-                                input {
-                                    r#type: "range",
-                                    min: "12",
-                                    max: "36",
-                                    step: "6",
-                                    value: "{db_range}",
-                                    class: "w-full",
-                                    oninput: move |evt: Event<FormData>| {
-                                        if let Ok(v) = evt.value().parse::<f64>() {
-                                            db_range.set(v);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Band Selector
-                    div {
-                        h3 {
-                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
-                            "Band Selection"
-                        }
-
-                        div {
-                            class: "flex flex-wrap gap-2",
-                            for (i, band) in bands.read().iter().enumerate() {
-                                button {
-                                    key: "{i}",
-                                    class: if i == sel {
-                                        "px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground"
-                                    } else if band.enabled {
-                                        "px-3 py-1.5 rounded-lg text-sm font-medium bg-muted text-foreground hover:bg-muted/80"
-                                    } else {
-                                        "px-3 py-1.5 rounded-lg text-sm font-medium bg-muted/50 text-muted-foreground"
-                                    },
-                                    onclick: move |_| selected_band.set(i),
-                                    "Band {i + 1}"
-                                }
-                            }
-                        }
-                    }
-
-                    // Selected Band Parameters
-                    if let Some(band) = current_band {
-                        div {
-                            h3 {
-                                class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
-                                "Band {sel + 1} Parameters"
-                            }
-
-                            div {
-                                class: "space-y-4",
-
-                                // Enabled toggle
-                                label {
-                                    class: "flex items-center gap-3 cursor-pointer",
-                                    input {
-                                        r#type: "checkbox",
-                                        checked: band.enabled,
-                                        class: "w-4 h-4 rounded border-border",
-                                        onchange: move |evt: Event<FormData>| {
-                                            bands.write()[sel].enabled = evt.checked();
-                                        }
-                                    }
-                                    span { class: "text-sm text-foreground", "Enabled" }
-                                }
-
-                                // Shape selector
-                                div {
-                                    class: "space-y-1",
-                                    label { class: "text-sm text-muted-foreground", "Shape" }
-                                    select {
-                                        class: "w-full px-3 py-2 rounded-lg bg-muted border border-border text-foreground text-sm",
-                                        value: shape_to_string(&band.shape),
-                                        onchange: move |evt: Event<FormData>| {
-                                            bands.write()[sel].shape = string_to_shape(&evt.value());
-                                        },
-                                        option { value: "bell", "Bell" }
-                                        option { value: "low_shelf", "Low Shelf" }
-                                        option { value: "high_shelf", "High Shelf" }
-                                        option { value: "low_cut", "Low Cut" }
-                                        option { value: "high_cut", "High Cut" }
-                                        option { value: "notch", "Notch" }
-                                        option { value: "bandpass", "Band Pass" }
-                                    }
-                                }
-
-                                // Frequency
-                                div {
-                                    class: "space-y-1",
-                                    label {
-                                        class: "text-sm text-muted-foreground",
-                                        "Frequency: {format_frequency(band.frequency)}"
-                                    }
-                                    input {
-                                        r#type: "range",
-                                        min: "1.301", // log10(20)
-                                        max: "4.301", // log10(20000)
-                                        step: "0.01",
-                                        value: "{band.frequency.log10()}",
-                                        class: "w-full",
-                                        oninput: move |evt: Event<FormData>| {
-                                            if let Ok(v) = evt.value().parse::<f32>() {
-                                                bands.write()[sel].frequency = 10.0_f32.powf(v);
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Gain
-                                div {
-                                    class: "space-y-1",
-                                    label {
-                                        class: "text-sm text-muted-foreground",
-                                        "Gain: {band.gain:.1} dB"
-                                    }
-                                    input {
-                                        r#type: "range",
-                                        min: "-24",
-                                        max: "24",
-                                        step: "0.1",
-                                        value: "{band.gain}",
-                                        class: "w-full",
-                                        oninput: move |evt: Event<FormData>| {
-                                            if let Ok(v) = evt.value().parse::<f32>() {
-                                                bands.write()[sel].gain = v;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Q
-                                div {
-                                    class: "space-y-1",
-                                    label {
-                                        class: "text-sm text-muted-foreground",
-                                        "Q: {band.q:.2}"
-                                    }
-                                    input {
-                                        r#type: "range",
-                                        min: "-1.6", // log10(0.025)
-                                        max: "1.6",  // log10(40)
-                                        step: "0.01",
-                                        value: "{band.q.log10()}",
-                                        class: "w-full",
-                                        oninput: move |evt: Event<FormData>| {
-                                            if let Ok(v) = evt.value().parse::<f32>() {
-                                                bands.write()[sel].q = 10.0_f32.powf(v);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Add/Remove Bands
-                    div {
-                        h3 {
-                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
-                            "Manage Bands"
-                        }
-
-                        div {
-                            class: "flex gap-2",
-
-                            button {
-                                class: "flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50",
-                                disabled: bands.read().len() >= 24,
-                                onclick: move |_| {
-                                    let mut b = bands.write();
-                                    let idx = b.len();
-                                    b.push(EqBand {
-                                        index: idx,
-                                        used: true,
-                                        enabled: true,
-                                        frequency: 1000.0,
-                                        gain: 0.0,
-                                        q: 1.0,
-                                        shape: EqBandShape::Bell,
-                                        ..Default::default()
-                                    });
-                                },
-                                "+ Add Band"
-                            }
-
-                            button {
-                                class: "flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-50",
-                                disabled: bands.read().len() <= 1,
-                                onclick: move |_| {
-                                    let mut b = bands.write();
-                                    if b.len() > 1 {
-                                        let sel_idx = *selected_band.peek();
-                                        let remove_idx = sel_idx.min(b.len() - 1);
-                                        b.remove(remove_idx);
-                                        if sel_idx >= b.len() {
-                                            selected_band.set(b.len() - 1);
-                                        }
-                                    }
-                                },
-                                "- Remove"
-                            }
-                        }
-                    }
-
-                    // Presets
-                    div {
-                        h3 {
-                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
-                            "Presets"
-                        }
-
-                        div {
-                            class: "grid grid-cols-2 gap-2",
-
-                            button {
-                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
-                                onclick: move |_| {
-                                    bands.set(preset_flat());
-                                    selected_band.set(0);
-                                },
-                                "Flat"
-                            }
-
-                            button {
-                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
-                                onclick: move |_| {
-                                    bands.set(preset_vocal_presence());
-                                    selected_band.set(0);
-                                },
-                                "Vocal Presence"
-                            }
-
-                            button {
-                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
-                                onclick: move |_| {
-                                    bands.set(preset_bass_boost());
-                                    selected_band.set(0);
-                                },
-                                "Bass Boost"
-                            }
-
-                            button {
-                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
-                                onclick: move |_| {
-                                    bands.set(preset_smiley());
-                                    selected_band.set(0);
-                                },
-                                "Smiley Curve"
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Band Data Table
-            div {
-                class: "max-w-6xl mx-auto mt-8 bg-card rounded-xl border border-border p-4",
-
-                h2 {
-                    class: "text-lg font-semibold text-foreground mb-4",
-                    "Band Data"
-                }
-
-                div {
-                    class: "overflow-x-auto",
-
-                    table {
-                        class: "w-full text-sm",
-
-                        thead {
-                            tr {
-                                class: "border-b border-border",
-                                th { class: "px-4 py-2 text-left text-muted-foreground font-medium", "#" }
-                                th { class: "px-4 py-2 text-left text-muted-foreground font-medium", "Enabled" }
-                                th { class: "px-4 py-2 text-left text-muted-foreground font-medium", "Shape" }
-                                th { class: "px-4 py-2 text-left text-muted-foreground font-medium", "Frequency" }
-                                th { class: "px-4 py-2 text-left text-muted-foreground font-medium", "Gain" }
-                                th { class: "px-4 py-2 text-left text-muted-foreground font-medium", "Q" }
-                            }
-                        }
-
-                        tbody {
-                            for (i, band) in bands.read().iter().enumerate() {
-                                tr {
-                                    key: "{i}",
-                                    class: if i == sel { "bg-primary/10" } else { "hover:bg-muted/50" },
-
-                                    td { class: "px-4 py-2 font-medium", "{i + 1}" }
-                                    td {
-                                        class: "px-4 py-2",
-                                        span {
-                                            class: if band.enabled { "text-green-500" } else { "text-muted-foreground" },
-                                            if band.enabled { "Yes" } else { "No" }
-                                        }
-                                    }
-                                    td { class: "px-4 py-2", "{shape_display_name(&band.shape)}" }
-                                    td { class: "px-4 py-2 font-mono", "{format_frequency(band.frequency)}" }
-                                    td { class: "px-4 py-2 font-mono", "{band.gain:+.1} dB" }
-                                    td { class: "px-4 py-2 font-mono", "{band.q:.2}" }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// =============================================================================
-// Helper Functions for EQ Test Page
-// =============================================================================
-
-fn format_frequency(freq: f32) -> String {
-    if freq >= 1000.0 {
-        format!("{:.1} kHz", freq / 1000.0)
-    } else {
-        format!("{:.0} Hz", freq)
-    }
-}
-
-fn shape_to_string(shape: &EqBandShape) -> &'static str {
-    match shape {
-        EqBandShape::Bell => "bell",
-        EqBandShape::LowShelf => "low_shelf",
-        EqBandShape::HighShelf => "high_shelf",
-        EqBandShape::LowCut => "low_cut",
-        EqBandShape::HighCut => "high_cut",
-        EqBandShape::Notch => "notch",
-        EqBandShape::BandPass => "bandpass",
-        EqBandShape::TiltShelf => "tilt_shelf",
-        EqBandShape::FlatTilt => "flat_tilt",
-        EqBandShape::AllPass => "allpass",
-    }
-}
-
-fn string_to_shape(s: &str) -> EqBandShape {
-    match s {
-        "bell" => EqBandShape::Bell,
-        "low_shelf" => EqBandShape::LowShelf,
-        "high_shelf" => EqBandShape::HighShelf,
-        "low_cut" => EqBandShape::LowCut,
-        "high_cut" => EqBandShape::HighCut,
-        "notch" => EqBandShape::Notch,
-        "bandpass" => EqBandShape::BandPass,
-        "tilt_shelf" => EqBandShape::TiltShelf,
-        "flat_tilt" => EqBandShape::FlatTilt,
-        "allpass" => EqBandShape::AllPass,
-        _ => EqBandShape::Bell,
-    }
-}
-
-fn shape_display_name(shape: &EqBandShape) -> &'static str {
-    match shape {
-        EqBandShape::Bell => "Bell",
-        EqBandShape::LowShelf => "Low Shelf",
-        EqBandShape::HighShelf => "High Shelf",
-        EqBandShape::LowCut => "Low Cut",
-        EqBandShape::HighCut => "High Cut",
-        EqBandShape::Notch => "Notch",
-        EqBandShape::BandPass => "Band Pass",
-        EqBandShape::TiltShelf => "Tilt Shelf",
-        EqBandShape::FlatTilt => "Flat Tilt",
-        EqBandShape::AllPass => "All Pass",
-    }
-}
-
-// Preset generators
-fn preset_flat() -> Vec<EqBand> {
-    vec![EqBand {
-        index: 0,
-        used: true,
-        enabled: true,
-        frequency: 1000.0,
-        gain: 0.0,
-        q: 1.0,
-        shape: EqBandShape::Bell,
-        ..Default::default()
-    }]
-}
-
-fn preset_vocal_presence() -> Vec<EqBand> {
-    vec![
-        EqBand {
-            index: 0,
-            used: true,
-            enabled: true,
-            frequency: 80.0,
-            gain: -3.0,
-            q: 0.7,
-            shape: EqBandShape::HighCut,
-            ..Default::default()
-        },
-        EqBand {
-            index: 1,
-            used: true,
-            enabled: true,
-            frequency: 200.0,
-            gain: -2.0,
-            q: 1.5,
-            shape: EqBandShape::Bell,
-            ..Default::default()
-        },
-        EqBand {
-            index: 2,
-            used: true,
-            enabled: true,
-            frequency: 3000.0,
-            gain: 3.0,
-            q: 1.0,
-            shape: EqBandShape::Bell,
-            ..Default::default()
-        },
-        EqBand {
-            index: 3,
-            used: true,
-            enabled: true,
-            frequency: 8000.0,
-            gain: 2.0,
-            q: 0.8,
-            shape: EqBandShape::HighShelf,
-            ..Default::default()
-        },
-    ]
-}
-
-fn preset_bass_boost() -> Vec<EqBand> {
-    vec![
-        EqBand {
-            index: 0,
-            used: true,
-            enabled: true,
-            frequency: 60.0,
-            gain: 6.0,
-            q: 0.8,
-            shape: EqBandShape::LowShelf,
-            ..Default::default()
-        },
-        EqBand {
-            index: 1,
-            used: true,
-            enabled: true,
-            frequency: 120.0,
-            gain: 3.0,
-            q: 1.0,
-            shape: EqBandShape::Bell,
-            ..Default::default()
-        },
-        EqBand {
-            index: 2,
-            used: true,
-            enabled: true,
-            frequency: 400.0,
-            gain: -1.0,
-            q: 2.0,
-            shape: EqBandShape::Bell,
-            ..Default::default()
-        },
-    ]
-}
-
-fn preset_smiley() -> Vec<EqBand> {
-    vec![
-        EqBand {
-            index: 0,
-            used: true,
-            enabled: true,
-            frequency: 60.0,
-            gain: 5.0,
-            q: 0.7,
-            shape: EqBandShape::LowShelf,
-            ..Default::default()
-        },
-        EqBand {
-            index: 1,
-            used: true,
-            enabled: true,
-            frequency: 250.0,
-            gain: -2.0,
-            q: 1.5,
-            shape: EqBandShape::Bell,
-            ..Default::default()
-        },
-        EqBand {
-            index: 2,
-            used: true,
-            enabled: true,
-            frequency: 1000.0,
-            gain: -3.0,
-            q: 1.0,
-            shape: EqBandShape::Bell,
-            ..Default::default()
-        },
-        EqBand {
-            index: 3,
-            used: true,
-            enabled: true,
-            frequency: 4000.0,
-            gain: 2.0,
-            q: 1.5,
-            shape: EqBandShape::Bell,
-            ..Default::default()
-        },
-        EqBand {
-            index: 4,
-            used: true,
-            enabled: true,
-            frequency: 12000.0,
-            gain: 5.0,
-            q: 0.7,
-            shape: EqBandShape::HighShelf,
-            ..Default::default()
-        },
-    ]
-}
-
-// =============================================================================
-// Compressor Test Page
-// =============================================================================
-
-/// Test page for the compressor graph component
-#[component]
-fn TestCompressor() -> Element {
-    // Compressor parameters state
+    // === Compressor State ===
     let mut params = use_signal(CompressorParams::default);
-
-    // Simulated metering (in a real app, this would come from the DSP)
     let mut metering = use_signal(CompressorMetering::default);
-
-    // Simulated input level animation
     let mut sim_time = use_signal(|| 0.0_f64);
+    let mut comp_db_range = use_signal(|| DbRange::Range48);
 
-    // Animation effect for simulated levels
+    // Animation effect for simulated compressor levels
     use_effect(move || {
         #[cfg(target_arch = "wasm32")]
         {
@@ -3317,13 +2662,20 @@ fn TestCompressor() -> Element {
 
                 let gr = output - input_clamped;
 
+                // Read peaks before setting to avoid borrow conflict
+                let prev = metering.peek();
+                let input_peak = input_clamped.max(prev.input_peak * 0.99);
+                let output_peak = output.max(prev.output_peak * 0.99);
+                let gr_peak = gr.min(prev.gr_peak * 0.99);
+                drop(prev);
+
                 metering.set(CompressorMetering {
                     input_level: input_clamped,
                     output_level: output,
                     gain_reduction: gr,
-                    input_peak: input_clamped.max(metering.peek().input_peak * 0.99),
-                    output_peak: output.max(metering.peek().output_peak * 0.99),
-                    gr_peak: gr.min(metering.peek().gr_peak * 0.99),
+                    input_peak,
+                    output_peak,
+                    gr_peak,
                 });
             }) as Box<dyn FnMut()>);
 
@@ -3337,489 +2689,339 @@ fn TestCompressor() -> Element {
         }
     });
 
-    // DB range selection
-    let mut db_range = use_signal(|| DbRange::Range48);
-
     rsx! {
         div {
-            class: "min-h-screen bg-background p-8",
+            class: "min-h-screen bg-background p-6",
 
             // Header
             div {
-                class: "max-w-6xl mx-auto mb-8",
+                class: "max-w-7xl mx-auto mb-6",
                 h1 {
                     class: "text-2xl font-bold text-foreground mb-2",
-                    "Compressor Graph Test"
+                    "Audio FX Controls"
                 }
                 p {
-                    class: "text-muted-foreground",
-                    "Interactive compressor transfer curve. Drag the threshold point to adjust threshold. Drag above threshold to adjust ratio. Mouse wheel to adjust knee width."
+                    class: "text-muted-foreground text-sm",
+                    "Interactive EQ and Compressor widgets for audio production interfaces."
                 }
             }
 
-            // Main content
+            // Main content - side by side
             div {
-                class: "max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8",
+                class: "max-w-7xl mx-auto grid grid-cols-1 xl:grid-cols-2 gap-6",
 
-                // Compressor Graph (2 columns on large screens)
+                // === EQ Section ===
                 div {
-                    class: "lg:col-span-2 bg-card rounded-xl border border-border p-4",
+                    class: "bg-card rounded-xl border border-border p-4",
 
-                    h2 {
-                        class: "text-lg font-semibold text-foreground mb-4",
-                        "Transfer Curve"
+                    div {
+                        class: "flex items-center justify-between mb-4",
+                        h2 {
+                            class: "text-lg font-semibold text-foreground",
+                            "Parametric EQ"
+                        }
+                        div {
+                            class: "flex items-center gap-2",
+                            label { class: "text-xs text-muted-foreground", "Range:" }
+                            select {
+                                class: "px-2 py-1 rounded bg-muted border border-border text-foreground text-xs",
+                                value: "{*eq_db_range.read()}",
+                                onchange: move |evt: Event<FormData>| {
+                                    if let Ok(v) = evt.value().parse::<f64>() {
+                                        eq_db_range.set(v);
+                                    }
+                                },
+                                option { value: "6", "±6 dB" }
+                                option { value: "12", "±12 dB" }
+                                option { value: "18", "±18 dB" }
+                                option { value: "24", "±24 dB" }
+                                option { value: "30", "±30 dB" }
+                            }
+                        }
                     }
 
-                    // Graph container with aspect ratio
+                    // EQ Graph
                     div {
-                        class: "w-full",
-                        style: "aspect-ratio: 1 / 1; max-width: 500px; margin: 0 auto;",
+                        class: "w-full mb-4",
+                        style: "aspect-ratio: 800 / 350;",
 
-                        CompressorGraph {
-                            params: params.read().clone(),
-                            metering: metering.read().clone(),
-                            db_range: *db_range.read(),
+                        EqGraph {
+                            bands: bands,
+                            db_range: *eq_db_range.read(),
                             show_grid: true,
-                            show_gr_meter: true,
-                            show_levels: true,
-                            interactive: true,
-                            on_threshold_change: move |v: f32| {
-                                params.write().threshold = v;
+                            fill_curve: true,
+                            on_band_change: move |(idx, band): (usize, EqBand)| {
+                                let mut b = bands.write();
+                                if idx < b.len() {
+                                    b[idx] = band;
+                                }
                             },
-                            on_ratio_change: move |v: f32| {
-                                params.write().ratio = v;
+                            on_band_add: move |band: EqBand| {
+                                bands.write().push(band);
                             },
-                            on_knee_change: move |v: f32| {
-                                params.write().knee = v;
+                            on_band_remove: move |idx: usize| {
+                                let mut b = bands.write();
+                                if idx < b.len() {
+                                    b.remove(idx);
+                                    let sel_idx = *selected_band.peek();
+                                    if sel_idx >= b.len() && !b.is_empty() {
+                                        selected_band.set(b.len() - 1);
+                                    }
+                                }
                             },
+                            on_begin: move |idx: usize| {
+                                selected_band.set(idx);
+                            },
+                        }
+                    }
+
+                    // EQ Band info
+                    div {
+                        class: "flex flex-wrap gap-2 text-xs",
+                        for (i, band) in bands.read().iter().enumerate() {
+                            div {
+                                class: if i == *selected_band.read() {
+                                    "px-2 py-1 rounded bg-primary/20 border border-primary/40 text-foreground"
+                                } else {
+                                    "px-2 py-1 rounded bg-muted border border-border text-muted-foreground"
+                                },
+                                onclick: move |_| selected_band.set(i),
+                                "{format_frequency(band.frequency)} • {band.gain:+.1}dB"
+                            }
                         }
                     }
                 }
 
-                // Control Panel
+                // === Compressor Section ===
                 div {
-                    class: "bg-card rounded-xl border border-border p-4 space-y-6",
+                    class: "bg-card rounded-xl border border-border p-4",
 
-                    // Display Options
                     div {
-                        h3 {
-                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
-                            "Display Options"
+                        class: "flex items-center justify-between mb-4",
+                        h2 {
+                            class: "text-lg font-semibold text-foreground",
+                            "Compressor"
                         }
-
                         div {
-                            class: "space-y-3",
-
-                            // dB Range
-                            div {
-                                class: "space-y-1",
-                                label { class: "text-sm text-muted-foreground", "dB Range" }
-                                select {
-                                    class: "w-full px-3 py-2 rounded-lg bg-muted border border-border text-foreground text-sm",
-                                    value: match *db_range.read() {
-                                        DbRange::Range30 => "30",
-                                        DbRange::Range48 => "48",
-                                        DbRange::Range60 => "60",
-                                        DbRange::Range72 => "72",
-                                    },
-                                    onchange: move |evt: Event<FormData>| {
-                                        db_range.set(match evt.value().as_str() {
-                                            "30" => DbRange::Range30,
-                                            "48" => DbRange::Range48,
-                                            "60" => DbRange::Range60,
-                                            "72" => DbRange::Range72,
-                                            _ => DbRange::Range48,
-                                        });
-                                    },
-                                    option { value: "30", "30 dB" }
-                                    option { value: "48", "48 dB" }
-                                    option { value: "60", "60 dB" }
-                                    option { value: "72", "72 dB" }
-                                }
+                            class: "flex items-center gap-2",
+                            label { class: "text-xs text-muted-foreground", "Range:" }
+                            select {
+                                class: "px-2 py-1 rounded bg-muted border border-border text-foreground text-xs",
+                                value: match *comp_db_range.read() {
+                                    DbRange::Range30 => "30",
+                                    DbRange::Range48 => "48",
+                                    DbRange::Range60 => "60",
+                                    DbRange::Range72 => "72",
+                                },
+                                onchange: move |evt: Event<FormData>| {
+                                    comp_db_range.set(match evt.value().as_str() {
+                                        "30" => DbRange::Range30,
+                                        "48" => DbRange::Range48,
+                                        "60" => DbRange::Range60,
+                                        "72" => DbRange::Range72,
+                                        _ => DbRange::Range48,
+                                    });
+                                },
+                                option { value: "30", "30 dB" }
+                                option { value: "48", "48 dB" }
+                                option { value: "60", "60 dB" }
+                                option { value: "72", "72 dB" }
                             }
                         }
                     }
 
-                    // Compressor Parameters
+                    // Compressor Graph
                     div {
-                        h3 {
-                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
-                            "Compressor Parameters"
+                        class: "w-full mb-4 flex justify-center",
+                        div {
+                            style: "width: 320px; height: 320px;",
+
+                            CompressorGraph {
+                                params: params.read().clone(),
+                                metering: metering.read().clone(),
+                                db_range: *comp_db_range.read(),
+                                show_grid: true,
+                                show_gr_meter: true,
+                                show_levels: true,
+                                interactive: true,
+                                on_threshold_change: move |v: f32| {
+                                    params.write().threshold = v;
+                                },
+                                on_ratio_change: move |v: f32| {
+                                    params.write().ratio = v;
+                                },
+                                on_knee_change: move |v: f32| {
+                                    params.write().knee = v;
+                                },
+                            }
+                        }
+                    }
+
+                    // Compressor controls
+                    div {
+                        class: "grid grid-cols-4 gap-3 text-xs",
+
+                        // Threshold
+                        div {
+                            class: "space-y-1",
+                            label { class: "text-muted-foreground", "Threshold" }
+                            input {
+                                r#type: "range",
+                                min: "-60",
+                                max: "0",
+                                step: "0.5",
+                                value: "{params.read().threshold}",
+                                class: "w-full h-1",
+                                oninput: move |evt: Event<FormData>| {
+                                    if let Ok(v) = evt.value().parse::<f32>() {
+                                        params.write().threshold = v;
+                                    }
+                                }
+                            }
+                            div { class: "text-foreground font-mono", "{params.read().threshold:.1} dB" }
                         }
 
+                        // Ratio
                         div {
-                            class: "space-y-4",
-
-                            // Mode selector
-                            div {
-                                class: "space-y-1",
-                                label { class: "text-sm text-muted-foreground", "Mode" }
-                                select {
-                                    class: "w-full px-3 py-2 rounded-lg bg-muted border border-border text-foreground text-sm",
-                                    value: match params.read().mode {
-                                        CompressorMode::Compress => "compress",
-                                        CompressorMode::Expand => "expand",
-                                        CompressorMode::Inflate => "inflate",
-                                        CompressorMode::Shape => "shape",
-                                    },
-                                    onchange: move |evt: Event<FormData>| {
-                                        params.write().mode = match evt.value().as_str() {
-                                            "compress" => CompressorMode::Compress,
-                                            "expand" => CompressorMode::Expand,
-                                            "inflate" => CompressorMode::Inflate,
-                                            "shape" => CompressorMode::Shape,
-                                            _ => CompressorMode::Compress,
-                                        };
-                                    },
-                                    option { value: "compress", "Compress" }
-                                    option { value: "expand", "Expand" }
-                                    option { value: "inflate", "Inflate" }
-                                    option { value: "shape", "Shape" }
-                                }
-                            }
-
-                            // Threshold
-                            div {
-                                class: "space-y-1",
-                                label {
-                                    class: "text-sm text-muted-foreground",
-                                    "Threshold: {params.read().threshold:.1} dB"
-                                }
-                                input {
-                                    r#type: "range",
-                                    min: "-60",
-                                    max: "0",
-                                    step: "0.5",
-                                    value: "{params.read().threshold}",
-                                    class: "w-full",
-                                    oninput: move |evt: Event<FormData>| {
-                                        if let Ok(v) = evt.value().parse::<f32>() {
-                                            params.write().threshold = v;
-                                        }
+                            class: "space-y-1",
+                            label { class: "text-muted-foreground", "Ratio" }
+                            input {
+                                r#type: "range",
+                                min: "1",
+                                max: "20",
+                                step: "0.1",
+                                value: "{params.read().ratio}",
+                                class: "w-full h-1",
+                                oninput: move |evt: Event<FormData>| {
+                                    if let Ok(v) = evt.value().parse::<f32>() {
+                                        params.write().ratio = v;
                                     }
                                 }
                             }
+                            div { class: "text-foreground font-mono", "{params.read().ratio:.1}:1" }
+                        }
 
-                            // Ratio
-                            div {
-                                class: "space-y-1",
-                                label {
-                                    class: "text-sm text-muted-foreground",
-                                    "Ratio: {params.read().ratio:.1}:1"
-                                }
-                                input {
-                                    r#type: "range",
-                                    min: "1",
-                                    max: "20",
-                                    step: "0.1",
-                                    value: "{params.read().ratio}",
-                                    class: "w-full",
-                                    oninput: move |evt: Event<FormData>| {
-                                        if let Ok(v) = evt.value().parse::<f32>() {
-                                            params.write().ratio = v;
-                                        }
+                        // Knee
+                        div {
+                            class: "space-y-1",
+                            label { class: "text-muted-foreground", "Knee" }
+                            input {
+                                r#type: "range",
+                                min: "0",
+                                max: "24",
+                                step: "0.5",
+                                value: "{params.read().knee}",
+                                class: "w-full h-1",
+                                oninput: move |evt: Event<FormData>| {
+                                    if let Ok(v) = evt.value().parse::<f32>() {
+                                        params.write().knee = v;
                                     }
                                 }
                             }
+                            div { class: "text-foreground font-mono", "{params.read().knee:.1} dB" }
+                        }
 
-                            // Knee
+                        // GR Display
+                        div {
+                            class: "space-y-1",
+                            label { class: "text-muted-foreground", "Gain Reduction" }
                             div {
-                                class: "space-y-1",
-                                label {
-                                    class: "text-sm text-muted-foreground",
-                                    "Knee: {params.read().knee:.1} dB"
-                                }
-                                input {
-                                    r#type: "range",
-                                    min: "0",
-                                    max: "24",
-                                    step: "0.5",
-                                    value: "{params.read().knee}",
-                                    class: "w-full",
-                                    oninput: move |evt: Event<FormData>| {
-                                        if let Ok(v) = evt.value().parse::<f32>() {
-                                            params.write().knee = v;
-                                        }
-                                    }
+                                class: "h-4 bg-muted rounded overflow-hidden",
+                                div {
+                                    class: "h-full bg-red-500 transition-all",
+                                    style: "width: {(-metering.read().gain_reduction / 24.0 * 100.0).clamp(0.0, 100.0)}%",
                                 }
                             }
-
-                            // Attack
-                            div {
-                                class: "space-y-1",
-                                label {
-                                    class: "text-sm text-muted-foreground",
-                                    "Attack: {params.read().attack:.1} ms"
-                                }
-                                input {
-                                    r#type: "range",
-                                    min: "0.1",
-                                    max: "100",
-                                    step: "0.1",
-                                    value: "{params.read().attack}",
-                                    class: "w-full",
-                                    oninput: move |evt: Event<FormData>| {
-                                        if let Ok(v) = evt.value().parse::<f32>() {
-                                            params.write().attack = v;
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Release
-                            div {
-                                class: "space-y-1",
-                                label {
-                                    class: "text-sm text-muted-foreground",
-                                    "Release: {params.read().release:.0} ms"
-                                }
-                                input {
-                                    r#type: "range",
-                                    min: "10",
-                                    max: "1000",
-                                    step: "10",
-                                    value: "{params.read().release}",
-                                    class: "w-full",
-                                    oninput: move |evt: Event<FormData>| {
-                                        if let Ok(v) = evt.value().parse::<f32>() {
-                                            params.write().release = v;
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Curve
-                            div {
-                                class: "space-y-1",
-                                label {
-                                    class: "text-sm text-muted-foreground",
-                                    "Curve: {params.read().curve:.2}"
-                                }
-                                input {
-                                    r#type: "range",
-                                    min: "-1",
-                                    max: "1",
-                                    step: "0.05",
-                                    value: "{params.read().curve}",
-                                    class: "w-full",
-                                    oninput: move |evt: Event<FormData>| {
-                                        if let Ok(v) = evt.value().parse::<f32>() {
-                                            params.write().curve = v;
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Makeup Gain
-                            div {
-                                class: "space-y-1",
-                                label {
-                                    class: "text-sm text-muted-foreground",
-                                    "Makeup: {params.read().makeup:.1} dB"
-                                }
-                                input {
-                                    r#type: "range",
-                                    min: "0",
-                                    max: "24",
-                                    step: "0.5",
-                                    value: "{params.read().makeup}",
-                                    class: "w-full",
-                                    oninput: move |evt: Event<FormData>| {
-                                        if let Ok(v) = evt.value().parse::<f32>() {
-                                            params.write().makeup = v;
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Mix
-                            div {
-                                class: "space-y-1",
-                                label {
-                                    class: "text-sm text-muted-foreground",
-                                    "Mix: {(params.read().mix * 100.0):.0}%"
-                                }
-                                input {
-                                    r#type: "range",
-                                    min: "0",
-                                    max: "1",
-                                    step: "0.01",
-                                    value: "{params.read().mix}",
-                                    class: "w-full",
-                                    oninput: move |evt: Event<FormData>| {
-                                        if let Ok(v) = evt.value().parse::<f32>() {
-                                            params.write().mix = v;
-                                        }
-                                    }
-                                }
-                            }
+                            div { class: "text-red-500 font-mono", "{metering.read().gain_reduction:.1} dB" }
                         }
                     }
 
                     // Presets
                     div {
-                        h3 {
-                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
-                            "Presets"
+                        class: "flex flex-wrap gap-2 mt-4",
+                        button {
+                            class: "px-2 py-1 rounded text-xs bg-muted text-foreground hover:bg-muted/80",
+                            onclick: move |_| params.set(CompressorParams::default()),
+                            "Default"
                         }
-
-                        div {
-                            class: "grid grid-cols-2 gap-2",
-
-                            button {
-                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
-                                onclick: move |_| {
-                                    params.set(CompressorParams::default());
-                                },
-                                "Default"
-                            }
-
-                            button {
-                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
-                                onclick: move |_| {
-                                    params.set(CompressorParams {
-                                        threshold: -12.0,
-                                        ratio: 2.0,
-                                        knee: 12.0,
-                                        attack: 30.0,
-                                        release: 200.0,
-                                        ..Default::default()
-                                    });
-                                },
-                                "Gentle"
-                            }
-
-                            button {
-                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
-                                onclick: move |_| {
-                                    params.set(CompressorParams {
-                                        threshold: -24.0,
-                                        ratio: 8.0,
-                                        knee: 0.0,
-                                        attack: 1.0,
-                                        release: 50.0,
-                                        ..Default::default()
-                                    });
-                                },
-                                "Aggressive"
-                            }
-
-                            button {
-                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
-                                onclick: move |_| {
-                                    params.set(CompressorParams {
-                                        threshold: -30.0,
-                                        ratio: 20.0,
-                                        knee: 0.0,
-                                        attack: 0.5,
-                                        release: 30.0,
-                                        ..Default::default()
-                                    });
-                                },
-                                "Limiter"
-                            }
-
-                            button {
-                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
-                                onclick: move |_| {
-                                    params.set(CompressorParams {
-                                        mode: CompressorMode::Expand,
-                                        threshold: -40.0,
-                                        ratio: 4.0,
-                                        knee: 6.0,
-                                        attack: 5.0,
-                                        release: 100.0,
-                                        range: -80.0,
-                                        ..Default::default()
-                                    });
-                                },
-                                "Gate"
-                            }
-
-                            button {
-                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
-                                onclick: move |_| {
-                                    params.set(CompressorParams {
-                                        mode: CompressorMode::Inflate,
-                                        threshold: -24.0,
-                                        ratio: 3.0,
-                                        knee: 12.0,
-                                        attack: 20.0,
-                                        release: 150.0,
-                                        ..Default::default()
-                                    });
-                                },
-                                "Upward"
-                            }
+                        button {
+                            class: "px-2 py-1 rounded text-xs bg-muted text-foreground hover:bg-muted/80",
+                            onclick: move |_| params.set(CompressorParams {
+                                threshold: -12.0,
+                                ratio: 2.0,
+                                knee: 12.0,
+                                ..Default::default()
+                            }),
+                            "Gentle"
+                        }
+                        button {
+                            class: "px-2 py-1 rounded text-xs bg-muted text-foreground hover:bg-muted/80",
+                            onclick: move |_| params.set(CompressorParams {
+                                threshold: -24.0,
+                                ratio: 8.0,
+                                knee: 0.0,
+                                ..Default::default()
+                            }),
+                            "Aggressive"
+                        }
+                        button {
+                            class: "px-2 py-1 rounded text-xs bg-muted text-foreground hover:bg-muted/80",
+                            onclick: move |_| params.set(CompressorParams {
+                                threshold: -30.0,
+                                ratio: 20.0,
+                                knee: 0.0,
+                                ..Default::default()
+                            }),
+                            "Limiter"
                         }
                     }
                 }
             }
 
-            // Metering Display
+            // Instructions
             div {
-                class: "max-w-6xl mx-auto mt-8 bg-card rounded-xl border border-border p-4",
-
-                h2 {
-                    class: "text-lg font-semibold text-foreground mb-4",
-                    "Real-time Metering"
+                class: "max-w-7xl mx-auto mt-6 p-4 bg-muted/50 rounded-lg border border-border",
+                h3 {
+                    class: "text-sm font-semibold text-foreground mb-2",
+                    "Interaction Guide"
                 }
-
                 div {
-                    class: "grid grid-cols-3 gap-8",
-
-                    // Input Level
+                    class: "grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-muted-foreground",
                     div {
-                        class: "text-center",
-                        div {
-                            class: "text-sm text-muted-foreground mb-1",
-                            "Input"
-                        }
-                        div {
-                            class: "text-2xl font-mono text-foreground",
-                            "{metering.read().input_level:.1} dB"
-                        }
-                        div {
-                            class: "text-xs text-muted-foreground mt-1",
-                            "Peak: {metering.read().input_peak:.1} dB"
+                        h4 { class: "font-medium text-foreground mb-1", "EQ" }
+                        ul {
+                            class: "space-y-0.5 list-disc list-inside",
+                            li { "Drag bands to adjust frequency/gain" }
+                            li { "Mouse wheel to adjust Q" }
+                            li { "Double-click to add new band" }
+                            li { "Drag outside to remove band" }
+                            li { "Shift+drag for fine control" }
                         }
                     }
-
-                    // Gain Reduction
                     div {
-                        class: "text-center",
-                        div {
-                            class: "text-sm text-muted-foreground mb-1",
-                            "Gain Reduction"
-                        }
-                        div {
-                            class: "text-2xl font-mono text-red-500",
-                            "{metering.read().gain_reduction:.1} dB"
-                        }
-                        div {
-                            class: "text-xs text-muted-foreground mt-1",
-                            "Peak: {metering.read().gr_peak:.1} dB"
-                        }
-                    }
-
-                    // Output Level
-                    div {
-                        class: "text-center",
-                        div {
-                            class: "text-sm text-muted-foreground mb-1",
-                            "Output"
-                        }
-                        div {
-                            class: "text-2xl font-mono text-foreground",
-                            "{metering.read().output_level:.1} dB"
-                        }
-                        div {
-                            class: "text-xs text-muted-foreground mt-1",
-                            "Peak: {metering.read().output_peak:.1} dB"
+                        h4 { class: "font-medium text-foreground mb-1", "Compressor" }
+                        ul {
+                            class: "space-y-0.5 list-disc list-inside",
+                            li { "Drag threshold point to adjust threshold" }
+                            li { "Drag above threshold to adjust ratio" }
+                            li { "Mouse wheel to adjust knee width" }
+                            li { "Shift+drag for fine control" }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+// =============================================================================
+// Helper Functions for FX UI
+// =============================================================================
+
+fn format_frequency(freq: f32) -> String {
+    if freq >= 1000.0 {
+        format!("{:.1}k", freq / 1000.0)
+    } else {
+        format!("{:.0}", freq)
     }
 }
