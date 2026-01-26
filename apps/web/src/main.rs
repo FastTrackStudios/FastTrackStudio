@@ -18,11 +18,16 @@ use lucide_dioxus::{
 // Setlist components
 use std::sync::Arc;
 use fts::setlist::{LocalSetlistClient, MockSetlist};
-use ui::{PerformanceView, SetlistServiceProvider};
+use fts::rig::{LocalRigClient, MockRig};
+use ui::{PerformanceView, RigControlView, RigServiceProvider, SetlistServiceProvider};
+
+// Audio controls
+use audio_controls::widgets::{EqBand, EqBandShape, EqGraph};
 
 // Static assets
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
+const MAIN_CSS: Asset = asset!("/assets/main.css");
 
 /// Application routes
 #[derive(Debug, Clone, Routable, PartialEq)]
@@ -56,9 +61,14 @@ pub enum Route {
     PatternView { id: String },
     #[route("/test/render")]
     TestRender {},
+    #[route("/test/eq")]
+    TestEq {},
     // Setlist control view (demo with mock data)
     #[route("/control/setlist")]
     ControlSetlist {},
+    // Rig control view (demo with mock guitar data)
+    #[route("/control/rig/guitar")]
+    ControlRigGuitar {},
 }
 
 fn main() {
@@ -112,6 +122,7 @@ fn App() -> Element {
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
+        document::Link { rel: "stylesheet", href: MAIN_CSS }
         Router::<Route> {}
     }
 }
@@ -2464,6 +2475,32 @@ fn ControlSetlist() -> Element {
     }
 }
 
+// =============================================================================
+// Rig Control View - Demo with mock guitar data
+// =============================================================================
+
+/// Rig control view with mock guitar service
+///
+/// This demonstrates the RigControlView component working in a web context
+/// with the MockRig service providing sample guitar rig data.
+#[component]
+fn ControlRigGuitar() -> Element {
+    // Create mock service with local client wrapper for in-process ROAM calls
+    let client = use_hook(|| {
+        let service = Arc::new(MockRig::with_sample_guitar_data());
+        LocalRigClient::new(service)
+    });
+
+    rsx! {
+        RigServiceProvider { client,
+            div {
+                class: "h-[calc(100vh-4rem)] w-full flex flex-col overflow-hidden bg-background",
+                RigControlView {}
+            }
+        }
+    }
+}
+
 /// Test page for debugging chart rendering - no transforms, just raw output
 #[component]
 fn TestRender() -> Element {
@@ -2516,4 +2553,713 @@ fn TestRender() -> Element {
             }
         }
     }
+}
+
+// =============================================================================
+// EQ Test Page
+// =============================================================================
+
+/// Test page for the parametric EQ graph component
+#[component]
+fn TestEq() -> Element {
+    // EQ bands state - start with some demo bands
+    let mut bands = use_signal(|| {
+        vec![
+            EqBand {
+                index: 0,
+                used: true,
+                enabled: true,
+                frequency: 80.0,
+                gain: 3.0,
+                q: 0.7,
+                shape: EqBandShape::LowShelf,
+                ..Default::default()
+            },
+            EqBand {
+                index: 1,
+                used: true,
+                enabled: true,
+                frequency: 250.0,
+                gain: -2.5,
+                q: 1.5,
+                shape: EqBandShape::Bell,
+                ..Default::default()
+            },
+            EqBand {
+                index: 2,
+                used: true,
+                enabled: true,
+                frequency: 1000.0,
+                gain: 1.5,
+                q: 2.0,
+                shape: EqBandShape::Bell,
+                ..Default::default()
+            },
+            EqBand {
+                index: 3,
+                used: true,
+                enabled: true,
+                frequency: 4000.0,
+                gain: 2.0,
+                q: 1.0,
+                shape: EqBandShape::Bell,
+                ..Default::default()
+            },
+            EqBand {
+                index: 4,
+                used: true,
+                enabled: true,
+                frequency: 12000.0,
+                gain: 4.0,
+                q: 0.8,
+                shape: EqBandShape::HighShelf,
+                ..Default::default()
+            },
+        ]
+    });
+
+    // Currently selected band for editing
+    let mut selected_band = use_signal(|| 0_usize);
+
+    // Graph display options
+    let mut show_grid = use_signal(|| true);
+    let mut fill_curve = use_signal(|| true);
+    let mut db_range = use_signal(|| 24.0_f64);
+
+    let sel = *selected_band.read();
+    let bands_vec = bands.read();
+    let current_band = bands_vec.get(sel).cloned();
+
+    rsx! {
+        div {
+            class: "min-h-screen bg-background p-8",
+
+            // Header
+            div {
+                class: "max-w-6xl mx-auto mb-8",
+                h1 {
+                    class: "text-2xl font-bold text-foreground mb-2",
+                    "Parametric EQ Test"
+                }
+                p {
+                    class: "text-muted-foreground",
+                    "Pro-Q style EQ: Drag bands to adjust freq/gain. Mouse wheel to adjust Q. Double-click to add bands (smart filter type). Drag outside to remove."
+                }
+            }
+
+            // Main content
+            div {
+                class: "max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8",
+
+                // EQ Graph (2 columns on large screens)
+                div {
+                    class: "lg:col-span-2 bg-card rounded-xl border border-border p-4",
+
+                    h2 {
+                        class: "text-lg font-semibold text-foreground mb-4",
+                        "EQ Curve"
+                    }
+
+                    // EQ Graph container with aspect ratio
+                    div {
+                        class: "w-full",
+                        style: "aspect-ratio: 800 / 350;",
+
+                        EqGraph {
+                            bands: bands,
+                            db_range: *db_range.read(),
+                            show_grid: *show_grid.read(),
+                            fill_curve: *fill_curve.read(),
+                            on_band_change: move |(idx, band): (usize, EqBand)| {
+                                let mut b = bands.write();
+                                if idx < b.len() {
+                                    b[idx] = band;
+                                }
+                            },
+                            on_band_add: move |band: EqBand| {
+                                bands.write().push(band);
+                            },
+                            on_band_remove: move |idx: usize| {
+                                let mut b = bands.write();
+                                if idx < b.len() {
+                                    b.remove(idx);
+                                    // Update selected band if needed
+                                    let sel_idx = *selected_band.peek();
+                                    if sel_idx >= b.len() && !b.is_empty() {
+                                        selected_band.set(b.len() - 1);
+                                    }
+                                }
+                            },
+                            on_begin: move |idx: usize| {
+                                selected_band.set(idx);
+                            },
+                        }
+                    }
+                }
+
+                // Debug Panel (1 column)
+                div {
+                    class: "bg-card rounded-xl border border-border p-4 space-y-6",
+
+                    // Display Options
+                    div {
+                        h3 {
+                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
+                            "Display Options"
+                        }
+
+                        div {
+                            class: "space-y-3",
+
+                            // Show Grid toggle
+                            label {
+                                class: "flex items-center gap-3 cursor-pointer",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: *show_grid.read(),
+                                    class: "w-4 h-4 rounded border-border",
+                                    onchange: move |evt: Event<FormData>| {
+                                        show_grid.set(evt.checked());
+                                    }
+                                }
+                                span { class: "text-sm text-foreground", "Show Grid" }
+                            }
+
+                            // Fill Curve toggle
+                            label {
+                                class: "flex items-center gap-3 cursor-pointer",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: *fill_curve.read(),
+                                    class: "w-4 h-4 rounded border-border",
+                                    onchange: move |evt: Event<FormData>| {
+                                        fill_curve.set(evt.checked());
+                                    }
+                                }
+                                span { class: "text-sm text-foreground", "Fill Under Curve" }
+                            }
+
+                            // dB Range
+                            div {
+                                class: "space-y-1",
+                                label {
+                                    class: "text-sm text-muted-foreground",
+                                    "dB Range: {db_range:.0} dB"
+                                }
+                                input {
+                                    r#type: "range",
+                                    min: "12",
+                                    max: "36",
+                                    step: "6",
+                                    value: "{db_range}",
+                                    class: "w-full",
+                                    oninput: move |evt: Event<FormData>| {
+                                        if let Ok(v) = evt.value().parse::<f64>() {
+                                            db_range.set(v);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Band Selector
+                    div {
+                        h3 {
+                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
+                            "Band Selection"
+                        }
+
+                        div {
+                            class: "flex flex-wrap gap-2",
+                            for (i, band) in bands.read().iter().enumerate() {
+                                button {
+                                    key: "{i}",
+                                    class: if i == sel {
+                                        "px-3 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground"
+                                    } else if band.enabled {
+                                        "px-3 py-1.5 rounded-lg text-sm font-medium bg-muted text-foreground hover:bg-muted/80"
+                                    } else {
+                                        "px-3 py-1.5 rounded-lg text-sm font-medium bg-muted/50 text-muted-foreground"
+                                    },
+                                    onclick: move |_| selected_band.set(i),
+                                    "Band {i + 1}"
+                                }
+                            }
+                        }
+                    }
+
+                    // Selected Band Parameters
+                    if let Some(band) = current_band {
+                        div {
+                            h3 {
+                                class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
+                                "Band {sel + 1} Parameters"
+                            }
+
+                            div {
+                                class: "space-y-4",
+
+                                // Enabled toggle
+                                label {
+                                    class: "flex items-center gap-3 cursor-pointer",
+                                    input {
+                                        r#type: "checkbox",
+                                        checked: band.enabled,
+                                        class: "w-4 h-4 rounded border-border",
+                                        onchange: move |evt: Event<FormData>| {
+                                            bands.write()[sel].enabled = evt.checked();
+                                        }
+                                    }
+                                    span { class: "text-sm text-foreground", "Enabled" }
+                                }
+
+                                // Shape selector
+                                div {
+                                    class: "space-y-1",
+                                    label { class: "text-sm text-muted-foreground", "Shape" }
+                                    select {
+                                        class: "w-full px-3 py-2 rounded-lg bg-muted border border-border text-foreground text-sm",
+                                        value: shape_to_string(&band.shape),
+                                        onchange: move |evt: Event<FormData>| {
+                                            bands.write()[sel].shape = string_to_shape(&evt.value());
+                                        },
+                                        option { value: "bell", "Bell" }
+                                        option { value: "low_shelf", "Low Shelf" }
+                                        option { value: "high_shelf", "High Shelf" }
+                                        option { value: "low_cut", "Low Cut" }
+                                        option { value: "high_cut", "High Cut" }
+                                        option { value: "notch", "Notch" }
+                                        option { value: "bandpass", "Band Pass" }
+                                    }
+                                }
+
+                                // Frequency
+                                div {
+                                    class: "space-y-1",
+                                    label {
+                                        class: "text-sm text-muted-foreground",
+                                        "Frequency: {format_frequency(band.frequency)}"
+                                    }
+                                    input {
+                                        r#type: "range",
+                                        min: "1.301", // log10(20)
+                                        max: "4.301", // log10(20000)
+                                        step: "0.01",
+                                        value: "{band.frequency.log10()}",
+                                        class: "w-full",
+                                        oninput: move |evt: Event<FormData>| {
+                                            if let Ok(v) = evt.value().parse::<f32>() {
+                                                bands.write()[sel].frequency = 10.0_f32.powf(v);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Gain
+                                div {
+                                    class: "space-y-1",
+                                    label {
+                                        class: "text-sm text-muted-foreground",
+                                        "Gain: {band.gain:.1} dB"
+                                    }
+                                    input {
+                                        r#type: "range",
+                                        min: "-24",
+                                        max: "24",
+                                        step: "0.1",
+                                        value: "{band.gain}",
+                                        class: "w-full",
+                                        oninput: move |evt: Event<FormData>| {
+                                            if let Ok(v) = evt.value().parse::<f32>() {
+                                                bands.write()[sel].gain = v;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Q
+                                div {
+                                    class: "space-y-1",
+                                    label {
+                                        class: "text-sm text-muted-foreground",
+                                        "Q: {band.q:.2}"
+                                    }
+                                    input {
+                                        r#type: "range",
+                                        min: "-1.6", // log10(0.025)
+                                        max: "1.6",  // log10(40)
+                                        step: "0.01",
+                                        value: "{band.q.log10()}",
+                                        class: "w-full",
+                                        oninput: move |evt: Event<FormData>| {
+                                            if let Ok(v) = evt.value().parse::<f32>() {
+                                                bands.write()[sel].q = 10.0_f32.powf(v);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Add/Remove Bands
+                    div {
+                        h3 {
+                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
+                            "Manage Bands"
+                        }
+
+                        div {
+                            class: "flex gap-2",
+
+                            button {
+                                class: "flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50",
+                                disabled: bands.read().len() >= 24,
+                                onclick: move |_| {
+                                    let mut b = bands.write();
+                                    let idx = b.len();
+                                    b.push(EqBand {
+                                        index: idx,
+                                        used: true,
+                                        enabled: true,
+                                        frequency: 1000.0,
+                                        gain: 0.0,
+                                        q: 1.0,
+                                        shape: EqBandShape::Bell,
+                                        ..Default::default()
+                                    });
+                                },
+                                "+ Add Band"
+                            }
+
+                            button {
+                                class: "flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 disabled:opacity-50",
+                                disabled: bands.read().len() <= 1,
+                                onclick: move |_| {
+                                    let mut b = bands.write();
+                                    if b.len() > 1 {
+                                        let sel_idx = *selected_band.peek();
+                                        let remove_idx = sel_idx.min(b.len() - 1);
+                                        b.remove(remove_idx);
+                                        if sel_idx >= b.len() {
+                                            selected_band.set(b.len() - 1);
+                                        }
+                                    }
+                                },
+                                "- Remove"
+                            }
+                        }
+                    }
+
+                    // Presets
+                    div {
+                        h3 {
+                            class: "text-sm font-semibold text-foreground mb-3 uppercase tracking-wide",
+                            "Presets"
+                        }
+
+                        div {
+                            class: "grid grid-cols-2 gap-2",
+
+                            button {
+                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
+                                onclick: move |_| {
+                                    bands.set(preset_flat());
+                                    selected_band.set(0);
+                                },
+                                "Flat"
+                            }
+
+                            button {
+                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
+                                onclick: move |_| {
+                                    bands.set(preset_vocal_presence());
+                                    selected_band.set(0);
+                                },
+                                "Vocal Presence"
+                            }
+
+                            button {
+                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
+                                onclick: move |_| {
+                                    bands.set(preset_bass_boost());
+                                    selected_band.set(0);
+                                },
+                                "Bass Boost"
+                            }
+
+                            button {
+                                class: "px-3 py-2 rounded-lg text-sm bg-muted text-foreground hover:bg-muted/80",
+                                onclick: move |_| {
+                                    bands.set(preset_smiley());
+                                    selected_band.set(0);
+                                },
+                                "Smiley Curve"
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Band Data Table
+            div {
+                class: "max-w-6xl mx-auto mt-8 bg-card rounded-xl border border-border p-4",
+
+                h2 {
+                    class: "text-lg font-semibold text-foreground mb-4",
+                    "Band Data"
+                }
+
+                div {
+                    class: "overflow-x-auto",
+
+                    table {
+                        class: "w-full text-sm",
+
+                        thead {
+                            tr {
+                                class: "border-b border-border",
+                                th { class: "px-4 py-2 text-left text-muted-foreground font-medium", "#" }
+                                th { class: "px-4 py-2 text-left text-muted-foreground font-medium", "Enabled" }
+                                th { class: "px-4 py-2 text-left text-muted-foreground font-medium", "Shape" }
+                                th { class: "px-4 py-2 text-left text-muted-foreground font-medium", "Frequency" }
+                                th { class: "px-4 py-2 text-left text-muted-foreground font-medium", "Gain" }
+                                th { class: "px-4 py-2 text-left text-muted-foreground font-medium", "Q" }
+                            }
+                        }
+
+                        tbody {
+                            for (i, band) in bands.read().iter().enumerate() {
+                                tr {
+                                    key: "{i}",
+                                    class: if i == sel { "bg-primary/10" } else { "hover:bg-muted/50" },
+
+                                    td { class: "px-4 py-2 font-medium", "{i + 1}" }
+                                    td {
+                                        class: "px-4 py-2",
+                                        span {
+                                            class: if band.enabled { "text-green-500" } else { "text-muted-foreground" },
+                                            if band.enabled { "Yes" } else { "No" }
+                                        }
+                                    }
+                                    td { class: "px-4 py-2", "{shape_display_name(&band.shape)}" }
+                                    td { class: "px-4 py-2 font-mono", "{format_frequency(band.frequency)}" }
+                                    td { class: "px-4 py-2 font-mono", "{band.gain:+.1} dB" }
+                                    td { class: "px-4 py-2 font-mono", "{band.q:.2}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Helper Functions for EQ Test Page
+// =============================================================================
+
+fn format_frequency(freq: f32) -> String {
+    if freq >= 1000.0 {
+        format!("{:.1} kHz", freq / 1000.0)
+    } else {
+        format!("{:.0} Hz", freq)
+    }
+}
+
+fn shape_to_string(shape: &EqBandShape) -> &'static str {
+    match shape {
+        EqBandShape::Bell => "bell",
+        EqBandShape::LowShelf => "low_shelf",
+        EqBandShape::HighShelf => "high_shelf",
+        EqBandShape::LowCut => "low_cut",
+        EqBandShape::HighCut => "high_cut",
+        EqBandShape::Notch => "notch",
+        EqBandShape::BandPass => "bandpass",
+        EqBandShape::TiltShelf => "tilt_shelf",
+        EqBandShape::FlatTilt => "flat_tilt",
+        EqBandShape::AllPass => "allpass",
+    }
+}
+
+fn string_to_shape(s: &str) -> EqBandShape {
+    match s {
+        "bell" => EqBandShape::Bell,
+        "low_shelf" => EqBandShape::LowShelf,
+        "high_shelf" => EqBandShape::HighShelf,
+        "low_cut" => EqBandShape::LowCut,
+        "high_cut" => EqBandShape::HighCut,
+        "notch" => EqBandShape::Notch,
+        "bandpass" => EqBandShape::BandPass,
+        "tilt_shelf" => EqBandShape::TiltShelf,
+        "flat_tilt" => EqBandShape::FlatTilt,
+        "allpass" => EqBandShape::AllPass,
+        _ => EqBandShape::Bell,
+    }
+}
+
+fn shape_display_name(shape: &EqBandShape) -> &'static str {
+    match shape {
+        EqBandShape::Bell => "Bell",
+        EqBandShape::LowShelf => "Low Shelf",
+        EqBandShape::HighShelf => "High Shelf",
+        EqBandShape::LowCut => "Low Cut",
+        EqBandShape::HighCut => "High Cut",
+        EqBandShape::Notch => "Notch",
+        EqBandShape::BandPass => "Band Pass",
+        EqBandShape::TiltShelf => "Tilt Shelf",
+        EqBandShape::FlatTilt => "Flat Tilt",
+        EqBandShape::AllPass => "All Pass",
+    }
+}
+
+// Preset generators
+fn preset_flat() -> Vec<EqBand> {
+    vec![EqBand {
+        index: 0,
+        used: true,
+        enabled: true,
+        frequency: 1000.0,
+        gain: 0.0,
+        q: 1.0,
+        shape: EqBandShape::Bell,
+        ..Default::default()
+    }]
+}
+
+fn preset_vocal_presence() -> Vec<EqBand> {
+    vec![
+        EqBand {
+            index: 0,
+            used: true,
+            enabled: true,
+            frequency: 80.0,
+            gain: -3.0,
+            q: 0.7,
+            shape: EqBandShape::HighCut,
+            ..Default::default()
+        },
+        EqBand {
+            index: 1,
+            used: true,
+            enabled: true,
+            frequency: 200.0,
+            gain: -2.0,
+            q: 1.5,
+            shape: EqBandShape::Bell,
+            ..Default::default()
+        },
+        EqBand {
+            index: 2,
+            used: true,
+            enabled: true,
+            frequency: 3000.0,
+            gain: 3.0,
+            q: 1.0,
+            shape: EqBandShape::Bell,
+            ..Default::default()
+        },
+        EqBand {
+            index: 3,
+            used: true,
+            enabled: true,
+            frequency: 8000.0,
+            gain: 2.0,
+            q: 0.8,
+            shape: EqBandShape::HighShelf,
+            ..Default::default()
+        },
+    ]
+}
+
+fn preset_bass_boost() -> Vec<EqBand> {
+    vec![
+        EqBand {
+            index: 0,
+            used: true,
+            enabled: true,
+            frequency: 60.0,
+            gain: 6.0,
+            q: 0.8,
+            shape: EqBandShape::LowShelf,
+            ..Default::default()
+        },
+        EqBand {
+            index: 1,
+            used: true,
+            enabled: true,
+            frequency: 120.0,
+            gain: 3.0,
+            q: 1.0,
+            shape: EqBandShape::Bell,
+            ..Default::default()
+        },
+        EqBand {
+            index: 2,
+            used: true,
+            enabled: true,
+            frequency: 400.0,
+            gain: -1.0,
+            q: 2.0,
+            shape: EqBandShape::Bell,
+            ..Default::default()
+        },
+    ]
+}
+
+fn preset_smiley() -> Vec<EqBand> {
+    vec![
+        EqBand {
+            index: 0,
+            used: true,
+            enabled: true,
+            frequency: 60.0,
+            gain: 5.0,
+            q: 0.7,
+            shape: EqBandShape::LowShelf,
+            ..Default::default()
+        },
+        EqBand {
+            index: 1,
+            used: true,
+            enabled: true,
+            frequency: 250.0,
+            gain: -2.0,
+            q: 1.5,
+            shape: EqBandShape::Bell,
+            ..Default::default()
+        },
+        EqBand {
+            index: 2,
+            used: true,
+            enabled: true,
+            frequency: 1000.0,
+            gain: -3.0,
+            q: 1.0,
+            shape: EqBandShape::Bell,
+            ..Default::default()
+        },
+        EqBand {
+            index: 3,
+            used: true,
+            enabled: true,
+            frequency: 4000.0,
+            gain: 2.0,
+            q: 1.5,
+            shape: EqBandShape::Bell,
+            ..Default::default()
+        },
+        EqBand {
+            index: 4,
+            used: true,
+            enabled: true,
+            frequency: 12000.0,
+            gain: 5.0,
+            q: 0.7,
+            shape: EqBandShape::HighShelf,
+            ..Default::default()
+        },
+    ]
 }

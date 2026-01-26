@@ -558,21 +558,70 @@ canvas {
 
 /* Scrollbar styling for dark theme */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #1f2937;
+  background: #18181b; /* zinc-900 */
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #4b5563;
-  border-radius: 4px;
+  background: #3f3f46; /* zinc-700 */
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
+  background: #52525b; /* zinc-600 */
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 #18181b;
+}
+
+/* Pedalboard specific scrollbar - slightly more visible */
+.pedalboard::-webkit-scrollbar {
+  height: 8px;
+}
+
+.pedalboard::-webkit-scrollbar-track {
+  background: #27272a; /* zinc-800 */
+  border-radius: 4px;
+}
+
+.pedalboard::-webkit-scrollbar-thumb {
+  background: #52525b; /* zinc-600 */
+  border-radius: 4px;
+}
+
+.pedalboard::-webkit-scrollbar-thumb:hover {
+  background: #71717a; /* zinc-500 */
+}
+
+/* Preset browser scrollbar - minimal and subtle */
+.preset-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.preset-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.preset-list::-webkit-scrollbar-thumb {
+  background: #404040;
+  border-radius: 2px;
+}
+
+.preset-list::-webkit-scrollbar-thumb:hover {
+  background: #525252;
+}
+
+.preset-list {
+  scrollbar-width: thin;
+  scrollbar-color: #404040 transparent;
 }
 
 /* Inline code */

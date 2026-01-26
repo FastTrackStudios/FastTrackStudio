@@ -1,0 +1,30 @@
+[package]
+name = "fts-dsp"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "DSP algorithms for FastTrackStudio - EQ, dynamics, filters"
+
+[dependencies]
+# Math and DSP
+num-traits = "0.2"
+num-complex = "0.4"
+realfft = "3.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+
+# Rendering (optional - for EQ graph visualization)
+kurbo = { version = "0.11", optional = true }
+
+[dev-dependencies]
+approx = "0.5"
+
+[features]
+default = []
+simd = []
+render = ["kurbo"]
+
+[lints]
+workspace = true

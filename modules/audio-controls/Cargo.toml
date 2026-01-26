@@ -1,0 +1,36 @@
+[package]
+name = "audio-controls"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Professional audio parameter control widgets for Dioxus"
+
+[dependencies]
+dioxus = { workspace = true, features = ["macro", "signals", "hooks", "html"] }
+wasm-bindgen = "0.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window", "Document", "MouseEvent", "EventTarget", "Performance"] }
+js-sys = "0.3"
+
+[dependencies.nih_plug]
+workspace = true
+optional = true
+
+[dependencies.nih_plug_dioxus]
+workspace = true
+optional = true
+
+[dependencies.fts-dsp]
+path = "../dsp"
+features = ["render"]
+optional = true
+
+[features]
+default = []
+nih-plug = ["dep:nih_plug", "dep:nih_plug_dioxus"]
+dsp = ["dep:fts-dsp"]
+
+[lints]
+workspace = true

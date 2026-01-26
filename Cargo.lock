@@ -1015,6 +1015,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "audio-controls"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+ "fts-dsp",
+ "js-sys",
+ "nih_plug",
+ "nih_plug_dioxus",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "audio-core"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4504,7 +4517,7 @@ dependencies = [
 [[package]]
 name = "facet"
 version = "0.43.2"
-source = "git+https://github.com/facet-rs/facet?branch=main#b51c354c654f850a6e8ad9c85c73c50da83aa391"
+source = "git+https://github.com/facet-rs/facet?branch=main#a03551d849797da8457867a1a1cd6cc4947cad4b"
 dependencies = [
  "autocfg",
  "facet-core 0.43.2 (git+https://github.com/facet-rs/facet?branch=main)",
@@ -4541,7 +4554,7 @@ dependencies = [
 [[package]]
 name = "facet-core"
 version = "0.43.2"
-source = "git+https://github.com/facet-rs/facet?branch=main#b51c354c654f850a6e8ad9c85c73c50da83aa391"
+source = "git+https://github.com/facet-rs/facet?branch=main#a03551d849797da8457867a1a1cd6cc4947cad4b"
 dependencies = [
  "autocfg",
  "camino",
@@ -4619,7 +4632,7 @@ dependencies = [
 [[package]]
 name = "facet-macro-parse"
 version = "0.43.2"
-source = "git+https://github.com/facet-rs/facet?branch=main#b51c354c654f850a6e8ad9c85c73c50da83aa391"
+source = "git+https://github.com/facet-rs/facet?branch=main#a03551d849797da8457867a1a1cd6cc4947cad4b"
 dependencies = [
  "facet-macro-types",
  "proc-macro2",
@@ -4629,7 +4642,7 @@ dependencies = [
 [[package]]
 name = "facet-macro-types"
 version = "0.43.2"
-source = "git+https://github.com/facet-rs/facet?branch=main#b51c354c654f850a6e8ad9c85c73c50da83aa391"
+source = "git+https://github.com/facet-rs/facet?branch=main#a03551d849797da8457867a1a1cd6cc4947cad4b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4639,7 +4652,7 @@ dependencies = [
 [[package]]
 name = "facet-macros"
 version = "0.43.2"
-source = "git+https://github.com/facet-rs/facet?branch=main#b51c354c654f850a6e8ad9c85c73c50da83aa391"
+source = "git+https://github.com/facet-rs/facet?branch=main#a03551d849797da8457867a1a1cd6cc4947cad4b"
 dependencies = [
  "facet-macros-impl",
 ]
@@ -4647,7 +4660,7 @@ dependencies = [
 [[package]]
 name = "facet-macros-impl"
 version = "0.43.2"
-source = "git+https://github.com/facet-rs/facet?branch=main#b51c354c654f850a6e8ad9c85c73c50da83aa391"
+source = "git+https://github.com/facet-rs/facet?branch=main#a03551d849797da8457867a1a1cd6cc4947cad4b"
 dependencies = [
  "facet-macro-parse",
  "facet-macro-types",
@@ -4710,7 +4723,7 @@ dependencies = [
 [[package]]
 name = "facet-reflect"
 version = "0.43.2"
-source = "git+https://github.com/facet-rs/facet?branch=main#b51c354c654f850a6e8ad9c85c73c50da83aa391"
+source = "git+https://github.com/facet-rs/facet?branch=main#a03551d849797da8457867a1a1cd6cc4947cad4b"
 dependencies = [
  "facet-core 0.43.2 (git+https://github.com/facet-rs/facet?branch=main)",
 ]
@@ -5069,6 +5082,7 @@ dependencies = [
  "irpc",
  "irpc-iroh",
  "keyflow",
+ "nucleo-matcher",
  "once_cell",
  "reaper-high",
  "reaper-low",
@@ -5087,6 +5101,18 @@ dependencies = [
  "tokio-test",
  "tracing",
  "uuid 1.19.0",
+]
+
+[[package]]
+name = "fts-dsp"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "kurbo 0.11.3",
+ "num-complex",
+ "num-traits",
+ "realfft",
+ "serde",
 ]
 
 [[package]]
@@ -8995,6 +9021,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nucleo-matcher"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf33f538733d1a5a3494b836ba913207f14d9d4a1d3cd67030c5061bdd2cac85"
+dependencies = [
+ "memchr",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -14248,6 +14284,7 @@ dependencies = [
 name = "ui"
 version = "0.1.0"
 dependencies = [
+ "audio-controls",
  "daw",
  "dioxus",
  "dioxus-router",
@@ -14256,6 +14293,7 @@ dependencies = [
  "keyflow",
  "lucide-dioxus 2.562.0",
  "lumen-blocks 0.2.0 (git+https://github.com/Leaf-Computer/lumen-blocks.git?tag=v0.2.0)",
+ "nucleo-matcher",
  "roam",
  "tracing",
  "uuid 1.19.0",
@@ -14524,6 +14562,7 @@ dependencies = [
  "getrandom 0.3.4",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 
@@ -14990,6 +15029,7 @@ name = "web"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "audio-controls",
  "console_error_panic_hook",
  "dioxus",
  "dioxus-sdk-time",

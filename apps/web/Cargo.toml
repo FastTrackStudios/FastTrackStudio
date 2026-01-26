@@ -20,6 +20,7 @@ keyflow = { path = "../../packages/keyflow", features = ["engraver", "highlighti
 # FastTrackStudio modules
 fts = { path = "../../modules/fts", features = ["dioxus"] }
 ui = { path = "../../modules/ui" }
+audio-controls = { path = "../../modules/audio-controls" }
 
 # Roam context (for MockSetlist service calls)
 roam = { workspace = true }

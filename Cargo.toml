@@ -36,6 +36,8 @@ members = [
     "modules/rppxml",
     "modules/fx",
     "modules/visibility-manager",
+    "modules/audio-controls",
+    "modules/dsp",
 ]
 # Exclude submodules that have their own workspaces
 exclude = ["libs/nih-plug", "libs/vendor/blitz", "libs/vendor/anyrender", "libs/vendor/reaper-rs", "libs/vendor/baseview", "apps/fts-control"]

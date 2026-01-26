@@ -54,3 +54,6 @@
 [submodule "libs/ref/dioxus/dioxus"]
 	path = libs/ref/dioxus/dioxus
 	url = https://github.com/DioxusLabs/dioxus.git
+[submodule "libs/ref/ZLEqualizer"]
+	path = libs/ref/ZLEqualizer
+	url = https://github.com/ZL-Audio/ZLEqualizer.git
