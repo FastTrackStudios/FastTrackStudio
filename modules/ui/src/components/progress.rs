@@ -1,5 +1,55 @@
 use dioxus::prelude::*;
 
+// region:    --- LoopIndicator
+
+/// Loop indicator for progress bars
+/// Represents the loop region as percentages (0-100) within the progress bar
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct LoopIndicator {
+    /// Whether looping is enabled
+    pub enabled: bool,
+    /// Loop start position as percentage (0-100)
+    pub start_percent: f64,
+    /// Loop end position as percentage (0-100)
+    pub end_percent: f64,
+}
+
+impl LoopIndicator {
+    /// Create a new loop indicator
+    pub fn new(enabled: bool, start_percent: f64, end_percent: f64) -> Self {
+        Self {
+            enabled,
+            start_percent: start_percent.clamp(0.0, 100.0),
+            end_percent: end_percent.clamp(0.0, 100.0),
+        }
+    }
+
+    /// Create a loop indicator from a TimeSelection and song timing info
+    ///
+    /// Converts absolute time positions to percentages within the song.
+    pub fn from_time_selection(
+        selection: &daw::primitives::TimeSelection,
+        song_start_seconds: f64,
+        song_duration_seconds: f64,
+        enabled: bool,
+    ) -> Self {
+        if song_duration_seconds <= 0.0 {
+            return Self::default();
+        }
+
+        let start_relative = (selection.start.time.to_seconds() - song_start_seconds).max(0.0);
+        let end_relative = (selection.end.time.to_seconds() - song_start_seconds).max(0.0);
+
+        Self {
+            enabled,
+            start_percent: (start_relative / song_duration_seconds * 100.0).clamp(0.0, 100.0),
+            end_percent: (end_relative / song_duration_seconds * 100.0).clamp(0.0, 100.0),
+        }
+    }
+}
+
+// endregion: --- LoopIndicator
+
 /// Time signature card component
 /// Displays a time signature in fraction format (e.g., 4/4)
 #[component]
@@ -161,6 +211,7 @@ pub fn SegmentedProgressBar(
     #[props(default)] tempo_markers: Vec<TempoMarker>,
     #[props(default)] song_key: Option<String>,
     #[props(default)] on_section_click: Option<Callback<usize>>,
+    #[props(default)] loop_indicator: Option<LoopIndicator>,
 ) -> Element {
     let current_progress = progress();
 
@@ -513,6 +564,65 @@ pub fn SegmentedProgressBar(
                         }
                     }
                 }
+                // Loop indicator overlay and markers (rendered on top of everything)
+                if let Some(ref loop_ind) = loop_indicator {
+                    if loop_ind.enabled {
+                        // Yellow tinted overlay for loop region
+                        div {
+                            class: "absolute top-0 bottom-0 pointer-events-none z-40",
+                            style: format!(
+                                "left: {}%; width: {}%; background-color: rgba(250, 204, 21, 0.15); border-top: 2px solid #facc15; border-bottom: 2px solid #facc15;",
+                                loop_ind.start_percent,
+                                loop_ind.end_percent - loop_ind.start_percent
+                            ),
+                        }
+                        // Start marker - yellow triangle pointing right
+                        div {
+                            class: "absolute pointer-events-none z-50",
+                            style: format!(
+                                "left: {}%; top: 0; transform: translateX(-50%);",
+                                loop_ind.start_percent
+                            ),
+                            // Triangle pointing down
+                            div {
+                                style: "width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #facc15;",
+                            }
+                        }
+                        // End marker - yellow triangle pointing left
+                        div {
+                            class: "absolute pointer-events-none z-50",
+                            style: format!(
+                                "left: {}%; top: 0; transform: translateX(-50%);",
+                                loop_ind.end_percent
+                            ),
+                            // Triangle pointing down
+                            div {
+                                style: "width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #facc15;",
+                            }
+                        }
+                        // Bottom triangles (pointing up)
+                        div {
+                            class: "absolute pointer-events-none z-50",
+                            style: format!(
+                                "left: {}%; bottom: 0; transform: translateX(-50%);",
+                                loop_ind.start_percent
+                            ),
+                            div {
+                                style: "width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 8px solid #facc15;",
+                            }
+                        }
+                        div {
+                            class: "absolute pointer-events-none z-50",
+                            style: format!(
+                                "left: {}%; bottom: 0; transform: translateX(-50%);",
+                                loop_ind.end_percent
+                            ),
+                            div {
+                                style: "width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 8px solid #facc15;",
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -594,6 +704,7 @@ pub fn SongProgressBar(
     on_section_click: Option<Callback<usize>>,
     #[props(default)] tempo_markers: Vec<TempoMarker>,
     #[props(default)] song_key: Option<String>,
+    #[props(default)] loop_indicator: Option<LoopIndicator>,
 ) -> Element {
     rsx! {
         div {
@@ -604,6 +715,7 @@ pub fn SongProgressBar(
                 tempo_markers: tempo_markers,
                 song_key: song_key,
                 on_section_click: on_section_click,
+                loop_indicator: loop_indicator,
             }
         }
     }

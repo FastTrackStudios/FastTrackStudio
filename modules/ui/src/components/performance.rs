@@ -3,6 +3,19 @@
 //! This component renders the main setlist performance view with a sidebar
 //! navigator and main content area. It uses the setlist service via hooks
 //! for all actions and reads from global signals for state.
+//!
+//! # Keyboard Shortcuts
+//!
+//! The following keyboard shortcuts are available when the view is focused:
+//!
+//! | Key | Action |
+//! |-----|--------|
+//! | `Space` | Toggle play/pause |
+//! | `C` | Toggle section loop |
+//! | `←` (Left Arrow) | Smart previous (prev section, or prev song if at first section) |
+//! | `→` (Right Arrow) | Smart next (next section, or next song if at last section) |
+//! | `↑` (Up Arrow) | Previous song |
+//! | `↓` (Down Arrow) | Next song |
 
 use daw::primitives::MusicalPosition;
 use dioxus::prelude::*;
@@ -114,9 +127,58 @@ pub fn PerformanceView() -> Element {
     // Create is_looping signal (static for now)
     let is_looping_signal = use_signal(|| false);
 
+    // Clone actions for keyboard handler
+    let toggle_playback = actions.toggle_playback.clone();
+    let toggle_section_loop = actions.toggle_section_loop.clone();
+    let smart_prev = actions.smart_prev.clone();
+    let smart_next = actions.smart_next.clone();
+    let prev_song = actions.prev_song.clone();
+    let next_song = actions.next_song.clone();
+
+    // Keyboard event handler
+    let onkeydown = move |evt: KeyboardEvent| {
+        let key = evt.key();
+        match key {
+            // Space: Toggle play/pause
+            Key::Character(c) if c == " " => {
+                evt.prevent_default();
+                toggle_playback.call(());
+            }
+            // C: Toggle section loop
+            Key::Character(c) if c == "c" || c == "C" => {
+                evt.prevent_default();
+                toggle_section_loop.call(());
+            }
+            // Left Arrow: Smart previous (prev section, or prev song if at first section)
+            Key::ArrowLeft => {
+                evt.prevent_default();
+                smart_prev.call(());
+            }
+            // Right Arrow: Smart next (next section, or next song if at last section)
+            Key::ArrowRight => {
+                evt.prevent_default();
+                smart_next.call(());
+            }
+            // Up Arrow: Previous song
+            Key::ArrowUp => {
+                evt.prevent_default();
+                prev_song.call(());
+            }
+            // Down Arrow: Next song
+            Key::ArrowDown => {
+                evt.prevent_default();
+                next_song.call(());
+            }
+            _ => {}
+        }
+    };
+
     rsx! {
         div {
-            class: "flex-1 flex overflow-hidden",
+            class: "flex-1 flex overflow-hidden outline-none",
+            tabindex: 0,
+            autofocus: true,
+            onkeydown: onkeydown,
             Sidebar {
                 current_song_index: reactive_song_index,
                 current_section_index: reactive_section_index,
@@ -132,9 +194,9 @@ pub fn PerformanceView() -> Element {
                 is_playing: is_playing_signal,
                 is_looping: is_looping_signal,
                 on_play_pause: actions.toggle_playback.clone(),
-                on_loop_toggle: actions.toggle_song_loop,
-                on_back: actions.prev_section,
-                on_forward: actions.next_section,
+                on_loop_toggle: actions.toggle_section_loop.clone(),
+                on_back: actions.smart_prev,
+                on_forward: actions.smart_next,
                 on_seek_to_musical_position: Some(on_seek_to_musical_position),
             }
         }

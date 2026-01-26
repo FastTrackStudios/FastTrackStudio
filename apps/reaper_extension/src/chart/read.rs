@@ -143,8 +143,11 @@ pub fn read_midi_notes_from_track(project: Project, track: Track) -> Vec<MidiNot
 }
 
 /// Read key signature from KEY track
-/// The KEY track should have items with MIDI notes that represent the key
-/// We'll read the first note from the first item to determine the key
+///
+/// The KEY track should have items where each item's notes (P_NOTES) contain the key name.
+/// For example: "C", "Cm", "F#", "Bbm", "Eb major", etc.
+///
+/// Falls back to reading the first MIDI note pitch if no item notes are found.
 pub fn read_key_from_track(project: Project) -> Option<keyflow::Key> {
     let key_track = find_track_by_name(project, "KEY")?;
 
@@ -155,7 +158,39 @@ pub fn read_key_from_track(project: Project) -> Option<keyflow::Key> {
     let reaper = Reaper::get();
     let medium_reaper = reaper.medium_reaper();
 
-    // Get active take
+    // First, try to read key from item notes (P_NOTES)
+    let key_from_notes = unsafe {
+        let notes_key = std::ffi::CString::new("P_NOTES").expect("CString::new failed");
+        let mut buffer = vec![0u8; 256];
+        let buffer_ptr = buffer.as_mut_ptr() as *mut std::os::raw::c_char;
+
+        let success = medium_reaper.low().GetSetMediaItemInfo_String(
+            item_raw.as_ptr(),
+            notes_key.as_ptr(),
+            buffer_ptr,
+            false, // setNewValue = false (get value)
+        );
+
+        if success {
+            let c_str = std::ffi::CStr::from_ptr(buffer_ptr);
+            let notes = c_str.to_string_lossy().to_string();
+            let trimmed = notes.trim();
+            if !trimmed.is_empty() {
+                tracing::debug!("KEY track item notes: '{}'", trimmed);
+                parse_key_from_string(trimmed)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    if key_from_notes.is_some() {
+        return key_from_notes;
+    }
+
+    // Fallback: read key from first MIDI note pitch
     let take = unsafe { medium_reaper.get_active_take(item_raw) }?;
 
     // Check if take is MIDI using unsafe low-level API
@@ -226,4 +261,44 @@ pub fn read_key_from_track(project: Project) -> Option<keyflow::Key> {
     }
 
     None
+}
+
+/// Parse a key from a string like "C", "Cm", "F#m", "Bb major", "Eb minor"
+fn parse_key_from_string(s: &str) -> Option<keyflow::Key> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+
+    // Check for minor indicators
+    let is_minor = s.ends_with('m')
+        || s.to_lowercase().ends_with("minor")
+        || s.to_lowercase().ends_with("min");
+
+    // Extract the root note
+    let root_str = if is_minor {
+        if s.to_lowercase().ends_with("minor") {
+            s[..s.len() - 5].trim()
+        } else if s.to_lowercase().ends_with("min") {
+            s[..s.len() - 3].trim()
+        } else {
+            // Ends with 'm'
+            &s[..s.len() - 1]
+        }
+    } else if s.to_lowercase().ends_with("major") {
+        s[..s.len() - 5].trim()
+    } else if s.to_lowercase().ends_with("maj") {
+        s[..s.len() - 3].trim()
+    } else {
+        s
+    };
+
+    // Try to parse as MusicalNote
+    let musical_note = keyflow::primitives::MusicalNote::from_string(root_str)?;
+
+    if is_minor {
+        Some(keyflow::Key::minor(musical_note))
+    } else {
+        Some(keyflow::Key::major(musical_note))
+    }
 }

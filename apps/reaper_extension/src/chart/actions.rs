@@ -3,9 +3,14 @@
 use crate::chart::{build, detection, read};
 use crate::infrastructure::action_registry::{ActionDef, ActionSection};
 use keyflow::chord::midi::{MidiNoteName, midi_pitch_to_note_name};
-use keyflow::time::{MusicalDuration, MusicalPosition, PPQDuration, PPQPosition};
+use keyflow::engraver::export::{PdfExportConfig, PdfSerializer, SvgExportConfig, SvgSerializer};
+use keyflow::engraver::fonts::SMuFLFont;
+use keyflow::engraver::layout::chart::{ChartLayoutConfig, ChartLayoutEngine, LayoutMode};
+use keyflow::engraver::style::MStyle;
+use keyflow::time::{MusicalDuration, MusicalPosition, PPQDuration, PPQPosition, TimeSignature};
 use reaper_high::{Project, Reaper};
 use reaper_medium::ReaperStringArg;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 /// Log chords detected from MIDI data in the current project
@@ -758,17 +763,162 @@ fn debug_midi_and_sections_handler() {
     reaper.show_console_msg(ReaperStringArg::from(debug_output.as_str()));
 }
 
+// Embedded fonts from musescore reference library
+static BRAVURA_FONT: &[u8] = include_bytes!(
+    "../../../../libs/reference/sheet-music/musescore/fonts/bravura/Bravura.otf"
+);
+static BRAVURA_METADATA: &[u8] = include_bytes!(
+    "../../../../libs/reference/sheet-music/musescore/fonts/bravura/bravura_metadata.json"
+);
+static TEXT_FONT: &[u8] =
+    include_bytes!("../../../../libs/reference/sheet-music/musescore/fonts/FreeSans.ttf");
+
+/// Export chart to PDF file
+fn export_chart_pdf_handler() {
+    let reaper = Reaper::get();
+    let current_project = reaper.current_project();
+
+    info!("\n=== FastTrackStudio: Export Chart to PDF ===\n");
+
+    // Find CHORDS track (default name, can be made configurable later)
+    let chords_track = match read::find_track_by_name(current_project.clone(), "CHORDS") {
+        Some(track) => track,
+        None => {
+            warn!("CHORDS track not found. Please create a track named 'CHORDS' with MIDI notes.");
+            reaper.show_console_msg("CHORDS track not found.\n");
+            return;
+        }
+    };
+
+    // Read MIDI notes from CHORDS track
+    let midi_notes = read::read_midi_notes_from_track(current_project.clone(), chords_track);
+
+    if midi_notes.is_empty() {
+        info!("No MIDI notes found in CHORDS track");
+        reaper.show_console_msg("No MIDI notes found in CHORDS track.\n");
+        return;
+    }
+
+    // Get key signature from KEY track (optional)
+    let key = read::read_key_from_track(current_project.clone());
+    if let Some(ref key_info) = key {
+        info!(key = %key_info, "Detected key from KEY track");
+    }
+
+    // Detect chords from MIDI notes
+    let min_chord_duration_ppq = 180;
+    let detected_chords =
+        detection::detect_chords_from_reaper_midi_notes(&midi_notes, min_chord_duration_ppq);
+
+    if detected_chords.is_empty() {
+        reaper.show_console_msg("No chords detected from MIDI notes.\n");
+        info!("No chords detected");
+        return;
+    }
+
+    info!(
+        chord_count = detected_chords.len(),
+        "Detected chords from MIDI notes"
+    );
+
+    // Build Chart from detected chords
+    let tempo_bpm = Some(120.0);
+    let chart = build::build_chart_from_chords(detected_chords, current_project.clone(), key, tempo_bpm);
+
+    // Get project file path for default save location
+    let default_path = if let Some(project_path) = current_project.file() {
+        let mut pdf_path = project_path.clone();
+        pdf_path.set_extension("pdf");
+        pdf_path
+    } else {
+        std::path::PathBuf::from("chart.pdf")
+    };
+
+    // Create layout engine
+    let smufl_font = SMuFLFont::from_bytes(BRAVURA_FONT, BRAVURA_METADATA)
+        .expect("Failed to load SMuFL font");
+
+    let style = MStyle::default();
+    let config = ChartLayoutConfig {
+        mode: LayoutMode::Paginated,
+        page_width: 612.0,  // US Letter
+        page_height: 792.0,
+        margin_top: 72.0,
+        margin_bottom: 72.0,
+        margin_left: 72.0,
+        margin_right: 72.0,
+        staff_height: 32.0,
+        system_spacing: 48.0,
+        measure_offset: 0,
+        use_stems: false,
+        ..Default::default()
+    };
+
+    let mut engine = ChartLayoutEngine::new(&chart, smufl_font.clone(), style.clone(), config);
+
+    // Layout the chart
+    let layout_result = engine.layout();
+
+    // Get the scene for rendering
+    let scene = engine.render_all_pages();
+
+    // Create PDF config with embedded fonts
+    let title = chart.metadata.title.clone().unwrap_or_else(|| "Chart".to_string());
+    let pdf_config = PdfExportConfig::letter()
+        .with_title(&title)
+        .with_author("FastTrackStudio")
+        .with_font(Arc::new(TEXT_FONT.to_vec()))
+        .with_smufl_font(Arc::new(BRAVURA_FONT.to_vec()));
+
+    // Serialize to PDF
+    let mut serializer = PdfSerializer::new(pdf_config);
+
+    match serializer.serialize(&scene) {
+        Ok(pdf_bytes) => {
+            // Save to file
+            let save_path = default_path.to_string_lossy().to_string();
+            match std::fs::write(&save_path, &pdf_bytes) {
+                Ok(_) => {
+                    let msg = format!("Chart exported to: {}\n", save_path);
+                    reaper.show_console_msg(ReaperStringArg::from(msg.as_str()));
+                    info!("PDF exported to: {}", save_path);
+                }
+                Err(e) => {
+                    let msg = format!("Failed to save PDF: {}\n", e);
+                    reaper.show_console_msg(ReaperStringArg::from(msg.as_str()));
+                    warn!("Failed to save PDF: {}", e);
+                }
+            }
+        }
+        Err(e) => {
+            let msg = format!("Failed to generate PDF: {}\n", e);
+            reaper.show_console_msg(ReaperStringArg::from(msg.as_str()));
+            warn!("Failed to generate PDF: {}", e);
+        }
+    }
+}
+
 /// Register chart/keyflow actions
 pub fn register_chart_actions() {
-    // Register keyflow actions (chord detection, chart building)
-    let keyflow_actions = vec![ActionDef {
-        command_id: "FTS_KEYFLOW_LOG_CHORDS",
-        display_name: "Log Chords".to_string(),
-        handler: log_chords_handler,
-        appears_in_menu: true,
-        section: ActionSection::Main,
-        ..Default::default()
-    }];
+    // Register keyflow actions (chord detection, chart building, PDF export)
+    let keyflow_actions = vec![
+        ActionDef {
+            command_id: "FTS_KEYFLOW_LOG_CHORDS",
+            display_name: "Log Chords".to_string(),
+            handler: log_chords_handler,
+            appears_in_menu: true,
+            section: ActionSection::Main,
+            ..Default::default()
+        },
+        ActionDef {
+            command_id: "FTS_KEYFLOW_EXPORT_PDF",
+            display_name: "Export Chart as PDF".to_string(),
+            handler: export_chart_pdf_handler,
+            appears_in_menu: true,
+            section: ActionSection::Main,
+            ..Default::default()
+        },
+    ];
 
     crate::infrastructure::action_registry::register_actions(&keyflow_actions, "Keyflow");
 

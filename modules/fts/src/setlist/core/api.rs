@@ -30,6 +30,10 @@ pub struct SetlistApi {
     /// Progress through the active section (0.0 to 1.0, linear time-based)
     /// None if no active section
     pub section_progress: Option<f64>,
+    /// Whether looping is enabled
+    pub looping: bool,
+    /// Loop region (if set) - start and end positions
+    pub loop_selection: Option<daw::primitives::TimeSelection>,
 }
 
 impl SetlistApi {
@@ -49,6 +53,31 @@ impl SetlistApi {
             active_slide_index,
             song_progress,
             section_progress,
+            looping: false,
+            loop_selection: None,
+        }
+    }
+
+    /// Create a new SetlistApi with loop state
+    pub fn with_loop(
+        setlist: Setlist,
+        active_song_index: Option<usize>,
+        active_section_index: Option<usize>,
+        active_slide_index: Option<usize>,
+        song_progress: Option<f64>,
+        section_progress: Option<f64>,
+        looping: bool,
+        loop_selection: Option<daw::primitives::TimeSelection>,
+    ) -> Self {
+        Self {
+            setlist,
+            active_song_index,
+            active_section_index,
+            active_slide_index,
+            song_progress,
+            section_progress,
+            looping,
+            loop_selection,
         }
     }
 

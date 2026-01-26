@@ -1,0 +1,446 @@
+//! Preset Browser - Hierarchical preset selection UI
+//!
+//! A tree-based preset browser that displays the 5-level preset hierarchy:
+//! 1. Generic (Base Tones) - Clean, Dry, Crunch, Drive, Lead, etc.
+//! 2. Genre - Blues, Jazz, Rock, Metal, Worship, etc.
+//! 3. Sub-Genre - Nu-Metal, Classic Rock, etc.
+//! 4. Archetype - John Mayer, SRV, etc.
+//! 5. Song-Specific - Gravity, Lenny, etc.
+
+use std::collections::HashSet;
+
+use dioxus::prelude::*;
+use uuid::Uuid;
+
+use fts::rig::core::{CategoryNode, PresetSummary};
+
+use crate::hooks::use_rig_actions;
+
+/// Props for the preset browser sidebar
+#[derive(Props, Clone, PartialEq)]
+pub struct PresetBrowserProps {
+    /// Currently selected preset ID
+    #[props(default)]
+    pub selected_preset_id: Option<Uuid>,
+    /// Available presets organized as a tree
+    pub tree: CategoryNode,
+    /// Callback when a preset is selected
+    #[props(default)]
+    pub on_select: Option<Callback<Uuid>>,
+}
+
+/// Hierarchical preset browser with tree view
+#[component]
+pub fn PresetBrowserSidebar(props: PresetBrowserProps) -> Element {
+    // Local state
+    let mut search_query = use_signal(String::new);
+    let mut expanded_nodes = use_signal(|| {
+        // Default expand first level
+        let mut set = HashSet::new();
+        set.insert("".to_string()); // Root
+        set
+    });
+
+    let actions = use_rig_actions();
+
+    // Filter presets by search query
+    let filtered_tree = use_memo(move || {
+        let query = search_query();
+        if query.is_empty() {
+            props.tree.clone()
+        } else {
+            filter_tree(&props.tree, &query)
+        }
+    });
+
+    rsx! {
+        div { class: "w-64 border-r border-zinc-700 bg-zinc-900 flex flex-col h-full",
+            // Header
+            div { class: "p-3 border-b border-zinc-700",
+                h2 { class: "text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2",
+                    "Presets"
+                }
+
+                // Search bar
+                div { class: "relative",
+                    input {
+                        r#type: "text",
+                        class: "w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-500",
+                        placeholder: "Search presets...",
+                        value: "{search_query}",
+                        oninput: move |e| search_query.set(e.value())
+                    }
+                    if !search_query().is_empty() {
+                        button {
+                            class: "absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300",
+                            onclick: move |_| search_query.set(String::new()),
+                            "x"
+                        }
+                    }
+                }
+            }
+
+            // Tree view
+            div { class: "flex-1 overflow-y-auto p-2",
+                CategoryTree {
+                    node: filtered_tree.read().clone(),
+                    depth: 0,
+                    expanded: expanded_nodes(),
+                    on_toggle: move |path: String| {
+                        let mut set = expanded_nodes();
+                        if set.contains(&path) {
+                            set.remove(&path);
+                        } else {
+                            set.insert(path);
+                        }
+                        expanded_nodes.set(set);
+                    },
+                    selected: props.selected_preset_id,
+                    on_select: move |id: Uuid| {
+                        if let Some(cb) = &props.on_select {
+                            cb.call(id);
+                        } else {
+                            actions.load_preset.call(id);
+                        }
+                    }
+                }
+            }
+
+            // Footer with count
+            div { class: "p-2 border-t border-zinc-700 text-xs text-zinc-500",
+                "{filtered_tree.read().total_count} presets"
+            }
+        }
+    }
+}
+
+/// Props for the category tree
+#[derive(Props, Clone, PartialEq)]
+struct CategoryTreeProps {
+    node: CategoryNode,
+    depth: usize,
+    expanded: HashSet<String>,
+    on_toggle: Callback<String>,
+    selected: Option<Uuid>,
+    on_select: Callback<Uuid>,
+}
+
+/// Recursive category tree component
+#[component]
+fn CategoryTree(props: CategoryTreeProps) -> Element {
+    let path_key = props.node.path.join("/");
+    let is_expanded = props.expanded.contains(&path_key) || props.depth == 0;
+    let has_children = !props.node.children.is_empty() || !props.node.presets.is_empty();
+
+    // Skip rendering the root node's header but render its children
+    if props.depth == 0 {
+        return rsx! {
+            div { class: "space-y-0.5",
+                // Render child categories
+                for child in props.node.children.iter() {
+                    CategoryTree {
+                        node: child.clone(),
+                        depth: props.depth + 1,
+                        expanded: props.expanded.clone(),
+                        on_toggle: props.on_toggle.clone(),
+                        selected: props.selected,
+                        on_select: props.on_select.clone()
+                    }
+                }
+
+                // Render presets at this level
+                for preset in props.node.presets.iter() {
+                    PresetLeafItem {
+                        preset: preset.clone(),
+                        depth: props.depth + 1,
+                        is_selected: props.selected == Some(preset.id),
+                        on_select: props.on_select.clone()
+                    }
+                }
+            }
+        };
+    }
+
+    let level_color = match props.node.level {
+        1 => "bg-blue-500",    // Generic
+        2 => "bg-green-500",   // Genre
+        3 => "bg-yellow-500",  // Sub-genre
+        4 => "bg-purple-500",  // Archetype
+        5 => "bg-pink-500",    // Song
+        _ => "bg-zinc-500",
+    };
+
+    let indent_class = format!("pl-{}", props.depth * 3);
+
+    rsx! {
+        div { class: "select-none",
+            // Category header
+            div {
+                class: "flex items-center gap-1.5 py-1 px-2 hover:bg-zinc-800 rounded cursor-pointer {indent_class}",
+                onclick: {
+                    let path_key = path_key.clone();
+                    let on_toggle = props.on_toggle.clone();
+                    move |_| on_toggle.call(path_key.clone())
+                },
+
+                // Expand/collapse icon
+                if has_children {
+                    span { class: "w-3 text-[10px] text-zinc-500",
+                        if is_expanded { "v" } else { ">" }
+                    }
+                } else {
+                    span { class: "w-3" }
+                }
+
+                // Level indicator dot
+                span { class: "w-1.5 h-1.5 rounded-full {level_color}" }
+
+                // Category name
+                span { class: "flex-1 text-sm font-medium text-zinc-200",
+                    "{props.node.name}"
+                }
+
+                // Preset count badge
+                if props.node.total_count > 0 {
+                    span { class: "text-[10px] text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded",
+                        "{props.node.total_count}"
+                    }
+                }
+            }
+
+            // Children (if expanded)
+            if is_expanded {
+                div { class: "space-y-0.5",
+                    // Render child categories
+                    for child in props.node.children.iter() {
+                        CategoryTree {
+                            node: child.clone(),
+                            depth: props.depth + 1,
+                            expanded: props.expanded.clone(),
+                            on_toggle: props.on_toggle.clone(),
+                            selected: props.selected,
+                            on_select: props.on_select.clone()
+                        }
+                    }
+
+                    // Render presets at this level
+                    for preset in props.node.presets.iter() {
+                        PresetLeafItem {
+                            preset: preset.clone(),
+                            depth: props.depth + 1,
+                            is_selected: props.selected == Some(preset.id),
+                            on_select: props.on_select.clone()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Props for preset leaf item
+#[derive(Props, Clone, PartialEq)]
+struct PresetLeafItemProps {
+    preset: PresetSummary,
+    depth: usize,
+    is_selected: bool,
+    on_select: Callback<Uuid>,
+}
+
+/// Preset item at leaf level
+#[component]
+fn PresetLeafItem(props: PresetLeafItemProps) -> Element {
+    let indent_class = format!("pl-{}", (props.depth + 1) * 3);
+    let selected_class = if props.is_selected {
+        "bg-blue-900/50 border-l-2 border-blue-500"
+    } else {
+        "hover:bg-zinc-800"
+    };
+
+    let preset_id = props.preset.id;
+
+    rsx! {
+        div {
+            class: "flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer {indent_class} {selected_class}",
+            onclick: move |_| props.on_select.call(preset_id),
+
+            // Preset icon
+            span { class: "text-xs text-zinc-500", "o" }
+
+            // Name
+            span { class: "flex-1 text-sm text-zinc-300 truncate",
+                "{props.preset.name}"
+            }
+
+            // Snapshot count if any
+            if props.preset.snapshot_count > 0 {
+                span { class: "text-[10px] text-zinc-500",
+                    "({props.preset.snapshot_count})"
+                }
+            }
+        }
+    }
+}
+
+/// Filter tree by search query
+fn filter_tree(tree: &CategoryNode, query: &str) -> CategoryNode {
+    let query_lower = query.to_lowercase();
+
+    let mut filtered = CategoryNode {
+        name: tree.name.clone(),
+        path: tree.path.clone(),
+        level: tree.level,
+        children: Vec::new(),
+        presets: Vec::new(),
+        total_count: 0,
+    };
+
+    // Filter presets at this level
+    filtered.presets = tree
+        .presets
+        .iter()
+        .filter(|p| {
+            p.name.to_lowercase().contains(&query_lower)
+                || p.category.display_name().to_lowercase().contains(&query_lower)
+        })
+        .cloned()
+        .collect();
+
+    // Recursively filter children
+    for child in &tree.children {
+        let filtered_child = filter_tree(child, query);
+        if filtered_child.total_count > 0 || !filtered_child.presets.is_empty() {
+            filtered.children.push(filtered_child);
+        }
+    }
+
+    // Update total count
+    filtered.total_count = filtered.presets.len()
+        + filtered
+            .children
+            .iter()
+            .map(|c| c.total_count)
+            .sum::<usize>();
+
+    filtered
+}
+
+/// Compact preset browser for smaller spaces
+#[component]
+pub fn CompactPresetBrowser(
+    selected_preset_id: Option<Uuid>,
+    tree: CategoryNode,
+    on_select: Option<Callback<Uuid>>,
+) -> Element {
+    let actions = use_rig_actions();
+    let mut is_open = use_signal(|| false);
+    let mut search_query = use_signal(String::new);
+
+    // Flatten tree for simple list view
+    let filtered_presets = use_memo(move || {
+        let query = search_query();
+        flatten_presets(&tree, &query)
+    });
+
+    // Find selected preset name
+    let selected_name = filtered_presets
+        .read()
+        .iter()
+        .find(|p| Some(p.id) == selected_preset_id)
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "Select Preset".to_string());
+
+    rsx! {
+        div { class: "relative",
+            // Dropdown button
+            button {
+                class: "w-full flex items-center justify-between gap-2 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 text-sm",
+                onclick: move |_| is_open.set(!is_open()),
+
+                span { class: "truncate text-zinc-200", "{selected_name}" }
+                span { class: "text-zinc-500", if is_open() { "v" } else { ">" } }
+            }
+
+            // Dropdown panel
+            if is_open() {
+                div {
+                    class: "absolute top-full left-0 right-0 mt-1 bg-zinc-900 border border-zinc-700 rounded shadow-lg z-50 max-h-64 overflow-hidden flex flex-col",
+
+                    // Search
+                    div { class: "p-2 border-b border-zinc-700",
+                        input {
+                            r#type: "text",
+                            class: "w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 placeholder-zinc-500",
+                            placeholder: "Search...",
+                            value: "{search_query}",
+                            oninput: move |e| search_query.set(e.value())
+                        }
+                    }
+
+                    // List
+                    div { class: "flex-1 overflow-y-auto",
+                        for preset in filtered_presets.read().iter() {
+                            {
+                                let is_selected = Some(preset.id) == selected_preset_id;
+                                let class_str = if is_selected {
+                                    "w-full text-left px-3 py-1.5 text-sm hover:bg-zinc-800 bg-blue-900/50"
+                                } else {
+                                    "w-full text-left px-3 py-1.5 text-sm hover:bg-zinc-800"
+                                };
+                                let preset_id = preset.id;
+                                let preset_name = preset.name.clone();
+                                let preset_short_name = preset.category.short_name();
+                                let on_select = on_select.clone();
+                                let load_preset = actions.load_preset.clone();
+                                rsx! {
+                                    button {
+                                        key: "{preset_id}",
+                                        class: "{class_str}",
+                                        onclick: move |_| {
+                                            if let Some(cb) = &on_select {
+                                                cb.call(preset_id);
+                                            } else {
+                                                load_preset.call(preset_id);
+                                            }
+                                            is_open.set(false);
+                                        },
+
+                                        div { class: "text-zinc-200", "{preset_name}" }
+                                        div { class: "text-[10px] text-zinc-500", "{preset_short_name}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Flatten tree into a list of presets
+fn flatten_presets(tree: &CategoryNode, query: &str) -> Vec<PresetSummary> {
+    let query_lower = query.to_lowercase();
+    let mut result = Vec::new();
+
+    // Add presets at this level
+    for preset in &tree.presets {
+        if query.is_empty()
+            || preset.name.to_lowercase().contains(&query_lower)
+            || preset
+                .category
+                .display_name()
+                .to_lowercase()
+                .contains(&query_lower)
+        {
+            result.push(preset.clone());
+        }
+    }
+
+    // Recurse into children
+    for child in &tree.children {
+        result.extend(flatten_presets(child, query));
+    }
+
+    result
+}

@@ -1033,15 +1033,13 @@ pub fn format_rest(duration_ticks: u32, ppq: u32) -> String {
     if is_close(triplet_eighth) {
         "r8t".to_string()
     } else if is_close(triplet_quarter) {
-        // Two triplet eighths instead of triplet quarter for readability
-        "r8t r8t".to_string()
+        "r4t".to_string()
     } else if is_close(sixteenth) {
         "r16".to_string()
     } else if is_close(eighth) {
         "r8".to_string()
     } else if is_close(quarter) {
-        // Three triplet eighths instead of quarter rest for triplet grooves
-        "r8t r8t r8t".to_string()
+        "r4".to_string()
     } else if is_close(half) {
         "r2".to_string()
     } else if is_close(whole) {
@@ -1239,6 +1237,8 @@ pub enum SectionType {
     Bridge,
     /// Instrumental break/solo
     Instrumental,
+    /// Interlude (transitional section)
+    Interlude,
     /// Outro/ending
     Outro,
     /// Generic hit/stab marker
@@ -1282,6 +1282,7 @@ impl SectionType {
             "IN" | "INTRO" => Self::Intro,
             "OUT" | "OUTRO" => Self::Outro,
             "INST" | "SOLO" | "INSTRUMENTAL" => Self::Instrumental,
+            "INT" | "INTERLUDE" => Self::Interlude,
             _ => {
                 // Check for longer patterns
                 if text_lower.contains("intro") {
@@ -1296,6 +1297,8 @@ impl SectionType {
                     Self::PreChorus
                 } else if text_lower.contains("outro") {
                     Self::Outro
+                } else if text_lower.contains("interlude") {
+                    Self::Interlude
                 } else if text_lower.contains("solo") || text_lower.contains("inst") {
                     Self::Instrumental
                 } else {

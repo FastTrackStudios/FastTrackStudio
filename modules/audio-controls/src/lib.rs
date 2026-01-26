@@ -88,6 +88,7 @@ pub mod prelude {
             DetectionMode, StereoLink,
         },
         eq_graph::{EqBand, EqBandShape, EqGraph, StereoMode},
+        gate_graph::{GateDbRange, GateGraph, GateMetering, GateMode, GateParams},
         hslider::{HSlider, SliderVariant},
         knob::{Knob, KnobVariant},
         vslider::VSlider,

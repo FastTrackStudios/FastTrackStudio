@@ -62,7 +62,10 @@ mod wasm_broadcast {
 
     impl<T: Clone> Sender<T> {
         pub fn send(&self, value: T) -> Result<usize, ()> {
-            let mut subs = self.subscribers.lock().unwrap();
+            let Some(mut subs) = self.subscribers.lock().ok() else {
+                // Mutex is poisoned or contended, skip this send
+                return Ok(0);
+            };
             // Remove closed channels and send to remaining
             subs.retain(|tx| !tx.is_closed());
             let count = subs.len();
@@ -74,7 +77,9 @@ mod wasm_broadcast {
 
         pub fn subscribe(&self) -> Receiver<T> {
             let (tx, rx) = async_channel::bounded(64);
-            self.subscribers.lock().unwrap().push(tx);
+            if let Some(mut subs) = self.subscribers.lock().ok() {
+                subs.push(tx);
+            }
             Receiver { inner: rx }
         }
     }
@@ -126,6 +131,10 @@ pub struct MockSetlist {
     position: Arc<RwLock<f64>>,
     /// Whether playback is currently active
     is_playing: Arc<AtomicBool>,
+    /// Whether looping is enabled
+    looping: Arc<AtomicBool>,
+    /// Loop region (start and end in absolute seconds)
+    loop_selection: Arc<RwLock<Option<daw::primitives::TimeSelection>>>,
     /// Whether the playback loop has been started
     playback_started: Arc<AtomicBool>,
     /// Broadcast channel for SetlistEvent
@@ -147,6 +156,8 @@ impl MockSetlist {
             active_slide: Arc::new(RwLock::new(None)),
             position: Arc::new(RwLock::new(0.0)),
             is_playing: Arc::new(AtomicBool::new(false)),
+            looping: Arc::new(AtomicBool::new(false)),
+            loop_selection: Arc::new(RwLock::new(None)),
             playback_started: Arc::new(AtomicBool::new(false)),
             event_tx,
             indices_tx,
@@ -280,6 +291,8 @@ impl MockSetlist {
             song_progress: self.calculate_song_progress(position),
             section_progress: self.calculate_section_progress(position),
             is_playing: self.is_playing.load(Ordering::Relaxed),
+            looping: self.looping.load(Ordering::Relaxed),
+            loop_selection: self.loop_selection.read().unwrap().clone(),
         }
     }
 
@@ -429,6 +442,23 @@ impl MockSetlist {
                 let new_position = {
                     let mut pos = mock.position.write().unwrap();
                     *pos += delta;
+
+                    // Check for loop boundary and wrap if needed
+                    if mock.looping.load(Ordering::Relaxed) {
+                        if let Some(ref selection) = *mock.loop_selection.read().unwrap() {
+                            let loop_end = selection.end.time.to_seconds();
+                            let loop_start = selection.start.time.to_seconds();
+                            if *pos >= loop_end {
+                                tracing::debug!(
+                                    "MockSetlist: loop end reached at {}, jumping back to {}",
+                                    loop_end,
+                                    loop_start
+                                );
+                                *pos = loop_start;
+                            }
+                        }
+                    }
+
                     *pos
                 };
 
@@ -775,8 +805,98 @@ impl SetlistService for MockSetlist {
             SetlistCommand::SeekTo { seconds } => {
                 self.seek_to(seconds);
             }
-            SetlistCommand::ToggleSongLoop | SetlistCommand::ToggleSectionLoop => {
-                // Mock: no-op for now (would need loop state tracking)
+            SetlistCommand::ToggleSongLoop => {
+                // Toggle loop and set loop region to current song boundaries
+                let was_looping = self.looping.fetch_xor(true, Ordering::Relaxed);
+                let now_looping = !was_looping;
+
+                if now_looping {
+                    // Set loop region to current song boundaries
+                    if let Some(song_idx) = *self.active_song.read().unwrap() {
+                        if let Some(setlist) = self.setlist.read().unwrap().as_ref() {
+                            if let Some(song) = setlist.songs.get(song_idx) {
+                                let start = song.effective_start();
+                                let end = song.effective_end();
+                                let selection = daw::primitives::TimeSelection::from_seconds(start, end);
+                                *self.loop_selection.write().unwrap() = Some(selection);
+                                tracing::debug!(
+                                    "MockSetlist: song loop enabled, region {:.2} - {:.2}",
+                                    start,
+                                    end
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    tracing::debug!("MockSetlist: loop disabled");
+                }
+
+                // Emit update to notify UI
+                let position = *self.position.read().unwrap();
+                self.emit_position_update(position);
+            }
+            SetlistCommand::ToggleSectionLoop => {
+                // Toggle loop and set loop region to current section boundaries
+                let was_looping = self.looping.fetch_xor(true, Ordering::Relaxed);
+                let now_looping = !was_looping;
+
+                if now_looping {
+                    // Set loop region to current section boundaries
+                    let song_idx = *self.active_song.read().unwrap();
+                    let section_idx = *self.active_section.read().unwrap();
+                    if let (Some(song_idx), Some(section_idx)) = (song_idx, section_idx) {
+                        if let Some(setlist) = self.setlist.read().unwrap().as_ref() {
+                            if let Some(song) = setlist.songs.get(song_idx) {
+                                if let Some(section) = song.sections.get(section_idx) {
+                                    if let (Some(start), Some(end)) =
+                                        (section.start_seconds(), section.end_seconds())
+                                    {
+                                        let selection =
+                                            daw::primitives::TimeSelection::from_seconds(start, end);
+                                        *self.loop_selection.write().unwrap() = Some(selection);
+                                        tracing::debug!(
+                                            "MockSetlist: section loop enabled, region {:.2} - {:.2}",
+                                            start,
+                                            end
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    tracing::debug!("MockSetlist: loop disabled");
+                }
+
+                // Emit update to notify UI
+                let position = *self.position.read().unwrap();
+                self.emit_position_update(position);
+            }
+            SetlistCommand::SetLoopRegion {
+                start_seconds,
+                end_seconds,
+            } => {
+                let selection = daw::primitives::TimeSelection::from_seconds(start_seconds, end_seconds);
+                *self.loop_selection.write().unwrap() = Some(selection);
+                self.looping.store(true, Ordering::Relaxed);
+                tracing::debug!(
+                    "MockSetlist: custom loop region set {:.2} - {:.2}",
+                    start_seconds,
+                    end_seconds
+                );
+
+                // Emit update to notify UI
+                let position = *self.position.read().unwrap();
+                self.emit_position_update(position);
+            }
+            SetlistCommand::ClearLoop => {
+                self.looping.store(false, Ordering::Relaxed);
+                *self.loop_selection.write().unwrap() = None;
+                tracing::debug!("MockSetlist: loop cleared");
+
+                // Emit update to notify UI
+                let position = *self.position.read().unwrap();
+                self.emit_position_update(position);
             }
             SetlistCommand::TogglePlayback => {
                 self.toggle_playback();
@@ -861,6 +981,8 @@ impl Clone for MockSetlist {
             active_slide: Arc::clone(&self.active_slide),
             position: Arc::clone(&self.position),
             is_playing: Arc::clone(&self.is_playing),
+            looping: Arc::clone(&self.looping),
+            loop_selection: Arc::clone(&self.loop_selection),
             playback_started: Arc::clone(&self.playback_started),
             event_tx: self.event_tx.clone(),
             indices_tx: self.indices_tx.clone(),

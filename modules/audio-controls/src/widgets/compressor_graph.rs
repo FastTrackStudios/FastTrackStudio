@@ -161,7 +161,17 @@ pub struct CompressorMetering {
     pub output_peak: f32,
     /// Peak gain reduction.
     pub gr_peak: f32,
+    /// History of gain reduction values for waveform display.
+    /// Each value is GR in dB (negative). Newest values at the end.
+    /// The graph will display the most recent `gr_history_size` values.
+    pub gr_history: Vec<f32>,
+    /// History of input level values for waveform display.
+    /// Each value is input level in dB. Newest values at the end.
+    pub input_history: Vec<f32>,
 }
+
+/// Default number of history samples to display.
+pub const DEFAULT_HISTORY_SIZE: usize = 128;
 
 /// dB range options for the graph.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -354,6 +364,12 @@ pub struct CompressorGraphProps {
     /// Whether to show input/output level visualization on curve.
     #[props(default = true)]
     pub show_levels: bool,
+    /// Whether to show the GR history trace (scrolling waveform).
+    #[props(default = true)]
+    pub show_gr_trace: bool,
+    /// Whether to show the input level history trace.
+    #[props(default = true)]
+    pub show_input_trace: bool,
     /// Whether interaction is enabled.
     #[props(default = true)]
     pub interactive: bool,
@@ -499,6 +515,77 @@ pub fn CompressorGraph(props: CompressorGraphProps) -> Element {
             )
         })
         .collect();
+
+    // Generate GR history trace path (scrolling waveform from right to left)
+    // The trace is drawn as a filled area from the unity line down to the GR level
+    let gr_trace_path = if props.show_gr_trace && !props.metering.gr_history.is_empty() {
+        let history = &props.metering.gr_history;
+        let num_samples = history.len();
+        let samples_to_show = num_samples.min(DEFAULT_HISTORY_SIZE);
+        let start_idx = num_samples.saturating_sub(samples_to_show);
+
+        let mut path = String::new();
+        let x_step = layout.graph_size / (samples_to_show.max(1) as f64 - 1.0).max(1.0);
+
+        // Start at the right edge (newest sample), go left (older samples)
+        // Draw the top line (unity/0dB line)
+        let right_x = layout.padding + layout.graph_size;
+        let unity_y = layout.db_to_y(0.0);
+
+        path.push_str(&format!("M {:.1} {:.1}", right_x, unity_y));
+
+        // Draw line along unity from right to left
+        for i in 0..samples_to_show {
+            let x = right_x - (i as f64) * x_step;
+            path.push_str(&format!(" L {:.1} {:.1}", x, unity_y));
+        }
+
+        // Now draw down and back along the GR curve (from left/oldest to right/newest)
+        for i in (0..samples_to_show).rev() {
+            let sample_idx = start_idx + (samples_to_show - 1 - i);
+            let gr = history.get(sample_idx).copied().unwrap_or(0.0);
+            // GR is negative, so output = input + gr, at unity input (0dB), output = gr
+            let output_db = gr.clamp(min_db as f32, 0.0) as f64;
+            let x = right_x - (i as f64) * x_step;
+            let y = layout.db_to_y(output_db);
+            path.push_str(&format!(" L {:.1} {:.1}", x, y));
+        }
+
+        path.push_str(" Z"); // Close the path
+        path
+    } else {
+        String::new()
+    };
+
+    // Generate input level history trace path
+    let input_trace_path = if props.show_input_trace && !props.metering.input_history.is_empty() {
+        let history = &props.metering.input_history;
+        let num_samples = history.len();
+        let samples_to_show = num_samples.min(DEFAULT_HISTORY_SIZE);
+        let start_idx = num_samples.saturating_sub(samples_to_show);
+
+        let mut path = String::new();
+        let x_step = layout.graph_size / (samples_to_show.max(1) as f64 - 1.0).max(1.0);
+        let right_x = layout.padding + layout.graph_size;
+
+        // Draw line from oldest (left) to newest (right)
+        for i in 0..samples_to_show {
+            let sample_idx = start_idx + i;
+            let level = history.get(sample_idx).copied().unwrap_or(min_db as f32);
+            let level_clamped = level.clamp(min_db as f32, 0.0) as f64;
+            let x = right_x - ((samples_to_show - 1 - i) as f64) * x_step;
+            let y = layout.db_to_y(level_clamped);
+
+            if i == 0 {
+                path.push_str(&format!("M {:.1} {:.1}", x, y));
+            } else {
+                path.push_str(&format!(" L {:.1} {:.1}", x, y));
+            }
+        }
+        path
+    } else {
+        String::new()
+    };
 
     // Capture layout values for closures
     let padding = layout.padding;
@@ -677,6 +764,27 @@ pub fn CompressorGraph(props: CompressorGraphProps) -> Element {
                     width: "{knee_high_x - knee_low_x}",
                     height: "{layout.graph_size}",
                     fill: "{knee_color}",
+                }
+            }
+
+            // GR history trace (filled area showing gain reduction over time)
+            if props.show_gr_trace && !gr_trace_path.is_empty() {
+                path {
+                    d: "{gr_trace_path}",
+                    fill: "rgba(255, 59, 48, 0.3)",
+                    stroke: "none",
+                }
+            }
+
+            // Input level history trace (line showing input level over time)
+            if props.show_input_trace && !input_trace_path.is_empty() {
+                path {
+                    d: "{input_trace_path}",
+                    stroke: "rgba(48, 209, 88, 0.6)",
+                    stroke_width: "1.5",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    fill: "none",
                 }
             }
 

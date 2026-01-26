@@ -267,6 +267,7 @@ mod tests {
             start_ppq,
             end_ppq,
             root_pitch: 60,
+            velocity: 100, // Default velocity for test chords
         }
     }
 

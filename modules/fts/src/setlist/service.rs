@@ -98,6 +98,10 @@ pub struct ActiveIndices {
     pub section_progress: Option<f64>,
     /// Whether playback is currently active
     pub is_playing: bool,
+    /// Whether looping is enabled
+    pub looping: bool,
+    /// Loop region (if set) - start and end positions
+    pub loop_selection: Option<daw::primitives::TimeSelection>,
 }
 
 /// Commands that can be executed on the setlist
@@ -118,10 +122,14 @@ pub enum SetlistCommand {
     PreviousSection,
     /// Navigate to a specific time position
     SeekTo { seconds: f64 },
-    /// Toggle loop for the current song
+    /// Toggle loop for the current song (sets loop to song boundaries)
     ToggleSongLoop,
-    /// Toggle loop for the current section
+    /// Toggle loop for the current section (sets loop to section boundaries)
     ToggleSectionLoop,
+    /// Set custom loop region (start and end in seconds, relative to song start)
+    SetLoopRegion { start_seconds: f64, end_seconds: f64 },
+    /// Clear the loop region
+    ClearLoop,
     /// Toggle playback (play/pause)
     TogglePlayback,
 }

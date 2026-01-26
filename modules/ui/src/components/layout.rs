@@ -1,6 +1,6 @@
 use crate::components::mode_toggle::ModeToggle;
 use crate::components::progress::{
-    MeasureIndicator, ProgressSection, SongProgressBar, TempoMarker,
+    LoopIndicator, MeasureIndicator, ProgressSection, SongProgressBar, TempoMarker,
 };
 use crate::components::section_progress::SectionProgressBar;
 use crate::components::sidebar_items::{SectionItem, SongItem, SongItemData};
@@ -389,17 +389,6 @@ pub fn MainContent(
         // Reading SETLIST here makes this effect reactive to SETLIST changes
         let _ = SETLIST.read();
         let progress_value = SETLIST.read().as_ref().and_then(|api| api.song_progress);
-
-        // Log the raw progress value (0.0-1.0) for debugging
-        if let Some(p) = progress_value {
-            static LAST_SONG_PROGRESS: std::sync::Mutex<Option<f64>> = std::sync::Mutex::new(None);
-            let mut last = LAST_SONG_PROGRESS.lock().unwrap();
-            if *last != Some(p) {
-                info!("song_progress: {:.4} (0.0-1.0)", p);
-                *last = Some(p);
-            }
-        }
-
         let new_progress = progress_value.map(|p| p * 100.0).unwrap_or(0.0);
         progress.set(new_progress);
     });
@@ -1633,6 +1622,56 @@ pub fn MainContent(
         section_progress.set(progress_value);
     });
 
+    // Compute loop indicator from SETLIST
+    // This reads looping and loop_selection from SetlistApi and converts to LoopIndicator
+    // IMPORTANT: Must use the same total_start/total_duration as progress_sections_data
+    // to align the loop indicator with the progress bar
+    let loop_indicator = use_memo(move || {
+        let song_idx = current_song_index()?;
+        let setlist_structure = SETLIST_STRUCTURE.read();
+        let setlist_api = SETLIST.read();
+        let api = setlist_api.as_ref()?;
+        let song = setlist_structure.as_ref()?.songs.get(song_idx)?;
+
+        // Calculate total timeline (same as progress_sections_data)
+        let count_in_start = song
+            .count_in_marker
+            .as_ref()
+            .map(|m| m.position.time.to_seconds())
+            .unwrap_or(0.0);
+        let song_start = song.effective_start();
+        let song_end = song.effective_end();
+        let ending_pos = song.render_end().max(song.hard_cut());
+
+        let total_start = if count_in_start > 0.0 {
+            count_in_start
+        } else {
+            song_start
+        };
+        let total_end = if ending_pos > song_end {
+            ending_pos
+        } else {
+            song_end
+        };
+        let total_duration = total_end - total_start;
+
+        if total_duration <= 0.0 {
+            return None;
+        }
+
+        // Check if we have loop info from the SetlistApi
+        // The looping and loop_selection fields come from ActiveIndices
+        let looping = api.looping;
+        let loop_selection = api.loop_selection.as_ref()?;
+
+        Some(LoopIndicator::from_time_selection(
+            loop_selection,
+            total_start,
+            total_duration,
+            looping,
+        ))
+    });
+
     // Compute detail badges using transport info
     // First try SONG_TRANSPORT (REAPER live data), fall back to song metadata + SETLIST progress
     let detail_badges = use_memo(move || {
@@ -1807,6 +1846,7 @@ pub fn MainContent(
                             },
                             tempo_markers: tempo_markers(),
                             song_key: song_position.map(|i| i.to_string()),
+                            loop_indicator: loop_indicator(),
                         }
                     }
                     // Section Progress Bar (positioned below BPM markers, with room for labels)

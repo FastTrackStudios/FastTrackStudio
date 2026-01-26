@@ -1,0 +1,551 @@
+//! Tag Browser - Scout-inspired tag filtering UI
+//!
+//! Provides components for:
+//! - Tag sidebar with category grouping
+//! - Inclusive/exclusive tag filtering (+tag, -tag)
+//! - Quick tag panel (Command+T style)
+//! - Tag search and creation
+
+use std::collections::HashSet;
+
+use dioxus::prelude::*;
+use fts::rig::core::{FuzzyMatch, PresetTag, TagCategory, TagFilter, TagRegistry};
+use uuid::Uuid;
+
+/// Props for the tag browser sidebar
+#[derive(Props, Clone, PartialEq)]
+pub struct TagBrowserProps {
+    /// The tag registry with all available tags
+    pub registry: TagRegistry,
+    /// Currently active filter
+    #[props(default)]
+    pub filter: TagFilter,
+    /// Callback when filter changes
+    pub on_filter_change: Callback<TagFilter>,
+    /// Whether to show hidden tags
+    #[props(default)]
+    pub show_hidden: bool,
+}
+
+/// Tag browser sidebar with category grouping
+#[component]
+pub fn TagBrowserSidebar(props: TagBrowserProps) -> Element {
+    let mut search_query = use_signal(String::new);
+    let mut expanded_categories = use_signal(|| {
+        // Default expand BaseTone and Genre
+        let mut set = HashSet::new();
+        set.insert(TagCategory::BaseTone);
+        set.insert(TagCategory::Genre);
+        set
+    });
+
+    // Filter tags by search query
+    let filtered_registry = use_memo({
+        let registry = props.registry.clone();
+        move || {
+            let query = search_query();
+            if query.is_empty() {
+                registry.clone()
+            } else {
+                // Return a filtered view - for now just use the full registry
+                // Real filtering happens in the category display
+                registry.clone()
+            }
+        }
+    });
+
+    rsx! {
+        div { class: "w-56 border-r border-zinc-700 bg-zinc-900 flex flex-col h-full",
+            // Header
+            div { class: "p-3 border-b border-zinc-700",
+                h2 { class: "text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2",
+                    "Tags"
+                }
+
+                // Search bar
+                div { class: "relative",
+                    input {
+                        r#type: "text",
+                        class: "w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-500",
+                        placeholder: "Search tags...",
+                        value: "{search_query}",
+                        oninput: move |e| search_query.set(e.value())
+                    }
+                }
+
+                // Active filter summary
+                if !props.filter.include.is_empty() || !props.filter.exclude.is_empty() {
+                    div { class: "mt-2 flex flex-wrap gap-1",
+                        for tag_id in props.filter.include.iter() {
+                            {
+                                let tag = props.registry.get(*tag_id);
+                                let tag_name = tag.map(|t| t.name.clone()).unwrap_or_else(|| "Unknown".to_string());
+                                let tag_color = tag.and_then(|t| t.color.clone()).unwrap_or_else(|| "#3B82F6".to_string());
+                                let filter = props.filter.clone();
+                                let on_filter_change = props.on_filter_change.clone();
+                                let tag_id_copy = *tag_id;
+                                rsx! {
+                                    button {
+                                        key: "{tag_id_copy}",
+                                        class: "px-2 py-0.5 text-xs rounded flex items-center gap-1",
+                                        style: "background-color: {tag_color}20; color: {tag_color}; border: 1px solid {tag_color}40;",
+                                        onclick: move |_| {
+                                            let mut new_filter = filter.clone();
+                                            new_filter.include.remove(&tag_id_copy);
+                                            on_filter_change.call(new_filter);
+                                        },
+                                        span { "+{tag_name}" }
+                                        span { class: "opacity-60", "x" }
+                                    }
+                                }
+                            }
+                        }
+                        for tag_id in props.filter.exclude.iter() {
+                            {
+                                let tag = props.registry.get(*tag_id);
+                                let tag_name = tag.map(|t| t.name.clone()).unwrap_or_else(|| "Unknown".to_string());
+                                let filter = props.filter.clone();
+                                let on_filter_change = props.on_filter_change.clone();
+                                let tag_id_copy = *tag_id;
+                                rsx! {
+                                    button {
+                                        key: "{tag_id_copy}",
+                                        class: "px-2 py-0.5 text-xs rounded flex items-center gap-1 bg-red-900/30 text-red-400 border border-red-800",
+                                        onclick: move |_| {
+                                            let mut new_filter = filter.clone();
+                                            new_filter.exclude.remove(&tag_id_copy);
+                                            on_filter_change.call(new_filter);
+                                        },
+                                        span { "-{tag_name}" }
+                                        span { class: "opacity-60", "x" }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Clear all button
+                        button {
+                            class: "px-2 py-0.5 text-xs text-zinc-500 hover:text-zinc-300",
+                            onclick: {
+                                let on_filter_change = props.on_filter_change.clone();
+                                move |_| on_filter_change.call(TagFilter::new())
+                            },
+                            "Clear"
+                        }
+                    }
+                }
+            }
+
+            // Tag categories
+            div { class: "flex-1 overflow-y-auto p-2",
+                for category in TagCategory::all() {
+                    {
+                        let registry_ref = filtered_registry.read();
+                        let query = search_query();
+
+                        // Use fuzzy search when there's a query, otherwise show by category
+                        let tags: Vec<_> = if query.is_empty() {
+                            // No search - show all tags in category
+                            if props.show_hidden {
+                                registry_ref.by_category(*category).into_iter().cloned().collect()
+                            } else {
+                                registry_ref.visible_by_category(*category).into_iter().cloned().collect()
+                            }
+                        } else {
+                            // Fuzzy search - filter by category from fuzzy results
+                            registry_ref
+                                .fuzzy_search(&query)
+                                .into_iter()
+                                .filter(|m| m.tag.category == *category)
+                                .filter(|m| props.show_hidden || !m.tag.hidden)
+                                .map(|m| m.tag.clone())
+                                .collect()
+                        };
+
+                        if tags.is_empty() {
+                            rsx! {}
+                        } else {
+                            let is_expanded = expanded_categories().contains(category);
+                            let category_copy = *category;
+                            rsx! {
+                                TagCategorySection {
+                                    key: "{category:?}",
+                                    category: *category,
+                                    tags,
+                                    is_expanded,
+                                    filter: props.filter.clone(),
+                                    on_toggle: {
+                                        move |_| {
+                                            let mut set = expanded_categories();
+                                            if set.contains(&category_copy) {
+                                                set.remove(&category_copy);
+                                            } else {
+                                                set.insert(category_copy);
+                                            }
+                                            expanded_categories.set(set);
+                                        }
+                                    },
+                                    on_filter_change: props.on_filter_change.clone()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Footer with tag count
+            div { class: "p-2 border-t border-zinc-700 text-xs text-zinc-500",
+                "{props.registry.len()} tags"
+            }
+        }
+    }
+}
+
+/// Props for tag category section
+#[derive(Props, Clone, PartialEq)]
+struct TagCategorySectionProps {
+    category: TagCategory,
+    tags: Vec<PresetTag>,
+    is_expanded: bool,
+    filter: TagFilter,
+    on_toggle: Callback<()>,
+    on_filter_change: Callback<TagFilter>,
+}
+
+/// A category section with expandable tag list
+#[component]
+fn TagCategorySection(props: TagCategorySectionProps) -> Element {
+    let color = props.category.default_color().unwrap_or_else(|| "#6B7280".to_string());
+
+    rsx! {
+        div { class: "mb-2",
+            // Category header
+            button {
+                class: "w-full flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-800 rounded text-left",
+                onclick: move |_| props.on_toggle.call(()),
+
+                // Expand icon
+                span { class: "w-3 text-[10px] text-zinc-500",
+                    if props.is_expanded { "v" } else { ">" }
+                }
+
+                // Category color dot
+                span {
+                    class: "w-2 h-2 rounded-full",
+                    style: "background-color: {color};"
+                }
+
+                // Category name
+                span { class: "flex-1 text-sm font-medium text-zinc-300",
+                    "{props.category.display_name()}"
+                }
+
+                // Tag count
+                span { class: "text-[10px] text-zinc-500",
+                    "{props.tags.len()}"
+                }
+            }
+
+            // Tags list
+            if props.is_expanded {
+                div { class: "ml-5 space-y-0.5",
+                    for tag in props.tags.iter() {
+                        {
+                            let is_included = props.filter.include.contains(&tag.id);
+                            let is_excluded = props.filter.exclude.contains(&tag.id);
+                            let tag_id = tag.id;
+                            let tag_name = tag.name.clone();
+                            let tag_color = tag.color.clone().unwrap_or_else(|| color.clone());
+                            let filter = props.filter.clone();
+                            let on_filter_change = props.on_filter_change.clone();
+
+                            rsx! {
+                                TagItem {
+                                    key: "{tag_id}",
+                                    tag_id,
+                                    name: tag_name,
+                                    color: tag_color,
+                                    is_included,
+                                    is_excluded,
+                                    on_include: {
+                                        let filter = filter.clone();
+                                        let on_filter_change = on_filter_change.clone();
+                                        move |_| {
+                                            let mut new_filter = filter.clone();
+                                            if new_filter.include.contains(&tag_id) {
+                                                new_filter.include.remove(&tag_id);
+                                            } else {
+                                                new_filter.include.insert(tag_id);
+                                                new_filter.exclude.remove(&tag_id);
+                                            }
+                                            on_filter_change.call(new_filter);
+                                        }
+                                    },
+                                    on_exclude: {
+                                        let filter = filter.clone();
+                                        let on_filter_change = on_filter_change.clone();
+                                        move |_| {
+                                            let mut new_filter = filter.clone();
+                                            if new_filter.exclude.contains(&tag_id) {
+                                                new_filter.exclude.remove(&tag_id);
+                                            } else {
+                                                new_filter.exclude.insert(tag_id);
+                                                new_filter.include.remove(&tag_id);
+                                            }
+                                            on_filter_change.call(new_filter);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Props for a single tag item
+#[derive(Props, Clone, PartialEq)]
+struct TagItemProps {
+    tag_id: Uuid,
+    name: String,
+    color: String,
+    is_included: bool,
+    is_excluded: bool,
+    on_include: Callback<()>,
+    on_exclude: Callback<()>,
+}
+
+/// A single tag with +/- buttons
+#[component]
+fn TagItem(props: TagItemProps) -> Element {
+    let bg_class = if props.is_included {
+        format!("background-color: {}30;", props.color)
+    } else if props.is_excluded {
+        "background-color: #7f1d1d30;".to_string()
+    } else {
+        String::new()
+    };
+
+    let text_style = if props.is_included {
+        format!("color: {};", props.color)
+    } else if props.is_excluded {
+        "color: #f87171;".to_string()
+    } else {
+        "color: #a1a1aa;".to_string()
+    };
+
+    let include_btn_class = if props.is_included {
+        "w-5 h-5 text-xs rounded hover:bg-zinc-700 text-green-400"
+    } else {
+        "w-5 h-5 text-xs rounded hover:bg-zinc-700 text-zinc-500 opacity-0 group-hover:opacity-100"
+    };
+
+    let exclude_btn_class = if props.is_excluded {
+        "w-5 h-5 text-xs rounded hover:bg-zinc-700 text-red-400"
+    } else {
+        "w-5 h-5 text-xs rounded hover:bg-zinc-700 text-zinc-500 opacity-0 group-hover:opacity-100"
+    };
+
+    rsx! {
+        div {
+            class: "flex items-center gap-1 px-2 py-1 rounded hover:bg-zinc-800 group",
+            style: "{bg_class}",
+
+            // Tag name
+            span {
+                class: "flex-1 text-sm truncate",
+                style: "{text_style}",
+                "{props.name}"
+            }
+
+            // Include button (+)
+            button {
+                class: "{include_btn_class}",
+                onclick: move |_| props.on_include.call(()),
+                "+"
+            }
+
+            // Exclude button (-)
+            button {
+                class: "{exclude_btn_class}",
+                onclick: move |_| props.on_exclude.call(()),
+                "-"
+            }
+        }
+    }
+}
+
+/// Props for the quick tag panel
+#[derive(Props, Clone, PartialEq)]
+pub struct QuickTagPanelProps {
+    /// The tag registry with all available tags
+    pub registry: TagRegistry,
+    /// Currently selected tags
+    pub selected_tags: HashSet<Uuid>,
+    /// Callback when tags are updated
+    pub on_tags_change: Callback<HashSet<Uuid>>,
+    /// Callback to close the panel
+    pub on_close: Callback<()>,
+}
+
+/// Quick tag panel (Command+T style)
+#[component]
+pub fn QuickTagPanel(props: QuickTagPanelProps) -> Element {
+    let mut search_query = use_signal(String::new);
+
+    // Filter and group tags
+    let filtered_tags = use_memo({
+        let registry = props.registry.clone();
+        move || {
+            let query = search_query().to_lowercase();
+            if query.is_empty() {
+                registry.visible().cloned().collect::<Vec<_>>()
+            } else {
+                registry
+                    .search(&query)
+                    .into_iter()
+                    .filter(|t| !t.hidden)
+                    .cloned()
+                    .collect()
+            }
+        }
+    });
+
+    rsx! {
+        div { class: "fixed inset-0 bg-black/50 flex items-center justify-center z-50",
+            onclick: move |_| props.on_close.call(()),
+
+            div {
+                class: "bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-96 max-h-96 flex flex-col",
+                onclick: move |e| e.stop_propagation(),
+
+                // Header with search
+                div { class: "p-3 border-b border-zinc-700",
+                    input {
+                        r#type: "text",
+                        class: "w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-blue-500",
+                        placeholder: "Search or create tag...",
+                        value: "{search_query}",
+                        oninput: move |e| search_query.set(e.value()),
+                        autofocus: true
+                    }
+                }
+
+                // Tag list
+                div { class: "flex-1 overflow-y-auto p-2",
+                    if filtered_tags.read().is_empty() && !search_query().is_empty() {
+                        div { class: "p-4 text-center",
+                            p { class: "text-zinc-400 text-sm mb-2",
+                                "No tags found for \"{search_query()}\""
+                            }
+                            button {
+                                class: "px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-sm text-white",
+                                "Create \"{search_query()}\" tag"
+                            }
+                        }
+                    } else {
+                        for tag in filtered_tags.read().iter() {
+                            {
+                                let is_selected = props.selected_tags.contains(&tag.id);
+                                let tag_id = tag.id;
+                                let tag_name = tag.name.clone();
+                                let tag_color = tag.color.clone().unwrap_or_else(|| "#6B7280".to_string());
+                                let category_name = tag.category.display_name();
+                                let selected_tags = props.selected_tags.clone();
+                                let on_tags_change = props.on_tags_change.clone();
+
+                                rsx! {
+                                    button {
+                                        key: "{tag_id}",
+                                        class: "w-full flex items-center gap-2 px-3 py-2 rounded hover:bg-zinc-800 text-left",
+                                        onclick: move |_| {
+                                            let mut new_tags = selected_tags.clone();
+                                            if new_tags.contains(&tag_id) {
+                                                new_tags.remove(&tag_id);
+                                            } else {
+                                                new_tags.insert(tag_id);
+                                            }
+                                            on_tags_change.call(new_tags);
+                                        },
+
+                                        // Checkbox
+                                        div {
+                                            class: "w-4 h-4 rounded border flex items-center justify-center",
+                                            style: if is_selected { format!("background-color: {}; border-color: {};", tag_color, tag_color) } else { "border-color: #52525b;".to_string() },
+                                            if is_selected {
+                                                span { class: "text-white text-xs", "v" }
+                                            }
+                                        }
+
+                                        // Tag info
+                                        div { class: "flex-1",
+                                            div {
+                                                class: "text-sm",
+                                                style: "color: {tag_color};",
+                                                "{tag_name}"
+                                            }
+                                            div { class: "text-[10px] text-zinc-500",
+                                                "{category_name}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Footer
+                div { class: "p-3 border-t border-zinc-700 flex justify-between items-center",
+                    span { class: "text-xs text-zinc-500",
+                        "{props.selected_tags.len()} selected"
+                    }
+                    button {
+                        class: "px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-sm text-white",
+                        onclick: move |_| props.on_close.call(()),
+                        "Done"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Compact tag display for showing a preset's tags
+#[component]
+pub fn TagChips(
+    tags: Vec<PresetTag>,
+    #[props(default = 5)] max_display: usize,
+) -> Element {
+    let display_tags = if tags.len() > max_display {
+        &tags[..max_display]
+    } else {
+        &tags
+    };
+    let overflow_count = tags.len().saturating_sub(max_display);
+
+    rsx! {
+        div { class: "flex flex-wrap gap-1",
+            for tag in display_tags {
+                {
+                    let color = tag.color.clone().unwrap_or_else(|| "#6B7280".to_string());
+                    rsx! {
+                        span {
+                            key: "{tag.id}",
+                            class: "px-1.5 py-0.5 text-[10px] rounded",
+                            style: "background-color: {color}20; color: {color};",
+                            "{tag.name}"
+                        }
+                    }
+                }
+            }
+            if overflow_count > 0 {
+                span { class: "px-1.5 py-0.5 text-[10px] text-zinc-500",
+                    "+{overflow_count}"
+                }
+            }
+        }
+    }
+}

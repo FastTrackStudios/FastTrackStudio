@@ -1,4 +1,5 @@
 pub mod arrangement;
+pub mod block_controls;
 pub mod chord_tab;
 pub mod chords;
 pub mod layout;
@@ -7,13 +8,16 @@ pub mod midi_editor;
 pub mod mode_toggle;
 pub mod performance;
 pub mod piano;
+pub mod preset_browser;
 pub mod progress;
+pub mod rig;
 pub mod ruler;
 pub mod section_progress;
 pub mod sidebar_items;
 pub mod slider;
 pub mod song;
 pub mod syllable_editor;
+pub mod tag_browser;
 pub mod tcp;
 pub mod text_fit;
 pub mod transport;
@@ -28,8 +32,8 @@ pub use midi_editor::MidiEditor;
 pub use mode_toggle::ModeToggle;
 pub use piano::{MidiNote, Piano, PianoProps};
 pub use progress::{
-    CompactProgressBar, MeasureIndicator, ProgressSection, SegmentedProgressBar, SongProgressBar,
-    TempoCard, TempoMarker, TimeSignatureCard,
+    CompactProgressBar, LoopIndicator, MeasureIndicator, ProgressSection, SegmentedProgressBar,
+    SongProgressBar, TempoCard, TempoMarker, TimeSignatureCard,
 };
 pub use ruler::{MeasureInfo, Ruler};
 pub use section_progress::SectionProgressBar;
@@ -40,3 +44,9 @@ pub use tcp::TrackControlPanel;
 pub use text_fit::{TextFit, TextFitMode, TextFitProps};
 pub use transport::{ConnectionStatus, TransportControlBar};
 pub use performance::PerformanceView;
+pub use preset_browser::{CompactPresetBrowser, PresetBrowserSidebar};
+pub use rig::RigControlView;
+pub use block_controls::{
+    AmpControls, AmpParams, BlockType, CabControls, CabParams, DelayControls, DelayParams,
+    DriveControls, DriveParams, ExpandableBlockControls, ReverbControls, ReverbParams,
+};

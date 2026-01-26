@@ -163,5 +163,10 @@ required-features = ["engraver-example"]
 name = "highlighting_demo"
 required-features = ["highlighting"]
 
+# Tests that require specific features
+[[test]]
+name = "021_midi_import_thriller"
+required-features = ["midi-import"]
+
 [lints]
 workspace = true

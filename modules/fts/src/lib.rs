@@ -4,11 +4,13 @@
 //! - Setlist management
 //! - Lyrics sync and display
 //! - Chord detection and display
+//! - Rig management (presets, patches, scenes for live VST hosting)
 //! - Smart templates (includes naming conventions and track templates)
 //! - DAW reactive REAPER implementations (when `reaper` feature is enabled)
 
 pub mod chords;
 pub mod lyrics;
+pub mod rig;
 pub mod setlist;
 
 /// DAW Reactive REAPER implementations
@@ -22,3 +24,9 @@ pub mod daw_reactive;
 // Re-export commonly used types
 pub use lyrics::Lyrics;
 pub use setlist::{LyricsState, NavigationCommand, Setlist, SetlistApi, Song, TransportCommand};
+
+// Re-export rig types
+pub use rig::{
+    LocalRigClient, MockRig, Patch, PatchCategory, Preset, Profile, Rig, RigCommand, RigEvent,
+    RigService, Scene, Snapshot,
+};

@@ -16,6 +16,66 @@ use fts::setlist::core::{Setlist, Song, Section, SectionType, section_from_secon
 use fts::SetlistApi;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// Aggregated logging counters
+static UPDATE_COUNT: AtomicU64 = AtomicU64::new(0);
+static INDEX_CHANGE_COUNT: AtomicU64 = AtomicU64::new(0);
+static PLAY_STATE_CHANGE_COUNT: AtomicU64 = AtomicU64::new(0);
+static LOOP_STATE_CHANGE_COUNT: AtomicU64 = AtomicU64::new(0);
+static LAST_LOG_TIME: AtomicU64 = AtomicU64::new(0);
+static LAST_SONG_PROGRESS: AtomicU64 = AtomicU64::new(0);
+static LAST_SECTION_PROGRESS: AtomicU64 = AtomicU64::new(0);
+static LAST_IS_PLAYING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static LAST_IS_LOOPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Get current time in milliseconds (platform-agnostic)
+fn current_time_ms() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::now() as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
+}
+
+/// Log aggregated stats if at least 1 second has passed
+fn log_stats_if_needed() {
+    let now = current_time_ms();
+    let last = LAST_LOG_TIME.load(Ordering::Relaxed);
+
+    if now - last >= 1000 {
+        LAST_LOG_TIME.store(now, Ordering::Relaxed);
+
+        let updates = UPDATE_COUNT.swap(0, Ordering::Relaxed);
+        let index_changes = INDEX_CHANGE_COUNT.swap(0, Ordering::Relaxed);
+        let play_changes = PLAY_STATE_CHANGE_COUNT.swap(0, Ordering::Relaxed);
+        let loop_changes = LOOP_STATE_CHANGE_COUNT.swap(0, Ordering::Relaxed);
+        let song_progress = f64::from_bits(LAST_SONG_PROGRESS.load(Ordering::Relaxed));
+        let section_progress = f64::from_bits(LAST_SECTION_PROGRESS.load(Ordering::Relaxed));
+        let is_playing = LAST_IS_PLAYING.load(Ordering::Relaxed);
+        let is_looping = LAST_IS_LOOPING.load(Ordering::Relaxed);
+
+        tracing::debug!(
+            "setlist_state: {} updates/sec ({}hz), {} index changes, {} play state changes, {} loop state changes | song={:.1}% section={:.1}% playing={} looping={}",
+            updates,
+            updates,
+            index_changes,
+            play_changes,
+            loop_changes,
+            song_progress * 100.0,
+            section_progress * 100.0,
+            is_playing,
+            is_looping
+        );
+    }
+}
 
 /// Hook that subscribes to setlist service events and updates global signals
 ///
@@ -242,26 +302,52 @@ fn parse_time_signature(ts_str: &Option<String>) -> Option<TimeSignature> {
 /// - SECTION_PROGRESS (0.0 to 1.0)
 /// - IS_PLAYING (from the is_playing field in ActiveIndices)
 fn update_all_signals(indices: &ActiveIndices, setlist_cache: &Arc<RwLock<Option<Setlist>>>) {
-    tracing::debug!(
-        "update_all_signals: song_progress={:?}, section_progress={:?}, is_playing={}",
-        indices.song_progress,
-        indices.section_progress,
-        indices.is_playing
-    );
+    // Track stats for aggregated logging
+    UPDATE_COUNT.fetch_add(1, Ordering::Relaxed);
+
+    // Track index changes
+    let current_indices = *ACTIVE_INDICES.read();
+    let new_indices = (indices.song_index, indices.section_index, indices.slide_index);
+    if current_indices != new_indices {
+        INDEX_CHANGE_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+
+    // Track play state changes
+    let was_playing = LAST_IS_PLAYING.load(Ordering::Relaxed);
+    if was_playing != indices.is_playing {
+        PLAY_STATE_CHANGE_COUNT.fetch_add(1, Ordering::Relaxed);
+        LAST_IS_PLAYING.store(indices.is_playing, Ordering::Relaxed);
+    }
+
+    // Track loop state changes
+    let was_looping = LAST_IS_LOOPING.load(Ordering::Relaxed);
+    if was_looping != indices.looping {
+        LOOP_STATE_CHANGE_COUNT.fetch_add(1, Ordering::Relaxed);
+        LAST_IS_LOOPING.store(indices.looping, Ordering::Relaxed);
+    }
+
+    // Store progress values for logging
+    if let Some(p) = indices.song_progress {
+        LAST_SONG_PROGRESS.store(p.to_bits(), Ordering::Relaxed);
+    }
+    if let Some(p) = indices.section_progress {
+        LAST_SECTION_PROGRESS.store(p.to_bits(), Ordering::Relaxed);
+    }
+
+    // Log aggregated stats once per second
+    log_stats_if_needed();
 
     // Update SETLIST (the main signal that UI components read from)
     if let Some(setlist) = setlist_cache.read().unwrap().clone() {
-        let api = SetlistApi::new(
+        let api = SetlistApi::with_loop(
             setlist,
             indices.song_index,
             indices.section_index,
             indices.slide_index,
             indices.song_progress,
             indices.section_progress,
-        );
-        tracing::debug!(
-            "update_all_signals: updating SETLIST with song_progress={:?}",
-            api.song_progress
+            indices.looping,
+            indices.loop_selection.clone(),
         );
         *SETLIST.write() = Some(api);
     } else {

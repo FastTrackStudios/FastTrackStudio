@@ -96,17 +96,27 @@ pub struct DetectedChord {
     pub end_ppq: i64,
     /// Root pitch (MIDI note number)
     pub root_pitch: u8,
+    /// Maximum velocity of notes in this chord (0-127)
+    /// Used for phrase marker detection (velocity > 120 = accented)
+    pub velocity: u8,
 }
 
 impl DetectedChord {
     /// Create a new detected chord
-    pub fn new(chord: Chord, start_ppq: i64, end_ppq: i64, root_pitch: u8) -> Self {
+    pub fn new(chord: Chord, start_ppq: i64, end_ppq: i64, root_pitch: u8, velocity: u8) -> Self {
         Self {
             chord,
             start_ppq,
             end_ppq,
             root_pitch,
+            velocity,
         }
+    }
+
+    /// Check if this chord is accented (velocity > 120)
+    /// Used for phrase marker (`>`) detection in chart generation
+    pub fn is_accented(&self) -> bool {
+        self.velocity > 120
     }
 }
 
@@ -116,6 +126,7 @@ struct ActiveNote {
     pitch: u8,
     start_ppq: i64,
     end_ppq: i64,
+    velocity: u8,
 }
 
 /// Detect chords from MIDI notes using keyflow's semitone sequence analysis
@@ -156,6 +167,7 @@ pub fn detect_chords_from_midi_notes(
             pitch: note_info.pitch,
             start_ppq: note_info.start_ppq,
             end_ppq: note_info.end_ppq,
+            velocity: note_info.velocity,
         };
 
         // Update chord_min_eppq (earliest end time of active notes)
@@ -271,6 +283,9 @@ fn build_chord_from_notes(
     let mut pitches: Vec<u8> = active_notes.iter().map(|n| n.pitch).collect();
     pitches.sort();
 
+    // Calculate max velocity from all notes in this chord
+    let max_velocity = active_notes.iter().map(|n| n.velocity).max().unwrap_or(0);
+
     // Find the earliest start and earliest end of active notes (clamped to limit)
     let chord_start = active_notes
         .iter()
@@ -334,6 +349,7 @@ fn build_chord_from_notes(
                 start_ppq: chord_start,
                 end_ppq: chord_end,
                 root_pitch: actual_root_pitch,
+                velocity: max_velocity,
             });
         }
     }

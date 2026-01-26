@@ -25,6 +25,7 @@ use ui::{PerformanceView, RigControlView, RigServiceProvider, SetlistServiceProv
 use audio_controls::widgets::{
     CompressorGraph, CompressorMetering, CompressorMode, CompressorParams, DbRange,
     EqBand, EqBandShape, EqGraph,
+    GateDbRange, GateGraph, GateMetering, GateMode, GateParams,
 };
 
 // Static assets
@@ -2662,12 +2663,29 @@ fn TestFxUi() -> Element {
 
                 let gr = output - input_clamped;
 
-                // Read peaks before setting to avoid borrow conflict
+                // Read peaks and history before setting to avoid borrow conflict
                 let prev = metering.peek();
                 let input_peak = input_clamped.max(prev.input_peak * 0.99);
                 let output_peak = output.max(prev.output_peak * 0.99);
                 let gr_peak = gr.min(prev.gr_peak * 0.99);
+
+                // Clone history vectors and append new values
+                let mut gr_history = prev.gr_history.clone();
+                let mut input_history = prev.input_history.clone();
                 drop(prev);
+
+                // Append new values to history
+                gr_history.push(gr);
+                input_history.push(input_clamped);
+
+                // Trim history to max size (keep last DEFAULT_HISTORY_SIZE samples)
+                const MAX_HISTORY: usize = 128;
+                if gr_history.len() > MAX_HISTORY {
+                    gr_history.drain(0..gr_history.len() - MAX_HISTORY);
+                }
+                if input_history.len() > MAX_HISTORY {
+                    input_history.drain(0..input_history.len() - MAX_HISTORY);
+                }
 
                 metering.set(CompressorMetering {
                     input_level: input_clamped,
@@ -2676,6 +2694,8 @@ fn TestFxUi() -> Element {
                     input_peak,
                     output_peak,
                     gr_peak,
+                    gr_history,
+                    input_history,
                 });
             }) as Box<dyn FnMut()>);
 
@@ -2978,6 +2998,40 @@ fn TestFxUi() -> Element {
                 }
             }
 
+            // === Gate Section (Full Width) ===
+            div {
+                class: "max-w-7xl mx-auto mt-6 bg-card rounded-xl border border-border p-4",
+
+                div {
+                    class: "flex items-center justify-between mb-4",
+                    h2 {
+                        class: "text-lg font-semibold text-foreground",
+                        "Noise Gate"
+                    }
+                    span {
+                        class: "text-xs text-muted-foreground",
+                        "Pro-G Style"
+                    }
+                }
+
+                // Gate Graph with integrated knobs
+                div {
+                    class: "flex justify-center",
+
+                    GateGraph {
+                        params: GateParams::default(),
+                        metering: GateMetering::default(),
+                        db_range: GateDbRange::Range60,
+                        show_grid: true,
+                        show_gr_meter: true,
+                        show_levels: true,
+                        show_gr_trace: false,
+                        show_controls: true,
+                        interactive: true,
+                    }
+                }
+            }
+
             // Instructions
             div {
                 class: "max-w-7xl mx-auto mt-6 p-4 bg-muted/50 rounded-lg border border-border",
@@ -2986,7 +3040,7 @@ fn TestFxUi() -> Element {
                     "Interaction Guide"
                 }
                 div {
-                    class: "grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-muted-foreground",
+                    class: "grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-muted-foreground",
                     div {
                         h4 { class: "font-medium text-foreground mb-1", "EQ" }
                         ul {
@@ -3006,6 +3060,16 @@ fn TestFxUi() -> Element {
                             li { "Drag above threshold to adjust ratio" }
                             li { "Mouse wheel to adjust knee width" }
                             li { "Shift+drag for fine control" }
+                        }
+                    }
+                    div {
+                        h4 { class: "font-medium text-foreground mb-1", "Gate" }
+                        ul {
+                            class: "space-y-0.5 list-disc list-inside",
+                            li { "Use knobs to adjust parameters" }
+                            li { "Large knob controls threshold" }
+                            li { "Small knobs for ratio/range" }
+                            li { "Right panel for envelope controls" }
                         }
                     }
                 }
