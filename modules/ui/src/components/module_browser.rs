@@ -1,0 +1,185 @@
+//! Module Browser Component
+//!
+//! Browse and select module presets (e.g., John Mayer Drive, Ambient Shimmer).
+//! Modules are intent-driven collections of blocks that can be swapped as a unit.
+
+use dioxus::prelude::*;
+use fts::rig::ModulePresetInfo;
+use lucide_dioxus::{Search, Package};
+
+use crate::context::use_module_service;
+
+/// Module Browser component for browsing and selecting module presets
+#[component]
+pub fn ModuleBrowser(
+    /// Currently selected module preset ID
+    selected_id: Option<uuid::Uuid>,
+    /// Callback when a module is selected
+    on_select: Option<Callback<uuid::Uuid>>,
+) -> Element {
+    let mut search_query = use_signal(String::new);
+    let mut selected_category = use_signal(|| "All");
+    let module_service = use_module_service();
+
+    // Fetch all module presets
+    let presets = use_resource(move || {
+        let client = module_service.client.clone();
+        async move {
+            client.get_all_module_presets().await
+        }
+    });
+
+    let filtered_presets = use_memo(move || {
+        let query = search_query().to_lowercase();
+        let category = selected_category();
+
+        if let Some(all_presets) = presets.read().as_ref() {
+            all_presets
+                .iter()
+                .filter(|p| {
+                    // Filter by search query
+                    let matches_search = query.is_empty() || p.name.to_lowercase().contains(&query);
+
+                    // Filter by category (matching module_type display name)
+                    let module_type_str = format!("{:?}", p.module_type);
+                    let matches_category = category == "All" || module_type_str.contains(category);
+
+                    matches_search && matches_category
+                })
+                .cloned()
+                .collect()
+        } else {
+            vec![]
+        }
+    });
+
+    rsx! {
+        div { class: "flex flex-col h-full bg-card",
+            // Header with search and filter
+            div { class: "p-4 border-b border-border",
+                h2 { class: "text-lg font-semibold mb-3", "Module Browser" }
+                p { class: "text-sm text-muted-foreground mb-3",
+                    "Browse module presets - complete signal chains ready to use"
+                }
+
+                // Search bar
+                div { class: "relative mb-3",
+                    Search { class: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" }
+                    input {
+                        class: "w-full pl-9 pr-3 py-2 bg-background border border-border rounded-md text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary",
+                        r#type: "text",
+                        placeholder: "Search modules...",
+                        value: "{search_query}",
+                        oninput: move |evt| search_query.set(evt.value().clone()),
+                    }
+                }
+
+                // Category filter tabs
+                div { class: "flex gap-2 overflow-x-auto pb-2",
+                    for category in ["All", "Drive", "Post-FX", "Pre-FX", "Modulation", "Dynamics"] {
+                        button {
+                            class: if selected_category() == category {
+                                "px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md"
+                            } else {
+                                "px-3 py-1.5 text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 rounded-md transition-colors"
+                            },
+                            onclick: move |_| selected_category.set(category),
+                            "{category}"
+                        }
+                    }
+                }
+            }
+
+            // Module list
+            div { class: "flex-1 overflow-y-auto p-4 space-y-3",
+                match presets.read().as_ref() {
+                    Some(_) => rsx! {
+                        for preset in filtered_presets() {
+                            ModuleCard {
+                                preset: preset.clone(),
+                                is_selected: selected_id == Some(preset.id),
+                                on_select: on_select,
+                            }
+                        }
+                    },
+                    None => rsx! {
+                        div { class: "text-sm text-muted-foreground p-4",
+                            "Loading modules..."
+                        }
+                    },
+                }
+            }
+
+            // Footer with info
+            div { class: "p-3 border-t border-border bg-muted/30",
+                p { class: "text-xs text-muted-foreground text-center",
+                    "Click a module to view details • Drag to add to preset"
+                }
+            }
+        }
+    }
+}
+
+/// Module card component
+#[component]
+fn ModuleCard(
+    preset: ModulePresetInfo,
+    is_selected: bool,
+    on_select: Option<Callback<uuid::Uuid>>,
+) -> Element {
+    let module_type_str = format!("{:?}", preset.module_type);
+    let description = preset.block_names.join(" → ");
+    let selected_class = if is_selected {
+        "border-primary bg-primary/10"
+    } else {
+        "border-border hover:border-primary/50"
+    };
+
+    rsx! {
+        div {
+            class: "p-4 bg-background border {selected_class} rounded-lg hover:shadow-md transition-all cursor-pointer",
+            onclick: move |_| {
+                if let Some(cb) = on_select {
+                    cb.call(preset.id);
+                }
+            },
+
+            // Header
+            div { class: "flex items-start justify-between mb-2",
+                div { class: "flex items-center gap-2",
+                    Package { class: "w-4 h-4 text-primary" }
+                    h3 { class: "font-semibold text-sm", "{preset.name}" }
+                }
+                if preset.rating > 0 {
+                    div { class: "flex items-center gap-1",
+                        for _ in 0..preset.rating {
+                            span { class: "text-yellow-500 text-xs", "★" }
+                        }
+                    }
+                }
+            }
+
+            // Module type and block count
+            div { class: "flex items-center gap-2 mb-2",
+                span { class: "text-xs font-medium text-primary/80 bg-primary/10 px-2 py-0.5 rounded",
+                    "{module_type_str}"
+                }
+                span { class: "text-xs text-muted-foreground",
+                    "{preset.block_count} blocks"
+                }
+            }
+
+            // Description (signal flow)
+            p { class: "text-xs text-muted-foreground mb-2",
+                "{description}"
+            }
+
+            // Notes
+            if let Some(notes) = &preset.notes {
+                p { class: "text-xs text-muted-foreground/70 italic mb-3",
+                    "{notes}"
+                }
+            }
+        }
+    }
+}

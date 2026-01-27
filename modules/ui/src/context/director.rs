@@ -1,0 +1,9 @@
+//! Director service context for dependency injection
+
+use fts::rig::{LocalDirectorClient, MockDirector};
+
+crate::define_service_context! {
+    /// Director service context for dependency injection
+    name: Director,
+    client_type: LocalDirectorClient<MockDirector>,
+}
