@@ -6,6 +6,7 @@
 mod block;
 mod category;
 mod layer;
+mod parameter;
 mod patch;
 mod performance;
 mod preset;
@@ -19,6 +20,7 @@ mod tags;
 pub use block::*;
 pub use category::*;
 pub use layer::*;
+pub use parameter::*;
 pub use patch::*;
 pub use performance::*;
 pub use preset::*;
