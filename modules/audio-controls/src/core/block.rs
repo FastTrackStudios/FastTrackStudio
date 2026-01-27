@@ -629,4 +629,340 @@ pub mod definitions {
                     .with_curve(CurveType::Logarithmic),
             )
     }
+
+    /// Create a Compressor block definition.
+    #[must_use]
+    pub fn compressor() -> BlockDefinition {
+        BlockDefinition::new("compressor", "Compressor", BlockCategory::Dynamics)
+            .with_parameter(
+                BlockParameter::gain("threshold", "Threshold", -60.0, 0.0)
+                    .with_priority(1)
+                    .with_short_name("Thr")
+                    .with_default(0.3),
+            )
+            .with_parameter(
+                BlockParameter {
+                    id: "ratio".to_string(),
+                    name: "Ratio".to_string(),
+                    short_name: "Rat".to_string(),
+                    value: 0.16,
+                    default: 0.16,
+                    unit: ":1".to_string(),
+                    format: ParameterFormat::Float { min: 1.0, max: 20.0, precision: 1 },
+                    priority: 1,
+                },
+            )
+            .with_parameter(
+                BlockParameter::time_ms("attack", "Attack", 0.01, 100.0)
+                    .with_priority(2)
+                    .with_short_name("Att")
+                    .with_default(0.1),
+            )
+            .with_parameter(
+                BlockParameter::time_ms("release", "Release", 1.0, 1000.0)
+                    .with_priority(2)
+                    .with_short_name("Rel")
+                    .with_default(0.3),
+            )
+            .with_parameter(
+                BlockParameter::gain("makeup", "Makeup", -12.0, 24.0)
+                    .with_priority(2)
+                    .with_short_name("Make")
+                    .with_default(0.33),
+            )
+            .with_parameter(
+                BlockParameter::gain("knee", "Knee", 0.0, 24.0)
+                    .with_priority(3)
+                    .with_short_name("Knee")
+                    .with_default(0.25),
+            )
+            .with_parameter(
+                BlockParameter::percent("mix", "Mix")
+                    .with_priority(3)
+                    .with_default(1.0),
+            )
+            .with_macro_mapping(
+                ParameterMapping::new("threshold", "Threshold")
+                    .with_param_range(0.2, 0.8)
+                    .with_curve(CurveType::Linear),
+            )
+    }
+
+    /// Create a Gate block definition.
+    #[must_use]
+    pub fn gate() -> BlockDefinition {
+        BlockDefinition::new("gate", "Gate", BlockCategory::Dynamics)
+            .with_parameter(
+                BlockParameter::gain("threshold", "Threshold", -60.0, 0.0)
+                    .with_priority(1)
+                    .with_short_name("Thr")
+                    .with_default(0.5),
+            )
+            .with_parameter(
+                BlockParameter {
+                    id: "ratio".to_string(),
+                    name: "Ratio".to_string(),
+                    short_name: "Rat".to_string(),
+                    value: 0.5,
+                    default: 0.5,
+                    unit: ":1".to_string(),
+                    format: ParameterFormat::Float { min: 1.0, max: 20.0, precision: 1 },
+                    priority: 2,
+                },
+            )
+            .with_parameter(
+                BlockParameter::gain("range", "Range", -80.0, 0.0)
+                    .with_priority(1)
+                    .with_short_name("Rng")
+                    .with_default(0.25),
+            )
+            .with_parameter(
+                BlockParameter::gain("knee", "Knee", 0.0, 24.0)
+                    .with_priority(3)
+                    .with_short_name("Knee")
+                    .with_default(0.25),
+            )
+            .with_parameter(
+                BlockParameter::time_ms("attack", "Attack", 0.01, 100.0)
+                    .with_priority(2)
+                    .with_short_name("Att")
+                    .with_default(0.005),
+            )
+            .with_parameter(
+                BlockParameter::time_ms("release", "Release", 1.0, 1000.0)
+                    .with_priority(2)
+                    .with_short_name("Rel")
+                    .with_default(0.1),
+            )
+            .with_macro_mapping(
+                ParameterMapping::new("threshold", "Threshold")
+                    .with_param_range(0.2, 0.8)
+                    .with_curve(CurveType::Linear),
+            )
+    }
+
+    /// Create an EQ block definition.
+    #[must_use]
+    pub fn eq() -> BlockDefinition {
+        BlockDefinition::new("eq", "EQ", BlockCategory::Eq)
+            .with_parameter(
+                BlockParameter::frequency("high_freq", "High Frequency", 2000.0, 20000.0)
+                    .with_priority(1)
+                    .with_short_name("HFreq")
+                    .with_default(0.8),
+            )
+            .with_parameter(
+                BlockParameter::gain("high_gain", "High Gain", -12.0, 12.0)
+                    .with_priority(1)
+                    .with_short_name("HGain")
+                    .with_default(0.5),
+            )
+            .with_parameter(
+                BlockParameter::frequency("mid_freq", "Mid Frequency", 200.0, 4000.0)
+                    .with_priority(2)
+                    .with_short_name("MFreq")
+                    .with_default(0.5),
+            )
+            .with_parameter(
+                BlockParameter::gain("mid_gain", "Mid Gain", -12.0, 12.0)
+                    .with_priority(2)
+                    .with_short_name("MGain")
+                    .with_default(0.5),
+            )
+            .with_parameter(
+                BlockParameter::frequency("low_freq", "Low Frequency", 20.0, 500.0)
+                    .with_priority(1)
+                    .with_short_name("LFreq")
+                    .with_default(0.2),
+            )
+            .with_parameter(
+                BlockParameter::gain("low_gain", "Low Gain", -12.0, 12.0)
+                    .with_priority(1)
+                    .with_short_name("LGain")
+                    .with_default(0.5),
+            )
+            .with_macro_mapping(
+                ParameterMapping::new("low_gain", "Low Gain")
+                    .with_param_range(0.2, 0.8)
+                    .with_curve(CurveType::SCurve),
+            )
+    }
+
+    /// Create a Chorus block definition.
+    #[must_use]
+    pub fn chorus() -> BlockDefinition {
+        BlockDefinition::new("chorus", "Chorus", BlockCategory::Modulation)
+            .with_parameter(
+                BlockParameter::frequency("rate", "Rate", 0.01, 10.0)
+                    .with_priority(1)
+                    .with_short_name("Rate")
+                    .with_default(0.1),
+            )
+            .with_parameter(
+                BlockParameter::percent("depth", "Depth")
+                    .with_priority(2)
+                    .with_short_name("Depth")
+                    .with_default(0.5),
+            )
+            .with_parameter(
+                BlockParameter::time_ms("delay", "Delay", 1.0, 40.0)
+                    .with_priority(2)
+                    .with_short_name("Dly")
+                    .with_default(0.5),
+            )
+            .with_parameter(
+                BlockParameter::percent("mix", "Mix")
+                    .with_priority(1)
+                    .with_default(0.5),
+            )
+            .with_macro_mapping(
+                ParameterMapping::new("mix", "Mix")
+                    .with_param_range(0.0, 0.8)
+                    .with_curve(CurveType::SCurve),
+            )
+    }
+
+    /// Create a Flanger block definition.
+    #[must_use]
+    pub fn flanger() -> BlockDefinition {
+        BlockDefinition::new("flanger", "Flanger", BlockCategory::Modulation)
+            .with_parameter(
+                BlockParameter::frequency("rate", "Rate", 0.01, 10.0)
+                    .with_priority(1)
+                    .with_short_name("Rate")
+                    .with_default(0.05),
+            )
+            .with_parameter(
+                BlockParameter::percent("depth", "Depth")
+                    .with_priority(2)
+                    .with_short_name("Depth")
+                    .with_default(0.5),
+            )
+            .with_parameter(
+                BlockParameter::time_ms("delay", "Delay", 0.1, 10.0)
+                    .with_priority(2)
+                    .with_short_name("Dly")
+                    .with_default(0.2),
+            )
+            .with_parameter(
+                BlockParameter {
+                    id: "feedback".to_string(),
+                    name: "Feedback".to_string(),
+                    short_name: "FB".to_string(),
+                    value: 0.5,
+                    default: 0.5,
+                    unit: "".to_string(),
+                    format: ParameterFormat::Float { min: -1.0, max: 1.0, precision: 2 },
+                    priority: 3,
+                },
+            )
+            .with_parameter(
+                BlockParameter::percent("mix", "Mix")
+                    .with_priority(1)
+                    .with_default(0.5),
+            )
+            .with_macro_mapping(
+                ParameterMapping::new("mix", "Mix")
+                    .with_param_range(0.0, 0.8)
+                    .with_curve(CurveType::SCurve),
+            )
+    }
+
+    /// Create a Saturator block definition.
+    #[must_use]
+    pub fn saturator() -> BlockDefinition {
+        BlockDefinition::new("saturator", "Saturator", BlockCategory::Drive)
+            .with_parameter(
+                BlockParameter::gain("drive", "Drive", 0.0, 48.0)
+                    .with_priority(1)
+                    .with_short_name("Drv")
+                    .with_default(0.25),
+            )
+            .with_parameter(
+                BlockParameter::percent("mix", "Mix")
+                    .with_priority(1)
+                    .with_default(1.0),
+            )
+            .with_parameter(
+                BlockParameter::gain("output", "Output", -24.0, 6.0)
+                    .with_priority(2)
+                    .with_short_name("Out")
+                    .with_default(0.5),
+            )
+            .with_parameter(
+                BlockParameter::percent("tone", "Tone")
+                    .with_priority(3)
+                    .with_short_name("Tone")
+                    .with_default(0.5),
+            )
+            .with_macro_mapping(
+                ParameterMapping::new("drive", "Drive")
+                    .with_param_range(0.0, 0.8)
+                    .with_curve(CurveType::Exponential),
+            )
+    }
+
+    /// Create a Deesser block definition.
+    #[must_use]
+    pub fn deesser() -> BlockDefinition {
+        BlockDefinition::new("deesser", "Deesser", BlockCategory::Eq)
+            .with_parameter(
+                BlockParameter::frequency("frequency", "Frequency", 2000.0, 16000.0)
+                    .with_priority(1)
+                    .with_short_name("Freq")
+                    .with_default(0.5),
+            )
+            .with_parameter(
+                BlockParameter::gain("threshold", "Threshold", -60.0, 0.0)
+                    .with_priority(1)
+                    .with_short_name("Thr")
+                    .with_default(0.4),
+            )
+            .with_parameter(
+                BlockParameter::gain("range", "Range", 0.0, 24.0)
+                    .with_priority(2)
+                    .with_short_name("Rng")
+                    .with_default(0.5),
+            )
+            .with_parameter(
+                BlockParameter {
+                    id: "ratio".to_string(),
+                    name: "Ratio".to_string(),
+                    short_name: "Rat".to_string(),
+                    value: 0.4,
+                    default: 0.4,
+                    unit: ":1".to_string(),
+                    format: ParameterFormat::Float { min: 1.0, max: 10.0, precision: 1 },
+                    priority: 2,
+                },
+            )
+            .with_macro_mapping(
+                ParameterMapping::new("threshold", "Threshold")
+                    .with_param_range(0.2, 0.8)
+                    .with_curve(CurveType::Linear),
+            )
+    }
+
+    /// Create a Tuner block definition.
+    #[must_use]
+    pub fn tuner() -> BlockDefinition {
+        BlockDefinition::new("tuner", "Tuner", BlockCategory::Utility)
+            .with_parameter(
+                BlockParameter::percent("speed", "Speed")
+                    .with_priority(1)
+                    .with_short_name("Spd")
+                    .with_default(0.5),
+            )
+            .with_parameter(
+                BlockParameter::percent("humanize", "Humanize")
+                    .with_priority(2)
+                    .with_short_name("Hum")
+                    .with_default(0.0),
+            )
+            .with_macro_mapping(
+                ParameterMapping::new("speed", "Speed")
+                    .with_param_range(0.3, 0.9)
+                    .with_curve(CurveType::Logarithmic),
+            )
+    }
 }
