@@ -14294,6 +14294,7 @@ dependencies = [
  "lucide-dioxus 2.562.0",
  "lumen-blocks 0.2.0 (git+https://github.com/Leaf-Computer/lumen-blocks.git?tag=v0.2.0)",
  "nucleo-matcher",
+ "paste",
  "roam",
  "tracing",
  "uuid 1.19.0",
