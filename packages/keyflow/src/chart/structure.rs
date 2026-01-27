@@ -69,6 +69,11 @@ pub struct Chart {
     /// Tracks the last used measure count for each section type
     #[serde(skip)]
     pub(crate) section_measure_memory: HashMap<SectionType, usize>,
+
+    /// Default push/pull amount for the entire chart.
+    /// If set, pushed chords matching this amount are displayed as just `'`
+    /// instead of `'_8t`, etc. This is detected from the most common push type.
+    pub default_push_amount: Option<crate::chord::PushPullAmount>,
 }
 
 impl Chart {
@@ -91,6 +96,7 @@ impl Chart {
             settings: ChartSettings::new(),
             melody_variables: MelodyVariables::new(),
             section_measure_memory: HashMap::new(),
+            default_push_amount: None,
         }
     }
 
