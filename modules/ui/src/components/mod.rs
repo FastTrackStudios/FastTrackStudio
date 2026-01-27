@@ -1,4 +1,5 @@
 pub mod arrangement;
+pub mod block_chain;
 pub mod block_controls;
 pub mod chord_tab;
 pub mod chords;
