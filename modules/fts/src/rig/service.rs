@@ -628,128 +628,64 @@ impl SetlistInfo {
 
 // region:    --- Local Client
 
-use roam::wire::{ConnectionId, MethodId, RequestId};
+crate::define_local_client! {
+    /// A local client for in-process RigService calls.
+    ///
+    /// This wraps any `RigService` implementation and provides a convenient
+    /// interface for calling service methods without needing a transport layer.
+    client: LocalRigClient,
+    service: RigService,
+    methods: {
+        /// Get all available profiles
+        async fn get_available_profiles() -> Vec<ProfileInfo>;
 
-/// Create a dummy context for local/in-process calls.
-fn local_context() -> Context {
-    Context::new(
-        ConnectionId(0),
-        RequestId(0),
-        MethodId(0),
-        vec![],
-        vec![],
-    )
-}
+        /// Get the currently loaded profile
+        async fn get_current_profile() -> Option<ProfileInfo>;
 
-/// A local client for in-process RigService calls.
-///
-/// This wraps any `RigService` implementation and provides a convenient
-/// interface for calling service methods without needing a transport layer.
-#[derive(Clone)]
-pub struct LocalRigClient<S: RigService + Send + Sync + 'static> {
-    service: Arc<S>,
-}
+        /// Get the currently loaded rig
+        async fn get_current_rig() -> Option<RigInfo>;
 
-impl<S: RigService + Send + Sync + 'static> LocalRigClient<S> {
-    /// Create a new local client wrapping the given service.
-    pub fn new(service: Arc<S>) -> Self {
-        Self { service }
-    }
+        /// Get all sections in the current rig
+        async fn get_sections() -> Vec<SectionInfo>;
 
-    /// Get all available profiles
-    pub async fn get_available_profiles(&self) -> Vec<ProfileInfo> {
-        self.service.get_available_profiles(&local_context()).await
-    }
+        /// Get all global blocks in the current rig
+        async fn get_global_blocks() -> Vec<GlobalBlockInfo>;
 
-    /// Get the currently loaded profile
-    pub async fn get_current_profile(&self) -> Option<ProfileInfo> {
-        self.service.get_current_profile(&local_context()).await
-    }
+        /// Get all available presets in the current profile
+        async fn get_available_presets() -> Vec<PresetInfo>;
 
-    /// Get the currently loaded rig
-    pub async fn get_current_rig(&self) -> Option<RigInfo> {
-        self.service.get_current_rig(&local_context()).await
-    }
+        /// Get the currently loaded preset
+        async fn get_current_preset() -> Option<PresetInfo>;
 
-    /// Get all sections in the current rig
-    pub async fn get_sections(&self) -> Vec<SectionInfo> {
-        self.service.get_sections(&local_context()).await
-    }
+        /// Get presets by category (uses fallback resolution)
+        async fn get_presets_by_category(category: PresetCategory) -> Vec<PresetInfo>;
 
-    /// Get all global blocks in the current rig
-    pub async fn get_global_blocks(&self) -> Vec<GlobalBlockInfo> {
-        self.service.get_global_blocks(&local_context()).await
-    }
+        /// Get patches available for a section
+        async fn get_patches(section_id: Uuid) -> Vec<PatchInfo>;
 
-    /// Get all available presets in the current profile
-    pub async fn get_available_presets(&self) -> Vec<PresetInfo> {
-        self.service.get_available_presets(&local_context()).await
-    }
+        /// Get all available setlists
+        async fn get_available_setlists() -> Vec<SetlistInfo>;
 
-    /// Get the currently loaded preset
-    pub async fn get_current_preset(&self) -> Option<PresetInfo> {
-        self.service.get_current_preset(&local_context()).await
-    }
+        /// Get the current setlist
+        async fn get_current_setlist() -> Option<SetlistInfo>;
 
-    /// Get presets by category (uses fallback resolution)
-    pub async fn get_presets_by_category(&self, category: PresetCategory) -> Vec<PresetInfo> {
-        self.service
-            .get_presets_by_category(&local_context(), category)
-            .await
-    }
+        /// Get all songs in the current setlist
+        async fn get_setlist_songs() -> Vec<SongInfo>;
 
-    /// Get patches available for a section
-    pub async fn get_patches(&self, section_id: Uuid) -> Vec<PatchInfo> {
-        self.service.get_patches(&local_context(), section_id).await
-    }
+        /// Get the current song
+        async fn get_current_song() -> Option<SongInfo>;
 
-    /// Get all available setlists
-    pub async fn get_available_setlists(&self) -> Vec<SetlistInfo> {
-        self.service.get_available_setlists(&local_context()).await
-    }
+        /// Get the current scene
+        async fn get_current_scene() -> Option<SceneInfo>;
 
-    /// Get the current setlist
-    pub async fn get_current_setlist(&self) -> Option<SetlistInfo> {
-        self.service.get_current_setlist(&local_context()).await
-    }
+        /// Execute a rig command
+        async fn execute(cmd: RigCommand) -> ();
 
-    /// Get all songs in the current setlist
-    pub async fn get_setlist_songs(&self) -> Vec<SongInfo> {
-        self.service.get_setlist_songs(&local_context()).await
-    }
+        /// Subscribe to all rig events
+        async fn subscribe(events: Tx<RigEvent>) -> ();
 
-    /// Get the current song
-    pub async fn get_current_song(&self) -> Option<SongInfo> {
-        self.service.get_current_song(&local_context()).await
-    }
-
-    /// Get the current scene
-    pub async fn get_current_scene(&self) -> Option<SceneInfo> {
-        self.service.get_current_scene(&local_context()).await
-    }
-
-    /// Execute a rig command
-    pub async fn execute(&self, cmd: RigCommand) {
-        self.service.execute(&local_context(), cmd).await;
-    }
-
-    /// Subscribe to rig events
-    pub async fn subscribe(&self, events: Tx<RigEvent>) {
-        self.service.subscribe(&local_context(), events).await;
-    }
-
-    /// Subscribe to parameter changes
-    pub async fn subscribe_parameters(&self, block_ids: Vec<Uuid>, values: Tx<(Uuid, u32, f64)>) {
-        self.service
-            .subscribe_parameters(&local_context(), block_ids, values)
-            .await;
-    }
-}
-
-// Implement PartialEq for Dioxus component props
-impl<S: RigService + Send + Sync + 'static> PartialEq for LocalRigClient<S> {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.service, &other.service)
+        /// Subscribe to parameter changes for specific blocks
+        async fn subscribe_parameters(block_ids: Vec<Uuid>, values: Tx<(Uuid, u32, f64)>) -> ();
     }
 }
 

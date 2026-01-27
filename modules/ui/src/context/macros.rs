@@ -47,15 +47,15 @@ macro_rules! define_service_context {
             }
 
             #[doc = "Provider component that injects the " $name:lower " service into context"]
-            #[::dioxus::prelude::component]
             pub fn [<$name ServiceProvider>](
                 client: $client_ty,
                 children: ::dioxus::prelude::Element
             ) -> ::dioxus::prelude::Element {
-                ::dioxus::prelude::use_context_provider(|| [<$name ServiceCtx>] {
+                use ::dioxus::prelude::*;
+                use_context_provider(move || [<$name ServiceCtx>] {
                     client: client.clone(),
                 });
-                ::dioxus::prelude::rsx! { {children} }
+                children
             }
         }
     };
