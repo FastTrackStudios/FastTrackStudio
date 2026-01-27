@@ -62,6 +62,7 @@ pub mod prelude {
             definitions as block_definitions, BlockCategory, BlockDefinition, BlockInstance,
             BlockParameter, ParameterFormat,
         },
+        registry::BlockRegistry,
         gesture::{GestureState, ScrollSensitivity, TouchGesture, TouchRecognizer},
         layout::{FormFactor, FormFactorCategory, LayoutConstraints, LevelOfDetail},
         macro_curve::{presets as macro_presets, CurveType, MacroControl, ParameterMapping},

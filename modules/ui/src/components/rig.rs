@@ -4,8 +4,9 @@
 //! including preset selection, scene navigation, and block controls.
 
 use audio_controls::prelude::{
-    block_definitions, BlockCategory, BlockDefinition, BlockInstance, BlockParameter as AudioBlockParameter,
-    BlockView, FormFactor, LayoutConstraints, LevelOfDetail, ParameterFormat, Pedalboard,
+    BlockCategory, BlockDefinition, BlockInstance, BlockParameter as AudioBlockParameter,
+    BlockRegistry, BlockView, FormFactor, LayoutConstraints, LevelOfDetail, ParameterFormat,
+    Pedalboard,
 };
 use dioxus::prelude::*;
 use fts::rig::core::{PresetTag, TagRegistry};
@@ -1108,25 +1109,7 @@ fn ViewModeButton(props: ViewModeButtonProps) -> Element {
 
 /// Get the appropriate BlockDefinition for a block name.
 fn get_block_definition(name: &str) -> BlockDefinition {
-    let name_lower = name.to_lowercase();
-
-    if name_lower.contains("drive") || name_lower.contains("od") || name_lower.contains("dist") {
-        block_definitions::drive()
-    } else if name_lower.contains("amp") {
-        block_definitions::amp()
-    } else if name_lower.contains("cab") || name_lower.contains("ir") {
-        block_definitions::cabinet()
-    } else if name_lower.contains("delay") || name_lower.contains("echo") {
-        block_definitions::delay()
-    } else if name_lower.contains("reverb") || name_lower.contains("verb") || name_lower.contains("room") || name_lower.contains("hall") {
-        block_definitions::reverb()
-    } else {
-        // Default to drive for unknown blocks
-        let mut def = block_definitions::drive();
-        def.name = name.to_string();
-        def.type_id = name.to_lowercase().replace(' ', "_");
-        def
-    }
+    BlockRegistry::global().lookup_by_name(name)
 }
 
 /// Create a BlockInstance from GlobalBlockInfo.
@@ -1532,49 +1515,13 @@ struct EffectiveBlockContainerProps {
 
 /// Get a block definition based on block type
 fn get_effective_block_definition(block: &EffectiveBlock) -> BlockDefinition {
-    let block_type = block.block_type.as_str();
+    let registry = BlockRegistry::global();
+    let type_id = block.block_type.to_lowercase();
 
-    let mut def = match block_type {
-        "Drive" => block_definitions::drive(),
-        "Amp" => block_definitions::amp(),
-        "Cabinet" => block_definitions::cabinet(),
-        "Delay" => block_definitions::delay(),
-        "Reverb" => block_definitions::reverb(),
-        "Compressor" => {
-            let mut d = block_definitions::drive();
-            d.name = "Compressor".to_string();
-            d.type_id = "compressor".to_string();
-            d.category = BlockCategory::Dynamics;
-            d
-        }
-        "Modulation" => {
-            let mut d = block_definitions::delay();
-            d.name = "Modulation".to_string();
-            d.type_id = "modulation".to_string();
-            d.category = BlockCategory::Modulation;
-            d
-        }
-        "EQ" | "Eq" => {
-            let mut d = block_definitions::drive();
-            d.name = "EQ".to_string();
-            d.type_id = "eq".to_string();
-            d.category = BlockCategory::Eq;
-            d
-        }
-        "Gate" => {
-            let mut d = block_definitions::drive();
-            d.name = "Gate".to_string();
-            d.type_id = "gate".to_string();
-            d.category = BlockCategory::Dynamics;
-            d
-        }
-        _ => {
-            let mut d = block_definitions::drive();
-            d.name = block.name.clone();
-            d.type_id = block.block_type.to_lowercase();
-            d
-        }
-    };
+    let mut def = registry
+        .get(&type_id)
+        .cloned()
+        .unwrap_or_else(|| registry.lookup_by_name(&block.block_type));
 
     // Set the actual block name
     def.name = block.name.clone();
