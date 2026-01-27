@@ -654,9 +654,7 @@ fn SetlistPreviewCard() -> Element {
             div {
                 class: "h-96 overflow-hidden",
 
-                SetlistServiceProvider { client,
-                    PerformanceView {}
-                }
+                {SetlistServiceProvider(client.clone(), rsx! { PerformanceView {} })}
             }
 
             // Overlay with CTA
@@ -2470,12 +2468,12 @@ fn ControlSetlist() -> Element {
     });
 
     rsx! {
-        SetlistServiceProvider { client,
+        {SetlistServiceProvider(client.clone(), rsx! {
             div {
                 class: "h-[calc(100vh-4rem)] w-full flex flex-col overflow-hidden bg-background",
                 PerformanceView {}
             }
-        }
+        })}
     }
 }
 
@@ -2496,12 +2494,12 @@ fn ControlRigGuitar() -> Element {
     });
 
     rsx! {
-        RigServiceProvider { client,
+        {RigServiceProvider(client.clone(), rsx! {
             div {
                 class: "h-[calc(100vh-4rem)] w-full flex flex-col overflow-hidden bg-background",
                 RigControlView {}
             }
-        }
+        })}
     }
 }
 
