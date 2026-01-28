@@ -427,19 +427,14 @@ fn debug_midi_and_sections_handler() {
     // Read MIDI notes
     let midi_notes = read::read_midi_notes_from_track(current_project.clone(), chords_track);
 
-    // Get setlist and sections
-    use fts::setlist::infra::traits::SetlistBuilder;
+    // Read markers and regions for section info
     use reaper_high::Reaper;
-    let project_name = if let Some(file_path) = current_project.file() {
-        if let Some(file_name) = file_path.file_stem() {
-            let name = file_name.to_string();
-            Some(name)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let markers = read::read_markers_from_project(current_project.clone());
+    let regions = read::read_regions_from_project(current_project.clone());
+    let boundaries = read::find_song_boundaries(&markers, &regions);
+    let section_regions = boundaries
+        .as_ref()
+        .map(|b| read::get_sections_from_regions(&regions, b));
 
     // Get tempo for PPQ to seconds conversion
     let ppq_resolution = 480.0;
@@ -598,159 +593,121 @@ fn debug_midi_and_sections_handler() {
         ));
     }
 
-    debug_output.push_str("=== Sections ===\n");
+    debug_output.push_str("=== Markers & Regions ===\n");
 
-    let reaper = Reaper::get();
-    if let Ok(setlist) = reaper.build_setlist_from_open_projects(None) {
-        if let Some(name) = project_name {
-            if let Some(song) = setlist
-                .songs
+    // Show markers
+    debug_output.push_str(&format!("Markers: {}\n", markers.len()));
+    for m in &markers {
+        debug_output.push_str(&format!("  '{}' at {:.3}s\n", m.name, m.position_seconds));
+    }
+
+    // Show boundaries
+    if let Some(ref bounds) = boundaries {
+        debug_output.push_str(&format!(
+            "\nSong boundaries: start={:.3}s, end={:.3}s",
+            bounds.song_start, bounds.song_end
+        ));
+        if let Some(ci) = bounds.count_in_start {
+            debug_output.push_str(&format!(", count_in={:.3}s", ci));
+        }
+        debug_output.push('\n');
+    } else {
+        debug_output.push_str("\nNo SONGSTART marker found - no song boundaries\n");
+    }
+
+    debug_output.push_str("\n=== Sections ===\n");
+
+    if let Some(ref sections) = section_regions {
+        debug_output.push_str(&format!("{} sections found\n\n", sections.len()));
+
+        for (idx, section) in sections.iter().enumerate() {
+            let start_sec = section.start_seconds;
+            let end_sec = section.end_seconds;
+            let duration = end_sec - start_sec;
+
+            debug_output.push_str(&format!(
+                "Section {}: '{}' [{:.3}s - {:.3}s, dur: {:.3}s]\n",
+                idx + 1,
+                section.name,
+                start_sec,
+                end_sec,
+                duration
+            ));
+
+            // Find notes and chords in this section
+            let notes_in_section: Vec<_> = midi_notes
                 .iter()
-                .find(|s| s.name == name || s.name.contains(&name) || name.contains(&s.name))
-            {
+                .filter(|note| {
+                    let note_time = ppq_to_seconds(note.start_ppq);
+                    let note_end_time = ppq_to_seconds(note.end_ppq);
+                    note_time < end_sec && note_end_time > start_sec
+                })
+                .collect();
+
+            let chords_in_section: Vec<_> = detected_chords
+                .iter()
+                .filter(|chord| {
+                    let chord_start = ppq_to_seconds(chord.start_ppq);
+                    chord_start >= start_sec && chord_start < end_sec
+                })
+                .collect();
+
+            debug_output.push_str(&format!(
+                "  Notes: {} | Chords: {}\n",
+                notes_in_section.len(),
+                chords_in_section.len()
+            ));
+
+            // Group notes by start_ppq within this section
+            let mut section_notes_by_time: BTreeMap<i64, Vec<&read::MidiNote>> =
+                BTreeMap::new();
+            for note in &notes_in_section {
+                section_notes_by_time
+                    .entry(note.start_ppq)
+                    .or_insert_with(Vec::new)
+                    .push(note);
+            }
+
+            // Show note groups with chords (first 8 groups per section)
+            for (start_ppq, notes) in section_notes_by_time.iter().take(8) {
+                let note_time = ppq_to_seconds(*start_ppq);
+                let mut notes_with_pitch: Vec<(u8, String)> = notes
+                    .iter()
+                    .map(|n| (n.pitch, midi_pitch_to_note_name(n.pitch)))
+                    .collect();
+                notes_with_pitch.sort_by_key(|(pitch, _)| *pitch);
+                let sorted_note_names: Vec<String> = notes_with_pitch
+                    .iter()
+                    .map(|(_, name)| name.clone())
+                    .collect();
+
+                let note_ppq_pos = PPQPosition::new(*start_ppq);
+
                 debug_output.push_str(&format!(
-                    "Song: {} | {} sections\n\n",
-                    song.name,
-                    song.sections.len()
+                    "  [{:6.2}s] [{}] | PPQ: {}",
+                    note_time,
+                    sorted_note_names.join(", "),
+                    note_ppq_pos
                 ));
 
-                for (idx, section) in song.sections.iter().enumerate() {
-                    let start_sec = section.start_seconds().unwrap_or(0.0);
-                    let end_sec = section.end_seconds().unwrap_or(0.0);
-                    let duration = end_sec - start_sec;
-
-                    debug_output.push_str(&format!(
-                        "Section {}: {} [{:.3}s - {:.3}s, dur: {:.3}s]\n",
-                        idx + 1,
-                        section.display_name(),
-                        start_sec,
-                        end_sec,
-                        duration
-                    ));
-
-                    // Log all chords and whether they overlap with this section
-                    debug_output.push_str(&format!(
-                        "  Section boundaries: start={:.3}s, end={:.3}s\n",
-                        start_sec, end_sec
-                    ));
-
-                    // Find notes and chords in this section (using overlap logic like build.rs)
-                    let notes_in_section: Vec<_> = midi_notes
-                        .iter()
-                        .filter(|note| {
-                            let note_time = ppq_to_seconds(note.start_ppq);
-                            let note_end_time = ppq_to_seconds(note.end_ppq);
-                            // Overlap check: note starts before section ends AND note ends after section starts
-                            note_time < end_sec && note_end_time > start_sec
-                        })
-                        .collect();
-
-                    let chords_in_section: Vec<_> = detected_chords
-                        .iter()
-                        .filter(|chord| {
-                            let chord_start = ppq_to_seconds(chord.start_ppq);
-                            // Chord must start at or after section start and before section end
-                            chord_start >= start_sec && chord_start < end_sec
-                        })
-                        .collect();
-
-                    // Log overlap check for first few chords
-                    debug_output.push_str(&format!(
-                        "  Checking chord overlap (section: {:.3}s - {:.3}s):\n",
-                        start_sec, end_sec
-                    ));
-                    for (i, chord) in detected_chords.iter().take(5).enumerate() {
-                        let chord_start = ppq_to_seconds(chord.start_ppq);
-                        let chord_end = ppq_to_seconds(chord.end_ppq);
-                        let overlaps = chord_start < end_sec && chord_end > start_sec;
-                        debug_output.push_str(&format!(
-                            "    Chord {}: {} | start={:.3}s, end={:.3}s | overlaps={}\n",
-                            i + 1,
-                            chord.chord.to_string(),
-                            chord_start,
-                            chord_end,
-                            overlaps
-                        ));
-                    }
-
-                    debug_output.push_str(&format!(
-                        "  Notes: {} | Chords: {}\n",
-                        notes_in_section.len(),
-                        chords_in_section.len()
-                    ));
-
-                    // Group notes by start_ppq within this section
-                    let mut section_notes_by_time: BTreeMap<i64, Vec<&read::MidiNote>> =
-                        BTreeMap::new();
-                    for note in &notes_in_section {
-                        section_notes_by_time
-                            .entry(note.start_ppq)
-                            .or_insert_with(Vec::new)
-                            .push(note);
-                    }
-
-                    // Show note groups with chords (first 8 groups per section)
-                    let mut shown_groups = 0;
-                    for (start_ppq, notes) in section_notes_by_time.iter().take(8) {
-                        shown_groups += 1;
-                        let note_time = ppq_to_seconds(*start_ppq);
-                        // Sort notes by MIDI pitch (ascending)
-                        let mut notes_with_pitch: Vec<(u8, String)> = notes
-                            .iter()
-                            .map(|n| (n.pitch, midi_pitch_to_note_name(n.pitch)))
-                            .collect();
-                        notes_with_pitch.sort_by_key(|(pitch, _)| *pitch);
-                        let sorted_note_names: Vec<String> = notes_with_pitch
-                            .iter()
-                            .map(|(_, name)| name.clone())
-                            .collect();
-
-                        // Convert to musical position
-                        let note_ppq_pos = PPQPosition::new(*start_ppq);
-                        let note_total_beats = *start_ppq as f64 / ppq_resolution;
-                        let note_measures = (note_total_beats / beats_per_measure).floor() as i32;
-                        let note_beats = (note_total_beats % beats_per_measure).floor() as i32;
-                        let note_subdivision = ((note_total_beats % 1.0) * 1000.0).round() as i32;
-                        let note_musical_pos = MusicalPosition::try_new(
-                            note_measures,
-                            note_beats,
-                            note_subdivision.clamp(0, 999),
-                        )
-                        .unwrap_or_else(|_| MusicalPosition::start());
-
-                        debug_output.push_str(&format!(
-                            "  [{:6.2}s] [{}] | PPQ: {} | Pos: {}",
-                            note_time,
-                            sorted_note_names.join(", "),
-                            note_ppq_pos,
-                            note_musical_pos
-                        ));
-
-                        // Show chord if detected at this time
-                        if let Some(chord) = chord_by_start.get(start_ppq) {
-                            debug_output.push_str(&format!(" → {}\n", chord.chord.to_string()));
-                        } else {
-                            debug_output.push_str(" → (no chord)\n");
-                        }
-                    }
-
-                    if section_notes_by_time.len() > 8 {
-                        debug_output.push_str(&format!(
-                            "  ... and {} more note groups\n",
-                            section_notes_by_time.len() - 8
-                        ));
-                    }
-
-                    debug_output.push('\n');
+                if let Some(chord) = chord_by_start.get(start_ppq) {
+                    debug_output.push_str(&format!(" → {}\n", chord.chord.to_string()));
+                } else {
+                    debug_output.push_str(" → (no chord)\n");
                 }
-            } else {
-                debug_output.push_str(&format!("Song '{}' not found in setlist\n", name));
             }
-        } else {
-            debug_output.push_str("Could not determine project name\n");
+
+            if section_notes_by_time.len() > 8 {
+                debug_output.push_str(&format!(
+                    "  ... and {} more note groups\n",
+                    section_notes_by_time.len() - 8
+                ));
+            }
+
+            debug_output.push('\n');
         }
     } else {
-        debug_output.push_str("Failed to build setlist\n");
+        debug_output.push_str("No sections found (no SONGSTART marker or no regions)\n");
     }
 
     debug_output.push_str("\n=====================================\n");

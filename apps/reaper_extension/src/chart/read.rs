@@ -263,6 +263,229 @@ pub fn read_key_from_track(project: Project) -> Option<keyflow::Key> {
     None
 }
 
+/// A project marker (single time point)
+#[derive(Debug, Clone)]
+pub struct ProjectMarker {
+    pub name: String,
+    pub position_seconds: f64,
+}
+
+/// A project region (time range)
+#[derive(Debug, Clone)]
+pub struct ProjectRegion {
+    pub name: String,
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+}
+
+/// Song boundaries derived from markers
+#[derive(Debug, Clone)]
+pub struct SongBoundaries {
+    /// SONGSTART marker position in seconds
+    pub song_start: f64,
+    /// SONGEND marker position in seconds (or end of last region/item)
+    pub song_end: f64,
+    /// Count-In marker position in seconds (if present, before SONGSTART)
+    pub count_in_start: Option<f64>,
+}
+
+/// Read all markers from the current project
+pub fn read_markers_from_project(project: Project) -> Vec<ProjectMarker> {
+    let mut markers = Vec::new();
+    let bookmark_count = project.bookmark_count();
+
+    for i in 0..bookmark_count.total_count {
+        if let Some(bookmark) = project.find_bookmark_by_index(i) {
+            let info = bookmark.basic_info();
+
+            if info.bookmark_type() == reaper_high::BookmarkType::Marker {
+                let position_seconds: f64 = info.position.into();
+                let name = bookmark.name().to_string().trim().to_string();
+
+                tracing::debug!("Found marker: '{}' at {:.3}s", name, position_seconds);
+                markers.push(ProjectMarker {
+                    name,
+                    position_seconds,
+                });
+            }
+        }
+    }
+
+    markers.sort_by(|a, b| {
+        a.position_seconds
+            .partial_cmp(&b.position_seconds)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    markers
+}
+
+/// Read all regions from the current project
+pub fn read_regions_from_project(project: Project) -> Vec<ProjectRegion> {
+    let mut regions = Vec::new();
+    let bookmark_count = project.bookmark_count();
+
+    for i in 0..bookmark_count.total_count {
+        if let Some(bookmark) = project.find_bookmark_by_index(i) {
+            let info = bookmark.basic_info();
+
+            if info.bookmark_type() == reaper_high::BookmarkType::Region {
+                if let Some(end_position) = info.region_end_position {
+                    let start_seconds: f64 = info.position.into();
+                    let end_seconds: f64 = end_position.into();
+                    let name = bookmark.name().to_string().trim().to_string();
+
+                    tracing::debug!(
+                        "Found region: '{}' at {:.3}s - {:.3}s",
+                        name,
+                        start_seconds,
+                        end_seconds
+                    );
+                    regions.push(ProjectRegion {
+                        name,
+                        start_seconds,
+                        end_seconds,
+                    });
+                }
+            }
+        }
+    }
+
+    regions.sort_by(|a, b| {
+        a.start_seconds
+            .partial_cmp(&b.start_seconds)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    regions
+}
+
+/// Find song boundaries from markers
+///
+/// Looks for:
+/// - SONGSTART marker (required) - defines the song start
+/// - SONGEND marker (optional) - defines the song end
+/// - Count-In marker (optional) - defines count-in start before SONGSTART
+///
+/// Returns None if no SONGSTART marker is found.
+pub fn find_song_boundaries(
+    markers: &[ProjectMarker],
+    regions: &[ProjectRegion],
+) -> Option<SongBoundaries> {
+    // Find SONGSTART marker (case-insensitive)
+    let song_start_marker = markers
+        .iter()
+        .find(|m| m.name.eq_ignore_ascii_case("SONGSTART"));
+
+    let song_start = match song_start_marker {
+        Some(m) => m.position_seconds,
+        None => {
+            tracing::warn!("No SONGSTART marker found in project");
+            return None;
+        }
+    };
+
+    // Find SONGEND marker (case-insensitive)
+    let song_end = markers
+        .iter()
+        .find(|m| m.name.eq_ignore_ascii_case("SONGEND"))
+        .map(|m| m.position_seconds)
+        .unwrap_or_else(|| {
+            // Fallback: use the end of the last region that starts after SONGSTART,
+            // or a large value if no regions
+            regions
+                .iter()
+                .filter(|r| r.start_seconds >= song_start)
+                .map(|r| r.end_seconds)
+                .fold(f64::NEG_INFINITY, f64::max)
+                .max(song_start + 1.0) // At least 1 second after song start
+        });
+
+    // Find Count-In marker (case-insensitive)
+    let count_in_start = markers
+        .iter()
+        .find(|m| m.name.eq_ignore_ascii_case("Count-In"))
+        .map(|m| m.position_seconds)
+        .filter(|&pos| pos < song_start); // Only valid if before SONGSTART
+
+    tracing::info!(
+        "Song boundaries: start={:.3}s, end={:.3}s, count_in={:?}",
+        song_start,
+        song_end,
+        count_in_start
+    );
+
+    Some(SongBoundaries {
+        song_start,
+        song_end,
+        count_in_start,
+    })
+}
+
+/// Get sections from regions that fall between SONGSTART and SONGEND
+///
+/// Returns regions as sections, filtered to only those within the song boundaries.
+/// Also adds a Count-In section if a Count-In marker exists before SONGSTART.
+pub fn get_sections_from_regions(
+    regions: &[ProjectRegion],
+    boundaries: &SongBoundaries,
+) -> Vec<ProjectRegion> {
+    let mut sections: Vec<ProjectRegion> = regions
+        .iter()
+        .filter(|r| {
+            // Region must be within song boundaries
+            // Allow small tolerance (0.01s) for regions that start exactly at SONGSTART
+            let within = r.start_seconds >= (boundaries.song_start - 0.01)
+                && r.end_seconds <= (boundaries.song_end + 0.01);
+
+            // Exclude the outermost region that spans the entire song
+            // (this is the "song region" wrapper, not a section)
+            let is_song_wrapper = (r.start_seconds - boundaries.song_start).abs() < 0.01
+                && (r.end_seconds - boundaries.song_end).abs() < 0.01;
+
+            let include = within && !is_song_wrapper;
+            if include {
+                tracing::debug!(
+                    "  Section region: '{}' ({:.3}s - {:.3}s)",
+                    r.name,
+                    r.start_seconds,
+                    r.end_seconds
+                );
+            }
+            include
+        })
+        .cloned()
+        .collect();
+
+    // Add Count-In section if present
+    if let Some(count_in_start) = boundaries.count_in_start {
+        sections.push(ProjectRegion {
+            name: "Count-In".to_string(),
+            start_seconds: count_in_start,
+            end_seconds: boundaries.song_start,
+        });
+    }
+
+    // Sort by start time
+    sections.sort_by(|a, b| {
+        a.start_seconds
+            .partial_cmp(&b.start_seconds)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    tracing::info!("Found {} sections within song boundaries", sections.len());
+    for s in &sections {
+        tracing::info!(
+            "  Section: '{}' ({:.3}s - {:.3}s)",
+            s.name,
+            s.start_seconds,
+            s.end_seconds
+        );
+    }
+
+    sections
+}
+
 /// Parse a key from a string like "C", "Cm", "F#m", "Bb major", "Eb minor"
 fn parse_key_from_string(s: &str) -> Option<keyflow::Key> {
     let s = s.trim();

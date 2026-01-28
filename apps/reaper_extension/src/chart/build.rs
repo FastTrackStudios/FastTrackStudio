@@ -2,18 +2,16 @@
 
 use super::detection::DetectedChord;
 use super::read;
-use fts::setlist::infra::traits::SetlistBuilder;
 use keyflow::chart::{Chart, ChartSection, ChordInstance, Measure};
 use keyflow::chord::ChordRhythm;
 use keyflow::key::Key;
-use keyflow::primitives::RootNotation;
 use keyflow::sections::{Section, SectionType};
 use keyflow::time::{
     AbsolutePosition, MusicalDuration, MusicalPosition, PPQDuration, PPQPosition, Tempo,
     TimeSignature,
 };
 use reaper_high::{Project, Reaper};
-use reaper_medium::{MediaItemTake, ProjectRef};
+use reaper_medium::MediaItemTake;
 use tracing::warn;
 
 /// Build a Chart from detected chords
@@ -51,38 +49,8 @@ pub fn build_chart_from_chords(
     let bpm = tempo_bpm.unwrap_or(120.0);
     chart.tempo = Some(Tempo::new(bpm));
 
-    // Get time signature from REAPER project using the same logic as setlist service
-    // Use the setlist building function which already handles tempo/time signature reading
-    // We'll get the time signature from the song's starting_time_signature if available
-    let time_sig = {
-        // Try to get time signature from setlist (which reads from tempo/time sig markers)
-        // Use the trait method directly on the Reaper instance (operates on all open projects)
-        let reaper = Reaper::get();
-        if let Ok(setlist) = reaper.build_setlist_from_open_projects(None) {
-            // Find the current song by project name (reuse project_name from above)
-            if let Some(ref name) = project_name {
-                if let Some(song) = setlist.songs.iter().find(|s| s.name == *name) {
-                    if let Some(ts) = song.starting_time_signature {
-                        tracing::debug!(
-                            "Using time signature from setlist song '{}': {}/{}",
-                            name,
-                            ts.numerator,
-                            ts.denominator
-                        );
-                        ts
-                    } else {
-                        TimeSignature::new(4, 4) // Fallback to 4/4
-                    }
-                } else {
-                    TimeSignature::new(4, 4) // Fallback to 4/4
-                }
-            } else {
-                TimeSignature::new(4, 4) // Fallback to 4/4
-            }
-        } else {
-            TimeSignature::new(4, 4) // Fallback to 4/4
-        }
-    };
+    // Default time signature (TODO: read from project tempo/time sig markers)
+    let time_sig = TimeSignature::new(4, 4);
 
     tracing::debug!(
         "Chart time signature: {}/{}",
@@ -97,22 +65,15 @@ pub fn build_chart_from_chords(
         return chart;
     }
 
-    // Get setlist and find current song
-    // Use the trait method directly on the Reaper instance (operates on all open projects)
-    let reaper = Reaper::get();
-    let song_sections = if let Ok(setlist) = reaper.build_setlist_from_open_projects(None) {
-        project_name.and_then(|name| {
-            setlist
-                .songs
-                .iter()
-                .find(|song| {
-                    song.name == name || song.name.contains(&name) || name.contains(&song.name)
-                })
-                .map(|song| song.sections.clone())
-        })
-    } else {
-        None
-    };
+    // Read markers and regions directly from the project
+    let markers = read::read_markers_from_project(project.clone());
+    let regions = read::read_regions_from_project(project.clone());
+
+    // Find song boundaries from SONGSTART/SONGEND/Count-In markers
+    let boundaries = read::find_song_boundaries(&markers, &regions);
+
+    // Get sections from regions within the song boundaries
+    let section_regions = boundaries.as_ref().map(|b| read::get_sections_from_regions(&regions, b));
 
     // Get a MIDI take from the project to use for PPQ conversions
     // We'll use the CHORDS track if available, otherwise any MIDI take
@@ -269,204 +230,251 @@ pub fn build_chart_from_chords(
         });
     }
 
-    // If we have sections from the setlist, organize chords by section
-    if let Some(sections) = song_sections {
-        // Group chords by section based on time position
-        for setlist_section in sections {
-            let section_start = setlist_section.start_seconds().unwrap_or(0.0);
-            let section_end = setlist_section.end_seconds().unwrap_or(f64::MAX);
+    // If we have section regions, organize chords by section
+    if let Some(ref regions) = section_regions {
+        if !regions.is_empty() {
+            // Group chords by section based on time position
+            for region in regions {
+                let section_start = region.start_seconds;
+                let section_end = region.end_seconds;
 
-            // Log section boundaries for debugging
-            tracing::debug!(
-                "Section '{}': start={:.3}s, end={:.3}s",
-                setlist_section.display_name(),
-                section_start,
-                section_end
-            );
+                // Log section boundaries for debugging
+                tracing::debug!(
+                    "Section '{}': start={:.3}s, end={:.3}s",
+                    region.name,
+                    section_start,
+                    section_end
+                );
 
-            // Find all chords that are within this section's time range
-            // A chord is in the section if:
-            // - It starts at or after the section starts AND
-            // - It starts before the section ends
-            // This excludes chords that start before the section (even if they extend into it)
-            let section_chords: Vec<_> = chords_with_time
-                .iter()
-                .filter(|cwt| {
-                    let in_section =
-                        cwt.time_seconds >= section_start && cwt.time_seconds < section_end;
-                    if in_section {
-                        tracing::debug!(
-                            "  Chord {} ({} - {:.3}s) is in section '{}' ({:.3}s - {:.3}s)",
-                            cwt.instance.full_symbol,
-                            cwt.time_seconds,
-                            cwt.end_time_seconds,
-                            setlist_section.display_name(),
-                            section_start,
-                            section_end
-                        );
-                    }
-                    in_section
-                })
-                .collect();
+                // Find all chords that are within this section's time range
+                let section_chords: Vec<_> = chords_with_time
+                    .iter()
+                    .filter(|cwt| {
+                        let in_section =
+                            cwt.time_seconds >= section_start && cwt.time_seconds < section_end;
+                        if in_section {
+                            tracing::debug!(
+                                "  Chord {} ({:.3}s - {:.3}s) in section '{}' ({:.3}s - {:.3}s)",
+                                cwt.instance.full_symbol,
+                                cwt.time_seconds,
+                                cwt.end_time_seconds,
+                                region.name,
+                                section_start,
+                                section_end
+                            );
+                        }
+                        in_section
+                    })
+                    .collect();
 
-            if section_chords.is_empty() {
-                continue;
-            }
-
-            // Convert section start to PPQ and musical position to calculate offset
-            let section_start_ppq = if let Some(take) = midi_take {
-                let reaper = Reaper::get();
-                let low_reaper = reaper.medium_reaper().low();
-                // Convert section start time to PPQ
-                unsafe {
-                    low_reaper.MIDI_GetPPQPosFromProjTime(take.as_ptr(), section_start) as i64
+                if section_chords.is_empty() {
+                    continue;
                 }
-            } else {
-                // Fallback: manual calculation
-                (section_start / (60.0 / bpm) * ppq_resolution) as i64
-            };
 
-            // Get the musical position of the section start to use as offset
-            let section_start_position = ppq_to_musical_position(section_start_ppq);
-            let section_start_measure = section_start_position.measure;
-
-            // Organize chords into measures for this section
-            // Measure 1.0 should be at the section start, so we offset by (section_start_measure - 1)
-            // This means if section starts at measure 5, offset = 4, so measure 5 becomes measure 1
-            let measure_offset = section_start_measure - 1;
-            let mut measures: Vec<Measure> = Vec::new();
-            let mut current_measure_chords: Vec<ChordInstance> = Vec::new();
-            let mut current_measure_index: Option<i32> = None;
-
-            // Get the time signature for this section (use chart's time signature or default to 4/4)
-            let time_sig_tuple = chart
-                .time_signature
-                .map(|ts| (ts.numerator as u8, ts.denominator as u8))
-                .unwrap_or((4, 4));
-
-            tracing::debug!(
-                "Building measures for section '{}' with time signature: {}/{}",
-                setlist_section.display_name(),
-                time_sig_tuple.0,
-                time_sig_tuple.1
-            );
-
-            for chord_with_time in section_chords {
-                // Calculate measure relative to section start
-                // Measure 1.0 should be at the section start
-                let chord_measure_absolute = chord_with_time.position.measure;
-                let mut chord_measure_relative = chord_measure_absolute - measure_offset;
-
-                // Ensure relative measure is at least 1 (measure 1.0 is section start)
-                chord_measure_relative = chord_measure_relative.max(1);
-
-                // If we've moved to a new measure, finalize the current one
-                if let Some(measure_idx) = current_measure_index {
-                    if chord_measure_relative > measure_idx {
-                        // Add any remaining chords to current measure
-                        if !current_measure_chords.is_empty() {
-                            let measure = Measure::new()
-                                .with_chords(current_measure_chords.clone())
-                                .with_time_signature(time_sig_tuple);
-                            measures.push(measure);
-                        }
-
-                        // Start new measure(s) if there's a gap
-                        let mut gap_measure = measure_idx + 1;
-                        while gap_measure < chord_measure_relative {
-                            measures.push(Measure::new().with_time_signature(time_sig_tuple));
-                            gap_measure += 1;
-                        }
-
-                        current_measure_chords = Vec::new();
-                        current_measure_index = Some(chord_measure_relative);
+                // Convert section start to PPQ and musical position to calculate offset
+                let section_start_ppq = if let Some(take) = midi_take {
+                    let reaper = Reaper::get();
+                    let low_reaper = reaper.medium_reaper().low();
+                    unsafe {
+                        low_reaper.MIDI_GetPPQPosFromProjTime(take.as_ptr(), section_start) as i64
                     }
                 } else {
-                    // First chord in section
-                    // Measure 1.0 should be at section start
-                    // If the first chord is not at measure 1, add empty measures before it
-                    if chord_measure_relative > 1 {
-                        // Add empty measures from 1 to chord_measure_relative - 1
-                        for _ in 1..chord_measure_relative {
-                            measures.push(Measure::new().with_time_signature(time_sig_tuple));
+                    (section_start / (60.0 / bpm) * ppq_resolution) as i64
+                };
+
+                // Get the musical position of the section start to use as offset
+                let section_start_position = ppq_to_musical_position(section_start_ppq);
+                let section_start_measure = section_start_position.measure;
+
+                // Organize chords into measures for this section
+                let measure_offset = section_start_measure - 1;
+                let mut measures: Vec<Measure> = Vec::new();
+                let mut current_measure_chords: Vec<ChordInstance> = Vec::new();
+                let mut current_measure_index: Option<i32> = None;
+
+                let time_sig_tuple = chart
+                    .time_signature
+                    .map(|ts| (ts.numerator as u8, ts.denominator as u8))
+                    .unwrap_or((4, 4));
+
+                tracing::debug!(
+                    "Building measures for section '{}' with time signature: {}/{}",
+                    region.name,
+                    time_sig_tuple.0,
+                    time_sig_tuple.1
+                );
+
+                for chord_with_time in section_chords {
+                    let chord_measure_absolute = chord_with_time.position.measure;
+                    let mut chord_measure_relative = chord_measure_absolute - measure_offset;
+                    chord_measure_relative = chord_measure_relative.max(1);
+
+                    if let Some(measure_idx) = current_measure_index {
+                        if chord_measure_relative > measure_idx {
+                            if !current_measure_chords.is_empty() {
+                                let measure = Measure::new()
+                                    .with_chords(current_measure_chords.clone())
+                                    .with_time_signature(time_sig_tuple);
+                                measures.push(measure);
+                            }
+
+                            let mut gap_measure = measure_idx + 1;
+                            while gap_measure < chord_measure_relative {
+                                measures.push(Measure::new().with_time_signature(time_sig_tuple));
+                                gap_measure += 1;
+                            }
+
+                            current_measure_chords = Vec::new();
+                            current_measure_index = Some(chord_measure_relative);
                         }
+                    } else {
+                        if chord_measure_relative > 1 {
+                            for _ in 1..chord_measure_relative {
+                                measures.push(Measure::new().with_time_signature(time_sig_tuple));
+                            }
+                        }
+                        current_measure_index = Some(chord_measure_relative);
                     }
-                    current_measure_index = Some(chord_measure_relative);
+
+                    current_measure_chords.push(chord_with_time.instance.clone());
                 }
 
-                current_measure_chords.push(chord_with_time.instance.clone());
-            }
-
-            // Add final measure
-            if !current_measure_chords.is_empty() {
-                let measure = Measure::new()
-                    .with_chords(current_measure_chords)
-                    .with_time_signature(time_sig_tuple);
-                measures.push(measure);
-            }
-
-            // Create chart section from setlist section
-            let chart_section = ChartSection::new(setlist_section.clone()).with_measures(measures);
-            chart.sections.push(chart_section);
-        }
-    } else {
-        // Fallback: if no sections found, create a single "Detected Chords" section
-        // Get the time signature for the fallback section
-        let time_sig_tuple = chart
-            .time_signature
-            .map(|ts| (ts.numerator as u8, ts.denominator as u8))
-            .unwrap_or((4, 4));
-
-        tracing::debug!(
-            "Building fallback section with time signature: {}/{}",
-            time_sig_tuple.0,
-            time_sig_tuple.1
-        );
-
-        // Organize all chords into measures
-        let mut measures: Vec<Measure> = Vec::new();
-        let mut current_measure_chords: Vec<ChordInstance> = Vec::new();
-        let mut current_measure_index: Option<usize> = None;
-
-        for chord_with_time in &chords_with_time {
-            let chord_measure = (chord_with_time.ppq_position.ppq / ticks_per_measure) as usize;
-
-            if let Some(measure_idx) = current_measure_index {
-                if chord_measure > measure_idx {
-                    if !current_measure_chords.is_empty() {
-                        let measure = Measure::new()
-                            .with_chords(current_measure_chords.clone())
-                            .with_time_signature(time_sig_tuple);
-                        measures.push(measure);
-                    }
-
-                    let mut gap_measure = measure_idx + 1;
-                    while gap_measure < chord_measure {
-                        measures.push(Measure::new().with_time_signature(time_sig_tuple));
-                        gap_measure += 1;
-                    }
-
-                    current_measure_chords = Vec::new();
-                    current_measure_index = Some(chord_measure);
+                // Add final measure
+                if !current_measure_chords.is_empty() {
+                    let measure = Measure::new()
+                        .with_chords(current_measure_chords)
+                        .with_time_signature(time_sig_tuple);
+                    measures.push(measure);
                 }
-            } else {
-                current_measure_index = Some(chord_measure);
+
+                // Parse section type from region name
+                let section = parse_section_from_region_name(&region.name);
+                let chart_section = ChartSection::new(section).with_measures(measures);
+                chart.sections.push(chart_section);
             }
 
-            current_measure_chords.push(chord_with_time.instance.clone());
+            return chart;
         }
-
-        if !current_measure_chords.is_empty() {
-            let measure = Measure::new()
-                .with_chords(current_measure_chords)
-                .with_time_signature(time_sig_tuple);
-            measures.push(measure);
-        }
-
-        let section = Section::new(SectionType::Custom("Detected Chords".to_string()));
-        let chart_section = ChartSection::new(section).with_measures(measures);
-        chart.sections.push(chart_section);
     }
 
+    // Fallback: no sections found - use all chords between SONGSTART and SONGEND
+    // (or all chords if no boundaries found)
+    let time_sig_tuple = chart
+        .time_signature
+        .map(|ts| (ts.numerator as u8, ts.denominator as u8))
+        .unwrap_or((4, 4));
+
+    // Filter chords to song boundaries if available
+    let filtered_chords: Vec<&ChordWithTime> = if let Some(ref bounds) = boundaries {
+        chords_with_time
+            .iter()
+            .filter(|cwt| {
+                cwt.time_seconds >= bounds.song_start && cwt.time_seconds < bounds.song_end
+            })
+            .collect()
+    } else {
+        chords_with_time.iter().collect()
+    };
+
+    tracing::debug!(
+        "Building fallback section with {} chords, time signature: {}/{}",
+        filtered_chords.len(),
+        time_sig_tuple.0,
+        time_sig_tuple.1
+    );
+
+    // Organize chords into measures
+    let mut measures: Vec<Measure> = Vec::new();
+    let mut current_measure_chords: Vec<ChordInstance> = Vec::new();
+    let mut current_measure_index: Option<i32> = None;
+
+    // Calculate measure offset from song start
+    let song_start_measure_offset = if let Some(ref bounds) = boundaries {
+        let song_start_ppq = if let Some(take) = midi_take {
+            let reaper = Reaper::get();
+            let low_reaper = reaper.medium_reaper().low();
+            unsafe {
+                low_reaper.MIDI_GetPPQPosFromProjTime(take.as_ptr(), bounds.song_start) as i64
+            }
+        } else {
+            (bounds.song_start / (60.0 / bpm) * ppq_resolution) as i64
+        };
+        ppq_to_musical_position(song_start_ppq).measure - 1
+    } else {
+        0
+    };
+
+    for chord_with_time in &filtered_chords {
+        let chord_measure_absolute = chord_with_time.position.measure;
+        let mut chord_measure_relative = chord_measure_absolute - song_start_measure_offset;
+        chord_measure_relative = chord_measure_relative.max(1);
+
+        if let Some(measure_idx) = current_measure_index {
+            if chord_measure_relative > measure_idx {
+                if !current_measure_chords.is_empty() {
+                    let measure = Measure::new()
+                        .with_chords(current_measure_chords.clone())
+                        .with_time_signature(time_sig_tuple);
+                    measures.push(measure);
+                }
+
+                let mut gap_measure = measure_idx + 1;
+                while gap_measure < chord_measure_relative {
+                    measures.push(Measure::new().with_time_signature(time_sig_tuple));
+                    gap_measure += 1;
+                }
+
+                current_measure_chords = Vec::new();
+                current_measure_index = Some(chord_measure_relative);
+            }
+        } else {
+            if chord_measure_relative > 1 {
+                for _ in 1..chord_measure_relative {
+                    measures.push(Measure::new().with_time_signature(time_sig_tuple));
+                }
+            }
+            current_measure_index = Some(chord_measure_relative);
+        }
+
+        current_measure_chords.push(chord_with_time.instance.clone());
+    }
+
+    if !current_measure_chords.is_empty() {
+        let measure = Measure::new()
+            .with_chords(current_measure_chords)
+            .with_time_signature(time_sig_tuple);
+        measures.push(measure);
+    }
+
+    let section_name = if boundaries.is_some() {
+        "Song"
+    } else {
+        "Detected Chords"
+    };
+    let section = Section::new(SectionType::Custom(section_name.to_string()));
+    let chart_section = ChartSection::new(section).with_measures(measures);
+    chart.sections.push(chart_section);
+
     chart
+}
+
+/// Parse a section type from a REAPER region name
+///
+/// Attempts to match common section names (Verse, Chorus, Bridge, etc.)
+/// Falls back to Custom section type for unrecognized names.
+fn parse_section_from_region_name(name: &str) -> Section {
+    let name_trimmed = name.trim();
+
+    // Try to parse using keyflow's section type parser
+    if let Some(parsed) = SectionType::parse_with_measure_count(name_trimmed) {
+        let mut section = Section::new(parsed.section_type);
+        section.name = Some(name_trimmed.to_string());
+        section.comment = parsed.comment;
+        return section;
+    }
+
+    // Fallback: use the raw name as a Custom section
+    let mut section = Section::new(SectionType::Custom(name_trimmed.to_string()));
+    section.name = Some(name_trimmed.to_string());
+    section
 }
