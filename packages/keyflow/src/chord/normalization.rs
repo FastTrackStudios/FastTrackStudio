@@ -44,8 +44,9 @@ impl Chord {
 
         // Check if we have extensions or a family that makes Power quality redundant
         // "C59" is not standard notation - it should just be "C9" (Power implied when no 3rd)
+        // B5/C should display as B/C — power implied by voicing when there's a bass note
         let power_is_redundant = self.quality == ChordQuality::Power
-            && (self.family.is_some() || self.extensions.has_any());
+            && (self.family.is_some() || self.extensions.has_any() || self.bass.is_some());
 
         // For suspended chords with seventh (7sus4, 9sus4), defer quality until after family
         if is_suspended_with_seventh {

@@ -436,9 +436,23 @@ fn analyze_chord_structure(semitones: &[u8]) -> Result<ChordInfo> {
     let has_ninth = has_ninth_extension; // Use the earlier variable
     // has_sharp_ninth already defined above
     let has_eleventh = has_eleventh_extension; // Use the earlier variable
-    let has_sharp_eleventh = semitones.contains(&SHARP_ELEVENTH);
-    let has_flat_thirteenth = semitones.contains(&FLAT_THIRTEENTH);
-    let has_thirteenth = semitones.contains(&THIRTEENTH);
+
+    // For #11, 13th, b13: avoid double-counting octave-displaced chord tones as extensions.
+    // Example: Cdim7 = [0, 3, 18, 21] — semitone 18 (pc 6) is just the dim 5th in a higher
+    // octave, not #11. And semitone 21 (pc 9) is the dim 7th, not the 13th.
+    //
+    // Rules:
+    // - #11 (pc 6): Block when dim5th is present WITHOUT a perfect 5th (pure dim chord).
+    //   If both dim5th and P5 are present, the tritone IS #11.
+    // - 13th (pc 9): Block when it's a diminished chord with dim7th (pc 9 = dim7).
+    //   Don't block when a minor/major 7th is present (then pc 9 is a separate 6th/13th).
+    // - b13 (pc 8): Block when aug5th is present (same pitch class).
+    let has_sharp_eleventh = semitones.contains(&SHARP_ELEVENTH)
+        && !(has_dim_fifth && !has_perfect_fifth);
+    let is_dim_with_dim7 = has_dim_fifth && has_minor_third && has_sixth_or_dim7
+        && !has_minor_seventh && !has_major_seventh;
+    let has_thirteenth = semitones.contains(&THIRTEENTH) && !is_dim_with_dim7;
+    let has_flat_thirteenth = semitones.contains(&FLAT_THIRTEENTH) && !has_aug_fifth;
 
     // Check if we have seventh or extensions (affects quality inference when third is missing)
     let has_any_seventh = has_minor_seventh || has_major_seventh || has_sixth_or_dim7;
@@ -744,11 +758,29 @@ fn build_chord_with_inversion(
 
     // Apply extensions, alterations, additions
     chord.extensions = info.extensions;
-    chord.alterations = info.alterations;
+    chord.alterations = info.alterations.clone();
     chord.additions = info.additions;
 
     // Set the original root as the bass note (slash chord)
     chord.bass = Some(original_root.clone());
+
+    // Fix chord quality when the bass note conflicts with the detected quality.
+    // Example: D/F — bass F is minor 3rd from D, but chord has F# (major 3rd).
+    // The analysis sees both m3 and M3 and picks minor, but the m3 is just the bass note.
+    let bass_from_new_root = (12 - root_offset) % 12; // interval from new root to bass
+    if bass_from_new_root == 3 && chord.quality == ChordQuality::Minor {
+        // Bass note is a minor 3rd from root. Check if the original semitones
+        // contain a major 3rd (4 semitones from new root) — if so, switch to Major.
+        let pcs: HashSet<u8> = original_semitones.iter().map(|s| s % 12).collect();
+        let rotated: HashSet<u8> = pcs.iter().map(|&pc| (pc + 12 - root_offset) % 12).collect();
+        if rotated.contains(&4) {
+            chord.quality = ChordQuality::Major;
+        }
+    }
+
+    // Note: We do NOT remove alterations that match the bass note's pitch class.
+    // Example: Db7#11/G — the #11 (G) IS the bass note AND a legitimate chord extension.
+    // Both roles coexist in slash chords.
 
     // Recompute intervals
     chord.compute_intervals();

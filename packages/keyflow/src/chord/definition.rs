@@ -1040,10 +1040,28 @@ impl std::fmt::Display for Chord {
             && self.additions.contains(&ChordDegree::Second)
             && self.family.is_none();
 
+        // Check if the family already includes the quality in its symbol
+        // FullyDiminished.symbol() = "dim7", HalfDiminished.symbol() = "m7b5"
+        // So we shouldn't output "dim" before these
+        let family_includes_quality = matches!(
+            self.family,
+            Some(ChordFamily::FullyDiminished) | Some(ChordFamily::HalfDiminished)
+        );
+
+        // Check if Power quality is redundant (has 7th, extensions, or is a slash chord)
+        // B5/C should display as B/C, not B5/C — power implied by voicing
+        let power_is_redundant = self.quality == ChordQuality::Power
+            && (self.family.is_some() || self.extensions.has_any() || self.bass.is_some());
+
         // For suspended chords with sevenths, we defer writing the "sus" part
         // until after the family/extensions (C7sus4, not Csus47)
         if is_suspended_with_seventh {
             // Don't write quality yet - will be written after family/extensions
+        } else if family_includes_quality {
+            // Skip quality - the family symbol already includes it
+            // (e.g., FullyDiminished outputs "dim7", HalfDiminished outputs "m7b5")
+        } else if power_is_redundant {
+            // Skip "5" when we have a 7th or extensions
         } else if is_sixth_chord && self.quality == ChordQuality::Major {
             // For major sixth chords, just use "C6" (standard notation)
             // Minor sixth chords will show "Cm6" via the quality display

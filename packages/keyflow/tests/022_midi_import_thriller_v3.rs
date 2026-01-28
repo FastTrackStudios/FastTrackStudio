@@ -106,18 +106,18 @@ C C+ // C // Cm7b5 Cmaj7
 
 Interlude D 8 "TRUMPETS"
 Fm6 . 'Dbmaj7/F .
-D/F . B7/F .
+D/F . B7#11/F .
 
 Outro 8
 Em7b5/D 'Dmaj9 Em7b5/D 'Dmaj7
-Em7b5/D 'Dmaj9 Gm7/D 'D11sus4
+Em7b5/D 'Dmaj9 Gm7/D 'D7sus4
 
 Outro 8
 'Gm7/D 'Dadd9 'Em7b5/D 'Dadd9
 'Em7b5/D 'Dadd9 'Bbmaj7 'C6add11
 
 Hits 4
-'C#/G . . .
+'Db#11/G . . .
 "#;
 
     assert_eq!(

@@ -475,6 +475,21 @@ fn apply_midi_octave_adjustments(
         chord.extensions.ninth = None;
         chord.additions.retain(|&d| d != ChordDegree::Ninth && d != ChordDegree::Second);
     }
+
+    // For sus4 chords with a natural 11th extension, the 11th is redundant (same as the 4th)
+    // D11sus4 → D7sus4, G11sus4 → G7sus4
+    if matches!(chord.quality, ChordQuality::Suspended(SuspendedType::Fourth))
+        && chord.extensions.eleventh.is_some()
+    {
+        chord.extensions.eleventh = None;
+    }
+
+    // For sus2 chords with a natural 9th extension, the 9th is redundant (same as the 2nd)
+    if matches!(chord.quality, ChordQuality::Suspended(SuspendedType::Second))
+        && chord.extensions.ninth.is_some()
+    {
+        chord.extensions.ninth = None;
+    }
 }
 
 /// Convert a vector of MIDI pitches to a semitone sequence relative to a root pitch
