@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 pub type EventStreamSubject<T> = RefCell<LocalSubject<'static, T, ()>>;
 
 /// Reactive streams for chords state
-#[derive(Clone, Default, Debug, Facet)]
+#[derive(Clone, Default, Debug)]
 pub struct ChordsStreams {
     /// Chords changed for a specific project
     pub chords_changed: EventStreamSubject<(String, ChordsData)>, // project_name, chords
@@ -67,7 +67,7 @@ pub trait ChordsReactiveService {
 ///
 /// This manages state and emits to reactive streams.
 /// Backend-specific implementations can wrap this and subscribe to backend events.
-#[derive(Debug, Facet)]
+#[derive(Debug)]
 pub struct DefaultChordsReactiveService {
     /// Current state
     state: Arc<Mutex<ChordsReactiveState>>,

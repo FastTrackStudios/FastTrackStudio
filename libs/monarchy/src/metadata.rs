@@ -142,13 +142,13 @@ pub trait Metadata: Clone + Default + Send + Sync + 'static {
         + PartialEq
         + Serialize
         + for<'de> Deserialize<'de>
-        + Facet
+        + for<'a> Facet<'a>
         + Send
         + Sync
         + 'static;
 
     /// The value type that can be stored in this metadata
-    type Value: Clone + Debug + Facet + Send + Sync + 'static;
+    type Value: Clone + Debug + for<'a> Facet<'a> + Send + Sync + 'static;
 
     /// Get a value for a given field
     fn get(&self, field: &Self::Field) -> Option<Self::Value>;

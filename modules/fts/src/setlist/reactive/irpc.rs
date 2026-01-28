@@ -76,7 +76,7 @@ pub struct LyricsChangedMessage {
 }
 
 /// Lyrics annotations changed message
-#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LyricsAnnotationsChangedMessage {
     pub song_index: usize,
     pub annotations: LyricsAnnotations,

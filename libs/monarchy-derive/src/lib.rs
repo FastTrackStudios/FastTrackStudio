@@ -260,7 +260,8 @@ pub fn derive_metadata(input: TokenStream) -> TokenStream {
     // Generate the output tokens
     let output = quote! {
         // Field enum
-        #[derive(Debug, Clone, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, ::serde::Serialize, ::serde::Deserialize, ::monarchy::facet::Facet)]
+        #[repr(u8)]
         #[serde(rename_all = "snake_case")]
         pub enum #field_enum_name {
             #(#field_variants),*
@@ -276,7 +277,8 @@ pub fn derive_metadata(input: TokenStream) -> TokenStream {
         }
 
         // Value enum
-        #[derive(Debug, Clone)]
+        #[derive(Debug, Clone, ::monarchy::facet::Facet)]
+        #[repr(C)]
         pub enum #value_enum_name {
             #(#value_variants),*
         }

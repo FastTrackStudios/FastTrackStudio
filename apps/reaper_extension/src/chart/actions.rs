@@ -4,7 +4,6 @@ use crate::chart::{build, detection, read};
 use crate::infrastructure::action_registry::{ActionDef, ActionSection};
 use keyflow::chord::midi::{MidiNoteName, midi_pitch_to_note_name};
 use keyflow::engraver::export::{PdfExportConfig, PdfSerializer, SvgExportConfig, SvgSerializer};
-use keyflow::engraver::fonts::SMuFLFont;
 use keyflow::engraver::layout::chart::{ChartLayoutConfig, ChartLayoutEngine, LayoutMode};
 use keyflow::engraver::style::MStyle;
 use keyflow::time::{MusicalDuration, MusicalPosition, PPQDuration, PPQPosition, TimeSignature};
@@ -767,9 +766,6 @@ fn debug_midi_and_sections_handler() {
 static BRAVURA_FONT: &[u8] = include_bytes!(
     "../../../../libs/reference/sheet-music/musescore/fonts/bravura/Bravura.otf"
 );
-static BRAVURA_METADATA: &[u8] = include_bytes!(
-    "../../../../libs/reference/sheet-music/musescore/fonts/bravura/bravura_metadata.json"
-);
 static TEXT_FONT: &[u8] =
     include_bytes!("../../../../libs/reference/sheet-music/musescore/fonts/FreeSans.ttf");
 
@@ -831,36 +827,33 @@ fn export_chart_pdf_handler() {
         pdf_path.set_extension("pdf");
         pdf_path
     } else {
-        std::path::PathBuf::from("chart.pdf")
+        camino::Utf8PathBuf::from("chart.pdf")
     };
 
     // Create layout engine
-    let smufl_font = SMuFLFont::from_bytes(BRAVURA_FONT, BRAVURA_METADATA)
-        .expect("Failed to load SMuFL font");
-
-    let style = MStyle::default();
+    let style: &'static MStyle = Box::leak(Box::new(MStyle::default()));
     let config = ChartLayoutConfig {
-        mode: LayoutMode::Paginated,
+        use_stems: false,
+        use_page_offsets: false, // For PDF export
+        ..ChartLayoutConfig::default()
+    };
+    let mode = LayoutMode::Paginated {
         page_width: 612.0,  // US Letter
         page_height: 792.0,
-        margin_top: 72.0,
-        margin_bottom: 72.0,
-        margin_left: 72.0,
-        margin_right: 72.0,
-        staff_height: 32.0,
-        system_spacing: 48.0,
-        measure_offset: 0,
-        use_stems: false,
-        ..Default::default()
     };
 
-    let mut engine = ChartLayoutEngine::new(&chart, smufl_font.clone(), style.clone(), config);
+    let engine = ChartLayoutEngine::with_config(
+        config,
+        style,
+        Arc::new(TEXT_FONT.to_vec()),
+        Arc::new(BRAVURA_FONT.to_vec()),
+    );
 
     // Layout the chart
-    let layout_result = engine.layout();
+    let layout_result = engine.layout_chart(&chart, &mode);
 
     // Get the scene for rendering
-    let scene = engine.render_all_pages();
+    let scene = &layout_result.scene;
 
     // Create PDF config with embedded fonts
     let title = chart.metadata.title.clone().unwrap_or_else(|| "Chart".to_string());
@@ -876,7 +869,7 @@ fn export_chart_pdf_handler() {
     match serializer.serialize(&scene) {
         Ok(pdf_bytes) => {
             // Save to file
-            let save_path = default_path.to_string_lossy().to_string();
+            let save_path = default_path.as_str();
             match std::fs::write(&save_path, &pdf_bytes) {
                 Ok(_) => {
                     let msg = format!("Chart exported to: {}\n", save_path);

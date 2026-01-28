@@ -40,7 +40,7 @@ pub struct SetlistReactiveState {
 /// 2. Compares new state with old state to detect changes
 /// 3. Emits granular updates via reactive streams
 /// 4. Provides APIs for updating state
-#[derive(Debug, Facet)]
+#[derive(Debug)]
 pub struct SetlistReactiveService {
     /// Current state
     state: Arc<Mutex<SetlistReactiveState>>,

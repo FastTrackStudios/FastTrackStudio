@@ -228,8 +228,19 @@ anyrender_vello_cpu = { path = "libs/vendor/anyrender/crates/anyrender_vello_cpu
 anyrender_vello_hybrid = { path = "libs/vendor/anyrender/crates/anyrender_vello_hybrid" }
 anyrender_svg = { path = "libs/vendor/anyrender/crates/anyrender_svg" }
 wgpu_context = { path = "libs/vendor/anyrender/crates/wgpu_context" }
-# Facet - roam requires git version, patch crates.io to avoid duplicates
+# Facet - roam requires git version, patch all crates.io sub-crates to avoid duplicates
 facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-core = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-json = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-reflect = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-format = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-dessert = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-path = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-solver = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-toml = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-postcard = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-pretty = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-value = { git = "https://github.com/facet-rs/facet", branch = "main" }
 
 # Profile settings for WASM builds
 # The "too many locals" error occurs when compiling large Rust projects to WASM in debug mode

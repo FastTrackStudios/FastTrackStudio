@@ -166,6 +166,9 @@ pub use monarchy_derive::{Metadata, MetadataBuilder};
 // Re-export serde traits for derive usage
 pub use serde::{Deserialize, Serialize};
 
+// Re-export facet for derive macro usage (so downstream crates don't need direct facet dependency)
+pub use facet;
+
 use facet::Facet;
 use serde::{Serializer, ser::SerializeStruct};
 

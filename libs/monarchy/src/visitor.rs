@@ -242,7 +242,7 @@ impl<'a, M: Metadata> CollapseHelper<'a, M> {
 /// - Never collapse deepest groups (Kick, Snare, etc.)
 /// - Never collapse metadata-derived groups (In, Out, L, R, etc.)
 /// - Collapse intermediate config groups that have a single child
-#[derive(Clone, Debug, Facet)]
+#[derive(Clone, Debug)]
 pub struct CollapseIntermediateGroups<'a, M: Metadata> {
     helper: CollapseHelper<'a, M>,
 }
@@ -355,7 +355,7 @@ impl<'a, M: Metadata> StructureVisitor<M> for CollapseIntermediateGroups<'a, M> 
 /// For example:
 /// - Drums -> Kick (single deepest group) becomes just Kick
 /// - Drums -> [Kick, Snare] stays as Drums -> [Kick, Snare]
-#[derive(Clone, Debug, Facet)]
+#[derive(Clone, Debug)]
 pub struct CollapseTopLevelGroups<'a, M: Metadata> {
     helper: CollapseHelper<'a, M>,
 }
