@@ -457,17 +457,23 @@ fn apply_midi_octave_adjustments(
         chord.additions.retain(|&d| d != ChordDegree::Ninth);
     }
 
-    // Convert Power + 9th extension (no 3rd, no 7th) → sus2
-    // A chord with only root, 2nd/9th, and 5th is a sus2 chord, not a power chord with add9
+    // Convert Power + 2nd/9th (no 3rd, no 7th) → sus2
+    // A chord with only root, 2nd/9th, and 5th is a sus2 chord
+    // The 2nd/9th can be in extensions.ninth, additions as Ninth, or additions as Second
+    // (the D2 code above may have already converted Ninth→Second)
+    let has_second_or_ninth = chord.extensions.ninth.is_some()
+        || chord.additions.contains(&ChordDegree::Ninth)
+        || chord.additions.contains(&ChordDegree::Second);
     if has_root
         && has_fifth
         && !has_third
         && chord.family.is_none()
         && chord.quality == ChordQuality::Power
-        && chord.extensions.ninth.is_some()
+        && has_second_or_ninth
     {
         chord.quality = ChordQuality::Suspended(SuspendedType::Second);
         chord.extensions.ninth = None;
+        chord.additions.retain(|&d| d != ChordDegree::Ninth && d != ChordDegree::Second);
     }
 }
 
@@ -666,7 +672,7 @@ mod tests {
 
     #[test]
     fn test_d2_power_chord_with_added_second() {
-        // D3, A3, D4, E4, A4 should be D2 (power chord with added 2nd), not Asus4/D
+        // D3, A3, D4, E4, A4 should be Dsus2 (root, 2nd, 5th), not Asus4/D
         // Pattern: root (D), 5th (A), root (D), 2nd (E), 5th (A)
         // D3 = 50, A3 = 57, D4 = 62, E4 = 64, A4 = 69
         let notes = vec![
@@ -689,10 +695,10 @@ mod tests {
         println!("Quality: {:?}", chord.quality);
         println!("Additions: {:?}", chord.additions);
 
-        // Should be exactly D2 (power chord with added 2nd), not Asus4/D
+        // Should be exactly Dsus2 (root, 2nd, 5th with no 3rd)
         assert_eq!(
-            chord_name, "D2",
-            "Should be exactly D2, not Asus4/D. Root pitch: {}, Additions: {:?}, Name: {}",
+            chord_name, "Dsus2",
+            "Should be exactly Dsus2, not Asus4/D. Root pitch: {}, Additions: {:?}, Name: {}",
             chords[0].root_pitch, chord.additions, chord_name
         );
         assert_eq!(
@@ -702,8 +708,8 @@ mod tests {
         );
         assert_eq!(
             chord.quality,
-            ChordQuality::Power,
-            "Should be exactly Power quality, got {:?}",
+            ChordQuality::Suspended(SuspendedType::Second),
+            "Should be exactly Suspended(Second) quality, got {:?}",
             chord.quality
         );
         assert_eq!(
@@ -711,10 +717,9 @@ mod tests {
             "Should have exactly no 7th family, got {:?}",
             chord.family
         );
-        assert_eq!(
-            chord.additions,
-            vec![ChordDegree::Second],
-            "Should have exactly [Second] in additions, got {:?}",
+        assert!(
+            chord.additions.is_empty(),
+            "Should have no additions (sus2 is quality, not addition), got {:?}",
             chord.additions
         );
     }
@@ -1300,18 +1305,17 @@ mod tests {
     }
 
     #[test]
-    fn test_d2_chord_after_previous_chord() {
-        // This test simulates the scenario where D2 appears after another chord
-        // Based on the debug output: D2 at 80640 works, but at 83520 it doesn't
+    fn test_dsus2_chord_after_previous_chord() {
+        // This test simulates the scenario where Dsus2 appears after another chord
         // D3 = 50, A3 = 57, D4 = 62, E4 = 64, A4 = 69
         let notes = vec![
-            // First chord group (should be detected as D2)
+            // First chord group (should be detected as Dsus2)
             create_midi_note(50, 80640, 83520), // D3
             create_midi_note(57, 80640, 83520), // A3
             create_midi_note(62, 80640, 83520), // D4
             create_midi_note(64, 80640, 83520), // E4
             create_midi_note(69, 80640, 83520), // A4
-            // Second chord group (should also be detected as D2)
+            // Second chord group (should also be detected as Dsus2)
             create_midi_note(50, 83520, 86400), // D3
             create_midi_note(57, 83520, 86400), // A3
             create_midi_note(62, 83520, 86400), // D4
@@ -1320,26 +1324,24 @@ mod tests {
         ];
 
         let chords = detect_chords_from_midi_notes(&notes, 180);
-        // Must detect at least one D2 chord
         assert!(
             !chords.is_empty(),
-            "MUST detect D2 chords. Got {} chords",
+            "MUST detect Dsus2 chords. Got {} chords",
             chords.len()
         );
 
-        // Find all D2 chords
-        let d2_chords: Vec<_> = chords
+        // Find all Dsus2 chords
+        let dsus2_chords: Vec<_> = chords
             .iter()
             .filter(|c| {
                 c.root_pitch == 50
-                    && c.chord.quality == ChordQuality::Power
-                    && c.chord.additions.contains(&ChordDegree::Second)
+                    && c.chord.quality == ChordQuality::Suspended(SuspendedType::Second)
             })
             .collect();
 
         assert!(
-            !d2_chords.is_empty(),
-            "MUST detect at least one D2 chord. Found chords: {:?}",
+            !dsus2_chords.is_empty(),
+            "MUST detect at least one Dsus2 chord. Found chords: {:?}",
             chords
                 .iter()
                 .map(|c| format!(
@@ -1349,12 +1351,12 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        // Check the second chord (at 83520) - this is the one that's failing in REAPER
+        // Check the second chord (at 83520)
         let second_chord = chords.iter().find(|c| c.start_ppq == 83520);
 
         assert!(
             second_chord.is_some(),
-            "MUST detect D2 chord starting at 83520. Found chords: {:?}",
+            "MUST detect Dsus2 chord starting at 83520. Found chords: {:?}",
             chords
                 .iter()
                 .map(|c| format!(
@@ -1367,29 +1369,17 @@ mod tests {
         let chord = second_chord.unwrap();
         let chord_name = chord.chord.to_string();
 
-        // Must be exactly D2
         assert_eq!(
-            chord_name, "D2",
-            "MUST be exactly D2 at 83520, not '{}'. Root pitch: {}, Quality: {:?}, Additions: {:?}",
-            chord_name, chord.root_pitch, chord.chord.quality, chord.chord.additions
+            chord_name, "Dsus2",
+            "MUST be exactly Dsus2 at 83520, not '{}'. Root pitch: {}, Quality: {:?}",
+            chord_name, chord.root_pitch, chord.chord.quality
         );
-        assert_eq!(
-            chord.root_pitch, 50,
-            "Root MUST be exactly D3 (50) at 83520, got {}",
-            chord.root_pitch
-        );
+        assert_eq!(chord.root_pitch, 50);
         assert_eq!(
             chord.chord.quality,
-            ChordQuality::Power,
-            "Quality MUST be exactly Power at 83520, got {:?}",
-            chord.chord.quality
+            ChordQuality::Suspended(SuspendedType::Second),
         );
-        assert_eq!(
-            chord.chord.additions,
-            vec![ChordDegree::Second],
-            "Additions MUST be exactly [Second] at 83520, got {:?}",
-            chord.chord.additions
-        );
+        assert!(chord.chord.additions.is_empty());
     }
 
     #[test]
@@ -1581,17 +1571,16 @@ mod tests {
 
         let chord = &chords[0].chord;
         let chord_name = chord.to_string();
-        // Should be exactly D2 (power chord with added 2nd), not Dsus2
-        // This is root, 5th, 2nd with no 3rd, which is D2 not Dsus2
+        // Root + 2nd + 5th with no 3rd = Dsus2
         assert_eq!(
-            chord_name, "D2",
-            "Should be exactly D2, got: {}",
+            chord_name, "Dsus2",
+            "Should be exactly Dsus2, got: {}",
             chord_name
         );
         assert_eq!(
             chord.quality,
-            ChordQuality::Power,
-            "Should be exactly Power quality, got {:?}",
+            ChordQuality::Suspended(SuspendedType::Second),
+            "Should be exactly Suspended(Second) quality, got {:?}",
             chord.quality
         );
         assert_eq!(
@@ -1604,10 +1593,9 @@ mod tests {
             "Root should be exactly D2 (38), got {}",
             chords[0].root_pitch
         );
-        assert_eq!(
-            chord.additions,
-            vec![ChordDegree::Second],
-            "Should have exactly [Second] in additions, got {:?}",
+        assert!(
+            chord.additions.is_empty(),
+            "Should have no additions, got {:?}",
             chord.additions
         );
     }

@@ -211,12 +211,18 @@ fn find_simplest_interpretation(
             let has_seventh = info.family.is_some();
 
             // Check for "2 chord" pattern: root(0) + fifth(7) + second(2 or 14), no third
-            // D2 chords (power + 2nd) are complete musical structures that shouldn't be inverted
+            // sus2 chords (root + 2nd + 5th) are complete musical structures that shouldn't be inverted
             let has_two_chord_pattern = rotated_pcs.contains(&0)
                 && rotated_pcs.contains(&7)
                 && (rotated_pcs.contains(&2) || rotated_with_octave.contains(&14))
                 && !rotated_pcs.contains(&3)
                 && !rotated_pcs.contains(&4);
+
+            // Check for 6th chord pattern: root(0) + fifth(7) + sixth(9)
+            // X6 chords are complete harmonic concepts even without the 3rd
+            let has_sixth_chord_pattern = rotated_pcs.contains(&0)
+                && rotated_pcs.contains(&7)
+                && rotated_pcs.contains(&9);
 
             // Calculate complexity score (lower = simpler = better)
             let complexity = chord_complexity_score(&info, &rotated_pcs);
@@ -235,12 +241,18 @@ fn find_simplest_interpretation(
             // For the original root: prefer it if:
             // 1. It has a complete triad (3/3), OR
             // 2. It has a 7th (even with altered/missing 5th, like C7#5), OR
-            // 3. It's a "2 chord" (power + 2nd with no 3rd)
-            // This keeps C6 as C6, C7#5 as C7#5, and D2 as D2
+            // 3. It's a sus2 chord (root + 2nd + 5th with no 3rd), OR
+            // 4. It's a 6th chord (root + 5th + 6th)
+            // This keeps C6 as C6, C7#5 as C7#5, and Dsus2 as Dsus2
             //
             // BUT: reduce the bonus if the chord has multiple harsh alterations
             // (like b5 + b9), because that likely means there's a simpler interpretation
-            if potential_root == 0 && (has_complete_triad || has_seventh || has_two_chord_pattern) {
+            if potential_root == 0
+                && (has_complete_triad
+                    || has_seventh
+                    || has_two_chord_pattern
+                    || has_sixth_chord_pattern)
+            {
                 // Scale the bonus based on alteration count and harshness
                 // Clean chords get full bonus, altered chords get reduced bonus
                 let bonus = if alteration_count >= 2 && has_harsh_alterations {
