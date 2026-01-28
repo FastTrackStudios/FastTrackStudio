@@ -264,16 +264,32 @@ pub fn build_songs_from_project_with_cache(
                     }
                 }
             } else {
-                // No song region found, create a song from markers alone
-                // Look for SONGEND or =END to find the song boundaries
-                let song_end = markers.iter().find(|m| {
-                    (m.name.trim().eq_ignore_ascii_case("SONGEND") || m.name.trim() == "=END")
+                // No song region found, create a song from markers alone.
+                // Use Count-In (or SONGSTART) as the start boundary and =END (or SONGEND) as the end boundary.
+                // This ensures all section regions between these markers are included.
+
+                // Find the earliest start: Count-In marker if before SONGSTART, otherwise SONGSTART
+                let count_in_marker = markers.iter().find(|m| {
+                    m.name.trim().eq_ignore_ascii_case("Count-In")
+                        && m.position_seconds() < start_marker.position_seconds()
+                });
+                let region_start = count_in_marker
+                    .map(|m| m.position_seconds())
+                    .unwrap_or_else(|| start_marker.position_seconds());
+
+                // Find the latest end: =END > SONGEND > fallback
+                let end_marker = markers.iter().find(|m| {
+                    m.name.trim() == "=END"
                         && m.position_seconds() >= start_marker.position_seconds()
                 });
-
-                let end_pos = song_end
+                let song_end_marker = markers.iter().find(|m| {
+                    m.name.trim().eq_ignore_ascii_case("SONGEND")
+                        && m.position_seconds() >= start_marker.position_seconds()
+                });
+                let region_end = end_marker
+                    .or(song_end_marker)
                     .map(|m| m.position_seconds())
-                    .unwrap_or_else(|| start_marker.position_seconds() + 120.0); // Default 2 minutes
+                    .unwrap_or_else(|| start_marker.position_seconds() + 120.0);
 
                 // Create a synthetic region for this song
                 let synthetic_region_name = format!("{} (Song)", project_name);
@@ -296,9 +312,18 @@ pub fn build_songs_from_project_with_cache(
                     }
                 }
 
+                debug!(
+                    region_start = region_start,
+                    region_end = region_end,
+                    has_count_in = count_in_marker.is_some(),
+                    has_end_marker = end_marker.is_some(),
+                    has_song_end = song_end_marker.is_some(),
+                    "Creating synthetic song region from markers"
+                );
+
                 let synthetic_region = Region::from_seconds(
-                    start_marker.position_seconds() - 4.0, // Assume 4 seconds before SONGSTART for song start
-                    end_pos,
+                    region_start,
+                    region_end,
                     synthetic_region_name,
                 )
                 .unwrap();
