@@ -21,7 +21,6 @@ splitty = "1.0.2"
 colored = "2.1"
 
 # Workspace dependencies
-data = { workspace = true }
 daw = { path = "../../modules/daw" }
 keyflow = { path = "../../packages/keyflow" }
 

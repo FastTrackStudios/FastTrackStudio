@@ -11,7 +11,7 @@
 //! # Examples
 //!
 //! ```
-//! use data::patch::{Patch, PatchCategory, PatchVariation};
+//! use rig_control::patch::{Patch, PatchCategory, PatchVariation};
 //!
 //! let mut patch = Patch::new("Grand Piano", PatchCategory::piano());
 //! patch.add_variation(PatchVariation::soft());

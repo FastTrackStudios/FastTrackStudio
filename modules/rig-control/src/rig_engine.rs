@@ -7,14 +7,14 @@
 
 use async_trait::async_trait;
 
-use data::engine::{
+use crate::engine::{
     EngineError, PresetLoadHandle, PresetReadiness, SwitchOutcome,
 };
-use data::module::ModuleType;
-use data::module_preset::ModuleSnapshot;
-use data::performance::Scene;
-use data::preset::Preset;
-use data::rig::Rig;
+use crate::module::ModuleType;
+use crate::module_preset::ModuleSnapshot;
+use crate::performance::Scene;
+use crate::preset::Preset;
+use crate::rig::Rig;
 
 use super::slot::ModuleSlot;
 

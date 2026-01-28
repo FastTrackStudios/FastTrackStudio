@@ -7,9 +7,9 @@
 
 use async_trait::async_trait;
 
-use data::engine::{EngineError, InstanceHandle, InstanceState, ModuleTarget};
-use data::module::ModuleType;
-use data::module_preset::{ModulePreset, ModuleSnapshot};
+use crate::engine::{EngineError, InstanceHandle, InstanceState, ModuleTarget};
+use crate::module::ModuleType;
+use crate::module_preset::{ModulePreset, ModuleSnapshot};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LoadResult

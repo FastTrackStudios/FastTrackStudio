@@ -38,7 +38,7 @@ members = [
     "modules/visibility-manager",
     "modules/audio-controls",
     "modules/dsp",
-    "modules/data",
+    "modules/rig-control",
 ]
 # Exclude submodules that have their own workspaces
 exclude = ["libs/nih-plug", "libs/vendor/blitz", "libs/vendor/anyrender", "libs/vendor/reaper-rs", "libs/vendor/baseview", "apps/fts-control"]
@@ -58,7 +58,7 @@ name = "fts-workspace"
 
 [workspace.dependencies]
 actions = { path = "modules/actions" }
-data = { path = "modules/data" }
+rig-control = { path = "modules/rig-control" }
 anyhow = "1.0"
 async-trait = "0.1"
 atomic_float = "1.0"

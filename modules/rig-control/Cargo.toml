@@ -1,0 +1,19 @@
+[package]
+name = "rig-control"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "FastTrackStudio rig control — core data types and gapless module engine"
+
+[dependencies]
+uuid = { version = "1.0", features = ["v4", "v5"] }
+facet = { workspace = true }
+async-trait = "0.1.89"
+tokio = { version = "1", features = ["time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+
+[lints]
+workspace = true

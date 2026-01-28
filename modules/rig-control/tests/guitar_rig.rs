@@ -4,19 +4,19 @@
 //! This exercises the full public API surface of the `data` crate to ensure
 //! all types compose correctly for a realistic guitar rig setup.
 
-use data::block::{Block, GlobalBlock, PluginId};
-use data::category::{BaseTone, Genre, PresetCategory};
-use data::module::{ModuleBlock, ModuleType};
-use data::module_preset::{
+use rig_control::block::{Block, GlobalBlock, PluginId};
+use rig_control::category::{BaseTone, Genre, PresetCategory};
+use rig_control::module::{ModuleBlock, ModuleType};
+use rig_control::module_preset::{
     GlobalModuleOverride, ModuleAssignment, ModuleOverride, ModulePreset, ModuleSnapshot,
 };
-use data::performance::{PerformanceSetlist, PerformanceSong, Scene};
-use data::preset::builder::PresetBuilder;
-use data::preset::{Credit, Inspiration, Preset, Snapshot};
-use data::profile::{Profile, SceneTemplate};
-use data::rig::{InstrumentType, Rig};
-use data::tags::Tags;
-use data::*;
+use rig_control::performance::{PerformanceSetlist, PerformanceSong, Scene};
+use rig_control::preset::builder::PresetBuilder;
+use rig_control::preset::{Credit, Inspiration, Preset, Snapshot};
+use rig_control::profile::{Profile, SceneTemplate};
+use rig_control::rig::{InstrumentType, Rig};
+use rig_control::tags::Tags;
+use rig_control::*;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixture

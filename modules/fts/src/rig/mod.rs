@@ -44,7 +44,6 @@
 pub mod core;
 #[cfg(feature = "dioxus")]
 pub mod dioxus;
-pub mod engine;
 pub mod local_client;
 pub mod mock;
 pub mod service;

@@ -5,8 +5,8 @@
 //! orchestrator uses the diff to decide which slots need loading,
 //! activation, snapshot changes, or nothing at all.
 
-use data::engine::{InstanceHandle, SlotDiff};
-use data::module::ModuleType;
+use crate::engine::{InstanceHandle, SlotDiff};
+use crate::module::ModuleType;
 
 use super::resolver::{ResolvedModules, ResolvedSlot};
 
@@ -201,8 +201,8 @@ pub fn compute_diff(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use data::engine::{InstanceHandle, ModuleTarget};
-    use data::id::{ModulePresetId, ModuleSnapshotId};
+    use crate::engine::{InstanceHandle, ModuleTarget};
+    use crate::id::{ModulePresetId, ModuleSnapshotId};
 
     fn no_preloads(_mt: ModuleType, _slot: &ResolvedSlot) -> Option<InstanceHandle> {
         None

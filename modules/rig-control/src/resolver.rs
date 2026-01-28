@@ -14,12 +14,12 @@
 
 use std::collections::HashMap;
 
-use data::engine::ModuleTarget;
-use data::module::ModuleType;
-use data::module_preset::{ModuleOverride, ModuleOverrideType};
-use data::performance::Scene;
-use data::preset::Preset;
-use data::rig::Rig;
+use crate::engine::ModuleTarget;
+use crate::module::ModuleType;
+use crate::module_preset::{ModuleOverride, ModuleOverrideType};
+use crate::performance::Scene;
+use crate::preset::Preset;
+use crate::rig::Rig;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ResolvedSlot
@@ -155,11 +155,11 @@ fn apply_overrides(resolved: &mut ResolvedModules, overrides: &[ModuleOverride])
 mod tests {
     use super::*;
 
-    use data::category::{BaseTone, PresetCategory};
-    use data::id::{ModulePresetId, ModuleSnapshotId, PresetId};
-    use data::module_preset::{GlobalModuleOverride, ModuleAssignment, ModuleOverride};
-    use data::normalized::Order;
-    use data::rig::InstrumentType;
+    use crate::category::{BaseTone, PresetCategory};
+    use crate::id::{ModulePresetId, ModuleSnapshotId, PresetId};
+    use crate::module_preset::{GlobalModuleOverride, ModuleAssignment, ModuleOverride};
+    use crate::normalized::Order;
+    use crate::rig::InstrumentType;
 
     fn test_preset(assignments: Vec<ModuleAssignment>) -> Preset {
         let mut preset = Preset::new(

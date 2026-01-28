@@ -13,7 +13,7 @@
 
 #[test]
 fn normalized_clamps_at_construction() {
-    use data::normalized::NormalizedF64;
+    use rig_control::normalized::NormalizedF64;
 
     // Values are silently clamped — no way to hold 1.5 or -0.3
     let over = NormalizedF64::new(1.5);
@@ -29,7 +29,7 @@ fn normalized_clamps_at_construction() {
 
 #[test]
 fn rating_cannot_exceed_five() {
-    use data::normalized::Rating;
+    use rig_control::normalized::Rating;
 
     let r = Rating::new(99);
     assert_eq!(r.get(), 5); // clamped
@@ -37,7 +37,7 @@ fn rating_cannot_exceed_five() {
 
 #[test]
 fn midi_note_cannot_exceed_127() {
-    use data::normalized::MidiNote;
+    use rig_control::normalized::MidiNote;
 
     let n = MidiNote::new(200);
     assert_eq!(n.get(), 127); // clamped
@@ -49,7 +49,7 @@ fn midi_note_cannot_exceed_127() {
 
 #[test]
 fn non_empty_vec_rejects_empty() {
-    use data::non_empty::NonEmptyVec;
+    use rig_control::non_empty::NonEmptyVec;
 
     let result = NonEmptyVec::<i32>::from_vec(vec![]);
     assert!(result.is_none()); // can't construct empty
@@ -62,8 +62,8 @@ fn non_empty_vec_rejects_empty() {
 
 #[test]
 fn section_always_has_a_layer() {
-    use data::layer::Layer;
-    use data::section::Section;
+    use rig_control::layer::Layer;
+    use rig_control::section::Section;
 
     // Section::new requires a primary layer — there is no way to create
     // a section with zero layers.
@@ -80,7 +80,7 @@ fn section_always_has_a_layer() {
 /// This match covers ALL variants — if one is added, this test fails to compile.
 #[test]
 fn module_type_match_is_exhaustive() {
-    use data::module::ModuleType;
+    use rig_control::module::ModuleType;
 
     let t = ModuleType::Drive;
     let name = match t {
@@ -112,9 +112,9 @@ fn module_type_match_is_exhaustive() {
 
 #[test]
 fn module_override_variants_are_distinct() {
-    use data::id::ModulePresetId;
-    use data::module::ModuleType;
-    use data::module_preset::{ModuleOverride, ModuleOverrideType};
+    use rig_control::id::ModulePresetId;
+    use rig_control::module::ModuleType;
+    use rig_control::module_preset::{ModuleOverride, ModuleOverrideType};
 
     let swap = ModuleOverride::swap_preset(ModuleType::Amp, ModulePresetId::new(), None);
     let disable = ModuleOverride::disable(ModuleType::Amp);
@@ -130,10 +130,10 @@ fn module_override_variants_are_distinct() {
 
 #[test]
 fn global_override_lock_semantics() {
-    use data::id::ModulePresetId;
-    use data::module::ModuleType;
-    use data::module_preset::GlobalModuleOverride;
-    use data::rig::{InstrumentType, Rig};
+    use rig_control::id::ModulePresetId;
+    use rig_control::module::ModuleType;
+    use rig_control::module_preset::GlobalModuleOverride;
+    use rig_control::rig::{InstrumentType, Rig};
 
     let mut rig = Rig::new("Test", InstrumentType::Guitar);
     let preset_id = ModulePresetId::new();
@@ -156,7 +156,7 @@ fn global_override_lock_semantics() {
 
 #[test]
 fn param_format_roundtrip_is_format_specific() {
-    use data::parameter::ParamFormat;
+    use rig_control::parameter::ParamFormat;
 
     // A Percent format normalizes 0-100 -> 0.0-1.0
     let pct = ParamFormat::Percent;
@@ -188,7 +188,7 @@ fn param_format_roundtrip_is_format_specific() {
 
 #[test]
 fn category_fallback_chain_is_type_driven() {
-    use data::category::{BaseTone, Genre, PresetCategory};
+    use rig_control::category::{BaseTone, Genre, PresetCategory};
 
     let specific = PresetCategory::Genre {
         base_tone: BaseTone::Lead,
@@ -214,9 +214,9 @@ fn category_fallback_chain_is_type_driven() {
 
 #[test]
 fn active_preset_resolve_unresolve_cycle() {
-    use data::category::{BaseTone, PresetCategory};
-    use data::preset::{Preset, Snapshot};
-    use data::selection::ActivePreset;
+    use rig_control::category::{BaseTone, PresetCategory};
+    use rig_control::preset::{Preset, Snapshot};
+    use rig_control::selection::ActivePreset;
 
     let mut preset = Preset::new(
         "Test",
@@ -245,10 +245,10 @@ fn active_preset_resolve_unresolve_cycle() {
 
 #[test]
 fn active_preset_resolve_invalid_id_returns_none() {
-    use data::category::{BaseTone, PresetCategory};
-    use data::id::SnapshotId;
-    use data::preset::Preset;
-    use data::selection::ActivePreset;
+    use rig_control::category::{BaseTone, PresetCategory};
+    use rig_control::id::SnapshotId;
+    use rig_control::preset::Preset;
+    use rig_control::selection::ActivePreset;
 
     let preset = Preset::new(
         "Empty",
@@ -268,9 +268,9 @@ fn active_preset_resolve_invalid_id_returns_none() {
 
 #[test]
 fn builder_typestate_happy_path() {
-    use data::category::{BaseTone, PresetCategory};
-    use data::normalized::Rating;
-    use data::preset::builder::PresetBuilder;
+    use rig_control::category::{BaseTone, PresetCategory};
+    use rig_control::normalized::Rating;
+    use rig_control::preset::builder::PresetBuilder;
 
     let preset = PresetBuilder::new()
         .name("Blues Clean")

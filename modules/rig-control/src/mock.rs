@@ -12,14 +12,14 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use data::engine::{
+use crate::engine::{
     EngineError, InstanceHandle, InstanceState, ModuleTarget, PresetLoadHandle, PresetReadiness,
 };
-use data::module::ModuleType;
-use data::module_preset::{ModulePreset, ModuleSnapshot};
-use data::performance::Scene;
-use data::preset::Preset;
-use data::rig::Rig;
+use crate::module::ModuleType;
+use crate::module_preset::{ModulePreset, ModuleSnapshot};
+use crate::performance::Scene;
+use crate::preset::Preset;
+use crate::rig::Rig;
 
 use super::diff::{self, SlotState};
 use super::resolver::{self, ResolvedModules, ResolvedSlot};
@@ -387,7 +387,7 @@ impl RigEngine for MockRigEngine {
             diffs
                 .iter()
                 .filter_map(|d| match d {
-                    data::engine::SlotDiff::LoadAndActivate { module_type, target } => {
+                    crate::engine::SlotDiff::LoadAndActivate { module_type, target } => {
                         let module_preset = rig.get_module_preset(target.module_preset_id);
                         module_preset.map(|mp| DiffAction::LoadAndActivate {
                             module_type: *module_type,
@@ -395,13 +395,13 @@ impl RigEngine for MockRigEngine {
                             module_preset: mp.clone(),
                         })
                     }
-                    data::engine::SlotDiff::Activate { module_type, handle } => {
+                    crate::engine::SlotDiff::Activate { module_type, handle } => {
                         Some(DiffAction::Activate {
                             module_type: *module_type,
                             handle: *handle,
                         })
                     }
-                    data::engine::SlotDiff::ApplySnapshot {
+                    crate::engine::SlotDiff::ApplySnapshot {
                         module_type,
                         snapshot_id,
                         ..
@@ -417,17 +417,17 @@ impl RigEngine for MockRigEngine {
                             snapshot: s,
                         })
                     }
-                    data::engine::SlotDiff::Disable { module_type } => {
+                    crate::engine::SlotDiff::Disable { module_type } => {
                         Some(DiffAction::Disable {
                             module_type: *module_type,
                         })
                     }
-                    data::engine::SlotDiff::Enable { module_type } => {
+                    crate::engine::SlotDiff::Enable { module_type } => {
                         Some(DiffAction::Enable {
                             module_type: *module_type,
                         })
                     }
-                    data::engine::SlotDiff::NoChange { .. } => None,
+                    crate::engine::SlotDiff::NoChange { .. } => None,
                 })
                 .collect()
         };
@@ -610,19 +610,19 @@ impl RigEngine for MockRigEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use data::category::{BaseTone, PresetCategory};
-    use data::id::{ModulePresetId, PresetId};
-    use data::module::ModuleType;
-    use data::module_preset::ModuleAssignment;
-    use data::normalized::Order;
-    use data::rig::InstrumentType;
+    use crate::category::{BaseTone, PresetCategory};
+    use crate::id::{ModulePresetId, PresetId};
+    use crate::module::ModuleType;
+    use crate::module_preset::ModuleAssignment;
+    use crate::normalized::Order;
+    use crate::rig::InstrumentType;
 
     fn test_rig_with_presets() -> (Rig, ModulePresetId, ModulePresetId) {
         let mut rig = Rig::new("Test Rig", InstrumentType::Guitar);
 
         let drive_preset =
-            data::module_preset::ModulePreset::new("Blues Stack", ModuleType::Drive);
-        let amp_preset = data::module_preset::ModulePreset::new("AC30", ModuleType::Amp);
+            crate::module_preset::ModulePreset::new("Blues Stack", ModuleType::Drive);
+        let amp_preset = crate::module_preset::ModulePreset::new("AC30", ModuleType::Amp);
         let drive_id = drive_preset.id;
         let amp_id = amp_preset.id;
 
@@ -661,7 +661,7 @@ mod tests {
         let preset_id = ModulePresetId::new();
         let target = ModuleTarget::new(ModuleType::Drive, preset_id);
         let module_preset =
-            data::module_preset::ModulePreset::new("Test", ModuleType::Drive);
+            crate::module_preset::ModulePreset::new("Test", ModuleType::Drive);
 
         // Load
         let result = slot.load(&target, &module_preset).await;
@@ -683,7 +683,7 @@ mod tests {
     async fn mock_slot_gapless_switch() {
         let slot = MockModuleSlot::new(ModuleType::Drive);
         let module_preset =
-            data::module_preset::ModulePreset::new("Test", ModuleType::Drive);
+            crate::module_preset::ModulePreset::new("Test", ModuleType::Drive);
 
         // Load and activate first instance
         let target1 = ModuleTarget::new(ModuleType::Drive, ModulePresetId::new());
@@ -723,7 +723,7 @@ mod tests {
     async fn mock_slot_cleanup_tails() {
         let slot = MockModuleSlot::new(ModuleType::Drive);
         let module_preset =
-            data::module_preset::ModulePreset::new("Test", ModuleType::Drive);
+            crate::module_preset::ModulePreset::new("Test", ModuleType::Drive);
 
         // Create a tailing instance
         let target1 = ModuleTarget::new(ModuleType::Drive, ModulePresetId::new());
@@ -751,7 +751,7 @@ mod tests {
         let preset_id = ModulePresetId::new();
         let target = ModuleTarget::new(ModuleType::Drive, preset_id);
         let module_preset =
-            data::module_preset::ModulePreset::new("Test", ModuleType::Drive);
+            crate::module_preset::ModulePreset::new("Test", ModuleType::Drive);
 
         let r1 = slot.load(&target, &module_preset).await;
         let h1 = r1.handle().unwrap();
