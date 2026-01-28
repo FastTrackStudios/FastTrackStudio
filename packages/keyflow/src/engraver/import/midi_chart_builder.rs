@@ -1408,13 +1408,6 @@ fn format_measure(
                         if needs_duration_suffix {
                             let suffix = format_duration_suffix_from_ticks(*ticks, ppq);
                             parts.push(format!("{}{}", chord_base, suffix));
-                        } else if has_rests {
-                            let suffix = if *ticks >= half_beat {
-                                "_4".to_string()
-                            } else {
-                                format_duration_suffix_from_ticks(*ticks, ppq)
-                            };
-                            parts.push(format!("{}{}", chord_base, suffix));
                         } else if is_sole_chord && adjusted_beats >= beats_per_measure {
                             parts.push(chord_base);
                         } else {
@@ -1445,26 +1438,8 @@ fn format_measure(
     }
 }
 
-/// Formatting mode for section output.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum SectionFormatMode {
-    /// Compact dot notation: spaces between measures, 8 per line, no pipes.
-    Compact,
-    /// Double-space between measures, 4 per line (used for Chorus).
-    DoubleSpace,
-}
-
-/// Determine formatting mode based on section type.
-/// Chorus sections use double-space separators.
-/// All other sections use compact dot notation.
-fn determine_format_mode(section_type: &str) -> SectionFormatMode {
-    match section_type {
-        "CH" => SectionFormatMode::DoubleSpace,
-        _ => SectionFormatMode::Compact,
-    }
-}
-
 /// Format rhythm elements as Keyflow notation with measure awareness.
+/// All sections use compact formatting: single space between measures, 4 measures per line.
 fn format_rhythm_elements(
     elements: &[ChordOrRest],
     section_start_tick: i64,
@@ -1472,7 +1447,7 @@ fn format_rhythm_elements(
     ppq: u32,
     beats_per_measure: i32,
     use_short_push: bool,
-    section_type: &str,
+    _section_type: &str,
 ) -> String {
     let measures = build_measures(
         elements,
@@ -1482,21 +1457,12 @@ fn format_rhythm_elements(
         beats_per_measure,
     );
 
-    let mode = determine_format_mode(section_type);
-
-    match mode {
-        SectionFormatMode::Compact => {
-            format_measures_compact(&measures, beats_per_measure, use_short_push, ppq)
-        }
-        SectionFormatMode::DoubleSpace => {
-            format_measures_double_space(&measures, beats_per_measure, use_short_push, ppq)
-        }
-    }
+    format_measures(&measures, beats_per_measure, use_short_push, ppq)
 }
 
-/// Format measures with compact dot notation (no pipes).
-/// Full-measure chords are space-separated, repeats shown as `.`, 4 measures per line.
-fn format_measures_compact(
+/// Format measures with compact notation.
+/// Single space between measures, 4 measures per line, repeats shown as `.`.
+fn format_measures(
     measures: &[MeasureContent],
     beats_per_measure: i32,
     use_short_push: bool,
@@ -1508,33 +1474,6 @@ fn format_measures_compact(
     for (i, content) in measures.iter().enumerate() {
         if i > 0 && measure_count % 4 != 0 {
             result.push(' ');
-        }
-
-        result.push_str(&format_measure(content, beats_per_measure, use_short_push, ppq));
-        measure_count += 1;
-
-        if measure_count % 4 == 0 && i < measures.len() - 1 {
-            result.push('\n');
-        }
-    }
-
-    result
-}
-
-/// Format measures with double-space separators (used for Chorus).
-/// Measures separated by two spaces, 4 per line.
-fn format_measures_double_space(
-    measures: &[MeasureContent],
-    beats_per_measure: i32,
-    use_short_push: bool,
-    ppq: u32,
-) -> String {
-    let mut result = String::new();
-    let mut measure_count = 0;
-
-    for (i, content) in measures.iter().enumerate() {
-        if i > 0 && measure_count % 4 != 0 {
-            result.push_str("  ");
         }
 
         result.push_str(&format_measure(content, beats_per_measure, use_short_push, ppq));

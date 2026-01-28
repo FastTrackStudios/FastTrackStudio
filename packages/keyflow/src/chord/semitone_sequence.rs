@@ -480,17 +480,22 @@ fn analyze_chord_structure(semitones: &[u8]) -> Result<ChordInfo> {
         ChordQuality::Minor
     } else if has_major_third {
         ChordQuality::Major
+    } else if has_sus2 {
+        // sus2 takes priority over "7th + extension = Major" because the absence
+        // of a 3rd is definitive. C7sus2 = [0, 2, 7, 10], not C9.
+        ChordQuality::Suspended(SuspendedType::Second)
+    } else if has_sus4 && !(has_any_seventh && has_any_extension) {
+        // sus4 only when it's a simpler voicing (e.g., Bb7sus4 = [0, 5, 7, 10]).
+        // When both a 7th AND other extensions are present (e.g., 9th), the 4th is
+        // really an 11th in an extended chord (Bb11 = [0, 5, 7, 10, 14]).
+        ChordQuality::Suspended(SuspendedType::Fourth)
     } else if has_any_seventh && has_any_extension {
-        // No third detected, but has BOTH seventh AND extensions - assume Major quality
-        // This handles voicings like C9 without the E, or Bb11 without the D
+        // No third detected, no sus pattern, but has BOTH seventh AND extensions.
+        // Assume Major quality for voicings like Bb11 without the D.
         ChordQuality::Major
-    } else if has_any_seventh && !has_sus2 && !has_sus4 {
+    } else if has_any_seventh {
         // Has seventh but no extensions and no sus pattern - assume Major
         ChordQuality::Major
-    } else if has_sus2 {
-        ChordQuality::Suspended(SuspendedType::Second)
-    } else if has_sus4 {
-        ChordQuality::Suspended(SuspendedType::Fourth)
     } else if !has_major_third && !has_minor_third && has_perfect_fifth {
         ChordQuality::Power
     } else {
@@ -566,7 +571,10 @@ fn analyze_chord_structure(semitones: &[u8]) -> Result<ChordInfo> {
     // Re-evaluate has_add2 based on family:
     // If there's a 7th AND pitch class 2 is present, it's a 9th, not add2
     // This handles cases where the 9th is voiced in the same octave (semitone 2 instead of 14)
-    let has_implicit_ninth = has_second_pitch_class && family.is_some();
+    // Exception: sus2 chords — the 2nd IS the sus quality, not a 9th extension.
+    // C7sus2 = [0, 2, 7, 10] should be sus2 + dominant 7, not C9.
+    let is_sus2 = quality == ChordQuality::Suspended(SuspendedType::Second);
+    let has_implicit_ninth = has_second_pitch_class && family.is_some() && !is_sus2;
     let has_add2_final = has_add2 && !has_implicit_ninth;
 
     // Re-evaluate has_add4 based on family and ninth:

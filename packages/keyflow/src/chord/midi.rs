@@ -438,7 +438,17 @@ fn apply_midi_octave_adjustments(
     let has_ninth_extension = chord.extensions.ninth.is_some();
 
     if has_root && has_fifth && has_second && !has_third && !has_ninth_extension {
-        if chord.quality.is_suspended() || chord.quality == ChordQuality::Power {
+        // Only convert to Power+add2 when there's no 7th family.
+        // If a 7th is present and quality is sus2, this is a 7sus2 chord (e.g., C7sus2),
+        // NOT a power chord with add2. Converting to Power would lose the sus2 quality
+        // since the Power→sus2 reconversion below only fires when family.is_none().
+        let is_sus2_with_seventh = chord.quality.is_suspended()
+            && matches!(chord.quality, ChordQuality::Suspended(SuspendedType::Second))
+            && chord.family.is_some();
+
+        if !is_sus2_with_seventh
+            && (chord.quality.is_suspended() || chord.quality == ChordQuality::Power)
+        {
             chord.quality = ChordQuality::Power;
             chord.additions.retain(|&d| d != ChordDegree::Ninth);
             if !chord.additions.contains(&ChordDegree::Second) {

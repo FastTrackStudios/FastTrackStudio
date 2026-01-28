@@ -41,55 +41,54 @@ Transcribed By: Cody Wright
 COUNT 2
 
 HITS
-r8t >Ab9_8t r8t r8t r8t >F9_8t r2 s1
+r8t >Ab9_8t r8t r4t >'F9_8t r4 r4 s1
 
 IN
 >'Cm . . .
 
 VS
->'F/C . Cm .
 'F/C . Cm .
 'F/C . Cm .
-'F/C . Cm Cm9
+'F/C . Cm7 .
+'F/C . Cm7 C7sus2
 
 CH
->Cm/Eb / 'Eb ///  'Eb / 'F/C / 'Cm //  'F/A  'Fm9
->Cm/Eb / 'Eb ///  'Eb / 'F/C / 'Cm //  'F/A  r8t >Ab9_8t r8t r4t >'F9_8t r4t >Fm/Ab /
+>Cm/Eb / 'Eb /// 'Eb / 'F/C / 'Cm // 'F/A 'Fm9
+>Cm/Eb / 'Eb /// 'Eb / 'F/C / 'Cm // 'F/A r8t >Ab9_8t r8t r4t >'F9_8t r4 >Fm/Ab
 
 INST 4
-Cm . F6 // Abdim7 'Csus2 // 'C5 //
+Cm . F6 / Abdim7 / 'Csus2 / 'C5 //
 
 VS
-F/C . Cm .
 'F/C . Cm .
-'F/C . 'Cm .
-'F/C . Cm // Gm7 // 'Abmaj7 / Abmaj7#5 / 'Db7#11/G //
+'F/C . Cm .
+'F/C . 'Cm7 .
+'F/C . Cm / Gm7 / 'Abmaj7 >Abmaj7#5_8t >'Db7#11/G //
 
 CH
->Cm/Eb / 'Eb ///  'Eb / 'F/C / 'Cm //  'F/A  'Fm9
->Cm/Eb / 'Eb ///  'Eb / 'F/C / 'Cm //  'F/A  r8t >Ab9_8t r8t r4t >'F9_8t r4t >Fm/Ab /
+>Cm/Eb / 'Eb /// 'Eb / 'F/C / 'Cm // 'F/A 'Fm9
+>Cm/Eb / 'Eb /// 'Eb / 'F/C / 'Cm // 'F/A r8t >Ab9_8t r8t r4t >'F9_8t r4 >Fm/Ab_8t
+r4 r4 r4 r4
 
 BR
->'_4F7 . Abmaj9 //// // r8t >Abmaj9_8t r8t >Bb_8t r4t
-'>Cm7 | Ebmaj7/Bb | Am7b5 | Abmaj7 |
-G7sus4 | 'G7
+>'F7 . Abmaj9 >Abmaj9 / r8t >Abadd9_8t r8t >Bb_8t
+'Cm7 Ebmaj7/Bb Am7b5 Abmaj7
+G7sus4 'G7
 
 VS
 >'F/C . Cm .
-'F/C . Cm Db7#11 // 'Cmaj9 //
-'F7 //// // 'Fmaj7/C 'Cm7 .
-'F 'Am // 'Dbmaj7 // 'Gmaj7 // 'Fm11 // 'Eb9 / Bbm/F / 'Gb7b9 //
+'F/C . Cm Db7#11/G // 'Cmaj9 //
+>'F7 r4 r4t >'Fmaj7/C // 'Cm7 .
+'F 'Am / 'Dbmaj7/Ab // 'Gmaj7 / 'Fm11 // >'Eb9 r8t >Bbm/F_8t >'G7b9 // >'Cm/Eb_8t
 
 CH 3A 10
->'Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A //// | 'Fm9 ////
->Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A |
-r8t >Ab9_8t r8t r8t >'F9_8t r8t r4 r8t >Bb9_8t r8t
-r8t r8t C7#11_8t r4 r8t Dbmaj7_8t r8t r4
-'Bb11
+r8t >Eb' Eb' // 'F/C / 'Cm // 'F/A 'Fm9
+>Cm/Eb / 'Eb /// 'Eb / 'F/C / 'Cm // 'F/A r8t >Ab9_8t r8t r4t >'F9_8t r4 r8t >Bb9_8t
+r4t >C7#11_8t r4 r8t >Dbmaj7_8t r8t r4 >'Bb11
 
 CH 3B 8
->Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A //// | 'Fm9 ////
->Cm/Eb / 'Eb /// | 'Eb / 'F/C / 'Cm // | 'F/A | r8t >Ab9_8t r8t r8t >'F9_8t r8t r4 >Cm
+>Cm/Eb / 'Eb /// 'Eb / 'F/C / 'Cm // 'F/A 'Fm9
+>Cm/Eb / 'Eb /// 'Eb / 'F/C / 'Cm // 'F/A r8t >Ab9_8t r8t r4t >'F9_8t r4 r4
 
 Interlude A 8
 >'Cm . . .
@@ -98,14 +97,14 @@ Interlude A 8
 Interlude B 8 "HORNS"
 /push 4
 'Cm . 'Cm7b5 .
-'Cm Cm/maj7 'B/C .
+'Cm 'Cm/maj7 'Cmaj7b5 .
 
 Interlude C 8 "WINDS"
-C C+ // C // Cm7b5 Cmaj7
-'Cmaj7 . Fm/C Cdim7
+C C+ / C / Cm7b5 .
+'Cmaj7 r8t Fm/C Cdim7
 
 Interlude D 8 "TRUMPETS"
-Fm6 . 'Dbmaj7/F .
+>'Fm6 . Dbmaj7/F .
 D/F . B7#11/F .
 
 Outro 8
@@ -117,7 +116,7 @@ Outro 8
 'Em7b5/D 'Dadd9 'Bbmaj7 'C6add11
 
 Hits 4
-'Db#11/G . . .
+>'Db#11/G . . .
 "#;
 
     assert_eq!(
