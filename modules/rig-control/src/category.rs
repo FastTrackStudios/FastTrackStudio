@@ -45,6 +45,12 @@ pub enum BaseTone {
     // Bass
     BassClean,
     BassDrive,
+    // Vocal
+    Natural,
+    Warm,
+    Bright,
+    Breathy,
+    Powerful,
 }
 
 impl BaseTone {
@@ -66,6 +72,11 @@ impl BaseTone {
             Self::Brass => "Brass",
             Self::BassClean => "Bass Clean",
             Self::BassDrive => "Bass Drive",
+            Self::Natural => "Natural",
+            Self::Warm => "Warm",
+            Self::Bright => "Bright",
+            Self::Breathy => "Breathy",
+            Self::Powerful => "Powerful",
         }
     }
 
@@ -88,6 +99,11 @@ impl BaseTone {
             "brass" => Some(Self::Brass),
             "bass clean" | "bassclean" => Some(Self::BassClean),
             "bass drive" | "bassdrive" => Some(Self::BassDrive),
+            "natural" => Some(Self::Natural),
+            "warm" => Some(Self::Warm),
+            "bright" => Some(Self::Bright),
+            "breathy" => Some(Self::Breathy),
+            "powerful" => Some(Self::Powerful),
             _ => None,
         }
     }
@@ -102,6 +118,10 @@ impl BaseTone {
 
     pub fn bass_tones() -> &'static [Self] {
         &[Self::BassClean, Self::BassDrive]
+    }
+
+    pub fn vocal_tones() -> &'static [Self] {
+        &[Self::Natural, Self::Warm, Self::Bright, Self::Breathy, Self::Powerful]
     }
 }
 

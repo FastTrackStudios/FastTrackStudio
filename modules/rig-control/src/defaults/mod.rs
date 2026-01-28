@@ -5,3 +5,4 @@
 
 pub mod blocks;
 pub mod guitar;
+pub mod vocals;

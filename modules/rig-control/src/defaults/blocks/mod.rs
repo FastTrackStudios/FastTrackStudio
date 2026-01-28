@@ -13,3 +13,4 @@ pub mod special;
 pub mod time;
 pub mod source;
 pub mod master;
+pub mod vocal;

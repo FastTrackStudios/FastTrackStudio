@@ -96,6 +96,10 @@ pub enum BlockType {
     Special,
     Freeze,
     Custom,
+    // Vocal-specific
+    DeEsser,
+    Saturator,
+    Tuner,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
