@@ -3,10 +3,8 @@
 //! Renders charts using Vello with WebGPU backend.
 //! Ported from apps/web/src/renderer.rs for the documentation site.
 
-use std::sync::Arc;
-
 use keyflow::Chart;
-use keyflow::engraver::fonts::SMuFLFont;
+use keyflow::engraver::fonts::ChartFontBundle;
 use keyflow::engraver::layout::ChartLayoutMode;
 use keyflow::engraver::layout::chart::{ChartLayoutConfig, ChartLayoutEngine, ChartLayoutResult};
 use keyflow::engraver::renderer::scene_renderer::SceneRenderBuilder;
@@ -15,16 +13,7 @@ use vello::Scene;
 use vello::kurbo::{Affine, Rect};
 use vello::peniko::Color;
 
-// Embedded fonts from musescore reference library
-static BRAVURA_FONT: &[u8] =
-    include_bytes!("../../../libs/reference/sheet-music/musescore/fonts/bravura/Bravura.otf");
-static BRAVURA_METADATA: &[u8] = include_bytes!(
-    "../../../libs/reference/sheet-music/musescore/fonts/bravura/bravura_metadata.json"
-);
-static TEXT_FONT: &[u8] =
-    include_bytes!("../../../libs/reference/sheet-music/musescore/fonts/FreeSans.ttf");
-static MUSEJAZZ_TEXT_FONT: &[u8] =
-    include_bytes!("../../../libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf");
+// Fonts are now provided by ChartFontBundle from keyflow
 
 /// Screen DPI for rendering
 const SCREEN_DPI: f64 = 96.0;
@@ -37,14 +26,8 @@ const DPI_SCALE: f64 = SCREEN_DPI / POINTS_PER_INCH;
 ///
 /// Manages fonts, layout engine, and Vello scene rendering.
 pub struct ChartLayoutManager {
-    /// SMuFL font for music notation
-    smufl_font: SMuFLFont<'static>,
-    /// Text font data (FreeSans)
-    text_font_data: Arc<Vec<u8>>,
-    /// MuseJazz font data for chord symbols
-    musejazz_font_data: Arc<Vec<u8>>,
-    /// Bravura font data for PDF export (SMuFL symbols)
-    bravura_font_data: Arc<Vec<u8>>,
+    /// Font bundle (single source of truth for all chart fonts)
+    font_bundle: ChartFontBundle,
     /// Layout engine
     layout_engine: ChartLayoutEngine,
     /// Cached layout result
@@ -59,30 +42,15 @@ pub struct ChartLayoutManager {
 impl ChartLayoutManager {
     /// Create a new chart layout manager with embedded fonts.
     pub fn new() -> Result<Self, String> {
-        // Load SMuFL font with metadata
-        let smufl_font = SMuFLFont::from_reader(BRAVURA_FONT, BRAVURA_METADATA)
-            .map_err(|e| format!("Failed to load Bravura font: {e}"))?;
+        // Load font bundle (single source of truth)
+        let font_bundle = ChartFontBundle::new()?;
 
-        // Store font data as Arc for sharing with renderer
-        let text_font_data = Arc::new(TEXT_FONT.to_vec());
-        let musejazz_font_data = Arc::new(MUSEJAZZ_TEXT_FONT.to_vec());
-        let symbol_font_data = Arc::new(BRAVURA_FONT.to_vec());
-
-        // Create layout engine with fonts
-        // Leak the style for 'static lifetime (web app runs for session duration)
+        // Create layout engine with correct font wiring via bundle
         let style = Box::leak(Box::new(MStyle::new()));
-        // Use MuseJazz for text metrics since the default harmony style uses MuseJazzText font.
-        // This ensures measurements match the rendered glyphs.
-        let layout_engine = ChartLayoutEngine::new(style, musejazz_font_data.clone(), symbol_font_data);
-
-        // Store Bravura font data for PDF export
-        let bravura_font_data = Arc::new(BRAVURA_FONT.to_vec());
+        let layout_engine = font_bundle.create_layout_engine(style);
 
         Ok(Self {
-            smufl_font,
-            text_font_data,
-            musejazz_font_data,
-            bravura_font_data,
+            font_bundle,
             layout_engine,
             layout_result: None,
             last_chart_hash: 0,
@@ -225,17 +193,8 @@ impl ChartLayoutManager {
         // Render layout if available
         if let Some(ref layout) = self.layout_result {
             // Create scene renderer with fonts
-            let mut renderer = SceneRenderBuilder::new()
-                .spatium(5.0)
-                .build()
-                .with_font(&self.smufl_font)
-                .with_text_font_arc(self.text_font_data.clone())
-                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
-                .with_named_font_arc("section-note", self.text_font_data.clone())
-                .with_named_font_arc("title-bold", self.text_font_data.clone())
-                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+            let base_renderer = SceneRenderBuilder::new().spatium(5.0).build();
+            let mut renderer = self.font_bundle.configure_renderer(base_renderer);
 
             // Set viewport for culling
             let viewport_rect = Rect::new(0.0, 0.0, width, height);
@@ -288,17 +247,8 @@ impl ChartLayoutManager {
         // Render layout if available
         if let Some(ref layout) = self.layout_result {
             // Create scene renderer with fonts
-            let mut renderer = SceneRenderBuilder::new()
-                .spatium(5.0)
-                .build()
-                .with_font(&self.smufl_font)
-                .with_text_font_arc(self.text_font_data.clone())
-                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
-                .with_named_font_arc("section-note", self.text_font_data.clone())
-                .with_named_font_arc("title-bold", self.text_font_data.clone())
-                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+            let base_renderer = SceneRenderBuilder::new().spatium(5.0).build();
+            let mut renderer = self.font_bundle.configure_renderer(base_renderer);
 
             // Set viewport for culling
             let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
@@ -369,17 +319,8 @@ impl ChartLayoutManager {
         // Render layout if available
         if let Some(ref layout) = self.layout_result {
             // Create scene renderer with fonts
-            let mut renderer = SceneRenderBuilder::new()
-                .spatium(5.0)
-                .build()
-                .with_font(&self.smufl_font)
-                .with_text_font_arc(self.text_font_data.clone())
-                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
-                .with_named_font_arc("section-note", self.text_font_data.clone())
-                .with_named_font_arc("title-bold", self.text_font_data.clone())
-                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+            let base_renderer = SceneRenderBuilder::new().spatium(5.0).build();
+            let mut renderer = self.font_bundle.configure_renderer(base_renderer);
 
             // Set viewport for culling
             let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
@@ -464,17 +405,8 @@ impl ChartLayoutManager {
         // Render layout if available - NO background fill
         if let Some(ref layout) = self.layout_result {
             // Create scene renderer with fonts
-            let mut renderer = SceneRenderBuilder::new()
-                .spatium(5.0)
-                .build()
-                .with_font(&self.smufl_font)
-                .with_text_font_arc(self.text_font_data.clone())
-                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
-                .with_named_font_arc("section-note", self.text_font_data.clone())
-                .with_named_font_arc("title-bold", self.text_font_data.clone())
-                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+            let base_renderer = SceneRenderBuilder::new().spatium(5.0).build();
+            let mut renderer = self.font_bundle.configure_renderer(base_renderer);
 
             // Set viewport for culling
             let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
@@ -555,17 +487,8 @@ impl ChartLayoutManager {
 
         // Render layout if available
         if let Some(ref layout) = self.layout_result {
-            let mut renderer = SceneRenderBuilder::new()
-                .spatium(5.0)
-                .build()
-                .with_font(&self.smufl_font)
-                .with_text_font_arc(self.text_font_data.clone())
-                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
-                .with_named_font_arc("section-note", self.text_font_data.clone())
-                .with_named_font_arc("title-bold", self.text_font_data.clone())
-                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+            let base_renderer = SceneRenderBuilder::new().spatium(5.0).build();
+            let mut renderer = self.font_bundle.configure_renderer(base_renderer);
 
             let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
             renderer.set_viewport(viewport_rect);
@@ -639,17 +562,8 @@ impl ChartLayoutManager {
 
         // Render layout if available
         if let Some(ref layout) = self.layout_result {
-            let mut renderer = SceneRenderBuilder::new()
-                .spatium(5.0)
-                .build()
-                .with_font(&self.smufl_font)
-                .with_text_font_arc(self.text_font_data.clone())
-                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
-                .with_named_font_arc("section-note", self.text_font_data.clone())
-                .with_named_font_arc("title-bold", self.text_font_data.clone())
-                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+            let base_renderer = SceneRenderBuilder::new().spatium(5.0).build();
+            let mut renderer = self.font_bundle.configure_renderer(base_renderer);
 
             let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
             renderer.set_viewport(viewport_rect);
@@ -842,17 +756,8 @@ impl ChartLayoutManager {
         // Render layout if available
         if let Some(ref layout) = self.layout_result {
             // Create scene renderer with fonts
-            let mut renderer = SceneRenderBuilder::new()
-                .spatium(5.0)
-                .build()
-                .with_font(&self.smufl_font)
-                .with_text_font_arc(self.text_font_data.clone())
-                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
-                .with_named_font_arc("section-note", self.text_font_data.clone())
-                .with_named_font_arc("title-bold", self.text_font_data.clone())
-                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+            let base_renderer = SceneRenderBuilder::new().spatium(5.0).build();
+            let mut renderer = self.font_bundle.configure_renderer(base_renderer);
 
             // Set viewport for culling
             let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
@@ -903,15 +808,15 @@ impl ChartLayoutManager {
             default_stroke_width: 0.5,
             embedded_fonts: vec![
                 // SMuFL music symbol font
-                ("Bravura".to_string(), self.bravura_font_data.as_ref().clone()),
+                ("Bravura".to_string(), self.font_bundle.symbol_font_data().as_ref().clone()),
                 // Chord symbol fonts
-                ("MuseJazzText".to_string(), self.musejazz_font_data.as_ref().clone()),
-                ("MuseJazz".to_string(), self.musejazz_font_data.as_ref().clone()),
+                ("MuseJazzText".to_string(), self.font_bundle.text_font_data().as_ref().clone()),
+                ("MuseJazz".to_string(), self.font_bundle.text_font_data().as_ref().clone()),
                 // Text fonts - FreeSans with all aliases used in the chart
-                ("FreeSans".to_string(), self.text_font_data.as_ref().clone()),
-                ("title-bold".to_string(), self.text_font_data.as_ref().clone()),
-                ("part-name-bold".to_string(), self.text_font_data.as_ref().clone()),
-                ("sans-serif".to_string(), self.text_font_data.as_ref().clone()),
+                ("FreeSans".to_string(), self.font_bundle.aux_font_data().as_ref().clone()),
+                ("title-bold".to_string(), self.font_bundle.aux_font_data().as_ref().clone()),
+                ("part-name-bold".to_string(), self.font_bundle.aux_font_data().as_ref().clone()),
+                ("sans-serif".to_string(), self.font_bundle.aux_font_data().as_ref().clone()),
             ],
         };
 
@@ -950,15 +855,15 @@ impl ChartLayoutManager {
             // Include embedded fonts so SVGs are self-contained
             let config = SvgExportConfig::for_page(page_x, page_y, page_width, page_height)
                 // SMuFL music symbol font
-                .with_embedded_font("Bravura", self.bravura_font_data.as_ref().clone())
+                .with_embedded_font("Bravura", self.font_bundle.symbol_font_data().as_ref().clone())
                 // Chord symbol fonts
-                .with_embedded_font("MuseJazzText", self.musejazz_font_data.as_ref().clone())
-                .with_embedded_font("MuseJazz", self.musejazz_font_data.as_ref().clone())
+                .with_embedded_font("MuseJazzText", self.font_bundle.text_font_data().as_ref().clone())
+                .with_embedded_font("MuseJazz", self.font_bundle.text_font_data().as_ref().clone())
                 // Text fonts - FreeSans with all aliases used in the chart
-                .with_embedded_font("FreeSans", self.text_font_data.as_ref().clone())
-                .with_embedded_font("title-bold", self.text_font_data.as_ref().clone())
-                .with_embedded_font("part-name-bold", self.text_font_data.as_ref().clone())
-                .with_embedded_font("sans-serif", self.text_font_data.as_ref().clone());
+                .with_embedded_font("FreeSans", self.font_bundle.aux_font_data().as_ref().clone())
+                .with_embedded_font("title-bold", self.font_bundle.aux_font_data().as_ref().clone())
+                .with_embedded_font("part-name-bold", self.font_bundle.aux_font_data().as_ref().clone())
+                .with_embedded_font("sans-serif", self.font_bundle.aux_font_data().as_ref().clone());
 
             let mut serializer = SvgSerializer::new(config);
             let svg = serializer.serialize(&layout.scene);
@@ -999,21 +904,21 @@ impl ChartLayoutManager {
             background: Some(vello::peniko::Color::WHITE),
             default_stroke_width: 0.5,
             // Use MuseJazz as the default text font
-            font_data: Some(self.musejazz_font_data.clone()),
+            font_data: Some(self.font_bundle.text_font_data().clone()),
             // Use Bravura for SMuFL music symbols
-            smufl_font_data: Some(self.bravura_font_data.clone()),
+            smufl_font_data: Some(self.font_bundle.symbol_font_data().clone()),
         };
 
         let mut serializer = PdfSerializer::new(config);
 
         // Add additional named fonts for font-family matching
-        if let Err(e) = serializer.add_named_font("MuseJazzText", &self.musejazz_font_data) {
+        if let Err(e) = serializer.add_named_font("MuseJazzText", self.font_bundle.text_font_data()) {
             tracing::warn!("Failed to add MuseJazzText font: {}", e);
         }
-        if let Err(e) = serializer.add_named_font("MuseJazz", &self.musejazz_font_data) {
+        if let Err(e) = serializer.add_named_font("MuseJazz", self.font_bundle.text_font_data()) {
             tracing::warn!("Failed to add MuseJazz font: {}", e);
         }
-        if let Err(e) = serializer.add_named_font("FreeSans", &self.text_font_data) {
+        if let Err(e) = serializer.add_named_font("FreeSans", self.font_bundle.aux_font_data()) {
             tracing::warn!("Failed to add FreeSans font: {}", e);
         }
 
@@ -1173,17 +1078,8 @@ impl ChartLayoutManager {
 
         // Render layout if available
         if let Some(ref layout) = self.layout_result {
-            let mut renderer = SceneRenderBuilder::new()
-                .spatium(5.0)
-                .build()
-                .with_font(&self.smufl_font)
-                .with_text_font_arc(self.text_font_data.clone())
-                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz Text", self.musejazz_font_data.clone())
-                .with_named_font_arc("section-note", self.text_font_data.clone())
-                .with_named_font_arc("title-bold", self.text_font_data.clone())
-                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+            let base_renderer = SceneRenderBuilder::new().spatium(5.0).build();
+            let mut renderer = self.font_bundle.configure_renderer(base_renderer);
 
             // Set viewport for culling
             let viewport_rect = Rect::new(0.0, 0.0, canvas_width as f64, canvas_height as f64);
@@ -1289,10 +1185,10 @@ impl ChartLayoutManager {
         // Note: Font names here are for logging - fontdb extracts actual family names from font files
         // The important thing is that all required font data is loaded
         let fonts: Vec<(&str, &[u8])> = vec![
-            ("Bravura", self.bravura_font_data.as_slice()),
+            ("Bravura", self.font_bundle.symbol_font_data().as_slice()),
             // MuseJazz font file has internal family name "MuseJazz Text" (with space)
-            ("MuseJazz Text", self.musejazz_font_data.as_slice()),
-            ("FreeSans", self.text_font_data.as_slice()),
+            ("MuseJazz Text", self.font_bundle.text_font_data().as_slice()),
+            ("FreeSans", self.font_bundle.aux_font_data().as_slice()),
         ];
 
         PdfSerializer::serialize_from_svg(&svg_pages, &fonts)
@@ -1371,10 +1267,10 @@ impl ChartLayoutManager {
         // Note: Font names here are for logging - fontdb extracts actual family names from font files
         // The important thing is that all required font data is loaded
         let fonts: Vec<(&str, &[u8])> = vec![
-            ("Bravura", self.bravura_font_data.as_slice()),
+            ("Bravura", self.font_bundle.symbol_font_data().as_slice()),
             // MuseJazz font file has internal family name "MuseJazz Text" (with space)
-            ("MuseJazz Text", self.musejazz_font_data.as_slice()),
-            ("FreeSans", self.text_font_data.as_slice()),
+            ("MuseJazz Text", self.font_bundle.text_font_data().as_slice()),
+            ("FreeSans", self.font_bundle.aux_font_data().as_slice()),
         ];
 
         PdfSerializer::serialize_from_svg(&svg_pages, &fonts)

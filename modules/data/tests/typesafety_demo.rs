@@ -97,11 +97,11 @@ fn module_type_match_is_exhaustive() {
         ModuleType::PreFx => "Pre FX",
         ModuleType::Volume => "Volume",
         ModuleType::Amp => "Amp",
-        ModuleType::Cabinet => "Cabinet",
         ModuleType::PostEq => "Post EQ",
         ModuleType::Modulation => "Modulation",
-        ModuleType::PostFx => "Post FX",
-        ModuleType::Transient => "Transient",
+        ModuleType::Time => "Time",
+        ModuleType::Motion => "Motion",
+        ModuleType::Master => "Master",
     };
     assert_eq!(name, "Drive");
 }

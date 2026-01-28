@@ -11,6 +11,29 @@ pub fn find_marker_by_name<'a>(markers: &'a [Marker], name: &str) -> Option<&'a 
         .find(|m| m.name.trim().eq_ignore_ascii_case(name))
 }
 
+/// Check if a marker name is a Count-In marker.
+///
+/// Matches all common variants case-insensitively:
+/// "Count-In", "Count In", "CountIn", "COUNTIN", "count-in", "COUNT-IN", etc.
+pub fn is_count_in_marker_name(name: &str) -> bool {
+    let normalized: String = name
+        .trim()
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    normalized == "countin"
+}
+
+/// Find the Count-In marker from a list of markers.
+///
+/// Supports all common naming variants: "Count-In", "Count In", "CountIn", "COUNTIN", etc.
+pub fn find_count_in_marker<'a>(markers: &'a [Marker]) -> Option<&'a Marker> {
+    markers
+        .iter()
+        .find(|m| is_count_in_marker_name(&m.name))
+}
+
 /// Find song regions by identifying regions that contain other regions (sections)
 /// A song region is the largest region that contains multiple other regions within it.
 pub fn find_song_regions(regions: &[Region]) -> Vec<Region> {
@@ -69,15 +92,43 @@ pub fn find_song_region_for_marker<'a>(
         return None;
     }
 
-    // If only one, use it
+    // If only one region contains the marker, check if it's a real parent container
+    // (i.e., it contains at least 2 other regions inside it). If not, it's just a
+    // small section region at the same position as the marker — return None so the
+    // caller can fall through to the synthetic region path using Count-In/=END markers.
     if containing_regions.len() == 1 {
-        let selected = containing_regions[0].clone();
+        let candidate = containing_regions[0];
+        let contained_count = regions
+            .iter()
+            .filter(|other| {
+                // Exclude the candidate itself
+                other.start_seconds() != candidate.start_seconds()
+                    || other.end_seconds() != candidate.end_seconds()
+            })
+            .filter(|other| {
+                other.start_seconds() >= candidate.start_seconds()
+                    && other.end_seconds() <= candidate.end_seconds()
+            })
+            .count();
+
+        if contained_count >= 2 {
+            let selected = candidate.clone();
+            debug!(
+                region_name = %selected.name,
+                contained_count,
+                "Selected single containing region as song region (contains {} other regions)",
+                contained_count
+            );
+            return Some(selected);
+        }
+
         debug!(
-            region_name = %selected.name,
-            region_color = ?selected.color,
-            "Selected single containing region as song region"
+            region_name = %candidate.name,
+            contained_count,
+            "Single containing region is not a parent container ({} contained regions), returning None",
+            contained_count
         );
-        return Some(selected);
+        return None;
     }
 
     // If multiple, find the one that contains the most other regions (sections)

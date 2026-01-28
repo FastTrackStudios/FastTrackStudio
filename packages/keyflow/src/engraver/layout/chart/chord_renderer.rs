@@ -17,7 +17,7 @@
 //! - The second chord stays at its notehead-aligned position
 //!
 //! With proper pre-measurement, collisions should be rare. The debug logging
-//! (enabled via `#[cfg(debug_assertions)]`) reports when collisions occur, which
+//! (via `tracing::debug!`) reports when collisions occur, which
 //! can indicate issues with the measure pass or layout distribution.
 //!
 //! To disable collision detection, set `min_chord_symbol_gap = 0.0` in config.
@@ -202,8 +202,7 @@ fn resolve_chord_collisions(
             // Moving only the first chord left preserves notehead-chord alignment.
             adjustments[i] -= overlap;
 
-            #[cfg(debug_assertions)]
-            eprintln!(
+            tracing::debug!(
                 "[chord-collision] Detected overlap of {:.1}pt between chords {} and {}. \
                  Moving first chord left by {:.1}pt (preserves notehead alignment)",
                 overlap,
@@ -430,9 +429,8 @@ pub fn calculate_segment_index(
             }
 
             // Debug: log segment count mismatch
-            #[cfg(debug_assertions)]
             if segment_positions.len() < measure.rhythm_elements.len() {
-                eprintln!(
+                tracing::debug!(
                     "[chord-position] WARNING: segment_positions.len()={} < rhythm_elements.len()={} for chord_idx={}",
                     segment_positions.len(),
                     measure.rhythm_elements.len(),
@@ -544,9 +542,8 @@ pub fn render_chord_symbols(
 
     let is_boundary = is_at_boundary(ctx.measure_idx, ctx.local_measure_idx);
 
-    #[cfg(debug_assertions)]
     if ctx.measure_idx == 0 {
-        eprintln!(
+        tracing::debug!(
             "[chord-render-start] section={} measure={} is_boundary={} chord_count={} chords={:?}",
             ctx.section_name,
             ctx.measure_idx,
@@ -608,10 +605,9 @@ pub fn render_chord_symbols(
             is_boundary,
         );
 
-        #[cfg(debug_assertions)]
         {
             let is_pushed = chord.push_pull.as_ref().map_or(false, |(is_push, _)| *is_push);
-            eprintln!(
+            tracing::debug!(
                 "[chord-render] section={} measure={} chord_idx={} '{}' is_pushed={} is_first_real={} is_boundary={} is_pushed_at_boundary={} segment_idx={} internal_push_positions={:?}",
                 ctx.section_name,
                 ctx.measure_idx,
@@ -721,9 +717,8 @@ pub fn render_chord_symbols(
     }
 
     // Perform collision detection and resolution if enabled
-    #[cfg(debug_assertions)]
     if !chord_bounds_info.is_empty() {
-        eprintln!(
+        tracing::debug!(
             "[chord-collision] measure={} chords={} min_gap={:.1} bounds: {:?}",
             ctx.measure_idx,
             chord_bounds_info.len(),
@@ -743,8 +738,7 @@ pub fn render_chord_symbols(
             ctx.measure_x + ctx.measure_width,
         );
 
-        #[cfg(debug_assertions)]
-        eprintln!(
+        tracing::debug!(
             "[chord-collision] had_collisions={} adjustments={:?}",
             collision_result.had_collisions, collision_result.adjustments
         );
@@ -792,8 +786,7 @@ pub fn render_spillback_chords(
             .map(|(idx, _)| *idx)
             .unwrap_or_else(|| ctx.segment_positions.len().saturating_sub(1));
 
-        #[cfg(debug_assertions)]
-        eprintln!(
+        tracing::debug!(
             "[spillback-render] section={} measure={} '{}' beat_pos={} segment_idx={} positions_len={} segment_x={:.2} spillback_positions={:?}",
             ctx.section_name,
             ctx.measure_idx,

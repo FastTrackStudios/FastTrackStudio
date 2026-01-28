@@ -565,8 +565,7 @@ pub fn expand_melodies_across_measures(
             continue;
         }
 
-        #[cfg(debug_assertions)]
-        eprintln!(
+        tracing::debug!(
             "[melody-spillover] Measure {} has {} melodies",
             measure_idx,
             measure.melodies.len()
@@ -574,8 +573,7 @@ pub fn expand_melodies_across_measures(
 
         // Process each melody attached to this measure
         for melody in &measure.melodies {
-            #[cfg(debug_assertions)]
-            eprintln!(
+            tracing::debug!(
                 "[melody-spillover]   Processing melody with {} notes, total_beats: {:.2}",
                 melody.notes.len(),
                 melody.notes.iter().map(|n| n.duration_beats()).sum::<f64>()
@@ -638,21 +636,18 @@ pub fn expand_melodies_across_measures(
     }
 
     // Log summary of melody distribution
-    #[cfg(debug_assertions)]
-    {
-        for (measure_idx, data) in result.iter() {
-            eprintln!(
-                "[melody-spillover] Output measure {}: {} segments, {:.2} total beats",
-                measure_idx,
-                data.segments.len(),
-                data.total_beats
+    for (measure_idx, data) in result.iter() {
+        tracing::debug!(
+            "[melody-spillover] Output measure {}: {} segments, {:.2} total beats",
+            measure_idx,
+            data.segments.len(),
+            data.total_beats
+        );
+        for (i, seg) in data.segments.iter().enumerate() {
+            tracing::debug!(
+                "[melody-spillover]   Segment {}: pitch={}, beats={:.2}, tie_in={}, tie_out={}",
+                i, seg.pitch, seg.beats, seg.tie_from_previous, seg.tie_to_next
             );
-            for (i, seg) in data.segments.iter().enumerate() {
-                eprintln!(
-                    "[melody-spillover]   Segment {}: pitch={}, beats={:.2}, tie_in={}, tie_out={}",
-                    i, seg.pitch, seg.beats, seg.tie_from_previous, seg.tie_to_next
-                );
-            }
         }
     }
 

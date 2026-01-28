@@ -44,6 +44,29 @@ impl Default for CountInSnippetConfig {
     }
 }
 
+/// Geometry of a single count-in beat, for creating `BeatPosition` entries.
+#[derive(Debug, Clone)]
+pub struct CountInBeatGeometry {
+    /// X position of this beat (in page coordinates).
+    pub x: f64,
+    /// Width of this beat slot.
+    pub width: f64,
+    /// Y position of the staff top.
+    pub staff_y: f64,
+    /// Staff height.
+    pub staff_height: f64,
+    /// Measure index within the count-in (0-indexed).
+    pub measure_index: usize,
+    /// Beat index within the measure (0-indexed).
+    pub beat_index: usize,
+    /// SMuFL glyph codepoint for the slash notehead.
+    pub glyph_codepoint: char,
+    /// Glyph size in spatiums (scaled).
+    pub glyph_size: f64,
+    /// Glyph Y center position.
+    pub glyph_y: f64,
+}
+
 /// Result of rendering a count-in snippet.
 #[derive(Debug)]
 pub struct CountInSnippetResult {
@@ -53,6 +76,8 @@ pub struct CountInSnippetResult {
     pub width: f64,
     /// Total height of the snippet.
     pub height: f64,
+    /// Beat geometry for each beat in the count-in, for cursor highlighting.
+    pub beat_geometries: Vec<CountInBeatGeometry>,
 }
 
 
@@ -160,6 +185,9 @@ pub fn render_count_in_snippet(
         ));
     }
 
+    // Collect beat geometry for cursor highlighting
+    let mut beat_geometries = Vec::new();
+
     // Render slashes and beat numbers for each measure
     for measure_idx in 0..config.num_measures {
         let measure_start_x = staff_start_x + measure_width * measure_idx as f64;
@@ -180,6 +208,19 @@ pub fn render_count_in_snippet(
                 position: Point::new(beat_x, staff_center_y),
                 size: spatium,
                 color: Color::BLACK,
+            });
+
+            // Record beat geometry for cursor positioning
+            beat_geometries.push(CountInBeatGeometry {
+                x: beat_x,
+                width: beat_spacing,
+                staff_y: staff_top_y,
+                staff_height,
+                measure_index: measure_idx,
+                beat_index: beat_idx,
+                glyph_codepoint: slash_codepoint,
+                glyph_size: spatium,
+                glyph_y: staff_center_y,
             });
 
             // Beat number below slash
@@ -216,6 +257,7 @@ pub fn render_count_in_snippet(
         node,
         width: staff_width,
         height: total_height,
+        beat_geometries,
     }
 }
 

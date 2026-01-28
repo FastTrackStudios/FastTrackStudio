@@ -12,6 +12,7 @@ use crate::id::{BlockId, ModulePresetId, RigId, SectionId};
 use crate::module::ModuleType;
 use crate::module_preset::{GlobalModuleOverride, ModulePreset};
 use crate::section::Section;
+use crate::tags::{Taggable, Tags};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // InstrumentType
@@ -64,6 +65,8 @@ pub struct Rig {
     pub module_presets: Vec<ModulePreset>,
     /// Globally locked module overrides (persist across all preset/scene/song changes).
     pub global_module_overrides: Vec<GlobalModuleOverride>,
+    /// Tags for organizing and filtering.
+    pub tags: Tags,
 }
 
 impl Rig {
@@ -77,6 +80,7 @@ impl Rig {
             global_blocks: Vec::new(),
             module_presets: Vec::new(),
             global_module_overrides: Vec::new(),
+            tags: Tags::new(),
         }
     }
 
@@ -128,6 +132,20 @@ impl Rig {
     }
 }
 
+impl Taggable for Rig {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -148,6 +166,7 @@ mod tests {
         GlobalBlock {
             block,
             order: Order::new(0),
+            tags: Tags::new(),
         }
     }
 

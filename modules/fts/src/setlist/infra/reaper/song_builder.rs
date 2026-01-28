@@ -13,7 +13,8 @@ use tracing::{debug, warn};
 use super::markers::{read_markers_from_project, read_regions_from_project};
 use super::parser::parse_song_name;
 use super::region_finder::{
-    find_marker_by_name, find_song_region, find_song_region_for_marker, find_song_regions,
+    find_count_in_marker, find_marker_by_name, find_song_region, find_song_region_for_marker,
+    find_song_regions, is_count_in_marker_name,
 };
 use super::section_builder::{build_sections_from_regions, build_sections_from_regions_simple};
 use super::stats::{flush_build_stats_if_needed, record_song_built};
@@ -270,7 +271,7 @@ pub fn build_songs_from_project_with_cache(
 
                 // Find the earliest start: Count-In marker if before SONGSTART, otherwise SONGSTART
                 let count_in_marker = markers.iter().find(|m| {
-                    m.name.trim().eq_ignore_ascii_case("Count-In")
+                    is_count_in_marker_name(&m.name)
                         && m.position_seconds() < start_marker.position_seconds()
                 });
                 let region_start = count_in_marker
@@ -626,9 +627,9 @@ pub fn build_song_from_region(
     let start_marker_position = start_marker.position.clone();
 
     // Find special markers within this song region
-    // Count-In marker
+    // Count-In marker (supports "Count-In", "Count In", "CountIn", "COUNTIN", etc.)
     if let Some(marker) = context.all_markers.iter().find(|m| {
-        m.name.trim().eq_ignore_ascii_case("Count-In")
+        is_count_in_marker_name(&m.name)
             && m.position_seconds() >= song_region.start_seconds()
             && m.position_seconds() <= song_region.end_seconds()
     }) {
@@ -926,11 +927,12 @@ pub fn build_song_from_project_simple(
         .insert("project_name".to_string(), project_name.to_string());
 
     // Find special markers
-    // Count-In marker
-    if let Some(marker) = find_marker_by_name(markers, "Count-In") {
+    // Count-In marker (supports "Count-In", "Count In", "CountIn", "COUNTIN", etc.)
+    if let Some(marker) = find_count_in_marker(markers) {
         song.set_count_in_marker(marker.clone());
         debug!(
             position = marker.position_seconds(),
+            name = %marker.name,
             "Found Count-In marker"
         );
     }

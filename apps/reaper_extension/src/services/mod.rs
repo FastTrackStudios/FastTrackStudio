@@ -13,8 +13,10 @@ pub mod stream_service;
 
 pub use command_service::CommandService;
 pub use midi_service::{
-    AnalyzedChord, MIN_CHORD_DURATION_PPQ, detect_chords_from_midi_track, find_track_by_name,
-    get_first_midi_take, get_project_time_signature, read_midi_notes_from_take,
+    AnalyzedChord, MIN_CHORD_DURATION_PPQ, build_midi_file_from_reaper,
+    detect_chords_from_midi_track, find_track_by_name, generate_chart_text_from_reaper,
+    get_beats_at_time, get_first_midi_take, get_internal_measure_at_time, get_measure_at_time,
+    get_project_time_signature, read_midi_notes_from_take,
 };
 pub use reaper_transport::ReaperTransport;
 pub use seek_service::SeekService;

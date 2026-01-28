@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::block::Block;
 use crate::id::{BlockId, ModuleId};
 use crate::normalized::{MidiChannel, NormalizedF64, Order};
+use crate::tags::{Taggable, Tags};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ModuleType
@@ -41,13 +42,11 @@ pub enum ModuleType {
     PreFx = 15,
     Volume = 16,
     Amp = 17,
-    Cabinet = 18,
     PostEq = 19,
     Modulation = 20,
-    PostFx = 21,
-
-    // ── Utility ──────────────────────────────────────────────────────────
-    Transient = 30,
+    Time = 21,
+    Motion = 22,
+    Master = 23,
 }
 
 impl ModuleType {
@@ -67,11 +66,11 @@ impl ModuleType {
             Self::PreFx => "Pre FX",
             Self::Volume => "Volume",
             Self::Amp => "Amp",
-            Self::Cabinet => "Cabinet",
             Self::PostEq => "Post EQ",
             Self::Modulation => "Modulation",
-            Self::PostFx => "Post FX",
-            Self::Transient => "Transient",
+            Self::Time => "Time",
+            Self::Motion => "Motion",
+            Self::Master => "Master",
         }
     }
 }
@@ -146,6 +145,7 @@ pub struct ModuleBlock {
     pub block: Block,
     pub order: Order,
     pub midi_trigger: Option<MidiTriggerConfig>,
+    pub tags: Tags,
 }
 
 impl ModuleBlock {
@@ -156,6 +156,7 @@ impl ModuleBlock {
             block,
             order,
             midi_trigger: None,
+            tags: Tags::new(),
         }
     }
 
@@ -164,6 +165,20 @@ impl ModuleBlock {
     pub fn with_midi_trigger(mut self, config: MidiTriggerConfig) -> Self {
         self.midi_trigger = Some(config);
         self
+    }
+}
+
+impl Taggable for ModuleBlock {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+
+    fn name(&self) -> &str {
+        &self.block.name
     }
 }
 
@@ -189,7 +204,7 @@ pub struct ModuleMacro {
 /// A processing stage containing blocks and macro knobs.
 ///
 /// Modules represent logical groups in the signal chain (e.g. "Drive",
-/// "Cabinet", "EQ"). Each module holds one or more [`ModuleBlock`]s
+/// "Amp", "EQ"). Each module holds one or more [`ModuleBlock`]s
 /// and optional [`ModuleMacro`] knobs for quick parameter access.
 #[derive(Debug, Clone, Facet)]
 pub struct Module {
@@ -202,6 +217,7 @@ pub struct Module {
     pub level: NormalizedF64,
     pub send_mode: SendMode,
     pub split_sync: bool,
+    pub tags: Tags,
 }
 
 impl Module {
@@ -217,6 +233,7 @@ impl Module {
             level: NormalizedF64::ONE,
             send_mode: SendMode::default(),
             split_sync: false,
+            tags: Tags::new(),
         }
     }
 
@@ -244,6 +261,20 @@ impl Module {
     pub fn toggle_bypass(&mut self) -> bool {
         self.enabled = !self.enabled;
         self.enabled
+    }
+}
+
+impl Taggable for Module {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 
@@ -313,12 +344,13 @@ mod tests {
         assert_eq!(ModuleType::Eq.display_name(), "EQ");
         assert_eq!(ModuleType::PreFx.display_name(), "Pre FX");
         assert_eq!(ModuleType::PostEq.display_name(), "Post EQ");
-        assert_eq!(ModuleType::PostFx.display_name(), "Post FX");
-        assert_eq!(ModuleType::Transient.display_name(), "Transient");
+        assert_eq!(ModuleType::Time.display_name(), "Time");
+        assert_eq!(ModuleType::Motion.display_name(), "Motion");
+        assert_eq!(ModuleType::Master.display_name(), "Master");
 
         // Display trait matches display_name
         assert_eq!(format!("{}", ModuleType::Drive), "Drive");
-        assert_eq!(format!("{}", ModuleType::Cabinet), "Cabinet");
+        assert_eq!(format!("{}", ModuleType::Time), "Time");
     }
 
     #[test]

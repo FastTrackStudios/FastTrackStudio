@@ -115,7 +115,9 @@ fn analyze_single_chord(
     let measure_index = (chord.start_ppq / ticks_per_measure) as usize;
     let tick_in_measure = chord.start_ppq % ticks_per_measure;
 
-    // Find which beat the chord is closest to
+    // Find the nearest beat. round() is correct here because push/pull
+    // detection measures distance to the closest beat — a chord 480 ticks
+    // before beat 2 should snap to beat 2 (push), not beat 1 (pull).
     let beat_float = tick_in_measure as f64 / ticks_per_beat as f64;
     let nearest_beat = beat_float.round() as i64;
     let beat_start_tick = nearest_beat * ticks_per_beat;

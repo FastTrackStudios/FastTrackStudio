@@ -45,7 +45,7 @@ chord_overlay = ["input", "keyflow", "keyflow/engraver", "dep:reaper-embed", "de
 key_overlay = ["input", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
 # Enable chart window (docked chart display from keyflow parsing)
 # Note: input feature required due to unconditional imports in infrastructure modules
-chart_window = ["input", "keyflow", "keyflow/engraver", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
+chart_window = ["input", "keyflow", "keyflow/engraver", "keyflow/midi-import", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
 
 [dependencies]
 dynamic-template = { path = "../../modules/dynamic-template", optional = true }

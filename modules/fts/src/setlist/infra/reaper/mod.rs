@@ -25,7 +25,8 @@ pub use command_handler::ReaperSetlistCommandHandler;
 pub use markers::{read_markers_from_project, read_regions_from_project};
 pub use parser::{extract_number_from_name, parse_section_type_from_name, parse_song_name};
 pub use region_finder::{
-    find_marker_by_name, find_song_region, find_song_region_for_marker, find_song_regions,
+    find_count_in_marker, find_marker_by_name, find_song_region, find_song_region_for_marker,
+    find_song_regions, is_count_in_marker_name,
 };
 pub use section_builder::{build_sections_from_regions, build_sections_from_regions_simple};
 pub use song_builder::{build_setlist_from_open_projects, build_song_from_current_project};

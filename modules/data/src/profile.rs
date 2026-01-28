@@ -13,8 +13,10 @@ use uuid::Uuid;
 use crate::category::PresetCategory;
 use crate::id::{BlockId, GlobalBlockId, PresetId, ProfileId, RigId, SceneTemplateId, SectionId, SnapshotId, VariationId};
 use crate::module_preset::ModuleOverride;
+use crate::preset::BlockOverride;
 use crate::normalized::NormalizedF64;
 use crate::parameter::ParameterValue;
+use crate::tags::{Taggable, Tags};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Profile
@@ -36,6 +38,7 @@ pub struct Profile {
     pub default_scene_template_id: Option<SceneTemplateId>,
 
     pub metadata: HashMap<String, String>,
+    pub tags: Tags,
 }
 
 impl Profile {
@@ -49,6 +52,7 @@ impl Profile {
             scene_templates: Vec::new(),
             default_scene_template_id: None,
             metadata: HashMap::new(),
+            tags: Tags::new(),
         }
     }
 
@@ -82,6 +86,18 @@ impl Profile {
     }
 }
 
+impl Taggable for Profile {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SceneTemplate
 // ─────────────────────────────────────────────────────────────────────────────
@@ -98,8 +114,11 @@ pub struct SceneTemplate {
     pub parameter_state: SceneParameterState,
     /// Module overrides for this scene template — replace specific modules
     /// while keeping the rest from the base preset.
-
     pub module_overrides: Vec<ModuleOverride>,
+    /// Block-level parameter overrides — fine-grained tweaks on top of the
+    /// loaded preset. Only stores what differs from the base.
+    pub block_overrides: Vec<BlockOverride>,
+    pub tags: Tags,
 }
 
 impl SceneTemplate {
@@ -112,6 +131,8 @@ impl SceneTemplate {
             default_snapshot_id: None,
             parameter_state: SceneParameterState::new(),
             module_overrides: Vec::new(),
+            block_overrides: Vec::new(),
+            tags: Tags::new(),
         }
     }
 
@@ -124,6 +145,8 @@ impl SceneTemplate {
             default_snapshot_id: None,
             parameter_state: SceneParameterState::new(),
             module_overrides: Vec::new(),
+            block_overrides: Vec::new(),
+            tags: Tags::new(),
         }
     }
 
@@ -159,6 +182,23 @@ impl SceneTemplate {
     /// Add a module override for this scene template.
     pub fn add_module_override(&mut self, module_override: ModuleOverride) {
         self.module_overrides.push(module_override);
+    }
+
+    /// Add a block-level parameter override for this scene template.
+    pub fn add_block_override(&mut self, block_override: BlockOverride) {
+        self.block_overrides.push(block_override);
+    }
+}
+
+impl Taggable for SceneTemplate {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 

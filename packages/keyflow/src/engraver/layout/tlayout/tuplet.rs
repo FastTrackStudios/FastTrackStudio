@@ -238,9 +238,8 @@ pub fn layout_tuplet(
         // Clamp: prefer staying within boundary, but never go before last note
         let clamped_x = p2.x.min(max_endpoint).max(min_endpoint);
 
-        #[cfg(debug_assertions)]
         if p2.x != clamped_x {
-            eprintln!(
+            tracing::debug!(
                 "[tuplet-boundary] Adjusting bracket p2.x from {:.1} to {:.1} (boundary={:.1}, last_note={:.1})",
                 p2.x, clamped_x, boundary, last.x
             );

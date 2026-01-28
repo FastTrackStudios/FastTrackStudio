@@ -70,6 +70,23 @@ pub struct Song {
     /// Each measure has a Position with both MusicalPosition and TimePosition
     /// This allows clients to display measures correctly without complex tempo calculations
     pub measure_positions: Vec<Position>,
+    /// Initial key of the song (e.g., Eb major, Cm).
+    /// Read once from the KEY track (first item) so downstream consumers
+    /// don't need to re-read the track.
+    pub initial_key: Option<Key>,
+    /// Key changes within the song, sorted by position.
+    /// Each entry is (position_seconds, key). The first key change is the
+    /// second item on the KEY track (the initial key is stored separately).
+    pub key_changes: Vec<SongKeyChange>,
+}
+
+/// A key change at a specific position within a song.
+#[derive(Debug, Clone, Serialize, Deserialize, Facet)]
+pub struct SongKeyChange {
+    /// Position in project seconds where the key change occurs
+    pub position_seconds: f64,
+    /// The new key
+    pub key: Key,
 }
 
 impl Song {
@@ -99,6 +116,8 @@ impl Song {
             lyrics: None,
             chart: None,
             measure_positions: Vec::new(),
+            initial_key: None,
+            key_changes: Vec::new(),
         })
     }
 
@@ -150,6 +169,8 @@ impl Song {
             lyrics: None,
             chart: None,
             measure_positions: Vec::new(),
+            initial_key: None,
+            key_changes: Vec::new(),
         })
     }
 
@@ -886,6 +907,8 @@ impl Clone for Song {
             lyrics: self.lyrics.clone(),
             chart: self.chart.clone(),
             measure_positions: self.measure_positions.clone(),
+            initial_key: self.initial_key.clone(),
+            key_changes: self.key_changes.clone(),
         }
     }
 }

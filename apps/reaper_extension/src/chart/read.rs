@@ -14,7 +14,7 @@ pub fn find_track_by_name(project: Project, name: &str) -> Option<Track> {
             // Debug: log all track names to help diagnose
             tracing::debug!("Checking track: '{}' against '{}'", track_name_str, name);
             if track_name_str.eq_ignore_ascii_case(name) {
-                tracing::info!("Found matching track: '{}'", track_name_str);
+                tracing::debug!("Found matching track: '{}'", track_name_str);
                 return Some(track);
             }
         } else {
@@ -484,6 +484,103 @@ pub fn get_sections_from_regions(
     }
 
     sections
+}
+
+/// A key entry from the KEY track with its position in the project
+#[derive(Debug, Clone)]
+pub struct KeyEntry {
+    /// The parsed key
+    pub key: keyflow::Key,
+    /// Position in seconds (start of the item on the KEY track)
+    pub position_seconds: f64,
+}
+
+/// Read all key signatures from the KEY track, sorted by position.
+///
+/// Each item on the KEY track represents a key signature. The item's notes (P_NOTES)
+/// contain the key name (e.g., "Eb", "Cm", "F#m"). Items later in the timeline
+/// represent key changes.
+///
+/// Returns an empty Vec if no KEY track exists or no valid keys are found.
+pub fn read_all_keys_from_track(project: Project) -> Vec<KeyEntry> {
+    let key_track = match find_track_by_name(project, "KEY") {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
+
+    let reaper = Reaper::get();
+    let medium_reaper = reaper.medium_reaper();
+    let mut entries = Vec::new();
+
+    for item in key_track.items() {
+        let item_raw = item.raw();
+
+        // Get item start position in project time
+        let item_start_time = unsafe {
+            medium_reaper
+                .low()
+                .GetMediaItemInfo_Value(item_raw.as_ptr(), c"D_POSITION".as_ptr())
+        };
+
+        // Try to read key from item notes (P_NOTES)
+        let key = unsafe {
+            let notes_key = std::ffi::CString::new("P_NOTES").expect("CString::new failed");
+            let mut buffer = vec![0u8; 256];
+            let buffer_ptr = buffer.as_mut_ptr() as *mut std::os::raw::c_char;
+
+            let success = medium_reaper.low().GetSetMediaItemInfo_String(
+                item_raw.as_ptr(),
+                notes_key.as_ptr(),
+                buffer_ptr,
+                false,
+            );
+
+            if success {
+                let c_str = std::ffi::CStr::from_ptr(buffer_ptr);
+                let notes = c_str.to_string_lossy().to_string();
+                let trimmed = notes.trim();
+                if !trimmed.is_empty() {
+                    tracing::debug!(
+                        "KEY track item at {:.3}s: '{}'",
+                        item_start_time,
+                        trimmed
+                    );
+                    parse_key_from_string(trimmed)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(key) = key {
+            entries.push(KeyEntry {
+                key,
+                position_seconds: item_start_time,
+            });
+        }
+    }
+
+    // Sort by position
+    entries.sort_by(|a, b| {
+        a.position_seconds
+            .partial_cmp(&b.position_seconds)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    if !entries.is_empty() {
+        tracing::debug!(
+            "Read {} key entries from KEY track: {:?}",
+            entries.len(),
+            entries
+                .iter()
+                .map(|e| format!("{} at {:.3}s", e.key, e.position_seconds))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    entries
 }
 
 /// Parse a key from a string like "C", "Cm", "F#m", "Bb major", "Eb minor"

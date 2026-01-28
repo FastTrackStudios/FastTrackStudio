@@ -185,8 +185,7 @@ pub fn build_rhythm(source: RhythmSource<'_>, config: &RhythmBuildConfig) -> Rhy
 fn extract_base_rhythm(source: RhythmSource<'_>, config: &RhythmBuildConfig) -> RhythmBuildResult {
     match source {
         RhythmSource::ExplicitRhythm { elements, spillbacks } => {
-            #[cfg(debug_assertions)]
-            eprintln!(
+            tracing::debug!(
                 "[rhythm-source] Using ExplicitRhythm ({} elements, {} spillbacks)",
                 elements.len(),
                 spillbacks.map_or(0, |s| s.len())
@@ -194,13 +193,11 @@ fn extract_base_rhythm(source: RhythmSource<'_>, config: &RhythmBuildConfig) -> 
             extract_from_explicit(elements, spillbacks, config)
         }
         RhythmSource::MelodyData(data) => {
-            #[cfg(debug_assertions)]
-            eprintln!("[rhythm-source] Using MelodyData");
+            tracing::debug!("[rhythm-source] Using MelodyData");
             extract_from_melody(data)
         }
         RhythmSource::SlashNotation { chords, spillbacks } => {
-            #[cfg(debug_assertions)]
-            eprintln!(
+            tracing::debug!(
                 "[rhythm-source] Using SlashNotation ({} chords, {} spillbacks)",
                 chords.len(),
                 spillbacks.map_or(0, |s| s.len())
@@ -281,14 +278,12 @@ fn extract_from_explicit(
     // we need to modify the end of the measure to accommodate the pushed chord
     if config.push_alters_rhythm {
         if let Some(spillbacks) = spillbacks {
-            #[cfg(debug_assertions)]
-            eprintln!(
+            tracing::debug!(
                 "[explicit-spillback] Processing {} spillbacks in extract_from_explicit",
                 spillbacks.len()
             );
             for spillback in spillbacks {
-                #[cfg(debug_assertions)]
-                eprintln!(
+                tracing::debug!(
                     "[explicit-spillback] spillback: '{}' base={:?} level={}",
                     spillback.chord_symbol, spillback.push_base, spillback.push_level
                 );
@@ -300,16 +295,14 @@ fn extract_from_explicit(
                         let last_ticks = last_entry.duration().ticks();
                         const QUARTER_TICKS: i32 = 480;
 
-                        #[cfg(debug_assertions)]
-                        eprintln!(
+                        tracing::debug!(
                             "[explicit-spillback] last_ticks={} QUARTER_TICKS={}",
                             last_ticks, QUARTER_TICKS
                         );
 
                         // We can handle any duration >= quarter note
                         if last_ticks >= QUARTER_TICKS {
-                            #[cfg(debug_assertions)]
-                            eprintln!("[explicit-spillback] Expanding rhythm for spillback '{}'", spillback.chord_symbol);
+                            tracing::debug!("[explicit-spillback] Expanding rhythm for spillback '{}'", spillback.chord_symbol);
                             let was_rest = matches!(last_entry, RhythmEntry::Rest(_));
                             let remaining_ticks = last_ticks - QUARTER_TICKS;
 
@@ -445,9 +438,8 @@ fn extract_from_slash(
 
     // Check spillbacks from next measure
     if let Some(spills) = spillbacks {
-        #[cfg(debug_assertions)]
         if !spills.is_empty() {
-            eprintln!(
+            tracing::debug!(
                 "[rhythm-builder] Processing {} spillbacks, num_beats={}, push_alters_rhythm={}",
                 spills.len(),
                 num_beats,
@@ -455,8 +447,7 @@ fn extract_from_slash(
             );
         }
         for spillback in spills {
-            #[cfg(debug_assertions)]
-            eprintln!(
+            tracing::debug!(
                 "[rhythm-builder] spillback: chord='{}' beat={} base={:?} level={}",
                 spillback.chord_symbol,
                 spillback.beat_position,
@@ -468,8 +459,7 @@ fn extract_from_slash(
                 if target_beat < num_beats && !beats_with_triplets[target_beat].0 {
                     // Mark as triplet but no internal chord (it's from next measure)
                     beats_with_triplets[target_beat] = (true, None);
-                    #[cfg(debug_assertions)]
-                    eprintln!("[rhythm-builder] Marked beat {} as triplet from spillback", target_beat);
+                    tracing::debug!("[rhythm-builder] Marked beat {} as triplet from spillback", target_beat);
                 }
             }
         }

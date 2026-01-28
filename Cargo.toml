@@ -58,6 +58,7 @@ name = "fts-workspace"
 
 [workspace.dependencies]
 actions = { path = "modules/actions" }
+data = { path = "modules/data" }
 anyhow = "1.0"
 async-trait = "0.1"
 atomic_float = "1.0"

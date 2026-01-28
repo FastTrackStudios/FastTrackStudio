@@ -311,6 +311,31 @@ impl MidiFile {
         })
     }
 
+    /// Construct a `MidiFile` from pre-extracted components.
+    ///
+    /// Use this when you already have MIDI data from a DAW (e.g., REAPER)
+    /// rather than a standalone `.mid` file. This lets you feed DAW track
+    /// data into `generate_chart_text()` for identical output to the
+    /// file-based pipeline.
+    #[must_use]
+    pub fn from_parts(
+        ppq: u32,
+        tracks: Vec<MidiTrack>,
+        tempo_map: Vec<TempoEvent>,
+        time_signatures: Vec<TimeSignatureEvent>,
+        markers: Vec<MarkerEvent>,
+        track_names: Vec<Option<String>>,
+    ) -> Self {
+        Self {
+            ppq,
+            tracks,
+            tempo_map,
+            time_signatures,
+            markers,
+            track_names,
+        }
+    }
+
     /// Get the PPQ (pulses per quarter note) of this MIDI file.
     #[must_use]
     pub fn ppq(&self) -> u32 {

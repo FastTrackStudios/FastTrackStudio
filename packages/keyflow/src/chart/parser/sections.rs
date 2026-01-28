@@ -442,7 +442,7 @@ impl Chart {
             if is_setting_line {
                 // This is a settings line - apply it temporarily
                 if let Err(e) = self.settings.parse_setting_line(line) {
-                    eprintln!("Warning: Failed to parse section setting '{}': {}", line, e);
+                    tracing::warn!("Failed to parse section setting '{}': {}", line, e);
                 } else {
                     has_section_settings = true;
                 }
@@ -541,8 +541,8 @@ impl Chart {
                                         parsed_measures.push(space_measure);
                                     }
                                 } else if actual_measures > count {
-                                    eprintln!(
-                                        "Warning: Section {:?} has {} measures but specified {} - using actual content",
+                                    tracing::warn!(
+                                        "Section {:?} has {} measures but specified {} - using actual content",
                                         section_type, actual_measures, count
                                     );
                                 }

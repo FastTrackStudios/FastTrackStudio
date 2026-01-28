@@ -662,7 +662,7 @@ impl Chart {
                         // melodies to specific measures.
                     }
                     Err(e) => {
-                        eprintln!("Warning: Failed to parse melody block '{}': {}", trimmed, e);
+                        tracing::warn!("Failed to parse melody block '{}': {}", trimmed, e);
                     }
                 }
                 continue;
@@ -676,7 +676,7 @@ impl Chart {
                         pending_cues.push(cue);
                     }
                     Err(e) => {
-                        eprintln!("Warning: Failed to parse text cue '{}': {}", line, e);
+                        tracing::warn!("Failed to parse text cue '{}': {}", line, e);
                     }
                 }
             } else if trimmed.starts_with('<') && trimmed.contains('>') {
@@ -687,7 +687,7 @@ impl Chart {
                         pending_dynamics.push(dynamic);
                     }
                     Err(e) => {
-                        eprintln!("Warning: Failed to parse dynamic marking '{}': {}", line, e);
+                        tracing::warn!("Failed to parse dynamic marking '{}': {}", line, e);
                     }
                 }
             } else {
@@ -1222,7 +1222,7 @@ impl Chart {
                     // Attach the melody to the current measure
                     current_measure.melodies.push(melody);
                 } else {
-                    eprintln!("Warning: Unknown melody variable '{}'", var_name);
+                    tracing::warn!("Unknown melody variable '{}'", var_name);
                 }
                 continue;
             }
@@ -1246,8 +1246,8 @@ impl Chart {
                                 current_measure.melodies.push(melody);
                             }
                             Err(e) => {
-                                eprintln!(
-                                    "Warning: Failed to parse inline melody '{}': {}",
+                                tracing::warn!(
+                                    "Failed to parse inline melody '{}': {}",
                                     melody_str, e
                                 );
                             }

@@ -14,19 +14,18 @@ use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, RwLock};
 
 use daw::primitives::TimeSignature;
-use keyflow::engraver::fonts::SMuFLFont;
+use keyflow::engraver::fonts::ChartFontBundle;
 use keyflow::engraver::layout::chart::{
-    BeatPosition, ChartLayoutConfig, ChartLayoutEngine, ChartLayoutResult, LayoutMode,
+    BeatPosition, ChartCursor, ChartLayoutConfig, ChartLayoutEngine, ChartLayoutResult,
+    CursorConfig, CursorState, CursorStyle as KeyflowCursorStyle, HighlightCommand, LayoutMode,
 };
 use keyflow::engraver::renderer::scene_renderer::{SceneRenderBuilder, VelloSceneRenderer};
 use keyflow::engraver::style::MStyle;
-use fts::setlist::core::Song;
+use fts::setlist::core::{Song, SongKeyChange};
 use fts::setlist::infra::traits::SetlistBuilder;
 use keyflow::Chart;
-use keyflow::chart::types::{ChartSection, ChordInstance, Measure};
-use keyflow::chord::{ChordRhythm, has_rhythmic_complexity, reaper_ppq_to_layout_ticks};
-use keyflow::sections::{Section, SectionType};
-use keyflow::time::{AbsolutePosition, MusicalDuration, MusicalPosition};
+use keyflow::sections::SectionType;
+use keyflow::time::{AbsolutePosition, MusicalPosition};
 use raw_window_handle::{
     AppKitDisplayHandle, AppKitWindowHandle, DisplayHandle, HandleError, HasDisplayHandle,
     HasWindowHandle, RawDisplayHandle, RawWindowHandle, WindowHandle,
@@ -40,9 +39,11 @@ use vello::kurbo::{Affine, BezPath, Point, Rect, RoundedRect, Stroke};
 use vello::peniko::{Color, Fill};
 
 use crate::infrastructure::action_registry::{ActionDef, ActionSection};
+use crate::chart::{KeyEntry, read_all_keys_from_track};
 use crate::services::{
-    AnalyzedChord, detect_chords_from_midi_track, find_track_by_name, get_first_midi_take,
-    get_project_time_signature, read_midi_notes_from_take,
+    find_track_by_name, generate_chart_text_from_reaper, get_beats_at_time,
+    get_first_midi_take, get_internal_measure_at_time, get_project_time_signature,
+    read_midi_notes_from_take,
 };
 use reaper_embed::{DockedWindow, ReaperWindow, VelloEmbedSourceWithEvents, WindowConfig};
 
@@ -142,18 +143,7 @@ fn get_shared_playback_state() -> SharedPlaybackState {
         .unwrap_or_default()
 }
 
-// Embedded fonts from musescore reference library
-static BRAVURA_FONT: &[u8] = include_bytes!(
-    "../../../../libs/reference/sheet-music/musescore/fonts/bravura/Bravura.otf"
-);
-static BRAVURA_METADATA: &[u8] = include_bytes!(
-    "../../../../libs/reference/sheet-music/musescore/fonts/bravura/bravura_metadata.json"
-);
-static TEXT_FONT: &[u8] =
-    include_bytes!("../../../../libs/reference/sheet-music/musescore/fonts/FreeSans.ttf");
-static MUSEJAZZ_TEXT_FONT: &[u8] = include_bytes!(
-    "../../../../libs/reference/sheet-music/musescore/fonts/musejazz/MuseJazzText.otf"
-);
+// Fonts are now provided by ChartFontBundle from keyflow
 
 /// Screen DPI for rendering
 const SCREEN_DPI: f64 = 96.0;
@@ -162,29 +152,14 @@ const POINTS_PER_INCH: f64 = 72.0;
 /// DPI scaling factor: converts points to screen pixels
 const DPI_SCALE: f64 = SCREEN_DPI / POINTS_PER_INCH;
 
+/// Convert a `[u8; 4]` RGBA color from the keyflow cursor module to a Vello `Color`.
+fn rgba_to_color(rgba: &[u8; 4]) -> Color {
+    Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3])
+}
+
 // ============================================================================
 // Playback Cursor Types
 // ============================================================================
-
-/// Visual style for playback cursor
-#[derive(Debug, Clone)]
-pub enum CursorStyle {
-    /// Thin vertical line at current position
-    VerticalLine { color: Color, width: f64 },
-    /// Highlight entire current measure
-    MeasureHighlight { color: Color, alpha: f32 },
-    /// Highlight current beat/chord position
-    BeatBox { color: Color, alpha: f32 },
-}
-
-impl Default for CursorStyle {
-    fn default() -> Self {
-        CursorStyle::VerticalLine {
-            color: Color::from_rgba8(255, 80, 80, 255), // Red
-            width: 6.0,                                 // Thick for visibility from a distance
-        }
-    }
-}
 
 /// Auto-follow mode during playback
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -198,7 +173,10 @@ pub enum FollowMode {
     None,
 }
 
-/// Playback cursor state tracking REAPER transport
+/// Playback transport state tracking REAPER transport.
+///
+/// Position and geometry fields are now computed by `ChartCursor` and stored
+/// in `CursorState`. This struct only tracks transport-level state.
 #[derive(Debug, Clone, Default)]
 struct PlaybackState {
     /// Current playhead position in seconds
@@ -209,48 +187,6 @@ struct PlaybackState {
     is_recording: bool,
     /// Whether REAPER is paused
     is_paused: bool,
-    /// Current measure index (0-based) in the chart
-    current_measure: Option<usize>,
-    /// Cursor X position in layout coordinates (before transform)
-    cursor_x: f64,
-    /// Cursor Y position (top of cursor line)
-    cursor_y: f64,
-    /// Cursor height (spans staff height)
-    cursor_height: f64,
-    /// Current page number (for page-turn follow)
-    current_page: u32,
-    /// Current system index within page
-    current_system: usize,
-}
-
-/// Configuration for element highlighting during playback
-#[derive(Debug, Clone)]
-struct HighlightConfig {
-    /// Whether to highlight chords
-    highlight_chords: bool,
-    /// Whether to show cursor when stopped
-    show_cursor_when_stopped: bool,
-    /// Accent color for highlighting current note/rest being played
-    accent_color: Color,
-    /// Color for recently passed elements (fading out)
-    recent_color: Option<Color>,
-    /// How long to keep "recent" highlighting (seconds)
-    recent_duration: f64,
-    /// Whether to highlight the current beat's notehead
-    highlight_notehead: bool,
-}
-
-impl Default for HighlightConfig {
-    fn default() -> Self {
-        Self {
-            highlight_chords: true,
-            show_cursor_when_stopped: true,
-            accent_color: Color::from_rgba8(255, 60, 60, 255), // Red accent for current note
-            recent_color: Some(Color::from_rgba8(255, 150, 150, 180)), // Faded red
-            recent_duration: 0.5,
-            highlight_notehead: true,
-        }
-    }
 }
 
 /// Wrapper for REAPER's main window that implements HasWindowHandle
@@ -332,12 +268,8 @@ impl HasDisplayHandle for ReaperMainWindow {
 
 /// Chart renderer state
 struct ChartRendererState {
-    /// SMuFL font for music notation
-    smufl_font: SMuFLFont<'static>,
-    /// Text font data (FreeSans)
-    text_font_data: Arc<Vec<u8>>,
-    /// MuseJazz font data for chord symbols
-    musejazz_font_data: Arc<Vec<u8>>,
+    /// Font bundle (single source of truth for all chart fonts)
+    font_bundle: ChartFontBundle,
     /// Layout engine
     layout_engine: ChartLayoutEngine,
     /// Current chart
@@ -358,16 +290,16 @@ struct ChartRendererState {
     // === Playback Cursor Fields ===
     /// Song reference for time-to-measure mapping
     song: Option<Song>,
-    /// Playback state (position, playing status)
+    /// Transport state (playing, position)
     playback: PlaybackState,
-    /// Visual style for cursor
-    cursor_style: CursorStyle,
+    /// Renderer-agnostic cursor from keyflow engraver
+    chart_cursor: ChartCursor,
+    /// Last computed cursor state (updated each frame during playback)
+    cursor_state: Option<CursorState>,
     /// Auto-follow mode
     follow_mode: FollowMode,
     /// Last page we jumped to (for page-turn follow)
     last_followed_page: u32,
-    /// Highlight configuration
-    highlight_config: HighlightConfig,
     /// Song start time offset (for mapping transport position to chart time)
     song_start_offset: f64,
     /// Tempo (BPM) for calculating measure timing
@@ -414,19 +346,12 @@ impl ChartRendererState {
         measure_offset: i32,
         count_in_measures: u8,
     ) -> Self {
-        // Load SMuFL font
-        let smufl_font =
-            SMuFLFont::from_reader(BRAVURA_FONT, std::io::Cursor::new(BRAVURA_METADATA))
-                .expect("Failed to load Bravura font");
+        // Load font bundle (single source of truth)
+        let font_bundle = ChartFontBundle::new().expect("Failed to create chart font bundle");
 
-        // Create font data arcs
-        let text_font_data = Arc::new(TEXT_FONT.to_vec());
-        let musejazz_font_data = Arc::new(MUSEJAZZ_TEXT_FONT.to_vec());
-
-        // Create layout engine with static style
+        // Create layout engine with correct font wiring via bundle
         let style: &'static MStyle = Box::leak(Box::new(MStyle::default()));
-        let layout_engine =
-            ChartLayoutEngine::new(style, text_font_data.clone(), musejazz_font_data.clone());
+        let layout_engine = font_bundle.create_layout_engine(style);
 
         // Create layout config with stemmed notation, measure offset, and count-in
         let config = ChartLayoutConfig {
@@ -458,9 +383,7 @@ impl ChartRendererState {
         let initial_transform = Affine::translate((50.0, 50.0)) * Affine::scale(DPI_SCALE);
 
         let mut state = Self {
-            smufl_font,
-            text_font_data,
-            musejazz_font_data,
+            font_bundle,
             layout_engine,
             chart,
             layout_result,
@@ -472,10 +395,10 @@ impl ChartRendererState {
             // Playback fields
             song,
             playback: PlaybackState::default(),
-            cursor_style: CursorStyle::default(),
+            chart_cursor: ChartCursor::default(),
+            cursor_state: None,
             follow_mode: FollowMode::default(),
             last_followed_page: 0,
-            highlight_config: HighlightConfig::default(),
             song_start_offset,
             tempo,
             time_signature,
@@ -504,9 +427,12 @@ impl ChartRendererState {
 
     /// Update playhead position from shared FTS setlist state.
     ///
-    /// This reads from the global SharedPlaybackState which is populated by the
-    /// timer callback from the FTS setlist infrastructure, avoiding direct REAPER queries.
-    /// Uses tick-based positions for tempo-independent smooth cursor movement.
+    /// Uses REAPER's `TimeMap2_timeToBeats` API for tempo-accurate beat positions
+    /// instead of estimating ticks from time and tempo. This correctly handles
+    /// tempo changes, time signature changes, and the project measure offset.
+    ///
+    /// The chart layout uses 480 ticks per quarter note with tick 0 at SONGSTART.
+    /// Count-in measures have negative tick values.
     fn update_playhead(&mut self) {
         // Get shared state (populated by timer from FTS setlist)
         let shared = get_shared_playback_state();
@@ -527,186 +453,167 @@ impl ChartRendererState {
             self.time_signature = shared.time_signature.clone();
         }
 
-        // Update song start offset if changed
-        if (shared.song_start_seconds - self.song_start_offset).abs() > 0.001 {
+        // Update song start offset if the shared state has been populated (non-zero)
+        // and differs from our current value. Don't override with 0.0 from uninitialized state.
+        if shared.song_start_seconds > 0.001
+            && (shared.song_start_seconds - self.song_start_offset).abs() > 0.001
+        {
             self.song_start_offset = shared.song_start_seconds;
         }
 
-        // Calculate time relative to song start
-        let relative_time = self.playback.position_seconds - self.song_start_offset;
+        // Use REAPER's beat API for tempo-accurate tick calculation.
+        // TimeMap2_timeToBeats returns total quarter-note beats from project start,
+        // accounting for all tempo and time signature changes.
+        let reaper = Reaper::get();
+        let project = reaper.current_project();
 
-        // Convert time to ticks using current tempo for smooth, tempo-accurate movement
-        // Formula: ticks = time * (tempo / 60) * 480 = time * tempo * 8
-        let current_tick = (relative_time * self.tempo * 8.0) as i64;
+        let current_beats = get_beats_at_time(project, self.playback.position_seconds);
+        let songstart_beats = get_beats_at_time(project, self.song_start_offset);
 
-        // Use tick-based positions from layout result for smooth cursor placement
+        // Relative beats from SONGSTART (negative = before SONGSTART, i.e. count-in)
+        let relative_beats = current_beats - songstart_beats;
+
+        // Convert to ticks: 480 ticks per quarter note (matches layout engine's PPQ)
+        let current_tick = (relative_beats * 480.0) as i64;
+
+        // Compute cursor state via the keyflow ChartCursor abstraction
         if let Some(ref layout) = self.layout_result {
-            if let Some(beat) = layout.beat_at_tick(current_tick) {
-                // Get interpolated X position within the beat using tick-based interpolation
-                let cursor_x = beat.x_at_tick(current_tick);
-
-                self.playback.current_measure = Some(beat.measure);
-                self.playback.current_page = beat.page;
-                self.playback.current_system = beat.system;
-                self.playback.cursor_x = cursor_x;
-                self.playback.cursor_y = beat.staff_y;
-                self.playback.cursor_height = beat.staff_height;
-            } else {
-                // Tick is outside the chart range
-                self.playback.current_measure = None;
-            }
+            self.cursor_state = self.chart_cursor.compute(layout, current_tick);
         } else {
-            self.playback.current_measure = None;
+            self.cursor_state = None;
         }
     }
 
     /// Find the beat at a given time position (from layout result)
     fn find_beat_at_time(&self, time: f64) -> Option<&BeatPosition> {
-        let relative_time = time - self.song_start_offset;
-        // Convert to tick for lookup
-        let tick = (relative_time * self.tempo * 8.0) as i64;
+        let reaper = Reaper::get();
+        let project = reaper.current_project();
+        let current_beats = get_beats_at_time(project, time);
+        let songstart_beats = get_beats_at_time(project, self.song_start_offset);
+        let relative_beats = current_beats - songstart_beats;
+        let tick = (relative_beats * 480.0) as i64;
         self.layout_result.as_ref()?.beat_at_tick(tick)
     }
 
-    /// Render the playback cursor overlay
+    /// Render the playback cursor overlay.
     ///
-    /// Uses beat-level positions from the layout result for precise placement.
-    /// The cursor is page-aware - it only renders on the currently visible page.
+    /// Translates renderer-agnostic `HighlightCommand` values from the keyflow
+    /// `ChartCursor` into Vello draw calls.
     fn render_cursor(&self, scene: &mut Scene) {
         // Check if we should show cursor
         let should_show = self.playback.is_playing
             || self.playback.is_paused
-            || (self.highlight_config.show_cursor_when_stopped
-                && self.playback.current_measure.is_some());
+            || (self.chart_cursor.config.show_when_stopped && self.cursor_state.is_some());
 
         if !should_show {
             return;
         }
 
-        // Get current beat from layout result for beat-based styles (tick-based lookup)
-        let relative_time = self.playback.position_seconds - self.song_start_offset;
-        let current_tick = (relative_time * self.tempo * 8.0) as i64;
-        let current_beat = self
-            .layout_result
-            .as_ref()
-            .and_then(|layout| layout.beat_at_tick(current_tick));
+        let Some(ref state) = self.cursor_state else {
+            return;
+        };
 
-        match &self.cursor_style {
-            CursorStyle::VerticalLine { color, width } => {
-                if self.playback.current_measure.is_some() {
-                    // Extend cursor 25% above and below the staff for better visibility
-                    let extension = self.playback.cursor_height * 0.25;
-                    let extended_top = self.playback.cursor_y - extension;
-                    let extended_bottom =
-                        self.playback.cursor_y + self.playback.cursor_height + extension;
-
-                    // Transform cursor position to screen coordinates
-                    let cursor_top =
-                        self.transform * Point::new(self.playback.cursor_x, extended_top);
-                    let cursor_bottom =
-                        self.transform * Point::new(self.playback.cursor_x, extended_bottom);
-
-                    // Draw vertical line
+        for cmd in &state.commands {
+            match cmd {
+                HighlightCommand::StrokeLine {
+                    x,
+                    y_top,
+                    y_bottom,
+                    color,
+                    width,
+                } => {
+                    let top = self.transform * Point::new(*x, *y_top);
+                    let bottom = self.transform * Point::new(*x, *y_bottom);
                     let mut path = BezPath::new();
-                    path.move_to(cursor_top);
-                    path.line_to(cursor_bottom);
-
-                    scene.stroke(&Stroke::new(*width), Affine::IDENTITY, *color, None, &path);
+                    path.move_to(top);
+                    path.line_to(bottom);
+                    scene.stroke(
+                        &Stroke::new(*width),
+                        Affine::IDENTITY,
+                        rgba_to_color(color),
+                        None,
+                        &path,
+                    );
                 }
-            }
-            CursorStyle::MeasureHighlight { color, alpha } => {
-                // Get all beats in the current measure from layout result
-                if let (Some(beat), Some(layout)) = (current_beat, &self.layout_result) {
-                    let measure_beats = layout.beats_in_measure(beat.measure);
-                    if !measure_beats.is_empty() {
-                        // Find bounds of all beats in this measure
-                        let min_x = measure_beats
-                            .iter()
-                            .map(|b| b.x)
-                            .fold(f64::INFINITY, f64::min);
-                        let max_x = measure_beats
-                            .iter()
-                            .map(|b| b.x + b.width)
-                            .fold(f64::NEG_INFINITY, f64::max);
-                        let y = beat.staff_y;
-                        let height = beat.staff_height;
-
-                        // Transform measure rect to screen coordinates
-                        let top_left = self.transform * Point::new(min_x, y);
-                        let bottom_right = self.transform * Point::new(max_x, y + height);
-
-                        let rect =
-                            Rect::new(top_left.x, top_left.y, bottom_right.x, bottom_right.y);
-                        let highlight_color = color.multiply_alpha(*alpha);
-
-                        scene.fill(
-                            Fill::NonZero,
-                            Affine::IDENTITY,
-                            highlight_color,
-                            None,
-                            &rect,
-                        );
-                    }
-                }
-            }
-            CursorStyle::BeatBox { color, alpha } => {
-                // Use actual beat bounds from layout result
-                if let Some(beat) = current_beat {
-                    // Transform beat box to screen coordinates using actual beat position
-                    let top_left = self.transform * Point::new(beat.x, beat.staff_y);
-                    let bottom_right = self.transform
-                        * Point::new(beat.x + beat.width, beat.staff_y + beat.staff_height);
-
-                    let rect = Rect::new(top_left.x, top_left.y, bottom_right.x, bottom_right.y);
-                    let rounded = RoundedRect::from_rect(rect, 3.0);
-                    let highlight_color = color.multiply_alpha(*alpha);
-
+                HighlightCommand::FillRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                    color,
+                } => {
+                    let tl = self.transform * Point::new(*x, *y);
+                    let br = self.transform * Point::new(*x + *width, *y + *height);
+                    let rect = Rect::new(tl.x, tl.y, br.x, br.y);
                     scene.fill(
                         Fill::NonZero,
                         Affine::IDENTITY,
-                        highlight_color,
+                        rgba_to_color(color),
+                        None,
+                        &rect,
+                    );
+                }
+                HighlightCommand::FillRoundedRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                    radius,
+                    color,
+                } => {
+                    let tl = self.transform * Point::new(*x, *y);
+                    let br = self.transform * Point::new(*x + *width, *y + *height);
+                    let rect = Rect::new(tl.x, tl.y, br.x, br.y);
+                    let rounded = RoundedRect::from_rect(rect, *radius);
+                    scene.fill(
+                        Fill::NonZero,
+                        Affine::IDENTITY,
+                        rgba_to_color(color),
                         None,
                         &rounded,
                     );
                 }
-            }
-        }
-
-        // Draw accent highlight on current beat's notehead (slash) using actual glyph outline
-        if self.highlight_config.highlight_notehead {
-            if let Some(beat) = current_beat {
-                if let Some(codepoint) = beat.glyph_codepoint {
-                    // SMuFL: 1 em = 4 staff spaces, so font_size = spatium * 4
-                    let font_size = beat.glyph_size * 4.0;
-
-                    // Get the glyph path from the font
-                    if let Some(glyph_path) = self.smufl_font.get_glyph_path(codepoint, font_size) {
-                        // Position the glyph at the beat's X position and staff center
-                        // Font outlines are Y-up, but screen coordinates are Y-down
-                        // The notehead should be centered on the middle staff line (2 spatiums from top)
-                        let notehead_x = beat.x;
-                        let notehead_y = beat.staff_y + beat.staff_height * 0.5; // Center on staff
-
-                        // Build the transform: base view transform + glyph position + Y-flip
+                HighlightCommand::StrokeGlyph {
+                    codepoint,
+                    font_size,
+                    x,
+                    y,
+                    stroke_width,
+                    color,
+                } => {
+                    if let Some(glyph_path) =
+                        self.font_bundle.smufl_font().get_glyph_path(*codepoint, *font_size)
+                    {
+                        // Font outlines are Y-up; screen is Y-down → flip Y
                         let glyph_transform = self.transform
-                            * Affine::translate((notehead_x, notehead_y))
+                            * Affine::translate((*x, *y))
                             * Affine::scale_non_uniform(1.0, -1.0);
-
-                        // Draw glow effect first (underneath) - stroked outline around the glyph
-                        let glow_color = self.highlight_config.accent_color.multiply_alpha(0.4);
                         scene.stroke(
-                            &Stroke::new(6.0), // Glow extends outward from the glyph edge
+                            &Stroke::new(*stroke_width),
                             glyph_transform,
-                            glow_color,
+                            rgba_to_color(color),
                             None,
                             &glyph_path,
                         );
-
-                        // Fill the glyph with solid accent color (exact same size as original)
+                    }
+                }
+                HighlightCommand::FillGlyph {
+                    codepoint,
+                    font_size,
+                    x,
+                    y,
+                    color,
+                } => {
+                    if let Some(glyph_path) =
+                        self.font_bundle.smufl_font().get_glyph_path(*codepoint, *font_size)
+                    {
+                        let glyph_transform = self.transform
+                            * Affine::translate((*x, *y))
+                            * Affine::scale_non_uniform(1.0, -1.0);
                         scene.fill(
                             Fill::NonZero,
                             glyph_transform,
-                            self.highlight_config.accent_color,
+                            rgba_to_color(color),
                             None,
                             &glyph_path,
                         );
@@ -717,28 +624,31 @@ impl ChartRendererState {
     }
 
     /// Update auto-follow based on cursor position
-    fn update_follow(&mut self, viewport_width: f64, viewport_height: f64) {
+    fn update_follow(&mut self, viewport_width: f64, _viewport_height: f64) {
         if !self.playback.is_playing {
-            return; // Don't follow when stopped
+            return;
         }
+
+        // Extract the values we need before any mutable borrows
+        let Some((cs_page, cs_cursor_x)) = self
+            .cursor_state
+            .as_ref()
+            .map(|cs| (cs.page, cs.cursor_x))
+        else {
+            return;
+        };
 
         match self.follow_mode {
             FollowMode::PageTurn => {
-                // Jump when cursor changes page
-                if self.playback.current_page != self.last_followed_page
-                    && self.playback.current_page > 0
-                {
-                    self.jump_to_page(self.playback.current_page);
-                    self.last_followed_page = self.playback.current_page;
+                if cs_page != self.last_followed_page && cs_page > 0 {
+                    self.jump_to_page(cs_page);
+                    self.last_followed_page = cs_page;
                 } else {
-                    // Check if cursor X is outside viewport
                     let cursor_screen_x =
-                        (self.transform * Point::new(self.playback.cursor_x, 0.0)).x;
-
+                        (self.transform * Point::new(cs_cursor_x, 0.0)).x;
                     if cursor_screen_x < 0.0 || cursor_screen_x > viewport_width {
-                        // Jump to put cursor at left side of viewport
                         let scale = self.current_scale();
-                        let target_x = -self.playback.cursor_x * scale + 50.0; // 50px margin
+                        let target_x = -cs_cursor_x * scale + 50.0;
                         let current_y = self.transform.translation().y;
                         self.transform =
                             Affine::translate((target_x, current_y)) * Affine::scale(scale);
@@ -746,18 +656,14 @@ impl ChartRendererState {
                 }
             }
             FollowMode::SmoothScroll => {
-                // Smoothly interpolate toward keeping cursor centered
                 let scale = self.current_scale();
-                let target_x = -self.playback.cursor_x * scale + viewport_width / 2.0;
+                let target_x = -cs_cursor_x * scale + viewport_width / 2.0;
                 let current_x = self.transform.translation().x;
-                let new_x = current_x + (target_x - current_x) * 0.1; // 10% per frame
-
+                let new_x = current_x + (target_x - current_x) * 0.1;
                 let current_y = self.transform.translation().y;
                 self.transform = Affine::translate((new_x, current_y)) * Affine::scale(scale);
             }
-            FollowMode::None => {
-                // Do nothing - user controls scroll
-            }
+            FollowMode::None => {}
         }
     }
 
@@ -812,9 +718,9 @@ impl ChartRendererState {
             song.tempo_time_sig_changes.len().hash(&mut hasher);
         }
 
-        // Hash MIDI CHORDS track state - hash ALL note data to detect any change
+        // Hash CHORDS track state - hash ALL note data to detect any change
         // (pitch changes, position changes, added/removed notes, etc.)
-        if let Some(track) = find_track_by_name(project, "MIDI CHORDS") {
+        if let Some(track) = find_track_by_name(project, "CHORDS") {
             true.hash(&mut hasher); // Track exists
             if let Some(midi_info) = get_first_midi_take(&track) {
                 let notes = read_midi_notes_from_take(midi_info.take);
@@ -828,6 +734,15 @@ impl ChartRendererState {
             }
         } else {
             false.hash(&mut hasher); // Track doesn't exist
+        }
+
+        // Hash KEY track state for key signature change detection
+        let key_entries = read_all_keys_from_track(project);
+        key_entries.len().hash(&mut hasher);
+        for entry in &key_entries {
+            // Hash key name and position (quantized to avoid float comparison issues)
+            format!("{}", entry.key).hash(&mut hasher);
+            ((entry.position_seconds * 1000.0) as i64).hash(&mut hasher);
         }
 
         hasher.finish()
@@ -1043,16 +958,8 @@ impl ChartRendererState {
         if let Some(ref layout) = self.layout_result {
             // Create scene renderer with fonts
             // Arc clones are cheap (atomic increment only)
-            let mut renderer = SceneRenderBuilder::new()
-                .spatium(5.0)
-                .build()
-                .with_font(&self.smufl_font)
-                .with_text_font_arc(self.text_font_data.clone())
-                .with_named_font_arc("MuseJazzText", self.musejazz_font_data.clone())
-                .with_named_font_arc("MuseJazz", self.musejazz_font_data.clone())
-                .with_named_font_arc("section-note", self.text_font_data.clone())
-                .with_named_font_arc("title-bold", self.text_font_data.clone())
-                .with_named_font_arc("part-name-bold", self.text_font_data.clone());
+            let base_renderer = SceneRenderBuilder::new().spatium(5.0).build();
+            let mut renderer = self.font_bundle.configure_renderer(base_renderer);
 
             // Set viewport for culling optimization (skip off-screen nodes)
             renderer.set_viewport(Rect::new(0.0, 0.0, width as f64, height as f64));
@@ -1127,7 +1034,28 @@ thread_local! {
     static FLOATING_CHART_WINDOW: RefCell<Option<ChartFloatingWindow>> = const { RefCell::new(None) };
 }
 
-/// Build a chart from MIDI chords on the "MIDI CHORDS" track with timing analysis.
+/// Build a chart from MIDI chords on the "CHORDS" track using the unified pipeline.
+///
+/// Populate a Song's `initial_key` and `key_changes` from KEY track entries.
+///
+/// The first entry becomes `initial_key`; subsequent entries become `key_changes`.
+fn populate_song_keys(song: &mut Song, key_entries: &[KeyEntry]) {
+    if let Some(first) = key_entries.first() {
+        song.initial_key = Some(first.key.clone());
+    }
+    song.key_changes = key_entries
+        .iter()
+        .skip(1)
+        .map(|e| SongKeyChange {
+            position_seconds: e.position_seconds,
+            key: e.key.clone(),
+        })
+        .collect();
+}
+
+/// Uses `generate_chart_text_from_reaper()` → `Chart::parse()`, which is the EXACT same
+/// pipeline as test 22. This ensures identical chord detection, rhythm analysis, groove
+/// pattern detection, and measure formatting.
 ///
 /// Returns the chart and a flag indicating if any chords have push/pull timing
 /// (i.e., the chart has rhythmic complexity and should use stemmed notation).
@@ -1135,133 +1063,118 @@ fn build_chart_from_midi_chords(song: &Song) -> Option<(Chart, bool)> {
     let reaper = Reaper::get();
     let project = reaper.current_project();
 
-    // Get time signature for timing analysis
-    let (time_sig_num, time_sig_denom) = get_project_time_signature(project);
+    // Get key root from the song's initial key for chord respelling
+    let key_root = song.initial_key.as_ref().map(|k| k.to_string());
+    let title = Some(song.name.as_str());
 
-    // Detect chords from MIDI with timing analysis
-    let analyzed_chords = detect_chords_from_midi_track(project, time_sig_num, time_sig_denom)?;
+    // Generate chart text using the same pipeline as test 22
+    let chart_text = generate_chart_text_from_reaper(
+        project,
+        key_root.as_deref(),
+        title,
+    )?;
 
-    if analyzed_chords.is_empty() {
+    if chart_text.trim().is_empty() {
+        warn!("generate_chart_text_from_reaper returned empty text");
         return None;
     }
 
-    // Check if chart has rhythmic complexity (any push/pull)
-    let has_complexity = analyzed_chords
-        .iter()
-        .any(|ac| ac.timing.push_pull.is_some());
+    // Parse the chart text — identical to how the web app and tests do it
+    let chart = match Chart::parse(&chart_text) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("Failed to parse generated chart text: {}", e);
+            return None;
+        }
+    };
 
-    // Calculate count-in measures for MIDI chord offset
-    let count_in_measures = calculate_count_in_measures(song);
+    // Detect rhythmic complexity from the chart text (push/pull directives)
+    let has_complexity = chart_text.contains("/push")
+        || chart.sections.iter().any(|s| {
+            s.measures().iter().any(|m| {
+                m.chords.iter().any(|c| c.push_pull.is_some())
+            })
+        });
 
     info!(
-        "Detected {} MIDI chords, rhythmic complexity: {}, count_in: {}",
-        analyzed_chords.len(),
+        "Built chart from unified MIDI pipeline: {} sections, {} measures, rhythmic_complexity: {}",
+        chart.sections.len(),
+        chart.sections.iter().map(|s| s.measures().len()).sum::<usize>(),
         has_complexity,
-        count_in_measures
-    );
-
-    // Build chart from analyzed chords
-    let chart = build_chart_from_analyzed_chords(
-        &analyzed_chords,
-        song,
-        time_sig_num,
-        time_sig_denom,
-        count_in_measures,
     );
 
     Some((chart, has_complexity))
 }
 
-/// Build a Chart from analyzed chords, merging into the song's existing section structure.
+/// Apply key entries from the KEY track to a chart.
 ///
-/// This uses the song's marker-based sections and overlays the MIDI chord data
-/// onto the corresponding measures.
-///
-/// `count_in_measures` is used to offset chart measures to REAPER measures.
-/// The +1 accounts for REAPER's 0-indexed measures vs 1-indexed count-in calculation.
-fn build_chart_from_analyzed_chords(
-    analyzed_chords: &[AnalyzedChord],
+/// The first key entry becomes the chart's initial/current key.
+/// Subsequent key entries (at different positions) become key changes,
+/// mapped to the section they fall within.
+fn apply_key_entries_to_chart(
+    chart: &mut Chart,
+    key_entries: &[crate::chart::KeyEntry],
     song: &Song,
-    time_sig_num: u8,
-    time_sig_denom: u8,
-    count_in_measures: u8,
-) -> Chart {
-    // Start with the marker-based chart which has proper section structure
-    let mut chart = song.to_chart();
-
-    // Remove CountIn sections - we use REAPER's measure_offset for count-in rendering
-    // instead of the FTS CountIn section (which is used for progress bar display)
-    chart
-        .sections
-        .retain(|section| section.section.section_type != SectionType::CountIn);
-
-    // Group MIDI chords by measure index
-    let mut chords_by_measure: std::collections::BTreeMap<usize, Vec<&AnalyzedChord>> =
-        std::collections::BTreeMap::new();
-    for chord in analyzed_chords {
-        chords_by_measure
-            .entry(chord.timing.measure_index)
-            .or_default()
-            .push(chord);
+) {
+    if key_entries.is_empty() {
+        return;
     }
 
-    // Track global measure index across all sections
-    let mut global_measure_idx = 0usize;
+    // First entry is the initial key
+    let first = &key_entries[0];
+    chart.initial_key = Some(first.key.clone());
+    chart.current_key = Some(first.key.clone());
 
-    // Iterate through all sections and measures, adding MIDI chords
-    for (section_idx, chart_section) in chart.sections.iter_mut().enumerate() {
-        for measure in chart_section.measures_mut() {
-            // Clear existing chords from marker parsing (we're replacing with MIDI chords)
-            measure.chords.clear();
+    info!("Applied initial key: {}", first.key);
 
-            // Set time signature
-            measure.time_signature = (time_sig_num, time_sig_denom);
+    // Subsequent entries are key changes
+    if key_entries.len() > 1 {
+        let reaper = Reaper::get();
+        let project = reaper.current_project();
+        let songstart_measure =
+            get_internal_measure_at_time(project, song.effective_start());
 
-            // Add MIDI chords for this measure
-            // MIDI chord measure_index is absolute REAPER measure (item_start + relative)
-            // Chart measures start at SONGSTART, so we need to add count_in offset
-            // to convert chart measure to REAPER measure
-            let reaper_measure_idx = global_measure_idx + count_in_measures as usize + 1;
-            if let Some(midi_chords) = chords_by_measure.get(&reaper_measure_idx) {
-                for analyzed in midi_chords {
-                    let detected = &analyzed.chord;
-                    let timing = &analyzed.timing;
+        for entry in &key_entries[1..] {
+            // Use REAPER beat API for exact measure calculation (no tempo estimates)
+            let entry_measure = get_internal_measure_at_time(project, entry.position_seconds);
+            let measure_idx = (entry_measure - songstart_measure).max(0);
 
-                    // Create position for this chord
-                    let position = AbsolutePosition::new(
-                        MusicalPosition::try_new(
-                            global_measure_idx as i32,
-                            timing.beat_index as i32,
-                            0,
-                        )
-                        .unwrap_or_else(|_| MusicalPosition::start()),
-                        section_idx,
-                    );
+            let section_idx = find_section_at_measure(chart, measure_idx as usize)
+                .unwrap_or(0);
 
-                    // Build ChordInstance
-                    let chord_instance = ChordInstance::new(
-                        detected.chord.root.clone(),
-                        detected.chord.to_string(),
-                        detected.chord.clone(),
-                        ChordRhythm::Default,
-                        detected.chord.to_string(),
-                        MusicalDuration::new(0, 1, 0), // 1 beat duration
-                        position,
-                    )
-                    .with_push_pull(timing.push_pull.clone());
+            let position = AbsolutePosition::new(
+                MusicalPosition::try_new(measure_idx, 0, 0)
+                    .unwrap_or_else(|_| MusicalPosition::start()),
+                section_idx,
+            );
 
-                    measure.chords.push(chord_instance);
-                }
-            }
+            chart.add_key_change(entry.key.clone(), position, section_idx);
 
-            // Generate rhythm slashes for this measure
-            measure.generate_rhythm_slashes(global_measure_idx as i32, section_idx);
-
-            global_measure_idx += 1;
+            info!(
+                "Applied key change to {} at section {}, measure {} ({:.3}s)",
+                entry.key, section_idx, measure_idx, entry.position_seconds
+            );
         }
     }
+}
 
-    chart
+/// Find the section index that contains a given measure index (0-indexed from SONGSTART).
+fn find_section_at_measure(chart: &Chart, target_measure: usize) -> Option<usize> {
+    let mut cumulative_measures = 0;
+    for (idx, section) in chart.sections.iter().enumerate() {
+        let section_measures = section.measures().len();
+        if target_measure < cumulative_measures + section_measures {
+            return Some(idx);
+        }
+        cumulative_measures += section_measures;
+    }
+
+    // If past end, return last section
+    if !chart.sections.is_empty() {
+        Some(chart.sections.len() - 1)
+    } else {
+        None
+    }
 }
 
 /// Build a chart and song from the current REAPER project.
@@ -1278,15 +1191,22 @@ fn build_chart_from_current_project() -> Option<(Chart, Song, bool, i32, u8)> {
     let measure_offset = project.measure_offset();
 
     match reaper.build_song_from_current_project() {
-        Ok(song) => {
+        Ok(mut song) => {
+            // Read key signatures from KEY track and populate Song fields
+            let key_entries = read_all_keys_from_track(project);
+            populate_song_keys(&mut song, &key_entries);
+
             // Calculate count-in measures from song markers
             let count_in_measures = calculate_count_in_measures(&song);
 
             // First, try to detect chords from MIDI track with timing analysis
-            if let Some((midi_chart, has_complexity)) = build_chart_from_midi_chords(&song) {
+            if let Some((mut midi_chart, has_complexity)) = build_chart_from_midi_chords(&song) {
+                // Apply key signatures from KEY track
+                apply_key_entries_to_chart(&mut midi_chart, &key_entries, &song);
+
                 let title = midi_chart.metadata.title.as_deref().unwrap_or("Untitled");
                 info!(
-                    "Built chart from MIDI: {} - {} sections, {} total measures, use_stems: {}, measure_offset: {}, count_in: {}",
+                    "Built chart from MIDI: {} - {} sections, {} total measures, use_stems: {}, measure_offset: {}, count_in: {}, key: {:?}",
                     title,
                     midi_chart.sections.len(),
                     midi_chart
@@ -1296,7 +1216,8 @@ fn build_chart_from_current_project() -> Option<(Chart, Song, bool, i32, u8)> {
                         .sum::<usize>(),
                     has_complexity,
                     measure_offset,
-                    count_in_measures
+                    count_in_measures,
+                    midi_chart.initial_key
                 );
                 return Some((
                     midi_chart,
@@ -1315,9 +1236,12 @@ fn build_chart_from_current_project() -> Option<(Chart, Song, bool, i32, u8)> {
                 .sections
                 .retain(|section| section.section.section_type != SectionType::CountIn);
 
+            // Apply key signatures from KEY track
+            apply_key_entries_to_chart(&mut chart, &key_entries, &song);
+
             let title = chart.metadata.title.as_deref().unwrap_or("Untitled");
             info!(
-                "Built chart from markers: {} - {} sections, {} total measures, tempo: {:.1} BPM, measure_offset: {}, count_in: {}",
+                "Built chart from markers: {} - {} sections, {} total measures, tempo: {:.1} BPM, measure_offset: {}, count_in: {}, key: {:?}",
                 title,
                 chart.sections.len(),
                 chart
@@ -1327,7 +1251,8 @@ fn build_chart_from_current_project() -> Option<(Chart, Song, bool, i32, u8)> {
                     .sum::<usize>(),
                 song.starting_tempo.unwrap_or(120.0),
                 measure_offset,
-                count_in_measures
+                count_in_measures,
+                chart.initial_key
             );
             Some((chart, song, false, measure_offset, count_in_measures)) // Marker-based charts don't have push/pull
         }

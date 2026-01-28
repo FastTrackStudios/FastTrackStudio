@@ -8,4 +8,7 @@ pub mod read;
 pub use detection::{
     DetectedChord, detect_chords_from_midi_notes, detect_chords_from_reaper_midi_notes,
 };
-pub use read::{MidiNote, find_track_by_name, read_key_from_track, read_midi_notes_from_track};
+pub use read::{
+    KeyEntry, MidiNote, find_track_by_name, read_all_keys_from_track, read_key_from_track,
+    read_midi_notes_from_track,
+};

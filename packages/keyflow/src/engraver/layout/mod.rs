@@ -75,7 +75,8 @@ pub use tlayout::{Layout, LayoutData};
 
 #[cfg(feature = "engraver")]
 pub use chart::{
-    ChartLayoutEngine, ChartLayoutResult, LayoutMode as ChartLayoutMode, MeasureMelodyData,
+    ChartCursor, ChartLayoutEngine, ChartLayoutResult, CursorConfig, CursorRgba, CursorState,
+    CursorStyle, HighlightCommand, LayoutMode as ChartLayoutMode, MeasureMelodyData,
     MelodyNoteSegment, PageLayoutMetrics, expand_melodies_across_measures,
 };
 

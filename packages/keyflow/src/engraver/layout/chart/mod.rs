@@ -10,6 +10,7 @@ pub mod collision;
 pub mod config;
 pub mod constants;
 pub mod count_in_renderer;
+pub mod cursor;
 pub mod layout_state;
 pub mod measure_layout;
 pub mod measure_pass;
@@ -45,6 +46,11 @@ pub use measure_pass::{
     MeasurementCache, compute_measure_weight, measure_chart, measure_measure,
 };
 
+// Re-export cursor types for renderer-agnostic playback highlighting
+pub use cursor::{
+    ChartCursor, CursorConfig, CursorState, CursorStyle, HighlightCommand, Rgba as CursorRgba,
+};
+
 // Re-export collision detection types
 pub use collision::{ChordCollisionContext, resolve_chord_positions};
 
@@ -76,6 +82,7 @@ use crate::sections::SectionType;
 use crate::{Chart, ChartPosition, SourceLink};
 use kurbo::{Affine, Rect};
 use rhythm_builder::{NoteHeadOverride, RhythmBuildConfig, RhythmBuildResult, RhythmSource};
+use tracing::debug;
 use vello::peniko::Color;
 
 /// Chart layout engine configuration.
@@ -551,8 +558,7 @@ impl ChartLayoutEngine {
             &mut measurement_cache,
         );
 
-        #[cfg(debug_assertions)]
-        eprintln!(
+        debug!(
             "[measure-pass] Pre-measured {} measures, cached {} chord widths",
             chart_measurements.len(),
             measurement_cache.len()
@@ -566,9 +572,16 @@ impl ChartLayoutEngine {
 
         // Process each section
         for (section_idx, chart_section) in chart.sections.iter().enumerate() {
-            // Skip count-in sections - we synthesize count-in from config.count_in_measures
+            // Skip count-in sections - we synthesize count-in from config.count_in_measures.
+            // Advance cumulative counters by the skipped section's duration so the
+            // next section starts at the correct tick (tick 0 = SONGSTART).
             if chart_section.section.section_type.is_compact() {
-                continue; // Don't render count-in as separate section
+                let skipped_measures = chart_section.measures().len() as i64;
+                cumulative_ticks += skipped_measures * ticks_per_measure;
+                cumulative_time +=
+                    skipped_measures as f64 * ticks_per_measure as f64 * seconds_per_tick;
+                global_section_measure_offset += chart_section.measures().len();
+                continue;
             }
 
             // Skip End sections entirely - they are only for progress bars, not charts
@@ -588,9 +601,8 @@ impl ChartLayoutEngine {
             // Detect push spillbacks (chords from next measure that push back)
             let mut push_spillback_map = detect_push_spillbacks(chart_section.measures());
 
-            #[cfg(debug_assertions)]
             if !push_spillback_map.is_empty() {
-                eprintln!(
+                debug!(
                     "[spillback-detection] Section {} detected {} spillbacks: {:?}",
                     chart_section.section.section_type.full_name(),
                     push_spillback_map.values().map(|v| v.len()).sum::<usize>(),
@@ -614,8 +626,7 @@ impl ChartLayoutEngine {
                     }
                     let last_measure_idx = chart_section.measures().len().saturating_sub(1);
 
-                    #[cfg(debug_assertions)]
-                    eprintln!(
+                    debug!(
                         "[cross-section-spillback] Section {} -> {} spillback: '{}' at measure {} beat {}",
                         chart_section.section.section_type.full_name(),
                         next_section.section.section_type.full_name(),
@@ -686,7 +697,7 @@ impl ChartLayoutEngine {
                     // Add title header on first page only
                     // Include count-in snippet in header instead of on first system
                     if !title_header_added {
-                        let header_height = self.add_title_header(
+                        let (header_height, count_in_geos) = self.add_title_header(
                             &mut root,
                             page_x,
                             page_offset_y,
@@ -698,6 +709,40 @@ impl ChartLayoutEngine {
                         );
                         page_y += header_height;
                         title_header_added = true;
+
+                        // Create BeatPosition entries for count-in beats so the
+                        // cursor can highlight them during the count-in period.
+                        let ticks_per_beat = 1920i64 / time_signature.1 as i64;
+                        for geo in &count_in_geos {
+                            let beat_offset_in_measure =
+                                geo.beat_index as i64 * ticks_per_beat;
+                            let measure_offset =
+                                geo.measure_index as i64 * ticks_per_measure;
+                            let absolute_tick =
+                                -count_in_ticks + measure_offset + beat_offset_in_measure;
+                            beat_positions.push(BeatPosition {
+                                page: page_number,
+                                system: 0,
+                                measure: geo.measure_index,
+                                beat: geo.beat_index,
+                                tick: beat_offset_in_measure as i32,
+                                duration_ticks: ticks_per_beat as i32,
+                                absolute_tick,
+                                x: geo.x,
+                                width: geo.width,
+                                staff_y: geo.staff_y,
+                                staff_height: geo.staff_height,
+                                time_start: absolute_tick as f64 * seconds_per_tick,
+                                time_end: (absolute_tick + ticks_per_beat) as f64
+                                    * seconds_per_tick,
+                                glyph_codepoint: Some(geo.glyph_codepoint),
+                                glyph_size: geo.glyph_size,
+                                glyph_y: geo.glyph_y,
+                                has_stem: false,
+                                stem_up: true,
+                                flag_count: 0,
+                            });
+                        }
                     }
                 }
 
@@ -1203,9 +1248,11 @@ impl ChartLayoutEngine {
 
         // Process each section
         for (section_idx, chart_section) in chart.sections.iter().enumerate() {
-            // Skip count-in sections - we synthesize count-in from config
+            // Skip count-in sections - we synthesize count-in from config.
+            // Advance measure offset so downstream indexing stays correct.
             if chart_section.section.section_type.is_compact() {
-                continue; // Don't render count-in as separate section
+                global_section_measure_offset += chart_section.measures().len();
+                continue;
             }
 
             // Skip End sections entirely - they are only for progress bars, not charts
@@ -1225,9 +1272,8 @@ impl ChartLayoutEngine {
             // Detect push spillbacks (chords from next measure that push back)
             let mut push_spillback_map = detect_push_spillbacks(chart_section.measures());
 
-            #[cfg(debug_assertions)]
             if !push_spillback_map.is_empty() {
-                eprintln!(
+                debug!(
                     "[spillback-detection] Section {} detected {} spillbacks: {:?}",
                     chart_section.section.section_type.full_name(),
                     push_spillback_map.values().map(|v| v.len()).sum::<usize>(),
@@ -1842,7 +1888,7 @@ impl ChartLayoutEngine {
 
     /// Add title header section on first page (Title, Subtitle, Composer, etc.)
     ///
-    /// Returns the height consumed by the header for layout adjustment.
+    /// Returns `(header_height, count_in_beat_geometries)`.
     /// Delegates to [`page_rendering::add_title_header_with_count_in`].
     ///
     /// If `count_in_measures` > 0, a compact count-in snippet is rendered
@@ -1857,7 +1903,7 @@ impl ChartLayoutEngine {
         tempo: Option<&crate::time::Tempo>,
         count_in_measures: usize,
         time_signature: (u8, u8),
-    ) -> f64 {
+    ) -> (f64, Vec<count_in_renderer::CountInBeatGeometry>) {
         let count_in_config = if count_in_measures > 0 {
             Some(page_rendering::CountInHeaderConfig {
                 num_measures: count_in_measures,
@@ -2031,8 +2077,7 @@ impl ChartLayoutEngine {
         let needs_triplet_rhythm =
             (has_triplet_spillbacks || has_internal_triplet_push) && self.config.push_alters_rhythm;
 
-        #[cfg(debug_assertions)]
-        eprintln!(
+        debug!(
             "[rhythm-source-select] has_spillbacks={} has_internal={} needs_triplet={} has_explicit={}",
             has_triplet_spillbacks,
             has_internal_triplet_push,
@@ -2566,8 +2611,7 @@ impl ChartLayoutEngine {
                     seen_real_chord = true;
 
                     if should_skip_for_spillback {
-                        #[cfg(debug_assertions)]
-                        eprintln!(
+                        debug!(
                             "[chord-min-width] Skipping pushed spillback '{}' - renders in previous measure",
                             chord.full_symbol
                         );
@@ -2644,8 +2688,7 @@ impl ChartLayoutEngine {
                     min_widths[idx1] = min_widths[idx1].max(min_width_points);
                 }
 
-                #[cfg(debug_assertions)]
-                eprintln!(
+                debug!(
                     "[chord-min-width] Chord '{}' at seg {} collision: deficit={:.1}pt, \
                      spacing contribution={:.1}pt. Setting min_width[{}]={:.1}pt",
                     chord1.full_symbol,
@@ -2666,9 +2709,8 @@ impl ChartLayoutEngine {
             min_widths[last_idx] = min_widths[last_idx].max(last_segment_padding);
         }
 
-        #[cfg(debug_assertions)]
         if min_widths.iter().any(|&w| w > 0.0) {
-            eprintln!("[chord-min-width] Final min_widths (pts): {:?}", min_widths);
+            debug!("[chord-min-width] Final min_widths (pts): {:?}", min_widths);
         }
 
         min_widths

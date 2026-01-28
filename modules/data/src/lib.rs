@@ -31,6 +31,8 @@ pub mod module_preset;
 pub mod source;
 pub mod rig;
 pub mod director;
+pub mod engine;
+pub mod defaults;
 
 // Re-export foundation types at crate root for convenience
 pub use id::*;

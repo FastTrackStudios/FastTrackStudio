@@ -7,6 +7,7 @@
 
 // region:    --- Modules
 
+pub mod bundle;
 pub mod tessellation;
 
 // endregion: --- Modules
@@ -22,6 +23,7 @@ use std::io::BufReader;
 use std::path::Path;
 
 // Re-export key types from smufl crate
+pub use bundle::ChartFontBundle;
 pub use smufl::{Glyph, Metadata as SMuFLMetadata, StaffSpaces};
 
 // Re-export tessellation utilities

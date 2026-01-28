@@ -8,6 +8,7 @@ use facet::Facet;
 use crate::block::Block;
 use crate::id::{BlockId, LayerId, PatchId, VariationId};
 use crate::normalized::{MidiNote, NormalizedF64, Pan};
+use crate::tags::{Taggable, Tags};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // KeyRange — enforces low ≤ high
@@ -115,6 +116,8 @@ pub struct Layer {
     pub key_range: Option<KeyRange>,
     /// Optional MIDI channel filter (None = omni)
     pub midi_channel: Option<u8>,
+    /// Tags for organizing and filtering.
+    pub tags: Tags,
 }
 
 impl Layer {
@@ -132,6 +135,7 @@ impl Layer {
             pan: Pan::CENTER,
             key_range: None,
             midi_channel: None,
+            tags: Tags::new(),
         }
     }
 
@@ -164,6 +168,20 @@ impl Layer {
 
     pub fn set_key_range(&mut self, range: KeyRange) {
         self.key_range = Some(range);
+    }
+}
+
+impl Taggable for Layer {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 

@@ -480,8 +480,7 @@ pub fn measure_measure_with_config(
 
         // Skip pushed spillback chords that don't render in this measure
         if should_skip_for_spillback {
-            #[cfg(debug_assertions)]
-            eprintln!(
+            tracing::debug!(
                 "[measure-pass] Skipping pushed spillback chord '{}' - renders in previous measure",
                 chord.full_symbol
             );

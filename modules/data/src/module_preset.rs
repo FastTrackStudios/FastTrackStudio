@@ -515,8 +515,8 @@ mod tests {
 
     #[test]
     fn module_override_custom() {
-        let module = Module::new("Custom Time", ModuleType::PostFx);
-        let ov = ModuleOverride::custom(ModuleType::PostFx, module);
+        let module = Module::new("Custom Time", ModuleType::Time);
+        let ov = ModuleOverride::custom(ModuleType::Time, module);
 
         assert!(ov.is_custom());
         assert!(!ov.is_swap());

@@ -9,6 +9,7 @@ use crate::layer::Layer;
 use crate::non_empty::NonEmptyVec;
 use crate::normalized::NormalizedF64;
 use crate::routing::SectionRouting;
+use crate::tags::{Taggable, Tags};
 
 /// A group of layers with shared routing.
 ///
@@ -22,6 +23,7 @@ pub struct Section {
     pub routing: SectionRouting,
     pub enabled: bool,
     pub volume: NormalizedF64,
+    pub tags: Tags,
 }
 
 impl Section {
@@ -34,6 +36,7 @@ impl Section {
             routing: SectionRouting::default(),
             enabled: true,
             volume: NormalizedF64::ONE,
+            tags: Tags::new(),
         }
     }
 
@@ -47,6 +50,7 @@ impl Section {
             routing: SectionRouting::default(),
             enabled: true,
             volume: NormalizedF64::ONE,
+            tags: Tags::new(),
         })
     }
 
@@ -68,6 +72,20 @@ impl Section {
     /// Number of layers (always >= 1).
     pub fn layer_count(&self) -> usize {
         self.layers.len()
+    }
+}
+
+impl Taggable for Section {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 

@@ -293,6 +293,49 @@ impl PushPullAmount {
     }
 }
 
+impl std::fmt::Display for PushPullAmount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.base {
+            PushPullBase::Duration {
+                duration,
+                dotted,
+                triplet,
+            } => {
+                let d = match duration {
+                    LilySyntax::Whole => "1",
+                    LilySyntax::Half => "2",
+                    LilySyntax::Quarter => "4",
+                    LilySyntax::Eighth => "8",
+                    LilySyntax::Sixteenth => "16",
+                    LilySyntax::ThirtySecond => "32",
+                };
+                write!(f, "{d}")?;
+                if *dotted {
+                    write!(f, ".")?;
+                }
+                if *triplet {
+                    write!(f, "t")?;
+                }
+                Ok(())
+            }
+            _ => {
+                let note = match self.level {
+                    1 => "8",
+                    2 => "16",
+                    3 => "32",
+                    _ => "?",
+                };
+                match &self.base {
+                    PushPullBase::Standard => write!(f, "{note}"),
+                    PushPullBase::Triplet => write!(f, "{note}t"),
+                    PushPullBase::Tuplet(n) => write!(f, "{note}:{n}"),
+                    PushPullBase::Duration { .. } => unreachable!(),
+                }
+            }
+        }
+    }
+}
+
 impl ChordRhythm {
     // region:    --- Constructors
 

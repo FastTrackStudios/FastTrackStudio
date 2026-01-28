@@ -1066,10 +1066,9 @@ impl MeasureBuilder {
         // push content wider than the allocated measure width
         if !self.tuplet_groups.is_empty() {
             let target_width = self.width.map(|w| w * spatium);
-            #[cfg(debug_assertions)]
             {
                 let actual_width = segments.total_width();
-                eprintln!(
+                tracing::debug!(
                     "[measure-builder] Rendering {} tuplet groups, boundary={:?} (actual={:.1})",
                     self.tuplet_groups.len(),
                     target_width,

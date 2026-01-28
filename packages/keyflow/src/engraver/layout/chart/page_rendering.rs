@@ -3,7 +3,7 @@
 //! This module provides functions for drawing page elements:
 //! staff lines, barlines, backgrounds, footers, and headers.
 
-use super::count_in_renderer::{self, CountInSnippetConfig};
+use super::count_in_renderer::{self, CountInBeatGeometry, CountInSnippetConfig};
 use crate::engraver::layout::orchestrator::PageMargins;
 use crate::engraver::layout::tlayout::BarlineType;
 use crate::engraver::scene::node::SceneNode;
@@ -410,7 +410,7 @@ pub struct CountInHeaderConfig {
 /// This is an extended version of `add_title_header` that also renders
 /// a compact count-in snippet next to the tempo indicator.
 ///
-/// Returns the height consumed by the header for layout adjustment.
+/// Returns `(header_height, count_in_beat_geometries)`.
 #[allow(clippy::too_many_arguments)]
 pub fn add_title_header_with_count_in(
     root: &mut SceneNode,
@@ -422,10 +422,10 @@ pub fn add_title_header_with_count_in(
     metadata: &crate::SongMetadata,
     tempo: Option<&crate::time::Tempo>,
     count_in: Option<&CountInHeaderConfig>,
-) -> f64 {
+) -> (f64, Vec<CountInBeatGeometry>) {
     // If there's no title, skip the entire header (no part name, version, subtitle, etc.)
     if metadata.title.is_none() {
-        return 0.0;
+        return (0.0, Vec::new());
     }
 
     let mut commands = Vec::new();
@@ -552,6 +552,7 @@ pub fn add_title_header_with_count_in(
 
     // Render count-in snippet next to tempo indicator
     let mut count_in_height = 0.0;
+    let mut count_in_beat_geos = Vec::new();
     if let Some(config) = count_in {
         if config.num_measures > 0 {
             let snippet_config = CountInSnippetConfig {
@@ -580,6 +581,7 @@ pub fn add_title_header_with_count_in(
 
             root.add_child(snippet_result.node);
             count_in_height = snippet_result.height;
+            count_in_beat_geos = snippet_result.beat_geometries;
         }
     }
 
@@ -644,7 +646,7 @@ pub fn add_title_header_with_count_in(
     // This padding creates space between header content and the first system
     let header_bottom_padding = 35.0;
     let header_height = current_y - (page_y + margins.top) + header_bottom_padding;
-    header_height.max(0.0)
+    (header_height.max(0.0), count_in_beat_geos)
 }
 
 #[cfg(test)]

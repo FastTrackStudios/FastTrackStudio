@@ -10,6 +10,7 @@ use facet::Facet;
 use crate::id::BlockId;
 use crate::normalized::Order;
 use crate::parameter::ParameterValue;
+use crate::tags::{Taggable, Tags};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PluginFormat
@@ -88,6 +89,12 @@ pub enum BlockType {
     Reverb,
     Gate,
     Volume,
+    Pitch,
+    Tremolo,
+    Limiter,
+    Send,
+    Special,
+    Freeze,
     Custom,
 }
 
@@ -114,6 +121,8 @@ pub struct Block {
     pub bypassed: bool,
     /// Current parameter values (sparse — only non-default values need storing).
     pub parameters: Vec<ParameterValue>,
+    /// Tags for organizing and filtering.
+    pub tags: Tags,
 }
 
 impl Block {
@@ -128,6 +137,7 @@ impl Block {
             plugin_preset: None,
             bypassed: false,
             parameters: Vec::new(),
+            tags: Tags::new(),
         }
     }
 
@@ -160,6 +170,20 @@ impl Block {
     }
 }
 
+impl Taggable for Block {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GlobalBlock
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,6 +197,22 @@ pub struct GlobalBlock {
     pub block: Block,
     /// Position in the global signal chain.
     pub order: Order,
+    /// Tags for organizing and filtering.
+    pub tags: Tags,
+}
+
+impl Taggable for GlobalBlock {
+    fn tags(&self) -> &Tags {
+        &self.tags
+    }
+
+    fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.tags
+    }
+
+    fn name(&self) -> &str {
+        &self.block.name
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -288,7 +328,7 @@ mod tests {
     #[test]
     fn global_block_holds_order() {
         let block = Block::new("Global EQ", PluginId::clap("eq", "EQ"));
-        let global = GlobalBlock { block, order: Order::new(3) };
+        let global = GlobalBlock { block, order: Order::new(3), tags: Tags::new() };
         assert_eq!(global.order.get(), 3);
         assert_eq!(global.block.name, "Global EQ");
     }

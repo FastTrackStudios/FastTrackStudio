@@ -5005,6 +5005,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "colored 2.2.0",
+ "data",
  "daw",
  "dioxus",
  "enumflags2",
@@ -16957,9 +16958,9 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "reaper-fluent"
-version = "0.1.0"
-
-[[patch.unused]]
 name = "anyrender_vello_hybrid"
 version = "0.1.1"
+
+[[patch.unused]]
+name = "reaper-fluent"
+version = "0.1.0"

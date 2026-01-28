@@ -15,6 +15,7 @@ use data::preset::builder::PresetBuilder;
 use data::preset::{Credit, Inspiration, Preset, Snapshot};
 use data::profile::{Profile, SceneTemplate};
 use data::rig::{InstrumentType, Rig};
+use data::tags::Tags;
 use data::*;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -222,10 +223,10 @@ fn build_guitar_rig() -> GuitarRigFixture {
     );
     let mp_phaser_id = mp_phaser.id;
 
-    // PostFx (3 presets)
+    // Time (3 presets)
     let mp_delay = make_module_preset(
         "Delay",
-        ModuleType::PostFx,
+        ModuleType::Time,
         "Digital Delay",
         "com.fts.delay",
         &[],
@@ -234,7 +235,7 @@ fn build_guitar_rig() -> GuitarRigFixture {
 
     let mp_reverb = make_module_preset(
         "Reverb",
-        ModuleType::PostFx,
+        ModuleType::Time,
         "Hall Reverb",
         "com.fts.reverb",
         &[],
@@ -243,16 +244,16 @@ fn build_guitar_rig() -> GuitarRigFixture {
 
     let mp_freeze = make_module_preset(
         "Freeze",
-        ModuleType::PostFx,
+        ModuleType::Time,
         "Freeze Pad",
         "com.fts.freeze",
         &[],
     );
 
-    // Transient (5 presets)
+    // Motion (5 presets)
     let mp_trem8 = make_module_preset(
         "Tremolo 8th",
-        ModuleType::Transient,
+        ModuleType::Motion,
         "Tremolo",
         "com.fts.trem8",
         &[],
@@ -261,7 +262,7 @@ fn build_guitar_rig() -> GuitarRigFixture {
 
     let mp_trem16 = make_module_preset(
         "Tremolo 16th",
-        ModuleType::Transient,
+        ModuleType::Motion,
         "Tremolo Fast",
         "com.fts.trem16",
         &[],
@@ -269,7 +270,7 @@ fn build_guitar_rig() -> GuitarRigFixture {
 
     let mp_vibrato = make_module_preset(
         "Vibrato",
-        ModuleType::Transient,
+        ModuleType::Motion,
         "Vibrato FX",
         "com.fts.vibrato",
         &[],
@@ -277,7 +278,7 @@ fn build_guitar_rig() -> GuitarRigFixture {
 
     let mp_rotary = make_module_preset(
         "Rotary",
-        ModuleType::Transient,
+        ModuleType::Motion,
         "Leslie Rotary",
         "com.fts.rotary",
         &[],
@@ -285,7 +286,7 @@ fn build_guitar_rig() -> GuitarRigFixture {
 
     let mp_toomuch = make_module_preset(
         "Too Much to Drink",
-        ModuleType::Transient,
+        ModuleType::Motion,
         "Wobble FX",
         "com.fts.wobble",
         &[],
@@ -365,6 +366,7 @@ fn build_guitar_rig() -> GuitarRigFixture {
     let global_eq = GlobalBlock {
         block: Block::new("Global EQ", PluginId::vst3("com.fts.globaleq", "Global EQ")),
         order: Order::new(0),
+        tags: Tags::new(),
     };
     rig.add_global_block(global_eq);
 
@@ -388,7 +390,7 @@ fn build_guitar_rig() -> GuitarRigFixture {
                 .with_snapshot(dream_clean_snap),
         )
         .module_assignment(ModuleAssignment::new(
-            ModuleType::PostFx,
+            ModuleType::Time,
             mp_reverb_id,
             Order::new(1),
         ))
@@ -420,7 +422,7 @@ fn build_guitar_rig() -> GuitarRigFixture {
                 .with_snapshot(dream_clean_snap),
         )
         .module_assignment(ModuleAssignment::new(
-            ModuleType::Transient,
+            ModuleType::Motion,
             mp_trem8_id,
             Order::new(1),
         ))
@@ -557,7 +559,7 @@ fn build_guitar_rig() -> GuitarRigFixture {
     song_cryin.add_scene(Scene::new("Solo", preset_stank_id));
     // Song-level module override: PostFx swapped to Delay
     song_cryin.add_module_override(ModuleOverride::swap_preset(
-        ModuleType::PostFx,
+        ModuleType::Time,
         mp_delay_id,
         None,
     ));
@@ -658,12 +660,12 @@ fn module_presets_have_correct_snapshot_counts() {
     assert_eq!(find_mp("Flanger").snapshots.len(), 0);
     assert_eq!(find_mp("Phaser").snapshots.len(), 0);
 
-    // PostFx presets: 0 snapshots each
+    // Time presets: 0 snapshots each
     assert_eq!(find_mp("Delay").snapshots.len(), 0);
     assert_eq!(find_mp("Reverb").snapshots.len(), 0);
     assert_eq!(find_mp("Freeze").snapshots.len(), 0);
 
-    // Transient presets: 0 snapshots each
+    // Motion presets: 0 snapshots each
     assert_eq!(find_mp("Tremolo 8th").snapshots.len(), 0);
     assert_eq!(find_mp("Tremolo 16th").snapshots.len(), 0);
     assert_eq!(find_mp("Vibrato").snapshots.len(), 0);
@@ -692,17 +694,17 @@ fn top_level_presets_have_module_assignments() {
             .unwrap_or_else(|| panic!("Preset '{name}' not found"))
     };
 
-    // AC30 Ambient Clean: Amp, PostFx, Modulation
+    // AC30 Ambient Clean: Amp, Time, Modulation
     let ac30 = find_preset("AC30 Ambient Clean");
     assert!(ac30.get_module_assignment(ModuleType::Amp).is_some());
-    assert!(ac30.get_module_assignment(ModuleType::PostFx).is_some());
+    assert!(ac30.get_module_assignment(ModuleType::Time).is_some());
     assert!(ac30.get_module_assignment(ModuleType::Modulation).is_some());
     assert_eq!(ac30.module_assignments.len(), 3);
 
-    // Tremolo Swells: Amp, Transient
+    // Tremolo Swells: Amp, Motion
     let trem = find_preset("Tremolo Swells");
     assert!(trem.get_module_assignment(ModuleType::Amp).is_some());
-    assert!(trem.get_module_assignment(ModuleType::Transient).is_some());
+    assert!(trem.get_module_assignment(ModuleType::Motion).is_some());
     assert_eq!(trem.module_assignments.len(), 2);
 
     // 80's Drive: Drive, Amp
@@ -745,10 +747,10 @@ fn song_level_override_applies() {
     let cryin = &fixture.songs[0];
     assert_eq!(cryin.name, "Cryin' (Mateus Asato)");
 
-    // Song-level PostFx override
+    // Song-level Time override
     assert_eq!(cryin.module_overrides.len(), 1);
     let override_ = &cryin.module_overrides[0];
-    assert_eq!(override_.module_type, ModuleType::PostFx);
+    assert_eq!(override_.module_type, ModuleType::Time);
     assert!(override_.is_swap());
 }
 
@@ -758,7 +760,7 @@ fn global_override_locks_amp() {
     assert!(fixture.rig.is_module_locked(&ModuleType::Amp));
     // Other module types should not be locked
     assert!(!fixture.rig.is_module_locked(&ModuleType::Drive));
-    assert!(!fixture.rig.is_module_locked(&ModuleType::PostFx));
+    assert!(!fixture.rig.is_module_locked(&ModuleType::Time));
     assert!(!fixture.rig.is_module_locked(&ModuleType::Modulation));
 }
 
@@ -848,7 +850,7 @@ fn module_reordering() {
     // Drive should come before Amp in signal chain
     assert!(drive_assignment.order < amp_assignment.order);
 
-    // The "AC30 Ambient Clean" has Amp(0), PostFx(1), Modulation(2)
+    // The "AC30 Ambient Clean" has Amp(0), Time(1), Modulation(2)
     let ac30 = fixture
         .presets
         .iter()
@@ -856,16 +858,16 @@ fn module_reordering() {
         .unwrap();
 
     let amp = ac30.get_module_assignment(ModuleType::Amp).unwrap();
-    let postfx = ac30.get_module_assignment(ModuleType::PostFx).unwrap();
+    let time = ac30.get_module_assignment(ModuleType::Time).unwrap();
     let modulation = ac30
         .get_module_assignment(ModuleType::Modulation)
         .unwrap();
 
     assert_eq!(amp.order, Order::new(0));
-    assert_eq!(postfx.order, Order::new(1));
+    assert_eq!(time.order, Order::new(1));
     assert_eq!(modulation.order, Order::new(2));
-    assert!(amp.order < postfx.order);
-    assert!(postfx.order < modulation.order);
+    assert!(amp.order < time.order);
+    assert!(time.order < modulation.order);
 }
 
 #[test]
