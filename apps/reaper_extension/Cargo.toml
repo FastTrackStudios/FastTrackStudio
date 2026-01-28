@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [features]
-default = ["core", "input", "live", "lyrics", "iroh_server", "keyflow"]
+default = ["core", "input", "live", "lyrics", "iroh_server", "keyflow", "dynamic_template", "visibility_manager", "auto_color", "embed_test", "chart_window"]
 # Core functionality (services, polling, change detection) - enabled by default features
 # When no features are enabled, extension is completely transparent (only menu)
 core = []
