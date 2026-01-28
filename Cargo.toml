@@ -38,6 +38,7 @@ members = [
     "modules/visibility-manager",
     "modules/audio-controls",
     "modules/dsp",
+    "modules/data",
 ]
 # Exclude submodules that have their own workspaces
 exclude = ["libs/nih-plug", "libs/vendor/blitz", "libs/vendor/anyrender", "libs/vendor/reaper-rs", "libs/vendor/baseview", "apps/fts-control"]
@@ -175,8 +176,8 @@ unsafe_code = "deny"
 # This allows unused variables, imports, functions, etc. without causing build failures
 unused = { level = "allow", priority = -1 }
 # Rust 2024 recommended lints
-future_incompatible = "warn"
-nonstandard_style = "warn"
+future_incompatible = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
 
 # Override nih_plug for any dependency that pulls it from git
 # This ensures all packages use our local submodule with REAPER embed UI support
