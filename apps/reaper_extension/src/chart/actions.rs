@@ -12,79 +12,48 @@ use reaper_medium::ReaperStringArg;
 use std::sync::Arc;
 use tracing::{info, warn};
 
-/// Log chords detected from MIDI data in the current project
+/// Log chords detected from MIDI data in the current project.
+///
+/// Uses the unified `generate_chart_text_from_reaper()` pipeline — the same
+/// code path as the chart window and test 022 — so chord spelling respects
+/// the key signature and the output uses proper keyflow notation.
 fn log_chords_handler() {
+    use crate::services::generate_chart_text_from_reaper;
+
     let reaper = Reaper::get();
-    let current_project = reaper.current_project();
+    let project = reaper.current_project();
 
     info!("\n=== FastTrackStudio: Chart - Detected Chords ===\n");
 
-    // Find CHORDS track (default name, can be made configurable later)
-    let chords_track = match read::find_track_by_name(current_project.clone(), "CHORDS") {
-        Some(track) => track,
-        None => {
-            warn!("CHORDS track not found. Please create a track named 'CHORDS' with MIDI notes.");
-            return;
-        }
-    };
-    // Read MIDI notes from CHORDS track
-    let midi_notes = read::read_midi_notes_from_track(current_project.clone(), chords_track);
-
-    if midi_notes.is_empty() {
-        info!("No MIDI notes found in CHORDS track");
-        return;
-    }
-
-    info!(
-        note_count = midi_notes.len(),
-        "Read MIDI notes from CHORDS track"
-    );
-
-    // Get key signature from KEY track (optional)
-    let key = read::read_key_from_track(current_project.clone());
-    if let Some(ref key_info) = key {
-        info!(key = %key_info, "Detected key from KEY track");
+    // Get key signature from KEY track (optional, used for chord respelling)
+    let key = read::read_key_from_track(project.clone());
+    let key_root = key.as_ref().map(|k| {
+        let s = k.to_string();
+        // Key::to_string produces e.g. "Eb Ionian" — extract root only
+        s.split_whitespace().next().unwrap_or(&s).to_string()
+    });
+    if let Some(ref kr) = key_root {
+        info!(key = %kr, "Detected key from KEY track");
     } else {
         warn!("Key: Not detected (KEY track not found or empty)");
     }
 
-    // Detect chords from MIDI notes
-    // Minimum chord duration: 180 ticks (similar to Lil Chordbox.lua)
-    // Assuming 480 PPQ (standard), 180 ticks = ~0.375 beats
-    let min_chord_duration_ppq = 180;
-    let detected_chords =
-        detection::detect_chords_from_reaper_midi_notes(&midi_notes, min_chord_duration_ppq);
+    // Use the unified pipeline (same as chart window and test 022)
+    let chart_text = match generate_chart_text_from_reaper(
+        project,
+        key_root.as_deref(),
+        None, // title comes from the pipeline
+    ) {
+        Some(text) if !text.trim().is_empty() => text,
+        _ => {
+            warn!("No chart text generated — is there a CHORDS track with MIDI notes?");
+            return;
+        }
+    };
 
-    if detected_chords.is_empty() {
-        let msg = "No chords detected from MIDI notes.\n";
-        reaper.show_console_msg(msg);
-        info!("No chords detected");
-        return;
-    }
-
-    info!(
-        chord_count = detected_chords.len(),
-        "Detected chords from MIDI notes"
-    );
-
-    // Get tempo from project (or use default)
-    // REAPER projects have tempo markers, but for simplicity, use a default
-    // TODO: Read actual tempo from project tempo markers
-    let tempo_bpm = Some(120.0);
-
-    // Build Chart from detected chords
-    let chart =
-        build::build_chart_from_chords(detected_chords, current_project.clone(), key, tempo_bpm);
-
-    // Convert chart to syntax format
-    let chart_syntax = format_chart_to_syntax(&chart);
-
-    // Log to tracing
-    info!("\n{}", chart_syntax);
-    info!("=====================================\n");
-
-    // Also log to REAPER console
-    reaper.show_console_msg(ReaperStringArg::from(chart_syntax.as_str()));
+    // Log to tracing and REAPER console
+    info!("\n{}", chart_text);
+    reaper.show_console_msg(ReaperStringArg::from(chart_text.as_str()));
 }
 
 /// Convert a Chart to chart syntax format
