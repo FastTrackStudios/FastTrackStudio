@@ -72,6 +72,10 @@ pub mod resolver;
 pub mod rig_engine;
 pub mod slot;
 
+// ── Service (ROAM) ─────────────────────────────────────────────────────────
+pub mod local_client;
+pub mod service;
+
 // Re-export core engine data types.
 pub use engine::{
     EngineError, InstanceHandle, InstanceState, ModuleTarget, PreloadPriority, PreloadRequest,
@@ -81,6 +85,13 @@ pub use engine::{
 // Re-export engine traits.
 pub use rig_engine::{RigEngine, TransitionResult};
 pub use slot::{ActivateResult, LoadResult, ModuleSlot};
+
+// Re-export service types.
+pub use service::{
+    EngineStateInfo, InstanceInfo, LocalRigControlClient, MockRigControlService, PreloadStatusInfo,
+    RigControlCommand, RigControlData, RigControlEvent, RigControlService, SlotErrorInfo,
+    SlotStateInfo, SwitchOutcomeInfo, TransitionResultInfo,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // compile_fail doctests — prove the type system catches mistakes

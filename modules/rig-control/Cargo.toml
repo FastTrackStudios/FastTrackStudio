@@ -9,6 +9,7 @@ description = "FastTrackStudio rig control — core data types and gapless modul
 [dependencies]
 uuid = { version = "1.0", features = ["v4", "v5"] }
 facet = { workspace = true }
+roam = { workspace = true }
 async-trait = "0.1.89"
 tokio = { version = "1", features = ["time"] }
 

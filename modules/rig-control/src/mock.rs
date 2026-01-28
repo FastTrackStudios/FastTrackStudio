@@ -324,6 +324,27 @@ impl MockRigEngine {
         instances[idx].state = InstanceState::Active;
     }
 
+    /// Get current slot states (public version for service layer).
+    pub fn current_slot_states_public(&self) -> Vec<SlotState> {
+        self.current_slot_states()
+    }
+
+    /// Disable a specific module slot.
+    pub async fn disable_slot(&self, module_type: ModuleType) {
+        let slots = self.slots.lock().unwrap();
+        if let Some(slot) = slots.get(&module_type) {
+            slot.disabled.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Enable a specific module slot.
+    pub async fn enable_slot(&self, module_type: ModuleType) {
+        let slots = self.slots.lock().unwrap();
+        if let Some(slot) = slots.get(&module_type) {
+            slot.disabled.store(false, Ordering::Relaxed);
+        }
+    }
+
     /// Get current slot states for diffing (acquires and drops both locks).
     fn current_slot_states(&self) -> Vec<SlotState> {
         let slots = self.slots.lock().unwrap();

@@ -11465,6 +11465,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "facet",
+ "roam",
  "tokio",
  "uuid 1.19.0",
 ]
