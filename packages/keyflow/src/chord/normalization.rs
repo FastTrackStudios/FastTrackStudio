@@ -114,7 +114,12 @@ impl Chord {
                 let should_show_seventh =
                     !self.extensions.has_any() || !self.extensions.has_natural();
                 if should_show_seventh {
-                    desc.push_str(&family.to_string());
+                    // MinorMajor7 uses slash notation: Cm/maj7 instead of CmMaj7
+                    if matches!(family, ChordFamily::MinorMajor7) {
+                        desc.push_str("/maj7");
+                    } else {
+                        desc.push_str(&family.to_string());
+                    }
                 }
                 // Extensions
                 if self.extensions.has_any() {

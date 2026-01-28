@@ -3,6 +3,7 @@
 //! Provides utilities for converting MIDI events to chords and working with MIDI note data.
 
 use crate::chord::{Chord, ChordDegree, ChordQuality, from_semitones};
+use crate::chord::quality::SuspendedType;
 use crate::primitives::note::Note;
 use crate::primitives::{MusicalNote, RootNotation};
 use helgoboss_midi::KeyNumber;
@@ -454,6 +455,19 @@ fn apply_midi_octave_adjustments(
         && chord.additions.contains(&ChordDegree::Ninth)
     {
         chord.additions.retain(|&d| d != ChordDegree::Ninth);
+    }
+
+    // Convert Power + 9th extension (no 3rd, no 7th) → sus2
+    // A chord with only root, 2nd/9th, and 5th is a sus2 chord, not a power chord with add9
+    if has_root
+        && has_fifth
+        && !has_third
+        && chord.family.is_none()
+        && chord.quality == ChordQuality::Power
+        && chord.extensions.ninth.is_some()
+    {
+        chord.quality = ChordQuality::Suspended(SuspendedType::Second);
+        chord.extensions.ninth = None;
     }
 }
 

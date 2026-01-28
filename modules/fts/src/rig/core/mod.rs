@@ -15,6 +15,7 @@ mod registry;
 mod rig;
 mod routing;
 mod section;
+pub mod selection;
 mod tags;
 
 pub use block::*;
@@ -29,4 +30,5 @@ pub use registry::*;
 pub use rig::*;
 pub use routing::*;
 pub use section::*;
+pub use selection::*;
 pub use tags::*;

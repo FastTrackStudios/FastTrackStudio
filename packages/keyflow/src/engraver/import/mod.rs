@@ -12,7 +12,13 @@ mod keyflow_import;
 #[cfg(feature = "midi-import")]
 mod midi_import;
 
+#[cfg(feature = "midi-import")]
+mod midi_chart_builder;
+
 pub use keyflow_import::import_chart;
+
+#[cfg(feature = "midi-import")]
+pub use midi_chart_builder::{generate_chart_text, MidiChartConfig};
 
 #[cfg(feature = "midi-import")]
 pub use midi_import::{

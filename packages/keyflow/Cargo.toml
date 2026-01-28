@@ -168,5 +168,9 @@ required-features = ["highlighting"]
 name = "021_midi_import_thriller"
 required-features = ["midi-import"]
 
+[[test]]
+name = "022_midi_import_thriller_v3"
+required-features = ["midi-import"]
+
 [lints]
 workspace = true
