@@ -172,5 +172,9 @@ required-features = ["midi-import"]
 name = "022_midi_import_thriller_v3"
 required-features = ["midi-import"]
 
+[[test]]
+name = "024_midi_import_movin_out"
+required-features = ["midi-import"]
+
 [lints]
 workspace = true

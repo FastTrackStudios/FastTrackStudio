@@ -298,7 +298,7 @@ pub struct ParamSpec {
 ///
 /// Lightweight value type used in [`Block`](crate::block::Block) parameter lists
 /// and real-time parameter change messages.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct ParameterValue {
     /// Index into the parent's parameter spec list.
     pub index: u32,

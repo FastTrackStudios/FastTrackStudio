@@ -13,6 +13,7 @@ pub mod piano;
 pub mod preset_browser;
 pub mod progress;
 pub mod rig;
+pub mod rig_grid;
 pub mod ruler;
 pub mod section_progress;
 pub mod sidebar_items;
@@ -48,6 +49,15 @@ pub use transport::{ConnectionStatus, TransportControlBar};
 pub use performance::PerformanceView;
 pub use preset_browser::{CompactPresetBrowser, PresetBrowserSidebar};
 pub use rig::RigControlView;
+pub use rig_grid::{
+    GuitarRigGrid, ModuleViewMode, GlobalViewOverride, block_type_color,
+    SignalFlowGrid, SignalFlowGridView, GridBlock, GridPosition, GridConnection,
+    GRID_COLS, GRID_ROWS,
+    // Page layout components
+    GuitarRigTopBar, GuitarRigLeftSidebar, GuitarRigRightSidebar, ModuleBrowserModal,
+    // Node-based system
+    Node, NodeGraph, NodePosition, NodeSize, NodeWidget, NodeCanvas, Wire,
+};
 pub use block_controls::{
     AmpControls, AmpParams, BlockType, CabControls, CabParams, DelayControls, DelayParams,
     DriveControls, DriveParams, ExpandableBlockControls, ReverbControls, ReverbParams,

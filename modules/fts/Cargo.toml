@@ -8,6 +8,7 @@ description = "FastTrackStudio core modules - setlist, lyrics, chords, naming co
 
 [dependencies]
 # Core dependencies
+rig-control = {workspace = true}
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = "2.0.17"

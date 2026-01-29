@@ -112,7 +112,7 @@ pub enum BlockType {
 /// Each block is backed by a plugin, has a bypass toggle, and holds a list of
 /// parameter values. Parameters are stored by index into the plugin's parameter
 /// spec list.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct Block {
     /// Unique identifier for this block instance.
     pub id: BlockId,

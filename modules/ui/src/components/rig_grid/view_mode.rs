@@ -4,7 +4,7 @@
 //! override that forces all modules to the same mode, or let each module
 //! remember its preferred view mode.
 
-/// View mode for displaying a single module in the rig grid.
+/// View mode for displaying the rig.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ModuleViewMode {
     /// Full parameter editing view.
@@ -17,14 +17,14 @@ pub enum ModuleViewMode {
     ///
     /// Shows only the `ModuleMacro` knobs that have been configured for rapid
     /// access. Width: ~192px per module.
-    #[default]
     Macro,
 
-    /// Minimal colored pill display.
+    /// Signal flow grid (Quad Cortex style).
     ///
-    /// Shows blocks as compact colored buttons (Quad Cortex style) with bypass
-    /// indicators. Width: ~128px per module.
-    Compact,
+    /// Shows blocks on a 14x6 grid with routing lines and I/O jacks.
+    /// This is the primary compact view mode.
+    #[default]
+    Grid,
 }
 
 impl ModuleViewMode {
@@ -33,7 +33,7 @@ impl ModuleViewMode {
         match self {
             Self::Detail => "Detail",
             Self::Macro => "Macro",
-            Self::Compact => "Compact",
+            Self::Grid => "Grid",
         }
     }
 
@@ -42,23 +42,24 @@ impl ModuleViewMode {
         match self {
             Self::Detail => "⚙",  // Gear for full settings
             Self::Macro => "◉",  // Circle for knobs
-            Self::Compact => "▪", // Square for pills
+            Self::Grid => "⊞",   // Grid for signal flow
         }
     }
 
     /// Get the recommended width in pixels for this view mode.
+    /// Note: Grid mode uses full width (signal flow layout).
     pub const fn width(self) -> u32 {
         match self {
             Self::Detail => 320,
             Self::Macro => 192,
-            Self::Compact => 128,
+            Self::Grid => 800, // Full signal flow grid
         }
     }
 
     /// Get all view modes in display order.
     pub const fn all() -> &'static [ModuleViewMode] {
         &[
-            ModuleViewMode::Compact,
+            ModuleViewMode::Grid,
             ModuleViewMode::Macro,
             ModuleViewMode::Detail,
         ]

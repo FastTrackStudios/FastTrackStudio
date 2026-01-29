@@ -139,7 +139,7 @@ pub struct MidiTriggerConfig {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A block positioned within a module, with optional MIDI trigger.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct ModuleBlock {
     pub id: Uuid,
     pub block: Block,
@@ -187,7 +187,7 @@ impl Taggable for ModuleBlock {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A macro knob that exposes a single block parameter for quick access.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct ModuleMacro {
     pub id: Uuid,
     pub name: String,
@@ -206,7 +206,7 @@ pub struct ModuleMacro {
 /// Modules represent logical groups in the signal chain (e.g. "Drive",
 /// "Amp", "EQ"). Each module holds one or more [`ModuleBlock`]s
 /// and optional [`ModuleMacro`] knobs for quick parameter access.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct Module {
     pub id: ModuleId,
     pub name: String,

@@ -56,23 +56,18 @@ struct MacroKnobProps {
 /// A single macro knob with label and value display.
 #[component]
 fn MacroKnob(props: MacroKnobProps) -> Element {
-    let macro_def = &props.macro_def;
-    let block_id = macro_def.block_id;
-    let param_index = macro_def.param_index;
+    let block_id = props.macro_def.block_id;
+    let param_index = props.macro_def.param_index;
+    let initial_value = props.macro_def.normalized.get() as f32;
 
     // Create signal for the knob value
-    let mut value = use_signal(|| macro_def.normalized.get() as f32);
-
-    // Sync external value changes
-    use_effect(move || {
-        value.set(macro_def.normalized.get() as f32);
-    });
+    let mut value = use_signal(move || initial_value);
 
     let on_change = props.on_change.clone();
 
     // Truncate label for display
-    let label = truncate_label(&macro_def.name, 8);
-    let display_value = &macro_def.display_value;
+    let label = truncate_label(&props.macro_def.name, 8);
+    let display_value = props.macro_def.display_value.clone();
 
     rsx! {
         div { class: "flex flex-col items-center gap-1",
@@ -147,7 +142,7 @@ fn KnobVisual(props: KnobVisualProps) -> Element {
     rsx! {
         svg {
             class: "w-full h-full",
-            viewBox: "0 0 {size} {size}",
+            view_box: "0 0 {size} {size}",
 
             // Background track
             circle {

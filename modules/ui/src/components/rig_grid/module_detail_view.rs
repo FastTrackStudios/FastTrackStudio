@@ -219,7 +219,7 @@ fn MiniKnob(props: MiniKnobProps) -> Element {
     rsx! {
         svg {
             class: "w-9 h-9 cursor-pointer",
-            viewBox: "0 0 {size} {size}",
+            view_box: "0 0 {size} {size}",
 
             // Background track
             circle {
@@ -290,5 +290,3 @@ fn MiniKnob(props: MiniKnobProps) -> Element {
     }
 }
 
-// Re-export the infer_block_type function for use in other modules
-pub use super::module_compact_view::infer_block_type;

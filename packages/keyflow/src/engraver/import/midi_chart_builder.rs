@@ -165,6 +165,15 @@ pub fn generate_chart_text(midi: &MidiFile, config: &MidiChartConfig) -> String 
         // Determine push setting for this section
         let use_short_push_for_section = use_triplet_setting || section_push_type.is_some();
 
+        // Layout preferences: default 4 measures per line; long instrumentals keep 8 with a midline bar.
+        let (measures_per_line, midline_separator_at) = if section.keyflow_type == "INST"
+            && section.length >= 8
+        {
+            (8usize, Some(4usize))
+        } else {
+            (4usize, None)
+        };
+
         // Format the elements with measure awareness
         let section_content = format_rhythm_elements(
             &elements,
@@ -174,12 +183,15 @@ pub fn generate_chart_text(midi: &MidiFile, config: &MidiChartConfig) -> String 
             beats_per_measure,
             use_short_push_for_section,
             &section.keyflow_type,
+            measures_per_line,
+            midline_separator_at,
         );
 
         if section_content.is_empty() {
             output.push_str("%\n");
         } else {
-            output.push_str(&section_content);
+            let compressed = compress_repeated_lines(&section_content);
+            output.push_str(&compressed);
             output.push('\n');
         }
 
@@ -187,6 +199,39 @@ pub fn generate_chart_text(midi: &MidiFile, config: &MidiChartConfig) -> String 
     }
 
     output
+}
+
+/// Compress consecutive identical lines by appending ` xN` (e.g., "line" → "line x2").
+fn compress_repeated_lines(input: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut prev: Option<&str> = None;
+    let mut count: usize = 0;
+
+    for line in input.lines() {
+        if Some(line) == prev {
+            count += 1;
+        } else {
+            if let Some(p) = prev {
+                if count > 1 {
+                    out.push(format!("{} x{}", p, count));
+                } else {
+                    out.push(p.to_string());
+                }
+            }
+            prev = Some(line);
+            count = 1;
+        }
+    }
+
+    if let Some(p) = prev {
+        if count > 1 {
+            out.push(format!("{} x{}", p, count));
+        } else {
+            out.push(p.to_string());
+        }
+    }
+
+    out.join("\n")
 }
 
 // ============================================================================
@@ -353,6 +398,9 @@ fn detect_push_pull_for_chord(
     let start_beat = start_ppq / ticks_per_beat;
     let end_beat = end_ppq / ticks_per_beat;
     let crosses_beat = end_beat > start_beat;
+    let next_beat_tick = (start_beat + 1) * ticks_per_beat;
+    let ends_at_next_beat = (end_ppq - next_beat_tick).abs() < tolerance as i64;
+    let short_duration = (end_ppq - start_ppq) <= ticks_per_beat / 2;
 
     if subdivision < tolerance || subdivision > (ppq - tolerance) {
         // On the beat
@@ -362,22 +410,73 @@ fn detect_push_pull_for_chord(
         (false, Some("t".to_string()))
     } else if (subdivision as i32 - triplet_quarter as i32).unsigned_abs() < tolerance {
         // Push by triplet eighth (2/3 of beat = 1/3 before next beat)
-        (true, Some("t".to_string()))
+        (crosses_beat || (short_duration && ends_at_next_beat), Some("t".to_string()))
     } else if (subdivision as i32 - dotted_eighth as i32).unsigned_abs() < tolerance {
         // Push by sixteenth (3/4 of beat = 1/4 before next beat)
-        (true, Some("16".to_string()))
+        (crosses_beat || (short_duration && ends_at_next_beat), Some("16".to_string()))
     } else if (subdivision as i32 - straight_eighth as i32).unsigned_abs() < tolerance {
         // Straight eighth — at the "and" of the beat.
         // In triplet-based songs, this is just syncopation, not a push.
         // In straight-eighth songs, mark as push if the chord crosses into the next beat.
-        if !is_triplet_song && crosses_beat {
-            (true, Some("8".to_string()))
-        } else {
-            (false, None)
-        }
+        let treat_as_push =
+            !is_triplet_song && (crosses_beat || (short_duration && ends_at_next_beat));
+        (treat_as_push, if treat_as_push { Some("8".to_string()) } else { None })
     } else {
         (false, None)
     }
+}
+
+/// Detect if a pushed chord is staccato (only lasts the push duration).
+///
+/// A staccato push is when a chord starts on a push position and ends at or near
+/// the next beat boundary. For example:
+/// - Triplet push: starts at beat + 2/3, ends near beat + 1
+/// - Eighth push: starts at beat + 1/2, ends near beat + 1
+/// - Sixteenth push: starts at beat + 3/4, ends near beat + 1
+///
+/// Returns `true` if the chord should be notated as staccato (`>'.Chord`).
+fn is_staccato_push(
+    start_ppq: i64,
+    end_ppq: i64,
+    ppq: u32,
+    songstart: u32,
+    is_pushed: bool,
+    push_amount: &Option<String>,
+) -> bool {
+    // Only pushed chords can be staccato pushes
+    if !is_pushed {
+        return false;
+    }
+
+    let ticks_per_beat = ppq as i64;
+    let tolerance = (ppq / 12) as i64; // ~80 ticks at 960 PPQ
+
+    // Calculate where this chord started relative to songstart
+    let relative_tick = if start_ppq >= songstart as i64 {
+        start_ppq - songstart as i64
+    } else {
+        start_ppq
+    };
+
+    // Find the next beat boundary after the start
+    let beat_of_start = relative_tick / ticks_per_beat;
+    let next_beat_tick = (beat_of_start + 1) * ticks_per_beat + (songstart as i64);
+
+    // Calculate the actual duration
+    let actual_duration = end_ppq - start_ppq;
+
+    // Calculate the expected push duration (time from start to next beat)
+    let expected_staccato_duration = next_beat_tick - start_ppq;
+
+    // The chord is staccato if it ends at or very close to the next beat
+    // (within tolerance of the expected push duration)
+    let ends_at_beat = (actual_duration - expected_staccato_duration).abs() < tolerance;
+
+    // Also check for slightly shorter durations (true staccato - chord released before beat)
+    let short_staccato = actual_duration < expected_staccato_duration
+        && actual_duration >= expected_staccato_duration / 2;
+
+    ends_at_beat || short_staccato
 }
 
 /// Check if a chord is a quarter push (starts on beat 4, majority in next measure).
@@ -688,7 +787,7 @@ fn build_rhythm_elements(
 
         if effective_start > current_pos {
             let gap = effective_start - current_pos;
-            if gap >= (ppq / 4) as i64 {
+            if gap >= (ppq / 6) as i64 {
                 elements.push(ChordOrRest::Rest {
                     start_ppq: current_pos,
                     end_ppq: effective_start,
@@ -716,7 +815,7 @@ fn build_rhythm_elements(
         // - Chords that stay within a single beat are NOT pushed
         // - Otherwise use normal detection
         let ticks_per_measure = ticks_per_beat * 4; // 4/4
-        let (is_pushed, push_amount) = if is_continuing {
+        let (mut is_pushed, mut push_amount) = if is_continuing {
             // This chord started in the previous section and sustains into this one.
             // Detect push type from the chord's actual start position.
             let quarter_pushed = is_quarter_push(chord, ppq);
@@ -737,16 +836,33 @@ fn build_rhythm_elements(
             }
         };
 
-        let is_staccato = actual_duration < triplet_eighth;
+        // Detect staccato push: pushed chord that only lasts the push duration
+        let is_staccato_pushed = is_staccato_push(
+            chord.start_ppq,
+            chord.end_ppq,
+            ppq,
+            songstart,
+            is_pushed,
+            &push_amount,
+        );
+
+        // For very short pushed hits that effectively end on the downbeat,
+        // prefer explicit short-duration notation (rest + hit) instead of push marks.
+        let max_short_hit = ticks_per_beat / 2;
+        let mut is_staccato_pushed = is_staccato_pushed;
+        if is_pushed && actual_duration <= max_short_hit {
+            is_pushed = false;
+            push_amount = None;
+            is_staccato_pushed = false;
+        }
+
+        // For very short chords (< triplet eighth), quantize the end to grid
+        let is_very_short = actual_duration < triplet_eighth;
         let quantized_end = if is_continuing {
             effective_end
-        } else if is_staccato {
-            let pos_in_grid = chord.start_ppq % triplet_eighth;
-            if pos_in_grid == 0 {
-                chord.start_ppq + triplet_eighth
-            } else {
-                chord.start_ppq + (triplet_eighth - pos_in_grid) + triplet_eighth
-            }
+        } else if is_very_short {
+            // Keep the actual short duration so sixteenth-note rhythms remain intact
+            chord.end_ppq
         } else {
             chord.end_ppq
         };
@@ -758,6 +874,7 @@ fn build_rhythm_elements(
             is_pushed,
             push_amount,
             is_accented,
+            is_staccato: is_staccato_pushed,
         });
 
         current_pos = quantized_end;
@@ -789,16 +906,19 @@ fn merge_consecutive_chords(elements: Vec<ChordOrRest>) -> Vec<ChordOrRest> {
                 is_pushed,
                 push_amount,
                 is_accented,
+                is_staccato,
             } => {
                 let can_merge = if let Some(last) = merged.last() {
                     if let ChordOrRest::Chord {
                         symbol: prev_symbol,
                         end_ppq: prev_end,
+                        is_staccato: prev_staccato,
                         ..
                     } = last
                     {
+                        // Don't merge staccato chords - they need to stay separate
                         let gap = start_ppq - prev_end;
-                        *prev_symbol == symbol && gap < 960 && gap >= 0
+                        *prev_symbol == symbol && gap < 960 && gap >= 0 && !*prev_staccato && !is_staccato
                     } else {
                         false
                     }
@@ -821,6 +941,7 @@ fn merge_consecutive_chords(elements: Vec<ChordOrRest>) -> Vec<ChordOrRest> {
                         is_pushed,
                         push_amount,
                         is_accented,
+                        is_staccato,
                     });
                 }
             }
@@ -856,6 +977,7 @@ fn apply_groove_pattern_push(elements: Vec<ChordOrRest>) -> Vec<ChordOrRest> {
                 is_pushed,
                 push_amount,
                 is_accented,
+                is_staccato,
             } => {
                 let is_f_chord =
                     symbol == "F/C" || symbol == "F" || symbol.starts_with("F/");
@@ -883,6 +1005,7 @@ fn apply_groove_pattern_push(elements: Vec<ChordOrRest>) -> Vec<ChordOrRest> {
                         push_amount.clone()
                     },
                     is_accented: *is_accented,
+                    is_staccato: *is_staccato,
                 });
             }
             ChordOrRest::Rest { start_ppq, end_ppq } => {
@@ -908,6 +1031,7 @@ enum MeasureContent {
         is_pushed: bool,
         push_amount: Option<String>,
         is_accented: bool,
+        is_staccato: bool,
     },
     Repeat,
     Silence,
@@ -923,6 +1047,7 @@ enum MeasureElement {
         is_pushed: bool,
         push_amount: Option<String>,
         is_accented: bool,
+        is_staccato: bool,
     },
     Rest {
         beats: i32,
@@ -973,6 +1098,7 @@ fn build_measures(
                     is_pushed,
                     push_amount,
                     is_accented,
+                    is_staccato,
                 } = elem
                 {
                     if *start_ppq >= prev_measure_start
@@ -1006,6 +1132,7 @@ fn build_measures(
                             is_pushed: *is_pushed,
                             push_amount: push_amount.clone(),
                             is_accented: *is_accented,
+                            is_staccato: *is_staccato,
                         });
                         current_beat = display_beats.min(beats_per_measure);
                         current_tick = chord_end_clamped.min(measure_end);
@@ -1027,6 +1154,7 @@ fn build_measures(
                     is_pushed,
                     push_amount,
                     is_accented,
+                    is_staccato,
                 } => {
                     if *end_ppq <= measure_start || *start_ppq >= measure_end {
                         continue;
@@ -1054,14 +1182,14 @@ fn build_measures(
                     let duration_ticks = chord_end_clamped - chord_start_clamped;
 
                     let chord_end_in_measure =
-                        (*end_ppq - measure_start).min(ticks_per_measure);
+                        (chord_end_clamped - measure_start).min(ticks_per_measure);
                     let end_beat =
                         ((chord_end_in_measure + ticks_per_beat - 1) / ticks_per_beat) as i32;
                     let duration_beats = (end_beat - start_beat).max(1);
 
                     // Add rest if there's a gap before this chord
                     let gap_ticks = chord_start_clamped - current_tick;
-                    let min_rest_ticks = ticks_per_beat / 4;
+                    let min_rest_ticks = ticks_per_beat / 6;
                     if start_beat > current_beat
                         || (start_beat == current_beat && gap_ticks >= min_rest_ticks)
                     {
@@ -1084,6 +1212,7 @@ fn build_measures(
                         is_pushed: *is_pushed,
                         push_amount: push_amount.clone(),
                         is_accented: *is_accented,
+                        is_staccato: *is_staccato,
                     });
 
                     current_beat = start_beat + duration_beats;
@@ -1149,10 +1278,11 @@ fn build_measures(
                     is_pushed,
                     push_amount,
                     is_accented,
+                    is_staccato,
                 } = e
                 {
                     if *start_ppq < measure_start && *end_ppq > measure_start {
-                        Some((symbol.clone(), *is_pushed, push_amount.clone(), *is_accented))
+                        Some((symbol.clone(), *is_pushed, push_amount.clone(), *is_accented, *is_staccato))
                     } else {
                         None
                     }
@@ -1161,7 +1291,7 @@ fn build_measures(
                 }
             });
 
-            if let Some((symbol, is_pushed, push_amount, is_accented)) = continuing_chord {
+            if let Some((symbol, is_pushed, push_amount, is_accented, is_staccato)) = continuing_chord {
                 if last_chord_symbol.as_ref() == Some(&symbol) {
                     MeasureContent::Repeat
                 } else {
@@ -1171,6 +1301,7 @@ fn build_measures(
                         is_pushed,
                         push_amount,
                         is_accented,
+                        is_staccato,
                     }
                 }
             } else {
@@ -1184,6 +1315,7 @@ fn build_measures(
                     is_pushed,
                     push_amount,
                     is_accented,
+                    is_staccato,
                     ticks,
                 } if *beats >= beats_per_measure
                     && *ticks >= ticks_per_measure - ticks_per_beat =>
@@ -1197,6 +1329,7 @@ fn build_measures(
                             is_pushed: *is_pushed,
                             push_amount: push_amount.clone(),
                             is_accented: *is_accented,
+                            is_staccato: *is_staccato,
                         }
                     }
                 }
@@ -1225,6 +1358,7 @@ fn build_measures(
                     is_pushed,
                     push_amount,
                     is_accented,
+                    is_staccato,
                     ..
                 }) = measure_elements.first()
                 {
@@ -1239,6 +1373,7 @@ fn build_measures(
                                 is_pushed: *is_pushed,
                                 push_amount: push_amount.clone(),
                                 is_accented: *is_accented,
+                                is_staccato: *is_staccato,
                             }
                         }
                     } else {
@@ -1278,7 +1413,7 @@ fn format_duration_suffix_from_ticks(ticks: i64, ppq: u32) -> String {
     let sixteenth = ticks_per_beat / 4;
     let eighth = ticks_per_beat / 2;
     let quarter = ticks_per_beat;
-    let tolerance = (ppq / 12) as i64;
+    let tolerance = (ppq / 24) as i64;
 
     if (ticks - triplet_eighth).abs() < tolerance {
         "_8t".to_string()
@@ -1307,7 +1442,7 @@ fn format_rest_from_ticks(ticks: i64, ppq: u32) -> String {
     let quarter = ticks_per_beat;
     let half = ticks_per_beat * 2;
     let whole = ticks_per_beat * 4;
-    let tolerance = (ppq / 12) as i64;
+    let tolerance = (ppq / 24) as i64;
 
     if (ticks - triplet_eighth).abs() < tolerance {
         "r8t".to_string()
@@ -1432,30 +1567,37 @@ fn format_rests_split_at_beats(
 /// - Triplet: `C'` (short) or `Ct'` (explicit)
 /// - Straight eighth: `C'`
 /// - Sixteenth: `C''`
+///
+/// Staccato pushes (pushed chord that only lasts the push duration):
+/// - `>'.C` (accent + staccato + push)
 fn format_chord_with_push(
     accent: &str,
     symbol: &str,
     is_pushed: bool,
     push_amount: &Option<String>,
     use_short_push: bool,
+    is_staccato: bool,
 ) -> String {
     let is_pull = !is_pushed && push_amount.is_some();
 
+    // Staccato marker goes between accent and push
+    let staccato = if is_staccato { "." } else { "" };
+
     if is_pushed {
         match push_amount.as_deref() {
-            Some("16") => format!("{}''{}", accent, symbol),
-            Some("t") if !use_short_push => format!("{}'t{}", accent, symbol),
+            Some("16") => format!("{}{}''{}", accent, staccato, symbol),
+            Some("t") if !use_short_push => format!("{}{}'t{}", accent, staccato, symbol),
             // Triplet (short), straight eighth, quarter, or unknown — single apostrophe
-            _ => format!("{}'{}", accent, symbol),
+            _ => format!("{}{}'{}", accent, staccato, symbol),
         }
     } else if is_pull {
         match push_amount.as_deref() {
-            Some("16") => format!("{}{}''", accent, symbol),
-            Some("t") if !use_short_push => format!("{}{}t'", accent, symbol),
-            _ => format!("{}{}'", accent, symbol),
+            Some("16") => format!("{}{}{}''", accent, staccato, symbol),
+            Some("t") if !use_short_push => format!("{}{}{}t'", accent, staccato, symbol),
+            _ => format!("{}{}{}'", accent, staccato, symbol),
         }
     } else {
-        format!("{}{}", accent, symbol)
+        format!("{}{}{}", accent, staccato, symbol)
     }
 }
 
@@ -1474,9 +1616,10 @@ fn format_measure(
             is_pushed,
             push_amount,
             is_accented,
+            is_staccato,
         } => {
             let accent = if *is_accented { ">" } else { "" };
-            format_chord_with_push(accent, symbol, *is_pushed, push_amount, use_short_push)
+            format_chord_with_push(accent, symbol, *is_pushed, push_amount, use_short_push, *is_staccato)
         }
         MeasureContent::Repeat => ".".to_string(),
         MeasureContent::Silence => "s1".to_string(),
@@ -1492,10 +1635,9 @@ fn format_measure(
                         is_pushed,
                         push_amount,
                         is_accented,
+                        is_staccato,
                     } => {
-                        let has_rests =
-                            elements.iter().any(|e| matches!(e, MeasureElement::Rest { .. }));
-                        let accent = if has_rests || *is_accented { ">" } else { "" };
+                        let accent = if *is_accented { ">" } else { "" };
 
                         let chord_base = format_chord_with_push(
                             accent,
@@ -1503,6 +1645,7 @@ fn format_measure(
                             *is_pushed,
                             push_amount,
                             use_short_push,
+                            *is_staccato,
                         );
 
                         let mut adjusted_beats = *beats;
@@ -1574,6 +1717,8 @@ fn format_rhythm_elements(
     beats_per_measure: i32,
     use_short_push: bool,
     _section_type: &str,
+    measures_per_line: usize,
+    midline_separator_at: Option<usize>,
 ) -> String {
     let measures = build_measures(
         elements,
@@ -1583,7 +1728,14 @@ fn format_rhythm_elements(
         beats_per_measure,
     );
 
-    format_measures(&measures, beats_per_measure, use_short_push, ppq)
+    format_measures(
+        &measures,
+        beats_per_measure,
+        use_short_push,
+        ppq,
+        measures_per_line,
+        midline_separator_at,
+    )
 }
 
 /// Format measures with compact notation.
@@ -1593,19 +1745,31 @@ fn format_measures(
     beats_per_measure: i32,
     use_short_push: bool,
     ppq: u32,
+    measures_per_line: usize,
+    midline_separator_at: Option<usize>,
 ) -> String {
     let mut result = String::new();
     let mut measure_count = 0;
+    let mut just_inserted_separator = false;
 
     for (i, content) in measures.iter().enumerate() {
-        if i > 0 && measure_count % 4 != 0 {
+        if i > 0 && measure_count % measures_per_line != 0 && !just_inserted_separator {
             result.push(' ');
         }
 
         result.push_str(&format_measure(content, beats_per_measure, use_short_push, ppq));
         measure_count += 1;
+        just_inserted_separator = false;
 
-        if measure_count % 4 == 0 && i < measures.len() - 1 {
+        if let Some(split_at) = midline_separator_at {
+            if measure_count % measures_per_line == split_at && i < measures.len() - 1 {
+                result.push_str(" | ");
+                just_inserted_separator = true;
+                continue;
+            }
+        }
+
+        if measure_count % measures_per_line == 0 && i < measures.len() - 1 {
             result.push('\n');
         }
     }

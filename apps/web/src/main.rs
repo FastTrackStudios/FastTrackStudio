@@ -19,7 +19,11 @@ use lucide_dioxus::{
 use std::sync::Arc;
 use fts::setlist::{LocalSetlistClient, MockSetlist};
 use fts::rig::{LocalRigClient, MockRig};
-use ui::{PerformanceView, RigControlView, RigServiceProvider, SetlistServiceProvider};
+use ui::{
+    GuitarRigGrid, GuitarRigLeftSidebar, GuitarRigRightSidebar, GuitarRigTopBar,
+    ModuleBrowserModal, ModuleViewMode, NodeCanvas, NodeGraph, PerformanceView, RigControlView,
+    RigServiceProvider, SetlistServiceProvider, SignalFlowGrid,
+};
 
 // Audio controls
 use audio_controls::widgets::{
@@ -136,13 +140,15 @@ fn App() -> Element {
 fn Layout() -> Element {
     let route = use_route::<Route>();
     let is_home = matches!(route, Route::Home {});
+    let is_rig_guitar = matches!(route, Route::ControlRigGuitar {});
 
     rsx! {
         div {
             class: "min-h-screen flex flex-col text-foreground",
 
-            // Floating glass navbar
-            nav {
+            // Floating glass navbar - hidden on guitar rig page
+            if !is_rig_guitar {
+                nav {
                 class: if is_home {
                     "fixed top-0 left-0 right-0 z-50"
                 } else {
@@ -254,55 +260,13 @@ fn Layout() -> Element {
                         }
                     }
                 }
+                }
             }
 
             // Main content area - add top padding on home to account for fixed nav
             main {
                 class: if is_home { "flex-1" } else { "flex-1" },
                 Outlet::<Route> {}
-            }
-
-            // Minimal footer
-            footer {
-                class: "border-t border-border/50 py-8 bg-card/30",
-
-                div {
-                    class: "max-w-7xl mx-auto px-4 lg:px-8",
-
-                    div {
-                        class: "flex flex-col sm:flex-row items-center justify-between gap-4",
-
-                        div {
-                            class: "flex items-center gap-2 text-muted-foreground text-sm",
-                            span { "© 2024 FastTrackStudio" }
-                            span { class: "text-border", "•" }
-                            span { "Built with Rust & Dioxus" }
-                        }
-
-                        div {
-                            class: "flex items-center gap-4",
-
-                            Link {
-                                to: Route::ControlSetlist {},
-                                class: "text-muted-foreground hover:text-foreground transition-colors text-sm",
-                                "Control"
-                            }
-
-                            a {
-                                href: "https://github.com/codywright/FastTrackStudio",
-                                target: "_blank",
-                                class: "text-muted-foreground hover:text-foreground transition-colors text-sm",
-                                "GitHub"
-                            }
-
-                            Link {
-                                to: Route::DocsHome {},
-                                class: "text-muted-foreground hover:text-foreground transition-colors text-sm",
-                                "Documentation"
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -2481,13 +2445,17 @@ fn ControlSetlist() -> Element {
 // Rig Control View - Demo with mock guitar data
 // =============================================================================
 
-/// Rig control view with mock guitar service
+/// Rig control view with Quad Cortex-inspired signal flow grid.
 ///
-/// This demonstrates the RigControlView component working in a web context
-/// with the MockRig service providing sample guitar rig data.
+/// Full-featured layout with:
+/// - Top bar: Modules button, view mode selector, preset info, connection status
+/// - Left sidebar: Preset browser with search, profile selector (toggleable)
+/// - Center: Signal flow grid (16x8)
+/// - Right sidebar: Scenes (top), Songs with setlist dropdown (bottom)
+/// - Module browser modal
 #[component]
 fn ControlRigGuitar() -> Element {
-    // Create mock service with local client wrapper for in-process ROAM calls
+    // Create mock rig client for demo
     let client = use_hook(|| {
         let service = Arc::new(MockRig::with_sample_guitar_data());
         LocalRigClient::new(service)
@@ -2495,11 +2463,87 @@ fn ControlRigGuitar() -> Element {
 
     rsx! {
         {RigServiceProvider(client.clone(), rsx! {
-            div {
-                class: "h-[calc(100vh-4rem)] w-full flex flex-col overflow-hidden bg-background",
-                RigControlView {}
-            }
+            GuitarRigPageContent {}
         })}
+    }
+}
+
+/// Inner content component that has access to the rig service context.
+#[component]
+fn GuitarRigPageContent() -> Element {
+    // Subscribe to rig service (populates global signals)
+    ui::use_rig_subscription();
+
+    // Get action callbacks
+    let actions = ui::use_rig_actions();
+
+    // Local UI state
+    let mut sidebar_open = use_signal(|| true);
+    let mut module_browser_open = use_signal(|| false);
+    let mut view_mode = use_signal(ModuleViewMode::default);
+
+    // Node graph state
+    let mut node_graph = use_signal(NodeGraph::sample_guitar_rig);
+
+    rsx! {
+        div { class: "h-screen w-full flex flex-col overflow-hidden bg-zinc-950",
+            // Top bar
+            GuitarRigTopBar {
+                sidebar_open: sidebar_open(),
+                on_toggle_sidebar: move |_| sidebar_open.set(!sidebar_open()),
+                on_open_module_browser: move |_| module_browser_open.set(true),
+                view_mode: view_mode(),
+                on_view_mode_change: move |m| view_mode.set(m),
+            }
+
+            // Main content area
+            div { class: "flex-1 flex overflow-hidden",
+                // Left sidebar (conditional)
+                GuitarRigLeftSidebar {
+                    is_open: sidebar_open(),
+                    on_preset_select: actions.load_preset.clone(),
+                    on_snapshot_select: Some(actions.load_preset_with_snapshot.clone()),
+                    on_profile_select: Callback::new(move |profile_id| {
+                        tracing::info!("Profile selected: {profile_id}");
+                    }),
+                }
+
+                // Center: Node canvas with pan/zoom
+                div { class: "flex-1 overflow-hidden",
+                    NodeCanvas {
+                        graph: node_graph,
+                        on_node_click: Some(Callback::new(move |node_id| {
+                            tracing::info!("Node clicked: {node_id}");
+                        })),
+                        on_toggle_bypass: Some(actions.toggle_block_bypass.clone()),
+                        on_node_move: Some(Callback::new(move |(node_id, pos): (uuid::Uuid, ui::NodePosition)| {
+                            tracing::debug!("Node {node_id} moved to ({:.0}, {:.0})", pos.x, pos.y);
+                        })),
+                    }
+                }
+
+                // Right sidebar
+                GuitarRigRightSidebar {
+                    on_scene_click: actions.go_to_scene.clone(),
+                    on_song_click: actions.go_to_song.clone(),
+                    on_prev_scene: actions.prev_scene.clone(),
+                    on_next_scene: actions.next_scene.clone(),
+                    on_prev_song: actions.prev_song.clone(),
+                    on_next_song: actions.next_song.clone(),
+                    on_setlist_change: actions.load_setlist.clone(),
+                }
+            }
+
+            // Module browser modal
+            ModuleBrowserModal {
+                is_open: module_browser_open(),
+                on_close: move |_| module_browser_open.set(false),
+                on_add_module: Callback::new(move |block_type| {
+                    tracing::info!("Add module: {block_type:?}");
+                    module_browser_open.set(false);
+                }),
+            }
+        }
     }
 }
 

@@ -52,64 +52,52 @@ Transcribed By: Cody Wright
 
 COUNT 2
 
-INTRO 8
+IN
 'F#m7 'B7 'E 'Amaj7 x2
 
-VS 8
+VS 1A 8
 'F#m7 'B7 'E 'Amaj7 x2
 
-VS
-F#m7 B7 D E
+VS 1B 8
+'F#m7 B7 D 'E
 'F#m7 'B7 'E 'Amaj7
 
-CH 7
-D E C#/F 'F#m // 'Ebm //
+CH
+D E C#/F 'F#m / 'Ebm //
 D 'Abm7b5 'C#7
 
 INST 4
-'F#m7 'B7 'E 'Amaj7
+'F#m7 'B7 'E 'Amaj7 /// >.'F#m7 /
 
 VS
->'.F#m7 r1. B7' //
-G#m7b5/D // 'G#m7b5 // 'Amaj7
-
+s1 r4 r4 r8t 'B7 / Ddim7 // 'Abm7b5 // 'Amaj7
 'F#m7 'B7 'E 'Amaj7
 
-VS
+VS 2B 8
 F#m7 B7 D E
 'F#m7 'B7 'E 'Amaj7
 
 CH
-D // D/F# // E // E7/D // C# // C#/F // F#m // F#m/E //
-D // D/F# // G#m7b5 Db7
+D / D/F# / E / E7/D / C# / C#/F / F#m / F#m7/E /
+D / D/F# / Abm7b5 C#7 //// .'F#m7 /
 
 INST 8
->'.F#m7 S1 x4
+s1 s1 s1 s1 | 'F#m7 / 'F#7/A# // 'Bm7 / 'D6 // .'E / r4 E r8t r4t .'E/G# r4 A / ''A / .'A r8t .'Fdim r8t F#m7_8t
 
 VS
->'.F#m7 r1 r1 D E
+s1 s1 D E
 'F#m7 'B7 'E 'Amaj7
 
 CH
-D E C#/F 'F#m // 'Ebm //
+D E C#/F 'F#m / 'Ebm //
 D 'Abm7b5 'C#7
 
-INST
-'F#m7 'B7 'E 'Amaj7 x2
-'F#m7 // 'F#7/C# // 'Bm7 // 'Bm7/D //
-'.E r4 .E_8 r8 r8 .E/G#_8 r4 | >A_8 r16 >A_8 r16 >A_8 r8 B_4.
-
-Outro 8
-F#7/A# Bm7 E/G# C#7 // Bdim7 // x2
-
-Guitar Solo 16
-F#7/A# Bm7 E/G# C#7 // Bdim7 // x4
-
-Synth Solo 16
-F#7/A# Bm7 E/G# C#7 // Bdim7 // x4
-
-Drum Solo 8
-F#7/A# Bm7 E/G# C#7 // Bdim7 // x2
+INST 56
+'F#m7 'B7 'E 'Amaj7 | 'F#m7 / 'F#7/C# // 'B7 'E // 'E/G# / A // .'tA_8t r8t 'B /
+'F#/A# Bm7 E/G# C#7 / Bdim7 / | F#/A# Bm7 E/G# Ddim7 / Bdim7 /
+>F#/A# Bm7 E/G# Ddim7 / Bdim7 / | Bdim7_8t F#/A# /// F#/A#_8t Bm7 /// Bm7_8t E/G# /// E/G#_8t Ddim7 // Bdim7 /
+F#/A# Bm7 E/G# Ddim7 / Bdim7 / | F#/A# Bm7 E/G# Ddim7 / Bdim7 / x3
+F#/A# s1 s1 s1 | s1 s1 s1 s1
 "#;
 
     assert_eq!(

@@ -21,6 +21,10 @@ keyflow = { path = "../../packages/keyflow", features = ["engraver", "highlighti
 fts = { path = "../../modules/fts", features = ["dioxus"] }
 ui = { path = "../../modules/ui" }
 audio-controls = { path = "../../modules/audio-controls" }
+rig-control = { path = "../../modules/rig-control" }
+
+# UUID for module/block IDs
+uuid = { version = "1.0", features = ["v4"] }
 
 # Roam context (for MockSetlist service calls)
 roam = { workspace = true }

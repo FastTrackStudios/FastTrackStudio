@@ -5014,6 +5014,7 @@ dependencies = [
  "reaper-medium",
  "regex",
  "reqwest 0.11.27",
+ "rig-control",
  "roam",
  "rpp-parser",
  "rxrust",
@@ -14231,6 +14232,7 @@ dependencies = [
  "lumen-blocks 0.2.0 (git+https://github.com/Leaf-Computer/lumen-blocks.git?tag=v0.2.0)",
  "nucleo-matcher",
  "paste",
+ "rig-control",
  "roam",
  "tracing",
  "uuid 1.19.0",
@@ -14982,6 +14984,7 @@ dependencies = [
  "lumen-blocks 0.3.0-wip",
  "parley 0.2.0",
  "peniko 0.3.2",
+ "rig-control",
  "roam",
  "serde",
  "serde_json",
@@ -16960,9 +16963,9 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "anyrender_vello_hybrid"
-version = "0.1.1"
-
-[[patch.unused]]
 name = "reaper-fluent"
 version = "0.1.0"
+
+[[patch.unused]]
+name = "anyrender_vello_hybrid"
+version = "0.1.1"

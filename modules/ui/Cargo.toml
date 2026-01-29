@@ -13,6 +13,7 @@ lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag 
 audio-controls = { path = "../../modules/audio-controls" }
 fts = { path = "../../modules/fts", features = ["dioxus"] }
 daw = { path = "../../modules/daw" }
+rig-control = { path = "../../modules/rig-control" }
 roam = { workspace = true }
 keyflow = { path = "../../packages/keyflow" }
 wasm-timer = "0.2"
