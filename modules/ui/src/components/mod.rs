@@ -50,11 +50,11 @@ pub use performance::PerformanceView;
 pub use preset_browser::{CompactPresetBrowser, PresetBrowserSidebar};
 pub use rig::RigControlView;
 pub use rig_grid::{
-    GuitarRigGrid, ModuleViewMode, GlobalViewOverride, block_type_color,
+    GuitarRigGrid, ModuleViewMode, GlobalViewOverride, RigViewMode, block_type_color,
     SignalFlowGrid, SignalFlowGridView, GridBlock, GridPosition, GridConnection,
     GRID_COLS, GRID_ROWS,
     // Page layout components
-    GuitarRigTopBar, GuitarRigLeftSidebar, GuitarRigRightSidebar, ModuleBrowserModal,
+    GuitarRigTopBar, GuitarRigLeftSidebar, GuitarRigRightSidebar, GuitarRigProfileSidebar, ModuleBrowserModal,
     // Node-based system
     Node, NodeGraph, NodePosition, NodeSize, NodeWidget, NodeCanvas, Wire,
 };

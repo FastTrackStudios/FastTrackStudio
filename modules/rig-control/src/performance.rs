@@ -253,6 +253,8 @@ impl Taggable for Scene {
 pub struct PerformanceSong {
     pub id: SongId,
     pub name: String,
+    /// Artist name (e.g., "Mateus Asato", "Dirty Loops", "Toto")
+    pub artist: Option<String>,
     pub scenes: Vec<Scene>,
     /// Index into `scenes` for the default scene when the song is loaded.
     pub default_scene_index: usize,
@@ -272,6 +274,7 @@ impl PerformanceSong {
         Self {
             id: SongId::new(),
             name: name.into(),
+            artist: None,
             scenes: Vec::new(),
             default_scene_index: 0,
             auto_advance: false,
@@ -279,6 +282,13 @@ impl PerformanceSong {
             module_overrides: Vec::new(),
             tags: Tags::new(),
         }
+    }
+
+    /// Set the artist name (builder pattern).
+    #[must_use]
+    pub fn with_artist(mut self, artist: impl Into<String>) -> Self {
+        self.artist = Some(artist.into());
+        self
     }
 
     /// Add a scene to this song.

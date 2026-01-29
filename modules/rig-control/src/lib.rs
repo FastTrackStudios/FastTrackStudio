@@ -89,8 +89,9 @@ pub use slot::{ActivateResult, LoadResult, ModuleSlot};
 // Re-export service types.
 pub use service::{
     EngineStateInfo, InstanceInfo, LocalRigControlClient, MockRigControlService, PreloadStatusInfo,
-    RigControlCommand, RigControlData, RigControlEvent, RigControlService, SlotErrorInfo,
-    SlotStateInfo, SwitchOutcomeInfo, TransitionResultInfo,
+    PresetInfo, PresetSceneInfo, ProfileInfo, ProfileSceneInfo, RigControlCommand, RigControlData,
+    RigControlEvent, RigControlService, RigInfo, SetlistInfo, SlotErrorInfo, SlotStateInfo,
+    SongInfo, SwitchOutcomeInfo, TransitionResultInfo,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ use crate::category::{BaseTone, Genre, PresetCategory};
 use crate::module::ModuleType;
 use crate::module_preset::{ModuleAssignment, ModulePreset};
 use crate::normalized::Order;
-use crate::preset::{Credit, Inspiration, Preset};
+use crate::preset::{Credit, Inspiration, Preset, Snapshot};
 
 /// Helper to build a module assignment from a preset reference.
 fn assign(module_preset: &ModulePreset, order: u8) -> ModuleAssignment {
@@ -155,6 +155,14 @@ pub fn ac30_ambient_clean(m: &GuitarModulePresets) -> Preset {
             .with_notes("AC30 clean with lush reverb and subtle chorus"),
     );
 
+    // Add preset scenes (snapshots)
+    preset.add_snapshot(Snapshot::new("Chimey"));
+    let dark_id = preset.add_snapshot(Snapshot::new("Dark"));
+    preset.add_snapshot(Snapshot::new("Wah"));
+
+    // Set "Dark" as the default scene
+    preset.set_default_snapshot(dark_id);
+
     preset
 }
 
@@ -177,6 +185,11 @@ pub fn tremolo_swells(m: &GuitarModulePresets) -> Preset {
         Inspiration::new("Vintage Tremolo")
             .with_notes("Fender-style harmonic tremolo swells"),
     );
+
+    // Add preset scenes (snapshots)
+    preset.add_snapshot(Snapshot::new("8th Notes"));
+    preset.add_snapshot(Snapshot::new("16th Notes"));
+    preset.add_snapshot(Snapshot::new("With Reverb"));
 
     preset
 }
@@ -206,6 +219,11 @@ pub fn eighties_drive(m: &GuitarModulePresets) -> Preset {
             .with_notes("Stacked Klon + TS into an edge-of-breakup AC30"),
     );
 
+    // Add preset scenes (snapshots)
+    preset.add_snapshot(Snapshot::new("Rhythm"));
+    preset.add_snapshot(Snapshot::new("Lead"));
+    preset.add_snapshot(Snapshot::new("Clean Boost"));
+
     preset
 }
 
@@ -233,6 +251,11 @@ pub fn stank(m: &GuitarModulePresets) -> Preset {
             .with_notes("Protein + Kilt stacked into a driven Marshall"),
     );
 
+    // Add preset scenes (snapshots)
+    preset.add_snapshot(Snapshot::new("Rhythm"));
+    preset.add_snapshot(Snapshot::new("Lead"));
+    preset.add_snapshot(Snapshot::new("Heavy"));
+
     preset
 }
 
@@ -259,6 +282,173 @@ pub fn edge_of_breakup(m: &GuitarModulePresets) -> Preset {
             .with_source("Gravity, Talk to Your Daughter")
             .with_notes("Dumble + Two-Rock just at the edge of breakup"),
     );
+
+    // Add preset scenes (snapshots)
+    preset.add_snapshot(Snapshot::new("Clean"));
+    preset.add_snapshot(Snapshot::new("Crunch"));
+    preset.add_snapshot(Snapshot::new("Lead"));
+
+    preset
+}
+
+/// "Worship Pad" — Ambient pad with delay, reverb, and freeze effects.
+pub fn worship_pad(m: &GuitarModulePresets) -> Preset {
+    let mut preset = Preset::new(
+        "Worship Pad",
+        PresetCategory::Generic { base_tone: BaseTone::Ambient },
+    );
+    preset.description = Some("Swelling ambient pad with long delay and freeze — perfect for worship".into());
+
+    preset.add_module_assignment(assign(&m.source, 0));
+    preset.add_module_assignment(assign(&m.dynamics, 1));
+    preset.add_module_assignment(assign_snap(&m.dream_ruby, 6, "Clean"));
+    preset.add_module_assignment(assign(&m.delay, 9));
+    preset.add_module_assignment(assign(&m.reverb, 10));
+    preset.add_module_assignment(assign(&m.freeze, 11));
+    preset.add_module_assignment(assign(&m.master, 12));
+
+    preset.add_credit(Credit::new("FTS", "Sound Designer"));
+    preset.add_inspiration(
+        Inspiration::new("Ambient Worship Swells")
+            .with_source("Hillsong United, Elevation Worship")
+            .with_notes("Swelling pads with volume swells and freeze effects"),
+    );
+
+    // Add preset scenes (snapshots)
+    preset.add_snapshot(Snapshot::new("Short Delay"));
+    preset.add_snapshot(Snapshot::new("Long Delay"));
+    preset.add_snapshot(Snapshot::new("Freeze"));
+
+    preset
+}
+
+/// "Classic Crunch" — Marshall-style rhythm crunch.
+pub fn classic_crunch(m: &GuitarModulePresets) -> Preset {
+    let mut preset = Preset::new(
+        "Classic Crunch",
+        PresetCategory::Genre {
+            base_tone: BaseTone::Crunch,
+            genre: Genre::Rock,
+        },
+    );
+    preset.description = Some("Classic Marshall plexi crunch — the sound of rock".into());
+
+    preset.add_module_assignment(assign(&m.source, 0));
+    preset.add_module_assignment(assign(&m.dynamics, 1));
+    preset.add_module_assignment(assign_snap(&m.marshall_stack, 6, "Crunch"));
+    preset.add_module_assignment(assign(&m.reverb, 9));
+    preset.add_module_assignment(assign(&m.master, 11));
+
+    preset.add_credit(Credit::new("FTS", "Sound Designer"));
+    preset.add_inspiration(
+        Inspiration::new("Classic Rock Crunch")
+            .with_source("AC/DC, Led Zeppelin")
+            .with_notes("Marshall plexi cranked up for that classic rock crunch"),
+    );
+
+    // Add preset scenes (snapshots)
+    preset.add_snapshot(Snapshot::new("Rhythm"));
+    preset.add_snapshot(Snapshot::new("Solo"));
+    preset.add_snapshot(Snapshot::new("Pushed"));
+
+    preset
+}
+
+/// "Modern Metal" — High-gain metal tone with tight low end.
+pub fn modern_metal(m: &GuitarModulePresets) -> Preset {
+    let mut preset = Preset::new(
+        "Modern Metal",
+        PresetCategory::Genre {
+            base_tone: BaseTone::Lead,
+            genre: Genre::Metal,
+        },
+    );
+    preset.description = Some("Modern high-gain metal — tight, aggressive, with scooped mids".into());
+
+    preset.add_module_assignment(assign(&m.source, 0));
+    preset.add_module_assignment(assign(&m.dynamics, 1));
+    preset.add_module_assignment(assign_snap(&m.protein_kilt, 4, "Blue + Green"));
+    preset.add_module_assignment(assign_snap(&m.marshall_stack, 6, "Drive"));
+    preset.add_module_assignment(assign(&m.delay, 9));
+    preset.add_module_assignment(assign(&m.master, 11));
+
+    preset.add_credit(Credit::new("FTS", "Sound Designer"));
+    preset.add_inspiration(
+        Inspiration::new("Modern Metal")
+            .with_source("Periphery, Architects")
+            .with_notes("Tight, aggressive high-gain for modern metal rhythms and leads"),
+    );
+
+    // Add preset scenes (snapshots)
+    preset.add_snapshot(Snapshot::new("Rhythm"));
+    preset.add_snapshot(Snapshot::new("Lead"));
+    preset.add_snapshot(Snapshot::new("Chug"));
+
+    preset
+}
+
+/// "Jazz Clean" — Warm, round jazz clean tone.
+pub fn jazz_clean(m: &GuitarModulePresets) -> Preset {
+    let mut preset = Preset::new(
+        "Jazz Clean",
+        PresetCategory::Genre {
+            base_tone: BaseTone::Clean,
+            genre: Genre::Jazz,
+        },
+    );
+    preset.description = Some("Warm, round jazz clean — perfect for archtop guitars".into());
+
+    preset.add_module_assignment(assign(&m.source, 0));
+    preset.add_module_assignment(assign(&m.dynamics, 1));
+    preset.add_module_assignment(assign_snap(&m.dumble_two_rock, 6, "Ultra-Clean"));
+    preset.add_module_assignment(assign(&m.chorus, 8));
+    preset.add_module_assignment(assign(&m.reverb, 9));
+    preset.add_module_assignment(assign(&m.master, 11));
+
+    preset.add_credit(Credit::new("FTS", "Sound Designer"));
+    preset.add_inspiration(
+        Inspiration::new("Classic Jazz")
+            .with_source("Wes Montgomery, George Benson")
+            .with_notes("Warm, round clean tone for jazz comping and leads"),
+    );
+
+    // Add preset scenes (snapshots)
+    preset.add_snapshot(Snapshot::new("Warm"));
+    preset.add_snapshot(Snapshot::new("Bright"));
+    preset.add_snapshot(Snapshot::new("With Chorus"));
+
+    preset
+}
+
+/// "Surf Rock" — Bright, reverb-drenched surf tone.
+pub fn surf_rock(m: &GuitarModulePresets) -> Preset {
+    let mut preset = Preset::new(
+        "Surf Rock",
+        PresetCategory::Genre {
+            base_tone: BaseTone::Clean,
+            genre: Genre::Rock,
+        },
+    );
+    preset.description = Some("Bright, reverb-drenched surf rock — Fender Reverb tank vibes".into());
+
+    preset.add_module_assignment(assign(&m.source, 0));
+    preset.add_module_assignment(assign(&m.dynamics, 1));
+    preset.add_module_assignment(assign_snap(&m.deluxe_ac30, 6, "Clean"));
+    preset.add_module_assignment(assign(&m.reverb, 9));
+    preset.add_module_assignment(assign(&m.vibrato, 10));
+    preset.add_module_assignment(assign(&m.master, 11));
+
+    preset.add_credit(Credit::new("FTS", "Sound Designer"));
+    preset.add_inspiration(
+        Inspiration::new("Surf Rock")
+            .with_source("Dick Dale, The Ventures")
+            .with_notes("Dripping with spring reverb and vibrato"),
+    );
+
+    // Add preset scenes (snapshots)
+    preset.add_snapshot(Snapshot::new("Classic"));
+    preset.add_snapshot(Snapshot::new("With Tremolo"));
+    preset.add_snapshot(Snapshot::new("Dark"));
 
     preset
 }

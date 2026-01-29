@@ -82,7 +82,7 @@ pub fn dumble_and_two_rock() -> ModulePreset {
 
 /// "Marshall Stack" amp preset — JCM800 style + Cab + Room.
 ///
-/// Snapshots: Clean, Drive.
+/// Snapshots: Clean, Crunch, Drive.
 pub fn marshall_stack() -> ModulePreset {
     let mut preset = ModulePreset::new("Marshall Stack", ModuleType::Amp)
         .with_description("Classic British high-gain stack");
@@ -92,9 +92,11 @@ pub fn marshall_stack() -> ModulePreset {
     preset.add_block(ModuleBlock::new(blocks::amp::room_send(), Order::new(2)));
 
     let clean = ModuleSnapshot::new("Clean");
+    let crunch = ModuleSnapshot::new("Crunch");
     let drive = ModuleSnapshot::new("Drive");
 
     let default_id = preset.add_snapshot(clean);
+    preset.add_snapshot(crunch);
     preset.add_snapshot(drive);
     preset.set_default_snapshot(default_id);
 

@@ -744,6 +744,50 @@ fn build_rhythm_elements(
         .filter(|c| c.start_ppq >= section_start_tick && c.start_ppq < section_end_tick)
         .collect();
 
+    // Drop short end-of-section pickup hits from this section so they can belong to the next one
+    let boundary_tolerance = (ppq / 24) as i64;
+    section_chords.retain(|c| {
+        let starts_in_last_beat = c.start_ppq >= section_end_tick - ticks_per_beat;
+        let ends_on_boundary = (c.end_ppq - section_end_tick).abs() <= boundary_tolerance;
+        let is_short = (c.end_ppq - c.start_ppq) <= ticks_per_beat / 2;
+        !(starts_in_last_beat && ends_on_boundary && is_short)
+    });
+
+    // Include pickup/push chords that start up to one beat before the section and land on/downbeat
+    let pickup_window = ticks_per_beat;
+    let pickup_tolerance = ticks_per_beat / 12;
+
+    // Detect a pickup/push chord that lands on the section downbeat (for staccato pushes)
+    let pickup_candidate = detected_chords.iter().find(|c| {
+        let starts_before = c.start_ppq >= section_start_tick - pickup_window
+            && c.start_ppq < section_start_tick;
+        let ends_near_downbeat =
+            (c.end_ppq - section_start_tick).abs() <= pickup_tolerance
+                || (c.end_ppq >= section_start_tick
+                    && c.end_ppq <= section_start_tick + ticks_per_beat / 2);
+        let short_hit = (c.end_ppq - c.start_ppq) <= ticks_per_beat / 2;
+        starts_before && ends_near_downbeat && short_hit
+    });
+    let mut pickup_chords: Vec<&DetectedChord> = detected_chords
+        .iter()
+        .filter(|c| {
+            c.start_ppq >= section_start_tick - pickup_window
+                && c.start_ppq < section_start_tick
+                && c.end_ppq >= section_start_tick - pickup_tolerance
+        })
+        .collect();
+
+    section_chords.extend(pickup_chords.drain(..));
+
+    // If there is a short pickup hit that ends on the section downbeat and isn't already included, inject it.
+    let existing_starts: std::collections::HashSet<i64> =
+        section_chords.iter().map(|c| c.start_ppq).collect();
+    if let Some(c) = pickup_candidate {
+        if !existing_starts.contains(&c.start_ppq) {
+            section_chords.push(c);
+        }
+    }
+
     // Also find chords that start before the section but sustain into it.
     // These are "continuing" chords — or pushed chords from the previous measure.
     let continuing_chords: Vec<&DetectedChord> = detected_chords
@@ -779,6 +823,9 @@ fn build_rhythm_elements(
     }
 
     let mut current_pos = section_start_tick;
+
+    // Ensure chords are ordered by start position
+    section_chords.sort_by_key(|c| c.start_ppq);
 
     for chord in section_chords {
         // Clamp chord start to section boundary for continuing chords
@@ -837,7 +884,7 @@ fn build_rhythm_elements(
         };
 
         // Detect staccato push: pushed chord that only lasts the push duration
-        let is_staccato_pushed = is_staccato_push(
+        let mut is_staccato_pushed = is_staccato_push(
             chord.start_ppq,
             chord.end_ppq,
             ppq,
@@ -849,8 +896,7 @@ fn build_rhythm_elements(
         // For very short pushed hits that effectively end on the downbeat,
         // prefer explicit short-duration notation (rest + hit) instead of push marks.
         let max_short_hit = ticks_per_beat / 2;
-        let mut is_staccato_pushed = is_staccato_pushed;
-        if is_pushed && actual_duration <= max_short_hit {
+        if is_pushed && actual_duration <= max_short_hit && !is_staccato_pushed {
             is_pushed = false;
             push_amount = None;
             is_staccato_pushed = false;
@@ -878,6 +924,41 @@ fn build_rhythm_elements(
         });
 
         current_pos = quantized_end;
+    }
+
+    // If the section still starts with a rest but we detected a pickup hit landing on the downbeat,
+    // convert the leading rest into that short staccato push chord.
+    if let Some(c) = pickup_candidate {
+        if let Some(ChordOrRest::Rest { start_ppq, end_ppq }) = elements.first() {
+            if *start_ppq == section_start_tick {
+                let chord_end = c.end_ppq.min(section_start_tick + ticks_per_beat / 2);
+                let remaining_rest_start = chord_end;
+                let remaining_rest_end = *end_ppq;
+                // Replace the leading rest with the pickup chord
+                elements.remove(0);
+                elements.insert(
+                    0,
+                    ChordOrRest::Chord {
+                        symbol: c.chord.normalized.clone(),
+                        start_ppq: section_start_tick,
+                        end_ppq: chord_end,
+                        is_pushed: true,
+                        push_amount: Some("8".to_string()),
+                        is_accented: c.is_accented(),
+                        is_staccato: true,
+                    },
+                );
+                if remaining_rest_end > remaining_rest_start {
+                    elements.insert(
+                        1,
+                        ChordOrRest::Rest {
+                            start_ppq: remaining_rest_start,
+                            end_ppq: remaining_rest_end,
+                        },
+                    );
+                }
+            }
+        }
     }
 
     if current_pos < section_end_tick {

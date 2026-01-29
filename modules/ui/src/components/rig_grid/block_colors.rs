@@ -110,6 +110,53 @@ pub fn block_type_bypassed_style(block_type: BlockType) -> String {
     )
 }
 
+/// Get a slightly varied color for a specific block instance.
+///
+/// This function takes the base color for a block type and applies a subtle
+/// variation based on the instance identifier (e.g., "Drive 1", "Drive 2").
+/// This helps distinguish between multiple blocks of the same type.
+pub fn block_instance_color(block_type: BlockType, instance_id: &str) -> BlockColor {
+    let base = block_type_color(block_type);
+
+    // Generate a hash from the instance_id to get a consistent variation
+    let hash: u32 = instance_id.bytes().map(|b| b as u32).sum();
+    let variation = (hash % 15) as i32 - 7; // -7 to +7 variation
+
+    // Parse the hex color and apply variation
+    let varied_bg = vary_hex_color(base.bg, variation);
+    let varied_border = vary_hex_color(base.border, variation);
+
+    BlockColor {
+        bg: Box::leak(varied_bg.into_boxed_str()),
+        fg: base.fg,
+        border: Box::leak(varied_border.into_boxed_str()),
+    }
+}
+
+/// Vary a hex color by adjusting its lightness.
+fn vary_hex_color(hex: &str, variation: i32) -> String {
+    // Parse hex color (#RRGGBB)
+    let hex = hex.trim_start_matches('#');
+    if hex.len() != 6 {
+        return format!("#{}", hex);
+    }
+
+    let r = i32::from_str_radix(&hex[0..2], 16).unwrap_or(0);
+    let g = i32::from_str_radix(&hex[2..4], 16).unwrap_or(0);
+    let b = i32::from_str_radix(&hex[4..6], 16).unwrap_or(0);
+
+    // Apply variation with clamping
+    let adjust = |val: i32| -> u8 {
+        (val + variation * 3).clamp(0, 255) as u8
+    };
+
+    let new_r = adjust(r);
+    let new_g = adjust(g);
+    let new_b = adjust(b);
+
+    format!("#{:02X}{:02X}{:02X}", new_r, new_g, new_b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

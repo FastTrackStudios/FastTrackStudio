@@ -29,6 +29,15 @@ pub struct ProfileInfo {
     pub rig_id: Uuid,
     /// Number of presets in this profile
     pub preset_count: usize,
+    /// Number of scenes in this profile
+    #[facet(default)]
+    pub scene_count: usize,
+    /// Scene names for quick display
+    #[facet(default)]
+    pub scene_names: Vec<String>,
+    /// Detailed scene info
+    #[facet(default)]
+    pub scenes: Vec<SceneInfo>,
 }
 
 /// Simplified rig information for RPC communication.
@@ -445,11 +454,39 @@ pub trait RigService {
 impl ProfileInfo {
     /// Convert from domain Profile to RPC ProfileInfo
     pub fn from_profile(p: &Profile) -> Self {
+        let scene_count = p.scene_templates.len();
+        let scene_names: Vec<String> = p.scene_templates.iter()
+            .map(|st| st.name.clone())
+            .collect();
+
+        let scenes: Vec<SceneInfo> = p.scene_templates.iter()
+            .enumerate()
+            .map(|(index, st)| {
+                // Extract preset ID from the preset reference
+                let preset_id = match &st.preset_reference {
+                    super::core::PresetReference::Direct { preset_id } => *preset_id,
+                    _ => Uuid::nil(), // For other reference types, use placeholder
+                };
+
+                SceneInfo {
+                    index,
+                    name: st.name.clone(),
+                    preset_id,
+                    preset_name: String::new(), // Will be resolved from preset registry
+                    snapshot_id: st.default_snapshot_id,
+                    snapshot_name: None, // Will be resolved from preset
+                }
+            })
+            .collect();
+
         Self {
             id: p.id,
             name: p.name.clone(),
             rig_id: p.rig_id,
             preset_count: p.presets.len(),
+            scene_count,
+            scene_names,
+            scenes,
         }
     }
 }

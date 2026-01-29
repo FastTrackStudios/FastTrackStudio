@@ -5,20 +5,17 @@
 
 use dioxus::prelude::*;
 use fts::rig::core::{PresetTag, TagRegistry};
-use fts::rig::service::{
-    BlockOverrideInfo, BlockParameterInfo, GlobalBlockInfo, PresetBlockInfo, PresetInfo, SceneInfo,
-    SectionInfo, SetlistInfo, SnapshotInfo, SongInfo,
-};
 use fts::rig::{
     RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_SETLISTS, RIG_CONNECTED, RIG_CURRENT_PRESET,
-    RIG_CURRENT_SCENE, RIG_CURRENT_SETLIST, RIG_CURRENT_SONG, RIG_CURRENT_SNAPSHOT_ID,
-    RIG_GLOBAL_BLOCKS, RIG_INFO, RIG_LOADING, RIG_PROFILE, RIG_SCENE_INDEX, RIG_SECTIONS,
+    RIG_CURRENT_SCENE, RIG_CURRENT_SETLIST, RIG_CURRENT_SONG, RIG_CURRENT_PRESET_SCENE_ID,
+    RIG_INFO, RIG_LOADING, RIG_PROFILE, RIG_SCENE_INDEX,
     RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
 use nucleo_matcher::{
     pattern::{CaseMatching, Normalization, Pattern},
     Config, Matcher, Utf32Str,
 };
+use rig_control::{PresetInfo, PresetSceneInfo, ProfileSceneInfo, SongInfo};
 use uuid::Uuid;
 
 use crate::components::block_chain::BlockChain;
@@ -64,52 +61,53 @@ pub struct EffectiveParameter {
     pub is_overridden: bool,
 }
 
-impl EffectiveBlock {
-    /// Create an effective block from a preset block and optional snapshot override
-    pub fn from_preset_block(
-        block: &PresetBlockInfo,
-        snapshot_override: Option<&BlockOverrideInfo>,
-    ) -> Self {
-        // Determine effective bypass state
-        let bypassed = snapshot_override
-            .and_then(|o| o.bypassed)
-            .unwrap_or(block.bypassed);
-
-        // Build effective parameters
-        let parameters = block
-            .parameters
-            .iter()
-            .map(|param| {
-                // Check if this parameter has a snapshot override
-                let override_value = snapshot_override.and_then(|o| {
-                    o.parameters
-                        .iter()
-                        .find(|p| p.param_id == param.id)
-                        .map(|p| p.value)
-                });
-
-                EffectiveParameter {
-                    id: param.id.clone(),
-                    name: param.name.clone(),
-                    value: override_value.unwrap_or(param.value),
-                    min_display: param.min_display,
-                    max_display: param.max_display,
-                    unit: param.unit.clone(),
-                    is_overridden: override_value.is_some(),
-                }
-            })
-            .collect();
-
-        Self {
-            id: block.id,
-            name: block.name.clone(),
-            block_type: block.block_type.clone(),
-            order: block.order,
-            bypassed,
-            parameters,
-        }
-    }
-}
+// TODO: Commented out - not needed with rig-control's module-based architecture
+// impl EffectiveBlock {
+//     /// Create an effective block from a preset block and optional snapshot override
+//     pub fn from_preset_block(
+//         block: &PresetBlockInfo,
+//         snapshot_override: Option<&BlockOverrideInfo>,
+//     ) -> Self {
+//         // Determine effective bypass state
+//         let bypassed = snapshot_override
+//             .and_then(|o| o.bypassed)
+//             .unwrap_or(block.bypassed);
+//
+//         // Build effective parameters
+//         let parameters = block
+//             .parameters
+//             .iter()
+//             .map(|param| {
+//                 // Check if this parameter has a snapshot override
+//                 let override_value = snapshot_override.and_then(|o| {
+//                     o.parameters
+//                         .iter()
+//                         .find(|p| p.param_id == param.id)
+//                         .map(|p| p.value)
+//                 });
+//
+//                 EffectiveParameter {
+//                     id: param.id.clone(),
+//                     name: param.name.clone(),
+//                     value: override_value.unwrap_or(param.value),
+//                     min_display: param.min_display,
+//                     max_display: param.max_display,
+//                     unit: param.unit.clone(),
+//                     is_overridden: override_value.is_some(),
+//                 }
+//             })
+//             .collect();
+//
+//         Self {
+//             id: block.id,
+//             name: block.name.clone(),
+//             block_type: block.block_type.clone(),
+//             order: block.order,
+//             bypassed,
+//             parameters,
+//         }
+//     }
+// }
 
 /// View modes for displaying blocks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -180,47 +178,51 @@ pub fn RigControlView() -> Element {
     let song_memo = use_memo(move || RIG_CURRENT_SONG.read().clone());
     let scene_memo = use_memo(move || RIG_CURRENT_SCENE.read().clone());
     let scene_index_memo = use_memo(move || *RIG_SCENE_INDEX.read());
-    let sections_memo = use_memo(move || RIG_SECTIONS.read().clone());
-    let _global_blocks_memo = use_memo(move || RIG_GLOBAL_BLOCKS.read().clone());
+    // TODO: Re-enable when rig-control supports sections/blocks
+    // let sections_memo = use_memo(move || RIG_SECTIONS.read().clone());
+    // let _global_blocks_memo = use_memo(move || RIG_GLOBAL_BLOCKS.read().clone());
     let presets_memo = use_memo(move || RIG_AVAILABLE_PRESETS.read().clone());
     let loading_memo = use_memo(move || *RIG_LOADING.read());
     let connected_memo = use_memo(move || *RIG_CONNECTED.read());
 
-    // Compute effective blocks: preset blocks with snapshot overrides applied
+    // TODO: Compute effective blocks when rig-control supports module blocks
+    // For now, return empty list since rig-control uses module-based architecture
     let effective_blocks = use_memo(move || {
-        let preset = RIG_CURRENT_PRESET.read();
-        let snapshot_id = *RIG_CURRENT_SNAPSHOT_ID.read();
+        let _preset = RIG_CURRENT_PRESET.read();
+        let _snapshot_id = *RIG_CURRENT_PRESET_SCENE_ID.read();
 
-        tracing::debug!(
-            "effective_blocks memo: preset={:?}, snapshot_id={:?}",
-            preset.as_ref().map(|p| &p.name),
-            snapshot_id
-        );
+        // tracing::debug!(
+        //     "effective_blocks memo: preset={:?}, snapshot_id={:?}",
+        //     preset.as_ref().map(|p| &p.name),
+        //     snapshot_id
+        // );
 
-        if let Some(preset) = preset.as_ref() {
-            // Find the current snapshot's overrides
-            let snapshot_overrides: Option<&SnapshotInfo> = snapshot_id
-                .and_then(|sid| preset.snapshots.iter().find(|s| s.id == sid));
+        Vec::<EffectiveBlock>::new()
 
-            tracing::debug!(
-                "effective_blocks: found snapshot overrides: {:?}",
-                snapshot_overrides.map(|s| (&s.name, s.block_overrides.len()))
-            );
-
-            // Build effective blocks with snapshot overrides
-            preset
-                .blocks
-                .iter()
-                .map(|block| {
-                    let block_override = snapshot_overrides
-                        .and_then(|s| s.block_overrides.iter().find(|o| o.block_id == block.id));
-
-                    EffectiveBlock::from_preset_block(block, block_override)
-                })
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        }
+        // if let Some(preset) = preset.as_ref() {
+        //     // Find the current snapshot's overrides
+        //     let snapshot_overrides: Option<&SnapshotInfo> = snapshot_id
+        //         .and_then(|sid| preset.snapshots.iter().find(|s| s.id == sid));
+        //
+        //     tracing::debug!(
+        //         "effective_blocks: found snapshot overrides: {:?}",
+        //         snapshot_overrides.map(|s| (&s.name, s.block_overrides.len()))
+        //     );
+        //
+        //     // Build effective blocks with snapshot overrides
+        //     preset
+        //         .blocks
+        //         .iter()
+        //         .map(|block| {
+        //             let block_override = snapshot_overrides
+        //                 .and_then(|s| s.block_overrides.iter().find(|o| o.block_id == block.id));
+        //
+        //             EffectiveBlock::from_preset_block(block, block_override)
+        //         })
+        //         .collect::<Vec<_>>()
+        // } else {
+        //     Vec::new()
+        // }
     });
 
     // Tag registry with default tags (for resolving tag names during search)
@@ -228,8 +230,6 @@ pub fn RigControlView() -> Element {
 
     // Local state
     let mut search_query = use_signal(String::new);
-    // Track collapsed presets (default is expanded, so we track which are collapsed)
-    let mut collapsed_preset_ids = use_signal(Vec::<Uuid>::new);
     let mut block_view_mode = use_signal(BlockViewMode::default);
 
     // Filter presets based on fuzzy search (searches name + tag names + snapshot names)
@@ -249,17 +249,10 @@ pub fn RigControlView() -> Element {
         let mut scored_presets: Vec<(PresetInfo, u32)> = all_presets
             .into_iter()
             .filter_map(|preset| {
-                // Build searchable text: name + all tag names + all snapshot names
-                let tag_names: Vec<String> = preset
-                    .tag_ids
-                    .iter()
-                    .filter_map(|id| registry.get(*id))
-                    .map(|t| t.name.clone())
-                    .collect();
-
-                let snapshot_names = preset.snapshot_names.join(" ");
-
-                let search_text = format!("{} {} {}", preset.name, tag_names.join(" "), snapshot_names);
+                // Build searchable text: name + category + description
+                // TODO: Add tag names and scene names when rig-control supports them
+                let description = preset.description.as_deref().unwrap_or("");
+                let search_text = format!("{} {} {}", preset.name, preset.category, description);
 
                 // Score the match
                 let mut buf = Vec::new();
@@ -345,27 +338,13 @@ pub fn RigControlView() -> Element {
                             }
                         } else {
                             for preset in filtered_presets.read().iter() {
+                                // Only expand the currently selected preset
                                 PresetWithSnapshots {
                                     preset: preset.clone(),
                                     is_active: preset_memo.read().as_ref().map(|p| p.id) == Some(preset.id),
-                                    // Default expanded - only collapsed if in the collapsed list
-                                    is_expanded: !collapsed_preset_ids().contains(&preset.id),
+                                    is_expanded: preset_memo.read().as_ref().map(|p| p.id) == Some(preset.id),
                                     registry: tag_registry.read().clone(),
                                     on_click: actions.load_preset.clone(),
-                                    on_toggle_expand: {
-                                        let preset_id = preset.id;
-                                        Callback::new(move |_: ()| {
-                                            let mut collapsed = collapsed_preset_ids();
-                                            if collapsed.contains(&preset_id) {
-                                                // Currently collapsed, expand it
-                                                collapsed.retain(|&id| id != preset_id);
-                                            } else {
-                                                // Currently expanded, collapse it
-                                                collapsed.push(preset_id);
-                                            }
-                                            collapsed_preset_ids.set(collapsed);
-                                        })
-                                    },
                                     on_snapshot_click: actions.load_preset_with_snapshot.clone(),
                                 }
                             }
@@ -443,18 +422,19 @@ pub fn RigControlView() -> Element {
                             }
                         }
 
-                        // Engines (sections) - more relevant for Keys rigs
-                        if !sections_memo().is_empty() {
-                            h3 { class: "text-lg font-semibold mb-3", "Engines" }
-                            div { class: "grid grid-cols-2 gap-3",
-                                for section in sections_memo() {
-                                    SectionCard {
-                                        section: section.clone(),
-                                        on_toggle: actions.toggle_section.clone(),
-                                    }
-                                }
-                            }
-                        }
+                        // TODO: Re-enable when rig-control supports sections
+                        // // Engines (sections) - more relevant for Keys rigs
+                        // if !sections_memo().is_empty() {
+                        //     h3 { class: "text-lg font-semibold mb-3", "Engines" }
+                        //     div { class: "grid grid-cols-2 gap-3",
+                        //         for section in sections_memo() {
+                        //             SectionCard {
+                        //                 section: section.clone(),
+                        //                 on_toggle: actions.toggle_section.clone(),
+                        //             }
+                        //         }
+                        //     }
+                        // }
                     }
                 }
 
@@ -559,7 +539,7 @@ pub fn RigControlView() -> Element {
 #[component]
 fn CurrentPresetCardCompact(
     preset: Option<PresetInfo>,
-    scene: Option<SceneInfo>,
+    scene: Option<ProfileSceneInfo>,
     search_query: String,
     preset_count: usize,
     total_count: usize,
@@ -588,8 +568,8 @@ fn CurrentPresetCardCompact(
                         span { class: "text-sm text-muted-foreground", "•" }
                         span { class: "text-sm text-muted-foreground",
                             "Scene: {s.name}"
-                            if let Some(snapshot) = &s.snapshot_name {
-                                span { class: "ml-1 opacity-75", "({snapshot})" }
+                            if let Some(preset_scene) = &s.preset_scene_name {
+                                span { class: "ml-1 opacity-75", "({preset_scene})" }
                             }
                         }
                     }
@@ -605,17 +585,13 @@ fn CurrentPresetCardCompact(
                     }
                 }
             }
-            // Snapshot pills
+            // TODO: Show scenes when rig-control supports them
+            // Snapshot pills would go here, but rig-control uses scenes instead
             if let Some(p) = &preset {
-                if !p.snapshot_names.is_empty() {
+                if let Some(desc) = &p.description {
                     div { class: "flex flex-col items-end gap-1",
-                        span { class: "text-xs text-muted-foreground mb-1", "Snapshots:" }
-                        div { class: "flex gap-2",
-                            for snapshot_name in &p.snapshot_names {
-                                span { class: "px-2 py-1 bg-muted text-muted-foreground text-xs rounded",
-                                    "{snapshot_name}"
-                                }
-                            }
+                        span { class: "text-xs text-muted-foreground italic max-w-xs text-right",
+                            "{desc}"
                         }
                     }
                 }
@@ -740,13 +716,11 @@ fn PresetWithSnapshots(
     is_expanded: bool,
     registry: TagRegistry,
     on_click: Callback<Uuid>,
-    on_toggle_expand: Callback<()>,
     on_snapshot_click: Callback<(Uuid, Uuid)>,
 ) -> Element {
-    // Read snapshot ID directly from global signal for reactivity
-    let current_snapshot_id = *RIG_CURRENT_SNAPSHOT_ID.read();
-
-    let has_snapshots = !preset.snapshot_names.is_empty();
+    let _registry = registry;
+    let current_snapshot_id = *RIG_CURRENT_PRESET_SCENE_ID.read();
+    let has_scenes = !preset.scene_names.is_empty();
     let preset_id = preset.id;
 
     let base_class = "px-3 py-2 cursor-pointer transition-colors";
@@ -765,43 +739,32 @@ fn PresetWithSnapshots(
                 div { class: "flex items-start justify-between",
                     div { class: "flex-1 min-w-0",
                         div { class: "font-medium text-sm truncate", "{preset.name}" }
-                        div { class: "text-xs text-muted-foreground", "{preset.category}" }
-
-                        // Tag display
-                        if !preset.tag_ids.is_empty() {
-                            PresetTagsDisplay {
-                                tag_ids: preset.tag_ids.clone(),
-                                registry: registry.clone(),
-                                max_visible: 3,
+                        div { class: "text-xs text-muted-foreground",
+                            "{preset.category}"
+                            if has_scenes {
+                                span { class: "ml-2 text-muted-foreground/60",
+                                    "• {preset.scene_count} scenes"
+                                }
                             }
                         }
-                    }
-                    if has_snapshots {
-                        button {
-                            class: "ml-2 p-1 hover:bg-muted rounded text-muted-foreground flex-shrink-0",
-                            onclick: move |e| {
-                                e.stop_propagation();
-                                on_toggle_expand.call(());
-                            },
-                            if is_expanded {
-                                "▼"
-                            } else {
-                                "▶"
+                        // Show rating if > 0
+                        if preset.rating > 0 {
+                            div { class: "text-xs text-yellow-500 mt-1",
+                                {"★".repeat(preset.rating as usize)}
                             }
                         }
                     }
                 }
             }
 
-            // Expanded snapshots
-            if is_expanded && has_snapshots {
+            // Expanded scenes (preset-level variations)
+            if is_expanded && has_scenes {
                 div { class: "bg-muted/30 py-1",
-                    for snapshot in preset.snapshots.iter() {
-                        SnapshotItem {
+                    for scene in &preset.scenes {
+                        PresetSceneItem {
                             preset_id,
-                            snapshot: snapshot.clone(),
-                            is_active: current_snapshot_id == Some(snapshot.id),
-                            registry: registry.clone(),
+                            scene: scene.clone(),
+                            is_active: current_snapshot_id == Some(scene.id),
                             on_click: on_snapshot_click.clone(),
                         }
                     }
@@ -811,17 +774,15 @@ fn PresetWithSnapshots(
     }
 }
 
-/// Individual snapshot item with optional tag display
+/// Individual preset scene item (preset-level variation)
 #[component]
-fn SnapshotItem(
+fn PresetSceneItem(
     preset_id: Uuid,
-    snapshot: SnapshotInfo,
+    scene: PresetSceneInfo,
     is_active: bool,
-    registry: TagRegistry,
     on_click: Callback<(Uuid, Uuid)>,
 ) -> Element {
-    let snapshot_id = snapshot.id;
-    let has_tags = !snapshot.tag_ids.is_empty();
+    let scene_id = scene.id;
 
     let base_class = "pl-6 pr-3 py-1.5 text-xs cursor-pointer transition-colors";
     let active_class = if is_active {
@@ -833,26 +794,55 @@ fn SnapshotItem(
     rsx! {
         div {
             class: "{base_class} {active_class}",
-            onclick: move |_| on_click.call((preset_id, snapshot_id)),
-            div { class: "flex items-center gap-2",
-                span { "• {snapshot.name}" }
-                // Show tags if there are any manual (non-auto-derived) tags
-                if has_tags {
-                    div { class: "flex gap-1",
-                        for tag_id in &snapshot.tag_ids {
-                            if let Some(tag) = registry.get(*tag_id) {
-                                TagChip {
-                                    key: "{tag.id}",
-                                    tag: tag.clone(),
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            onclick: move |_| on_click.call((preset_id, scene_id)),
+            "• {scene.name}"
         }
     }
 }
+
+// TODO: Commented out - old snapshot item (replaced by PresetSceneItem)
+// /// Individual snapshot item with optional tag display
+// #[component]
+// fn SnapshotItem(
+//     preset_id: Uuid,
+//     snapshot: SnapshotInfo,
+//     is_active: bool,
+//     registry: TagRegistry,
+//     on_click: Callback<(Uuid, Uuid)>,
+// ) -> Element {
+//     let snapshot_id = snapshot.id;
+//     let has_tags = !snapshot.tag_ids.is_empty();
+//
+//     let base_class = "pl-6 pr-3 py-1.5 text-xs cursor-pointer transition-colors";
+//     let active_class = if is_active {
+//         "bg-primary/10 text-primary"
+//     } else {
+//         "hover:bg-muted text-muted-foreground hover:text-foreground"
+//     };
+//
+//     rsx! {
+//         div {
+//             class: "{base_class} {active_class}",
+//             onclick: move |_| on_click.call((preset_id, snapshot_id)),
+//             div { class: "flex items-center gap-2",
+//                 span { "• {snapshot.name}" }
+//                 // Show tags if there are any manual (non-auto-derived) tags
+//                 if has_tags {
+//                     div { class: "flex gap-1",
+//                         for tag_id in &snapshot.tag_ids {
+//                             if let Some(tag) = registry.get(*tag_id) {
+//                                 TagChip {
+//                                     key: "{tag.id}",
+//                                     tag: tag.clone(),
+//                                 }
+//                             }
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
 
 /// Song header in the scene navigator
 #[component]
@@ -895,63 +885,38 @@ fn SceneItem(
 }
 
 /// Dropdown for selecting a setlist
+///
+/// TODO: Currently display-only since rig-control doesn't have setlist IDs yet.
+/// Setlists are just collections of songs, and there's currently only one ("Main Setlist").
 #[component]
 fn SetlistDropdown(on_select: Callback<Uuid>) -> Element {
     let current_setlist = RIG_CURRENT_SETLIST.read();
-    let available_setlists = RIG_AVAILABLE_SETLISTS.read();
-    let mut is_open = use_signal(|| false);
+    let _available_setlists = RIG_AVAILABLE_SETLISTS.read();
+    let _is_open = use_signal(|| false);
 
     let current_name = current_setlist
         .as_ref()
         .map(|s| s.name.clone())
         .unwrap_or_else(|| "No Setlist".to_string());
 
+    let song_count = current_setlist
+        .as_ref()
+        .map(|s| s.song_count)
+        .unwrap_or(0);
+
     rsx! {
         div { class: "relative flex-1",
-            // Dropdown button
-            button {
-                class: "w-full flex items-center justify-between px-2 py-1 text-xs font-medium bg-background border border-border rounded hover:bg-muted transition-colors",
-                onclick: move |_| is_open.set(!is_open()),
+            // Display current setlist (non-interactive for now)
+            div {
+                class: "w-full flex items-center justify-between px-2 py-1 text-xs font-medium bg-background border border-border rounded",
                 span { class: "truncate", "{current_name}" }
-                span { class: "ml-1 text-muted-foreground",
-                    if *is_open.read() { "▲" } else { "▼" }
+                span { class: "ml-2 text-muted-foreground text-[10px]",
+                    {format!("{} songs", song_count)}
                 }
             }
 
-            // Dropdown menu
-            if *is_open.read() {
-                div {
-                    class: "absolute top-full left-0 right-0 mt-1 bg-popover border border-border rounded shadow-lg z-50 max-h-48 overflow-y-auto",
-                    {
-                        available_setlists.iter().map(|setlist| {
-                            let setlist_id = setlist.id;
-                            let setlist_name = setlist.name.clone();
-                            let song_count = setlist.song_count;
-                            let is_current = current_setlist.as_ref().map(|c| c.id == setlist_id).unwrap_or(false);
-                            let on_select = on_select.clone();
-                            let mut is_open = is_open.clone();
-                            rsx! {
-                                button {
-                                    key: "{setlist_id}",
-                                    class: if is_current {
-                                        "w-full px-3 py-2 text-left text-xs hover:bg-muted flex items-center justify-between bg-primary/10"
-                                    } else {
-                                        "w-full px-3 py-2 text-left text-xs hover:bg-muted flex items-center justify-between"
-                                    },
-                                    onclick: move |_| {
-                                        on_select.call(setlist_id);
-                                        is_open.set(false);
-                                    },
-                                    span { class: "font-medium truncate", "{setlist_name}" }
-                                    span { class: "text-muted-foreground ml-2",
-                                        {format!("{} songs", song_count)}
-                                    }
-                                }
-                            }
-                        })
-                    }
-                }
-            }
+            // TODO: Add multi-setlist support when rig-control has setlist IDs
+            // For now, there's only one setlist so selection isn't needed
         }
     }
 }
@@ -989,54 +954,55 @@ fn SongItem(
 }
 
 
-/// Card for a rig section
-#[component]
-fn SectionCard(section: SectionInfo, on_toggle: Callback<Uuid>) -> Element {
-    let enabled_class = if section.enabled {
-        "border-primary bg-card"
-    } else {
-        "border-border bg-muted/50 opacity-60"
-    };
-
-    rsx! {
-        div {
-            class: "border rounded-lg p-3 cursor-pointer transition-all {enabled_class}",
-            onclick: move |_| on_toggle.call(section.id),
-            div { class: "flex items-center justify-between mb-2",
-                h4 { class: "font-semibold", "{section.name}" }
-                div {
-                    class: if section.enabled { "w-2 h-2 rounded-full bg-green-500" } else { "w-2 h-2 rounded-full bg-muted-foreground" },
-                }
-            }
-            p { class: "text-sm text-muted-foreground",
-                {format!("{} layer{}", section.layer_count, if section.layer_count == 1 { "" } else { "s" })}
-            }
-        }
-    }
-}
-
-/// Card for a global effect block
-#[component]
-fn GlobalBlockCard(block: GlobalBlockInfo, on_toggle_bypass: Callback<Uuid>) -> Element {
-    let enabled_class = if block.enabled {
-        "border-primary bg-card"
-    } else {
-        "border-border bg-muted/50 opacity-60"
-    };
-
-    rsx! {
-        div {
-            class: "border rounded-lg p-3 cursor-pointer transition-all {enabled_class}",
-            onclick: move |_| on_toggle_bypass.call(block.id),
-            div { class: "flex items-center justify-between",
-                span { class: "font-medium text-sm", "{block.name}" }
-                div {
-                    class: if block.enabled { "w-2 h-2 rounded-full bg-green-500" } else { "w-2 h-2 rounded-full bg-red-500" },
-                }
-            }
-        }
-    }
-}
+// TODO: Commented out - sections are part of old fts::rig architecture
+// /// Card for a rig section
+// #[component]
+// fn SectionCard(section: SectionInfo, on_toggle: Callback<Uuid>) -> Element {
+//     let enabled_class = if section.enabled {
+//         "border-primary bg-card"
+//     } else {
+//         "border-border bg-muted/50 opacity-60"
+//     };
+//
+//     rsx! {
+//         div {
+//             class: "border rounded-lg p-3 cursor-pointer transition-all {enabled_class}",
+//             onclick: move |_| on_toggle.call(section.id),
+//             div { class: "flex items-center justify-between mb-2",
+//                 h4 { class: "font-semibold", "{section.name}" }
+//                 div {
+//                     class: if section.enabled { "w-2 h-2 rounded-full bg-green-500" } else { "w-2 h-2 rounded-full bg-muted-foreground" },
+//                 }
+//             }
+//             p { class: "text-sm text-muted-foreground",
+//                 {format!("{} layer{}", section.layer_count, if section.layer_count == 1 { "" } else { "s" })}
+//             }
+//         }
+//     }
+// }
+//
+// /// Card for a global effect block
+// #[component]
+// fn GlobalBlockCard(block: GlobalBlockInfo, on_toggle_bypass: Callback<Uuid>) -> Element {
+//     let enabled_class = if block.enabled {
+//         "border-primary bg-card"
+//     } else {
+//         "border-border bg-muted/50 opacity-60"
+//     };
+//
+//     rsx! {
+//         div {
+//             class: "border rounded-lg p-3 cursor-pointer transition-all {enabled_class}",
+//             onclick: move |_| on_toggle_bypass.call(block.id),
+//             div { class: "flex items-center justify-between",
+//                 span { class: "font-medium text-sm", "{block.name}" }
+//                 div {
+//                     class: if block.enabled { "w-2 h-2 rounded-full bg-green-500" } else { "w-2 h-2 rounded-full bg-red-500" },
+//                 }
+//             }
+//         }
+//     }
+// }
 
 // ============================================================================
 // View Mode Selector

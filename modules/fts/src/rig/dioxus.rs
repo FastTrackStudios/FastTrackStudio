@@ -5,9 +5,8 @@
 
 #[cfg(feature = "dioxus")]
 mod dioxus_impl {
-    use crate::rig::service::{
-        GlobalBlockInfo, PatchInfo, PresetInfo, ProfileInfo, RigInfo, SceneInfo, SectionInfo,
-        SetlistInfo, SongInfo,
+    use rig_control::{
+        PresetInfo, ProfileInfo, ProfileSceneInfo, RigInfo, SetlistInfo, SongInfo,
     };
     use dioxus::prelude::*;
     use uuid::Uuid;
@@ -27,15 +26,16 @@ mod dioxus_impl {
         Signal::global(|| Vec::new());
 
     // ============================================================================
-    // Sections & Blocks
+    // Sections & Blocks (TODO: migrate to rig-control)
     // ============================================================================
 
-    /// Sections in the current rig
-    pub static RIG_SECTIONS: GlobalSignal<Vec<SectionInfo>> = Signal::global(|| Vec::new());
-
-    /// Global blocks in the current rig
-    pub static RIG_GLOBAL_BLOCKS: GlobalSignal<Vec<GlobalBlockInfo>> =
-        Signal::global(|| Vec::new());
+    // Note: These are commented out until rig-control provides equivalent types
+    // /// Sections in the current rig
+    // pub static RIG_SECTIONS: GlobalSignal<Vec<SectionInfo>> = Signal::global(|| Vec::new());
+    //
+    // /// Global blocks in the current rig
+    // pub static RIG_GLOBAL_BLOCKS: GlobalSignal<Vec<GlobalBlockInfo>> =
+    //     Signal::global(|| Vec::new());
 
     // ============================================================================
     // Preset State
@@ -48,16 +48,20 @@ mod dioxus_impl {
     pub static RIG_AVAILABLE_PRESETS: GlobalSignal<Vec<PresetInfo>> =
         Signal::global(|| Vec::new());
 
-    /// Current snapshot ID (if any)
-    pub static RIG_CURRENT_SNAPSHOT_ID: GlobalSignal<Option<Uuid>> = Signal::global(|| None);
+    /// Current preset scene ID (which scene of the preset is active)
+    pub static RIG_CURRENT_PRESET_SCENE_ID: GlobalSignal<Option<Uuid>> = Signal::global(|| None);
+
+    /// Current profile scene ID (which scene of the profile is active)
+    pub static RIG_CURRENT_PROFILE_SCENE_ID: GlobalSignal<Option<Uuid>> = Signal::global(|| None);
 
     // ============================================================================
-    // Patch State (per layer)
+    // Patch State (per layer) (TODO: migrate to rig-control)
     // ============================================================================
 
-    /// Available patches (for patch browser)
-    pub static RIG_AVAILABLE_PATCHES: GlobalSignal<Vec<PatchInfo>> =
-        Signal::global(|| Vec::new());
+    // Note: Commented out until rig-control provides equivalent types
+    // /// Available patches (for patch browser)
+    // pub static RIG_AVAILABLE_PATCHES: GlobalSignal<Vec<PatchInfo>> =
+    //     Signal::global(|| Vec::new());
 
     // ============================================================================
     // Setlist State
@@ -81,7 +85,7 @@ mod dioxus_impl {
     pub static RIG_CURRENT_SONG: GlobalSignal<Option<SongInfo>> = Signal::global(|| None);
 
     /// Current scene info (if in performance mode)
-    pub static RIG_CURRENT_SCENE: GlobalSignal<Option<SceneInfo>> = Signal::global(|| None);
+    pub static RIG_CURRENT_SCENE: GlobalSignal<Option<ProfileSceneInfo>> = Signal::global(|| None);
 
     /// Current song index
     pub static RIG_SONG_INDEX: GlobalSignal<usize> = Signal::global(|| 0);

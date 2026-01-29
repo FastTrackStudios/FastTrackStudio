@@ -68,6 +68,11 @@ pub fn build_guitar_rig() -> GuitarRigDefaults {
     let eighties_drive = presets::eighties_drive(&module_presets);
     let stank = presets::stank(&module_presets);
     let edge_of_breakup = presets::edge_of_breakup(&module_presets);
+    let worship_pad = presets::worship_pad(&module_presets);
+    let classic_crunch = presets::classic_crunch(&module_presets);
+    let modern_metal = presets::modern_metal(&module_presets);
+    let jazz_clean = presets::jazz_clean(&module_presets);
+    let surf_rock = presets::surf_rock(&module_presets);
 
     // 4. Build profiles
     let rig_id = rig.id;
@@ -134,6 +139,25 @@ pub fn build_guitar_rig() -> GuitarRigDefaults {
         &module_presets,
     );
 
+    let movin_out = songs::movin_out(
+        &songs::MovinOutPresets {
+            jazz_clean: &jazz_clean,
+            edge_of_breakup: &edge_of_breakup,
+            eighties_drive: &eighties_drive,
+            ac30_ambient_clean: &ac30_ambient_clean,
+        },
+        &module_presets,
+    );
+
+    let bennie_and_the_jets = songs::bennie_and_the_jets(
+        &songs::BenniePresetsBundle {
+            classic_crunch: &classic_crunch,
+            stank: &stank,
+            edge_of_breakup: &edge_of_breakup,
+        },
+        &module_presets,
+    );
+
     GuitarRigDefaults {
         rig,
         presets: vec![
@@ -142,8 +166,13 @@ pub fn build_guitar_rig() -> GuitarRigDefaults {
             eighties_drive,
             stank,
             edge_of_breakup,
+            worship_pad,
+            classic_crunch,
+            modern_metal,
+            jazz_clean,
+            surf_rock,
         ],
         profiles: vec![worship, blues, rock],
-        songs: vec![cryin, thriller, girl_goodbye],
+        songs: vec![cryin, thriller, girl_goodbye, movin_out, bennie_and_the_jets],
     }
 }

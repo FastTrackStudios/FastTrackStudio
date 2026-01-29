@@ -7,21 +7,26 @@
 use crate::context::rig::use_rig_service;
 use dioxus::prelude::*;
 use fts::rig::{
-    RigCommand, RIG_AVAILABLE_SETLISTS, RIG_CURRENT_PRESET, RIG_CURRENT_SETLIST,
-    RIG_CURRENT_SNAPSHOT_ID, RIG_SETLIST_SONGS,
+    RIG_AVAILABLE_SETLISTS, RIG_CURRENT_PRESET, RIG_CURRENT_SETLIST,
+    RIG_CURRENT_PRESET_SCENE_ID, RIG_PROFILE, RIG_SETLIST_SONGS,
 };
+use rig_control::{PreloadPriority, RigControlCommand};
 use uuid::Uuid;
 
 /// Collection of rig action callbacks
 #[derive(Clone)]
 pub struct RigActions {
-    /// Load a profile by ID
+    /// Load a profile by ID (with default scene)
     pub load_profile: Callback<Uuid>,
+    /// Load a profile with a specific scene index
+    pub load_profile_scene: Callback<(Uuid, usize)>,
     /// Load a rig by ID
     pub load_rig: Callback<Uuid>,
-    /// Load a preset by ID
+    /// Load a preset by ID (with default scene)
     pub load_preset: Callback<Uuid>,
-    /// Load a preset with a specific snapshot
+    /// Load a preset with a specific scene index
+    pub load_preset_scene: Callback<(Uuid, usize)>,
+    /// Load a preset with a specific snapshot (deprecated - use load_preset_scene)
     pub load_preset_with_snapshot: Callback<(Uuid, Uuid)>,
     /// Activate a snapshot on the current preset
     pub activate_snapshot: Callback<Uuid>,
@@ -78,16 +83,113 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |profile_id: Uuid| {
                 let client = client.clone();
                 spawn(async move {
-                    client.execute(RigCommand::LoadProfile { profile_id }).await;
+                    // Load profile with first scene (scene 0)
+                    let profiles = client.get_available_profiles().await;
+                    if let Some(profile) = profiles.iter().find(|p| p.id == profile_id) {
+                        if let Some(first_scene) = profile.scenes.first() {
+                            tracing::info!(
+                                "load_profile: loading profile '{}' with first scene '{}' (preset: {})",
+                                profile.name,
+                                first_scene.name,
+                                first_scene.preset_name
+                            );
+
+                            // If the scene specifies a preset scene, find its index
+                            let preset_scene_index = if let Some(preset_scene_id) = first_scene.preset_scene_id {
+                                let presets = client.get_available_presets().await;
+                                if let Some(preset) = presets.iter().find(|p| p.id == first_scene.preset_id) {
+                                    preset.scenes.iter()
+                                        .position(|s| s.id == preset_scene_id)
+                                        .unwrap_or(0)
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            };
+
+                            // Load the preset with the correct scene
+                            client.execute(RigControlCommand::LoadPresetWithScene {
+                                preset_id: first_scene.preset_id,
+                                scene_index: preset_scene_index,
+                            }).await;
+
+                            // Update signals
+                            if let Some(preset) = client.get_current_preset().await {
+                                *RIG_CURRENT_PRESET.write() = Some(preset);
+                            }
+                            *RIG_PROFILE.write() = Some(profile.clone());
+                        } else {
+                            tracing::warn!("load_profile: profile {} has no scenes", profile_id);
+                        }
+                    }
+                });
+            })
+        },
+        load_profile_scene: {
+            let client = ctx.client.clone();
+            Callback::new(move |(profile_id, scene_index): (Uuid, usize)| {
+                let client = client.clone();
+                spawn(async move {
+                    // Get the profile to extract scene information
+                    let profiles = client.get_available_profiles().await;
+                    if let Some(profile) = profiles.iter().find(|p| p.id == profile_id) {
+                        if let Some(scene) = profile.scenes.get(scene_index) {
+                            tracing::info!(
+                                "load_profile_scene: loading profile '{}' scene '{}' (preset: {})",
+                                profile.name,
+                                scene.name,
+                                scene.preset_name
+                            );
+
+                            // If the scene specifies a preset scene, find its index
+                            // Otherwise default to scene 0
+                            let preset_scene_index = if let Some(preset_scene_id) = scene.preset_scene_id {
+                                // Need to fetch preset to find scene index by ID
+                                let presets = client.get_available_presets().await;
+                                if let Some(preset) = presets.iter().find(|p| p.id == scene.preset_id) {
+                                    preset.scenes.iter()
+                                        .position(|s| s.id == preset_scene_id)
+                                        .unwrap_or(0)
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            };
+
+                            // Load the preset with the correct scene
+                            client.execute(RigControlCommand::LoadPresetWithScene {
+                                preset_id: scene.preset_id,
+                                scene_index: preset_scene_index,
+                            }).await;
+
+                            // Update signals
+                            if let Some(preset) = client.get_current_preset().await {
+                                *RIG_CURRENT_PRESET.write() = Some(preset);
+                            }
+                            if let Some(profile_reloaded) = client.get_available_profiles().await.iter().find(|p| p.id == profile_id) {
+                                *RIG_PROFILE.write() = Some(profile_reloaded.clone());
+                            }
+                        } else {
+                            tracing::warn!("load_profile_scene: scene {} not found in profile {}", scene_index, profile_id);
+                        }
+                    } else {
+                        tracing::warn!("load_profile_scene: profile {} not found", profile_id);
+                    }
                 });
             })
         },
         load_rig: {
             let client = ctx.client.clone();
             Callback::new(move |rig_id: Uuid| {
+                // Note: In rig-control architecture, you load a profile, not a rig directly
+                // A rig is initialized once, then you switch between profiles
+                // For backwards compatibility, we treat rig_id as a profile_id
                 let client = client.clone();
                 spawn(async move {
-                    client.execute(RigCommand::LoadRig { rig_id }).await;
+                    tracing::info!("load_rig: treating rig_id {} as profile_id", rig_id);
+                    client.execute(RigControlCommand::LoadProfile { profile_id: rig_id }).await;
                 });
             })
         },
@@ -96,10 +198,49 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |preset_id: Uuid| {
                 let client = client.clone();
                 spawn(async move {
-                    client.execute(RigCommand::LoadPreset { preset_id }).await;
-                    // Also fetch and update global signal directly (workaround for subscription issues)
+                    // Fetch preset to get default scene index
+                    let presets = client.get_available_presets().await;
+                    let scene_index = if let Some(preset) = presets.iter().find(|p| p.id == preset_id) {
+                        // Use default scene if specified, otherwise scene 0
+                        let index = preset.default_scene_index.unwrap_or(0);
+                        tracing::info!(
+                            "load_preset: loading '{}' with {} scene (index {})",
+                            preset.name,
+                            if preset.default_scene_index.is_some() { "default" } else { "first" },
+                            index
+                        );
+                        index
+                    } else {
+                        tracing::warn!("load_preset: preset {} not found, defaulting to scene 0", preset_id);
+                        0
+                    };
+
+                    // Load preset with the determined scene
+                    client.execute(RigControlCommand::LoadPresetWithScene {
+                        preset_id,
+                        scene_index,
+                    }).await;
+
+                    // Update global signal
                     if let Some(preset) = client.get_current_preset().await {
-                        tracing::debug!("load_preset: updating signal to '{}'", preset.name);
+                        tracing::debug!("load_preset: updating signal to '{}' with scene {}", preset.name, scene_index);
+                        *RIG_CURRENT_PRESET.write() = Some(preset);
+                    }
+                });
+            })
+        },
+        load_preset_scene: {
+            let client = ctx.client.clone();
+            Callback::new(move |(preset_id, scene_index): (Uuid, usize)| {
+                let client = client.clone();
+                spawn(async move {
+                    client.execute(RigControlCommand::LoadPresetWithScene {
+                        preset_id,
+                        scene_index,
+                    }).await;
+                    // Update global signals
+                    if let Some(preset) = client.get_current_preset().await {
+                        tracing::info!("load_preset_scene: loaded preset '{}' with scene {}", preset.name, scene_index);
                         *RIG_CURRENT_PRESET.write() = Some(preset);
                     }
                 });
@@ -107,23 +248,22 @@ pub fn use_rig_actions() -> RigActions {
         },
         load_preset_with_snapshot: {
             let client = ctx.client.clone();
-            Callback::new(move |(preset_id, snapshot_id): (Uuid, Uuid)| {
+            Callback::new(move |(preset_id, _snapshot_id): (Uuid, Uuid)| {
                 let client = client.clone();
+                // Note: In rig-control, "snapshots" are now "scenes" in profiles
+                // For preset loading without a profile context, we default to scene 0
+                // To properly handle scenes, use LoadSongScene or LoadPresetWithScene directly
                 spawn(async move {
                     client
-                        .execute(RigCommand::LoadPresetWithSnapshot {
+                        .execute(RigControlCommand::LoadPresetWithScene {
                             preset_id,
-                            snapshot_id,
+                            scene_index: 0, // Default to first scene
                         })
                         .await;
-                    // Also fetch and update global signals directly (workaround for subscription issues)
+                    // Update global signals
                     if let Some(preset) = client.get_current_preset().await {
-                        tracing::info!("load_preset_with_snapshot: updating RIG_CURRENT_PRESET to '{}', RIG_CURRENT_SNAPSHOT_ID to {:?}", preset.name, snapshot_id);
+                        tracing::info!("load_preset_with_snapshot: loaded preset '{}' with scene 0", preset.name);
                         *RIG_CURRENT_PRESET.write() = Some(preset);
-                        *RIG_CURRENT_SNAPSHOT_ID.write() = Some(snapshot_id);
-                        tracing::info!("load_preset_with_snapshot: signals updated");
-                    } else {
-                        tracing::warn!("load_preset_with_snapshot: get_current_preset returned None");
                     }
                 });
             })
@@ -140,7 +280,8 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |scene_index: usize| {
                 let client = client.clone();
                 spawn(async move {
-                    client.execute(RigCommand::GoToScene { scene_index }).await;
+                    // Use SwitchScene to change to a different scene in the current preset
+                    client.execute(RigControlCommand::SwitchScene { scene_index }).await;
                 });
             })
         },
@@ -149,7 +290,7 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |_: ()| {
                 let client = client.clone();
                 spawn(async move {
-                    client.execute(RigCommand::NextScene).await;
+                    client.execute(RigControlCommand::NextScene).await;
                 });
             })
         },
@@ -158,7 +299,7 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |_: ()| {
                 let client = client.clone();
                 spawn(async move {
-                    client.execute(RigCommand::PreviousScene).await;
+                    client.execute(RigControlCommand::PreviousScene).await;
                 });
             })
         },
@@ -167,7 +308,8 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |song_index: usize| {
                 let client = client.clone();
                 spawn(async move {
-                    client.execute(RigCommand::GoToSong { song_index }).await;
+                    // Load song scene 0 (first scene of the song)
+                    client.execute(RigControlCommand::LoadSongScene { song_index, scene_index: 0 }).await;
                 });
             })
         },
@@ -176,7 +318,7 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |_: ()| {
                 let client = client.clone();
                 spawn(async move {
-                    client.execute(RigCommand::NextSong).await;
+                    client.execute(RigControlCommand::NextSong).await;
                 });
             })
         },
@@ -185,7 +327,7 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |_: ()| {
                 let client = client.clone();
                 spawn(async move {
-                    client.execute(RigCommand::PreviousSong).await;
+                    client.execute(RigControlCommand::PreviousSong).await;
                 });
             })
         },
@@ -194,7 +336,15 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |preset_id: Uuid| {
                 let client = client.clone();
                 spawn(async move {
-                    client.execute(RigCommand::PreloadPreset { preset_id }).await;
+                    // Preload preset with default scene (0) at Low priority (for browsing)
+                    client
+                        .execute(RigControlCommand::Preload {
+                            preset_id,
+                            scene_index: 0,
+                            priority: PreloadPriority::Low,
+                        })
+                        .await;
+                    tracing::debug!("Preloading preset {} with scene 0", preset_id);
                 });
             })
         },
@@ -203,78 +353,77 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |song_index: usize| {
                 let client = client.clone();
                 spawn(async move {
-                    client.execute(RigCommand::PreloadSong { song_index }).await;
+                    // Get the song to find its first scene's preset
+                    if let Some(song) = client.get_setlist_songs().await.get(song_index) {
+                        // TODO: We need to get the preset_id from the song's first scene
+                        // For now, this is a placeholder - we'd need to expose scene info from songs
+                        tracing::debug!("Preload song {} (first scene)", song.name);
+                        // Implementation note: rig-control needs to expose preset_id from song scenes
+                        // to properly implement this. For now, we can't preload without knowing the preset.
+                    }
                 });
             })
         },
         set_parameter: {
-            let client = ctx.client.clone();
-            Callback::new(move |(block_id, param_index, value): (Uuid, u32, f64)| {
-                let client = client.clone();
-                spawn(async move {
-                    client
-                        .execute(RigCommand::SetParameter {
-                            block_id,
-                            param_index,
-                            value,
-                        })
-                        .await;
-                });
+            Callback::new(move |(module_type, param_index, value): (Uuid, u32, f64)| {
+                // TODO: Real-time parameter control needs to be added to RigControlCommand
+                // Potential command structure:
+                // RigControlCommand::SetModuleParameter {
+                //     module_type: ModuleType,
+                //     param_index: u32,
+                //     value: f64,
+                // }
+                tracing::warn!(
+                    "set_parameter not yet implemented - need to add parameter control to rig-control"
+                );
+                tracing::debug!("Would set module {:?} param {} to {}", module_type, param_index, value);
             })
         },
         set_block_parameter: {
-            let client = ctx.client.clone();
-            Callback::new(move |(block_id, param_index, value): (Uuid, u32, f32)| {
-                let client = client.clone();
-                spawn(async move {
-                    client
-                        .execute(RigCommand::SetParameter {
-                            block_id,
-                            param_index,
-                            value: f64::from(value),
-                        })
-                        .await;
-                });
+            Callback::new(move |(module_type, param_index, value): (Uuid, u32, f32)| {
+                // TODO: Same as set_parameter - needs rig-control implementation
+                tracing::warn!(
+                    "set_block_parameter not yet implemented - need to add parameter control to rig-control"
+                );
+                tracing::debug!("Would set module {:?} param {} to {}", module_type, param_index, value);
             })
         },
         toggle_block_bypass: {
-            let client = ctx.client.clone();
-            Callback::new(move |block_id: Uuid| {
-                let client = client.clone();
-                spawn(async move {
-                    // Toggle bypass (we'd need current state, so set to false for now)
-                    client.execute(RigCommand::SetBlockBypassed { block_id, bypassed: false }).await;
-                });
+            Callback::new(move |module_id: Uuid| {
+                // TODO: Bypass control needs to be added to RigControlCommand
+                // Potential command structure:
+                // RigControlCommand::SetModuleBypassed {
+                //     module_type: ModuleType,
+                //     bypassed: bool,
+                // }
+                // Or we could use DisableSlot/EnableSlot which already exist
+                tracing::warn!(
+                    "toggle_block_bypass not yet implemented - consider using DisableSlot/EnableSlot"
+                );
+                tracing::debug!("Would toggle bypass for module {:?}", module_id);
             })
         },
         toggle_section: {
-            let client = ctx.client.clone();
             Callback::new(move |section_id: Uuid| {
-                let client = client.clone();
-                spawn(async move {
-                    // Toggle section (we'd need current state, so set to true for now)
-                    client.execute(RigCommand::SetSectionEnabled { section_id, enabled: true }).await;
-                });
+                // Note: Sections don't exist in rig-control architecture
+                // In the new architecture, you control individual module slots via:
+                // - DisableSlot/EnableSlot commands
+                // Or you switch scenes which have different module configurations
+                tracing::debug!(
+                    "toggle_section called with {:?} - sections are replaced by module slots in rig-control",
+                    section_id
+                );
             })
         },
         load_setlist: {
-            let client = ctx.client.clone();
             Callback::new(move |setlist_id: Uuid| {
-                let client = client.clone();
-                spawn(async move {
-                    client.execute(RigCommand::LoadSetlist { setlist_id }).await;
-                    // Update global signals directly (workaround for subscription issues)
-                    if let Some(setlist) = client.get_current_setlist().await {
-                        tracing::debug!("load_setlist: updating signal to '{}'", setlist.name);
-                        *RIG_CURRENT_SETLIST.write() = Some(setlist);
-                    }
-                    // Also refresh the songs list
-                    let songs = client.get_setlist_songs().await;
-                    *RIG_SETLIST_SONGS.write() = songs;
-                    // And refresh available setlists
-                    let setlists = client.get_available_setlists().await;
-                    *RIG_AVAILABLE_SETLISTS.write() = setlists;
-                });
+                // Note: Setlists in rig-control are just views/collections of songs
+                // They don't need to be "loaded" - the current setlist is always active
+                // To switch songs, use go_to_song, next_song, or prev_song
+                tracing::debug!(
+                    "load_setlist called with {:?} - setlists are views, use song navigation instead",
+                    setlist_id
+                );
             })
         },
     }

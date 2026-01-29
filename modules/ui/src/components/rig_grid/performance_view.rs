@@ -6,7 +6,7 @@
 use dioxus::prelude::*;
 
 use super::node_graph::{Module, NodeGraph};
-use super::block_colors::block_type_color;
+use super::block_colors::{block_type_color, block_instance_color};
 use audio_controls::widgets::{CompressorGraph, CompressorParams, DbRange, EqBand, EqBandShape, EqGraph};
 
 /// Detail level for module display in performance view.
@@ -294,7 +294,7 @@ struct PerformanceModuleRendererProps {
 fn PerformanceModuleRenderer(props: PerformanceModuleRendererProps) -> Element {
     let module = &props.perf_module.module;
     let detail_level = props.perf_module.detail_level;
-    let color = block_type_color(module.block_type);
+    let color = block_instance_color(module.block_type, &module.name);
 
     let bg_color = if module.bypassed {
         format!("{}20", color.bg)
@@ -533,7 +533,7 @@ fn PerformanceModuleContent(props: PerformanceModuleContentProps) -> Element {
                 // Render each node with proper grid placement
                 for (node, start_row, end_row, start_col) in grid_items.iter() {
                     {
-                        let color = block_type_color(node.block_type);
+                        let color = block_instance_color(node.block_type, &node.name);
                         let grid_row = format!("{} / {}", start_row, end_row);
                         let grid_col = format!("{} / {}", start_col, start_col + 1);
 

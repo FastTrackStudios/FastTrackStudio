@@ -97,6 +97,127 @@ pub struct PreloadStatusInfo {
     pub readiness: PresetReadiness,
 }
 
+/// Simplified profile information for RPC communication.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct ProfileInfo {
+    /// Profile ID
+    pub id: Uuid,
+    /// Profile name
+    pub name: String,
+    /// Associated rig ID
+    pub rig_id: Uuid,
+    /// Number of scene templates in this profile
+    pub scene_count: usize,
+    /// Scene names for quick display
+    #[facet(default)]
+    pub scene_names: Vec<String>,
+    /// Detailed scene info
+    #[facet(default)]
+    pub scenes: Vec<ProfileSceneInfo>,
+    /// Optional description
+    #[facet(default)]
+    pub description: Option<String>,
+}
+
+/// Simplified profile scene information for RPC communication.
+///
+/// A ProfileScene is a template/scene within a Profile that references
+/// a specific Preset and optionally a specific PresetScene (variation).
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct ProfileSceneInfo {
+    /// Scene index within profile/song
+    pub index: usize,
+    /// Scene name
+    pub name: String,
+    /// Preset ID this scene references
+    pub preset_id: Uuid,
+    /// Preset name (resolved)
+    pub preset_name: String,
+    /// Preset scene ID (which variation of the preset to use, if any)
+    pub preset_scene_id: Option<Uuid>,
+    /// Preset scene name (if any)
+    pub preset_scene_name: Option<String>,
+}
+
+/// Simplified preset information for RPC communication.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct PresetInfo {
+    /// Preset ID
+    pub id: Uuid,
+    /// Preset name
+    pub name: String,
+    /// Category
+    pub category: String,
+    /// Star rating (0-5)
+    pub rating: u8,
+    /// Optional description
+    #[facet(default)]
+    pub description: Option<String>,
+    /// Number of scenes (preset-level variations)
+    pub scene_count: usize,
+    /// Scene names for quick display
+    pub scene_names: Vec<String>,
+    /// Scene details (preset-level variations that can load different modules)
+    #[facet(default)]
+    pub scenes: Vec<PresetSceneInfo>,
+    /// Default scene index to load when preset is activated (None means scene 0)
+    #[facet(default)]
+    pub default_scene_index: Option<usize>,
+}
+
+/// Simplified preset scene information for RPC communication.
+///
+/// Preset scenes allow switching between different module configurations
+/// within a preset. The routing/order is locked, but the content of modules
+/// can change between scenes.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct PresetSceneInfo {
+    /// Scene ID (internally this is a SnapshotId in the domain model)
+    pub id: Uuid,
+    /// Scene name (e.g., "Verse", "Chorus", "Solo")
+    pub name: String,
+}
+
+/// Simplified song information for RPC communication.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct SongInfo {
+    /// Song index in setlist
+    pub index: usize,
+    /// Song name
+    pub name: String,
+    /// Artist name
+    pub artist: Option<String>,
+    /// Number of scenes
+    pub scene_count: usize,
+    /// Scene names for quick display
+    pub scene_names: Vec<String>,
+    /// Current scene index (if this is the active song)
+    #[facet(default)]
+    pub current_scene_index: Option<usize>,
+}
+
+/// Simplified setlist information for RPC communication.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct SetlistInfo {
+    /// Setlist name
+    pub name: String,
+    /// Number of songs
+    pub song_count: usize,
+    /// Song names
+    pub song_names: Vec<String>,
+}
+
+/// Simplified rig information for RPC communication.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct RigInfo {
+    /// Rig ID
+    pub id: Uuid,
+    /// Rig name
+    pub name: String,
+    /// Instrument type
+    pub instrument_type: String,
+}
+
 // endregion: --- RPC Types
 
 // region:    --- Commands
@@ -150,6 +271,21 @@ pub enum RigControlCommand {
     DisableSlot { module_type: ModuleType },
     /// Re-enable a previously disabled module slot.
     EnableSlot { module_type: ModuleType },
+
+    // ── Profile/Preset Management ───────────────────────────────────────
+
+    /// Load a specific profile
+    LoadProfile { profile_id: Uuid },
+    /// Load a specific preset (uses scene index 0)
+    LoadPreset { preset_id: Uuid },
+    /// Go to next song in setlist
+    NextSong,
+    /// Go to previous song in setlist
+    PreviousSong,
+    /// Go to next scene in current song
+    NextScene,
+    /// Go to previous scene in current song
+    PreviousScene,
 
     // ── Tick ─────────────────────────────────────────────────────────────
 
@@ -220,6 +356,17 @@ pub enum RigControlEvent {
         reason: String,
     },
 
+    // ── Profile/Preset/Song Events ──────────────────────────────────────
+
+    /// A profile was loaded
+    ProfileLoaded { profile: ProfileInfo },
+    /// A preset was loaded
+    PresetLoaded { preset: PresetInfo, scene_index: usize },
+    /// A song changed
+    SongChanged { song_index: usize },
+    /// Current scene index changed
+    SceneIndexChanged { scene_index: usize },
+
     // ── Tail Cleanup ────────────────────────────────────────────────────
 
     /// A tailing instance was cleaned up.
@@ -263,6 +410,29 @@ pub trait RigControlService {
 
     /// Check readiness of a preload operation.
     async fn check_preload_status(&self, handle: u64) -> Option<PreloadStatusInfo>;
+
+    // ── Profile/Preset/Song Queries ─────────────────────────────────────
+
+    /// Get all available profiles
+    async fn get_available_profiles(&self) -> Vec<ProfileInfo>;
+    /// Get the currently loaded profile
+    async fn get_current_profile(&self) -> Option<ProfileInfo>;
+    /// Get all available presets
+    async fn get_available_presets(&self) -> Vec<PresetInfo>;
+    /// Get the currently loaded preset
+    async fn get_current_preset(&self) -> Option<PresetInfo>;
+    /// Get the current rig info
+    async fn get_current_rig(&self) -> Option<RigInfo>;
+    /// Get all available setlists
+    async fn get_available_setlists(&self) -> Vec<SetlistInfo>;
+    /// Get the current setlist
+    async fn get_current_setlist(&self) -> Option<SetlistInfo>;
+    /// Get all songs in the current setlist
+    async fn get_setlist_songs(&self) -> Vec<SongInfo>;
+    /// Get the current song
+    async fn get_current_song(&self) -> Option<SongInfo>;
+    /// Get the current scene (in performance/song mode)
+    async fn get_current_scene(&self) -> Option<ProfileSceneInfo>;
 
     // ── Commands ────────────────────────────────────────────────────────
 
@@ -396,6 +566,146 @@ impl PreloadStatusInfo {
     }
 }
 
+impl ProfileInfo {
+    /// Convert from domain Profile to RPC ProfileInfo
+    pub fn from_profile(p: &crate::profile::Profile, presets: &[crate::preset::Preset]) -> Self {
+        let scene_count = p.scene_templates.len();
+        let scene_names: Vec<String> = p
+            .scene_templates
+            .iter()
+            .map(|st| st.name.clone())
+            .collect();
+
+        let scenes: Vec<ProfileSceneInfo> = p
+            .scene_templates
+            .iter()
+            .enumerate()
+            .map(|(index, st)| {
+                // Extract preset ID from the preset reference
+                let preset_id = match &st.preset_reference {
+                    crate::profile::PresetReference::Direct { preset_id } => preset_id.as_uuid(),
+                    _ => Uuid::nil(), // For other reference types, use placeholder
+                };
+
+                // Resolve preset name from presets list
+                let preset_name = presets
+                    .iter()
+                    .find(|preset| preset.id.as_uuid() == preset_id)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default();
+
+                ProfileSceneInfo {
+                    index,
+                    name: st.name.clone(),
+                    preset_id,
+                    preset_name,
+                    preset_scene_id: st.default_snapshot_id.map(|id| id.as_uuid()),
+                    preset_scene_name: None,
+                }
+            })
+            .collect();
+
+        Self {
+            id: p.id.as_uuid(),
+            name: p.name.clone(),
+            rig_id: p.rig_id.as_uuid(),
+            scene_count,
+            scene_names,
+            scenes,
+            description: p.description.clone(),
+        }
+    }
+}
+
+impl PresetInfo {
+    /// Convert from domain Preset to RPC PresetInfo
+    pub fn from_preset(p: &crate::preset::Preset) -> Self {
+        // Note: In the domain model, these are called "snapshots" but at the preset level
+        // they represent "scenes" (different module configurations within the same routing)
+        let scenes: Vec<PresetSceneInfo> = p.snapshots.iter()
+            .map(|s| PresetSceneInfo {
+                id: s.id.as_uuid(),
+                name: s.name.clone(),
+            })
+            .collect();
+
+        let scene_names: Vec<String> = scenes.iter()
+            .map(|s| s.name.clone())
+            .collect();
+
+        // Find default scene index by looking up the default_snapshot_id
+        let default_scene_index = p.default_snapshot_id
+            .and_then(|default_id| {
+                p.snapshots.iter()
+                    .position(|s| s.id == default_id)
+            });
+
+        Self {
+            id: p.id.as_uuid(),
+            name: p.name.clone(),
+            category: format!("{:?}", p.category),
+            rating: p.rating.get(),
+            description: p.description.clone(),
+            scene_count: scenes.len(),
+            scene_names,
+            scenes,
+            default_scene_index,
+        }
+    }
+}
+
+impl SongInfo {
+    /// Convert from domain PerformanceSong to RPC SongInfo
+    pub fn from_song(
+        index: usize,
+        song: &crate::performance::PerformanceSong,
+        current_song_index: Option<usize>,
+        current_scene_index: Option<usize>,
+    ) -> Self {
+        let scene_count = song.scenes.len();
+        let scene_names: Vec<String> = song.scenes.iter().map(|s| s.name.clone()).collect();
+
+        let current_scene = if current_song_index == Some(index) {
+            current_scene_index
+        } else {
+            None
+        };
+
+        Self {
+            index,
+            name: song.name.clone(),
+            artist: song.artist.clone(),
+            scene_count,
+            scene_names,
+            current_scene_index: current_scene,
+        }
+    }
+}
+
+impl SetlistInfo {
+    /// Convert from a list of songs to RPC SetlistInfo
+    pub fn from_songs(name: impl Into<String>, songs: &[crate::performance::PerformanceSong]) -> Self {
+        let song_names: Vec<String> = songs.iter().map(|s| s.name.clone()).collect();
+
+        Self {
+            name: name.into(),
+            song_count: songs.len(),
+            song_names,
+        }
+    }
+}
+
+impl RigInfo {
+    /// Convert from domain Rig to RPC RigInfo
+    pub fn from_rig(r: &crate::rig::Rig) -> Self {
+        Self {
+            id: r.id.as_uuid(),
+            name: r.name.clone(),
+            instrument_type: format!("{:?}", r.instrument_type),
+        }
+    }
+}
+
 // endregion: --- Type Conversions
 
 // region:    --- Local Client
@@ -420,6 +730,36 @@ crate::define_local_client! {
         /// Check readiness of a preload operation
         async fn check_preload_status(handle: u64) -> Option<PreloadStatusInfo>;
 
+        /// Get all available profiles
+        async fn get_available_profiles() -> Vec<ProfileInfo>;
+
+        /// Get the currently loaded profile
+        async fn get_current_profile() -> Option<ProfileInfo>;
+
+        /// Get all available presets
+        async fn get_available_presets() -> Vec<PresetInfo>;
+
+        /// Get the currently loaded preset
+        async fn get_current_preset() -> Option<PresetInfo>;
+
+        /// Get the current rig info
+        async fn get_current_rig() -> Option<RigInfo>;
+
+        /// Get all available setlists
+        async fn get_available_setlists() -> Vec<SetlistInfo>;
+
+        /// Get the current setlist
+        async fn get_current_setlist() -> Option<SetlistInfo>;
+
+        /// Get all songs in the current setlist
+        async fn get_setlist_songs() -> Vec<SongInfo>;
+
+        /// Get the current song
+        async fn get_current_song() -> Option<SongInfo>;
+
+        /// Get the current scene
+        async fn get_current_scene() -> Option<ProfileSceneInfo>;
+
         /// Execute an engine command
         async fn execute(cmd: RigControlCommand) -> ();
 
@@ -435,7 +775,7 @@ crate::define_local_client! {
 
 // region:    --- Mock Implementation
 
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use crate::mock::MockRigEngine;
 use crate::performance::{PerformanceSong, Scene};
@@ -445,10 +785,11 @@ use crate::rig_engine::RigEngine;
 
 /// Data context for a `MockRigControlService`.
 ///
-/// Holds the rig, presets, and songs so the mock service can resolve
+/// Holds the rig, profiles, presets, and songs so the mock service can resolve
 /// commands into the domain types the engine needs.
 pub struct RigControlData {
     pub rig: Rig,
+    pub profiles: Vec<crate::profile::Profile>,
     pub presets: Vec<Preset>,
     pub songs: Vec<PerformanceSong>,
 }
@@ -482,6 +823,11 @@ pub struct MockRigControlService {
     engine: MockRigEngine,
     data: RigControlData,
     initialized: RwLock<bool>,
+    current_profile_index: RwLock<usize>,
+    current_preset_index: RwLock<usize>,
+    current_song_index: RwLock<usize>,
+    current_scene_index: RwLock<usize>,
+    event_subscriber: RwLock<Option<Arc<Tx<RigControlEvent>>>>,
 }
 
 impl MockRigControlService {
@@ -491,7 +837,24 @@ impl MockRigControlService {
             engine: MockRigEngine::new(),
             data,
             initialized: RwLock::new(false),
+            current_profile_index: RwLock::new(0),
+            current_preset_index: RwLock::new(0),
+            current_song_index: RwLock::new(0),
+            current_scene_index: RwLock::new(0),
+            event_subscriber: RwLock::new(None),
         }
+    }
+
+    /// Create a new mock service with default guitar rig data.
+    pub fn with_guitar_defaults() -> Self {
+        let defaults = crate::defaults::guitar::build_guitar_rig();
+        let data = RigControlData {
+            rig: defaults.rig,
+            profiles: defaults.profiles,
+            presets: defaults.presets,
+            songs: defaults.songs,
+        };
+        Self::new(data)
     }
 
     /// Build slot state info from the engine's internal state for a module type.
@@ -503,6 +866,27 @@ impl MockRigControlService {
             slot.active_instance(),
             slot.loaded_instances(),
         ))
+    }
+
+    /// Broadcast an event to the subscriber (non-blocking)
+    fn broadcast_event(&self, event: RigControlEvent) {
+        // Clone the Arc<Tx> if present
+        let tx_opt = self.event_subscriber.read().unwrap().clone();
+        if let Some(tx) = tx_opt {
+            // Send asynchronously in a background task
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                tokio::spawn(async move {
+                    let _ = tx.send(&event).await;
+                });
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                wasm_bindgen_futures::spawn_local(async move {
+                    let _ = tx.send(&event).await;
+                });
+            }
+        }
     }
 
     /// Resolve a scene, applying song-level overrides when relevant.
@@ -582,6 +966,93 @@ impl RigControlService for MockRigControlService {
         Some(PreloadStatusInfo::new(plh, readiness))
     }
 
+    async fn get_available_profiles(&self, _cx: &Context) -> Vec<ProfileInfo> {
+        self.data
+            .profiles
+            .iter()
+            .map(|p| ProfileInfo::from_profile(p, &self.data.presets))
+            .collect()
+    }
+
+    async fn get_current_profile(&self, _cx: &Context) -> Option<ProfileInfo> {
+        let index = *self.current_profile_index.read().unwrap();
+        self.data
+            .profiles
+            .get(index)
+            .map(|p| ProfileInfo::from_profile(p, &self.data.presets))
+    }
+
+    async fn get_available_presets(&self, _cx: &Context) -> Vec<PresetInfo> {
+        self.data
+            .presets
+            .iter()
+            .map(PresetInfo::from_preset)
+            .collect()
+    }
+
+    async fn get_current_preset(&self, _cx: &Context) -> Option<PresetInfo> {
+        let index = *self.current_preset_index.read().unwrap();
+        self.data.presets.get(index).map(PresetInfo::from_preset)
+    }
+
+    async fn get_current_rig(&self, _cx: &Context) -> Option<RigInfo> {
+        Some(RigInfo::from_rig(&self.data.rig))
+    }
+
+    async fn get_available_setlists(&self, _cx: &Context) -> Vec<SetlistInfo> {
+        // For now, just return one setlist with all songs
+        vec![SetlistInfo::from_songs("Main Setlist", &self.data.songs)]
+    }
+
+    async fn get_current_setlist(&self, _cx: &Context) -> Option<SetlistInfo> {
+        Some(SetlistInfo::from_songs("Main Setlist", &self.data.songs))
+    }
+
+    async fn get_setlist_songs(&self, _cx: &Context) -> Vec<SongInfo> {
+        let current_song = *self.current_song_index.read().unwrap();
+        let current_scene = *self.current_scene_index.read().unwrap();
+
+        self.data
+            .songs
+            .iter()
+            .enumerate()
+            .map(|(i, song)| SongInfo::from_song(i, song, Some(current_song), Some(current_scene)))
+            .collect()
+    }
+
+    async fn get_current_song(&self, _cx: &Context) -> Option<SongInfo> {
+        let current_song = *self.current_song_index.read().unwrap();
+        let current_scene = *self.current_scene_index.read().unwrap();
+
+        self.data
+            .songs
+            .get(current_song)
+            .map(|song| SongInfo::from_song(current_song, song, Some(current_song), Some(current_scene)))
+    }
+
+    async fn get_current_scene(&self, _cx: &Context) -> Option<ProfileSceneInfo> {
+        let song_index = *self.current_song_index.read().unwrap();
+        let scene_index = *self.current_scene_index.read().unwrap();
+
+        let song = self.data.songs.get(song_index)?;
+        let scene = song.scenes.get(scene_index)?;
+
+        let preset = self
+            .data
+            .presets
+            .iter()
+            .find(|p| p.id == scene.preset_id)?;
+
+        Some(ProfileSceneInfo {
+            index: scene_index,
+            name: scene.name.clone(),
+            preset_id: preset.id.as_uuid(),
+            preset_name: preset.name.clone(),
+            preset_scene_id: None,
+            preset_scene_name: None,
+        })
+    }
+
     async fn execute(&self, _cx: &Context, cmd: RigControlCommand) {
         match cmd {
             RigControlCommand::Initialize { rig_id: _ } => {
@@ -610,6 +1081,15 @@ impl RigControlService for MockRigControlService {
                     .engine
                     .load_preset_with_scene(preset, &merged, &self.data.rig)
                     .await;
+
+                // Update current preset index
+                if let Some(index) = self.data.presets.iter().position(|p| p.id.as_uuid() == preset_id) {
+                    *self.current_preset_index.write().unwrap() = index;
+                }
+
+                // Broadcast preset loaded event
+                let preset_info = PresetInfo::from_preset(preset);
+                self.broadcast_event(RigControlEvent::PresetLoaded { preset: preset_info, scene_index });
             }
             RigControlCommand::LoadSongScene {
                 song_index,
@@ -630,6 +1110,18 @@ impl RigControlService for MockRigControlService {
                     .engine
                     .load_preset_with_scene(preset, &merged, &self.data.rig)
                     .await;
+
+                // Update current indices
+                *self.current_song_index.write().unwrap() = song_index;
+                *self.current_scene_index.write().unwrap() = scene_index;
+
+                // Broadcast events
+                self.broadcast_event(RigControlEvent::SongChanged { song_index });
+                self.broadcast_event(RigControlEvent::SceneIndexChanged { scene_index });
+
+                // Also broadcast preset loaded (scenes in songs use scene 0 as the base)
+                let preset_info = PresetInfo::from_preset(preset);
+                self.broadcast_event(RigControlEvent::PresetLoaded { preset: preset_info, scene_index: 0 });
             }
             RigControlCommand::SwitchScene { scene_index: _ } => {
                 // Need to know current preset — simplified: search resolved state
@@ -673,14 +1165,76 @@ impl RigControlService for MockRigControlService {
             RigControlCommand::EnableSlot { module_type } => {
                 self.engine.enable_slot(module_type).await;
             }
+            RigControlCommand::LoadProfile { profile_id } => {
+                if let Some(index) = self.data.profiles.iter().position(|p| p.id.as_uuid() == profile_id) {
+                    *self.current_profile_index.write().unwrap() = index;
+
+                    // Get profile and broadcast event
+                    if let Some(profile) = self.data.profiles.get(index) {
+                        let profile_info = ProfileInfo::from_profile(profile, &self.data.presets);
+                        self.broadcast_event(RigControlEvent::ProfileLoaded { profile: profile_info });
+                    }
+                }
+            }
+            RigControlCommand::LoadPreset { preset_id } => {
+                if let Some(index) = self.data.presets.iter().position(|p| p.id.as_uuid() == preset_id) {
+                    *self.current_preset_index.write().unwrap() = index;
+                    // Note: In rig-control, presets don't have scenes - they're loaded via songs
+                    // This command just tracks which preset is "current" for UI purposes
+                }
+            }
+            RigControlCommand::NextSong => {
+                let mut song_index = self.current_song_index.write().unwrap();
+                *song_index = (*song_index + 1).min(self.data.songs.len().saturating_sub(1));
+                *self.current_scene_index.write().unwrap() = 0;
+                let index = *song_index;
+                drop(song_index);
+
+                // Broadcast events
+                self.broadcast_event(RigControlEvent::SongChanged { song_index: index });
+                self.broadcast_event(RigControlEvent::SceneIndexChanged { scene_index: 0 });
+            }
+            RigControlCommand::PreviousSong => {
+                let mut song_index = self.current_song_index.write().unwrap();
+                *song_index = song_index.saturating_sub(1);
+                *self.current_scene_index.write().unwrap() = 0;
+                let index = *song_index;
+                drop(song_index);
+
+                // Broadcast events
+                self.broadcast_event(RigControlEvent::SongChanged { song_index: index });
+                self.broadcast_event(RigControlEvent::SceneIndexChanged { scene_index: 0 });
+            }
+            RigControlCommand::NextScene => {
+                let mut scene_index = self.current_scene_index.write().unwrap();
+                let song_index = *self.current_song_index.read().unwrap();
+                if let Some(song) = self.data.songs.get(song_index) {
+                    *scene_index = (*scene_index + 1).min(song.scenes.len().saturating_sub(1));
+                }
+                let index = *scene_index;
+                drop(scene_index);
+
+                // Broadcast event
+                self.broadcast_event(RigControlEvent::SceneIndexChanged { scene_index: index });
+            }
+            RigControlCommand::PreviousScene => {
+                let mut scene_index = self.current_scene_index.write().unwrap();
+                *scene_index = scene_index.saturating_sub(1);
+                let index = *scene_index;
+                drop(scene_index);
+
+                // Broadcast event
+                self.broadcast_event(RigControlEvent::SceneIndexChanged { scene_index: index });
+            }
             RigControlCommand::Tick => {
                 self.engine.tick().await;
             }
         }
     }
 
-    async fn subscribe(&self, _cx: &Context, _events: Tx<RigControlEvent>) {
-        // Mock: no event broadcasting yet
+    async fn subscribe(&self, _cx: &Context, events: Tx<RigControlEvent>) {
+        // Store the event subscriber (replace any previous subscriber)
+        *self.event_subscriber.write().unwrap() = Some(Arc::new(events));
     }
 
     async fn subscribe_slots(

@@ -42,6 +42,7 @@ pub mod guitar_rig_grid;
 pub mod top_bar;
 pub mod left_sidebar;
 pub mod right_sidebar;
+pub mod profile_sidebar;
 pub mod module_browser_modal;
 // Node-based system
 pub mod node_graph;
@@ -50,7 +51,7 @@ pub mod node_focus_dialog;
 pub mod performance_view;
 
 // Re-export main components
-pub use view_mode::{ModuleViewMode, GlobalViewOverride};
+pub use view_mode::{ModuleViewMode, GlobalViewOverride, RigViewMode};
 pub use block_colors::block_type_color;
 pub use grid_model::{GridBlock, GridConnection, GridJack, GridPosition, SignalFlowGrid, GRID_COLS, GRID_ROWS};
 pub use signal_flow_grid::SignalFlowGridView;
@@ -65,6 +66,7 @@ pub use guitar_rig_grid::GuitarRigGrid;
 pub use top_bar::GuitarRigTopBar;
 pub use left_sidebar::GuitarRigLeftSidebar;
 pub use right_sidebar::GuitarRigRightSidebar;
+pub use profile_sidebar::GuitarRigProfileSidebar;
 pub use module_browser_modal::ModuleBrowserModal;
 
 // Node-based system

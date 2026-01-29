@@ -10,7 +10,7 @@
 use dioxus::prelude::*;
 use fts::rig::{RIG_CONNECTED, RIG_CURRENT_PRESET, RIG_LOADING};
 
-use super::view_mode::ModuleViewMode;
+use super::view_mode::{ModuleViewMode, RigViewMode};
 
 /// Props for the guitar rig top bar.
 #[derive(Props, Clone, PartialEq)]
@@ -21,10 +21,14 @@ pub struct GuitarRigTopBarProps {
     pub on_toggle_sidebar: Callback<()>,
     /// Callback to open the module browser modal.
     pub on_open_module_browser: Callback<()>,
-    /// Current view mode.
-    pub view_mode: ModuleViewMode,
-    /// Callback when view mode changes.
-    pub on_view_mode_change: Callback<ModuleViewMode>,
+    /// Current module view mode (Grid/Macro/Detail).
+    pub module_view_mode: ModuleViewMode,
+    /// Callback when module view mode changes.
+    pub on_module_view_mode_change: Callback<ModuleViewMode>,
+    /// Current rig view mode (Preset/Profile/Song).
+    pub rig_view_mode: RigViewMode,
+    /// Callback when rig view mode changes.
+    pub on_rig_view_mode_change: Callback<RigViewMode>,
 }
 
 /// Top bar for the guitar rig page.
@@ -94,14 +98,29 @@ pub fn GuitarRigTopBar(props: GuitarRigTopBarProps) -> Element {
                 // Separator
                 div { class: "w-px h-6 bg-zinc-700" }
 
-                // View mode selector
+                // Rig view mode selector (Preset/Profile/Song)
                 div { class: "flex items-center gap-1 bg-zinc-800 rounded-lg p-1",
-                    for mode in ModuleViewMode::all() {
-                        ViewModeButton {
+                    for mode in RigViewMode::all() {
+                        RigModeButton {
                             key: "{mode.display_name()}",
                             mode: *mode,
-                            is_active: *mode == props.view_mode,
-                            on_click: props.on_view_mode_change.clone(),
+                            is_active: *mode == props.rig_view_mode,
+                            on_click: props.on_rig_view_mode_change.clone(),
+                        }
+                    }
+                }
+
+                // Separator
+                div { class: "w-px h-6 bg-zinc-700" }
+
+                // Module view mode selector (Grid/Macro/Detail)
+                div { class: "flex items-center gap-1 bg-zinc-800 rounded-lg p-1",
+                    for mode in ModuleViewMode::all() {
+                        ModuleViewModeButton {
+                            key: "{mode.display_name()}",
+                            mode: *mode,
+                            is_active: *mode == props.module_view_mode,
+                            on_click: props.on_module_view_mode_change.clone(),
                         }
                     }
                 }
@@ -155,17 +174,44 @@ pub fn GuitarRigTopBar(props: GuitarRigTopBarProps) -> Element {
     }
 }
 
-/// Props for view mode button.
+/// Props for rig mode button.
 #[derive(Props, Clone, PartialEq)]
-struct ViewModeButtonProps {
+struct RigModeButtonProps {
+    mode: RigViewMode,
+    is_active: bool,
+    on_click: Callback<RigViewMode>,
+}
+
+/// Button for selecting a rig view mode (Preset/Profile/Song).
+#[component]
+fn RigModeButton(props: RigModeButtonProps) -> Element {
+    let mode = props.mode;
+
+    rsx! {
+        button {
+            class: if props.is_active {
+                "px-3 py-1.5 rounded text-xs font-medium bg-blue-600 text-white transition-colors"
+            } else {
+                "px-3 py-1.5 rounded text-xs font-medium text-zinc-400 hover:text-zinc-200 transition-colors"
+            },
+            title: "{props.mode.display_name()} mode",
+            onclick: move |_| props.on_click.call(mode),
+            span { "{props.mode.display_name()}" }
+        }
+    }
+}
+
+/// Props for module view mode button.
+#[derive(Props, Clone, PartialEq)]
+struct ModuleViewModeButtonProps {
     mode: ModuleViewMode,
     is_active: bool,
     on_click: Callback<ModuleViewMode>,
 }
 
-/// Button for selecting a view mode.
+/// Button for selecting a module view mode (Grid/Macro/Detail).
 #[component]
-fn ViewModeButton(props: ViewModeButtonProps) -> Element {
+fn ModuleViewModeButton(props: ModuleViewModeButtonProps) -> Element {
     let mode = props.mode;
 
     rsx! {

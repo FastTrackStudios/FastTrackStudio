@@ -11,11 +11,12 @@
 use crate::context::rig::use_rig_service;
 use dioxus::prelude::*;
 use fts::rig::{
-    RigEvent, RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_AVAILABLE_SETLISTS,
+    RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_AVAILABLE_SETLISTS,
     RIG_CONNECTED, RIG_CURRENT_PRESET, RIG_CURRENT_SCENE, RIG_CURRENT_SETLIST, RIG_CURRENT_SONG,
-    RIG_CURRENT_SNAPSHOT_ID, RIG_GLOBAL_BLOCKS, RIG_INFO, RIG_LOADING, RIG_PRELOADED_PRESETS,
-    RIG_PROFILE, RIG_SCENE_INDEX, RIG_SECTIONS, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
+    RIG_CURRENT_PRESET_SCENE_ID, RIG_INFO, RIG_LOADING, RIG_PRELOADED_PRESETS,
+    RIG_PROFILE, RIG_SCENE_INDEX, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
+use rig_control::RigControlEvent;
 
 /// Hook that subscribes to rig service events and updates global signals
 ///
@@ -79,15 +80,16 @@ pub fn use_rig_subscription() {
                 *RIG_INFO.write() = Some(rig);
             }
 
-            // Fetch sections
-            let sections = client.get_sections().await;
-            tracing::debug!("use_rig_subscription: {} sections", sections.len());
-            *RIG_SECTIONS.write() = sections;
-
-            // Fetch global blocks
-            let blocks = client.get_global_blocks().await;
-            tracing::debug!("use_rig_subscription: {} global blocks", blocks.len());
-            *RIG_GLOBAL_BLOCKS.write() = blocks;
+            // TODO: Re-enable when rig-control supports sections/blocks
+            // // Fetch sections
+            // let sections = client.get_sections().await;
+            // tracing::debug!("use_rig_subscription: {} sections", sections.len());
+            // *RIG_SECTIONS.write() = sections;
+            //
+            // // Fetch global blocks
+            // let blocks = client.get_global_blocks().await;
+            // tracing::debug!("use_rig_subscription: {} global blocks", blocks.len());
+            // *RIG_GLOBAL_BLOCKS.write() = blocks;
 
             // Fetch available presets
             let presets = client.get_available_presets().await;
@@ -97,6 +99,11 @@ pub fn use_rig_subscription() {
             // Fetch current preset
             if let Some(preset) = client.get_current_preset().await {
                 tracing::info!("use_rig_subscription: current preset '{}'", preset.name);
+                // Set the initial scene to the first scene (scene 0)
+                if let Some(first_scene) = preset.scenes.first() {
+                    tracing::info!("use_rig_subscription: initial preset scene '{}'", first_scene.name);
+                    *RIG_CURRENT_PRESET_SCENE_ID.write() = Some(first_scene.id);
+                }
                 *RIG_CURRENT_PRESET.write() = Some(preset);
             }
 
@@ -147,17 +154,32 @@ pub fn use_rig_subscription() {
             *RIG_LOADING.write() = false;
 
             // Create a channel for receiving rig events
-            let (tx, mut rx) = roam::channel::<RigEvent>();
+            let (tx, mut rx) = roam::channel::<RigControlEvent>();
 
             // Subscribe to rig events
             client.subscribe(tx).await;
             tracing::debug!("use_rig_subscription: subscribed to rig events");
 
             // Listen for updates and sync to global signals
-            while let Ok(Some(event)) = rx.recv().await {
-                handle_rig_event(&client, event).await;
+            loop {
+                match rx.recv().await {
+                    Ok(Some(event)) => {
+                        tracing::debug!("use_rig_subscription: received event");
+                        handle_rig_control_event(&client, event).await;
+                    }
+                    Ok(None) => {
+                        tracing::warn!("use_rig_subscription: channel closed gracefully");
+                        break;
+                    }
+                    Err(e) => {
+                        // Log error but don't break - this can happen with format changes during hot reload
+                        tracing::warn!("use_rig_subscription: deserialization error (may need page refresh): {:?}", e);
+                        // Continue listening for new events
+                        continue;
+                    }
+                }
             }
-            tracing::debug!("use_rig_subscription: subscription loop ended");
+            tracing::info!("use_rig_subscription: subscription loop ended");
 
             *RIG_CONNECTED.write() = false;
         });
@@ -165,124 +187,68 @@ pub fn use_rig_subscription() {
 }
 
 /// Handle a rig event and update global signals
-async fn handle_rig_event<S: fts::rig::RigService + Send + Sync + 'static>(
-    client: &fts::rig::LocalRigClient<S>,
-    event: RigEvent,
+async fn handle_rig_control_event<S: rig_control::RigControlService + Send + Sync + 'static>(
+    client: &rig_control::LocalRigControlClient<S>,
+    event: RigControlEvent,
 ) {
     match event {
-        RigEvent::ProfileLoaded { profile } => {
-            tracing::info!("RigEvent: profile loaded '{}'", profile.name);
+        RigControlEvent::ProfileLoaded { profile } => {
+            tracing::info!("✓ Profile loaded: '{}'", profile.name);
             *RIG_PROFILE.write() = Some(profile);
         }
-        RigEvent::RigLoaded { rig } => {
-            tracing::info!("RigEvent: rig loaded '{}'", rig.name);
-            *RIG_INFO.write() = Some(rig);
-        }
-        RigEvent::PresetLoaded { preset } => {
-            tracing::info!("RigEvent: preset loaded '{}'", preset.name);
+        RigControlEvent::PresetLoaded { preset, scene_index } => {
+            tracing::info!("✓ Preset loaded: '{}' (scene {})", preset.name, scene_index);
+            // Get the scene ID for the given index
+            let scene_id = preset.scenes.get(scene_index).map(|s| s.id);
+            if let Some(id) = scene_id {
+                tracing::debug!("  → Setting preset scene ID to {}", id);
+                *RIG_CURRENT_PRESET_SCENE_ID.write() = Some(id);
+            } else {
+                tracing::warn!("  → Scene index {} out of bounds (preset has {} scenes)",
+                    scene_index, preset.scenes.len());
+            }
             *RIG_CURRENT_PRESET.write() = Some(preset);
         }
-        RigEvent::SnapshotActivated {
-            preset_id: _,
-            snapshot_id,
-        } => {
-            tracing::debug!("RigEvent: snapshot activated {:?}", snapshot_id);
-            *RIG_CURRENT_SNAPSHOT_ID.write() = Some(snapshot_id);
-        }
-        RigEvent::SetlistLoaded { setlist } => {
-            tracing::info!("RigEvent: setlist loaded '{}'", setlist.name);
-            *RIG_CURRENT_SETLIST.write() = Some(setlist);
-            // Refetch songs for the new setlist
-            let songs = client.get_setlist_songs().await;
-            *RIG_SETLIST_SONGS.write() = songs;
-        }
-        RigEvent::SongChanged { song_index } => {
-            tracing::debug!("RigEvent: song changed to index {}", song_index);
+        RigControlEvent::SongChanged { song_index } => {
+            tracing::info!("✓ Song changed to index {}", song_index);
             *RIG_SONG_INDEX.write() = song_index;
             // Refetch song info
             if let Some(song) = client.get_current_song().await {
+                tracing::info!("  → Now playing: '{}'", song.name);
                 *RIG_CURRENT_SONG.write() = Some(song);
             }
         }
-        RigEvent::SceneChanged {
-            song_index,
-            scene_index,
-        } => {
-            tracing::debug!(
-                "RigEvent: scene changed to song {} scene {}",
-                song_index,
-                scene_index
-            );
-            *RIG_SONG_INDEX.write() = song_index;
+        RigControlEvent::SceneIndexChanged { scene_index } => {
+            tracing::info!("✓ Scene changed to index {}", scene_index);
             *RIG_SCENE_INDEX.write() = scene_index;
-            // Refetch scene and preset info
+            // Refetch scene info
             if let Some(scene) = client.get_current_scene().await {
-                tracing::debug!("RigEvent: updated scene to '{}'", scene.name);
+                tracing::info!("  → Scene: '{}'", scene.name);
                 *RIG_CURRENT_SCENE.write() = Some(scene);
             }
             if let Some(preset) = client.get_current_preset().await {
-                tracing::debug!("RigEvent: updated preset to '{}'", preset.name);
+                tracing::debug!("  → Preset refreshed: '{}'", preset.name);
                 *RIG_CURRENT_PRESET.write() = Some(preset);
             }
         }
-        RigEvent::PreloadCompleted { preset_id } => {
-            tracing::debug!("RigEvent: preset {:?} preloaded", preset_id);
-            let mut preloaded = RIG_PRELOADED_PRESETS.write();
-            if !preloaded.contains(&preset_id) {
-                preloaded.push(preset_id);
-            }
+        RigControlEvent::PreloadCompleted { handle: _ } => {
+            tracing::debug!("RigControlEvent: preload completed");
+            // TODO: Track preloaded presets
         }
-        RigEvent::ParameterChanged {
-            block_id,
-            param_index,
-            value,
-        } => {
-            tracing::trace!(
-                "RigEvent: parameter changed block={:?} param={} value={}",
-                block_id,
-                param_index,
-                value
-            );
-            // Parameter changes are typically handled by parameter-specific subscriptions
-        }
-        RigEvent::BlockChanged { block_id } => {
-            tracing::debug!("RigEvent: block {:?} changed", block_id);
-            // Refetch blocks
-            let blocks = client.get_global_blocks().await;
-            *RIG_GLOBAL_BLOCKS.write() = blocks;
-        }
-        RigEvent::SectionChanged { section_id } => {
-            tracing::debug!("RigEvent: section {:?} changed", section_id);
-            // Refetch sections
-            let sections = client.get_sections().await;
-            *RIG_SECTIONS.write() = sections;
-        }
-        RigEvent::LayerChanged {
-            section_id,
-            layer_index,
-        } => {
+        RigControlEvent::TransitionStarted { preset_id, scene_index } => {
             tracing::debug!(
-                "RigEvent: layer {} in section {:?} changed",
-                layer_index,
-                section_id
-            );
-            // Would update layer state here
-        }
-        RigEvent::TransitionStarted {
-            from_preset,
-            to_preset,
-        } => {
-            tracing::debug!(
-                "RigEvent: transition started from {:?} to {:?}",
-                from_preset,
-                to_preset
+                "RigControlEvent: transition started to preset {:?} scene {}",
+                preset_id,
+                scene_index
             );
             *RIG_LOADING.write() = true;
         }
-        RigEvent::TransitionCompleted => {
-            tracing::debug!("RigEvent: transition completed");
+        RigControlEvent::TransitionCompleted { result: _ } => {
+            tracing::debug!("RigControlEvent: transition completed");
             *RIG_LOADING.write() = false;
         }
+        // Ignore engine-level events for now
+        _ => {}
     }
 }
 

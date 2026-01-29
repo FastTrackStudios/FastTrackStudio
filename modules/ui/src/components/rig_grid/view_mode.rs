@@ -4,6 +4,47 @@
 //! override that forces all modules to the same mode, or let each module
 //! remember its preferred view mode.
 
+/// Page-level view mode for the guitar rig interface.
+///
+/// Determines which sidebars are shown and how the layout is organized.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum RigViewMode {
+    /// Preset browsing mode.
+    ///
+    /// - Left: Presets (full height)
+    /// - Right: Hidden
+    Preset,
+
+    /// Profile browsing mode.
+    ///
+    /// - Left: Presets (full height)
+    /// - Right: Profiles (full height)
+    Profile,
+
+    /// Song/performance mode (default).
+    ///
+    /// - Left: Split view (Presets 60%, Profiles 40%)
+    /// - Right: Songs and Scenes
+    #[default]
+    Song,
+}
+
+impl RigViewMode {
+    /// Get the display name for this view mode.
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Preset => "Presets",
+            Self::Profile => "Profiles",
+            Self::Song => "Songs",
+        }
+    }
+
+    /// Get all view modes in display order.
+    pub const fn all() -> &'static [RigViewMode] {
+        &[RigViewMode::Preset, RigViewMode::Profile, RigViewMode::Song]
+    }
+}
+
 /// View mode for displaying the rig.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ModuleViewMode {

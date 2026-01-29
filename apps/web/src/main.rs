@@ -18,10 +18,10 @@ use lucide_dioxus::{
 // Setlist components
 use std::sync::Arc;
 use fts::setlist::{LocalSetlistClient, MockSetlist};
-use fts::rig::{LocalRigClient, MockRig};
+use rig_control::{LocalRigControlClient, MockRigControlService};
 use ui::{
-    GuitarRigGrid, GuitarRigLeftSidebar, GuitarRigRightSidebar, GuitarRigTopBar,
-    ModuleBrowserModal, ModuleViewMode, NodeCanvas, NodeGraph, PerformanceView, RigControlView,
+    GuitarRigGrid, GuitarRigLeftSidebar, GuitarRigRightSidebar, GuitarRigProfileSidebar, GuitarRigTopBar,
+    ModuleBrowserModal, ModuleViewMode, RigViewMode, NodeCanvas, NodeGraph, PerformanceView, RigControlView,
     RigServiceProvider, SetlistServiceProvider, SignalFlowGrid,
 };
 
@@ -2455,10 +2455,10 @@ fn ControlSetlist() -> Element {
 /// - Module browser modal
 #[component]
 fn ControlRigGuitar() -> Element {
-    // Create mock rig client for demo
+    // Create mock rig control client with default guitar rig data
     let client = use_hook(|| {
-        let service = Arc::new(MockRig::with_sample_guitar_data());
-        LocalRigClient::new(service)
+        let service = Arc::new(MockRigControlService::with_guitar_defaults());
+        LocalRigControlClient::new(service)
     });
 
     rsx! {
@@ -2480,7 +2480,8 @@ fn GuitarRigPageContent() -> Element {
     // Local UI state
     let mut sidebar_open = use_signal(|| true);
     let mut module_browser_open = use_signal(|| false);
-    let mut view_mode = use_signal(ModuleViewMode::default);
+    let mut module_view_mode = use_signal(ModuleViewMode::default);
+    let mut rig_view_mode = use_signal(RigViewMode::default);
 
     // Node graph state
     let mut node_graph = use_signal(NodeGraph::sample_guitar_rig);
@@ -2492,8 +2493,10 @@ fn GuitarRigPageContent() -> Element {
                 sidebar_open: sidebar_open(),
                 on_toggle_sidebar: move |_| sidebar_open.set(!sidebar_open()),
                 on_open_module_browser: move |_| module_browser_open.set(true),
-                view_mode: view_mode(),
-                on_view_mode_change: move |m| view_mode.set(m),
+                module_view_mode: module_view_mode(),
+                on_module_view_mode_change: move |m| module_view_mode.set(m),
+                rig_view_mode: rig_view_mode(),
+                on_rig_view_mode_change: move |m| rig_view_mode.set(m),
             }
 
             // Main content area
@@ -2501,11 +2504,11 @@ fn GuitarRigPageContent() -> Element {
                 // Left sidebar (conditional)
                 GuitarRigLeftSidebar {
                     is_open: sidebar_open(),
+                    rig_view_mode: rig_view_mode(),
                     on_preset_select: actions.load_preset.clone(),
-                    on_snapshot_select: Some(actions.load_preset_with_snapshot.clone()),
-                    on_profile_select: Callback::new(move |profile_id| {
-                        tracing::info!("Profile selected: {profile_id}");
-                    }),
+                    on_preset_scene_select: Some(actions.load_preset_scene.clone()),
+                    on_profile_select: actions.load_profile.clone(),
+                    on_profile_scene_select: Some(actions.load_profile_scene.clone()),
                 }
 
                 // Center: Node canvas with pan/zoom
@@ -2522,15 +2525,26 @@ fn GuitarRigPageContent() -> Element {
                     }
                 }
 
-                // Right sidebar
-                GuitarRigRightSidebar {
-                    on_scene_click: actions.go_to_scene.clone(),
-                    on_song_click: actions.go_to_song.clone(),
-                    on_prev_scene: actions.prev_scene.clone(),
-                    on_next_scene: actions.next_scene.clone(),
-                    on_prev_song: actions.prev_song.clone(),
-                    on_next_song: actions.next_song.clone(),
-                    on_setlist_change: actions.load_setlist.clone(),
+                // Right sidebar - conditional based on rig view mode
+                match rig_view_mode() {
+                    RigViewMode::Song => rsx! {
+                        GuitarRigRightSidebar {
+                            on_scene_click: actions.go_to_scene.clone(),
+                            on_song_click: actions.go_to_song.clone(),
+                            on_prev_scene: actions.prev_scene.clone(),
+                            on_next_scene: actions.next_scene.clone(),
+                            on_prev_song: actions.prev_song.clone(),
+                            on_next_song: actions.next_song.clone(),
+                            on_setlist_change: actions.load_setlist.clone(),
+                        }
+                    },
+                    RigViewMode::Profile => rsx! {
+                        GuitarRigProfileSidebar {
+                            on_profile_select: actions.load_profile.clone(),
+                            on_profile_scene_select: Some(actions.load_profile_scene.clone()),
+                        }
+                    },
+                    RigViewMode::Preset => rsx! {},
                 }
             }
 

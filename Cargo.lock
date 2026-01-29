@@ -11469,6 +11469,7 @@ dependencies = [
  "roam",
  "tokio",
  "uuid 1.19.0",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

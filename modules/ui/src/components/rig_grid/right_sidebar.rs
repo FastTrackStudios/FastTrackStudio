@@ -5,11 +5,11 @@
 //! - Bottom panel: Songs list with setlist dropdown
 
 use dioxus::prelude::*;
-use fts::rig::service::SongInfo;
 use fts::rig::{
     RIG_AVAILABLE_SETLISTS, RIG_CURRENT_SETLIST, RIG_CURRENT_SONG, RIG_SCENE_INDEX,
     RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
+use rig_control::SongInfo;
 use uuid::Uuid;
 
 /// Props for the guitar rig right sidebar.
@@ -259,66 +259,39 @@ struct SetlistDropdownProps {
 }
 
 /// Dropdown for selecting a setlist.
+///
+/// TODO: Currently display-only since rig-control doesn't have setlist IDs yet.
+/// Setlists are just collections of songs, and there's currently only one ("Main Setlist").
 #[component]
 fn SetlistDropdown(props: SetlistDropdownProps) -> Element {
     let current_setlist = RIG_CURRENT_SETLIST.read();
-    let available_setlists = RIG_AVAILABLE_SETLISTS.read();
-    let mut is_open = use_signal(|| false);
+    let _available_setlists = RIG_AVAILABLE_SETLISTS.read();
+    let _is_open = use_signal(|| false);
 
     let current_name = current_setlist
         .as_ref()
         .map(|s| s.name.clone())
         .unwrap_or_else(|| "No Setlist".to_string());
 
+    let song_count = current_setlist
+        .as_ref()
+        .map(|s| s.song_count)
+        .unwrap_or(0);
+
     rsx! {
         div { class: "relative flex-1",
-            // Dropdown button
-            button {
+            // Display current setlist (non-interactive for now)
+            div {
                 class: "w-full flex items-center justify-between px-2 py-1 text-xs font-medium \
-                        bg-zinc-800 border border-zinc-700 rounded hover:bg-zinc-700 transition-colors text-zinc-300",
-                onclick: move |_| is_open.set(!is_open()),
+                        bg-zinc-800 border border-zinc-700 rounded text-zinc-300",
                 span { class: "truncate", "{current_name}" }
-                span { class: "ml-1 text-zinc-500",
-                    if *is_open.read() { "▲" } else { "▼" }
+                span { class: "ml-2 text-zinc-500 text-[10px]",
+                    {format!("{} songs", song_count)}
                 }
             }
 
-            // Dropdown menu
-            if *is_open.read() {
-                div {
-                    class: "absolute top-full left-0 right-0 mt-1 bg-zinc-800 border border-zinc-700 \
-                            rounded shadow-lg z-50 max-h-48 overflow-y-auto",
-                    for setlist in available_setlists.iter() {
-                        {
-                            let setlist_id = setlist.id;
-                            let setlist_name = setlist.name.clone();
-                            let song_count = setlist.song_count;
-                            let is_current = current_setlist.as_ref().map(|c| c.id == setlist_id).unwrap_or(false);
-                            let on_select = props.on_select.clone();
-                            let mut is_open = is_open.clone();
-
-                            rsx! {
-                                button {
-                                    key: "{setlist_id}",
-                                    class: if is_current {
-                                        "w-full px-3 py-2 text-left text-xs hover:bg-zinc-700 \
-                                         flex items-center justify-between bg-green-500/10 text-zinc-200"
-                                    } else {
-                                        "w-full px-3 py-2 text-left text-xs hover:bg-zinc-700 \
-                                         flex items-center justify-between text-zinc-300"
-                                    },
-                                    onclick: move |_| {
-                                        on_select.call(setlist_id);
-                                        is_open.set(false);
-                                    },
-                                    span { class: "font-medium truncate", "{setlist_name}" }
-                                    span { class: "text-zinc-500 ml-2", "{song_count} songs" }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            // TODO: Add multi-setlist support when rig-control has setlist IDs
+            // For now, there's only one setlist so selection isn't needed
         }
     }
 }
