@@ -817,7 +817,7 @@ mod tests {
         let weight = compute_measure_weight(&measurements, 4, 0);
         assert!((weight - 1.0).abs() < 0.01); // 4/4 = 1.0 base weight
 
-        // Measure with triplets gets a small bonus (0.12 per triplet)
+        // Measure with triplets gets a small bonus (0.08 per triplet)
         let measurements_triplet = MeasureMeasurements {
             chord_widths: vec![50.0, 50.0],
             min_width: 100.0,
@@ -825,8 +825,8 @@ mod tests {
             chord_layouts: Vec::new(),
         };
         let weight_with_triplets = compute_measure_weight(&measurements_triplet, 4, 3);
-        // 1.0 base + 3 * 0.12 = 1.36
-        assert!((weight_with_triplets - 1.36).abs() < 0.01);
+        // 1.0 base + 3 * 0.08 = 1.24
+        assert!((weight_with_triplets - 1.24).abs() < 0.01);
         assert!(weight_with_triplets > weight); // Slightly more than no triplets
 
         // 6/8 measure with 6 segments

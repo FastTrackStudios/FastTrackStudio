@@ -65,6 +65,7 @@ impl PluginId {
     pub fn js(uid: impl Into<String>, display_name: impl Into<String>) -> Self {
         Self::new(PluginFormat::Js, uid, display_name)
     }
+
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

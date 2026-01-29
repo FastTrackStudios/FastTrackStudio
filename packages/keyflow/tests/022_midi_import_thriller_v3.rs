@@ -54,7 +54,7 @@ VS
 
 CH
 >Cm/Eb / 'Eb /// 'Eb / 'F/C / 'Cm // 'F/A 'Fm9
->Cm/Eb / 'Eb /// 'Eb / 'F/C / 'Cm // 'F/A r8t >Ab9_8t r8t r4t >'F9_8t r4 >Fm/Ab
+>Cm/Eb / 'Eb /// 'Eb / 'F/C / 'Cm // 'F/A r8t >Ab9_8t r8t r4t >'F9_8t r4 >Fm/Ab /
 
 INST 4
 Cm . F6 / Abdim7 / 'Csus2 / 'C5 //

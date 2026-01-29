@@ -31,6 +31,7 @@ pub fn get_section_theme(section_type: &SectionType) -> RehearsalMarkStyle {
         SectionType::Bridge => rehearsal_themes::bridge(),
         SectionType::Outro => rehearsal_themes::outro(),
         SectionType::Instrumental => rehearsal_themes::instrumental(),
+        SectionType::Solo => rehearsal_themes::solo(),
         SectionType::Interlude => rehearsal_themes::interlude(),
 
         // Pre/Post sections - lighter versions of their parent section
@@ -126,12 +127,12 @@ mod tests {
 
     #[test]
     fn test_get_section_theme_intro_outro() {
-        // Intro and Outro should use blue theme
+        // Intro uses Orange 400, Outro uses Amber 400 (distinct warm tones)
         let intro_theme = get_section_theme(&SectionType::Intro);
         let outro_theme = get_section_theme(&SectionType::Outro);
 
-        // Both should be blue (same style)
-        assert_eq!(intro_theme.background_color, outro_theme.background_color);
+        // They should have different colors (Orange 400 vs Amber 400)
+        assert_ne!(intro_theme.background_color, outro_theme.background_color);
     }
 
     #[test]
@@ -145,18 +146,20 @@ mod tests {
 
     #[test]
     fn test_get_section_theme_pre_post_chorus() {
-        // Pre(Chorus) and Post(Chorus) should use purple like Chorus
+        // Pre(Chorus) and Post(Chorus) should use Blue 200 (lighter variant of Chorus Blue 500)
         let pre_chorus_theme = get_section_theme(&SectionType::Pre(Box::new(SectionType::Chorus)));
         let post_chorus_theme =
             get_section_theme(&SectionType::Post(Box::new(SectionType::Chorus)));
         let chorus_theme = get_section_theme(&SectionType::Chorus);
 
+        // Pre/Post share the same lighter color
         assert_eq!(
             pre_chorus_theme.background_color,
-            chorus_theme.background_color
+            post_chorus_theme.background_color
         );
-        assert_eq!(
-            post_chorus_theme.background_color,
+        // But differ from full Chorus (Blue 200 vs Blue 500)
+        assert_ne!(
+            pre_chorus_theme.background_color,
             chorus_theme.background_color
         );
     }

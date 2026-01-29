@@ -626,6 +626,17 @@ pub mod themes {
         }
     }
 
+    /// Solo section - Rose 400 (vibrant, standout)
+    #[must_use]
+    pub fn solo() -> RehearsalMarkStyle {
+        RehearsalMarkStyle {
+            background_color: tailwind::ROSE_400,
+            text_color: Color::WHITE,
+            border_color: None,
+            ..Default::default()
+        }
+    }
+
     /// Interlude section - Yellow 400 (bright pause/break)
     #[must_use]
     pub fn interlude() -> RehearsalMarkStyle {

@@ -1422,74 +1422,72 @@ mod tests {
 
     #[test]
     fn test_auto_stemless_single_quarter() {
-        // Single quarter should NOT be stemless (needs 2+)
+        // Single plain quarter is stemless (all plain quarters outside tuplets are stemless)
         let builder = MeasureBuilder::new()
             .time_signature(4, 4)
             .rhythmic()
             .rhythm(vec![Duration::Quarter]);
 
         let flags = builder.compute_auto_stemless();
-        assert_eq!(flags, vec![false]);
+        assert_eq!(flags, vec![true]);
     }
 
     #[test]
     fn test_auto_stemless_mixed_eighths_quarters() {
         // 8th 8th Q Q Q starting on beat 1:
-        // - 8th 8th (beat 1) = not quarters
-        // - Q on beat 2 (before strong beat 3) = alone = has stem
-        // - Q Q on beats 3-4 = consecutive after beat 3 = stemless
+        // - 8th 8th = not quarters, so stemmed
+        // - All plain quarters = stemless (regardless of position)
         let builder = MeasureBuilder::new()
             .time_signature(4, 4)
             .rhythmic()
             .rhythm(vec![
                 Duration::Eighth,  // beat 1
                 Duration::Eighth,  // beat 1.5
-                Duration::Quarter, // beat 2 (alone before beat 3)
+                Duration::Quarter, // beat 2
                 Duration::Quarter, // beat 3
                 Duration::Quarter, // beat 4
             ]);
 
         let flags = builder.compute_auto_stemless();
-        // Beat 2 quarter is alone before beat 3 = false
-        // Beat 3-4 quarters are consecutive = true
-        assert_eq!(flags, vec![false, false, false, true, true]);
+        // Eighths are stemmed, all plain quarters are stemless
+        assert_eq!(flags, vec![false, false, true, true, true]);
     }
 
     #[test]
     fn test_auto_stemless_quarter_breaks_chain() {
-        // Q 8th Q Q → first Q alone (false), 8th false, last 2 Q consecutive (true)
+        // Q 8th Q Q → all plain quarters are stemless, eighth is stemmed
         let builder = MeasureBuilder::new()
             .time_signature(4, 4)
             .rhythmic()
             .rhythm(vec![
-                Duration::Quarter, // beat 1 (alone)
-                Duration::Eighth,  // beat 2 (breaks chain)
-                Duration::Quarter, // beat 2.5 (before beat 3)
+                Duration::Quarter, // beat 1
+                Duration::Eighth,  // beat 2 (not a quarter)
+                Duration::Quarter, // beat 2.5
                 Duration::Quarter, // beat 3
             ]);
 
         let flags = builder.compute_auto_stemless();
-        // Q on beat 1 alone, Q before beat 3 alone, Q on beat 3 alone
-        // Actually the last two are at beats 2.5 and 3, crossing beat 3
-        assert_eq!(flags, vec![false, false, false, false]);
+        // All plain quarters are stemless, eighth is stemmed
+        assert_eq!(flags, vec![true, false, true, true]);
     }
 
     #[test]
     fn test_auto_stemless_half_note_breaks_chain() {
-        // Half + Q + Q → half on beats 1-2, Q Q on beats 3-4
+        // Half + Q + Q → half notes are also stemless (long duration), plain quarters are stemless
         let builder = MeasureBuilder::new()
             .time_signature(4, 4)
             .rhythmic()
             .rhythm(vec![Duration::Half, Duration::Quarter, Duration::Quarter]);
 
         let flags = builder.compute_auto_stemless();
-        // Half is not a quarter (false), Q Q on beats 3-4 are consecutive = true
-        assert_eq!(flags, vec![false, true, true]);
+        // Half notes and plain quarters are all stemless
+        assert_eq!(flags, vec![true, true, true]);
     }
 
     #[test]
     fn test_auto_stemless_dotted_quarter_not_plain_quarter() {
-        // Dotted quarters are NOT plain quarters, so they don't form stemless groups
+        // Dotted quarters are NOT plain quarters, so they keep stems
+        // Plain quarter is stemless regardless of context
         let builder = MeasureBuilder::new()
             .time_signature(4, 4)
             .rhythmic()
@@ -1500,8 +1498,8 @@ mod tests {
             ]);
 
         let flags = builder.compute_auto_stemless();
-        // Dotted quarters are NOT plain quarters, single plain quarter = false
-        assert_eq!(flags, vec![false, false, false]);
+        // Dotted quarters are NOT plain quarters = stemmed, plain quarter = stemless
+        assert_eq!(flags, vec![false, false, true]);
     }
 
     #[test]
@@ -1552,10 +1550,7 @@ mod tests {
 
     #[test]
     fn test_auto_stemless_beat_2_3_4_pattern() {
-        // Specific case from user: 8th 8th Q Q Q starting beat 1
-        // 8th on beat 1, 8th on beat 1.5, Q on beat 2, Q on beat 3, Q on beat 4
-        // Q on beat 2 is alone (before strong beat 3) = stem
-        // Q on beats 3-4 are consecutive = stemless
+        // 8th 8th Q Q Q: eighths are stemmed, all plain quarters are stemless
         let builder = MeasureBuilder::new()
             .time_signature(4, 4)
             .rhythmic()
@@ -1568,8 +1563,8 @@ mod tests {
             ]);
 
         let flags = builder.compute_auto_stemless();
-        // 8ths are not quarters (false), beat 2 Q alone (false), beats 3-4 Q consecutive (true)
-        assert_eq!(flags, vec![false, false, false, true, true]);
+        // Eighths are stemmed, all plain quarters are stemless
+        assert_eq!(flags, vec![false, false, true, true, true]);
     }
 
     #[test]
@@ -1596,7 +1591,7 @@ mod tests {
 
     #[test]
     fn test_auto_stemless_syncopation_no_quarters() {
-        // Complex syncopation with no plain quarters
+        // Complex syncopation with no plain quarters but has a half note
         let builder = MeasureBuilder::new()
             .time_signature(4, 4)
             .rhythmic()
@@ -1608,8 +1603,9 @@ mod tests {
             ]);
 
         let flags = builder.compute_auto_stemless();
-        // No plain quarters = no stemless notes
-        assert_eq!(flags, vec![false, false, false, false]);
+        // Eighth = stemmed, DottedQuarter = stemmed (not plain quarter),
+        // Eighth = stemmed, Half = stemless (long duration)
+        assert_eq!(flags, vec![false, false, false, true]);
     }
 
     #[test]

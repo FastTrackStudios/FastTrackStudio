@@ -9,7 +9,7 @@ use fts::setlist::SetlistApi;
 use fts::setlist::infra::traits::SetlistBuilder;
 use reaper_high::{Project as ReaperProject, Reaper};
 use std::sync::{Arc, Mutex};
-use tracing::info;
+use tracing::{debug, info};
 
 /// Service for managing setlist state
 #[derive(Debug)]
@@ -90,7 +90,7 @@ impl SetlistService {
         let update_count = UPDATE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if update_count % 1000 == 0 && update_count > 0 {
             if let Ok(transport) = transport_result {
-                info!(
+                debug!(
                     update_count,
                     position_seconds = transport_position,
                     is_playing = matches!(
@@ -159,7 +159,7 @@ impl SetlistService {
                                             })
                                             .unwrap_or_else(|| "N/A".to_string());
 
-                                        info!(
+                                        debug!(
                                             slide_index = adjusted_index,
                                             transport_time = transport_position,
                                             line_start_time = line_start_time,
@@ -238,7 +238,7 @@ impl SetlistService {
         if let Some(progress) = song_progress {
             let mut last = LAST_SONG_PROGRESS.lock().unwrap();
             if *last != Some(progress) {
-                info!(
+                debug!(
                     song_progress = progress,
                     transport_position = transport_position,
                     active_song_index = ?active_song_idx,
@@ -249,7 +249,7 @@ impl SetlistService {
         } else {
             let mut last = LAST_SONG_PROGRESS.lock().unwrap();
             if last.is_some() {
-                info!(
+                debug!(
                     transport_position = transport_position,
                     active_song_index = ?active_song_idx,
                     "song_progress is None (no active song)"
@@ -287,7 +287,7 @@ impl SetlistService {
         if let Some(progress) = section_progress {
             let mut last = LAST_SECTION_PROGRESS.lock().unwrap();
             if *last != Some(progress) {
-                info!(
+                debug!(
                     section_progress = progress,
                     transport_position = transport_position,
                     active_song_index = ?active_song_idx,
@@ -299,7 +299,7 @@ impl SetlistService {
         } else {
             let mut last = LAST_SECTION_PROGRESS.lock().unwrap();
             if last.is_some() {
-                info!(
+                debug!(
                     transport_position = transport_position,
                     active_song_index = ?active_song_idx,
                     active_section_index = ?active_section_idx,
@@ -331,7 +331,7 @@ impl SetlistService {
         // Log when active slide changes
         if prev_active_slide != new_active_slide {
             if let Some(slide_idx) = new_active_slide {
-                info!(
+                debug!(
                     active_slide_index = slide_idx,
                     previous_slide_index = ?prev_active_slide,
                     transport_position = transport_position,
@@ -339,7 +339,7 @@ impl SetlistService {
                 );
             } else if prev_active_slide.is_some() {
                 // Slide became None (e.g., moved to section without lyrics)
-                info!(
+                debug!(
                     previous_slide_index = ?prev_active_slide,
                     transport_position = transport_position,
                     "Active slide cleared (no active slide)"

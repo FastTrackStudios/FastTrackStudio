@@ -287,69 +287,101 @@ fn extract_from_explicit(
                     "[explicit-spillback] spillback: '{}' base={:?} level={}",
                     spillback.chord_symbol, spillback.push_base, spillback.push_level
                 );
-                if spillback.push_base == PushPullBase::Triplet && spillback.push_level == 1 {
-                    // Check if the measure has room for the spillback
-                    // We need to carve out a quarter note's worth (480 ticks) from the end
-                    // and split it into triplet quarter + triplet eighth
-                    if let Some(last_entry) = result.entries.last() {
-                        let last_ticks = last_entry.duration().ticks();
-                        const QUARTER_TICKS: i32 = 480;
 
-                        tracing::debug!(
-                            "[explicit-spillback] last_ticks={} QUARTER_TICKS={}",
-                            last_ticks, QUARTER_TICKS
-                        );
+                // Check if the measure has room for the spillback
+                // We need to carve out a quarter note's worth (480 ticks) from the end
+                // and split it into the appropriate subdivision pair
+                if let Some(last_entry) = result.entries.last() {
+                    let last_ticks = last_entry.duration().ticks();
+                    const QUARTER_TICKS: i32 = 480;
 
-                        // We can handle any duration >= quarter note
-                        if last_ticks >= QUARTER_TICKS {
-                            tracing::debug!("[explicit-spillback] Expanding rhythm for spillback '{}'", spillback.chord_symbol);
-                            let was_rest = matches!(last_entry, RhythmEntry::Rest(_));
-                            let remaining_ticks = last_ticks - QUARTER_TICKS;
+                    tracing::debug!(
+                        "[explicit-spillback] last_ticks={} QUARTER_TICKS={}",
+                        last_ticks, QUARTER_TICKS
+                    );
 
-                            // Remove the last entry
-                            result.entries.pop();
+                    // We can handle any duration >= quarter note
+                    if last_ticks >= QUARTER_TICKS {
+                        tracing::debug!("[explicit-spillback] Expanding rhythm for spillback '{}'", spillback.chord_symbol);
+                        let was_rest = matches!(last_entry, RhythmEntry::Rest(_));
+                        let remaining_ticks = last_ticks - QUARTER_TICKS;
 
-                            // If there's remaining time before the triplet, add it back as quarters
-                            // (for proper beat-based segment positioning)
-                            let num_remaining_quarters = remaining_ticks / QUARTER_TICKS;
-                            for _ in 0..num_remaining_quarters {
-                                if was_rest {
-                                    result.entries.push(RhythmEntry::Rest(Duration::Quarter));
-                                } else {
-                                    result.entries.push(RhythmEntry::Note(Duration::Quarter));
-                                }
-                            }
+                        // Remove the last entry
+                        result.entries.pop();
 
-                            // Create triplet quarter (rest or note) + triplet eighth (for spillback)
-                            let triplet_quarter = Duration::triplet(DurationKind::Quarter);
-                            let triplet_eighth = Duration::triplet(DurationKind::Eighth);
-
-                            let start_idx = result.entries.len();
-
+                        // If there's remaining time before the split, add it back as quarters
+                        let num_remaining_quarters = remaining_ticks / QUARTER_TICKS;
+                        for _ in 0..num_remaining_quarters {
                             if was_rest {
-                                result.entries.push(RhythmEntry::Rest(triplet_quarter));
+                                result.entries.push(RhythmEntry::Rest(Duration::Quarter));
                             } else {
-                                result.entries.push(RhythmEntry::Note(triplet_quarter));
+                                result.entries.push(RhythmEntry::Note(Duration::Quarter));
                             }
-                            // Spillback chord position (this is where the pushed chord renders)
-                            result.entries.push(RhythmEntry::Note(triplet_eighth));
+                        }
 
-                            // Add spillback position mapping
-                            let spillback_segment_idx = result.entries.len() - 1;
-                            result.spillback_positions.push((
-                                spillback_segment_idx,
-                                spillback.chord_symbol.clone(),
-                            ));
+                        let start_idx = result.entries.len();
+                        let is_triplet_group = match (spillback.push_base, spillback.push_level) {
+                            // Triplet push: [TripletQuarter, TripletEighth]
+                            (PushPullBase::Triplet, 1) => {
+                                let main_dur = Duration::triplet(DurationKind::Quarter);
+                                let push_dur = Duration::triplet(DurationKind::Eighth);
+                                if was_rest {
+                                    result.entries.push(RhythmEntry::Rest(main_dur));
+                                } else {
+                                    result.entries.push(RhythmEntry::Note(main_dur));
+                                }
+                                result.entries.push(RhythmEntry::Note(push_dur));
+                                true
+                            }
+                            // Straight eighth push: [Eighth, Eighth]
+                            (PushPullBase::Standard, 1) => {
+                                if was_rest {
+                                    result.entries.push(RhythmEntry::Rest(Duration::Eighth));
+                                } else {
+                                    result.entries.push(RhythmEntry::Note(Duration::Eighth));
+                                }
+                                result.entries.push(RhythmEntry::Note(Duration::Eighth));
+                                false
+                            }
+                            // Sixteenth push: [DottedEighth, Sixteenth]
+                            (PushPullBase::Standard, 2) => {
+                                if was_rest {
+                                    result.entries.push(RhythmEntry::Rest(Duration::DottedEighth));
+                                } else {
+                                    result.entries.push(RhythmEntry::Note(Duration::DottedEighth));
+                                }
+                                result.entries.push(RhythmEntry::Note(Duration::Sixteenth));
+                                false
+                            }
+                            // Fallback: straight eighth split
+                            _ => {
+                                if was_rest {
+                                    result.entries.push(RhythmEntry::Rest(Duration::Eighth));
+                                } else {
+                                    result.entries.push(RhythmEntry::Note(Duration::Eighth));
+                                }
+                                result.entries.push(RhythmEntry::Note(Duration::Eighth));
+                                false
+                            }
+                        };
 
-                            // Add triplet spec for the new group
+                        // Add spillback position mapping
+                        let spillback_segment_idx = result.entries.len() - 1;
+                        result.spillback_positions.push((
+                            spillback_segment_idx,
+                            spillback.chord_symbol.clone(),
+                        ));
+
+                        // Add triplet spec only for triplet groups
+                        if is_triplet_group {
                             result
                                 .tuplet_specs
                                 .push(TupletSpec::triplet(start_idx, result.entries.len()));
-
-                            // Update total ticks (should remain the same)
-                            result.total_ticks =
-                                result.entries.iter().map(|e| e.duration().ticks()).sum();
                         }
+
+                        // Update total ticks (should remain the same)
+                        result.total_ticks =
+                            result.entries.iter().map(|e| e.duration().ticks()).sum();
                     }
                 }
             }
@@ -388,11 +420,24 @@ fn extract_from_melody(data: &MeasureMelodyData) -> RhythmBuildResult {
     result
 }
 
+/// Info about a push that affects a particular beat.
+#[derive(Debug, Clone, Copy)]
+struct BeatPushInfo {
+    /// The push subdivision base (Standard, Triplet, etc.)
+    base: PushPullBase,
+    /// The push level (1 = eighth, 2 = sixteenth)
+    level: u8,
+    /// Index of the pushed chord within the measure (None for spillbacks)
+    chord_idx: Option<usize>,
+}
+
 /// Extract rhythm from slash/chord notation with push/pull support.
 ///
 /// This handles:
 /// - Basic slash notation (one quarter per chord)
 /// - Triplet pushes (chord anticipates by triplet eighth)
+/// - Eighth note pushes (chord anticipates by straight eighth)
+/// - Sixteenth note pushes (chord anticipates by sixteenth)
 /// - Spillback chords (pushed chords from next measure)
 fn extract_from_slash(
     chords: &[crate::ChordInstance],
@@ -409,27 +454,33 @@ fn extract_from_slash(
         .count();
     let num_beats = non_pushed_count.max(config.time_signature.0 as usize);
 
-    // Build a list of beats, tracking which ones have triplet pushes
-    // (has_triplet, pushed_chord_idx)
-    let mut beats_with_triplets: Vec<(bool, Option<usize>)> = vec![(false, None); num_beats];
+    // Build a list of beats, tracking which ones have pushes
+    let mut beats_with_pushes: Vec<Option<BeatPushInfo>> = vec![None; num_beats];
 
-    // Calculate natural beat positions and mark triplet pushes
+    // Calculate natural beat positions and mark pushes
     let mut cumulative_beats = 0usize;
     for (chord_idx, chord) in chords.iter().enumerate() {
-        let is_triplet_push = chord.push_pull.as_ref().is_some_and(|(is_push, amount)| {
-            *is_push && amount.base == PushPullBase::Triplet && amount.level == 1
-        });
+        let is_push = chord
+            .push_pull
+            .as_ref()
+            .is_some_and(|(is_push, _)| *is_push);
 
         let chord_duration_beats = match &chord.rhythm {
             ChordRhythm::Slashes { count, .. } => *count as usize,
             _ => 1,
         };
 
-        // Triplet push affects the PREVIOUS beat (where the anticipation lands)
-        if is_triplet_push && chord_idx > 0 {
-            let target_beat = cumulative_beats.saturating_sub(1);
-            if target_beat < num_beats {
-                beats_with_triplets[target_beat] = (true, Some(chord_idx));
+        // Push affects the PREVIOUS beat (where the anticipation lands)
+        if is_push && chord_idx > 0 {
+            if let Some((_, amount)) = &chord.push_pull {
+                let target_beat = cumulative_beats.saturating_sub(1);
+                if target_beat < num_beats && beats_with_pushes[target_beat].is_none() {
+                    beats_with_pushes[target_beat] = Some(BeatPushInfo {
+                        base: amount.base,
+                        level: amount.level,
+                        chord_idx: Some(chord_idx),
+                    });
+                }
             }
         }
 
@@ -454,54 +505,108 @@ fn extract_from_slash(
                 spillback.push_base,
                 spillback.push_level
             );
-            if spillback.push_base == PushPullBase::Triplet && spillback.push_level == 1 {
-                let target_beat = spillback.beat_position;
-                if target_beat < num_beats && !beats_with_triplets[target_beat].0 {
-                    // Mark as triplet but no internal chord (it's from next measure)
-                    beats_with_triplets[target_beat] = (true, None);
-                    tracing::debug!("[rhythm-builder] Marked beat {} as triplet from spillback", target_beat);
-                }
+            let target_beat = spillback.beat_position;
+            if target_beat < num_beats && beats_with_pushes[target_beat].is_none() {
+                beats_with_pushes[target_beat] = Some(BeatPushInfo {
+                    base: spillback.push_base,
+                    level: spillback.push_level,
+                    chord_idx: None, // spillback, not internal
+                });
             }
         }
     }
 
     // Build the rhythm array
     let mut rhythm_index = 0;
-    for (beat_idx, (has_triplet, pushed_chord_idx)) in
-        beats_with_triplets.iter().enumerate().take(num_beats)
-    {
-        if *has_triplet && config.push_alters_rhythm {
-            // Triplet beat: [TripletQuarter, TripletEighth]
-            let start_idx = rhythm_index;
-            result
-                .entries
-                .push(RhythmEntry::Note(Duration::TripletQuarter));
-            result
-                .entries
-                .push(RhythmEntry::Note(Duration::TripletEighth));
+    for (beat_idx, push_info) in beats_with_pushes.iter().enumerate().take(num_beats) {
+        if let Some(info) = push_info {
+            if config.push_alters_rhythm {
+                let start_idx = rhythm_index;
+                let is_triplet_group = match (info.base, info.level) {
+                    // Triplet push: [TripletQuarter, TripletEighth] = 480 ticks
+                    (PushPullBase::Triplet, 1) => {
+                        result
+                            .entries
+                            .push(RhythmEntry::Note(Duration::TripletQuarter));
+                        result
+                            .entries
+                            .push(RhythmEntry::Note(Duration::TripletEighth));
+                        true
+                    }
+                    // Straight eighth push: [Eighth, Eighth] = 480 ticks
+                    (PushPullBase::Standard, 1) => {
+                        result
+                            .entries
+                            .push(RhythmEntry::Note(Duration::Eighth));
+                        result
+                            .entries
+                            .push(RhythmEntry::Note(Duration::Eighth));
+                        false
+                    }
+                    // Sixteenth push: [DottedEighth, Sixteenth] = 480 ticks
+                    (PushPullBase::Standard, 2) => {
+                        result
+                            .entries
+                            .push(RhythmEntry::Note(Duration::DottedEighth));
+                        result
+                            .entries
+                            .push(RhythmEntry::Note(Duration::Sixteenth));
+                        false
+                    }
+                    // Triplet sixteenth: [TripletQuarter, TripletSixteenth]
+                    // For now, fall back to triplet eighth
+                    (PushPullBase::Triplet, 2) => {
+                        result
+                            .entries
+                            .push(RhythmEntry::Note(Duration::TripletQuarter));
+                        result
+                            .entries
+                            .push(RhythmEntry::Note(Duration::TripletEighth));
+                        true
+                    }
+                    // Other push types: fall back to straight eighth split
+                    _ => {
+                        result
+                            .entries
+                            .push(RhythmEntry::Note(Duration::Eighth));
+                        result
+                            .entries
+                            .push(RhythmEntry::Note(Duration::Eighth));
+                        false
+                    }
+                };
 
-            // Track internal push position
-            if let Some(chord_idx) = pushed_chord_idx {
-                result
-                    .internal_push_positions
-                    .push((*chord_idx, rhythm_index + 1));
-            }
-
-            // Track spillback chord position
-            if let Some(spills) = spillbacks {
-                if let Some(spillback) = spills.iter().find(|s| s.beat_position == beat_idx) {
+                // Track internal push position
+                if let Some(chord_idx) = info.chord_idx {
                     result
-                        .spillback_positions
-                        .push((rhythm_index + 1, spillback.chord_symbol.clone()));
+                        .internal_push_positions
+                        .push((chord_idx, rhythm_index + 1));
                 }
-            }
 
-            rhythm_index += 2;
-            result
-                .tuplet_specs
-                .push(TupletSpec::triplet(start_idx, rhythm_index));
+                // Track spillback chord position
+                if let Some(spills) = spillbacks {
+                    if let Some(spillback) = spills.iter().find(|s| s.beat_position == beat_idx) {
+                        result
+                            .spillback_positions
+                            .push((rhythm_index + 1, spillback.chord_symbol.clone()));
+                    }
+                }
+
+                rhythm_index += 2;
+
+                // Only add tuplet spec for triplet groups
+                if is_triplet_group {
+                    result
+                        .tuplet_specs
+                        .push(TupletSpec::triplet(start_idx, rhythm_index));
+                }
+            } else {
+                // push_alters_rhythm is false — just render a standard quarter
+                result.entries.push(RhythmEntry::Note(Duration::Quarter));
+                rhythm_index += 1;
+            }
         } else {
-            // Standard quarter note beat
+            // Standard quarter note beat (no push)
             // Check for standard (non-triplet) spillbacks
             if let Some(spills) = spillbacks {
                 if let Some(spillback) = spills
@@ -835,35 +940,36 @@ pub fn estimate_expanded_rhythm_counts(measure: &Measure, num_beats: usize) -> (
     }
 
     // For slash measures, simulate the expansion
-    let mut beats_with_triplets = vec![false; num_beats];
+    let mut beats_with_pushes = vec![false; num_beats];
     let mut cumulative_beats = 0usize;
 
     for (chord_idx, chord) in measure.chords.iter().enumerate() {
-        let is_triplet_push = chord.push_pull.as_ref().is_some_and(|(is_push, amount)| {
-            *is_push && amount.base == PushPullBase::Triplet && amount.level == 1
-        });
+        let is_push = chord
+            .push_pull
+            .as_ref()
+            .is_some_and(|(is_push, _)| *is_push);
 
         let chord_duration_beats = match &chord.rhythm {
             ChordRhythm::Slashes { count, .. } => *count as usize,
             _ => 1,
         };
 
-        if is_triplet_push && chord_idx > 0 {
+        if is_push && chord_idx > 0 {
             let target_beat = cumulative_beats.saturating_sub(1);
             if target_beat < num_beats {
-                beats_with_triplets[target_beat] = true;
+                beats_with_pushes[target_beat] = true;
             }
         }
 
         cumulative_beats += chord_duration_beats;
     }
 
-    // Count elements: regular beats = 1 element, triplet beats = 2 elements
-    let triplet_beats = beats_with_triplets.iter().filter(|&&b| b).count();
-    let regular_beats = num_beats - triplet_beats;
+    // Count elements: regular beats = 1 element, pushed beats = 2 elements
+    let pushed_beats = beats_with_pushes.iter().filter(|&&b| b).count();
+    let regular_beats = num_beats - pushed_beats;
 
-    let element_count = regular_beats + (triplet_beats * 2);
-    let triplet_element_count = triplet_beats * 2;
+    let element_count = regular_beats + (pushed_beats * 2);
+    let triplet_element_count = pushed_beats * 2; // Legacy: all pushed beats counted as "triplet"
 
     (element_count, triplet_element_count)
 }

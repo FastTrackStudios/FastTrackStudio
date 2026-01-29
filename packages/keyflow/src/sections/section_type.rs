@@ -16,6 +16,7 @@ pub enum SectionType {
     Bridge,
     Outro,
     Instrumental,
+    Solo,                   // Solo section (instrument specified via comment, e.g. Solo "Keys")
     CountIn,                // Count-in measures (rendered small, with whole rests)
     End,                    // End section (from SONGEND to =END, for ring-out/fade)
     Hits,                   // Hits section (rhythmic accents)
@@ -23,7 +24,7 @@ pub enum SectionType {
     Breakdown,              // Breakdown section
     Pre(Box<SectionType>),  // Pre-Chorus, Pre-Verse, etc.
     Post(Box<SectionType>), // Post-Chorus, Post-Verse, etc.
-    Custom(String),         // Custom section types like "SOLO Keys", etc.
+    Custom(String),         // Custom section types
 }
 
 /// Result of parsing a section marker line.
@@ -108,6 +109,7 @@ impl SectionType {
             SectionType::Bridge => "bridge".to_string(),
             SectionType::Outro => "outro".to_string(),
             SectionType::Instrumental => "instrumental".to_string(),
+            SectionType::Solo => "solo".to_string(),
             SectionType::CountIn => "count_in".to_string(),
             SectionType::End => "end".to_string(),
             SectionType::Hits => "hits".to_string(),
@@ -139,6 +141,7 @@ impl SectionType {
             SectionType::Bridge => "Bridge".to_string(),
             SectionType::Outro => "Outro".to_string(),
             SectionType::Instrumental => "Instrumental".to_string(),
+            SectionType::Solo => "Solo".to_string(),
             SectionType::CountIn => "Count-In".to_string(),
             SectionType::End => "End".to_string(),
             SectionType::Hits => "Hits".to_string(),
@@ -159,6 +162,7 @@ impl SectionType {
             SectionType::Bridge => "BR".to_string(),
             SectionType::Outro => "OUT".to_string(),
             SectionType::Instrumental => "INST".to_string(),
+            SectionType::Solo => "SOLO".to_string(),
             SectionType::CountIn => "COUNT".to_string(),
             SectionType::End => "END".to_string(),
             SectionType::Hits => "HITS".to_string(),
@@ -178,7 +182,10 @@ impl SectionType {
             | SectionType::Instrumental
             | SectionType::CountIn
             | SectionType::End => false,
-            SectionType::Hits | SectionType::Interlude | SectionType::Breakdown => false,
+            SectionType::Solo
+            | SectionType::Hits
+            | SectionType::Interlude
+            | SectionType::Breakdown => false,
             SectionType::Pre(_) | SectionType::Post(_) => false,
             SectionType::Custom(_) => false, // Custom sections don't get numbered
             _ => true,
@@ -214,6 +221,7 @@ impl SectionType {
             "intro" | "in" | "i" => return Ok(SectionType::Intro),
             "outro" | "out" | "o" => return Ok(SectionType::Outro),
             "instrumental" | "inst" | "instrument" => return Ok(SectionType::Instrumental),
+            "solo" => return Ok(SectionType::Solo),
             "count" | "countin" | "count-in" => return Ok(SectionType::CountIn),
             "hits" | "hit" => return Ok(SectionType::Hits),
             "interlude" | "inter" | "int" => return Ok(SectionType::Interlude),
@@ -306,7 +314,7 @@ impl SectionType {
         }
 
         Err(format!(
-            "Unknown section type: '{}' - supported types: verse, chorus, bridge, intro, outro, instrumental, count, hits, interlude, breakdown, pre-*, post-*",
+            "Unknown section type: '{}' - supported types: verse, chorus, bridge, intro, outro, instrumental, solo, count, hits, interlude, breakdown, pre-*, post-*",
             s
         ))
     }
@@ -406,21 +414,66 @@ impl SectionType {
             return None;
         }
 
+        // Handle Solo sections with instrument names.
+        // Supports both orderings:
+        //   "SOLO Keys"      → Solo with comment "Keys"
+        //   "SOLO Keys 8"    → Solo with comment "Keys", 8 measures
+        //   "Keys SOLO"      → Solo with comment "Keys"
+        //   "Keys SOLO 8"    → Solo with comment "Keys", 8 measures
+        //   "GUITAR SOLO"    → Solo with comment "Guitar"
+        //   "GUITAR SOLO 8"  → Solo with comment "Guitar", 8 measures
+        //   "SOLO 8"         → Solo with 8 measures (no instrument)
+        //   "SOLO"           → Solo (no instrument, no measures)
+        // Note: "SOLO \"Keys\"" is handled by the quoted comment extraction above.
+        if let Some(solo_result) = parse_solo_section(&parts, comment.clone()) {
+            return Some(solo_result);
+        }
+
         let section_str = parts[0];
 
-        // Section markers should be alone or followed by only a measure count/expression
-        // This prevents "c d g" from being parsed as a section marker
-        if parts.len() > 2 {
+        // Section markers should be alone or followed by a sub-label and/or measure count.
+        // This prevents lines like "c d g" from being parsed as a section marker.
+        //
+        // Supported patterns:
+        //   1 token:  "CH"           → section only
+        //   2 tokens: "CH 10"        → section + measure count
+        //             "CH 3A"        → section + sub-label (no measure count)
+        //   3 tokens: "CH 3A 10"     → section + sub-label + measure count
+        //             "Interlude A 8" → section + sub-label + measure count
+        if parts.len() > 3 {
             return None; // Too many tokens, not a section marker
         }
 
-        let measure_expr = if parts.len() > 1 {
-            // If there's a second token, it must be a valid expression
-            // Otherwise, this isn't a valid section marker
-            Some(MeasureExpression::parse(parts[1])?)
+        let measure_expr;
+        let sub_label_comment;
+
+        if parts.len() == 3 {
+            // Three tokens: first must be section type, second is sub-label, third is measure expr
+            if !is_sub_label(parts[1]) {
+                return None; // Second token is not a valid sub-label
+            }
+            // Third token must be a valid measure expression
+            measure_expr = Some(MeasureExpression::parse(parts[2])?);
+            sub_label_comment = Some(parts[1].to_string());
+        } else if parts.len() == 2 {
+            // Two tokens: second is either a measure expression or a sub-label
+            if let Some(expr) = MeasureExpression::parse(parts[1]) {
+                measure_expr = Some(expr);
+                sub_label_comment = None;
+            } else if is_sub_label(parts[1]) {
+                // Not a valid measure expression — treat as sub-label
+                measure_expr = None;
+                sub_label_comment = Some(parts[1].to_string());
+            } else {
+                return None; // Invalid second token
+            }
         } else {
-            None
+            measure_expr = None;
+            sub_label_comment = None;
         };
+
+        // Merge sub-label into comment (prefer quoted/preset comment if present)
+        let comment = comment.or(sub_label_comment);
 
         let section_type = match section_str {
             "intro" | "in" => Some(SectionType::Intro),
@@ -438,6 +491,85 @@ impl SectionType {
 
         section_type.map(|st| ParsedSection::full(st, measure_expr, comment))
     }
+}
+
+/// Parse a Solo section from whitespace-split parts.
+///
+/// Handles both "SOLO <instrument>" and "<instrument> SOLO" orderings,
+/// with optional measure count. The `existing_comment` is a pre-extracted
+/// quoted or preset comment that takes precedence over instrument names.
+///
+/// Returns `Some(ParsedSection)` if this is a Solo section, `None` otherwise.
+fn parse_solo_section(parts: &[&str], existing_comment: Option<String>) -> Option<ParsedSection> {
+    if parts.is_empty() || parts.len() > 3 {
+        return None;
+    }
+
+    let solo_idx = parts.iter().position(|&p| p == "solo")?;
+
+    // Determine instrument name and measure expression based on "solo" position
+    let (instrument, measure_token) = match (solo_idx, parts.len()) {
+        // "solo" — just Solo, no instrument
+        (0, 1) => (None, None),
+        // "solo 8" — Solo with measure count, OR "solo keys" — Solo with instrument
+        (0, 2) => {
+            if MeasureExpression::parse(parts[1]).is_some() {
+                (None, Some(parts[1]))
+            } else {
+                (Some(parts[1]), None)
+            }
+        }
+        // "solo keys 8" — Solo + instrument + measure count
+        (0, 3) => (Some(parts[1]), Some(parts[2])),
+        // "keys solo" — reversed, instrument first
+        (1, 2) => (Some(parts[0]), None),
+        // "keys solo 8" — reversed + measure count
+        (1, 3) => (Some(parts[0]), Some(parts[2])),
+        // "8 keys solo" — doesn't make sense
+        _ => return None,
+    };
+
+    let measure_expr = match measure_token {
+        Some(token) => Some(MeasureExpression::parse(token)?),
+        None => None,
+    };
+
+    // Use existing comment (from quoted string or preset) if available,
+    // otherwise use instrument name with title case
+    let comment = existing_comment.or_else(|| {
+        instrument.map(|name| {
+            let mut chars = name.chars();
+            match chars.next() {
+                Some(first) => {
+                    let upper: String = first.to_uppercase().collect();
+                    format!("{}{}", upper, chars.as_str())
+                }
+                None => String::new(),
+            }
+        })
+    });
+
+    Some(ParsedSection::full(SectionType::Solo, measure_expr, comment))
+}
+
+/// Check if a token is a valid section sub-label.
+///
+/// Sub-labels are short identifiers like "a", "b", "3a", "3b" used for split sections.
+/// They must be 1-3 characters long and end with a single letter (a-z).
+/// Examples: "a", "b", "3a", "3b", "2c"
+/// Non-examples: "abc", "10", "3ab", "hello"
+fn is_sub_label(s: &str) -> bool {
+    if s.is_empty() || s.len() > 3 {
+        return false;
+    }
+    let chars: Vec<char> = s.chars().collect();
+    // Last character must be a single letter
+    let last = *chars.last().unwrap();
+    if !last.is_ascii_alphabetic() {
+        return false;
+    }
+    // All preceding characters must be digits
+    chars[..chars.len() - 1].iter().all(|c| c.is_ascii_digit())
 }
 
 /// Extract a quoted comment from the end of the input.
@@ -649,6 +781,50 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_sub_labels() {
+        // Sub-label with measure count: "CH 3A 10" → Chorus, comment "3a", measure count 10
+        let parsed = SectionType::parse_with_measure_count("CH 3A 10").unwrap();
+        assert_eq!(parsed.section_type, SectionType::Chorus);
+        assert_eq!(parsed.measure_expr, Some(MeasureExpression::Absolute(10)));
+        assert_eq!(parsed.comment, Some("3a".to_string()));
+
+        // Sub-label with measure count: "CH 3B 8"
+        let parsed = SectionType::parse_with_measure_count("CH 3B 8").unwrap();
+        assert_eq!(parsed.section_type, SectionType::Chorus);
+        assert_eq!(parsed.measure_expr, Some(MeasureExpression::Absolute(8)));
+        assert_eq!(parsed.comment, Some("3b".to_string()));
+
+        // Interlude with single-letter sub-label: "Interlude A 8"
+        let parsed = SectionType::parse_with_measure_count("Interlude A 8").unwrap();
+        assert_eq!(parsed.section_type, SectionType::Interlude);
+        assert_eq!(parsed.measure_expr, Some(MeasureExpression::Absolute(8)));
+        assert_eq!(parsed.comment, Some("a".to_string()));
+
+        // Interlude with sub-label only (no measure count): "Interlude B"
+        let parsed = SectionType::parse_with_measure_count("Interlude B").unwrap();
+        assert_eq!(parsed.section_type, SectionType::Interlude);
+        assert_eq!(parsed.measure_expr, None);
+        assert_eq!(parsed.comment, Some("b".to_string()));
+
+        // Sub-label should NOT match long strings like "abc"
+        assert_eq!(SectionType::parse_with_measure_count("vs abc"), None);
+
+        // Four tokens should still be rejected
+        assert_eq!(SectionType::parse_with_measure_count("ch 3a 10 extra"), None);
+    }
+
+    #[test]
+    fn test_parse_sub_labels_with_quoted_comment() {
+        // Sub-label + quoted comment: 'Interlude B 8 "HORNS"'
+        let parsed =
+            SectionType::parse_with_measure_count(r#"Interlude B 8 "HORNS""#).unwrap();
+        assert_eq!(parsed.section_type, SectionType::Interlude);
+        assert_eq!(parsed.measure_expr, Some(MeasureExpression::Absolute(8)));
+        // Quoted comment takes precedence over sub-label
+        assert_eq!(parsed.comment, Some("HORNS".to_string()));
+    }
+
+    #[test]
     fn test_parse_custom_sections() {
         // Custom section with brackets
         assert_eq!(
@@ -745,6 +921,7 @@ mod tests {
         assert_eq!(SectionType::Bridge.key(), "bridge");
         assert_eq!(SectionType::Outro.key(), "outro");
         assert_eq!(SectionType::Instrumental.key(), "instrumental");
+        assert_eq!(SectionType::Solo.key(), "solo");
         assert_eq!(SectionType::CountIn.key(), "count_in");
         assert_eq!(SectionType::End.key(), "end");
 
@@ -758,6 +935,73 @@ mod tests {
         // Custom sections
         let custom = SectionType::Custom("SOLO Keys".to_string());
         assert_eq!(custom.key(), "solo_keys");
+    }
+
+    #[test]
+    fn test_parse_solo_sections() {
+        // "SOLO" alone
+        let parsed = SectionType::parse_with_measure_count("SOLO").unwrap();
+        assert_eq!(parsed.section_type, SectionType::Solo);
+        assert_eq!(parsed.measure_expr, None);
+        assert_eq!(parsed.comment, None);
+
+        // "SOLO 8" — Solo with measure count
+        let parsed = SectionType::parse_with_measure_count("SOLO 8").unwrap();
+        assert_eq!(parsed.section_type, SectionType::Solo);
+        assert_eq!(parsed.measure_expr, Some(MeasureExpression::Absolute(8)));
+        assert_eq!(parsed.comment, None);
+
+        // "SOLO Keys" — Solo with instrument name
+        let parsed = SectionType::parse_with_measure_count("SOLO Keys").unwrap();
+        assert_eq!(parsed.section_type, SectionType::Solo);
+        assert_eq!(parsed.measure_expr, None);
+        assert_eq!(parsed.comment, Some("Keys".to_string()));
+
+        // "SOLO Keys 8" — Solo with instrument + measure count
+        let parsed = SectionType::parse_with_measure_count("SOLO Keys 8").unwrap();
+        assert_eq!(parsed.section_type, SectionType::Solo);
+        assert_eq!(parsed.measure_expr, Some(MeasureExpression::Absolute(8)));
+        assert_eq!(parsed.comment, Some("Keys".to_string()));
+
+        // "Keys SOLO" — reversed syntax
+        let parsed = SectionType::parse_with_measure_count("Keys SOLO").unwrap();
+        assert_eq!(parsed.section_type, SectionType::Solo);
+        assert_eq!(parsed.measure_expr, None);
+        assert_eq!(parsed.comment, Some("Keys".to_string()));
+
+        // "GUITAR SOLO" — reversed with different instrument
+        let parsed = SectionType::parse_with_measure_count("GUITAR SOLO").unwrap();
+        assert_eq!(parsed.section_type, SectionType::Solo);
+        assert_eq!(parsed.measure_expr, None);
+        assert_eq!(parsed.comment, Some("Guitar".to_string()));
+
+        // "Guitar SOLO 8" — reversed with measure count
+        let parsed = SectionType::parse_with_measure_count("Guitar SOLO 8").unwrap();
+        assert_eq!(parsed.section_type, SectionType::Solo);
+        assert_eq!(parsed.measure_expr, Some(MeasureExpression::Absolute(8)));
+        assert_eq!(parsed.comment, Some("Guitar".to_string()));
+
+        // 'SOLO "Keys"' — quoted instrument name
+        let parsed = SectionType::parse_with_measure_count(r#"SOLO "Keys""#).unwrap();
+        assert_eq!(parsed.section_type, SectionType::Solo);
+        assert_eq!(parsed.measure_expr, None);
+        assert_eq!(parsed.comment, Some("Keys".to_string()));
+
+        // 'SOLO 8 "Keys"' — measure count + quoted instrument (standard ordering)
+        let parsed = SectionType::parse_with_measure_count(r#"SOLO 8 "Keys""#).unwrap();
+        assert_eq!(parsed.section_type, SectionType::Solo);
+        assert_eq!(parsed.measure_expr, Some(MeasureExpression::Absolute(8)));
+        assert_eq!(parsed.comment, Some("Keys".to_string()));
+    }
+
+    #[test]
+    fn test_solo_section_properties() {
+        assert_eq!(SectionType::Solo.key(), "solo");
+        assert_eq!(SectionType::Solo.full_name(), "Solo");
+        assert_eq!(SectionType::Solo.abbreviation(), "SOLO");
+        assert!(!SectionType::Solo.should_number());
+        assert!(SectionType::Solo.should_render());
+        assert!(SectionType::Solo.should_show_header());
     }
 
     #[test]

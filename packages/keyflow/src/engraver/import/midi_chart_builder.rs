@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 
 use crate::chord::{detect_chords_from_midi_notes, DetectedChord, MidiNote as KeyflowMidiNote};
 use crate::key::{KeySpelling, SpellingMode};
+use crate::primitives::note::Note;
 use crate::primitives::MusicalNote;
 
 use super::midi_import::{MidiFile, SectionType as MidiSectionType};
@@ -153,6 +154,7 @@ pub fn generate_chart_text(midi: &MidiFile, config: &MidiChartConfig) -> String 
             section_end_tick,
             ppq,
             songstart,
+            use_triplet_setting,
         );
 
         // Merge consecutive identical chords
@@ -201,6 +203,9 @@ enum ChordOrRest {
         is_pushed: bool,
         push_amount: Option<String>,
         is_accented: bool,
+        /// Staccato flag: true when a pushed chord only lasts for the push duration
+        /// (e.g., eighth-note push that ends on the downbeat). Notated as `>'.Chord`.
+        is_staccato: bool,
     },
     Rest {
         start_ppq: i64,
@@ -242,7 +247,70 @@ fn detect_chords_from_notes(midi: &MidiFile, config: &MidiChartConfig) -> Vec<De
         }
     }
 
+    // Apply common chord spelling normalizations
+    // (e.g., D#m -> Ebm, G#m -> Abm for readability)
+    for chord_event in &mut detected {
+        normalize_chord_spelling(&mut chord_event.chord);
+    }
+
     detected
+}
+
+/// Normalize chord spelling to use conventional/readable names.
+///
+/// Some enharmonic spellings are more common in music notation:
+/// - Ebm is more common than D#m
+/// - Abm is more common than G#m
+/// - Bb is more common than A# (always)
+/// - Db is more common than C# (for certain chord types)
+/// - Gb is more common than F# (for certain chord types)
+///
+/// Also handles diminished 7th chord inversions:
+/// - Fdim/B -> Bdim7 (since dim7 chords are symmetric, use bass as root)
+///
+/// This function adjusts uncommon spellings to their conventional equivalents.
+fn normalize_chord_spelling(chord: &mut crate::chord::Chord) {
+    use crate::chord::ChordFamily;
+
+    // First: Handle diminished chord inversions
+    // Dim7 chords are symmetric (all minor 3rds), so Fdim/B = Bdim7 = Abdim7 = Ddim7
+    // When we have Xdim/Y where Y is 3 semitones (minor 3rd) from X,
+    // convert to Ydim7 (use bass as root, make it fully diminished)
+    if chord.quality == crate::chord::ChordQuality::Diminished && chord.bass.is_some() {
+        // Check if bass is a minor 3rd below the root (part of the dim7 cycle)
+        if let (Some(root_note), Some(bass_root)) = (
+            chord.root.resolved_note(),
+            chord.bass.as_ref().and_then(|b| b.resolved_note()),
+        ) {
+            let root_semitone = root_note.semitone();
+            let bass_semitone = bass_root.semitone();
+            // Check if bass is 3, 6, or 9 semitones below root (dim7 cycle)
+            let interval = (root_semitone + 12 - bass_semitone) % 12;
+            if interval == 3 || interval == 6 || interval == 9 {
+                // Take the bass note and make it the root, make it dim7
+                if let Some(bass) = chord.bass.take() {
+                    chord.root = bass;
+                    chord.family = Some(ChordFamily::FullyDiminished);
+                    chord.normalize();
+                }
+            }
+        }
+    }
+
+    // Second: Handle enharmonic spelling normalization
+    // Get current root name from the resolved note
+    let root_name = chord.root.resolved_note().map(|n| n.name());
+
+    // Check if we need to respell with flats
+    let needs_flat_spelling = root_name.as_ref().is_some_and(|name| {
+        matches!(name.as_str(), "D#" | "G#" | "A#")
+    });
+
+    if needs_flat_spelling {
+        // Create a key spelling that prefers flats (F major has 1 flat)
+        let flat_spelling = KeySpelling::major(&MusicalNote::from_string("F").unwrap());
+        chord.respell_root(&flat_spelling, SpellingMode::Relaxed);
+    }
 }
 
 // ============================================================================
@@ -250,10 +318,20 @@ fn detect_chords_from_notes(midi: &MidiFile, config: &MidiChartConfig) -> Vec<De
 // ============================================================================
 
 /// Detect push/pull timing for a chord based on its position within a beat.
+///
+/// Returns `(is_pushed, push_amount)` where `push_amount` encodes the type:
+/// - `"t"` = triplet push/pull (swing eighth)
+/// - `"8"` = straight eighth push/pull
+/// - `"16"` = sixteenth note push/pull
+///
+/// When `is_triplet_song` is true, straight eighth positions are NOT marked as pushes
+/// because the song uses triplet-based timing (swing feel).
 fn detect_push_pull_for_chord(
     start_ppq: i64,
+    end_ppq: i64,
     ppq: u32,
     songstart: u32,
+    is_triplet_song: bool,
 ) -> (bool, Option<String>) {
     let relative_tick = if start_ppq >= songstart as i64 {
         start_ppq - songstart as i64
@@ -266,16 +344,37 @@ fn detect_push_pull_for_chord(
 
     let triplet_eighth = ppq / 3; // 320 at 960 PPQ
     let triplet_quarter = triplet_eighth * 2; // 640 at 960 PPQ
+    let straight_eighth = ppq / 2; // 480 at 960 PPQ
+    let sixteenth = ppq / 4; // 240 at 960 PPQ
+    let dotted_eighth = (ppq * 3) / 4; // 720 at 960 PPQ — sixteenth before next beat
     let tolerance = ppq / 24; // ~40 ticks
 
+    // Check if chord crosses into the next beat (true push vs syncopation)
+    let start_beat = start_ppq / ticks_per_beat;
+    let end_beat = end_ppq / ticks_per_beat;
+    let crosses_beat = end_beat > start_beat;
+
     if subdivision < tolerance || subdivision > (ppq - tolerance) {
+        // On the beat
         (false, None)
     } else if (subdivision as i32 - triplet_eighth as i32).unsigned_abs() < tolerance {
-        // Pull by triplet eighth
+        // Pull by triplet eighth (1/3 of beat after downbeat)
         (false, Some("t".to_string()))
     } else if (subdivision as i32 - triplet_quarter as i32).unsigned_abs() < tolerance {
-        // Push by triplet eighth
+        // Push by triplet eighth (2/3 of beat = 1/3 before next beat)
         (true, Some("t".to_string()))
+    } else if (subdivision as i32 - dotted_eighth as i32).unsigned_abs() < tolerance {
+        // Push by sixteenth (3/4 of beat = 1/4 before next beat)
+        (true, Some("16".to_string()))
+    } else if (subdivision as i32 - straight_eighth as i32).unsigned_abs() < tolerance {
+        // Straight eighth — at the "and" of the beat.
+        // In triplet-based songs, this is just syncopation, not a push.
+        // In straight-eighth songs, mark as push if the chord crosses into the next beat.
+        if !is_triplet_song && crosses_beat {
+            (true, Some("8".to_string()))
+        } else {
+            (false, None)
+        }
     } else {
         (false, None)
     }
@@ -380,8 +479,9 @@ fn should_use_triplet_push_from_detected(
     let mut other_push_count = 0;
 
     for chord in chords {
+        // Pass is_triplet_song=false to detect ALL push types for counting
         let (is_pushed, push_amount) =
-            detect_push_pull_for_chord(chord.start_ppq, ppq, songstart);
+            detect_push_pull_for_chord(chord.start_ppq, chord.end_ppq, ppq, songstart, false);
         if is_pushed || push_amount.is_some() {
             if push_amount.as_deref() == Some("t") {
                 triplet_count += 1;
@@ -524,12 +624,16 @@ fn calculate_section_lengths(
 /// - Chords that start within the section
 /// - Chords that start before the section but sustain into it (continuing chords)
 /// - Pushed chords that start up to one beat before the section boundary
+///
+/// `is_triplet_song` indicates whether the song uses triplet-based timing,
+/// which affects whether straight eighth positions are marked as pushes.
 fn build_rhythm_elements(
     detected_chords: &[DetectedChord],
     section_start_tick: i64,
     section_end_tick: i64,
     ppq: u32,
     songstart: u32,
+    is_triplet_song: bool,
 ) -> Vec<ChordOrRest> {
     let mut elements = Vec::new();
     let triplet_eighth = (ppq / 3) as i64;
@@ -619,7 +723,7 @@ fn build_rhythm_elements(
             if quarter_pushed {
                 (true, Some("4".to_string()))
             } else {
-                detect_push_pull_for_chord(chord.start_ppq, ppq, songstart)
+                detect_push_pull_for_chord(chord.start_ppq, chord.end_ppq, ppq, songstart, is_triplet_song)
             }
         } else if stays_in_same_beat {
             // Chord starts and ends in the same beat — not pushed
@@ -629,7 +733,7 @@ fn build_rhythm_elements(
             if quarter_pushed {
                 (true, Some("4".to_string()))
             } else {
-                detect_push_pull_for_chord(chord.start_ppq, ppq, songstart)
+                detect_push_pull_for_chord(chord.start_ppq, chord.end_ppq, ppq, songstart, is_triplet_song)
             }
         };
 
@@ -802,6 +906,7 @@ enum MeasureContent {
     FullMeasure {
         symbol: String,
         is_pushed: bool,
+        push_amount: Option<String>,
         is_accented: bool,
     },
     Repeat,
@@ -1042,12 +1147,12 @@ fn build_measures(
                     start_ppq,
                     end_ppq,
                     is_pushed,
+                    push_amount,
                     is_accented,
-                    ..
                 } = e
                 {
                     if *start_ppq < measure_start && *end_ppq > measure_start {
-                        Some((symbol.clone(), *is_pushed, *is_accented))
+                        Some((symbol.clone(), *is_pushed, push_amount.clone(), *is_accented))
                     } else {
                         None
                     }
@@ -1056,7 +1161,7 @@ fn build_measures(
                 }
             });
 
-            if let Some((symbol, is_pushed, is_accented)) = continuing_chord {
+            if let Some((symbol, is_pushed, push_amount, is_accented)) = continuing_chord {
                 if last_chord_symbol.as_ref() == Some(&symbol) {
                     MeasureContent::Repeat
                 } else {
@@ -1064,6 +1169,7 @@ fn build_measures(
                     MeasureContent::FullMeasure {
                         symbol,
                         is_pushed,
+                        push_amount,
                         is_accented,
                     }
                 }
@@ -1076,9 +1182,9 @@ fn build_measures(
                     symbol,
                     beats,
                     is_pushed,
+                    push_amount,
                     is_accented,
                     ticks,
-                    ..
                 } if *beats >= beats_per_measure
                     && *ticks >= ticks_per_measure - ticks_per_beat =>
                 {
@@ -1089,6 +1195,7 @@ fn build_measures(
                         MeasureContent::FullMeasure {
                             symbol: symbol.clone(),
                             is_pushed: *is_pushed,
+                            push_amount: push_amount.clone(),
                             is_accented: *is_accented,
                         }
                     }
@@ -1116,6 +1223,7 @@ fn build_measures(
                     symbol,
                     beats,
                     is_pushed,
+                    push_amount,
                     is_accented,
                     ..
                 }) = measure_elements.first()
@@ -1129,6 +1237,7 @@ fn build_measures(
                             MeasureContent::FullMeasure {
                                 symbol: symbol.clone(),
                                 is_pushed: *is_pushed,
+                                push_amount: push_amount.clone(),
                                 is_accented: *is_accented,
                             }
                         }
@@ -1311,6 +1420,45 @@ fn format_rests_split_at_beats(
 // Measure Formatting
 // ============================================================================
 
+/// Format a pushed/pulled chord with the correct push modifier prefix/suffix.
+///
+/// Push types:
+/// - Triplet (`"t"`): `'C` (short) or `'tC` (explicit)
+/// - Straight eighth (`"8"`): `'C`
+/// - Sixteenth (`"16"`): `''C`
+/// - Quarter (`"4"`): `'C`
+///
+/// Pull types (same modifiers, trailing):
+/// - Triplet: `C'` (short) or `Ct'` (explicit)
+/// - Straight eighth: `C'`
+/// - Sixteenth: `C''`
+fn format_chord_with_push(
+    accent: &str,
+    symbol: &str,
+    is_pushed: bool,
+    push_amount: &Option<String>,
+    use_short_push: bool,
+) -> String {
+    let is_pull = !is_pushed && push_amount.is_some();
+
+    if is_pushed {
+        match push_amount.as_deref() {
+            Some("16") => format!("{}''{}", accent, symbol),
+            Some("t") if !use_short_push => format!("{}'t{}", accent, symbol),
+            // Triplet (short), straight eighth, quarter, or unknown — single apostrophe
+            _ => format!("{}'{}", accent, symbol),
+        }
+    } else if is_pull {
+        match push_amount.as_deref() {
+            Some("16") => format!("{}{}''", accent, symbol),
+            Some("t") if !use_short_push => format!("{}{}t'", accent, symbol),
+            _ => format!("{}{}'", accent, symbol),
+        }
+    } else {
+        format!("{}{}", accent, symbol)
+    }
+}
+
 /// Format a single measure as Keyflow notation.
 fn format_measure(
     content: &MeasureContent,
@@ -1324,18 +1472,11 @@ fn format_measure(
         MeasureContent::FullMeasure {
             symbol,
             is_pushed,
+            push_amount,
             is_accented,
         } => {
             let accent = if *is_accented { ">" } else { "" };
-            if *is_pushed {
-                if use_short_push {
-                    format!("{}'{}", accent, symbol)
-                } else {
-                    format!("{}'t{}", accent, symbol)
-                }
-            } else {
-                format!("{}{}", accent, symbol)
-            }
+            format_chord_with_push(accent, symbol, *is_pushed, push_amount, use_short_push)
         }
         MeasureContent::Repeat => ".".to_string(),
         MeasureContent::Silence => "s1".to_string(),
@@ -1352,39 +1493,17 @@ fn format_measure(
                         push_amount,
                         is_accented,
                     } => {
-                        let is_pull = !*is_pushed && push_amount.is_some();
                         let has_rests =
                             elements.iter().any(|e| matches!(e, MeasureElement::Rest { .. }));
                         let accent = if has_rests || *is_accented { ">" } else { "" };
 
-                        let triplet_eighth = ticks_per_beat / 3;
-                        let is_staccato = *ticks <= triplet_eighth && *beats <= 1;
-
-                        let chord_base = if is_staccato {
-                            if *is_pushed {
-                                if use_short_push {
-                                    format!("{}'{}", accent, symbol)
-                                } else {
-                                    format!("{}'t{}", accent, symbol)
-                                }
-                            } else {
-                                format!("{}{}", accent, symbol)
-                            }
-                        } else if *is_pushed {
-                            if use_short_push {
-                                format!("{}'{}", accent, symbol)
-                            } else {
-                                format!("{}'t{}", accent, symbol)
-                            }
-                        } else if is_pull {
-                            if use_short_push {
-                                format!("{}{}'", accent, symbol)
-                            } else {
-                                format!("{}{}t'", accent, symbol)
-                            }
-                        } else {
-                            format!("{}{}", accent, symbol)
-                        };
+                        let chord_base = format_chord_with_push(
+                            accent,
+                            symbol,
+                            *is_pushed,
+                            push_amount,
+                            use_short_push,
+                        );
 
                         let mut adjusted_beats = *beats;
 
@@ -1405,11 +1524,18 @@ fn format_measure(
                         let half_beat = ticks_per_beat / 2;
                         let needs_duration_suffix = *ticks < half_beat;
 
+                        let is_last_element = idx == elements.len() - 1;
+
                         if needs_duration_suffix {
                             let suffix = format_duration_suffix_from_ticks(*ticks, ppq);
                             parts.push(format!("{}{}", chord_base, suffix));
                         } else if is_sole_chord && adjusted_beats >= beats_per_measure {
                             parts.push(chord_base);
+                        } else if adjusted_beats <= 1 && !is_sole_chord && is_last_element {
+                            // A 1-beat chord at the end of a multi-chord measure needs
+                            // an explicit slash to avoid being parsed as a whole measure.
+                            // In Keyflow, `Fm/Ab` alone = whole measure, but `Fm/Ab /` = 1 beat.
+                            parts.push(format!("{} /", chord_base));
                         } else {
                             let slashes = generate_slashes(adjusted_beats);
                             if slashes.is_empty() {

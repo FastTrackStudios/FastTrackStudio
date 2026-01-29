@@ -105,6 +105,14 @@ mod dioxus_impl {
 
     /// Preset IDs that have been preloaded
     pub static RIG_PRELOADED_PRESETS: GlobalSignal<Vec<Uuid>> = Signal::global(|| Vec::new());
+
+    // ============================================================================
+    // Module State (for guitar rig grid)
+    // ============================================================================
+
+    /// Current modules in the rig (for guitar rig grid UI)
+    pub static RIG_CURRENT_MODULES: GlobalSignal<Vec<rig_control::module::Module>> =
+        Signal::global(|| Vec::new());
 }
 
 #[cfg(feature = "dioxus")]

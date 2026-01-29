@@ -70,6 +70,12 @@ pub mod rgb {
     pub const VIOLET_400: (u8, u8, u8) = (167, 139, 250);
     pub const VIOLET_600: (u8, u8, u8) = (124, 58, 237);
     pub const VIOLET_800: (u8, u8, u8) = (91, 33, 182);
+
+    // Rose (Solo)
+    pub const ROSE_200: (u8, u8, u8) = (254, 205, 211);
+    pub const ROSE_400: (u8, u8, u8) = (251, 113, 133);
+    pub const ROSE_600: (u8, u8, u8) = (225, 29, 72);
+    pub const ROSE_800: (u8, u8, u8) = (159, 18, 57);
 }
 
 /// Section color configuration
@@ -156,6 +162,11 @@ pub fn colors_for_section_type(section_type: &SectionType) -> SectionColors {
             bright: ORANGE_400,
             muted: ORANGE_200,
             text: ORANGE_800,
+        },
+        SectionType::Solo => SectionColors {
+            bright: ROSE_400,
+            muted: ROSE_200,
+            text: ROSE_800,
         },
         SectionType::Interlude => SectionColors {
             bright: YELLOW_400,
