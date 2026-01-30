@@ -10,7 +10,7 @@ pub struct TransportState {
     pub is_playing: bool,
     pub is_recording: bool,
     pub position_seconds: f64,
-    pub tempo: f64,
+    pub tempo_bpm: f64,
 }
 
 /// Format seconds as MM:SS.mmm
@@ -175,20 +175,20 @@ pub fn TransportControls() -> Element {
     let ws = use_roam_websocket();
     let mut transport_state = use_signal(TransportState::default);
 
-    // TODO: Set up transport state subscription when TransportService supports it
+    // TODO: Set up transport state subscription via subscribe_transport
     // For now, the UI shows local state that updates optimistically on button clicks
 
     // Read current state
     let is_playing = transport_state.read().is_playing;
     let is_recording = transport_state.read().is_recording;
     let position = transport_state.read().position_seconds;
-    let tempo = transport_state.read().tempo;
+    let tempo = transport_state.read().tempo_bpm;
 
-    // Transport control actions - closures that handle button clicks
+    // Transport control actions - call HostService methods (not TransportService!)
     let on_stop = {
         let ws = ws.clone();
         move |_: ()| {
-            ws.call_ignore("TransportService", "stop", vec![]);
+            ws.call_ignore("HostService", "stop", vec![]);
             transport_state.write().is_playing = false;
         }
     };
@@ -197,10 +197,10 @@ pub fn TransportControls() -> Element {
         let ws = ws.clone();
         move |_: ()| {
             if is_playing {
-                ws.call_ignore("TransportService", "pause", vec![]);
+                ws.call_ignore("HostService", "stop", vec![]);
                 transport_state.write().is_playing = false;
             } else {
-                ws.call_ignore("TransportService", "play", vec![]);
+                ws.call_ignore("HostService", "play", vec![]);
                 transport_state.write().is_playing = true;
             }
         }
@@ -209,11 +209,7 @@ pub fn TransportControls() -> Element {
     let on_record = {
         let ws = ws.clone();
         move |_: ()| {
-            if is_recording {
-                ws.call_ignore("TransportService", "stop_recording", vec![]);
-            } else {
-                ws.call_ignore("TransportService", "start_recording", vec![]);
-            }
+            ws.call_ignore("HostService", "record", vec![]);
             transport_state.write().is_recording = !is_recording;
         }
     };
@@ -221,7 +217,7 @@ pub fn TransportControls() -> Element {
     let on_goto_start = {
         let ws = ws.clone();
         move |_: ()| {
-            ws.call_ignore("TransportService", "goto_start", vec![]);
+            ws.call_ignore("HostService", "set_position", vec![serde_json::json!(0.0)]);
             transport_state.write().position_seconds = 0.0;
         }
     };
@@ -229,7 +225,9 @@ pub fn TransportControls() -> Element {
     let on_goto_end = {
         let ws = ws.clone();
         move |_: ()| {
-            ws.call_ignore("TransportService", "goto_end", vec![]);
+            // TODO: Get project length and seek to it
+            // For now, just seek to 5 minutes as placeholder
+            ws.call_ignore("HostService", "set_position", vec![serde_json::json!(300.0)]);
         }
     };
 
@@ -319,9 +317,9 @@ pub fn TransportBar() -> Element {
         let ws = ws.clone();
         move |_: dioxus::events::MouseEvent| {
             if playing {
-                ws.call_ignore("TransportService", "pause", vec![]);
+                ws.call_ignore("HostService", "stop", vec![]);
             } else {
-                ws.call_ignore("TransportService", "play", vec![]);
+                ws.call_ignore("HostService", "play", vec![]);
             }
             is_playing.set(!playing);
         }
@@ -330,7 +328,7 @@ pub fn TransportBar() -> Element {
     let on_stop = {
         let ws = ws.clone();
         move |_: dioxus::events::MouseEvent| {
-            ws.call_ignore("TransportService", "stop", vec![]);
+            ws.call_ignore("HostService", "stop", vec![]);
             is_playing.set(false);
         }
     };
