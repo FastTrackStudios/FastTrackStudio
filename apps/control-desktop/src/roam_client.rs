@@ -228,6 +228,21 @@ impl RoamClient {
         info!("Subscribed to transport stream");
         Ok(rx)
     }
+
+    /// Get a connection handle for use with roam-http-bridge.
+    ///
+    /// This allows the HTTP server to expose the ROAM connection via WebSocket.
+    pub async fn get_handle(&self) -> Result<roam_session::ConnectionHandle, String> {
+        let client_guard = self.client.read().await;
+        let client = client_guard
+            .as_ref()
+            .ok_or_else(|| "Not connected".to_string())?;
+
+        client
+            .handle()
+            .await
+            .map_err(|e| format!("Failed to get handle: {}", e))
+    }
 }
 
 impl Default for RoamClient {

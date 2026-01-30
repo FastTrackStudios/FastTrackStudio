@@ -9,9 +9,10 @@ description = "FTS Control Desktop - Desktop app with embedded web server for DA
 # Dioxus for desktop UI
 dioxus = { version = "0.7.3", features = ["desktop", "router"] }
 
-# HTTP server for serving control-web and WebSocket bridge
-axum = { version = "0.8", features = ["ws"] }
+# HTTP server for serving control-web and ROAM HTTP bridge
+axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
+roam-http-bridge = { workspace = true }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
