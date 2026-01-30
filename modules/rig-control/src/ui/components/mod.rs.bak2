@@ -1,0 +1,22 @@
+pub mod block_browser;
+pub mod director;
+pub mod module_browser;
+pub mod performance;
+pub mod preset_browser;
+pub mod rig;
+pub mod rig_grid;
+pub mod tag_browser;
+
+// Re-export commonly used components
+pub use performance::PerformanceView;
+pub use preset_browser::{CompactPresetBrowser, PresetBrowserSidebar};
+pub use rig::RigControlView;
+pub use rig_grid::{
+    GuitarRigGrid, ModuleViewMode, GlobalViewOverride, RigViewMode, block_type_color,
+    SignalFlowGrid, SignalFlowGridView, GridBlock, GridPosition, GridConnection,
+    GRID_COLS, GRID_ROWS,
+    // Page layout components
+    GuitarRigTopBar, GuitarRigLeftSidebar, GuitarRigRightSidebar, GuitarRigProfileSidebar, ModuleBrowserModal,
+    // Node-based system
+    Node, NodeGraph, NodePosition, NodeSize, NodeWidget, NodeCanvas, Wire,
+};

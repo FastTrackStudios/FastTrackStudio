@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "services",
+    "hello-world-impl",
+    "hello-world-plugin",
+]
+resolver = "2"
+
+[workspace.dependencies]
+roam = { git = "https://github.com/bearcove/roam.git", rev = "3a23149" }
+tokio = { version = "1.42", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+hot-lib-reloader = "0.7"

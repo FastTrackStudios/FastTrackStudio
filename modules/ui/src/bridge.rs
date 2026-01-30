@@ -2,7 +2,10 @@
 //!
 //! This module provides the single authoritative mapping between the two block
 //! type systems used in different parts of the codebase.
+//!
+//! TODO: Re-enable when rig-control roam service issues are fixed
 
+/* TEMPORARILY DISABLED
 use fts::rig::core::BlockType;
 use audio_controls::prelude::BlockCategory;
 
@@ -85,3 +88,4 @@ mod tests {
         );
     }
 }
+*/

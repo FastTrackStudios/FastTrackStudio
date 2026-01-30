@@ -1,0 +1,28 @@
+[package]
+name = "socket-gateway"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "socket-gateway-extension"
+path = "src/main.rs"
+
+[dependencies]
+# Extension runtime for SHM guest setup
+extension-runtime = { path = "../../modules/extension-runtime" }
+
+# ROAM stream transport (Unix socket / TCP with COBS framing)
+roam-stream = { workspace = true }
+roam-session = { workspace = true }
+
+# Service protocols (for forwarding calls)
+host-proto = { path = "../host-proto" }
+
+# Async runtime
+tokio = { workspace = true, features = ["net"] }
+
+# Utilities
+tracing = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

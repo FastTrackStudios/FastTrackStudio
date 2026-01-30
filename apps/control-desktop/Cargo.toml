@@ -1,0 +1,46 @@
+[package]
+name = "control-desktop"
+version = "0.1.0"
+authors = ["Cody Wright <acodywright@gmail.com>"]
+edition = "2024"
+description = "FTS Control Desktop - Desktop app with embedded web server for DAW control"
+
+[dependencies]
+# Dioxus for desktop UI
+dioxus = { version = "0.7.3", features = ["desktop", "router"] }
+
+# HTTP server for serving control-web and WebSocket bridge
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = "1.0"
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Network utilities
+local-ip-address = "0.6"
+
+# Open URLs in browser
+open = "5"
+
+# ROAM RPC client for connecting to REAPER via Unix socket
+roam = { workspace = true }
+roam-stream = { workspace = true }
+roam-session = { workspace = true }
+host-proto = { path = "../../extensions/host-proto" }
+
+# Async utilities
+futures-util = "0.3"
+
+[build-dependencies]
+# For embedding control-web at build time (optional)
+
+[lints]
+workspace = true

@@ -190,7 +190,7 @@ impl<S: SetlistProvider> TransportReactiveService for ReaperTransportReactiveSer
 
         if changed {
             let message = format_transport_change(&changes, &project_id);
-            info!("{}", message);
+            debug!("{}", message);
             self.emit_transport(project_id, transport);
         }
     }

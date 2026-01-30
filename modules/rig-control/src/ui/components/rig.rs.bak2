@@ -1,0 +1,1047 @@
+//! Rig Control View components
+//!
+//! This module provides UI components for controlling a live VST rig,
+//! including preset selection, scene navigation, and block controls.
+
+use dioxus::prelude::*;
+use crate::ui::signals::core::{PresetTag, TagRegistry};
+use crate::ui::signals::{
+    RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_SETLISTS, RIG_CONNECTED, RIG_CURRENT_PRESET,
+    RIG_CURRENT_SCENE, RIG_CURRENT_SETLIST, RIG_CURRENT_SONG, RIG_CURRENT_PRESET_SNAPSHOT_ID,
+    RIG_INFO, RIG_LOADING, RIG_PROFILE, RIG_SCENE_INDEX,
+    RIG_SETLIST_SONGS, RIG_SONG_INDEX,
+};
+use nucleo_matcher::{
+    pattern::{CaseMatching, Normalization, Pattern},
+    Config, Matcher, Utf32Str,
+};
+use crate::{PresetInfo, PresetSnapshotInfo, ProfileSceneInfo, SongInfo};
+use uuid::Uuid;
+
+use crate::ui::components::block_chain::BlockChain;
+use crate::ui::hooks::{use_rig_actions, use_rig_subscription};
+
+// ============================================================================
+// Effective Block (with snapshot overrides applied)
+// ============================================================================
+
+/// A block with its effective parameter values (after applying snapshot overrides)
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectiveBlock {
+    /// Block ID
+    pub id: Uuid,
+    /// Block name
+    pub name: String,
+    /// Block type for UI rendering
+    pub block_type: String,
+    /// Order in signal chain
+    pub order: u8,
+    /// Effective bypassed state (may be overridden by snapshot)
+    pub bypassed: bool,
+    /// Effective parameters (with snapshot overrides applied)
+    pub parameters: Vec<EffectiveParameter>,
+}
+
+/// A parameter with its effective value
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectiveParameter {
+    /// Parameter ID
+    pub id: String,
+    /// Human-readable name
+    pub name: String,
+    /// Effective value (0.0 - 1.0)
+    pub value: f64,
+    /// Min display value
+    pub min_display: f64,
+    /// Max display value
+    pub max_display: f64,
+    /// Unit suffix
+    pub unit: String,
+    /// Whether this value is overridden by the current snapshot
+    pub is_overridden: bool,
+}
+
+// TODO: Commented out - not needed with rig-control's module-based architecture
+// impl EffectiveBlock {
+//     /// Create an effective block from a preset block and optional snapshot override
+//     pub fn from_preset_block(
+//         block: &PresetBlockInfo,
+//         snapshot_override: Option<&BlockOverrideInfo>,
+//     ) -> Self {
+//         // Determine effective bypass state
+//         let bypassed = snapshot_override
+//             .and_then(|o| o.bypassed)
+//             .unwrap_or(block.bypassed);
+//
+//         // Build effective parameters
+//         let parameters = block
+//             .parameters
+//             .iter()
+//             .map(|param| {
+//                 // Check if this parameter has a snapshot override
+//                 let override_value = snapshot_override.and_then(|o| {
+//                     o.parameters
+//                         .iter()
+//                         .find(|p| p.param_id == param.id)
+//                         .map(|p| p.value)
+//                 });
+//
+//                 EffectiveParameter {
+//                     id: param.id.clone(),
+//                     name: param.name.clone(),
+//                     value: override_value.unwrap_or(param.value),
+//                     min_display: param.min_display,
+//                     max_display: param.max_display,
+//                     unit: param.unit.clone(),
+//                     is_overridden: override_value.is_some(),
+//                 }
+//             })
+//             .collect();
+//
+//         Self {
+//             id: block.id,
+//             name: block.name.clone(),
+//             block_type: block.block_type.clone(),
+//             order: block.order,
+//             bypassed,
+//             parameters,
+//         }
+//     }
+// }
+
+/// View modes for displaying blocks
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BlockViewMode {
+    /// Simple card/list view
+    #[default]
+    Cards,
+    /// Vintage guitar pedalboard style
+    Pedalboard,
+    /// 19" rack mount style
+    Rack1U,
+    /// 500-Series modular style
+    Series500,
+}
+
+impl BlockViewMode {
+    /// Get display name for this view mode
+    pub const fn display_name(&self) -> &'static str {
+        match self {
+            Self::Pedalboard => "Pedalboard",
+            Self::Cards => "Cards",
+            Self::Rack1U => "1U Rack",
+            Self::Series500 => "500 Series",
+        }
+    }
+
+    /// Get icon/short label for this view mode
+    pub const fn icon(&self) -> &'static str {
+        match self {
+            Self::Pedalboard => "🎸",
+            Self::Cards => "📋",
+            Self::Rack1U => "🔲",
+            Self::Series500 => "▮▮",
+        }
+    }
+
+    /// Get all view modes
+    pub const fn all() -> &'static [BlockViewMode] {
+        &[
+            BlockViewMode::Cards,
+            BlockViewMode::Pedalboard,
+            BlockViewMode::Rack1U,
+            BlockViewMode::Series500,
+        ]
+    }
+}
+
+/// Main rig control view component
+///
+/// This component:
+/// - Subscribes to the rig service to populate global signals
+/// - Provides action callbacks via `use_rig_actions()`
+/// - Renders tag-based preset browser with fuzzy search
+///
+/// Must be wrapped in a `RigServiceProvider` to work.
+#[component]
+pub fn RigControlView() -> Element {
+    // Subscribe to service and populate global signals
+    use_rig_subscription();
+
+    // Get action callbacks from service
+    let actions = use_rig_actions();
+
+    // Use memos to reactively track global signals
+    let profile_memo = use_memo(move || RIG_PROFILE.read().clone());
+    let rig_memo = use_memo(move || RIG_INFO.read().clone());
+    let preset_memo = use_memo(move || RIG_CURRENT_PRESET.read().clone());
+    let song_memo = use_memo(move || RIG_CURRENT_SONG.read().clone());
+    let scene_memo = use_memo(move || RIG_CURRENT_SCENE.read().clone());
+    let scene_index_memo = use_memo(move || *RIG_SCENE_INDEX.read());
+    // TODO: Re-enable when rig-control supports sections/blocks
+    // let sections_memo = use_memo(move || RIG_SECTIONS.read().clone());
+    // let _global_blocks_memo = use_memo(move || RIG_GLOBAL_BLOCKS.read().clone());
+    let presets_memo = use_memo(move || RIG_AVAILABLE_PRESETS.read().clone());
+    let loading_memo = use_memo(move || *RIG_LOADING.read());
+    let connected_memo = use_memo(move || *RIG_CONNECTED.read());
+
+    // TODO: Compute effective blocks when rig-control supports module blocks
+    // For now, return empty list since rig-control uses module-based architecture
+    let effective_blocks = use_memo(move || {
+        let _preset = RIG_CURRENT_PRESET.read();
+        let _snapshot_id = *RIG_CURRENT_PRESET_SNAPSHOT_ID.read();
+
+        // tracing::debug!(
+        //     "effective_blocks memo: preset={:?}, snapshot_id={:?}",
+        //     preset.as_ref().map(|p| &p.name),
+        //     snapshot_id
+        // );
+
+        Vec::<EffectiveBlock>::new()
+
+        // if let Some(preset) = preset.as_ref() {
+        //     // Find the current snapshot's overrides
+        //     let snapshot_overrides: Option<&SnapshotInfo> = snapshot_id
+        //         .and_then(|sid| preset.snapshots.iter().find(|s| s.id == sid));
+        //
+        //     tracing::debug!(
+        //         "effective_blocks: found snapshot overrides: {:?}",
+        //         snapshot_overrides.map(|s| (&s.name, s.block_overrides.len()))
+        //     );
+        //
+        //     // Build effective blocks with snapshot overrides
+        //     preset
+        //         .blocks
+        //         .iter()
+        //         .map(|block| {
+        //             let block_override = snapshot_overrides
+        //                 .and_then(|s| s.block_overrides.iter().find(|o| o.block_id == block.id));
+        //
+        //             EffectiveBlock::from_preset_block(block, block_override)
+        //         })
+        //         .collect::<Vec<_>>()
+        // } else {
+        //     Vec::new()
+        // }
+    });
+
+    // Tag registry with default tags (for resolving tag names during search)
+    let tag_registry = use_memo(|| TagRegistry::with_defaults());
+
+    // Local state
+    let mut search_query = use_signal(String::new);
+    let mut block_view_mode = use_signal(BlockViewMode::default);
+
+    // Filter presets based on fuzzy search (searches name + tag names + snapshot names)
+    let filtered_presets = use_memo(move || {
+        let query = search_query();
+        let all_presets = presets_memo();
+        let registry = tag_registry.read();
+
+        if query.is_empty() {
+            return all_presets;
+        }
+
+        // Use nucleo matcher for fuzzy search
+        let mut matcher = Matcher::new(Config::DEFAULT);
+        let pattern = Pattern::parse(&query, CaseMatching::Smart, Normalization::Smart);
+
+        let mut scored_presets: Vec<(PresetInfo, u32)> = all_presets
+            .into_iter()
+            .filter_map(|preset| {
+                // Build searchable text: name + category + description
+                // TODO: Add tag names and scene names when rig-control supports them
+                let description = preset.description.as_deref().unwrap_or("");
+                let search_text = format!("{} {} {}", preset.name, preset.category, description);
+
+                // Score the match
+                let mut buf = Vec::new();
+                let haystack = Utf32Str::new(&search_text, &mut buf);
+
+                pattern.score(haystack, &mut matcher).map(|score| (preset, score))
+            })
+            .collect();
+
+        // Sort by score descending (best matches first)
+        scored_presets.sort_by(|a, b| b.1.cmp(&a.1));
+
+        scored_presets.into_iter().map(|(p, _)| p).collect::<Vec<_>>()
+    });
+
+    // Derive display values for search status
+    let query_for_display = search_query();
+    let preset_count = filtered_presets.read().len();
+    let total_count = presets_memo().len();
+    let has_search = !query_for_display.is_empty();
+
+    rsx! {
+        div { class: "flex flex-col h-full bg-background text-foreground",
+            // Main content area
+            div { class: "flex-1 flex overflow-hidden",
+                // === PRESET LIST with search ===
+                div { class: "w-64 border-r border-border bg-card flex flex-col",
+                    // Header with search
+                    div { class: "p-3 border-b border-border",
+                        div { class: "flex items-center justify-between mb-2",
+                            h3 { class: "text-xs font-semibold text-muted-foreground uppercase tracking-wider",
+                                "Presets"
+                            }
+                            span { class: "text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded",
+                                if has_search {
+                                    "{preset_count}/{total_count}"
+                                } else {
+                                    "{preset_count}"
+                                }
+                            }
+                        }
+
+                        // Search input
+                        div { class: "relative",
+                            input {
+                                class: "w-full px-3 py-2 pl-8 text-sm bg-muted border border-border rounded-md
+                                        placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary",
+                                r#type: "text",
+                                placeholder: "Search presets...",
+                                value: "{search_query}",
+                                oninput: move |e| search_query.set(e.value().clone()),
+                            }
+                            // Search icon
+                            span { class: "absolute left-2.5 top-2.5 text-muted-foreground text-sm",
+                                "?"
+                            }
+                            // Clear button
+                            if has_search {
+                                button {
+                                    class: "absolute right-2 top-2 text-muted-foreground hover:text-foreground text-sm px-1",
+                                    onclick: move |_| search_query.set(String::new()),
+                                    "x"
+                                }
+                            }
+                        }
+
+                        // Search hint
+                        p { class: "text-xs text-muted-foreground mt-2",
+                            "Search by name or tags"
+                        }
+                    }
+
+                    // Preset list with custom scrollbar
+                    div { class: "preset-list flex-1 overflow-y-auto",
+                        if filtered_presets.read().is_empty() {
+                            div { class: "p-4 text-center text-muted-foreground text-sm",
+                                if has_search {
+                                    p { "No presets match" }
+                                    p { class: "text-xs mt-1 text-blue-400", "\"{query_for_display}\"" }
+                                } else {
+                                    p { "No presets available" }
+                                }
+                            }
+                        } else {
+                            for preset in filtered_presets.read().iter() {
+                                // Only expand the currently selected preset
+                                PresetWithSnapshots {
+                                    preset: preset.clone(),
+                                    is_active: preset_memo.read().as_ref().map(|p| p.id) == Some(preset.id),
+                                    is_expanded: preset_memo.read().as_ref().map(|p| p.id) == Some(preset.id),
+                                    registry: tag_registry.read().clone(),
+                                    on_click: actions.load_preset.clone(),
+                                    on_snapshot_click: actions.load_preset_with_snapshot.clone(),
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // === CENTER: Current state and controls ===
+                div { class: "flex-1 flex flex-col overflow-hidden",
+                    // Top bar with current preset info
+                    div { class: "h-16 border-b border-border bg-card px-4 flex items-center justify-between",
+                        div { class: "flex items-center gap-4",
+                            // Current preset name
+                            if let Some(preset) = preset_memo.read().as_ref() {
+                                span { class: "text-lg font-semibold", "{preset.name}" }
+                                span { class: "px-2 py-1 bg-secondary text-secondary-foreground text-xs rounded",
+                                    "{preset.category}"
+                                }
+                            } else {
+                                span { class: "text-lg font-semibold text-muted-foreground", "No Preset Selected" }
+                            }
+                        }
+                        div { class: "flex items-center gap-3",
+                            // Connection indicator
+                            div { class: "flex items-center gap-2",
+                                div {
+                                    class: if connected_memo() { "w-2 h-2 rounded-full bg-green-500" } else { "w-2 h-2 rounded-full bg-red-500" },
+                                }
+                                span { class: "text-xs text-muted-foreground",
+                                    if connected_memo() { "Connected" } else { "Disconnected" }
+                                }
+                            }
+                            if loading_memo() {
+                                span { class: "text-sm text-muted-foreground animate-pulse", "Loading..." }
+                            }
+                        }
+                    }
+
+                    // Current preset display
+                    div { class: "p-4 border-b border-border bg-card/50",
+                        CurrentPresetCardCompact {
+                            preset: preset_memo.read().clone(),
+                            scene: scene_memo.read().clone(),
+                            search_query: query_for_display.clone(),
+                            preset_count: preset_count,
+                            total_count: total_count,
+                        }
+                    }
+
+                    // Main content grid
+                    div { class: "flex-1 p-4 overflow-y-auto",
+                        // View mode selector and title
+                        div { class: "flex items-center justify-between mb-4",
+                            h3 { class: "text-lg font-semibold", "Blocks" }
+
+                            // View mode buttons
+                            div { class: "flex items-center gap-1 bg-muted rounded-lg p-1",
+                                for mode in BlockViewMode::all() {
+                                    ViewModeButton {
+                                        mode: *mode,
+                                        is_active: *block_view_mode.read() == *mode,
+                                        on_click: move |m| block_view_mode.set(m),
+                                    }
+                                }
+                            }
+                        }
+
+                        // Render blocks using unified BlockChain pipeline
+                        div { class: "mb-6",
+                            BlockChain {
+                                blocks: effective_blocks(),
+                                view_mode: *block_view_mode.read(),
+                                on_toggle_bypass: actions.toggle_block_bypass.clone(),
+                                on_param_change: actions.set_block_parameter.clone(),
+                            }
+                        }
+
+                        // TODO: Re-enable when rig-control supports sections
+                        // // Engines (sections) - more relevant for Keys rigs
+                        // if !sections_memo().is_empty() {
+                        //     h3 { class: "text-lg font-semibold mb-3", "Engines" }
+                        //     div { class: "grid grid-cols-2 gap-3",
+                        //         for section in sections_memo() {
+                        //             SectionCard {
+                        //                 section: section.clone(),
+                        //                 on_toggle: actions.toggle_section.clone(),
+                        //             }
+                        //         }
+                        //     }
+                        // }
+                    }
+                }
+
+                // === RIGHT SIDEBAR: Scenes (top) and Songs (bottom) ===
+                div { class: "w-64 border-l border-border bg-card flex flex-col",
+                    // === TOP PANEL: SCENES ===
+                    div { class: "flex-1 flex flex-col min-h-0 border-b border-border",
+                        // Song header with scene info
+                        if let Some(song) = song_memo() {
+                            div { class: "p-3 border-b border-border bg-card/50",
+                                h2 { class: "font-semibold text-base truncate", "{song.name}" }
+                                p { class: "text-xs text-muted-foreground",
+                                    {format!("{} scenes", song.scene_count)}
+                                }
+                            }
+                        } else {
+                            div { class: "p-3 border-b border-border",
+                                h2 { class: "font-semibold text-base text-muted-foreground", "No Song" }
+                            }
+                        }
+
+                        // Scene list
+                        div { class: "flex-1 overflow-y-auto p-2",
+                            h3 { class: "text-xs font-semibold text-muted-foreground mb-2 px-2", "SCENES" }
+                            if let Some(song) = song_memo() {
+                                for scene_idx in 0..song.scene_count {
+                                    SceneItem {
+                                        index: scene_idx,
+                                        is_active: scene_idx == scene_index_memo(),
+                                        name: song.scene_names.get(scene_idx).cloned().unwrap_or_else(|| format!("Scene {}", scene_idx + 1)),
+                                        on_click: actions.go_to_scene.clone(),
+                                    }
+                                }
+                            }
+                        }
+
+                        // Scene navigation buttons
+                        div { class: "p-2 border-t border-border flex gap-2",
+                            button {
+                                class: "flex-1 px-2 py-1.5 bg-muted hover:bg-muted/80 rounded text-xs font-medium",
+                                onclick: move |_| actions.prev_scene.call(()),
+                                "← Prev"
+                            }
+                            button {
+                                class: "flex-1 px-2 py-1.5 bg-muted hover:bg-muted/80 rounded text-xs font-medium",
+                                onclick: move |_| actions.next_scene.call(()),
+                                "Next →"
+                            }
+                        }
+                    }
+
+                    // === BOTTOM PANEL: SONGS ===
+                    div { class: "flex-1 min-h-80 flex flex-col",
+                        // Setlist header with dropdown
+                        div { class: "p-2 border-b border-border bg-muted/30",
+                            div { class: "flex items-center gap-2 px-2",
+                                span { class: "text-xs font-semibold text-muted-foreground", "SETLIST:" }
+                                SetlistDropdown {
+                                    on_select: actions.load_setlist.clone(),
+                                }
+                            }
+                        }
+
+                        // Song list
+                        div { class: "flex-1 overflow-y-auto p-2",
+                            {
+                                let songs = RIG_SETLIST_SONGS.read();
+                                let current_song_idx = *RIG_SONG_INDEX.read();
+                                rsx! {
+                                    for song in songs.iter() {
+                                        SongItem {
+                                            song: song.clone(),
+                                            is_active: song.index == current_song_idx,
+                                            on_click: actions.go_to_song.clone(),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Song navigation buttons
+                        div { class: "p-2 border-t border-border flex gap-2",
+                            button {
+                                class: "flex-1 px-2 py-1.5 bg-muted hover:bg-muted/80 rounded text-xs font-medium",
+                                onclick: move |_| actions.prev_song.call(()),
+                                "← Prev Song"
+                            }
+                            button {
+                                class: "flex-1 px-2 py-1.5 bg-muted hover:bg-muted/80 rounded text-xs font-medium",
+                                onclick: move |_| actions.next_song.call(()),
+                                "Next Song →"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Compact current preset card with search info
+#[component]
+fn CurrentPresetCardCompact(
+    preset: Option<PresetInfo>,
+    scene: Option<ProfileSceneInfo>,
+    search_query: String,
+    preset_count: usize,
+    total_count: usize,
+) -> Element {
+    let has_search = !search_query.is_empty();
+
+    rsx! {
+        div { class: "flex items-center justify-between",
+            div {
+                // Current preset name
+                h2 { class: "text-2xl font-bold",
+                    if let Some(p) = &preset {
+                        "{p.name}"
+                    } else {
+                        "No Preset Selected"
+                    }
+                }
+                // Preset category and scene info
+                div { class: "flex items-center gap-3 mt-1",
+                    if let Some(p) = &preset {
+                        span { class: "text-sm text-muted-foreground",
+                            "{p.category}"
+                        }
+                    }
+                    if let Some(s) = &scene {
+                        span { class: "text-sm text-muted-foreground", "•" }
+                        span { class: "text-sm text-muted-foreground",
+                            "Scene: {s.name}"
+                            if let Some(preset_snapshot) = &s.preset_snapshot_name {
+                                span { class: "ml-1 opacity-75", "({preset_snapshot})" }
+                            }
+                        }
+                    }
+                }
+                // Search/count info
+                if has_search {
+                    p { class: "text-xs text-blue-400 mt-2",
+                        "Showing {preset_count} of {total_count} presets"
+                    }
+                } else {
+                    p { class: "text-xs text-muted-foreground mt-2",
+                        "{total_count} presets available"
+                    }
+                }
+            }
+            // TODO: Show scenes when rig-control supports them
+            // Snapshot pills would go here, but rig-control uses scenes instead
+            if let Some(p) = &preset {
+                if let Some(desc) = &p.description {
+                    div { class: "flex flex-col items-end gap-1",
+                        span { class: "text-xs text-muted-foreground italic max-w-xs text-right",
+                            "{desc}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Preset Tag Display Component
+// ============================================================================
+
+/// Display tags for a preset with consistent colors
+/// Shows top 3 tags by priority, with option to expand
+#[component]
+fn PresetTagsDisplay(
+    tag_ids: Vec<Uuid>,
+    registry: TagRegistry,
+    max_visible: Option<usize>,
+) -> Element {
+    let max_visible = max_visible.unwrap_or(3);
+    let mut show_all = use_signal(|| false);
+
+    // Resolve tag IDs to actual tags and sort by priority
+    let mut resolved_tags: Vec<&PresetTag> = tag_ids
+        .iter()
+        .filter_map(|id| registry.get(*id))
+        .collect();
+
+    // Sort by priority (highest first) for consistent display order
+    resolved_tags.sort_by(|a, b| b.priority.cmp(&a.priority));
+
+    if resolved_tags.is_empty() {
+        return rsx! {};
+    }
+
+    let total_tags = resolved_tags.len();
+    let has_more = total_tags > max_visible;
+    let display_all = show_all();
+
+    let visible_tags: Vec<&PresetTag> = if display_all {
+        resolved_tags
+    } else {
+        resolved_tags.into_iter().take(max_visible).collect()
+    };
+
+    let hidden_count = if display_all { 0 } else { total_tags.saturating_sub(max_visible) };
+
+    rsx! {
+        div { class: "flex flex-wrap items-center gap-1 mt-1",
+            for tag in visible_tags {
+                TagChip {
+                    key: "{tag.id}",
+                    tag: tag.clone(),
+                }
+            }
+
+            // "+N more" button to expand
+            if has_more && !display_all {
+                button {
+                    class: "text-xs text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted transition-colors",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                        show_all.set(true);
+                    },
+                    "+{hidden_count}"
+                }
+            }
+
+            // Collapse button when expanded
+            if display_all && has_more {
+                button {
+                    class: "text-xs text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted transition-colors",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                        show_all.set(false);
+                    },
+                    "−"
+                }
+            }
+        }
+    }
+}
+
+/// Single tag chip with consistent category-based coloring (Scout-style)
+#[component]
+fn TagChip(tag: PresetTag) -> Element {
+    // Scout-style colors - more saturated, category-based
+    // Using colors that match Scout's vibrant tag palette
+    let (bg_color, text_color) = match tag.category {
+        fts::rig::core::TagCategory::BaseTone => ("#3B82F6", "#93C5FD"),     // Blue
+        fts::rig::core::TagCategory::Genre => ("#22C55E", "#86EFAC"),        // Green
+        fts::rig::core::TagCategory::SubGenre => ("#EAB308", "#FDE047"),     // Yellow
+        fts::rig::core::TagCategory::Archetype => ("#A855F7", "#D8B4FE"),    // Purple
+        fts::rig::core::TagCategory::Song => ("#EC4899", "#F9A8D4"),         // Pink
+        fts::rig::core::TagCategory::Character => ("#F97316", "#FDBA74"),    // Orange
+        fts::rig::core::TagCategory::Context => ("#06B6D4", "#67E8F9"),      // Cyan
+        fts::rig::core::TagCategory::Gear => ("#6B7280", "#9CA3AF"),         // Gray
+        fts::rig::core::TagCategory::Custom => ("#78716C", "#A8A29E"),       // Stone
+    };
+
+    // Scout-style: solid background with lighter text
+    let style = format!(
+        "background-color: {}; color: {}; text-shadow: 0 1px 2px rgba(0,0,0,0.3);",
+        bg_color, text_color
+    );
+
+    rsx! {
+        span {
+            class: "text-xs px-1.5 py-0.5 rounded font-semibold whitespace-nowrap",
+            style: "{style}",
+            "{tag.name}"
+        }
+    }
+}
+
+/// Preset item with expandable snapshots
+#[component]
+fn PresetWithSnapshots(
+    preset: PresetInfo,
+    is_active: bool,
+    is_expanded: bool,
+    registry: TagRegistry,
+    on_click: Callback<Uuid>,
+    on_snapshot_click: Callback<(Uuid, Uuid)>,
+) -> Element {
+    let _registry = registry;
+    let current_snapshot_id = *RIG_CURRENT_PRESET_SNAPSHOT_ID.read();
+    let has_scenes = !preset.scene_names.is_empty();
+    let preset_id = preset.id;
+
+    let base_class = "px-3 py-2 cursor-pointer transition-colors";
+    let active_class = if is_active {
+        "bg-primary/20 border-l-2 border-primary"
+    } else {
+        "hover:bg-muted border-l-2 border-transparent"
+    };
+
+    rsx! {
+        div { class: "border-b border-border/50",
+            // Preset header
+            div {
+                class: "{base_class} {active_class}",
+                onclick: move |_| on_click.call(preset_id),
+                div { class: "flex items-start justify-between",
+                    div { class: "flex-1 min-w-0",
+                        div { class: "font-medium text-sm truncate", "{preset.name}" }
+                        div { class: "text-xs text-muted-foreground",
+                            "{preset.category}"
+                            if has_scenes {
+                                span { class: "ml-2 text-muted-foreground/60",
+                                    "• {preset.scene_count} scenes"
+                                }
+                            }
+                        }
+                        // Show rating if > 0
+                        if preset.rating > 0 {
+                            div { class: "text-xs text-yellow-500 mt-1",
+                                {"★".repeat(preset.rating as usize)}
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Expanded scenes (preset-level variations)
+            if is_expanded && has_scenes {
+                div { class: "bg-muted/30 py-1",
+                    for scene in &preset.scenes {
+                        PresetSnapshotItem {
+                            preset_id,
+                            scene: scene.clone(),
+                            is_active: current_snapshot_id == Some(scene.id),
+                            on_click: on_snapshot_click.clone(),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Individual preset scene item (preset-level variation)
+#[component]
+fn PresetSnapshotItem(
+    preset_id: Uuid,
+    scene: PresetSnapshotInfo,
+    is_active: bool,
+    on_click: Callback<(Uuid, Uuid)>,
+) -> Element {
+    let scene_id = scene.id;
+
+    let base_class = "pl-6 pr-3 py-1.5 text-xs cursor-pointer transition-colors";
+    let active_class = if is_active {
+        "bg-primary/10 text-primary"
+    } else {
+        "hover:bg-muted text-muted-foreground hover:text-foreground"
+    };
+
+    rsx! {
+        div {
+            class: "{base_class} {active_class}",
+            onclick: move |_| on_click.call((preset_id, scene_id)),
+            "• {scene.name}"
+        }
+    }
+}
+
+// TODO: Commented out - old snapshot item (replaced by PresetSnapshotItem)
+// /// Individual snapshot item with optional tag display
+// #[component]
+// fn SnapshotItem(
+//     preset_id: Uuid,
+//     snapshot: SnapshotInfo,
+//     is_active: bool,
+//     registry: TagRegistry,
+//     on_click: Callback<(Uuid, Uuid)>,
+// ) -> Element {
+//     let snapshot_id = snapshot.id;
+//     let has_tags = !snapshot.tag_ids.is_empty();
+//
+//     let base_class = "pl-6 pr-3 py-1.5 text-xs cursor-pointer transition-colors";
+//     let active_class = if is_active {
+//         "bg-primary/10 text-primary"
+//     } else {
+//         "hover:bg-muted text-muted-foreground hover:text-foreground"
+//     };
+//
+//     rsx! {
+//         div {
+//             class: "{base_class} {active_class}",
+//             onclick: move |_| on_click.call((preset_id, snapshot_id)),
+//             div { class: "flex items-center gap-2",
+//                 span { "• {snapshot.name}" }
+//                 // Show tags if there are any manual (non-auto-derived) tags
+//                 if has_tags {
+//                     div { class: "flex gap-1",
+//                         for tag_id in &snapshot.tag_ids {
+//                             if let Some(tag) = registry.get(*tag_id) {
+//                                 TagChip {
+//                                     key: "{tag.id}",
+//                                     tag: tag.clone(),
+//                                 }
+//                             }
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
+
+/// Song header in the scene navigator
+#[component]
+fn SongHeader(song: SongInfo) -> Element {
+    rsx! {
+        div { class: "p-3 border-b border-border",
+            h2 { class: "font-semibold text-lg truncate", "{song.name}" }
+            p { class: "text-sm text-muted-foreground",
+                {format!("{} scenes", song.scene_count)}
+            }
+        }
+    }
+}
+
+/// Individual scene item in the navigator
+#[component]
+fn SceneItem(
+    index: usize,
+    is_active: bool,
+    name: String,
+    on_click: Callback<usize>,
+) -> Element {
+    let base_class = "px-3 py-2 rounded cursor-pointer transition-colors mb-1";
+    let active_class = if is_active {
+        "bg-primary text-primary-foreground"
+    } else {
+        "hover:bg-muted"
+    };
+
+    rsx! {
+        div {
+            class: "{base_class} {active_class}",
+            onclick: move |_| on_click.call(index),
+            div { class: "flex items-center justify-between",
+                span { class: "font-medium text-sm truncate", "{name}" }
+                span { class: "text-xs opacity-60 ml-2", "{index + 1}" }
+            }
+        }
+    }
+}
+
+/// Dropdown for selecting a setlist
+///
+/// TODO: Currently display-only since rig-control doesn't have setlist IDs yet.
+/// Setlists are just collections of songs, and there's currently only one ("Main Setlist").
+#[component]
+fn SetlistDropdown(on_select: Callback<Uuid>) -> Element {
+    let current_setlist = RIG_CURRENT_SETLIST.read();
+    let _available_setlists = RIG_AVAILABLE_SETLISTS.read();
+    let _is_open = use_signal(|| false);
+
+    let current_name = current_setlist
+        .as_ref()
+        .map(|s| s.name.clone())
+        .unwrap_or_else(|| "No Setlist".to_string());
+
+    let song_count = current_setlist
+        .as_ref()
+        .map(|s| s.song_count)
+        .unwrap_or(0);
+
+    rsx! {
+        div { class: "relative flex-1",
+            // Display current setlist (non-interactive for now)
+            div {
+                class: "w-full flex items-center justify-between px-2 py-1 text-xs font-medium bg-background border border-border rounded",
+                span { class: "truncate", "{current_name}" }
+                span { class: "ml-2 text-muted-foreground text-[10px]",
+                    {format!("{} songs", song_count)}
+                }
+            }
+
+            // TODO: Add multi-setlist support when rig-control has setlist IDs
+            // For now, there's only one setlist so selection isn't needed
+        }
+    }
+}
+
+/// Individual song item in the setlist
+#[component]
+fn SongItem(
+    song: SongInfo,
+    is_active: bool,
+    on_click: Callback<usize>,
+) -> Element {
+    let index = song.index;
+    let base_class = "px-3 py-2 rounded cursor-pointer transition-colors mb-1";
+    let active_class = if is_active {
+        "bg-primary/20 border-l-2 border-primary"
+    } else {
+        "hover:bg-muted border-l-2 border-transparent"
+    };
+
+    rsx! {
+        div {
+            class: "{base_class} {active_class}",
+            onclick: move |_| on_click.call(index),
+            div { class: "flex items-center justify-between",
+                div { class: "flex-1 min-w-0",
+                    span { class: "font-medium text-sm truncate block", "{song.name}" }
+                    span { class: "text-xs text-muted-foreground",
+                        {format!("{} scenes", song.scene_count)}
+                    }
+                }
+                span { class: "text-xs opacity-60 ml-2", "{index + 1}" }
+            }
+        }
+    }
+}
+
+
+// TODO: Commented out - sections are part of old fts::rig architecture
+// /// Card for a rig section
+// #[component]
+// fn SectionCard(section: SectionInfo, on_toggle: Callback<Uuid>) -> Element {
+//     let enabled_class = if section.enabled {
+//         "border-primary bg-card"
+//     } else {
+//         "border-border bg-muted/50 opacity-60"
+//     };
+//
+//     rsx! {
+//         div {
+//             class: "border rounded-lg p-3 cursor-pointer transition-all {enabled_class}",
+//             onclick: move |_| on_toggle.call(section.id),
+//             div { class: "flex items-center justify-between mb-2",
+//                 h4 { class: "font-semibold", "{section.name}" }
+//                 div {
+//                     class: if section.enabled { "w-2 h-2 rounded-full bg-green-500" } else { "w-2 h-2 rounded-full bg-muted-foreground" },
+//                 }
+//             }
+//             p { class: "text-sm text-muted-foreground",
+//                 {format!("{} layer{}", section.layer_count, if section.layer_count == 1 { "" } else { "s" })}
+//             }
+//         }
+//     }
+// }
+//
+// /// Card for a global effect block
+// #[component]
+// fn GlobalBlockCard(block: GlobalBlockInfo, on_toggle_bypass: Callback<Uuid>) -> Element {
+//     let enabled_class = if block.enabled {
+//         "border-primary bg-card"
+//     } else {
+//         "border-border bg-muted/50 opacity-60"
+//     };
+//
+//     rsx! {
+//         div {
+//             class: "border rounded-lg p-3 cursor-pointer transition-all {enabled_class}",
+//             onclick: move |_| on_toggle_bypass.call(block.id),
+//             div { class: "flex items-center justify-between",
+//                 span { class: "font-medium text-sm", "{block.name}" }
+//                 div {
+//                     class: if block.enabled { "w-2 h-2 rounded-full bg-green-500" } else { "w-2 h-2 rounded-full bg-red-500" },
+//                 }
+//             }
+//         }
+//     }
+// }
+
+// ============================================================================
+// View Mode Selector
+// ============================================================================
+
+/// Props for view mode button
+#[derive(Props, Clone, PartialEq)]
+struct ViewModeButtonProps {
+    mode: BlockViewMode,
+    is_active: bool,
+    on_click: EventHandler<BlockViewMode>,
+}
+
+/// Button for selecting a view mode
+#[component]
+fn ViewModeButton(props: ViewModeButtonProps) -> Element {
+    let base_class = "px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer";
+    let active_class = if props.is_active {
+        "bg-primary text-primary-foreground shadow-sm"
+    } else {
+        "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+    };
+
+    let mode = props.mode;
+
+    rsx! {
+        button {
+            class: "{base_class} {active_class}",
+            onclick: move |_| props.on_click.call(mode),
+            title: "{props.mode.display_name()}",
+
+            span { class: "mr-1", "{props.mode.icon()}" }
+            span { class: "hidden sm:inline", "{props.mode.display_name()}" }
+        }
+    }
+}
+
+// Block chain/content components are now in block_chain.rs via the unified
+// BlockChain<T: RenderBlock> pipeline. The 16 components previously here
+// (GuitarPedalboard, PedalBlock, BlockCardsView, BlockCard, RackView,
+// RackBlock, Series500View, Series500Block, and all Effective* variants)
+// have been replaced by BlockChain + BlockContent + BlockChrome500.

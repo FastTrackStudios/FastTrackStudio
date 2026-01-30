@@ -1,0 +1,15 @@
+[package]
+name = "daw-reaper"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "daw-reaper-extension"
+path = "src/main.rs"
+
+[dependencies]
+daw-proto = { path = "../daw-proto" }
+extension-runtime = { path = "../../../modules/extension-runtime" }
+reaper-medium = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

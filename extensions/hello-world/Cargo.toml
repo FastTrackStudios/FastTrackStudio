@@ -1,0 +1,14 @@
+[package]
+name = "hello-world"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "hello-world-extension"
+path = "src/main.rs"
+
+[dependencies]
+hello-world-proto = { path = "../hello-world-proto" }
+extension-runtime = { path = "../../modules/extension-runtime" }
+tokio = { workspace = true }
+tracing = { workspace = true }

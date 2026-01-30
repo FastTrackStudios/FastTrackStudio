@@ -1,0 +1,9 @@
+[package]
+name = "hello-world-proto"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+roam = "0.6"
+facet = "0.43"
+serde = { workspace = true }

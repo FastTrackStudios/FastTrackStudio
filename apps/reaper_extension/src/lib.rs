@@ -7,6 +7,7 @@ mod infrastructure;
 #[cfg(feature = "input")]
 mod input;
 mod services;
+mod extension_host;
 
 #[cfg(feature = "auto_color")]
 mod auto_color;
@@ -104,6 +105,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     } else {
         info!("TaskSupport initialized");
     }
+
+    // Initialize extension host command queue (for main-thread execution of RPC commands)
+    crate::extension_host::init_command_queue();
+    info!("Extension host command queue initialized");
 
     // Register hookcommand2 for MIDI editor actions (must be done before action registration)
     if let Err(e) = session.plugin_register_add_hook_command_2::<MidiEditorActionHook>() {
@@ -338,8 +343,14 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
                 // Process pending command execution requests from async tasks
                 app.command_service.process_pending_commands();
 
+                // Process pending extension host commands (RPC -> main thread execution)
+                crate::extension_host::process_host_commands();
+
                 // Process smooth seek queue (check if we should execute queued seeks)
                 app.smooth_seek_service.process_smooth_seek_queue();
+
+                // Process plugin host operations (hot-reload events)
+                app.process_plugin_operations();
 
                 // Refresh trackname overlay (if enabled and open)
                 #[cfg(feature = "trackname_overlay")]

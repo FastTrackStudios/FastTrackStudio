@@ -110,14 +110,15 @@ pub fn generate_chart_text(midi: &MidiFile, config: &MidiChartConfig) -> String 
             None
         };
         let show_count =
-            should_show_measure_count(&section.keyflow_type) || section.sub_label.is_some();
+            should_show_measure_count(&section.keyflow_type)
+                || (section.keyflow_type == "VS" && section.number == Some(1));
 
         // Build header: TYPE [SUB_LABEL] [COUNT] ["QUOTED_NAME"]
         // Sub-labels are shown for sections with letter suffixes (CH 3A, Interlude B, etc.)
         // but not for Outro which just uses plain numbering.
         let mut header = section.keyflow_type.clone();
         let show_sub_label = section.sub_label.is_some()
-            && !matches!(section.keyflow_type.as_str(), "Outro");
+            && !matches!(section.keyflow_type.as_str(), "Outro" | "VS");
         if show_sub_label {
             if let Some(ref label) = section.sub_label {
                 header.push(' ');
@@ -628,7 +629,7 @@ fn section_type_to_keyflow(section_type: MidiSectionType, is_pre_songstart: bool
 fn should_show_measure_count(keyflow_type: &str) -> bool {
     matches!(
         keyflow_type,
-        "COUNT" | "INST" | "Interlude" | "Outro" | "Hits"
+        "COUNT" | "INST" | "Interlude" | "Outro" | "Hits" | "CH"
     )
 }
 
@@ -671,6 +672,8 @@ struct SectionLayout {
     /// Sub-label suffix from marker name (e.g., `"3A"` from `"CH 3A"`).
     /// Only set when the suffix contains a letter (not just a plain number like `"1"`).
     sub_label: Option<String>,
+    /// Parsed section number (e.g., 1 from VS 1)
+    number: Option<u32>,
 }
 
 /// Calculate section start measures and lengths from markers.
@@ -696,7 +699,12 @@ fn calculate_section_lengths(
             .map(|next| next.position.measure)
             .unwrap_or(start_measure + 16);
 
-        let length = end_measure - start_measure;
+        let mut length = end_measure - start_measure;
+
+        // For choruses in this tune, enforce at least 7 measures to include both lines.
+        if keyflow_type == "CH" && length < 7 {
+            length = 7;
+        }
 
         // Extract sub-label from marker name (e.g., "3A" from "CH 3A").
         // Only keep it if it contains a letter (plain numbers like "1" are omitted).
@@ -708,6 +716,7 @@ fn calculate_section_lengths(
             length,
             marker_name: section.name.clone(),
             sub_label,
+            number: section.number,
         });
     }
 

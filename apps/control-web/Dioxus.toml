@@ -1,0 +1,19 @@
+[application]
+name = "control-web"
+default_platform = "web"
+
+[web.app]
+title = "FTS Control"
+
+[web.watcher]
+reload_html = true
+watch_path = ["src", "assets", "tailwind.css"]
+
+# Proxy API requests during development
+# Option 1: Proxy to control-desktop (port 9250) when running it
+# Option 2: Proxy to http-gateway (port 3000) when running REAPER
+[[web.proxy]]
+backend = "http://localhost:9250/api"
+
+# Note: For smaller WASM binaries that load faster:
+# Use `dx serve --release` (recommended for development)

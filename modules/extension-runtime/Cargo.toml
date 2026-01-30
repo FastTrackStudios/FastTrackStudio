@@ -1,0 +1,19 @@
+[package]
+name = "extension-runtime"
+version.workspace = true
+edition.workspace = true
+
+[features]
+# Enable verbose startup logging for debugging extension initialization
+extension-debug = []
+
+[dependencies]
+roam = "0.6"
+roam-session = "0.6"
+roam-shm = "0.6"
+roam-tracing = "0.6"
+host-proto = { path = "../../extensions/host-proto" }
+tokio = { version = "1.0", features = ["full"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

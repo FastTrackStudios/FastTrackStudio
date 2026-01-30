@@ -1,0 +1,12 @@
+[package]
+name = "host-proto"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+roam = { version = "0.6" }
+facet = { version = "0.43" }
+serde = { workspace = true }
+
+# Re-export types from extension protocols
+daw-proto = { path = "../daw/daw-proto" }

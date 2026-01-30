@@ -18,12 +18,19 @@ use lucide_dioxus::{
 // Setlist components
 use std::sync::Arc;
 use fts::setlist::{LocalSetlistClient, MockSetlist};
-use rig_control::{LocalRigControlClient, MockRigControlService};
-use ui::{
-    GuitarRigGrid, GuitarRigLeftSidebar, GuitarRigRightSidebar, GuitarRigProfileSidebar, GuitarRigTopBar,
-    ModuleBrowserModal, ModuleViewMode, RigViewMode, NodeCanvas, NodeGraph, PerformanceView, RigControlView,
-    RigServiceProvider, SetlistServiceProvider, SignalFlowGrid,
-};
+// TODO: Re-enable when rig-control roam service issues are fixed
+// use rig_control::{LocalRigControlClient, MockRigControlService};
+
+// Rig control UI components
+// TODO: Re-enable when rig-control roam service issues are fixed
+// use rig_control::ui::{
+//     GuitarRigGrid, GuitarRigLeftSidebar, GuitarRigRightSidebar, GuitarRigProfileSidebar, GuitarRigTopBar,
+//     ModuleBrowserModal, ModuleViewMode, RigViewMode, NodeGraph,
+//     RigServiceProvider, SignalFlowGrid,
+// };
+
+// Remaining UI components
+use ui::{SetlistServiceProvider};
 
 // Audio controls
 use audio_controls::widgets::{
@@ -71,12 +78,15 @@ pub enum Route {
     TestRender {},
     #[route("/test/fx-ui")]
     TestFxUi {},
+    #[route("/test/extensions")]
+    TestExtensions {},
     // Setlist control view (demo with mock data)
     #[route("/control/setlist")]
     ControlSetlist {},
     // Rig control view (demo with mock guitar data)
-    #[route("/control/rig/guitar")]
-    ControlRigGuitar {},
+    // TODO: Re-enable when rig-control roam service issues are fixed
+    // #[route("/control/rig/guitar")]
+    // ControlRigGuitar {},
 }
 
 fn main() {
@@ -140,7 +150,9 @@ fn App() -> Element {
 fn Layout() -> Element {
     let route = use_route::<Route>();
     let is_home = matches!(route, Route::Home {});
-    let is_rig_guitar = matches!(route, Route::ControlRigGuitar {});
+    // TODO: Re-enable when rig-control roam service issues are fixed
+    // let is_rig_guitar = matches!(route, Route::ControlRigGuitar {});
+    let is_rig_guitar = false;
 
     rsx! {
         div {
@@ -616,9 +628,12 @@ fn SetlistPreviewCard() -> Element {
 
             // Preview of the setlist view (constrained height)
             div {
-                class: "h-96 overflow-hidden",
-
-                {SetlistServiceProvider(client.clone(), rsx! { PerformanceView {} })}
+                class: "h-96 overflow-hidden flex items-center justify-center bg-muted/30 rounded-lg",
+                // TODO: Re-enable PerformanceView when rig-control is fixed
+                div { class: "text-center text-muted-foreground",
+                    p { "Performance View Preview" }
+                    p { class: "text-sm mt-2 opacity-50", "(Temporarily unavailable)" }
+                }
             }
 
             // Overlay with CTA
@@ -2434,8 +2449,13 @@ fn ControlSetlist() -> Element {
     rsx! {
         {SetlistServiceProvider(client.clone(), rsx! {
             div {
-                class: "h-[calc(100vh-4rem)] w-full flex flex-col overflow-hidden bg-background",
-                PerformanceView {}
+                class: "h-[calc(100vh-4rem)] w-full flex flex-col overflow-hidden bg-background items-center justify-center",
+                // TODO: Re-enable PerformanceView when rig-control is fixed
+                div { class: "text-center text-muted-foreground",
+                    p { class: "text-lg mb-2", "Setlist Performance View" }
+                    p { class: "text-sm", "Temporarily unavailable" }
+                    p { class: "text-xs mt-2 opacity-50", "(Requires rig-control module)" }
+                }
             }
         })}
     }
@@ -2445,6 +2465,8 @@ fn ControlSetlist() -> Element {
 // Rig Control View - Demo with mock guitar data
 // =============================================================================
 
+// TODO: Re-enable when rig-control roam service issues are fixed
+/*
 /// Rig control view with Quad Cortex-inspired signal flow grid.
 ///
 /// Full-featured layout with:
@@ -2472,10 +2494,10 @@ fn ControlRigGuitar() -> Element {
 #[component]
 fn GuitarRigPageContent() -> Element {
     // Subscribe to rig service (populates global signals)
-    ui::use_rig_subscription();
+    rig_control::ui::use_rig_subscription();
 
     // Get action callbacks
-    let actions = ui::use_rig_actions();
+    let actions = rig_control::ui::use_rig_actions();
 
     // Local UI state
     let mut sidebar_open = use_signal(|| true);
@@ -2506,22 +2528,21 @@ fn GuitarRigPageContent() -> Element {
                     is_open: sidebar_open(),
                     rig_view_mode: rig_view_mode(),
                     on_preset_select: actions.load_preset.clone(),
-                    on_preset_scene_select: Some(actions.load_preset_scene.clone()),
+                    on_preset_snapshot_select: Some(actions.load_preset_snapshot.clone()),
                     on_profile_select: actions.load_profile.clone(),
                     on_profile_scene_select: Some(actions.load_profile_scene.clone()),
                 }
 
-                // Center: Node canvas with pan/zoom
-                div { class: "flex-1 overflow-hidden",
-                    NodeCanvas {
-                        graph: node_graph,
-                        on_node_click: Some(Callback::new(move |node_id| {
-                            tracing::info!("Node clicked: {node_id}");
-                        })),
-                        on_toggle_bypass: Some(actions.toggle_block_bypass.clone()),
-                        on_node_move: Some(Callback::new(move |(node_id, pos): (uuid::Uuid, ui::NodePosition)| {
-                            tracing::debug!("Node {node_id} moved to ({:.0}, {:.0})", pos.x, pos.y);
-                        })),
+                // Center: Node graph view (canvas temporarily disabled)
+                div { class: "flex-1 overflow-hidden flex items-center justify-center bg-zinc-900",
+                    div { class: "text-center text-muted-foreground px-8",
+                        p { class: "text-lg mb-2", "Guitar Rig Node Canvas" }
+                        p { class: "text-sm",
+                            "Interactive node canvas temporarily unavailable"
+                        }
+                        p { class: "text-xs mt-2 opacity-50",
+                            "(Requires porting NodeCanvas without audio_controls dependency)"
+                        }
                     }
                 }
 
@@ -2560,6 +2581,7 @@ fn GuitarRigPageContent() -> Element {
         }
     }
 }
+*/
 
 /// Test page for debugging chart rendering - no transforms, just raw output
 #[component]
@@ -2995,6 +3017,20 @@ fn GateSection() -> Element {
                 }
             }
         }
+    }
+}
+
+// =============================================================================
+// Extension System Test Page - WASM Local Services
+// =============================================================================
+
+/// Test page demonstrating extension architecture running locally in WASM
+#[component]
+fn TestExtensions() -> Element {
+    use components::ExtensionDemo;
+
+    rsx! {
+        ExtensionDemo {}
     }
 }
 

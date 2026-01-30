@@ -53,7 +53,7 @@ impl<S: SetlistProvider> ReaperTrackReactiveService<S> {
 
     /// Update a single track from REAPER
     pub fn update_track_from_reaper(&self, reaper_project: ReaperProject, track_index: usize) {
-        info!(
+        debug!(
             track_index,
             "update_track_from_reaper called - looking up project"
         );
@@ -62,7 +62,7 @@ impl<S: SetlistProvider> ReaperTrackReactiveService<S> {
             .setlist_provider
             .get_project_from_reaper(reaper_project)
         {
-            info!(
+            debug!(
                 project_id = %project.id(),
                 track_index,
                 "Project found in setlist, proceeding with track update"
@@ -84,7 +84,7 @@ impl<S: SetlistProvider> ReaperTrackReactiveService<S> {
             } else {
                 // Read the specific track from REAPER
                 if let Some(track) = get_track(&reaper_project, track_index) {
-                    info!(
+                    debug!(
                         project_id = %project.id(),
                         track_index,
                         track_name = %track.name,
@@ -122,7 +122,7 @@ impl<S: SetlistProvider> ReaperTrackReactiveService<S> {
                 }
                 found_name
             };
-            warn!(
+            debug!(
                 project_name = ?project_name,
                 track_index,
                 "Track update skipped: project not found in setlist"
@@ -249,7 +249,7 @@ impl<S: SetlistProvider> TrackReactiveService for ReaperTrackReactiveService<S> 
                 let mut changes = Vec::new();
 
                 if old_track.name != track.name {
-                    info!(
+                    debug!(
                         project_id = %project_id,
                         track_index,
                         old_name = %old_track.name,
@@ -328,7 +328,7 @@ impl<S: SetlistProvider> TrackReactiveService for ReaperTrackReactiveService<S> 
         };
 
         if changed {
-            info!(
+            debug!(
                 project_id = %project_id,
                 track_index,
                 track_name = %track.name,

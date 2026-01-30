@@ -44,6 +44,12 @@ pub fn init_tracing() {
                 .add_directive("iroh::protocol::router=error".parse().unwrap())
                 // Suppress protocol mismatch warnings (error 120: peer doesn't support any known protocol)
                 .add_directive("iroh::protocol=error".parse().unwrap())
+                // Suppress noisy ROAM internals (TRACE/DEBUG)
+                .add_directive("roam_shm=warn".parse().unwrap())
+                .add_directive("roam_session=warn".parse().unwrap())
+                .add_directive("roam=warn".parse().unwrap())
+                // Suppress repetitive track update logs
+                .add_directive("fts::daw_reactive::tracks=warn".parse().unwrap())
         };
 
         // Initialize the subscriber with formatted output

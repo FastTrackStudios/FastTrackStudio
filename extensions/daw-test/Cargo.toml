@@ -1,0 +1,15 @@
+[package]
+name = "daw-test"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "daw-test-extension"
+path = "src/main.rs"
+
+[dependencies]
+host-proto = { path = "../host-proto" }
+extension-runtime = { path = "../../modules/extension-runtime" }
+
+tokio = { workspace = true }
+tracing = { workspace = true }

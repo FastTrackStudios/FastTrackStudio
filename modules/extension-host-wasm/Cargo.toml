@@ -1,0 +1,22 @@
+[package]
+name = "extension-host-wasm"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# ROAM for in-memory RPC via tunnel_pair()
+roam = { workspace = true }
+roam-session = { workspace = true }
+
+# Service protocols
+hello-world-proto = { path = "../../extensions/hello-world-proto" }
+daw-proto = { path = "../../extensions/daw/daw-proto" }
+
+# Utilities
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+# WASM-specific
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"

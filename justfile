@@ -308,33 +308,101 @@ launch-reaper:
         exit 1
     fi
 
-# Build extension, link it, and launch REAPER in foreground for testing
+# Rebuild extensions (triggers hot-reload if REAPER is running)
+rebuild-extensions:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📦 Rebuilding extensions..."
+    cargo build -p daw-proto -p daw-test -p hello-world -p http-gateway -p socket-gateway
+    echo "✅ Extensions rebuilt - hot-reload should pick up changes"
+
+# Build extension, link it, build extensions, symlink them, and launch REAPER in foreground for testing
 test-reaper: link-extension
     #!/usr/bin/env bash
     set -euo pipefail
-    
+
     # Load .env file if it exists
     if [ -f .env ]; then set -a; source .env; set +a; fi
-    
+
     echo "✅ Extension built and linked"
-    echo "🚀 Launching REAPER..."
     echo ""
-    
-    # Launch REAPER in foreground (this will show logs)
+
+    # Build extensions (daw-reaper is NOT an extension - DAW services are in the host)
+    echo "📦 Building extensions..."
+    cargo build -p daw-proto -p daw-test -p hello-world -p http-gateway -p socket-gateway
+    echo "✅ Extensions built:"
+    echo "   - target/debug/daw-test-extension"
+    echo "   - target/debug/hello-world-extension"
+    echo "   - target/debug/http-gateway-extension"
+    echo "   - target/debug/socket-gateway-extension"
+    echo ""
+
+    # Determine Extensions/FTS directory relative to REAPER
     REAPER_EXECUTABLE="${REAPER_EXECUTABLE:-/Users/codywright/Music/FTS-REAPER/FTS-LIVE.app/Contents/MacOS/REAPER}"
-    if [[ -f "$REAPER_EXECUTABLE" ]]; then
-        echo "📋 Logs will appear below. Press Ctrl+C to stop REAPER."
-        echo ""
-        # Run the executable directly to see stdout/stderr in terminal
-        # Change to the app's Resources directory so REAPER can find its resources
-        APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
-        cd "$APP_DIR/Contents/Resources" || exit 1
-        exec "$REAPER_EXECUTABLE"
-    else
+    if [[ ! -f "$REAPER_EXECUTABLE" ]]; then
         echo "❌ REAPER executable not found: $REAPER_EXECUTABLE"
         echo "💡 Set REAPER_EXECUTABLE environment variable to the correct path"
         exit 1
     fi
+
+    # Calculate path to Extensions/FTS
+    # REAPER_EXECUTABLE: /path/to/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/MacOS/REAPER
+    # APP_DIR:           /path/to/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app
+    # RESOURCE_DIR:      /path/to/FastTrackStudio/Reaper/FTS-TRACKS (REAPER resource dir)
+    # PARENT:            /path/to/FastTrackStudio/Reaper
+    # GRANDPARENT:       /path/to/FastTrackStudio
+    # EXTENSIONS_DIR:    /path/to/FastTrackStudio/Extensions/FTS
+    APP_DIR="$(dirname "$(dirname "$(dirname "$REAPER_EXECUTABLE")")")"
+    RESOURCE_DIR="$(dirname "$APP_DIR")"
+    PARENT="$(dirname "$RESOURCE_DIR")"
+    GRANDPARENT="$(dirname "$PARENT")"
+    EXTENSIONS_DIR="$GRANDPARENT/Extensions/FTS"
+
+    echo "📁 Extensions directory: $EXTENSIONS_DIR"
+
+    # Create Extensions/FTS directory
+    mkdir -p "$EXTENSIONS_DIR"
+
+    # Clean up old symlinks from previous versions
+    for old_name in "hello-world-plugin" "hello-world-extension" "daw-reaper-extension"; do
+        OLD_TARGET="$EXTENSIONS_DIR/$old_name"
+        if [[ -L "$OLD_TARGET" ]] || [[ -f "$OLD_TARGET" ]]; then
+            rm -f "$OLD_TARGET"
+            echo "🗑️  Removed old symlink: $OLD_TARGET"
+        fi
+    done
+
+    # Symlink new extensions
+    # Note: daw-reaper is NOT an extension - DAW services are implemented in the host
+    echo ""
+    echo "🔗 Creating symlinks for extensions..."
+
+    for extension in "daw-test-extension" "hello-world-extension" "http-gateway-extension" "socket-gateway-extension"; do
+        SOURCE="$(pwd)/target/debug/$extension"
+        TARGET="$EXTENSIONS_DIR/$extension"
+
+        # Remove old symlink if exists
+        if [[ -L "$TARGET" ]] || [[ -f "$TARGET" ]]; then
+            rm -f "$TARGET"
+        fi
+
+        # Create new symlink
+        ln -s "$SOURCE" "$TARGET"
+        echo "  ✅ $extension -> $TARGET"
+    done
+
+    echo ""
+    echo "💡 For remote control, run 'just control-desktop' in a separate terminal"
+    echo ""
+
+    echo "🚀 Launching REAPER..."
+    echo "📋 Logs will appear below. Press Ctrl+C to stop REAPER."
+    echo ""
+
+    # Run the executable directly to see stdout/stderr in terminal
+    # Change to the app's Resources directory so REAPER can find its resources
+    cd "$APP_DIR/Contents/Resources" || exit 1
+    exec "$REAPER_EXECUTABLE"
 
 # Show running REAPER processes
 show-reaper-procs:
@@ -1041,6 +1109,105 @@ web-dev:
     # Run dx serve in foreground
     trap "kill $CSS_PID 2>/dev/null" EXIT
     cd apps/web && dx serve
+
+# ============================================================================
+# Control App Development (ROAM HTTP Bridge)
+# ============================================================================
+
+# Build Tailwind CSS for the control-web app
+control-web-css:
+    cd apps/control-web && bunx @tailwindcss/cli --input tailwind.css --output assets/tailwind.css
+
+# Run the control-web app dev server (builds CSS first, network accessible)
+control-web: control-web-css
+    cd apps/control-web && dx serve --addr 0.0.0.0 --port 9250
+
+# Run control-web dev server with CSS watcher in parallel (network accessible)
+control-web-dev:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Starting Tailwind CSS watcher and Dioxus dev server..."
+    echo "Server will be available on the network at port 9250"
+    echo "Press Ctrl+C to stop both"
+    # Run CSS watcher in background
+    (cd apps/control-web && bunx @tailwindcss/cli --input tailwind.css --output assets/tailwind.css --watch) &
+    CSS_PID=$!
+    # Run dx serve in foreground, bound to all interfaces
+    trap "kill $CSS_PID 2>/dev/null" EXIT
+    cd apps/control-web && dx serve --addr 0.0.0.0 --port 9250
+
+# Build control-web app (release mode)
+build-control-web:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📦 Building control-web app (release)..."
+    cd apps/control-web
+    bunx @tailwindcss/cli --input tailwind.css --output assets/tailwind.css
+    dx build --release
+    echo "✅ Control-web built at: target/dx/control-web/release/web/public"
+
+# Build control-web app in debug mode (faster, larger WASM)
+build-control-web-debug:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📦 Building control-web app (debug)..."
+    cd apps/control-web
+    bunx @tailwindcss/cli --input tailwind.css --output assets/tailwind.css
+    dx build
+    echo "✅ Control-web built at: target/dx/control-web/debug/web/public"
+
+# Run control-desktop dev server (hot reload, no prebuild)
+# For prototyping the desktop UI independently
+control-desktop-dev:
+    cd apps/control-desktop && dx serve
+
+# Run control-desktop with control-web embedded
+# Builds control-web first, then runs desktop app
+control-desktop: build-control-web-debug
+    cd apps/control-desktop && dx serve
+
+# Build control-desktop for release
+build-control-desktop:
+    cargo build -p control-desktop --release
+
+# Build everything for control (web UI + desktop app)
+build-control: build-control-web-debug
+    echo "✅ Control-web built at: target/dx/control-web/debug/web/public"
+    echo ""
+    echo "Run 'just control-desktop' to start the desktop app with embedded server"
+
+# Development: Quick reference for control app development
+control-dev:
+    #!/usr/bin/env bash
+    echo "╔════════════════════════════════════════════════════════════╗"
+    echo "║  Control App Development                                   ║"
+    echo "╠════════════════════════════════════════════════════════════╣"
+    echo "║                                                            ║"
+    echo "║  Web UI only (hot reload, network accessible):             ║"
+    echo "║    just control-web-dev                                    ║"
+    echo "║    → http://0.0.0.0:9250 (access from phone/tablet)        ║"
+    echo "║                                                            ║"
+    echo "║  Desktop UI only (hot reload):                             ║"
+    echo "║    just control-desktop-dev                                ║"
+    echo "║    → Desktop window opens, serves web on :9251             ║"
+    echo "║                                                            ║"
+    echo "║  Both in parallel:                                         ║"
+    echo "║    Terminal 1: just control-web-dev     (port 9250)        ║"
+    echo "║    Terminal 2: just control-desktop-dev (port 9251)        ║"
+    echo "║                                                            ║"
+    echo "╚════════════════════════════════════════════════════════════╝"
+
+# Full control app test: build web UI and run desktop app
+test-control: build-control-web-debug
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "✅ Control-web built"
+    echo ""
+    echo "Starting control-desktop..."
+    echo "  - Desktop UI will open"
+    echo "  - Web UI available at http://localhost:3000"
+    echo ""
+    cd apps/control-desktop && dx serve
 
 # ============================================================================
 # Ralphy + Task Master Integration

@@ -73,8 +73,12 @@ pub mod rig_engine;
 pub mod slot;
 
 // ── Service (ROAM) ─────────────────────────────────────────────────────────
-pub mod local_client;
 pub mod service;
+pub mod roam_test;
+
+// ── UI (Dioxus) ────────────────────────────────────────────────────────────
+#[cfg(feature = "dioxus")]
+pub mod ui;
 
 // Re-export core engine data types.
 pub use engine::{
@@ -88,8 +92,8 @@ pub use slot::{ActivateResult, LoadResult, ModuleSlot};
 
 // Re-export service types.
 pub use service::{
-    EngineStateInfo, InstanceInfo, LocalRigControlClient, MockRigControlService, PreloadStatusInfo,
-    PresetInfo, PresetSceneInfo, ProfileInfo, ProfileSceneInfo, RigControlCommand, RigControlData,
+    EngineStateInfo, InstanceInfo, MockRigControlService, PreloadStatusInfo,
+    PresetInfo, PresetSnapshotInfo, ProfileInfo, ProfileSceneInfo, RigControlCommand, RigControlData,
     RigControlEvent, RigControlService, RigInfo, SetlistInfo, SlotErrorInfo, SlotStateInfo,
     SongInfo, SwitchOutcomeInfo, TransitionResultInfo,
 };

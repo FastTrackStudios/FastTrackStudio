@@ -1,0 +1,16 @@
+[package]
+name = "daw-standalone"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+daw-proto = { path = "../daw-proto" }
+roam-session = { workspace = true }
+roam-wire = "0.6"
+
+# In-memory state management
+parking_lot = "0.12"
+
+# Utilities
+tracing = { workspace = true }
+wasm-timer = "0.2"  # Cross-platform timing (works in WASM)

@@ -1,0 +1,14 @@
+//! Context providers for dependency injection in Dioxus components
+
+#[macro_use]
+pub mod macros;
+
+pub mod block;
+pub mod director;
+pub mod module;
+pub mod rig;
+
+pub use block::{use_block_service, BlockServiceCtx, BlockServiceProvider};
+pub use director::{use_director_service, DirectorServiceCtx, DirectorServiceProvider};
+pub use module::{use_module_service, ModuleServiceCtx, ModuleServiceProvider};
+pub use rig::{use_rig_service, RigServiceCtx, RigServiceProvider};

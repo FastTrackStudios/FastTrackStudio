@@ -1,0 +1,24 @@
+[package]
+name = "hello-world-plugin"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "hello-world-plugin"
+path = "src/main.rs"
+
+[dependencies]
+hello-world-services = { path = "../services" }
+hello-world-impl = { path = "../hello-world-impl" }
+roam = { workspace = true }
+roam-shm = { git = "https://github.com/bearcove/roam.git", rev = "3a23149" }
+tokio = { workspace = true }
+hot-lib-reloader = { workspace = true }
+serde_json = { workspace = true }
+
+# CLI parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

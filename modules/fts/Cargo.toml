@@ -8,7 +8,8 @@ description = "FastTrackStudio core modules - setlist, lyrics, chords, naming co
 
 [dependencies]
 # Core dependencies
-rig-control = {workspace = true}
+# TODO: Re-enable when rig-control roam service issues are fixed
+# rig-control = {workspace = true, optional = true}
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = "2.0.17"
@@ -59,6 +60,8 @@ default-features = true
 default = []
 reaper = ["dep:reaper-high", "dep:reaper-medium", "dep:reaper-low", "dep:enumflags2", "dep:fragile"]
 rpp = ["dep:rpp-parser"]
+# TODO: Re-enable rig-control when roam service issues are fixed
+# dioxus = ["dep:dioxus", "rig-control/dioxus"]
 dioxus = ["dep:dioxus"]
 iroh = ["daw/iroh", "dep:irpc", "dep:irpc-iroh", "dep:iroh", "dep:rxrust"]
 full = ["reaper", "rpp", "iroh"]

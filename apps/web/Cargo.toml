@@ -21,13 +21,25 @@ keyflow = { path = "../../packages/keyflow", features = ["engraver", "highlighti
 fts = { path = "../../modules/fts", features = ["dioxus"] }
 ui = { path = "../../modules/ui" }
 audio-controls = { path = "../../modules/audio-controls" }
-rig-control = { path = "../../modules/rig-control" }
+# TODO: Re-enable when rig-control roam service issues are fixed
+# rig-control = { path = "../../modules/rig-control", features = ["dioxus"] }
+
+# Extension system (WASM-compatible)
+extension-host-wasm = { path = "../../modules/extension-host-wasm" }
+daw-standalone = { path = "../../extensions/daw/daw-standalone" }
+daw-proto = { path = "../../extensions/daw/daw-proto" }
+hello-world-proto = { path = "../../extensions/hello-world-proto" }
+
+# Additional dependencies for local services
+parking_lot = "0.12"
 
 # UUID for module/block IDs
 uuid = { version = "1.0", features = ["v4"] }
 
 # Roam context (for MockSetlist service calls)
 roam = { workspace = true }
+roam-session = { workspace = true }
+roam-wire = "0.6"
 
 # Geometry (match engraver version)
 kurbo = "0.12"

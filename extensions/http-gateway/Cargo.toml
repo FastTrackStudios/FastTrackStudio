@@ -1,0 +1,30 @@
+[package]
+name = "http-gateway"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "http-gateway-extension"
+path = "src/main.rs"
+
+[dependencies]
+# Extension runtime for SHM guest setup
+extension-runtime = { path = "../../modules/extension-runtime" }
+
+# ROAM HTTP Bridge - provides BridgeRouter, GenericBridgeService, WebSocket streaming
+roam-http-bridge = { workspace = true }
+roam-session = { workspace = true }
+
+# Service protocols (for ServiceDetail constants)
+host-proto = { path = "../host-proto" }
+
+# HTTP server with WebSocket support
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+tokio = { workspace = true }
+
+# Utilities
+tracing = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

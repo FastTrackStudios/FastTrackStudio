@@ -1,0 +1,54 @@
+[package]
+name = "control-web"
+version = "0.1.0"
+authors = ["Cody Wright <acodywright@gmail.com>"]
+edition = "2024"
+description = "FTS Control Web - Remote DAW control surface (web UI)"
+
+[dependencies]
+# Dioxus web framework
+dioxus = { version = "0.7.3", features = ["web", "router"] }
+
+# UI utilities
+dioxus-sdk-time = "0.7"
+
+# Serialization for WebSocket protocol
+serde = { workspace = true }
+serde_json = "1.0"
+
+# Logging
+tracing = { workspace = true }
+
+# WASM-specific dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# WASM bindings
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+
+# Web APIs for WebSocket
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Navigator",
+    "Location",
+    # WebSocket support
+    "WebSocket",
+    "MessageEvent",
+    "CloseEvent",
+    "ErrorEvent",
+    "BinaryType",
+] }
+
+# Async timers for WASM
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+# WASM panic hook and tracing
+console_error_panic_hook = "0.1"
+tracing-wasm = "0.2"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "registry"] }
+
+# Random for request IDs
+getrandom = { version = "0.2", features = ["js"] }
+
+[lints]
+workspace = true

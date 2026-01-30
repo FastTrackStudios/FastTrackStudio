@@ -11,7 +11,7 @@ use facet::Facet;
 /// - A song must have at least one scene
 /// - A patch must have at least one variation
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
-pub struct NonEmptyVec<T> {
+pub struct NonEmptyVec<T: 'static> {
     first: T,
     rest: Vec<T>,
 }

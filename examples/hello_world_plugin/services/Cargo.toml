@@ -1,0 +1,8 @@
+[package]
+name = "hello-world-services"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+roam = { workspace = true }
+uuid = { workspace = true }

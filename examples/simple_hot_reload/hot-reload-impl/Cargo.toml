@@ -1,0 +1,13 @@
+[package]
+name = "hot-reload-impl"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+# CRITICAL: Must be dylib for hot-reloading!
+crate-type = ["rlib", "dylib"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }

@@ -31,6 +31,8 @@ members = [
     "apps/desktop",
     "apps/mobile",
     "apps/web",
+    "apps/control-web",
+    "apps/control-desktop",
     "modules/ui",
     "modules/api",
     "modules/rppxml",
@@ -39,6 +41,20 @@ members = [
     "modules/audio-controls",
     "modules/dsp",
     "modules/rig-control",
+    # ROAM SHM Extension Architecture
+    "modules/extension-runtime",
+    "modules/extension-host-core",
+    "modules/extension-host-wasm",
+    "extensions/host-proto",
+    "extensions/hello-world-proto",
+    "extensions/hello-world",
+    "extensions/daw/daw-proto",
+    "extensions/daw/daw-reaper",
+    "extensions/daw/daw-standalone",
+    "extensions/daw-test",
+    "extensions/http-gateway",
+    "extensions/socket-gateway",
+    "apps/standalone",
 ]
 # Exclude submodules that have their own workspaces
 exclude = ["libs/nih-plug", "libs/vendor/blitz", "libs/vendor/anyrender", "libs/vendor/reaper-rs", "libs/vendor/baseview", "apps/fts-control"]
@@ -84,13 +100,24 @@ tauri-plugin-shell = "2"
 taurpc = "0.5.2"
 thiserror = "1.0"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 dioxus-sdk-time = "0.7"
 lucide-dioxus = "2"
 ui = { path = "modules/ui" }
 
-# Roam RPC framework (facet must match roam's version exactly)
-roam = { git = "https://github.com/bearcove/roam.git", rev = "1407c929" }
-facet = { version = "0.43.2", git = "https://github.com/facet-rs/facet", branch = "main", features = ["camino", "reflect", "uuid"] }
+# Roam RPC framework - use published crates.io version
+roam = { version = "0.6" }
+roam-session = { version = "0.6", features = ["tracing"] }
+roam-shm = { version = "0.6", features = ["tracing"] }
+roam-tracing = { version = "0.6" }
+roam-fdpass = { version = "0.6" }
+roam-local = { version = "0.6" }
+roam-http-bridge = { version = "0.6", features = ["tracing"] }
+roam-stream = { version = "0.6" }
+
+# Facet - use stable crates.io version
+facet = { version = "0.43", features = ["camino", "reflect", "uuid"] }
+
 microservice = { path = "modules/microservice" }
 
 [workspace.dependencies.chrono]
@@ -196,6 +223,7 @@ reaper-macros = { path = "libs/vendor/reaper-rs/main/macros" }
 reaper-fluent = { path = "libs/vendor/reaper-rs/main/fluent" }
 reaper-rx = { path = "libs/vendor/reaper-rs/main/rx" }
 
+
 # Override blitz crates from upstream git to use our local fork with post-processing support
 [patch."https://github.com/DioxusLabs/blitz.git"]
 dioxus-native = { path = "libs/vendor/blitz/packages/dioxus-native" }
@@ -230,25 +258,16 @@ anyrender_vello_cpu = { path = "libs/vendor/anyrender/crates/anyrender_vello_cpu
 anyrender_vello_hybrid = { path = "libs/vendor/anyrender/crates/anyrender_vello_hybrid" }
 anyrender_svg = { path = "libs/vendor/anyrender/crates/anyrender_svg" }
 wgpu_context = { path = "libs/vendor/anyrender/crates/wgpu_context" }
-# Facet - roam requires git version, patch all crates.io sub-crates to avoid duplicates
-facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-core = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-json = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-reflect = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-format = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-dessert = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-path = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-solver = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-toml = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-postcard = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-pretty = { git = "https://github.com/facet-rs/facet", branch = "main" }
-facet-value = { git = "https://github.com/facet-rs/facet", branch = "main" }
 
 # Profile settings for WASM builds
 # The "too many locals" error occurs when compiling large Rust projects to WASM in debug mode
 # We optimize web app in dev mode to reduce local variables
 
 [profile.dev.package.web]
+# Enable basic optimization to reduce WASM locals in dev builds
+opt-level = 1
+
+[profile.dev.package.control-web]
 # Enable basic optimization to reduce WASM locals in dev builds
 opt-level = 1
 

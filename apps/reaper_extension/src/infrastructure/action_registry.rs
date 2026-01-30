@@ -159,12 +159,12 @@ impl ActionDef {
         let command_id = self.command_id;
         let section_id = self.section.section_id();
 
-        // Use info! level for registration so it's visible in logs
-        info!(
+        // Debug-level registration logging
+        debug!(
             command_id = %self.command_id,
             display_name = %self.display_name,
             section_id = section_id,
-            "🔧 Registering action with REAPER"
+            "Registering action with REAPER"
         );
 
         // Build full action name with category prefix
@@ -223,11 +223,11 @@ impl ActionDef {
                 storage.push(registered_action);
             }
 
-            info!(
+            debug!(
                 command_id = %self.command_id,
                 action_name = %action_name,
                 reaper_cmd_id = reaper_cmd_id.get(),
-                "✅ Action registered with REAPER (main section)"
+                "Action registered with REAPER (main section)"
             );
         } else {
             // Register to MIDI editor or other sections using low-level custom_action API
@@ -324,10 +324,10 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
         defs_storage.extend(actions.iter().cloned());
     }
 
-    info!(
+    debug!(
         module = %module_name,
         action_count = actions.len(),
-        "📦 Starting action registration for module"
+        "Starting action registration for module"
     );
 
     if actions.is_empty() {
@@ -378,11 +378,11 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
         }
     }
 
-    info!(
+    debug!(
         module = %module_name,
         success_count,
         total = actions.len(),
-        "✅ Completed action registration: {}/{} actions successfully registered",
+        "Completed action registration: {}/{} actions successfully registered",
         success_count,
         actions.len()
     );
@@ -431,12 +431,12 @@ pub fn register_actions(actions: &[ActionDef], module_name: &str) {
             }
         }
 
-        info!(
+        debug!(
             module = %module_name,
             found_count,
             not_found_count = not_found.len(),
             total_stored = map.len(),
-            "🔍 Command ID lookup complete"
+            "Command ID lookup complete"
         );
 
         if !not_found.is_empty() {

@@ -9,6 +9,7 @@
 //! - DAW reactive REAPER implementations (when `reaper` feature is enabled)
 
 pub mod chords;
+pub mod local_client;
 pub mod lyrics;
 pub mod rig;
 pub mod setlist;
@@ -24,9 +25,3 @@ pub mod daw_reactive;
 // Re-export commonly used types
 pub use lyrics::Lyrics;
 pub use setlist::{LyricsState, NavigationCommand, Setlist, SetlistApi, Song, TransportCommand};
-
-// Re-export rig types
-pub use rig::{
-    LocalRigClient, MockRig, Patch, PatchCategory, Preset, Profile, Rig, RigCommand, RigEvent,
-    RigService, Scene, Snapshot,
-};

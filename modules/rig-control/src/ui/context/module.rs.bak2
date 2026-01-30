@@ -1,0 +1,9 @@
+//! Module service context for dependency injection
+
+use crate::ui::signals::{LocalModuleClient, MockModuleService};
+
+crate::define_service_context! {
+    /// Module service context for dependency injection
+    name: Module,
+    client_type: LocalModuleClient<MockModuleService>,
+}

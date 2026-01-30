@@ -1,0 +1,42 @@
+[package]
+name = "extension-host-core"
+version.workspace = true
+edition.workspace = true
+
+[features]
+# SHM transport for process isolation (REAPER, standalone desktop)
+shm = ["dep:roam-shm", "dep:notify"]
+# HTTP gateway for web/mobile access
+http = ["dep:roam-http-bridge", "dep:axum"]
+# Full feature set (default)
+default = ["shm", "http"]
+
+[dependencies]
+# Core ROAM dependencies
+roam = { workspace = true }
+roam-session = { workspace = true }
+roam-tracing = { workspace = true }
+
+# SHM transport (optional - for process isolation)
+roam-shm = { workspace = true, optional = true }
+notify = { version = "7.0", default-features = false, features = ["macos_kqueue"], optional = true }
+
+# HTTP bridge (optional - for web/mobile access)
+roam-http-bridge = { version = "0.6", features = ["tracing"], optional = true }
+roam-schema = { version = "0.6", optional = true }
+axum = { version = "0.8", optional = true }
+
+# Service protocols
+hello-world-proto = { path = "../../extensions/hello-world-proto" }
+daw-proto = { path = "../../extensions/daw/daw-proto" }
+
+# Utilities
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+serde = { workspace = true }
+serde_json = { workspace = true }

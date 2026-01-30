@@ -122,7 +122,7 @@ pub struct ProfileInfo {
 /// Simplified profile scene information for RPC communication.
 ///
 /// A ProfileScene is a template/scene within a Profile that references
-/// a specific Preset and optionally a specific PresetScene (variation).
+/// a specific Preset and optionally a specific PresetSnapshot (variation).
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct ProfileSceneInfo {
     /// Scene index within profile/song
@@ -134,9 +134,9 @@ pub struct ProfileSceneInfo {
     /// Preset name (resolved)
     pub preset_name: String,
     /// Preset scene ID (which variation of the preset to use, if any)
-    pub preset_scene_id: Option<Uuid>,
+    pub preset_snapshot_id: Option<Uuid>,
     /// Preset scene name (if any)
-    pub preset_scene_name: Option<String>,
+    pub preset_snapshot_name: Option<String>,
 }
 
 /// Simplified preset information for RPC communication.
@@ -159,10 +159,11 @@ pub struct PresetInfo {
     pub scene_names: Vec<String>,
     /// Scene details (preset-level variations that can load different modules)
     #[facet(default)]
-    pub scenes: Vec<PresetSceneInfo>,
-    /// Default scene index to load when preset is activated (None means scene 0)
-    #[facet(default)]
-    pub default_scene_index: Option<usize>,
+    pub scenes: Vec<PresetSnapshotInfo>,
+    // TEMP: Commented out to test serialization
+    // /// Default scene index to load when preset is activated (None means scene 0)
+    // #[facet(default)]
+    // pub default_scene_index: Option<usize>,
 }
 
 /// Simplified preset scene information for RPC communication.
@@ -171,7 +172,7 @@ pub struct PresetInfo {
 /// within a preset. The routing/order is locked, but the content of modules
 /// can change between scenes.
 #[derive(Debug, Clone, PartialEq, Facet)]
-pub struct PresetSceneInfo {
+pub struct PresetSnapshotInfo {
     /// Scene ID (internally this is a SnapshotId in the domain model)
     pub id: Uuid,
     /// Scene name (e.g., "Verse", "Chorus", "Solo")
@@ -599,8 +600,8 @@ impl ProfileInfo {
                     name: st.name.clone(),
                     preset_id,
                     preset_name,
-                    preset_scene_id: st.default_snapshot_id.map(|id| id.as_uuid()),
-                    preset_scene_name: None,
+                    preset_snapshot_id: st.default_snapshot_id.map(|id| id.as_uuid()),
+                    preset_snapshot_name: None,
                 }
             })
             .collect();
@@ -622,8 +623,8 @@ impl PresetInfo {
     pub fn from_preset(p: &crate::preset::Preset) -> Self {
         // Note: In the domain model, these are called "snapshots" but at the preset level
         // they represent "scenes" (different module configurations within the same routing)
-        let scenes: Vec<PresetSceneInfo> = p.snapshots.iter()
-            .map(|s| PresetSceneInfo {
+        let scenes: Vec<PresetSnapshotInfo> = p.snapshots.iter()
+            .map(|s| PresetSnapshotInfo {
                 id: s.id.as_uuid(),
                 name: s.name.clone(),
             })
@@ -633,12 +634,12 @@ impl PresetInfo {
             .map(|s| s.name.clone())
             .collect();
 
-        // Find default scene index by looking up the default_snapshot_id
-        let default_scene_index = p.default_snapshot_id
-            .and_then(|default_id| {
-                p.snapshots.iter()
-                    .position(|s| s.id == default_id)
-            });
+        // TEMP: Find default scene index by looking up the default_snapshot_id
+        // let default_scene_index = p.default_snapshot_id
+        //     .and_then(|default_id| {
+        //         p.snapshots.iter()
+        //             .position(|s| s.id == default_id)
+        //     });
 
         Self {
             id: p.id.as_uuid(),
@@ -649,7 +650,7 @@ impl PresetInfo {
             scene_count: scenes.len(),
             scene_names,
             scenes,
-            default_scene_index,
+            // TEMP: default_scene_index,
         }
     }
 }
@@ -707,71 +708,6 @@ impl RigInfo {
 }
 
 // endregion: --- Type Conversions
-
-// region:    --- Local Client
-
-crate::define_local_client! {
-    /// A local client for in-process RigControlService calls.
-    ///
-    /// For remote calls: `RigControlServiceClient::new(connection_handle)`
-    /// For local calls: `LocalRigControlClient::new(Arc::new(mock_impl))`
-    client: LocalRigControlClient,
-    service: RigControlService,
-    methods: {
-        /// Get the full engine state
-        async fn get_engine_state() -> EngineStateInfo;
-
-        /// Get a single slot's state
-        async fn get_slot_state(module_type: ModuleType) -> Option<SlotStateInfo>;
-
-        /// Get all slot states
-        async fn get_all_slot_states() -> Vec<SlotStateInfo>;
-
-        /// Check readiness of a preload operation
-        async fn check_preload_status(handle: u64) -> Option<PreloadStatusInfo>;
-
-        /// Get all available profiles
-        async fn get_available_profiles() -> Vec<ProfileInfo>;
-
-        /// Get the currently loaded profile
-        async fn get_current_profile() -> Option<ProfileInfo>;
-
-        /// Get all available presets
-        async fn get_available_presets() -> Vec<PresetInfo>;
-
-        /// Get the currently loaded preset
-        async fn get_current_preset() -> Option<PresetInfo>;
-
-        /// Get the current rig info
-        async fn get_current_rig() -> Option<RigInfo>;
-
-        /// Get all available setlists
-        async fn get_available_setlists() -> Vec<SetlistInfo>;
-
-        /// Get the current setlist
-        async fn get_current_setlist() -> Option<SetlistInfo>;
-
-        /// Get all songs in the current setlist
-        async fn get_setlist_songs() -> Vec<SongInfo>;
-
-        /// Get the current song
-        async fn get_current_song() -> Option<SongInfo>;
-
-        /// Get the current scene
-        async fn get_current_scene() -> Option<ProfileSceneInfo>;
-
-        /// Execute an engine command
-        async fn execute(cmd: RigControlCommand) -> ();
-
-        /// Subscribe to all engine events
-        async fn subscribe(events: Tx<RigControlEvent>) -> ();
-
-        /// Subscribe to state changes for specific module slots
-        async fn subscribe_slots(module_types: Vec<ModuleType>, states: Tx<SlotStateInfo>) -> ();
-    }
-}
-
-// endregion: --- Local Client
 
 // region:    --- Mock Implementation
 
@@ -1048,8 +984,8 @@ impl RigControlService for MockRigControlService {
             name: scene.name.clone(),
             preset_id: preset.id.as_uuid(),
             preset_name: preset.name.clone(),
-            preset_scene_id: None,
-            preset_scene_name: None,
+            preset_snapshot_id: None,
+            preset_snapshot_name: None,
         })
     }
 

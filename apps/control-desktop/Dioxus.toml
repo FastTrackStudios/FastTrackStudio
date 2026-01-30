@@ -1,0 +1,9 @@
+[application]
+name = "control-desktop"
+default_platform = "desktop"
+
+[desktop.window]
+title = "FTS Control"
+width = 400
+height = 600
+resizable = true
