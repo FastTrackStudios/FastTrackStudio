@@ -5,113 +5,22 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
-[features]
-default = ["core", "input", "live", "lyrics", "iroh_server", "keyflow", "dynamic_template", "visibility_manager", "auto_color", "embed_test", "chart_window"]
-# Core functionality (services, polling, change detection) - enabled by default features
-# When no features are enabled, extension is completely transparent (only menu)
-core = []
-# Enable FTS-Input key interception and redirection
-input = ["core"]
-# Enable Live tracks functionality
-live = ["core"]
-# Enable Dev/debug actions
-dev = []
-# Enable Lyrics functionality
-lyrics = ["core"]
-# Enable IROH server for IPC with desktop app
-iroh_server = ["core"]
-# Enable Keyflow engine for understanding music (chord detection, chart building)
-keyflow = ["core"]
-# Enable Dynamic-Template for track organization and sorting
-dynamic_template = ["core", "dep:dynamic-template"]
-# Enable Visibility Manager for dynamic track visibility groups
-visibility_manager = ["core", "dep:visibility-manager"]
-# Enable Auto Color for automatic track coloring based on classification
-auto_color = ["core", "dep:dynamic-template"]
-# Enable embed test for testing reaper-embed windows
-embed_test = ["dep:reaper-embed", "dep:vello", "dep:raw-window-handle"]
-# Enable trackname overlay (TK_Trackname-style track labels in arrange)
-# Requires input feature for reaper_windows::get_arrange_wnd
-trackname_overlay = ["input", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
-# Enable measure overlay (measure number indicator in arrange)
-# Requires input feature for reaper_windows::get_arrange_wnd
-measure_overlay = ["input", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
-# Enable chord overlay (chord symbol display from MIDI CHORDS track)
-# Requires input feature for reaper_windows::get_arrange_wnd
-# Uses keyflow/engraver for SMuFL chord symbol rendering with MuseJazz font
-chord_overlay = ["input", "keyflow", "keyflow/engraver", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle", "dep:kurbo"]
-# Enable key overlay (key display from KEY track item notes)
-# Requires input feature for reaper_windows::get_arrange_wnd
-key_overlay = ["input", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
-# Enable chart window (docked chart display from keyflow parsing)
-# Note: input feature required due to unconditional imports in infrastructure modules
-chart_window = ["input", "keyflow", "keyflow/engraver", "keyflow/midi-import", "dep:reaper-embed", "dep:vello", "dep:skrifa", "dep:raw-window-handle"]
-
 [dependencies]
-dynamic-template = { path = "../../modules/dynamic-template", optional = true }
-visibility-manager = { path = "../../modules/visibility-manager", optional = true }
-reaper-embed = { path = "../../libs/reaper-embed", optional = true }
-vello = { version = "0.6", features = ["wgpu"], optional = true }
-skrifa = { version = "0.26", optional = true }
-raw-window-handle = { version = "0.6", optional = true }
-kurbo = { version = "0.12", optional = true }
 reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-macros = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-high = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
-reaper-rx = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
-rxrust = { git = "https://github.com/rxRust/rxRust", rev = "349e50b3197e05926e2378ef8fc45cb67ad43b83" }
-fragile = "2.0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-swell-ui = { path = "../../libs/swell-ui" }
-anyhow = "1.0"
-async-trait = "0.1"
-thiserror = "2.0.17"
-daw = { path = "../../modules/daw", features = ["iroh"] }
-fts = { path = "../../modules/fts", features = ["reaper", "iroh"] }
-keyflow = { path = "../../packages/keyflow" }
-uuid = { version = "1.0", features = ["v4", "serde"] }
-enumflags2 = "0.7"
-camino = "1.1"
-peer-2-peer = { path = "../../modules/peer-2-peer" }
+daw = { path = "../../modules/daw" }
+fts = { path = "../../modules/fts" }
 tokio = { version = "1.0", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-notify = { version = "7.0", default-features = false, features = ["macos_fsevent"] }
-parking_lot = "0.12"
-irpc = { workspace = true }
-irpc-iroh = "0.11.0"
-iroh = { version = "0.95", features = ["discovery-local-network"] }
-n0-future = "0.3.0"
-crossbeam-channel = "0.5"
-helgoboss-midi = "0.4.0"
 roam = { workspace = true }
-facet = { workspace = true }
-roam-session = { workspace = true }
-roam-shm = { workspace = true }
-roam-tracing = { workspace = true }
-host-proto = { path = "../../extensions/host-proto" }
-extension-runtime = { path = "../../modules/extension-runtime" }
-hello-world-proto = { path = "../../extensions/hello-world-proto" }
-daw-proto = { path = "../../extensions/daw/daw-proto" }
-daw-reaper = { path = "../../extensions/daw/daw-reaper" }
-once_cell = "1.20"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-cocoa = "0.24.0"
-objc = "0.2.7"
 
 [lib]
 name = "reaper_extension"
 crate-type = ["cdylib", "rlib"]
 
 [lints.rust]
-unsafe_code = "allow"  # Required for low-level REAPER API calls
+unsafe_code = "allow"
 unused = { level = "allow", priority = -1 }
-# Suppress warnings from vendored dependencies (reaper-rs, baseview, etc.)
-unpredictable_function_pointer_comparisons = "allow"
-mismatched_lifetime_syntaxes = "allow"
-unexpected_cfgs = { level = "allow", priority = -1 }
-unused_imports = "allow"
-dead_code = "allow"
