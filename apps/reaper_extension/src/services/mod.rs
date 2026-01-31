@@ -4,6 +4,7 @@
 //! They manage state and provide high-level operations.
 
 pub mod command_service;
+pub mod daw_command_service;
 pub mod midi_service;
 pub mod reaper_transport;
 pub mod seek_service;
@@ -12,6 +13,7 @@ pub mod smooth_seek_service;
 pub mod stream_service;
 
 pub use command_service::CommandService;
+pub use daw_command_service::{DawCommandService, DawCommandProcessor};
 pub use midi_service::{
     AnalyzedChord, MIN_CHORD_DURATION_PPQ, build_midi_file_from_reaper,
     detect_chords_from_midi_track, find_track_by_name, generate_chart_text_from_reaper,

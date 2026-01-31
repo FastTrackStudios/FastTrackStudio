@@ -313,6 +313,7 @@ rebuild-extensions:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "📦 Rebuilding extensions..."
+    # Note: daw-reaper is a library, gets built with reaper_extension
     cargo build -p daw-proto -p daw-test -p hello-world -p http-gateway -p socket-gateway
     echo "✅ Extensions rebuilt - hot-reload should pick up changes"
 
@@ -327,7 +328,8 @@ test-reaper: link-extension
     echo "✅ Extension built and linked"
     echo ""
 
-    # Build extensions (daw-reaper is NOT an extension - DAW services are in the host)
+    # Build extensions
+    # Note: daw-reaper is now a library linked into reaper_extension
     echo "📦 Building extensions..."
     cargo build -p daw-proto -p daw-test -p hello-world -p http-gateway -p socket-gateway
     echo "✅ Extensions built:"
@@ -364,7 +366,7 @@ test-reaper: link-extension
     mkdir -p "$EXTENSIONS_DIR"
 
     # Clean up old symlinks from previous versions
-    for old_name in "hello-world-plugin" "hello-world-extension" "daw-reaper-extension"; do
+    for old_name in "hello-world-plugin" "hello-world-extension"; do
         OLD_TARGET="$EXTENSIONS_DIR/$old_name"
         if [[ -L "$OLD_TARGET" ]] || [[ -f "$OLD_TARGET" ]]; then
             rm -f "$OLD_TARGET"
@@ -372,8 +374,8 @@ test-reaper: link-extension
         fi
     done
 
-    # Symlink new extensions
-    # Note: daw-reaper is NOT an extension - DAW services are implemented in the host
+    # Symlink extensions
+    # Note: daw-reaper is now a library (no separate binary)
     echo ""
     echo "🔗 Creating symlinks for extensions..."
 

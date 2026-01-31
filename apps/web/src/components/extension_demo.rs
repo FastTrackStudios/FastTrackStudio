@@ -209,11 +209,11 @@ let client = LocalDawClient::new(transport);
 client.play().await;
 
 // In REAPER:
-let client = TransportServiceClient::new(shm_handle);
+let client = TransportClient::new(shm_handle);
 client.play().await;
 
 // In desktop app:
-let client = TransportServiceClient::new(shm_handle);
+let client = TransportClient::new(shm_handle);
 client.play().await;"#
                     }
                 }

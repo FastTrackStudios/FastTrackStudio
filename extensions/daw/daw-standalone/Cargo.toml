@@ -3,8 +3,17 @@ name = "daw-standalone"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "daw-standalone"
+path = "src/main.rs"
+
+[lib]
+name = "daw_standalone"
+path = "src/lib.rs"
+
 [dependencies]
 daw-proto = { path = "../daw-proto" }
+extension-runtime = { path = "../../../modules/extension-runtime" }
 roam-session = { workspace = true }
 roam-wire = "0.6"
 

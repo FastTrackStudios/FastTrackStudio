@@ -17,3 +17,4 @@ tokio = { version = "1.0", features = ["full"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
+parking_lot = "0.12"

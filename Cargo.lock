@@ -3149,6 +3149,7 @@ name = "daw-standalone"
 version = "0.1.0"
 dependencies = [
  "daw-proto",
+ "extension-runtime",
  "parking_lot 0.12.5",
  "roam-session",
  "roam-wire",
@@ -4702,6 +4703,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "host-proto",
+ "parking_lot 0.12.5",
  "roam",
  "roam-session",
  "roam-shm",
@@ -11608,8 +11610,10 @@ dependencies = [
  "crossbeam-channel",
  "daw",
  "daw-proto",
+ "daw-reaper",
  "dynamic-template",
  "enumflags2",
+ "extension-runtime",
  "facet",
  "fragile",
  "fts",

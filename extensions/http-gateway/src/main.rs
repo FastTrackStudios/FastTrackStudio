@@ -4,7 +4,7 @@
 //! Uses the `roam-http-bridge` crate for automatic JSON↔postcard transcoding.
 //!
 //! Architecture:
-//! - HTTP Request → HTTP Gateway → BridgeRouter → roam SHM → Host → DAW Services
+//! - HTTP Request → HTTP Gateway → BridgeRouter → roam SHM → Transport Service
 //! - WebSocket → Real-time streaming with `Tx<T>`/`Rx<T>` channels
 //!
 //! Endpoints:
@@ -19,16 +19,13 @@
 
 use axum::Router;
 use extension_runtime::{run_extension, ConnectionHandle, NoDispatcher};
+use host_proto::transport_service_detail;
 use roam_http_bridge::{BridgeRouter, GenericBridgeService};
 use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{error, info, warn};
-
-// Import the service detail function from host-proto
-// The #[roam::service] macro generates `host_service_service_detail()`
-use host_proto::host_service_service_detail;
 
 /// Find the control app dist directory
 /// Priority: 1) Sibling "control" directory (for deployed extensions)
@@ -83,19 +80,19 @@ async fn start_http_server(
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     };
 
-    // Get the ServiceDetail for HostService
+    // Get the ServiceDetail for Transport
     // We need to leak it to get a 'static reference (required by GenericBridgeService)
-    let host_service_detail: &'static _ = Box::leak(Box::new(host_service_service_detail()));
+    let transport_detail: &'static _ = Box::leak(Box::new(transport_service_detail()));
 
-    // Create a GenericBridgeService that auto-exposes all HostService methods
-    let host_service = GenericBridgeService::new(handle, host_service_detail);
+    // Create a GenericBridgeService that auto-exposes all Transport methods
+    let transport_service = GenericBridgeService::new(handle, transport_detail);
 
     info!("📦 Registered services:");
     info!(
-        "   - HostService ({} methods)",
-        host_service_detail.methods.len()
+        "   - Transport ({} methods)",
+        transport_detail.methods.len()
     );
-    for method in &host_service_detail.methods {
+    for method in &transport_detail.methods {
         info!("     • {}", method.method_name);
     }
 
@@ -103,7 +100,7 @@ async fn start_http_server(
     // This automatically provides:
     // - POST /{service}/{method} for RPC calls
     // - GET /@ws for WebSocket streaming
-    let bridge_router = BridgeRouter::new().service(host_service).build();
+    let bridge_router = BridgeRouter::new().service(transport_service).build();
 
     // CORS layer for API requests
     let cors = CorsLayer::new()
@@ -163,7 +160,7 @@ async fn start_http_server(
 
     info!("════════════════════════════════════════════════════════════");
     info!("  🌐 HTTP Gateway listening at: http://{}", addr);
-    info!("     POST /api/HostService/{{method}} - RPC calls");
+    info!("     POST /api/Transport/{{method}} - RPC calls");
     info!("     GET  /api/@ws - WebSocket (subprotocol: roam-bridge.v1)");
     if has_control_dist {
         info!("     GET  /* - FTS Control static files (SPA)");

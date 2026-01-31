@@ -41,7 +41,7 @@ impl GuestService for GuestServiceImpl {
 
         // Log that we're about to call the DAW service
         let _ = host
-            .log_message("info".to_string(), "Calling DAW TransportService.get_state()...".to_string())
+            .log_message("info".to_string(), "Calling DAW Transport.get_state()...".to_string())
             .await;
 
         // Forward a call to the "daw" service's get_state method

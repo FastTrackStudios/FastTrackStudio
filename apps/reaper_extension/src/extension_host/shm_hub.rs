@@ -21,6 +21,8 @@ use parking_lot::RwLock;
 use tracing::{debug, info, warn};
 
 use super::tracing_aggregator::TracingAggregator;
+use extension_runtime::ServiceRegistry;
+use daw_reaper::{ReaperTransport, TransportDispatcher};
 
 /// SHM Hub - host side of ROAM shared memory communication
 pub struct ShmHub {
@@ -47,6 +49,9 @@ pub struct ShmHub {
     /// Spawn tickets (kept alive to prevent doorbell FD from closing)
     /// CRITICAL: Must not be dropped until child process has established connection
     spawn_tickets: Arc<RwLock<HashMap<u8, SpawnTicket>>>,
+
+    /// Service registry for managing services across extensions
+    service_registry: ServiceRegistry,
 }
 
 impl ShmHub {
@@ -130,6 +135,7 @@ impl ShmHub {
             extension_names: Arc::new(RwLock::new(HashMap::new())),
             tracing,
             spawn_tickets: Arc::new(RwLock::new(HashMap::new())),
+            service_registry: ServiceRegistry::new(),
         })
     }
 
@@ -191,20 +197,33 @@ impl ShmHub {
     pub async fn register_peer(&self, peer_id: u8, extension_name: Option<String>) -> Result<ConnectionHandle> {
         debug!("Registering peer {} (name: {:?})", peer_id, extension_name);
 
-        // Create unified host service dispatcher (following dodeca pattern)
-        let host_service_dispatcher = super::host_service_impl::create_host_dispatcher(
+        // Create extension host dispatcher for lifecycle management
+        let extension_host_dispatcher = super::extension_host_impl::create_extension_host_dispatcher(
             self.connections.clone(),
             self.extension_names.clone(),
+            self.service_registry.clone(),
         );
+
+        // Create DAW transport dispatcher
+        // Uses ReaperTransport directly (REAPER API)
+        let transport = ReaperTransport::new();
+        let transport_dispatcher = TransportDispatcher::new(transport);
 
         // Create tracing dispatcher for this peer
         let tracing_dispatcher = self.tracing.dispatcher_for_peer(peer_id, extension_name.clone());
 
-        // Combine dispatchers using RoutedDispatcher
-        // Order: tracing → host_service (includes all DAW forwarding)
+        // Combine dispatchers:
+        // Tracing (primary) handles tracing calls
+        // Transport (fallback 1) handles DAW service calls
+        // ExtensionHost (fallback 2) handles lifecycle calls
+        let daw_dispatcher = RoutedDispatcher::new(
+            transport_dispatcher,
+            extension_host_dispatcher,
+        );
+
         let combined_dispatcher = RoutedDispatcher::new(
             tracing_dispatcher,
-            host_service_dispatcher,
+            daw_dispatcher,
         );
 
         // Register peer with driver and get connection handle
@@ -212,8 +231,8 @@ impl ShmHub {
         let roam_peer_id = PeerId::new(peer_id)
             .ok_or_else(|| anyhow::anyhow!("Invalid peer ID: {}", peer_id))?;
 
-        // add_peer returns (ConnectionHandle, Receiver<IncomingConnection>)
-        let (handle, _incoming) = self
+        // add_peer returns (ConnectionHandle, IncomingConnections)
+        let (handle, _incoming): (ConnectionHandle, _) = self
             .driver_handle
             .add_peer(roam_peer_id, combined_dispatcher)
             .await

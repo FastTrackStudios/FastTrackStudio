@@ -92,8 +92,10 @@ roam-session = { workspace = true }
 roam-shm = { workspace = true }
 roam-tracing = { workspace = true }
 host-proto = { path = "../../extensions/host-proto" }
+extension-runtime = { path = "../../modules/extension-runtime" }
 hello-world-proto = { path = "../../extensions/hello-world-proto" }
 daw-proto = { path = "../../extensions/daw/daw-proto" }
+daw-reaper = { path = "../../extensions/daw/daw-reaper" }
 once_cell = "1.20"
 
 [target.'cfg(target_os = "macos")'.dependencies]

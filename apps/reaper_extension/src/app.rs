@@ -6,6 +6,7 @@ use reaper_medium::ReaperSession;
 use std::error::Error;
 use std::sync::Arc;
 
+use crate::extension_host::ExtensionHost;
 use crate::infrastructure::action_registry::ActionRegistry;
 #[cfg(feature = "core")]
 use crate::infrastructure::change_detection::ChangeDetection;
@@ -15,9 +16,9 @@ use crate::infrastructure::reactive_app_state::ReactiveAppStateService;
 use crate::infrastructure::reactive_polling::ReactivePollingService;
 #[cfg(feature = "core")]
 use crate::services::{
-    CommandService, ReaperTransport, SeekService, SetlistService, SmoothSeekService, StreamService,
+    CommandService, DawCommandProcessor, DawCommandService, ReaperTransport, SeekService,
+    SetlistService, SmoothSeekService, StreamService,
 };
-use crate::extension_host::ExtensionHost;
 use tracing::{debug, error, info, warn};
 
 /// Application container - holds all services and manages initialization
@@ -49,6 +50,14 @@ pub struct App {
     /// Roam-based transport service for RPC communication
     #[cfg(feature = "core")]
     pub roam_transport: Arc<ReaperTransport>,
+
+    // DAW Command Service (for sending commands to DAW)
+    #[cfg(feature = "core")]
+    pub daw_command_service: Arc<DawCommandService>,
+
+    // DAW Command Processor (for processing commands, initialized later)
+    #[cfg(feature = "core")]
+    pub daw_command_processor: std::cell::RefCell<Option<DawCommandProcessor>>,
 
     // SHM Extension Host (manages guest extension processes)
     // Wrapped in RefCell to allow initialization in initialize() method
@@ -106,6 +115,9 @@ impl App {
             // Initialize roam RPC services
             let roam_transport = Arc::new(ReaperTransport::new());
 
+            // Initialize DAW command service (processor is deferred until start_daw_command_processor())
+            let daw_command_service = Arc::new(DawCommandService::new());
+
             // Note: SHM Extension Host initialization is deferred to initialize()
             // because we need REAPER to be fully available first
 
@@ -120,7 +132,9 @@ impl App {
                 reactive_polling,
                 reactive_state,
                 roam_transport,
-                extension_host: std::cell::RefCell::new(None),  // Will be initialized in initialize()
+                daw_command_service,
+                daw_command_processor: std::cell::RefCell::new(None),
+                extension_host: std::cell::RefCell::new(None), // Will be initialized in initialize()
                 _tokio_runtime: Some(tokio_runtime),
                 _session: std::cell::RefCell::new(session),
             })
@@ -132,7 +146,7 @@ impl App {
             // Minimal app with only action registry (for menu)
             Ok(Self {
                 action_registry,
-                extension_host: std::cell::RefCell::new(None),  // Will be initialized in initialize()
+                extension_host: std::cell::RefCell::new(None), // Will be initialized in initialize()
                 _tokio_runtime: Some(tokio_runtime),
                 _session: std::cell::RefCell::new(session),
             })
@@ -219,7 +233,9 @@ impl App {
         info!("Initializing SHM Extension Host...");
         let session_ref = self._session.borrow();
         let reaper = session_ref.reaper();
-        let runtime_handle = self._tokio_runtime.as_ref()
+        let runtime_handle = self
+            ._tokio_runtime
+            .as_ref()
             .expect("Tokio runtime not initialized")
             .handle();
         if let Some(mut host) = Self::initialize_extension_host(&reaper, runtime_handle) {
@@ -258,7 +274,10 @@ impl App {
     }
 
     /// Initialize the SHM Extension Host
-    fn initialize_extension_host(reaper: &reaper_medium::Reaper, runtime_handle: &tokio::runtime::Handle) -> Option<ExtensionHost> {
+    fn initialize_extension_host(
+        reaper: &reaper_medium::Reaper,
+        runtime_handle: &tokio::runtime::Handle,
+    ) -> Option<ExtensionHost> {
         info!("Initializing SHM Extension Host");
 
         // Get plugin directory path
@@ -400,5 +419,14 @@ impl App {
         };
 
         std::path::PathBuf::from("target/debug").join(binary_name)
+    }
+
+    /// Start the DAW command processor and wire it to the service
+    #[cfg(feature = "core")]
+    pub fn start_daw_command_processor(&self) {
+        let (processor, command_tx) = DawCommandProcessor::new();
+        self.daw_command_service.initialize(command_tx);
+        *self.daw_command_processor.borrow_mut() = Some(processor);
+        info!("DAW Command Processor started and wired to service");
     }
 }

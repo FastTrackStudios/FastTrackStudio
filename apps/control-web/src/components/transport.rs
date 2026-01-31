@@ -184,11 +184,11 @@ pub fn TransportControls() -> Element {
     let position = transport_state.read().position_seconds;
     let tempo = transport_state.read().tempo_bpm;
 
-    // Transport control actions - call HostService methods (not TransportService!)
+    // Transport control actions - call Transport methods
     let on_stop = {
         let ws = ws.clone();
         move |_: ()| {
-            ws.call_ignore("HostService", "stop", vec![]);
+            ws.call_ignore("Transport", "stop", vec![]);
             transport_state.write().is_playing = false;
         }
     };
@@ -197,10 +197,10 @@ pub fn TransportControls() -> Element {
         let ws = ws.clone();
         move |_: ()| {
             if is_playing {
-                ws.call_ignore("HostService", "stop", vec![]);
+                ws.call_ignore("Transport", "stop", vec![]);
                 transport_state.write().is_playing = false;
             } else {
-                ws.call_ignore("HostService", "play", vec![]);
+                ws.call_ignore("Transport", "play", vec![]);
                 transport_state.write().is_playing = true;
             }
         }
@@ -209,7 +209,7 @@ pub fn TransportControls() -> Element {
     let on_record = {
         let ws = ws.clone();
         move |_: ()| {
-            ws.call_ignore("HostService", "record", vec![]);
+            ws.call_ignore("Transport", "record", vec![]);
             transport_state.write().is_recording = !is_recording;
         }
     };
@@ -217,7 +217,7 @@ pub fn TransportControls() -> Element {
     let on_goto_start = {
         let ws = ws.clone();
         move |_: ()| {
-            ws.call_ignore("HostService", "set_position", vec![serde_json::json!(0.0)]);
+            ws.call_ignore("Transport", "set_position", vec![serde_json::json!(0.0)]);
             transport_state.write().position_seconds = 0.0;
         }
     };
@@ -227,7 +227,7 @@ pub fn TransportControls() -> Element {
         move |_: ()| {
             // TODO: Get project length and seek to it
             // For now, just seek to 5 minutes as placeholder
-            ws.call_ignore("HostService", "set_position", vec![serde_json::json!(300.0)]);
+            ws.call_ignore("Transport", "set_position", vec![serde_json::json!(300.0)]);
         }
     };
 
@@ -317,9 +317,9 @@ pub fn TransportBar() -> Element {
         let ws = ws.clone();
         move |_: dioxus::events::MouseEvent| {
             if playing {
-                ws.call_ignore("HostService", "stop", vec![]);
+                ws.call_ignore("Transport", "stop", vec![]);
             } else {
-                ws.call_ignore("HostService", "play", vec![]);
+                ws.call_ignore("Transport", "play", vec![]);
             }
             is_playing.set(!playing);
         }
@@ -328,7 +328,7 @@ pub fn TransportBar() -> Element {
     let on_stop = {
         let ws = ws.clone();
         move |_: dioxus::events::MouseEvent| {
-            ws.call_ignore("HostService", "stop", vec![]);
+            ws.call_ignore("Transport", "stop", vec![]);
             is_playing.set(false);
         }
     };

@@ -12,14 +12,14 @@
 mod shm_hub;
 mod extension_registry;
 mod hot_reload;
-mod host_service_impl;
+mod extension_host_impl;
 mod tracing_aggregator;
 mod peer_registry;
 
 pub use shm_hub::ShmHub;
 pub use extension_registry::{ExtensionRegistry, ExtensionGuest, ExtensionMetadata};
 pub use hot_reload::{HotReloadWatcher, WatchEvent};
-pub use host_service_impl::{HostServiceImpl, create_host_dispatcher, init_command_queue, process_host_commands};
+pub use extension_host_impl::{ExtensionHostImpl, create_extension_host_dispatcher};
 pub use tracing_aggregator::TracingAggregator;
 pub use peer_registry::{PeerRegistry, global_peer_registry};
 

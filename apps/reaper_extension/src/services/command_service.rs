@@ -4,6 +4,7 @@
 //! Commands are queued and executed on the main thread.
 
 use crate::infrastructure::action_registry::get_command_id;
+use daw_proto::{PlaybackState, TransportResult};
 use fts::setlist::{NavigationCommand, TransportCommand};
 use reaper_medium::{CommandId, ProjectContext};
 use std::sync::mpsc;
@@ -12,12 +13,21 @@ use tracing::{error, info, warn};
 
 /// Command execution request
 enum CommandRequest {
+    // Existing setlist commands
     Transport(TransportCommand),
     Navigation(NavigationCommand),
     SeekToSong(usize),
     SeekToTime(usize, f64), // (song_index, time_seconds)
     SeekToMusicalPosition(usize, daw::primitives::MusicalPosition), // (song_index, musical_position)
     ToggleLoop,
+
+    // DAW/Transport commands from extensions
+    DawPlay,
+    DawStop,
+    DawPause,
+    DawRecord,
+    DawGetState,
+    DawSetPosition(f64),
 }
 
 /// Service for executing commands on the main thread

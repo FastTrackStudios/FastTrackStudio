@@ -8,7 +8,7 @@
 use crate::roam_client::ConnectionStatus;
 use crate::shared_state::get_shared_state;
 use axum::Router;
-use host_proto::host_service_service_detail;
+use host_proto::transport_service_detail;
 use roam_http_bridge::{BridgeRouter, GenericBridgeService};
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
@@ -92,26 +92,26 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>
     // Get the ROAM connection handle
     let handle = shared.roam_client.get_handle().await?;
 
-    // Get the ServiceDetail for HostService
-    let host_service_detail: &'static _ = Box::leak(Box::new(host_service_service_detail()));
+    // Get the ServiceDetail for Transport
+    let transport_detail: &'static _ = Box::leak(Box::new(transport_service_detail()));
 
-    // Create a GenericBridgeService that auto-exposes all HostService methods
-    let host_service = GenericBridgeService::new(handle, host_service_detail);
+    // Create a GenericBridgeService that auto-exposes all Transport methods
+    let transport_service = GenericBridgeService::new(handle, transport_detail);
 
     info!("📦 Registered services:");
     info!(
-        "   - HostService ({} methods)",
-        host_service_detail.methods.len()
+        "   - Transport ({} methods)",
+        transport_detail.methods.len()
     );
-    for method in &host_service_detail.methods {
+    for method in &transport_detail.methods {
         info!("     • {}", method.method_name);
     }
 
     // Build the bridge router
     // Provides:
-    // - POST /api/{service}/{method} for RPC calls
+    // - POST /api/Transport/{method} for RPC calls
     // - GET /api/@ws for WebSocket streaming (roam-bridge.v1)
-    let bridge_router = BridgeRouter::new().service(host_service).build();
+    let bridge_router = BridgeRouter::new().service(transport_service).build();
 
     // CORS layer for cross-origin requests from phones/tablets
     let cors = CorsLayer::new()
@@ -162,7 +162,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>
 
     info!("════════════════════════════════════════════════════════════");
     info!("  🌐 HTTP Server listening at: http://0.0.0.0:{}", port);
-    info!("     POST /api/HostService/{{method}} - RPC calls");
+    info!("     POST /api/Transport/{{method}} - RPC calls");
     info!("     GET  /api/@ws - WebSocket (roam-bridge.v1)");
     info!("     GET  /* - Control web UI");
     info!("  Access from other devices on your network");
