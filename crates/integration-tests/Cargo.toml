@@ -1,0 +1,14 @@
+[package]
+name = "integration-tests"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+daw-proto = { path = "../../cells/daw/daw-proto" }
+roam = { workspace = true }
+roam-shm = { workspace = true }
+facet = { workspace = true }
+tokio = { workspace = true }
+tempfile = "3.14"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

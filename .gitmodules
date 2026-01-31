@@ -1,0 +1,9 @@
+[submodule "reference/roam"]
+	path = reference/roam
+	url = https://github.com/bearcove/roam.git
+[submodule "reference/tracey"]
+	path = reference/tracey
+	url = https://github.com/bearcove/tracey.git
+[submodule "reference/dodeca"]
+	path = reference/dodeca
+	url = https://github.com/bearcove/dodeca.git

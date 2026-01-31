@@ -1,0 +1,40 @@
+[package]
+name = "roam-test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Facet ecosystem
+facet = { workspace = true }
+facet-default = { workspace = true }
+facet-format = { workspace = true }
+facet-json = { workspace = true }
+facet-postcard = { workspace = true }
+facet-toml = { workspace = true }
+facet-value = { workspace = true }
+facet-yaml = { workspace = true }
+
+# Roam crates (only published ones)
+roam = { workspace = true }
+roam-codegen = { workspace = true }
+roam-frame = { workspace = true }
+roam-hash = { workspace = true }
+roam-schema = { workspace = true }
+roam-service-macros = { workspace = true }
+roam-session = { workspace = true }
+roam-shm = { workspace = true }
+roam-stream = { workspace = true }
+roam-task-local = { workspace = true }
+roam-tracing = { workspace = true }
+roam-websocket = { workspace = true }
+ur-taking-me-with-you = { workspace = true }
+shm-primitives = { workspace = true }
+
+# DAW protocol
+daw-proto = { path = "../cells/daw/daw-proto" }
+
+# Other dependencies
+tempfile = "3.24"
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

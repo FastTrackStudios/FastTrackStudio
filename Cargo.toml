@@ -1,0 +1,40 @@
+[workspace]
+members = ["main", "cells/daw/daw-proto", "cells/daw/daw-standalone", "crates/integration-tests", "xtask"]
+resolver = "2"
+
+[workspace.dependencies]
+# Facet ecosystem
+facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-default = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-format = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-json = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-postcard = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-toml = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-value = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-yaml = { git = "https://github.com/facet-rs/facet", branch = "main" }
+
+# Common dependencies
+thiserror = "2.0"
+tokio = { version = "1.48", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Roam crates as git dependencies (only published ones)
+roam = { git = "https://github.com/bearcove/roam", branch = "main" }
+roam-codegen = { git = "https://github.com/bearcove/roam", branch = "main" }
+roam-frame = { git = "https://github.com/bearcove/roam", branch = "main" }
+roam-hash = { git = "https://github.com/bearcove/roam", branch = "main" }
+roam-schema = { git = "https://github.com/bearcove/roam", branch = "main" }
+roam-service-macros = { git = "https://github.com/bearcove/roam", branch = "main" }
+roam-session = { git = "https://github.com/bearcove/roam", branch = "main" }
+roam-shm = { git = "https://github.com/bearcove/roam", branch = "main", features = ["tracing"] }
+roam-stream = { git = "https://github.com/bearcove/roam", branch = "main" }
+roam-task-local = { git = "https://github.com/bearcove/roam", branch = "main" }
+roam-tracing = { git = "https://github.com/bearcove/roam", branch = "main" }
+roam-websocket = { git = "https://github.com/bearcove/roam", branch = "main" }
+subject-rust = { git = "https://github.com/bearcove/roam", branch = "main" }
+ur-taking-me-with-you = { git = "https://github.com/bearcove/roam", branch = "main", features = ["tokio"] }
+shm-primitives = { git = "https://github.com/bearcove/roam", branch = "main" }
+
+# Local crates
+integration-tests = { path = "crates/integration-tests" }
