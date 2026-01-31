@@ -1,52 +1,28 @@
 //! FastTrackStudio - REAPER Extension (Minimal)
 //!
-//! Bare minimum implementation for testing the architecture.
+//! Minimal implementation using daw-reaper's Transport service.
 
-use reaper_high::{PluginContext, Reaper, ReaperPlugin};
-use reaper_medium::{HookCommand, WindowHandle};
-use std::sync::Arc;
-
-mod app;
-mod command_executor;
-mod services;
-
-use app::App;
+use daw_proto::TransportDispatcher;
+use daw_reaper::ReaperTransport;
+use extension_runtime::run_extension;
+use reaper_low::PluginContext;
+use reaper_macros::reaper_extension_plugin;
+use tracing::info;
 
 /// Plugin entry point
-#[reaper_high::reaper_extension_plugin]
-fn plugin_main(context: PluginContext) -> Result<(), Box<dyn std::error::Error>> {
+#[reaper_extension_plugin]
+fn plugin_main(_context: PluginContext) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
-    // Create and initialize the app
-    let app = App::new(context);
+    info!("FastTrackStudio extension initializing...");
 
-    // Register control surface for timer callbacks
-    Reaper::get().plugin_register_add_control_surface(&app);
+    // Run the extension with the transport service
+    // The extension_runtime handles control surface integration and main thread dispatch
+    run_extension!("reaper-extension", |_handle| {
+        TransportDispatcher::new(ReaperTransport::new())
+    });
 
-    // Register actions
-    register_actions();
-
+    info!("FastTrackStudio extension initialized");
     Ok(())
-}
-
-fn register_actions() {
-    // TODO: Register minimal set of actions
-    // For now, we'll just have the basic transport commands
-}
-
-/// Control surface implementation
-struct ControlSurface {
-    app: Arc<App>,
-}
-
-impl reaper_high::ControlSurface for ControlSurface {
-    fn run(&mut self) {
-        // Called by REAPER on main thread
-        // Process command queue
-        self.app.command_executor.process_pending();
-
-        // Update transport state from REAPER
-        self.app.transport_service.update_from_reaper();
-    }
 }

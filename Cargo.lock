@@ -11583,8 +11583,11 @@ dependencies = [
 name = "reaper_extension"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "daw",
- "fts",
+ "daw-proto",
+ "daw-reaper",
+ "extension-runtime",
  "reaper-high",
  "reaper-low",
  "reaper-macros",

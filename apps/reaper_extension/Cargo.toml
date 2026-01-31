@@ -13,9 +13,12 @@ reaper-high = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "ma
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 daw = { path = "../../modules/daw" }
-fts = { path = "../../modules/fts" }
-tokio = { version = "1.0", features = ["full"] }
+daw-proto = { path = "../../extensions/daw/daw-proto" }
+daw-reaper = { path = "../../extensions/daw/daw-reaper" }
+extension-runtime = { path = "../../modules/extension-runtime" }
 roam = { workspace = true }
+tokio = { version = "1.0", features = ["full"] }
+anyhow = "1.0"
 
 [lib]
 name = "reaper_extension"
