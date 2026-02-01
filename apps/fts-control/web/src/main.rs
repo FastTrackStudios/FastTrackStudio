@@ -50,20 +50,47 @@ fn main() {
 // Everything below only compiles for WASM
 // ============================================================================
 
-/// Determine the WebSocket URL based on current page location
+/// Determine the WebSocket URL for connecting to gateway-ws.
+///
+/// Priority:
+/// 1. Query param `?ws=ws://...` if present
+/// 2. Same hostname as page, but always port 3030 (gateway-ws default)
+/// 3. Fallback to ws://localhost:3030/ws
 #[cfg(target_arch = "wasm32")]
 fn get_websocket_url() -> String {
+    // Check for explicit ws= query param (useful for testing)
+    if let Some(url) = get_ws_query_param() {
+        return url;
+    }
+
+    // Use the page's hostname but connect to gateway-ws port (3030)
     web_sys::window()
-        .and_then(|w| w.location().host().ok())
-        .map(|host| {
+        .and_then(|w| w.location().hostname().ok())
+        .map(|hostname| {
             // Use wss:// if page is https://, otherwise ws://
             let protocol = web_sys::window()
                 .and_then(|w| w.location().protocol().ok())
                 .map(|p| if p == "https:" { "wss" } else { "ws" })
                 .unwrap_or("ws");
-            format!("{protocol}://{host}/ws")
+            // Always use port 3030 where gateway-ws listens
+            format!("{protocol}://{hostname}:3030/ws")
         })
         .unwrap_or_else(|| "ws://localhost:3030/ws".to_string())
+}
+
+/// Check for ?ws=... query parameter
+#[cfg(target_arch = "wasm32")]
+fn get_ws_query_param() -> Option<String> {
+    web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .and_then(|search| {
+            for param in search.trim_start_matches('?').split('&') {
+                if let Some(url) = param.strip_prefix("ws=") {
+                    return Some(url.to_string());
+                }
+            }
+            None
+        })
 }
 
 /// Connect to the gateway WebSocket and return a connection handle
