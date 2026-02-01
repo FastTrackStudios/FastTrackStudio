@@ -50,6 +50,18 @@ enum Commands {
     Build,
     /// Run DAW standalone cell
     Run,
+    /// Run WASM integration tests with Playwright
+    Playwright {
+        /// Install Playwright browsers before running tests
+        #[facet(args::named, default)]
+        install: bool,
+        /// Run tests in headed mode (visible browser)
+        #[facet(args::named, default)]
+        headed: bool,
+        /// Run tests in UI mode for debugging
+        #[facet(args::named, default)]
+        ui: bool,
+    },
 }
 
 #[derive(Facet)]
@@ -244,6 +256,40 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Run => {
             println!("=== Running DAW standalone cell ===");
             cmd!(sh, "cargo run -p daw-standalone").run()?;
+        }
+        Commands::Playwright {
+            install,
+            headed,
+            ui,
+        } => {
+            let wasm_test_dir = workspace_root.join("apps").join("tests").join("wasm");
+            sh.change_dir(&wasm_test_dir);
+
+            println!("=== Running WASM integration tests with Playwright ===");
+
+            // Install dependencies if needed
+            if !wasm_test_dir.join("node_modules").exists() || install {
+                println!("\n>>> Installing dependencies...");
+                cmd!(sh, "pnpm install").run()?;
+            }
+
+            // Install Playwright browsers if requested
+            if install {
+                println!("\n>>> Installing Playwright browsers...");
+                cmd!(sh, "pnpm exec playwright install chromium").run()?;
+            }
+
+            // Run tests
+            println!("\n>>> Running Playwright tests...");
+            if ui {
+                cmd!(sh, "pnpm exec playwright test --ui").run()?;
+            } else if headed {
+                cmd!(sh, "pnpm exec playwright test --headed").run()?;
+            } else {
+                cmd!(sh, "pnpm exec playwright test").run()?;
+            }
+
+            println!("\n=== Playwright tests completed ===");
         }
     }
 
