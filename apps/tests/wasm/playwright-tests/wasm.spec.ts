@@ -2,8 +2,8 @@ import { test, expect } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 
-// Project root (tests/playwright -> root)
-const projectRoot = new URL("../../..", import.meta.url).pathname;
+// Project root (apps/tests/wasm/playwright-tests -> root)
+const projectRoot = new URL("../../../..", import.meta.url).pathname;
 
 let hostServer: ChildProcess | null = null;
 let dioxusServer: ChildProcess | null = null;
