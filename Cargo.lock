@@ -2896,6 +2896,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 
 [[package]]
+name = "host-client"
+version = "0.1.0"
+dependencies = [
+ "daw-proto",
+ "eyre",
+ "facet",
+ "facet-postcard",
+ "futures",
+ "gateway-proto",
+ "host-manager-proto",
+ "roam",
+ "roam-local",
+ "roam-session",
+ "roam-stream",
+ "roam-websocket",
+ "roam-wire",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.26.2",
+ "tracing",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "host-manager"
 version = "0.1.0"
 dependencies = [

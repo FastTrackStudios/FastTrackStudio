@@ -2,7 +2,7 @@
 members = [
     "main",
     "cells/*/*",
-    "crates/*",
+    "modules/*",
     "xtask",
     "apps/*/*",
 ]
@@ -57,9 +57,10 @@ subject-rust = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otl
 ur-taking-me-with-you = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields", features = ["tokio"] }
 shm-primitives = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
 
-# Local crates
-integration-tests = { path = "crates/integration-tests" }
-cell-runtime = { path = "crates/cell-runtime" }
+# Local modules
+integration-tests = { path = "modules/integration-tests" }
+cell-runtime = { path = "modules/cell-runtime" }
+host-client = { path = "modules/host-client" }
 
 cell-host-proto = { path = "cells/cell-host/cell-host-proto" }
 daw-proto = { path = "cells/daw/daw-proto" }
