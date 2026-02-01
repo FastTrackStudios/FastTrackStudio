@@ -1,6 +1,20 @@
 [workspace]
-members = ["main", "cells/daw/daw-proto", "cells/daw/daw-standalone", "crates/integration-tests", "xtask"]
+members = [
+    "main",
+    "cells/*/*",
+    "crates/*",
+    "xtask",
+    "apps/*/*",
+]
+exclude = ["reference/roam"]
 resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.82"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/bearcove/roam"
 
 [workspace.dependencies]
 # Facet ecosystem
@@ -9,6 +23,7 @@ facet-default = { git = "https://github.com/facet-rs/facet", branch = "main" }
 facet-format = { git = "https://github.com/facet-rs/facet", branch = "main" }
 facet-json = { git = "https://github.com/facet-rs/facet", branch = "main" }
 facet-postcard = { git = "https://github.com/facet-rs/facet", branch = "main" }
+facet-pretty = { git = "https://github.com/facet-rs/facet", branch = "main" }
 facet-toml = { git = "https://github.com/facet-rs/facet", branch = "main" }
 facet-value = { git = "https://github.com/facet-rs/facet", branch = "main" }
 facet-yaml = { git = "https://github.com/facet-rs/facet", branch = "main" }
@@ -18,23 +33,39 @@ thiserror = "2.0"
 tokio = { version = "1.48", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+eyre = "0.6"
+futures = "0.3"
 
-# Roam crates as git dependencies (only published ones)
-roam = { git = "https://github.com/bearcove/roam", branch = "main" }
-roam-codegen = { git = "https://github.com/bearcove/roam", branch = "main" }
-roam-frame = { git = "https://github.com/bearcove/roam", branch = "main" }
-roam-hash = { git = "https://github.com/bearcove/roam", branch = "main" }
-roam-schema = { git = "https://github.com/bearcove/roam", branch = "main" }
-roam-service-macros = { git = "https://github.com/bearcove/roam", branch = "main" }
-roam-session = { git = "https://github.com/bearcove/roam", branch = "main" }
-roam-shm = { git = "https://github.com/bearcove/roam", branch = "main", features = ["tracing"] }
-roam-stream = { git = "https://github.com/bearcove/roam", branch = "main" }
-roam-task-local = { git = "https://github.com/bearcove/roam", branch = "main" }
-roam-tracing = { git = "https://github.com/bearcove/roam", branch = "main" }
-roam-websocket = { git = "https://github.com/bearcove/roam", branch = "main" }
-subject-rust = { git = "https://github.com/bearcove/roam", branch = "main" }
-ur-taking-me-with-you = { git = "https://github.com/bearcove/roam", branch = "main", features = ["tokio"] }
-shm-primitives = { git = "https://github.com/bearcove/roam", branch = "main" }
+# Roam crates from fork with OTLP improvements
+roam = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-codegen = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-frame = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-hash = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-schema = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-service-macros = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-session = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-shm = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields", features = ["tracing"] }
+roam-stream = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-task-local = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-telemetry = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-tracing = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-websocket = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-wire = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-local = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+roam-http-bridge = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+subject-rust = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+ur-taking-me-with-you = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields", features = ["tokio"] }
+shm-primitives = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
 
 # Local crates
 integration-tests = { path = "crates/integration-tests" }
+cell-runtime = { path = "crates/cell-runtime" }
+
+cell-host-proto = { path = "cells/cell-host/cell-host-proto" }
+daw-proto = { path = "cells/daw/daw-proto" }
+daw-control = { path = "cells/daw/daw-control" }
+session = { path = "cells/session/session" }
+gateway-proto = { path = "cells/gateway/gateway-proto" }
+host-manager-proto = { path = "cells/host-manager/host-manager-proto" }
+host-manager = { path = "cells/host-manager/host-manager" }
+daw-standalone = { path = "cells/daw/daw-standalone" }

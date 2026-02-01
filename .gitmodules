@@ -7,3 +7,6 @@
 [submodule "reference/dodeca"]
 	path = reference/dodeca
 	url = https://github.com/bearcove/dodeca.git
+[submodule "reference/facet"]
+	path = reference/facet
+	url = https://github.com/facet-rs/facet.git
