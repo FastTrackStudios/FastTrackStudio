@@ -274,31 +274,37 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             ui,
         } => {
             let wasm_test_dir = workspace_root.join("apps").join("tests").join("wasm");
-            sh.change_dir(&wasm_test_dir);
 
             println!("=== Running WASM integration tests with Playwright ===");
 
-            // Install dependencies if needed
-            if !wasm_test_dir.join("node_modules").exists() || install {
-                println!("\n>>> Installing dependencies...");
-                cmd!(sh, "pnpm install").run()?;
-            }
-
-            // Install Playwright browsers if requested
-            if install {
-                println!("\n>>> Installing Playwright browsers...");
-                cmd!(sh, "pnpm exec playwright install chromium").run()?;
-            }
-
-            // Run tests
-            println!("\n>>> Running Playwright tests...");
+            // Build the test command
+            let mut test_args = vec!["exec", "playwright", "test"];
             if ui {
-                cmd!(sh, "pnpm exec playwright test --ui").run()?;
+                test_args.push("--ui");
             } else if headed {
-                cmd!(sh, "pnpm exec playwright test --headed").run()?;
-            } else {
-                cmd!(sh, "pnpm exec playwright test").run()?;
+                test_args.push("--headed");
             }
+            let test_cmd = test_args.join(" ");
+
+            // Build the full command to run inside nix develop
+            let nix_cmd = if install {
+                format!(
+                    "cd {} && pnpm install && pnpm exec playwright install chromium && pnpm {}",
+                    wasm_test_dir.display(),
+                    test_cmd
+                )
+            } else if !wasm_test_dir.join("node_modules").exists() {
+                format!(
+                    "cd {} && pnpm install && pnpm {}",
+                    wasm_test_dir.display(),
+                    test_cmd
+                )
+            } else {
+                format!("cd {} && pnpm {}", wasm_test_dir.display(), test_cmd)
+            };
+
+            println!("\n>>> Running in nix develop shell...");
+            cmd!(sh, "nix develop --command bash -c {nix_cmd}").run()?;
 
             println!("\n=== Playwright tests completed ===");
         }
