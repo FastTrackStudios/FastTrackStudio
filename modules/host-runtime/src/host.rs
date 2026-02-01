@@ -25,7 +25,7 @@ use tokio::process::Command;
 use tokio::sync::Notify;
 use tracing::{debug, error, info};
 
-use crate::cells::{HostServiceImpl, cell_ready_registry};
+use crate::cells::{cell_ready_registry, HostServiceImpl};
 
 // ============================================================================
 // SHM Infrastructure
@@ -510,9 +510,9 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
             .iter()
             .map(|target| Host::get().get_or_create_late_bound(target))
             .collect();
-        crate::multi_forwarder::MultiForwarder::new(handles)
+        crate::forwarder::MultiForwarder::new(handles)
     } else {
-        crate::multi_forwarder::MultiForwarder::empty()
+        crate::forwarder::MultiForwarder::empty()
     };
 
     // Compose dispatchers: HostService -> Tracing -> Forwarder (fallback chain)

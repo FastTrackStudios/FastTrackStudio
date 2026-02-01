@@ -1,47 +1,37 @@
-//! DAW Host - Orchestrates DAW cells and routes calls between them
+//! Test Extension - Host that loads daw-standalone for integration testing
 //!
-//! This host uses the Host singleton pattern (like dodeca):
-//! 1. Initializes the Host singleton with SHM configuration
-//! 2. Registers cells for lazy spawning
-//! 3. Accesses cells via typed clients (triggers spawn on first access)
-//! 4. Uses LateBoundForwarder to route session's RPC calls to DAW
+//! This binary uses the shared host-runtime infrastructure with daw-standalone
+//! as the DAW implementation, allowing full integration testing without REAPER.
 
 #![deny(unsafe_code)]
-
-mod cells;
-mod host;
-mod multi_forwarder;
-mod tracing;
-mod unix_server;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ::tracing::{info, warn};
-use gateway_proto::GatewayControlClient;
-use session_proto::SessionServiceClient;
+use host_runtime::{
+    init_shm_infrastructure, init_tracing, spawn_tracing_consumer, CellConfig, Host,
+};
+use tracing::{info, warn};
 use tokio::time::sleep;
-
-use crate::host::{CellConfig, Host, default_cell_dir, init_shm_infrastructure};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
-    tracing::init_tracing();
+    init_tracing();
 
-    info!("DAW Host starting...");
+    info!("Test Extension starting (using daw-standalone)...");
 
     // Initialize SHM infrastructure (keep temp_dir alive)
     let _temp_dir = init_shm_infrastructure().await?;
 
     // Start cell tracing consumer
-    tracing::spawn_tracing_consumer();
+    spawn_tracing_consumer();
 
     // Find cell binary directory
-    let cell_dir = default_cell_dir();
+    let cell_dir = host_runtime::default_cell_dir();
 
-    // Register cells for lazy spawning
+    // Register cells for lazy spawning - TEST CONFIGURATION
     register_cells(&cell_dir);
 
     // Start Unix socket server for desktop app connections
@@ -50,22 +40,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn all cells
     spawn_cells().await?;
 
-    info!("Host running with DAW, Session, and Gateway-WS cells. Press Ctrl+C to shutdown.");
+    info!("Test Extension running with DAW, Session, and Gateway-WS cells. Press Ctrl+C to shutdown.");
 
     // Start health check loop
     start_health_check();
 
     // Keep running until Ctrl+C
     tokio::signal::ctrl_c().await?;
-    info!("Shutting down host...");
+    info!("Shutting down test extension...");
     Host::get().signal_exit();
 
     Ok(())
 }
 
 /// Register all cells with the Host for lazy spawning.
+/// Uses daw-standalone for testing (not daw-reaper).
 fn register_cells(cell_dir: &PathBuf) {
-    // DAW cell - standalone, no forwarding needed
+    // DAW cell - using standalone implementation for testing
     CellConfig::new("daw-standalone", cell_dir).register();
 
     // Session cell - forwards to DAW
@@ -78,7 +69,7 @@ fn register_cells(cell_dir: &PathBuf) {
         .forwards_to(&["daw-standalone"])
         .register();
 
-    info!("Cells registered for lazy spawning");
+    info!("Cells registered for lazy spawning (test configuration)");
 }
 
 /// Start the Unix socket server for desktop app connections.
@@ -88,7 +79,7 @@ fn start_unix_server() {
         .unwrap_or_else(|_| PathBuf::from("/tmp/fts-control.sock"));
 
     tokio::spawn(async move {
-        if let Err(e) = unix_server::start_server(&socket_path).await {
+        if let Err(e) = host_runtime::unix_server::start_server(&socket_path).await {
             warn!("Unix socket server error: {}", e);
         }
     });
@@ -107,7 +98,7 @@ async fn spawn_cells() -> Result<(), Box<dyn std::error::Error>> {
     // Session cell
     info!("Spawning Session cell...");
     Host::get()
-        .client_async::<SessionServiceClient>()
+        .client_async::<session_proto::SessionServiceClient>()
         .await
         .ok_or("Failed to spawn Session cell")?;
     info!("Session cell ready");
@@ -115,7 +106,7 @@ async fn spawn_cells() -> Result<(), Box<dyn std::error::Error>> {
     // Gateway WebSocket cell
     info!("Spawning Gateway-WS cell...");
     Host::get()
-        .client_async::<GatewayControlClient>()
+        .client_async::<gateway_proto::GatewayControlClient>()
         .await
         .ok_or("Failed to spawn Gateway-WS cell")?;
     info!("Gateway-WS cell ready");
@@ -127,13 +118,14 @@ async fn spawn_cells() -> Result<(), Box<dyn std::error::Error>> {
 fn start_health_check() {
     tokio::spawn(async move {
         // Get session client for health checks
-        let session_client = match Host::get().client_async::<SessionServiceClient>().await {
-            Some(c) => Arc::new(c),
-            None => {
-                warn!("Could not get session client for health checks");
-                return;
-            }
-        };
+        let session_client =
+            match Host::get().client_async::<session_proto::SessionServiceClient>().await {
+                Some(c) => Arc::new(c),
+                None => {
+                    warn!("Could not get session client for health checks");
+                    return;
+                }
+            };
 
         loop {
             match session_client.get_status().await {

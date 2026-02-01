@@ -68,7 +68,7 @@ test.beforeAll(async () => {
   console.log(`Project root: ${projectRoot}`);
 
   // Start the Rust host (includes gateway-ws)
-  hostServer = spawn("cargo", ["run", "-p", "fasttrackstudio", "--release"], {
+  hostServer = spawn("cargo", ["run", "-p", "test-extension", "--release"], {
     cwd: projectRoot,
     env: {
       ...process.env,
@@ -95,13 +95,15 @@ test.beforeAll(async () => {
   });
 
   // Wait for host to signal it's fully ready (all cells spawned)
-  console.log(`Waiting for host to start (gateway-ws on port ${HOST_PORT})...`);
+  console.log(
+    `Waiting for test-extension to start (gateway-ws on port ${HOST_PORT})...`,
+  );
   await waitForOutput(
     hostServer,
-    "Host running with DAW, Session, and Gateway-WS cells",
+    "Test Extension running with DAW, Session, and Gateway-WS cells",
     120000,
   );
-  console.log("Host is ready!");
+  console.log("Test extension is ready!");
 
   // Start Dioxus dev server for wasm-tests app
   console.log("Starting Dioxus dev server for WASM tests...");

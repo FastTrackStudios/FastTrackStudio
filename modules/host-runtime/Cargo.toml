@@ -1,0 +1,37 @@
+[package]
+name = "host-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "Shared host runtime infrastructure for FastTrackStudio extensions"
+
+[dependencies]
+# Facet ecosystem
+facet.workspace = true
+facet-postcard.workspace = true
+
+# Roam crates
+roam.workspace = true
+roam-session.workspace = true
+roam-shm.workspace = true
+roam-stream.workspace = true
+roam-tracing.workspace = true
+roam-local.workspace = true
+roam-wire.workspace = true
+shm-primitives.workspace = true
+
+# Protocols
+daw-proto.workspace = true
+session-proto.workspace = true
+cell-host-proto.workspace = true
+gateway-proto.workspace = true
+host-manager-proto.workspace = true
+
+# Runtime
+tokio.workspace = true
+
+# Utilities
+dashmap = "6"
+tempfile = "3.24"
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }

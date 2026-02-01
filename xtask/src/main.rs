@@ -113,42 +113,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Test => {
             println!("\n=== Running workspace tests ===");
-
-            // WASM-only crates that can't be tested on native
-            let wasm_excludes = ["fts-control-web", "fasttrackstudio-web", "wasm-tests"];
-            let exclude_args: Vec<String> = wasm_excludes
-                .iter()
-                .flat_map(|pkg| ["--exclude".to_string(), pkg.to_string()])
-                .collect();
+            // Note: WASM-only crates are excluded in workspace Cargo.toml
 
             // Try nextest first, fall back to cargo test
             if cmd!(sh, "cargo nextest --version").quiet().run().is_ok() {
                 println!("Using cargo-nextest");
                 // Use CI profile for longer timeouts when in CI
                 if std::env::var("CI").is_ok() {
-                    cmd!(
-                        sh,
-                        "cargo nextest run --workspace --profile ci {exclude_args...}"
-                    )
-                    .run()?;
+                    cmd!(sh, "cargo nextest run --workspace --profile ci").run()?;
                 } else {
-                    cmd!(sh, "cargo nextest run --workspace {exclude_args...}").run()?;
+                    cmd!(sh, "cargo nextest run --workspace").run()?;
                 }
             } else {
                 println!("cargo-nextest not found, using cargo test");
-                cmd!(sh, "cargo test --workspace {exclude_args...}").run()?;
+                cmd!(sh, "cargo test --workspace").run()?;
             }
 
             println!("\n=== All tests passed ===");
         }
         Commands::Clippy => {
             println!("=== Running clippy ===");
-            // Exclude WASM-only crates which only compile for wasm32
-            cmd!(
-                sh,
-                "cargo clippy --workspace --all-targets --exclude fts-control-web --exclude fasttrackstudio-web --exclude wasm-tests -- -D warnings"
-            )
-            .run()?;
+            // Note: WASM-only crates are excluded in workspace Cargo.toml
+            cmd!(sh, "cargo clippy --workspace --all-targets -- -D warnings").run()?;
         }
         Commands::Fmt { fix } => {
             if fix {
@@ -255,14 +241,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         Commands::Build => {
-            println!("=== Building all DAW cells ===");
+            println!("=== Building all cells and host extensions ===");
             cmd!(sh, "cargo build -p daw-proto").run()?;
             cmd!(sh, "cargo build -p daw-control").run()?;
             cmd!(sh, "cargo build -p daw-standalone").run()?;
             cmd!(sh, "cargo build -p daw-reaper").run()?;
             cmd!(sh, "cargo build -p session").run()?;
-            cmd!(sh, "cargo build -p fasttrackstudio").run()?;
-            println!("\n=== All cells built successfully ===");
+            cmd!(sh, "cargo build -p host-runtime").run()?;
+            cmd!(sh, "cargo build -p test-extension").run()?;
+            cmd!(sh, "cargo build -p reaper-extension").run()?;
+            println!("\n=== All cells and extensions built successfully ===");
         }
         Commands::Run => {
             println!("=== Running DAW standalone cell ===");

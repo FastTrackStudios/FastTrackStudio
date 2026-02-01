@@ -1,10 +1,12 @@
 [workspace]
 members = [
-    "main",
     "cells/*/*",
     "modules/*",
     "xtask",
-    "apps/*/*",
+    "apps/tests/*",
+    "apps/fts-control/*",
+    "apps/fasttrackstudio/*",
+    "apps/reaper-extension",
 ]
 exclude = ["reference/roam"]
 resolver = "2"
@@ -61,8 +63,11 @@ shm-primitives = { git = "https://github.com/Codys-Wright/roam", branch = "fix/o
 integration-tests = { path = "modules/integration-tests" }
 cell-runtime = { path = "modules/cell-runtime" }
 host-client = { path = "modules/host-client" }
+host-runtime = { path = "modules/host-runtime" }
 
+# Protocol crates
 cell-host-proto = { path = "cells/cell-host/cell-host-proto" }
+session-proto = { path = "cells/session/session-proto" }
 daw-proto = { path = "cells/daw/daw-proto" }
 daw-control = { path = "cells/daw/daw-control" }
 session = { path = "cells/session/session" }

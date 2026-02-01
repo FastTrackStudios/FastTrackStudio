@@ -1,0 +1,22 @@
+[package]
+name = "reaper-extension"
+version = "0.1.0"
+edition = "2021"
+description = "Production host extension that loads daw-reaper for REAPER integration"
+
+[[bin]]
+name = "reaper-extension"
+path = "src/main.rs"
+
+[dependencies]
+# Host runtime infrastructure
+host-runtime.workspace = true
+
+# Protocols (for spawning cells)
+daw-proto.workspace = true
+session-proto.workspace = true
+gateway-proto.workspace = true
+
+# Runtime
+tokio.workspace = true
+tracing.workspace = true

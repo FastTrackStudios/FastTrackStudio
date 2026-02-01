@@ -9,25 +9,49 @@
 //!
 //! The web app uses the exact same `daw-control` API as desktop apps, making
 //! UI components fully portable between platforms.
+//!
+//! Note: This crate is WASM-only. On native targets, it compiles to an empty binary.
 
+#![cfg_attr(not(target_arch = "wasm32"), allow(unused))]
+
+#[cfg(target_arch = "wasm32")]
 use daw_control::Daw;
+#[cfg(target_arch = "wasm32")]
 use dioxus::prelude::*;
+#[cfg(target_arch = "wasm32")]
 use roam::session::ConnectionHandle;
+#[cfg(target_arch = "wasm32")]
 use roam_session::{initiate_framed, HandshakeConfig, NoDispatcher};
+#[cfg(target_arch = "wasm32")]
 use roam_websocket::WsTransport;
 
+#[cfg(target_arch = "wasm32")]
 const FAVICON: Asset = asset!("/assets/favicon.ico");
+#[cfg(target_arch = "wasm32")]
 const MAIN_CSS: Asset = asset!("/assets/main.css");
+#[cfg(target_arch = "wasm32")]
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 
 fn main() {
-    // Initialize tracing for browser console
-    tracing_wasm::set_as_global_default();
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Initialize tracing for browser console
+        tracing_wasm::set_as_global_default();
+        dioxus::launch(App);
+    }
 
-    dioxus::launch(App);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        eprintln!("This binary only runs on wasm32. Use `dx build` to compile for WASM.");
+    }
 }
 
+// ============================================================================
+// Everything below only compiles for WASM
+// ============================================================================
+
 /// Determine the WebSocket URL based on current page location
+#[cfg(target_arch = "wasm32")]
 fn get_websocket_url() -> String {
     web_sys::window()
         .and_then(|w| w.location().host().ok())
@@ -43,6 +67,7 @@ fn get_websocket_url() -> String {
 }
 
 /// Connect to the gateway WebSocket and return a connection handle
+#[cfg(target_arch = "wasm32")]
 async fn connect_to_gateway() -> Result<ConnectionHandle, String> {
     let ws_url = get_websocket_url();
     tracing::info!("Connecting to gateway at {}", ws_url);
@@ -70,6 +95,7 @@ async fn connect_to_gateway() -> Result<ConnectionHandle, String> {
     Ok(handle)
 }
 
+#[cfg(target_arch = "wasm32")]
 #[component]
 fn App() -> Element {
     rsx! {
@@ -82,6 +108,7 @@ fn App() -> Element {
 }
 
 /// Connection state shared across components
+#[cfg(target_arch = "wasm32")]
 #[derive(Clone)]
 enum ConnectionState {
     Disconnected,
@@ -90,6 +117,7 @@ enum ConnectionState {
     Error(String),
 }
 
+#[cfg(target_arch = "wasm32")]
 #[component]
 fn DawController() -> Element {
     // Connection state
@@ -167,17 +195,17 @@ fn DawController() -> Element {
             div { class: "mb-8",
                 match &*conn_state.read() {
                     ConnectionState::Disconnected => rsx! {
-                        span { class: "text-gray-400", "○ Disconnected" }
+                        span { class: "text-gray-400", "Disconnected" }
                     },
                     ConnectionState::Connecting => rsx! {
-                        span { class: "text-yellow-400", "◌ Connecting..." }
+                        span { class: "text-yellow-400", "Connecting..." }
                     },
                     ConnectionState::Connected(_) => rsx! {
-                        span { class: "text-green-400", "● Connected" }
+                        span { class: "text-green-400", "Connected" }
                     },
                     ConnectionState::Error(e) => rsx! {
                         div { class: "text-red-400",
-                            span { "✕ Error: " }
+                            span { "Error: " }
                             span { "{e}" }
                         }
                     },

@@ -1,0 +1,138 @@
+//! REAPER Extension - Production host that loads daw-reaper
+//!
+//! This binary uses the shared host-runtime infrastructure with daw-reaper
+//! as the DAW implementation for real REAPER integration.
+
+#![deny(unsafe_code)]
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use host_runtime::{
+    init_shm_infrastructure, init_tracing, spawn_tracing_consumer, CellConfig, Host,
+};
+use tracing::{info, warn};
+use tokio::time::sleep;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize tracing
+    init_tracing();
+
+    info!("REAPER Extension starting (using daw-reaper)...");
+
+    // Initialize SHM infrastructure (keep temp_dir alive)
+    let _temp_dir = init_shm_infrastructure().await?;
+
+    // Start cell tracing consumer
+    spawn_tracing_consumer();
+
+    // Find cell binary directory
+    let cell_dir = host_runtime::default_cell_dir();
+
+    // Register cells for lazy spawning - PRODUCTION CONFIGURATION
+    register_cells(&cell_dir);
+
+    // Start Unix socket server for desktop app connections
+    start_unix_server();
+
+    // Spawn all cells
+    spawn_cells().await?;
+
+    info!("REAPER Extension running with DAW, Session, and Gateway-WS cells. Press Ctrl+C to shutdown.");
+
+    // Start health check loop
+    start_health_check();
+
+    // Keep running until Ctrl+C
+    tokio::signal::ctrl_c().await?;
+    info!("Shutting down REAPER extension...");
+    Host::get().signal_exit();
+
+    Ok(())
+}
+
+/// Register all cells with the Host for lazy spawning.
+/// Uses daw-reaper for production REAPER integration.
+fn register_cells(cell_dir: &PathBuf) {
+    // DAW cell - using REAPER implementation for production
+    CellConfig::new("daw-reaper", cell_dir).register();
+
+    // Session cell - forwards to DAW
+    CellConfig::new("session", cell_dir)
+        .forwards_to(&["daw-reaper"])
+        .register();
+
+    // Gateway WebSocket cell - forwards to DAW
+    CellConfig::new("gateway-ws", cell_dir)
+        .forwards_to(&["daw-reaper"])
+        .register();
+
+    info!("Cells registered for lazy spawning (production configuration)");
+}
+
+/// Start the Unix socket server for desktop app connections.
+fn start_unix_server() {
+    let socket_path = std::env::var("FTS_SOCKET")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp/fts-control.sock"));
+
+    tokio::spawn(async move {
+        if let Err(e) = host_runtime::unix_server::start_server(&socket_path).await {
+            warn!("Unix socket server error: {}", e);
+        }
+    });
+}
+
+/// Spawn all registered cells.
+async fn spawn_cells() -> Result<(), Box<dyn std::error::Error>> {
+    // DAW cell
+    info!("Spawning DAW cell...");
+    Host::get()
+        .client_async::<daw_proto::TransportServiceClient>()
+        .await
+        .ok_or("Failed to spawn DAW cell")?;
+    info!("DAW cell ready");
+
+    // Session cell
+    info!("Spawning Session cell...");
+    Host::get()
+        .client_async::<session_proto::SessionServiceClient>()
+        .await
+        .ok_or("Failed to spawn Session cell")?;
+    info!("Session cell ready");
+
+    // Gateway WebSocket cell
+    info!("Spawning Gateway-WS cell...");
+    Host::get()
+        .client_async::<gateway_proto::GatewayControlClient>()
+        .await
+        .ok_or("Failed to spawn Gateway-WS cell")?;
+    info!("Gateway-WS cell ready");
+
+    Ok(())
+}
+
+/// Start a background health check loop for the session cell.
+fn start_health_check() {
+    tokio::spawn(async move {
+        // Get session client for health checks
+        let session_client =
+            match Host::get().client_async::<session_proto::SessionServiceClient>().await {
+                Some(c) => Arc::new(c),
+                None => {
+                    warn!("Could not get session client for health checks");
+                    return;
+                }
+            };
+
+        loop {
+            match session_client.get_status().await {
+                Ok(status) => info!("Session health check: {}", status),
+                Err(e) => warn!("Session health check failed: {}", e),
+            }
+            sleep(Duration::from_secs(5)).await;
+        }
+    });
+}
