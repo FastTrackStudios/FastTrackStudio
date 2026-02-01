@@ -114,28 +114,39 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Test => {
             println!("\n=== Running workspace tests ===");
 
+            // WASM-only crates that can't be tested on native
+            let wasm_excludes = ["fts-control-web", "fasttrackstudio-web", "wasm-tests"];
+            let exclude_args: Vec<String> = wasm_excludes
+                .iter()
+                .flat_map(|pkg| ["--exclude".to_string(), pkg.to_string()])
+                .collect();
+
             // Try nextest first, fall back to cargo test
             if cmd!(sh, "cargo nextest --version").quiet().run().is_ok() {
                 println!("Using cargo-nextest");
                 // Use CI profile for longer timeouts when in CI
                 if std::env::var("CI").is_ok() {
-                    cmd!(sh, "cargo nextest run --workspace --profile ci").run()?;
+                    cmd!(
+                        sh,
+                        "cargo nextest run --workspace --profile ci {exclude_args...}"
+                    )
+                    .run()?;
                 } else {
-                    cmd!(sh, "cargo nextest run --workspace").run()?;
+                    cmd!(sh, "cargo nextest run --workspace {exclude_args...}").run()?;
                 }
             } else {
                 println!("cargo-nextest not found, using cargo test");
-                cmd!(sh, "cargo test --workspace").run()?;
+                cmd!(sh, "cargo test --workspace {exclude_args...}").run()?;
             }
 
             println!("\n=== All tests passed ===");
         }
         Commands::Clippy => {
             println!("=== Running clippy ===");
-            // Exclude wasm-browser-tests which only compiles for wasm32
+            // Exclude WASM-only crates which only compile for wasm32
             cmd!(
                 sh,
-                "cargo clippy --workspace --all-targets --exclude wasm-browser-tests -- -D warnings"
+                "cargo clippy --workspace --all-targets --exclude fts-control-web --exclude fasttrackstudio-web --exclude wasm-tests -- -D warnings"
             )
             .run()?;
         }
