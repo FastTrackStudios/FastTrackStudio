@@ -1,5 +1,5 @@
 [package]
-name = "roam-test"
+name = "fasttrackstudio"
 version = "0.1.0"
 edition = "2024"
 
@@ -30,11 +30,21 @@ roam-websocket = { workspace = true }
 ur-taking-me-with-you = { workspace = true }
 shm-primitives = { workspace = true }
 
-# DAW protocol
+# Protocols
 daw-proto = { path = "../cells/daw/daw-proto" }
+session-proto = { path = "../cells/session/session-proto" }
+cell-host-proto = { workspace = true }
+gateway-proto = { workspace = true }
+host-manager-proto = { workspace = true }
+
+# Unix socket support
+roam-local = { workspace = true }
+roam-wire = { workspace = true }
 
 # Other dependencies
+dashmap = "6"
 tempfile = "3.24"
 tokio = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }

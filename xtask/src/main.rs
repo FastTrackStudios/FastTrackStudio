@@ -1,4 +1,4 @@
-//! xtask: Development tasks for roam-test
+//! xtask: Development tasks for FastTrackStudio
 //!
 //! Run with: `cargo xtask <command>`
 
@@ -6,9 +6,9 @@ use std::process::ExitCode;
 
 use facet::Facet;
 use figue as args;
-use xshell::{cmd, Shell};
+use xshell::{Shell, cmd};
 
-/// Development tasks for roam-test
+/// Development tasks for FastTrackStudio
 #[derive(Facet)]
 struct Cli {
     #[facet(args::subcommand)]
@@ -232,10 +232,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         Commands::Build => {
-            println!("=== Building all cells ===");
+            println!("=== Building all DAW cells ===");
             cmd!(sh, "cargo build -p daw-proto").run()?;
+            cmd!(sh, "cargo build -p daw-control").run()?;
             cmd!(sh, "cargo build -p daw-standalone").run()?;
-            cmd!(sh, "cargo build -p roam-test").run()?;
+            cmd!(sh, "cargo build -p daw-reaper").run()?;
+            cmd!(sh, "cargo build -p session").run()?;
+            cmd!(sh, "cargo build -p fasttrackstudio").run()?;
             println!("\n=== All cells built successfully ===");
         }
         Commands::Run => {
