@@ -8,8 +8,9 @@ const projectRoot = new URL("../../../..", import.meta.url).pathname;
 let hostServer: ChildProcess | null = null;
 let dioxusServer: ChildProcess | null = null;
 
-const HOST_PORT = 3030; // gateway-ws port
-const DIOXUS_PORT = 8080; // Dioxus dev server port
+// Use random ports to avoid conflicts with other processes
+const HOST_PORT = 13030 + Math.floor(Math.random() * 1000); // gateway-ws port
+const DIOXUS_PORT = 18080 + Math.floor(Math.random() * 1000); // Dioxus dev server port
 
 /**
  * Wait for a port to become available
@@ -93,10 +94,14 @@ test.beforeAll(async () => {
     console.log(`Host server exited with code ${code}`);
   });
 
-  // Wait for gateway-ws to be ready
-  console.log(`Waiting for gateway-ws on port ${HOST_PORT}...`);
-  await waitForPort(HOST_PORT, 60000); // Allow time for cargo build
-  console.log("Gateway-ws is ready!");
+  // Wait for host to signal it's fully ready (all cells spawned)
+  console.log(`Waiting for host to start (gateway-ws on port ${HOST_PORT})...`);
+  await waitForOutput(
+    hostServer,
+    "Host running with DAW, Session, and Gateway-WS cells",
+    120000,
+  );
+  console.log("Host is ready!");
 
   // Start Dioxus dev server for wasm-tests app
   console.log("Starting Dioxus dev server for WASM tests...");
