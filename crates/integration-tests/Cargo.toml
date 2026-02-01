@@ -4,11 +4,31 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-daw-proto = { path = "../../cells/daw/daw-proto" }
+# DAW
+daw-proto = { workspace = true }
+daw-control = { workspace = true }
+daw-standalone = { workspace = true }
+
+# Host management
+host-manager-proto = { workspace = true }
+host-manager = { workspace = true }
+
+# Gateway
+gateway-proto = { workspace = true }
+
+# Roam
 roam = { workspace = true }
 roam-shm = { workspace = true }
+roam-stream = { workspace = true }
+roam-local = { workspace = true }
+roam-session = { workspace = true }
+roam-wire = { workspace = true }
+
+# Utils
 facet = { workspace = true }
+facet-postcard = { workspace = true }
 tokio = { workspace = true }
 tempfile = "3.14"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+eyre = { workspace = true }

@@ -4,8 +4,8 @@
 
 #![deny(unsafe_code)]
 
-use daw_proto::{Transport, TransportState, TransportStateUpdate};
-use roam::session::Tx;
+use daw_proto::TransportService;
+use daw_proto::transport::transport::TransportServiceDispatcher;
 use roam_shm::driver::{establish_guest, establish_multi_peer_host};
 use roam_shm::host::ShmHost;
 use roam_shm::layout::SegmentConfig;
@@ -14,55 +14,31 @@ use roam_shm::transport::ShmGuestTransport;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 /// Test implementation of Transport service
 #[derive(Clone)]
 pub struct TestTransport {
-    state: Arc<Mutex<TransportState>>,
-    update_tx: Arc<Mutex<Option<Tx<TransportStateUpdate>>>>,
+    state: Arc<Mutex<daw_proto::PlayState>>,
 }
 
 impl TestTransport {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(TransportState::Stopped)),
-            update_tx: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    pub async fn broadcast_update(&self) {
-        let state = *self.state.lock().await;
-        let update = TransportStateUpdate {
-            state,
-            position: daw_proto::TimePosition::from_seconds(0.0),
-            tempo: 120.0,
-        };
-
-        if let Some(tx) = self.update_tx.lock().await.as_ref() {
-            let _ = tx.send(&update).await;
+            state: Arc::new(Mutex::new(daw_proto::PlayState::Stopped)),
         }
     }
 }
 
-impl Transport for TestTransport {
-    async fn play(&self, _cx: &roam::Context) {
+impl TransportService for TestTransport {
+    async fn play(&self, _cx: &roam::Context, _project_id: Option<String>) {
         let mut state = self.state.lock().await;
-        *state = TransportState::Playing;
-        drop(state);
-        self.broadcast_update().await;
+        *state = daw_proto::PlayState::Playing;
     }
 
-    async fn stop(&self, _cx: &roam::Context) {
+    async fn stop(&self, _cx: &roam::Context, _project_id: Option<String>) {
         let mut state = self.state.lock().await;
-        *state = TransportState::Stopped;
-        drop(state);
-        self.broadcast_update().await;
-    }
-
-    async fn subscribe_state(&self, _cx: &roam::Context, updates: Tx<TransportStateUpdate>) {
-        *self.update_tx.lock().await = Some(updates);
-        self.broadcast_update().await;
+        *state = daw_proto::PlayState::Stopped;
     }
 }
 
@@ -92,14 +68,14 @@ pub fn setup_test() -> TestFixture {
     let peer_id = ticket.peer_id;
     let spawn_args = ticket.into_spawn_args();
 
-    let dispatcher = daw_proto::TransportDispatcher::new(TestTransport::new());
+    let dispatcher = TransportServiceDispatcher::new(TestTransport::new());
 
     let guest_transport = ShmGuestTransport::from_spawn_args(spawn_args).unwrap();
     let (guest_handle, _guest_incoming, guest_driver) =
         establish_guest(guest_transport, dispatcher.clone());
 
     let (host_driver, mut handles, _host_incoming, _driver_handle) =
-        establish_multi_peer_host::<daw_proto::TransportDispatcher<TestTransport>, _>(
+        establish_multi_peer_host::<TransportServiceDispatcher<TestTransport>, _>(
             host,
             vec![(peer_id, dispatcher)],
         );
@@ -116,7 +92,9 @@ pub fn setup_test() -> TestFixture {
 }
 
 /// Sets up a test that spawns an external binary
-pub async fn setup_external_test(binary_name: &str) -> (roam::session::ConnectionHandle, tempfile::TempDir) {
+pub async fn setup_external_test(
+    binary_name: &str,
+) -> (roam::session::ConnectionHandle, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daw-test.shm");
 
@@ -148,9 +126,9 @@ pub async fn setup_external_test(binary_name: &str) -> (roam::session::Connectio
     sleep(Duration::from_millis(100)).await;
 
     // Set up host
-    let dispatcher = daw_proto::TransportDispatcher::new(TestTransport::new());
+    let dispatcher = TransportServiceDispatcher::new(TestTransport::new());
     let (host_driver, mut handles, _incoming, _driver_handle) =
-        establish_multi_peer_host::<daw_proto::TransportDispatcher<TestTransport>, _>(
+        establish_multi_peer_host::<TransportServiceDispatcher<TestTransport>, _>(
             host,
             vec![(peer_id, dispatcher)],
         );
@@ -184,6 +162,6 @@ fn find_binary(name: &str) -> Option<PathBuf> {
             return Some(path.clone());
         }
     }
-    
+
     None
 }
