@@ -12,6 +12,7 @@ daw-standalone = { workspace = true }
 # Host management
 host-manager-proto = { workspace = true }
 host-manager = { workspace = true }
+host-client = { path = "../host-client" }
 
 # Gateway
 gateway-proto = { workspace = true }
@@ -32,3 +33,4 @@ tempfile = "3.14"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 eyre = { workspace = true }
+rand = "0.8"

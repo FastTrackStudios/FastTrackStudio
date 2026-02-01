@@ -62,6 +62,8 @@ enum Commands {
         #[facet(args::named, default)]
         ui: bool,
     },
+    /// Run native integration tests (spawns test-extension)
+    Integration,
 }
 
 #[derive(Facet)]
@@ -295,6 +297,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             cmd!(sh, "nix develop --command bash -c {nix_cmd}").run()?;
 
             println!("\n=== Playwright tests completed ===");
+        }
+        Commands::Integration => {
+            println!("=== Running native integration tests ===");
+
+            // First build test-extension and all cells it needs
+            println!("\n>>> Building test-extension and cells...");
+            cmd!(
+                sh,
+                "cargo build -p test-extension -p daw-standalone -p session -p gateway-ws"
+            )
+            .run()?;
+
+            // Run the integration tests
+            println!("\n>>> Running integration tests...");
+            if cmd!(sh, "cargo nextest --version").quiet().run().is_ok() {
+                cmd!(
+                    sh,
+                    "cargo nextest run -p integration-tests --test extension_tests"
+                )
+                .run()?;
+            } else {
+                cmd!(sh, "cargo test -p integration-tests --test extension_tests").run()?;
+            }
+
+            println!("\n=== Integration tests passed ===");
         }
     }
 

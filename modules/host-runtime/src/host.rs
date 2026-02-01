@@ -16,10 +16,10 @@ use std::time::Duration;
 
 use dashmap::DashMap;
 use roam::session::{ConnectionHandle, LateBoundHandle, RoutedDispatcher};
-use roam_shm::ShmHost;
 use roam_shm::driver::MultiPeerHostDriverHandle;
 use roam_shm::layout::SegmentConfig;
 use roam_shm::spawn::AddPeerOptions;
+use roam_shm::ShmHost;
 use roam_tracing::{HostTracingDispatcher, HostTracingState, TaggedRecord};
 use tokio::process::Command;
 use tokio::sync::Notify;
@@ -71,11 +71,35 @@ pub async fn init_shm_infrastructure() -> Result<tempfile::TempDir, Box<dyn std:
 }
 
 /// Get the default cell binary directory (target/debug or target/release).
+///
+/// Uses CARGO_MANIFEST_DIR at compile time to find the workspace root,
+/// or falls back to searching from the current executable's location.
 pub fn default_cell_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("target/debug")
+    // CARGO_MANIFEST_DIR for host-runtime is modules/host-runtime
+    // We need to go up to workspace root (../../) then into target/debug
+    let manifest_based = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent() // modules/
+        .and_then(|p| p.parent()) // workspace root
+        .map(|p| p.join("target/debug"));
+
+    if let Some(path) = manifest_based {
+        if path.exists() {
+            return path;
+        }
+    }
+
+    // Fallback: try to find target/debug relative to current exe
+    if let Ok(exe_path) = std::env::current_exe() {
+        // exe is in target/debug/, so parent twice then back in
+        if let Some(target_debug) = exe_path.parent() {
+            if target_debug.ends_with("target/debug") || target_debug.ends_with("target/release") {
+                return target_debug.to_path_buf();
+            }
+        }
+    }
+
+    // Final fallback: current directory + target/debug
+    PathBuf::from("target/debug")
 }
 
 // ============================================================================
@@ -538,10 +562,10 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
         }
     }
 
-    // Spawn the process
-    let child = match cmd.spawn() {
+    // Spawn the process using ur_taking_me_with_you so it dies when the host dies
+    let child = match ur_taking_me_with_you::spawn_dying_with_parent_async(cmd) {
         Ok(c) => {
-            debug!(cell = cell_name, pid = ?c.id(), "Cell process spawned");
+            debug!(cell = cell_name, pid = ?c.id(), "Cell process spawned (will die with parent)");
             c
         }
         Err(e) => {

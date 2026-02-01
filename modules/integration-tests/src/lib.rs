@@ -1,8 +1,29 @@
 //! Integration test harness for DAW cells
 //!
 //! Provides utilities for testing DAW cells with both in-process and multi-process scenarios.
+//!
+//! # Modules
+//!
+//! - [`harness`] - Test harness for spawning and managing test-extension
+//!
+//! # Example
+//!
+//! ```ignore
+//! use integration_tests::harness::TestExtensionHarness;
+//!
+//! #[tokio::test]
+//! async fn test_connection() {
+//!     let harness = TestExtensionHarness::spawn().await.unwrap();
+//!     harness.wait_ready().await.unwrap();
+//!
+//!     let conn = harness.connect_unix().await.unwrap();
+//!     conn.transport().play(None).await.unwrap();
+//! }
+//! ```
 
 #![deny(unsafe_code)]
+
+pub mod harness;
 
 use daw_proto::TransportService;
 use daw_proto::transport::transport::TransportServiceDispatcher;

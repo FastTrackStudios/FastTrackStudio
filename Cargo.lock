@@ -2876,6 +2876,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "ur-taking-me-with-you",
  "uuid",
 ]
 
@@ -3184,8 +3185,10 @@ dependencies = [
  "facet",
  "facet-postcard",
  "gateway-proto",
+ "host-client",
  "host-manager",
  "host-manager-proto",
+ "rand 0.8.5",
  "roam",
  "roam-local",
  "roam-session",
