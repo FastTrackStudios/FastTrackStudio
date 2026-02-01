@@ -1,0 +1,35 @@
+[package]
+name = "gateway-ws"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "gateway-ws"
+path = "src/main.rs"
+
+[dependencies]
+# Cell runtime
+cell-runtime.workspace = true
+
+# Protocols
+gateway-proto.workspace = true
+
+# Roam - binary RPC forwarding
+roam.workspace = true
+roam-session.workspace = true
+roam-stream.workspace = true
+roam-wire.workspace = true
+facet-postcard.workspace = true
+
+# Web server
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+
+# Async
+tokio.workspace = true
+futures.workspace = true
+futures-util = "0.3"
+
+# Utils
+tracing.workspace = true
+eyre.workspace = true

@@ -1,0 +1,8 @@
+[package]
+name = "gateway-proto"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+facet.workspace = true
+roam.workspace = true
