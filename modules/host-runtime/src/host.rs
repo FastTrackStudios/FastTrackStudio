@@ -184,6 +184,9 @@ impl CellConfig {
 // Host Singleton
 // ============================================================================
 
+/// A boxed service dispatcher that can be stored and cloned.
+pub type BoxedDispatcher = Arc<dyn roam::session::ServiceDispatcher>;
+
 /// The unified Host that owns all shared state.
 pub struct Host {
     /// Signaled when exit is requested.
@@ -211,6 +214,11 @@ pub struct Host {
     /// Key is the target cell name, value is the late-bound handle.
     /// When a cell is spawned, its handle gets bound to this.
     late_bound_handles: DashMap<String, LateBoundHandle>,
+
+    /// Optional DAW dispatcher for handling DAW service calls in-process.
+    /// This is used when the DAW implementation (e.g., ReaperTransport) needs
+    /// to run in the host process rather than a separate cell.
+    daw_dispatcher: OnceLock<BoxedDispatcher>,
 }
 
 impl Host {
@@ -230,6 +238,7 @@ impl Host {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(10),
                 late_bound_handles: DashMap::new(),
+                daw_dispatcher: OnceLock::new(),
             })
         })
     }
@@ -318,6 +327,40 @@ impl Host {
     /// Take the tracing record receiver.
     pub fn take_tracing_receiver(&self) -> Option<tokio::sync::mpsc::Receiver<TaggedRecord>> {
         self.tracing_state.take_receiver()
+    }
+
+    // =========================================================================
+    // DAW Dispatcher (In-Process)
+    // =========================================================================
+
+    /// Set the DAW dispatcher for handling DAW service calls in-process.
+    ///
+    /// This is used when the DAW implementation (e.g., ReaperTransport, ReaperProject)
+    /// needs to run in the host process rather than a separate cell. The dispatcher
+    /// is included in the fallback chain for all spawned cells.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let transport = ReaperTransport::new();
+    /// let project = ReaperProject::new();
+    /// let dispatcher = RoutedDispatcher::new(
+    ///     TransportServiceDispatcher::new(transport),
+    ///     ProjectServiceDispatcher::new(project),
+    /// );
+    /// Host::get().set_daw_dispatcher(Arc::new(dispatcher));
+    /// ```
+    pub fn set_daw_dispatcher(&self, dispatcher: BoxedDispatcher) {
+        if self.daw_dispatcher.set(dispatcher).is_err() {
+            error!("DAW dispatcher already set");
+        } else {
+            info!("DAW dispatcher registered for in-process handling");
+        }
+    }
+
+    /// Get the DAW dispatcher if set.
+    pub fn daw_dispatcher(&self) -> Option<&BoxedDispatcher> {
+        self.daw_dispatcher.get()
     }
 
     // =========================================================================
@@ -502,19 +545,17 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
         cmd.arg(arg);
     }
 
-    // Configure stdio
-    if inherit_stdio {
+    // Configure stdio - inherit to see cell output for debugging
+    if inherit_stdio || !quiet_mode {
         cmd.stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
-    } else if quiet_mode {
+        // Enable passthrough tracing so cells log directly to stderr
+        cmd.env("TRACING_PASSTHROUGH", "1");
+    } else {
         cmd.stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-    } else {
-        cmd.stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
     }
 
     // Create the host service dispatcher
@@ -539,12 +580,26 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
         crate::forwarder::MultiForwarder::empty()
     };
 
-    // Compose dispatchers: HostService -> Tracing -> Forwarder (fallback chain)
+    // Compose dispatchers: HostService -> Tracing -> [DAW] -> Forwarder (fallback chain)
     let base_dispatcher = RoutedDispatcher::new(host_service_dispatcher, tracing_dispatcher);
-    let dispatcher = RoutedDispatcher::new(base_dispatcher, forwarder);
 
-    // Register peer with driver
-    match driver_handle.add_peer(peer_id, dispatcher).await {
+    // Include DAW dispatcher in the chain if set (for in-process REAPER API handling)
+    // This allows guest cells to make DAW service calls that are handled locally
+    let with_forwarder = RoutedDispatcher::new(base_dispatcher, forwarder);
+
+    // Register peer with driver - use separate match arms to handle type differences
+    let add_peer_result = if let Some(daw_dispatcher) = Host::get().daw_dispatcher() {
+        debug!(cell = cell_name, "Including DAW dispatcher in chain");
+        let dispatcher = RoutedDispatcher::new(
+            with_forwarder,
+            crate::forwarder::ArcDispatcher::new(daw_dispatcher.clone()),
+        );
+        driver_handle.add_peer(peer_id, dispatcher).await
+    } else {
+        driver_handle.add_peer(peer_id, with_forwarder).await
+    };
+
+    match add_peer_result {
         Ok((handle, _incoming)) => {
             debug!(
                 cell = cell_name,
@@ -595,6 +650,104 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
         }
     });
 }
+
+// ============================================================================
+// In-Process Cell Registration
+// ============================================================================
+
+impl Host {
+    /// Register an in-process cell (runs within the host process, no spawning).
+    ///
+    /// This is used for cells that need direct access to host resources (like REAPER APIs)
+    /// and cannot run as separate processes. The dispatcher handles incoming RPC calls
+    /// to this cell.
+    ///
+    /// # Arguments
+    ///
+    /// * `cell_name` - The logical name of the cell (e.g., "daw-reaper")
+    /// * `dispatcher` - The service dispatcher for handling incoming requests
+    ///
+    /// # Returns
+    ///
+    /// A `ConnectionHandle` for making RPC calls to this cell, or `None` if registration fails.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let transport = ReaperTransport::new();
+    /// let project = ReaperProject::new();
+    /// let dispatcher = RoutedDispatcher::new(
+    ///     TransportServiceDispatcher::new(transport),
+    ///     ProjectServiceDispatcher::new(project),
+    /// );
+    /// let handle = Host::get().register_in_process_cell("daw-reaper", dispatcher).await?;
+    /// ```
+    pub async fn register_in_process_cell<D>(
+        &self,
+        cell_name: &str,
+        dispatcher: D,
+    ) -> Option<ConnectionHandle>
+    where
+        D: roam::session::ServiceDispatcher + 'static,
+    {
+        let driver_handle = self.driver_handle()?;
+
+        // Create a peer slot for this in-process cell
+        let cell_name_for_death = cell_name.to_string();
+        let ticket = match driver_handle
+            .create_peer(roam_shm::spawn::AddPeerOptions {
+                peer_name: Some(cell_name.to_string()),
+                on_death: Some(std::sync::Arc::new(move |peer_id| {
+                    error!(cell = %cell_name_for_death, ?peer_id, "In-process cell died unexpectedly");
+                })),
+                diagnostic_state: None,
+            })
+            .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                error!(cell = cell_name, error = ?e, "Failed to create peer for in-process cell");
+                return None;
+            }
+        };
+
+        let peer_id = ticket.peer_id;
+
+        // For in-process cells, we don't spawn a process - just register the dispatcher directly
+        // Drop the ticket to close the doorbell (no external process will connect)
+        drop(ticket);
+
+        // Register the dispatcher with the driver
+        match driver_handle.add_peer(peer_id, dispatcher).await {
+            Ok((handle, _incoming)) => {
+                info!(cell = cell_name, ?peer_id, "In-process cell registered");
+
+                // Store the handle
+                self.register_cell_handle(cell_name.to_string(), handle.clone());
+
+                // Bind to late-bound handle so other cells can forward to this one
+                self.bind_late_bound(cell_name, handle.clone());
+
+                // Mark the cell as ready
+                cell_ready_registry().mark_ready(cell_host_proto::ReadyMsg {
+                    cell_name: cell_name.to_string(),
+                    peer_id: peer_id.get() as u16,
+                    pid: Some(std::process::id()),
+                });
+
+                Some(handle)
+            }
+            Err(e) => {
+                error!(cell = cell_name, ?peer_id, error = ?e, "Failed to register in-process cell dispatcher");
+                None
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Cell Startup Helpers
+// ============================================================================
 
 /// Wait for a cell to be ready.
 async fn wait_for_cell_ready(cell_name: &str, timeout_secs: u64) {

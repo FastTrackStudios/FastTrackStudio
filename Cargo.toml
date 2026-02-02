@@ -82,6 +82,7 @@ gateway-proto = { path = "cells/gateway/gateway-proto" }
 host-manager-proto = { path = "cells/host-manager/host-manager-proto" }
 host-manager = { path = "cells/host-manager/host-manager" }
 daw-standalone = { path = "cells/daw/daw-standalone" }
+daw-reaper = { path = "cells/daw/daw-reaper" }
 actions-proto = { path = "modules/actions/actions-proto" }
 actions-registry = { path = "modules/actions/actions-registry" }
 actions-standalone = { path = "modules/actions/actions-standalone" }

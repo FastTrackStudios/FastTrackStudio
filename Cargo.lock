@@ -1297,11 +1297,11 @@ name = "daw-reaper"
 version = "0.1.0"
 dependencies = [
  "daw-proto",
- "facet",
+ "reaper-high",
+ "reaper-medium",
  "roam",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -5277,7 +5277,9 @@ dependencies = [
  "actions-proto",
  "actions-registry",
  "anyhow",
+ "camino",
  "daw-proto",
+ "daw-reaper",
  "fragile",
  "gateway-proto",
  "host-runtime",
@@ -5286,8 +5288,10 @@ dependencies = [
  "reaper-macros",
  "reaper-medium",
  "roam",
+ "roam-telemetry",
  "session-proto",
  "swell-ui",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

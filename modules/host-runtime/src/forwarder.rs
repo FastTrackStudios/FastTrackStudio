@@ -7,6 +7,7 @@ use roam::session::{
 };
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 /// A dispatcher that forwards to multiple late-bound targets.
 ///
@@ -70,5 +71,36 @@ impl ServiceDispatcher for MultiForwarder {
 
         // No forwarders at all - return empty future
         Box::pin(async {})
+    }
+}
+
+/// A wrapper that implements ServiceDispatcher for Arc<dyn ServiceDispatcher>.
+///
+/// This allows storing a dispatcher in an Arc while still being able to use it
+/// as a ServiceDispatcher in routed dispatcher chains.
+#[derive(Clone)]
+pub struct ArcDispatcher {
+    inner: Arc<dyn ServiceDispatcher>,
+}
+
+impl ArcDispatcher {
+    /// Create a new ArcDispatcher wrapping the given dispatcher.
+    pub fn new(dispatcher: Arc<dyn ServiceDispatcher>) -> Self {
+        Self { inner: dispatcher }
+    }
+}
+
+impl ServiceDispatcher for ArcDispatcher {
+    fn method_ids(&self) -> Vec<u64> {
+        self.inner.method_ids()
+    }
+
+    fn dispatch(
+        &self,
+        cx: Context,
+        payload: Vec<u8>,
+        registry: &mut ChannelRegistry,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
+        self.inner.dispatch(cx, payload, registry)
     }
 }

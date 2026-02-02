@@ -27,10 +27,16 @@ daw-proto.workspace = true
 session-proto.workspace = true
 gateway-proto.workspace = true
 
+# DAW REAPER implementation (in-process, not a cell)
+daw-reaper.workspace = true
+
 # Runtime
 roam.workspace = true
+roam-telemetry.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 fragile.workspace = true
 anyhow = "1.0"
+camino = "1.1"
+tempfile = "3.24.0"

@@ -2,31 +2,21 @@
 //!
 //! This cell provides a control surface that connects to a DAW implementation
 //! through daw-control and presents transport controls.
-//!
-//! Note: This cell uses explicit setup instead of `run_cell!` macro because
-//! it needs to perform application logic (DAW control) after driver startup.
 
 use actions_proto::{
     ActionCategory, ActionDefinition, ActionId, ActionResult, DefinesActions,
     DefinesActionsDispatcher,
 };
-use cell_runtime::{
-    CellTracingDispatcher, DiagnosticState, HostServiceClient, ReadyMsg, RoutedDispatcher,
-    ShmGuestTransport, SpawnArgs, WaitPolicy, dump_all_diagnostics,
-    establish_guest_with_diagnostics, init_cell_tracing, install_sigusr1_handler,
-    register_diagnostic, register_diagnostic_state, tracing_subscriber, ur_taking_me_with_you,
-};
+use cell_runtime::{HostServiceClient, WaitPolicy, run_cell};
 use daw_control::Daw;
-use eyre::Result;
-use roam::session::Context;
+use roam::session::{ConnectionHandle, Context};
 use roam_telemetry::{
     ExporterConfig, LoggingExporter, OtlpExporter, SpanExporter, TelemetryMiddleware,
 };
 use session_proto::{SessionService, SessionServiceDispatcher};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tracing::{info, warn};
-use tracing_subscriber::prelude::*;
 
 /// Composite exporter that sends to both OTLP and console
 #[derive(Clone)]
@@ -89,7 +79,24 @@ fn session_actions() -> Vec<ActionDefinition> {
 
 /// Implementation of SessionService and DefinesActions
 #[derive(Clone)]
-pub struct SessionServiceImpl;
+pub struct SessionServiceImpl {
+    handle_cell: Arc<OnceLock<ConnectionHandle>>,
+}
+
+impl SessionServiceImpl {
+    fn new(handle_cell: Arc<OnceLock<ConnectionHandle>>) -> Self {
+        Self { handle_cell }
+    }
+
+    fn handle(&self) -> &ConnectionHandle {
+        self.handle_cell.get().expect("handle not initialized")
+    }
+
+    #[allow(dead_code)]
+    fn host_client(&self) -> HostServiceClient {
+        HostServiceClient::new(self.handle().clone())
+    }
+}
 
 impl SessionService for SessionServiceImpl {
     async fn get_status(&self, _cx: &Context) -> String {
@@ -117,134 +124,55 @@ impl DefinesActions for SessionServiceImpl {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Install SIGUSR1 handler for diagnostics
-    install_sigusr1_handler("cell-session");
-
-    // Register diagnostic callback
-    register_diagnostic(|| {
-        let diagnostics = dump_all_diagnostics();
-        if !diagnostics.is_empty() {
-            eprint!("{}", diagnostics);
-        }
-    });
-
-    // Ensure this process dies when the parent dies
-    ur_taking_me_with_you::die_with_parent();
-
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(async_main())
-}
-
-async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize cell-side tracing
-    let (tracing_layer, tracing_guard) = init_cell_tracing(1024);
-    tracing_subscriber::registry().with(tracing_layer).init();
-
-    info!("Session Cell starting...");
-
-    // Parse spawn args and create transport
-    let args = SpawnArgs::from_env()?;
-    let peer_id = args.peer_id;
-    let transport = ShmGuestTransport::from_spawn_args(args)?;
-    info!("Connecting to host SHM segment...");
-
-    // Create telemetry middleware
-    let telemetry = create_telemetry();
-
-    // Create service implementation
-    let service_impl = SessionServiceImpl;
-
-    // Create dispatchers for both services
-    let session_dispatcher =
-        SessionServiceDispatcher::new(service_impl.clone()).with_middleware(telemetry.clone());
-    let actions_dispatcher = DefinesActionsDispatcher::new(service_impl).with_middleware(telemetry);
-
-    // Combine session + actions dispatchers
-    let services_dispatcher = RoutedDispatcher::new(session_dispatcher, actions_dispatcher);
-
-    // Combine with tracing dispatcher
-    let tracing_dispatcher = CellTracingDispatcher::new(tracing_guard.service());
-    let dispatcher = RoutedDispatcher::new(tracing_dispatcher, services_dispatcher);
-
-    // Create diagnostic state
-    let diagnostic_state = Arc::new(DiagnosticState::new("cell-session".to_string()));
-    register_diagnostic_state(&diagnostic_state);
-
-    // Establish guest connection
-    let (connection_handle, _incoming, driver) =
-        establish_guest_with_diagnostics(transport, dispatcher, Some(diagnostic_state));
-
-    info!("Connected to host!");
-
-    // Spawn driver FIRST - it needs to be running for RPC calls to work
-    let driver_handle = tokio::spawn(async move {
-        if let Err(e) = driver.run().await {
-            eprintln!("Driver error: {:?}", e);
-            std::process::exit(1);
-        }
-    });
-
-    // Start tracing after driver is spawned (needs driver for RPC)
-    tracing_guard.start(connection_handle.clone()).await;
-
-    // Signal readiness to host
-    let host = HostServiceClient::new(connection_handle.clone());
-    host.ready(ReadyMsg {
-        peer_id: peer_id.get() as u16,
-        cell_name: "session".to_string(),
-        pid: Some(std::process::id()),
-    })
-    .await?;
-
+/// Initialize DAW control after the cell is ready
+async fn init_daw_control(handle: ConnectionHandle) {
     // Initialize daw-control with the connection handle
-    Daw::init(connection_handle.clone())?;
+    if let Err(e) = Daw::init(handle.clone()) {
+        warn!("Failed to initialize daw-control: {}", e);
+        return;
+    }
     info!("daw-control initialized");
 
-    // Wait for DAW cell to be ready using host service (tower::Service pattern)
+    // Wait for DAW cell to be ready using host service
     info!("Waiting for DAW cell to be ready...");
-    let poll_response = host
+    let host = HostServiceClient::new(handle);
+    let poll_response = match host
         .poll_ready("daw-standalone".to_string(), WaitPolicy::default())
-        .await?;
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            warn!("Failed to poll DAW readiness: {}", e);
+            return;
+        }
+    };
 
     if !poll_response.ready {
         warn!("DAW cell did not become ready within timeout");
         info!("Session cell running without transport control.");
-        let _ = driver_handle.await;
-        return Ok(());
+        return;
     }
     info!("DAW cell is ready!");
 
-    // Try to get current project with retry logic (short retries since we know DAW is ready)
-    let _project = match wait_for_project_with_retry(3, Duration::from_millis(100)).await {
+    // Try to get current project with retry logic
+    match wait_for_project_with_retry(3, Duration::from_millis(100)).await {
         Ok(project) => {
             info!("Got current project: {}", project.guid());
-            project
         }
         Err(e) => {
             warn!("Could not get current project after retries: {}", e);
             warn!("DAW cell may not be available");
-
-            info!("Session cell running without transport control.");
-            let _ = driver_handle.await;
-            return Ok(());
         }
-    };
+    }
 
-    // Session cell is ready - just wait for driver to stop
-    info!("Session cell ready, waiting for shutdown signal...");
-    let _ = driver_handle.await;
-    info!("Session cell shutting down...");
-    Ok(())
+    info!("Session cell fully initialized");
 }
 
 /// Retry getting the current project with exponential backoff
 async fn wait_for_project_with_retry(
     max_retries: u32,
     delay: Duration,
-) -> Result<daw_control::Project> {
+) -> eyre::Result<daw_control::Project> {
     let daw = Daw::get();
     for attempt in 1..=max_retries {
         match daw.current_project().await {
@@ -263,4 +191,33 @@ async fn wait_for_project_with_retry(
         }
     }
     Err(eyre::eyre!("Exhausted all retries"))
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    run_cell!("session", |handle| {
+        let telemetry = create_telemetry();
+
+        // Create service implementation with access to handle
+        let service_impl = SessionServiceImpl::new(handle.clone());
+
+        // Create dispatchers for both services
+        let session_dispatcher =
+            SessionServiceDispatcher::new(service_impl.clone()).with_middleware(telemetry.clone());
+        let actions_dispatcher =
+            DefinesActionsDispatcher::new(service_impl).with_middleware(telemetry);
+
+        // Spawn DAW initialization in background (after ready is signaled)
+        let handle_for_init = handle.clone();
+        tokio::spawn(async move {
+            // Small delay to ensure ready() has been sent
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            if let Some(h) = handle_for_init.get() {
+                init_daw_control(h.clone()).await;
+            }
+        });
+
+        // Return combined dispatcher
+        RoutedDispatcher::new(session_dispatcher, actions_dispatcher)
+    })
 }
