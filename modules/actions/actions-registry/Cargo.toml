@@ -1,0 +1,10 @@
+[package]
+name = "actions-registry"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actions-proto.workspace = true
+roam.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true

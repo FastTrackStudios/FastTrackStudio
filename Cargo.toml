@@ -1,7 +1,14 @@
 [workspace]
 members = [
     "cells/*/*",
-    "modules/*",
+    "modules/cell-runtime",
+    "modules/host-client",
+    "modules/host-runtime",
+    "modules/integration-tests",
+    "modules/actions/actions-proto",
+    "modules/actions/actions-registry",
+    "modules/actions/actions-standalone",
+    "libs/*",
     "xtask",
     "apps/tests/*",
     "apps/fts-control/*",
@@ -75,3 +82,27 @@ gateway-proto = { path = "cells/gateway/gateway-proto" }
 host-manager-proto = { path = "cells/host-manager/host-manager-proto" }
 host-manager = { path = "cells/host-manager/host-manager" }
 daw-standalone = { path = "cells/daw/daw-standalone" }
+actions-proto = { path = "modules/actions/actions-proto" }
+actions-registry = { path = "modules/actions/actions-registry" }
+actions-standalone = { path = "modules/actions/actions-standalone" }
+
+# REAPER extension dependencies
+reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+reaper-high = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+reaper-macros = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+reaper-common-types = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", features = ["palette"] }
+swell-ui = { path = "libs/swell-ui" }
+fragile = "2.0.1"
+scopeguard = "1.1.0"
+raw-window-handle = "0.4.2"
+palette = "0.7.3"
+rxrust = { git = "https://github.com/rxRust/rxRust", rev = "349e50b3197e05926e2378ef8fc45cb67ad43b83" }
+
+# macOS dependencies for swell-ui (using exact versions for compatibility)
+objc2 = "=0.3.0-beta.3"
+objc2-foundation = "0.2.0"
+
+# Windows dependencies (optional, for cross-platform)
+winapi = { version = "0.3", features = ["winuser", "uxtheme"] }
+libloading = "0.9"

@@ -15,6 +15,11 @@
 #![cfg_attr(not(target_arch = "wasm32"), allow(unused))]
 
 #[cfg(target_arch = "wasm32")]
+mod actions;
+
+#[cfg(target_arch = "wasm32")]
+use actions::{ActionManager, ActionSource, CommandPalette};
+#[cfg(target_arch = "wasm32")]
 use daw_control::Daw;
 #[cfg(target_arch = "wasm32")]
 use dioxus::prelude::*;
@@ -24,6 +29,8 @@ use roam::session::ConnectionHandle;
 use roam_session::{initiate_framed, HandshakeConfig, NoDispatcher};
 #[cfg(target_arch = "wasm32")]
 use roam_websocket::WsTransport;
+#[cfg(target_arch = "wasm32")]
+use std::sync::Arc;
 
 #[cfg(target_arch = "wasm32")]
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -125,12 +132,50 @@ async fn connect_to_gateway() -> Result<ConnectionHandle, String> {
 #[cfg(target_arch = "wasm32")]
 #[component]
 fn App() -> Element {
+    // Command palette state
+    let mut palette_open = use_signal(|| false);
+    let selected_source = use_signal(|| ActionSource::Standalone);
+    let mut action_manager: Signal<Option<Arc<async_lock::RwLock<ActionManager>>>> =
+        use_signal(|| None);
+
+    // Initialize action manager
+    use_effect(move || {
+        spawn(async move {
+            let manager = ActionManager::new().await;
+            action_manager.set(Some(Arc::new(async_lock::RwLock::new(manager))));
+        });
+    });
+
+    // Global keyboard shortcut for command palette (Cmd+Shift+P)
+    let on_keydown = move |e: KeyboardEvent| {
+        if e.modifiers().meta()
+            && e.modifiers().shift()
+            && e.key() == Key::Character("p".to_string())
+        {
+            palette_open.set(true);
+        }
+    };
+
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
 
-        DawController {}
+        div {
+            onkeydown: on_keydown,
+            tabindex: 0,
+
+            DawController {
+                action_manager: action_manager.clone(),
+                palette_open: palette_open.clone(),
+            }
+
+            CommandPalette {
+                is_open: palette_open,
+                manager: action_manager,
+                selected_source: selected_source,
+            }
+        }
     }
 }
 
@@ -145,8 +190,15 @@ enum ConnectionState {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Props, Clone, PartialEq)]
+struct DawControllerProps {
+    action_manager: Signal<Option<Arc<async_lock::RwLock<ActionManager>>>>,
+    palette_open: Signal<bool>,
+}
+
+#[cfg(target_arch = "wasm32")]
 #[component]
-fn DawController() -> Element {
+fn DawController(mut props: DawControllerProps) -> Element {
     // Connection state
     let mut conn_state = use_signal(|| ConnectionState::Disconnected);
     let mut is_playing = use_signal(|| false);
@@ -154,6 +206,7 @@ fn DawController() -> Element {
 
     // Connect on mount
     use_effect(move || {
+        let action_manager = props.action_manager.clone();
         spawn(async move {
             conn_state.set(ConnectionState::Connecting);
 
@@ -164,6 +217,16 @@ fn DawController() -> Element {
                     if let Ok(project) = daw.current_project().await {
                         project_name.set(project.guid().to_string());
                     }
+
+                    // Register the gateway as a remote action source
+                    if let Some(manager_lock) = action_manager.read().as_ref() {
+                        let mut manager = manager_lock.write().await;
+                        let ws_url = get_websocket_url();
+                        manager
+                            .add_remote_host("Gateway".to_string(), ws_url, handle.clone())
+                            .await;
+                    }
+
                     conn_state.set(ConnectionState::Connected(handle));
                 }
                 Err(e) => {
@@ -214,9 +277,23 @@ fn DawController() -> Element {
 
     let is_connected = handle.is_some();
 
+    // Open command palette handler
+    let open_palette = move |_| {
+        props.palette_open.set(true);
+    };
+
     rsx! {
         div { class: "min-h-screen bg-gray-900 text-white p-8",
-            h1 { class: "text-3xl font-bold mb-8", "FTS Control" }
+            // Header with title and command palette button
+            div { class: "flex justify-between items-center mb-8",
+                h1 { class: "text-3xl font-bold", "FTS Control" }
+                button {
+                    class: "px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-2 transition-colors",
+                    onclick: open_palette,
+                    span { "Command Palette" }
+                    span { class: "text-xs text-gray-400", "⌘⇧P" }
+                }
+            }
 
             // Connection status
             div { class: "mb-8",

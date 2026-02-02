@@ -2,21 +2,35 @@
 name = "reaper-extension"
 version = "0.1.0"
 edition = "2021"
-description = "Production host extension that loads daw-reaper for REAPER integration"
+description = "REAPER extension that provides FastTrackStudio integration"
 
-[[bin]]
-name = "reaper-extension"
-path = "src/main.rs"
+[lib]
+crate-type = ["cdylib"]
+name = "reaper_fts"
+path = "src/lib.rs"
 
 [dependencies]
+# REAPER bindings
+reaper-low.workspace = true
+reaper-medium.workspace = true
+reaper-high.workspace = true
+reaper-macros.workspace = true
+swell-ui.workspace = true
+
 # Host runtime infrastructure
 host-runtime.workspace = true
 
-# Protocols (for spawning cells)
+# Protocols (for spawning cells and querying actions)
+actions-proto.workspace = true
+actions-registry.workspace = true
 daw-proto.workspace = true
 session-proto.workspace = true
 gateway-proto.workspace = true
 
 # Runtime
+roam.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
+fragile.workspace = true
+anyhow = "1.0"

@@ -6,6 +6,10 @@
 //! Note: This cell uses explicit setup instead of `run_cell!` macro because
 //! it needs to perform application logic (DAW control) after driver startup.
 
+use actions_proto::{
+    ActionCategory, ActionDefinition, ActionId, ActionResult, DefinesActions,
+    DefinesActionsDispatcher,
+};
 use cell_runtime::{
     CellTracingDispatcher, DiagnosticState, HostServiceClient, ReadyMsg, RoutedDispatcher,
     ShmGuestTransport, SpawnArgs, WaitPolicy, dump_all_diagnostics,
@@ -63,13 +67,53 @@ fn create_telemetry() -> TelemetryMiddleware<CompositeExporter> {
     })
 }
 
-/// Implementation of SessionService
+/// Session actions defined by this cell
+fn session_actions() -> Vec<ActionDefinition> {
+    vec![
+        ActionDefinition::new(
+            "fts.session.log_hello",
+            "Log Hello",
+            "Logs 'Hello from session!' to demonstrate the action system",
+        )
+        .with_category(ActionCategory::Session)
+        .with_menu_path("FTS/Session"),
+        ActionDefinition::new(
+            "fts.session.log_status",
+            "Log Status",
+            "Logs current session status",
+        )
+        .with_category(ActionCategory::Session)
+        .with_menu_path("FTS/Session"),
+    ]
+}
+
+/// Implementation of SessionService and DefinesActions
 #[derive(Clone)]
 pub struct SessionServiceImpl;
 
 impl SessionService for SessionServiceImpl {
     async fn get_status(&self, _cx: &Context) -> String {
         "session: healthy".to_string()
+    }
+}
+
+impl DefinesActions for SessionServiceImpl {
+    async fn get_actions(&self, _cx: &Context) -> Vec<ActionDefinition> {
+        session_actions()
+    }
+
+    async fn execute_action(&self, _cx: &Context, action_id: ActionId) -> ActionResult {
+        match action_id.as_str() {
+            "fts.session.log_hello" => {
+                info!("Hello from session!");
+                ActionResult::success_with_message("Logged hello from session")
+            }
+            "fts.session.log_status" => {
+                info!("Session status: healthy");
+                ActionResult::success_with_message("Logged session status")
+            }
+            _ => ActionResult::failure(format!("Unknown action: {}", action_id)),
+        }
     }
 }
 
@@ -110,13 +154,20 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     // Create telemetry middleware
     let telemetry = create_telemetry();
 
-    // Create session service dispatcher with telemetry
+    // Create service implementation
+    let service_impl = SessionServiceImpl;
+
+    // Create dispatchers for both services
     let session_dispatcher =
-        SessionServiceDispatcher::new(SessionServiceImpl).with_middleware(telemetry);
+        SessionServiceDispatcher::new(service_impl.clone()).with_middleware(telemetry.clone());
+    let actions_dispatcher = DefinesActionsDispatcher::new(service_impl).with_middleware(telemetry);
+
+    // Combine session + actions dispatchers
+    let services_dispatcher = RoutedDispatcher::new(session_dispatcher, actions_dispatcher);
 
     // Combine with tracing dispatcher
     let tracing_dispatcher = CellTracingDispatcher::new(tracing_guard.service());
-    let dispatcher = RoutedDispatcher::new(tracing_dispatcher, session_dispatcher);
+    let dispatcher = RoutedDispatcher::new(tracing_dispatcher, services_dispatcher);
 
     // Create diagnostic state
     let diagnostic_state = Arc::new(DiagnosticState::new("cell-session".to_string()));
@@ -129,7 +180,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Connected to host!");
 
     // Spawn driver FIRST - it needs to be running for RPC calls to work
-    let mut driver_handle = tokio::spawn(async move {
+    let driver_handle = tokio::spawn(async move {
         if let Err(e) = driver.run().await {
             eprintln!("Driver error: {:?}", e);
             std::process::exit(1);
@@ -167,7 +218,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     info!("DAW cell is ready!");
 
     // Try to get current project with retry logic (short retries since we know DAW is ready)
-    let project = match wait_for_project_with_retry(3, Duration::from_millis(100)).await {
+    let _project = match wait_for_project_with_retry(3, Duration::from_millis(100)).await {
         Ok(project) => {
             info!("Got current project: {}", project.guid());
             project

@@ -17,10 +17,15 @@ roam-websocket.workspace = true
 daw-control.workspace = true
 daw-proto.workspace = true
 
+# Actions system - command palette and action execution
+actions-proto.workspace = true
+actions-standalone.workspace = true
+
 # Async/WASM utilities
 futures.workspace = true
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
+async-lock = "3.4"
 
 # Web APIs (for window.location to get WebSocket URL)
 web-sys = { version = "0.3", features = ["Window", "Location"] }
