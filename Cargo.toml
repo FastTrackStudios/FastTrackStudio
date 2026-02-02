@@ -95,6 +95,7 @@ reaper-macros = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "
 reaper-common-types = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", features = ["palette"] }
 swell-ui = { path = "libs/swell-ui" }
 fragile = "2.0.1"
+crossbeam-channel = "0.5"
 scopeguard = "1.1.0"
 raw-window-handle = "0.4.2"
 palette = "0.7.3"

@@ -40,3 +40,4 @@ fragile.workspace = true
 anyhow = "1.0"
 camino = "1.1"
 tempfile = "3.24.0"
+crossbeam-channel.workspace = true

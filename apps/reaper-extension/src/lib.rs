@@ -14,11 +14,11 @@
 //! - Cell directory:      /Users/.../FastTrackStudio/Extensions/FTS2/
 
 mod action_registry;
-mod main_thread;
+mod global;
 mod menu;
 
 use fragile::Fragile;
-use reaper_high::Reaper as HighReaper;
+use reaper_high::{MainTaskMiddleware, Reaper as HighReaper};
 use reaper_low::{PluginContext, Swell};
 use reaper_macros::reaper_extension_plugin;
 use reaper_medium::ReaperSession;
@@ -28,6 +28,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use tracing::{debug, info, warn};
 
+use global::Global;
 use host_runtime::{init_shm_infrastructure, spawn_tracing_consumer, CellConfig, Host};
 use roam::session::RoutedDispatcher;
 use roam_telemetry::{
@@ -91,6 +92,8 @@ struct App {
     /// Keep SHM temp directory alive for extension lifetime
     #[allow(dead_code)]
     shm_temp_dir: Option<tempfile::TempDir>,
+    /// Main task middleware for processing TaskSupport queued tasks
+    task_middleware: RefCell<MainTaskMiddleware>,
 }
 
 // Manual Debug impl since ReaperSession and Runtime don't implement Debug
@@ -108,16 +111,28 @@ impl App {
             .enable_all()
             .build()?;
 
+        // Initialize Global (creates TaskSupport channels)
+        Global::init();
+
+        // Create task middleware for processing queued tasks
+        let task_middleware = Global::get().create_task_middleware();
+
         Ok(Self {
             session: RefCell::new(session),
             tokio_runtime,
             shm_temp_dir: None,
+            task_middleware: RefCell::new(task_middleware),
         })
     }
 
     /// Set the SHM temp directory (must be kept alive for extension lifetime)
     fn set_shm_temp_dir(&mut self, temp_dir: tempfile::TempDir) {
         self.shm_temp_dir = Some(temp_dir);
+    }
+
+    /// Process pending main thread tasks (called from timer callback)
+    fn process_tasks(&self) {
+        self.task_middleware.borrow_mut().run();
     }
 
     /// Initialize the extension (register actions, menus, spawn cells)
@@ -148,13 +163,9 @@ impl App {
             // Start tracing consumer for cell log aggregation
             spawn_tracing_consumer();
 
-            // Initialize the main thread dispatcher for REAPER API calls
-            // This queues commands from async RPC handlers for execution on the main thread
-            main_thread::MainThreadDispatcher::init();
-
             // Register the DAW dispatcher for in-process REAPER API handling
             // This allows guest cells to make DAW service calls (play, stop, etc.)
-            // that are handled locally using REAPER APIs
+            // that are handled locally using REAPER APIs via TaskSupport
             register_daw_dispatcher();
 
             // Register cells for lazy spawning
@@ -219,33 +230,18 @@ fn get_cell_directory() -> PathBuf {
 /// actual REAPER APIs, and registers them with the Host. When guest cells
 /// make DAW service calls, they're handled locally in-process.
 ///
-/// The implementations use callbacks to dispatch commands to the main thread
-/// since REAPER APIs can only be called from the main thread.
+/// Uses TaskSupport from reaper-high to dispatch REAPER API calls to the main thread.
 fn register_daw_dispatcher() {
     info!("Registering DAW dispatcher for in-process REAPER API handling...");
 
-    // Set up transport callback to queue commands via MainThreadDispatcher
-    daw_reaper::set_transport_callback(|cmd| {
-        use daw_reaper::TransportCommand;
-        match cmd {
-            TransportCommand::Play => main_thread::queue_play(),
-            TransportCommand::Stop => main_thread::queue_stop(),
-        }
-    });
-
-    // Set up project callback to queue commands and return result receiver
-    daw_reaper::set_get_current_project_callback(|| {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        if let Some(dispatcher) = main_thread::MainThreadDispatcher::get() {
-            dispatcher.queue(main_thread::MainThreadCommand::GetCurrentProject { response_tx: tx });
-        }
-        rx
-    });
+    // Set TaskSupport for daw-reaper to use
+    // This allows ReaperTransport and ReaperProject to dispatch calls to the main thread
+    daw_reaper::set_task_support(Global::task_support());
 
     // Create telemetry middleware for OTLP export
     let telemetry = create_telemetry();
 
-    // Create REAPER implementations (they use the callbacks we just set)
+    // Create REAPER implementations (they use TaskSupport for main thread dispatch)
     let transport = daw_reaper::ReaperTransport::new();
     let project = daw_reaper::ReaperProject::new();
 
@@ -320,12 +316,10 @@ fn register_cells(cell_dir: &PathBuf) {
 extern "C" fn timer_callback() {
     // Process any pending async tasks
     if let Some(app_fragile) = get_app() {
-        let _app = app_fragile.get();
+        let app = app_fragile.get();
 
-        // Process pending main thread commands (REAPER API calls)
-        if let Some(dispatcher) = main_thread::MainThreadDispatcher::get() {
-            dispatcher.process_pending();
-        }
+        // Process pending main thread tasks via TaskSupport middleware
+        app.process_tasks();
     }
 }
 
@@ -358,7 +352,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Create a medium-level API session
     let session = ReaperSession::load(context);
 
-    // Create the App
+    // Create the App (initializes Global/TaskSupport)
     let mut app = App::new(session)?;
 
     // Initialize the extension (mut needed to store SHM temp dir)

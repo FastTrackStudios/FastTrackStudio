@@ -22,6 +22,8 @@ use actions::{ActionManager, ActionSource, CommandPalette};
 #[cfg(target_arch = "wasm32")]
 use daw_control::Daw;
 #[cfg(target_arch = "wasm32")]
+use daw_proto::Transport as TransportState;
+#[cfg(target_arch = "wasm32")]
 use dioxus::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use roam::session::ConnectionHandle;
@@ -189,6 +191,43 @@ enum ConnectionState {
     Error(String),
 }
 
+/// Transport state for UI display
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Default)]
+struct TransportDisplayState {
+    is_playing: bool,
+    is_recording: bool,
+    is_looping: bool,
+    position: f64,
+    tempo: f64,
+    playrate: f64,
+}
+
+/// Helper to extract position in seconds from transport state
+#[cfg(target_arch = "wasm32")]
+fn get_position_seconds(state: &TransportState) -> f64 {
+    state
+        .playhead_position
+        .time
+        .as_ref()
+        .map(|t| t.to_seconds())
+        .unwrap_or(0.0)
+}
+
+/// Create a TransportDisplayState from a TransportState
+#[cfg(target_arch = "wasm32")]
+fn to_display_state(state: &TransportState) -> TransportDisplayState {
+    TransportDisplayState {
+        is_playing: state.play_state == daw_proto::PlayState::Playing
+            || state.play_state == daw_proto::PlayState::Recording,
+        is_recording: state.play_state == daw_proto::PlayState::Recording,
+        is_looping: state.looping,
+        position: get_position_seconds(state),
+        tempo: state.tempo.bpm,
+        playrate: state.playrate,
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 #[derive(Props, Clone, PartialEq)]
 struct DawControllerProps {
@@ -201,8 +240,15 @@ struct DawControllerProps {
 fn DawController(mut props: DawControllerProps) -> Element {
     // Connection state
     let mut conn_state = use_signal(|| ConnectionState::Disconnected);
-    let mut is_playing = use_signal(|| false);
+    let mut transport_state = use_signal(TransportDisplayState::default);
     let mut project_name = use_signal(|| String::from("No project"));
+
+    // Tempo input state
+    let mut tempo_input = use_signal(|| String::from("120"));
+    // Position input state
+    let mut position_input = use_signal(|| String::from("0"));
+    // Playrate input state
+    let mut playrate_input = use_signal(|| String::from("1.0"));
 
     // Connect on mount
     use_effect(move || {
@@ -216,6 +262,15 @@ fn DawController(mut props: DawControllerProps) -> Element {
                     let daw = Daw::new(handle.clone());
                     if let Ok(project) = daw.current_project().await {
                         project_name.set(project.guid().to_string());
+
+                        // Get initial transport state
+                        if let Ok(state) = project.transport().get_state().await {
+                            let display = to_display_state(&state);
+                            tempo_input.set(format!("{:.1}", display.tempo));
+                            position_input.set(format!("{:.2}", display.position));
+                            playrate_input.set(format!("{:.2}", display.playrate));
+                            transport_state.set(display);
+                        }
                     }
 
                     // Register the gateway as a remote action source
@@ -242,16 +297,62 @@ fn DawController(mut props: DawControllerProps) -> Element {
         _ => None,
     };
 
-    // Transport control handlers
-    let play = {
+    // Helper macro to create transport action handlers
+    macro_rules! transport_action {
+        ($handle:expr, $transport_state:expr, $action:ident) => {{
+            let handle = $handle.clone();
+            let mut ts = $transport_state.clone();
+            move |_| {
+                if let Some(h) = handle.clone() {
+                    spawn(async move {
+                        let daw = Daw::new(h);
+                        if let Ok(project) = daw.current_project().await {
+                            let _ = project.transport().$action().await;
+                            // Refresh state after action
+                            if let Ok(state) = project.transport().get_state().await {
+                                ts.set(to_display_state(&state));
+                            }
+                        }
+                    });
+                }
+            }
+        }};
+    }
+
+    // Playback control handlers
+    let play = transport_action!(handle, transport_state, play);
+    let pause = transport_action!(handle, transport_state, pause);
+    let stop = transport_action!(handle, transport_state, stop);
+    let play_pause = transport_action!(handle, transport_state, play_pause);
+    let play_stop = transport_action!(handle, transport_state, play_stop);
+
+    // Recording control handlers
+    let record = transport_action!(handle, transport_state, record);
+    let toggle_recording = transport_action!(handle, transport_state, toggle_recording);
+
+    // Position control handlers
+    let goto_start = transport_action!(handle, transport_state, goto_start);
+    let goto_end = transport_action!(handle, transport_state, goto_end);
+
+    // Loop control handlers
+    let toggle_loop = transport_action!(handle, transport_state, toggle_loop);
+
+    // Set tempo handler
+    let set_tempo = {
         let handle = handle.clone();
+        let mut ts = transport_state.clone();
+        let tempo_val = tempo_input.clone();
         move |_| {
             if let Some(h) = handle.clone() {
+                let tempo_str = tempo_val.read().clone();
                 spawn(async move {
-                    let daw = Daw::new(h);
-                    if let Ok(project) = daw.current_project().await {
-                        if project.transport().play().await.is_ok() {
-                            is_playing.set(true);
+                    if let Ok(bpm) = tempo_str.parse::<f64>() {
+                        let daw = Daw::new(h);
+                        if let Ok(project) = daw.current_project().await {
+                            let _ = project.transport().set_tempo(bpm).await;
+                            if let Ok(state) = project.transport().get_state().await {
+                                ts.set(to_display_state(&state));
+                            }
                         }
                     }
                 });
@@ -259,15 +360,70 @@ fn DawController(mut props: DawControllerProps) -> Element {
         }
     };
 
-    let stop = {
+    // Set position handler
+    let set_position = {
         let handle = handle.clone();
+        let mut ts = transport_state.clone();
+        let pos_val = position_input.clone();
+        move |_| {
+            if let Some(h) = handle.clone() {
+                let pos_str = pos_val.read().clone();
+                spawn(async move {
+                    if let Ok(seconds) = pos_str.parse::<f64>() {
+                        let daw = Daw::new(h);
+                        if let Ok(project) = daw.current_project().await {
+                            let _ = project.transport().set_position(seconds).await;
+                            if let Ok(state) = project.transport().get_state().await {
+                                ts.set(to_display_state(&state));
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    };
+
+    // Set playrate handler
+    let set_playrate = {
+        let handle = handle.clone();
+        let mut ts = transport_state.clone();
+        let rate_val = playrate_input.clone();
+        move |_| {
+            if let Some(h) = handle.clone() {
+                let rate_str = rate_val.read().clone();
+                spawn(async move {
+                    if let Ok(rate) = rate_str.parse::<f64>() {
+                        let daw = Daw::new(h);
+                        if let Ok(project) = daw.current_project().await {
+                            let _ = project.transport().set_playrate(rate).await;
+                            if let Ok(state) = project.transport().get_state().await {
+                                ts.set(to_display_state(&state));
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    };
+
+    // Refresh state handler
+    let refresh_state = {
+        let handle = handle.clone();
+        let mut ts = transport_state.clone();
+        let mut tempo_inp = tempo_input.clone();
+        let mut pos_inp = position_input.clone();
+        let mut rate_inp = playrate_input.clone();
         move |_| {
             if let Some(h) = handle.clone() {
                 spawn(async move {
                     let daw = Daw::new(h);
                     if let Ok(project) = daw.current_project().await {
-                        if project.transport().stop().await.is_ok() {
-                            is_playing.set(false);
+                        if let Ok(state) = project.transport().get_state().await {
+                            let display = to_display_state(&state);
+                            tempo_inp.set(format!("{:.1}", display.tempo));
+                            pos_inp.set(format!("{:.2}", display.position));
+                            rate_inp.set(format!("{:.2}", display.playrate));
+                            ts.set(display);
                         }
                     }
                 });
@@ -276,6 +432,7 @@ fn DawController(mut props: DawControllerProps) -> Element {
     };
 
     let is_connected = handle.is_some();
+    let ts = transport_state.read();
 
     // Open command palette handler
     let open_palette = move |_| {
@@ -287,16 +444,24 @@ fn DawController(mut props: DawControllerProps) -> Element {
             // Header with title and command palette button
             div { class: "flex justify-between items-center mb-8",
                 h1 { class: "text-3xl font-bold", "FTS Control" }
-                button {
-                    class: "px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-2 transition-colors",
-                    onclick: open_palette,
-                    span { "Command Palette" }
-                    span { class: "text-xs text-gray-400", "⌘⇧P" }
+                div { class: "flex gap-4",
+                    button {
+                        class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm transition-colors disabled:opacity-50",
+                        disabled: !is_connected,
+                        onclick: refresh_state,
+                        "Refresh"
+                    }
+                    button {
+                        class: "px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm flex items-center gap-2 transition-colors",
+                        onclick: open_palette,
+                        span { "Command Palette" }
+                        span { class: "text-xs text-gray-400", "Cmd+Shift+P" }
+                    }
                 }
             }
 
             // Connection status
-            div { class: "mb-8",
+            div { class: "mb-6",
                 match &*conn_state.read() {
                     ConnectionState::Disconnected => rsx! {
                         span { class: "text-gray-400", "Disconnected" }
@@ -317,30 +482,179 @@ fn DawController(mut props: DawControllerProps) -> Element {
             }
 
             // Project info
-            div { class: "mb-8 text-gray-400",
+            div { class: "mb-6 text-gray-400",
                 "Project: {project_name}"
             }
 
-            // Transport controls
-            div { class: "flex gap-4",
-                button {
-                    class: "px-6 py-3 bg-green-600 hover:bg-green-700 rounded-lg text-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
-                    disabled: !is_connected,
-                    onclick: play,
-                    "Play"
+            // Status indicators
+            div { class: "mb-6 flex gap-4 text-sm",
+                div {
+                    class: if ts.is_playing { "text-green-400" } else { "text-gray-500" },
+                    if ts.is_playing { "Playing" } else { "Stopped" }
                 }
-                button {
-                    class: "px-6 py-3 bg-red-600 hover:bg-red-700 rounded-lg text-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
-                    disabled: !is_connected,
-                    onclick: stop,
-                    "Stop"
+                div {
+                    class: if ts.is_recording { "text-red-400" } else { "text-gray-500" },
+                    if ts.is_recording { "Recording" } else { "Not Recording" }
+                }
+                div {
+                    class: if ts.is_looping { "text-blue-400" } else { "text-gray-500" },
+                    if ts.is_looping { "Loop ON" } else { "Loop OFF" }
                 }
             }
 
-            // Playing indicator
-            if is_playing() {
-                div { class: "mt-8 text-green-400 text-xl animate-pulse",
-                    "Playing..."
+            // Transport Controls Section
+            div { class: "bg-gray-800 rounded-lg p-6 mb-6",
+                h2 { class: "text-xl font-semibold mb-4", "Transport" }
+
+                // Playback Controls
+                div { class: "mb-4",
+                    h3 { class: "text-sm text-gray-400 mb-2", "Playback" }
+                    div { class: "flex gap-2 flex-wrap",
+                        button {
+                            class: "px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                            disabled: !is_connected,
+                            onclick: play,
+                            "Play"
+                        }
+                        button {
+                            class: "px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                            disabled: !is_connected,
+                            onclick: pause,
+                            "Pause"
+                        }
+                        button {
+                            class: "px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                            disabled: !is_connected,
+                            onclick: stop,
+                            "Stop"
+                        }
+                        button {
+                            class: "px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                            disabled: !is_connected,
+                            onclick: play_pause,
+                            "Play/Pause"
+                        }
+                        button {
+                            class: "px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                            disabled: !is_connected,
+                            onclick: play_stop,
+                            "Play/Stop"
+                        }
+                    }
+                }
+
+                // Recording Controls
+                div { class: "mb-4",
+                    h3 { class: "text-sm text-gray-400 mb-2", "Recording" }
+                    div { class: "flex gap-2",
+                        button {
+                            class: "px-4 py-2 bg-red-700 hover:bg-red-800 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                            disabled: !is_connected,
+                            onclick: record,
+                            "Record"
+                        }
+                        button {
+                            class: "px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                            disabled: !is_connected,
+                            onclick: toggle_recording,
+                            "Toggle Recording"
+                        }
+                    }
+                }
+
+                // Position Controls
+                div { class: "mb-4",
+                    h3 { class: "text-sm text-gray-400 mb-2", "Position" }
+                    div { class: "flex gap-2 items-center flex-wrap",
+                        button {
+                            class: "px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                            disabled: !is_connected,
+                            onclick: goto_start,
+                            "Go to Start"
+                        }
+                        button {
+                            class: "px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                            disabled: !is_connected,
+                            onclick: goto_end,
+                            "Go to End"
+                        }
+                        div { class: "flex items-center gap-2",
+                            input {
+                                r#type: "text",
+                                class: "w-24 px-2 py-2 bg-gray-700 rounded text-white",
+                                value: "{position_input}",
+                                oninput: move |e| position_input.set(e.value()),
+                            }
+                            span { class: "text-gray-400", "sec" }
+                            button {
+                                class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                                disabled: !is_connected,
+                                onclick: set_position,
+                                "Set Position"
+                            }
+                        }
+                        span { class: "text-gray-400 text-sm", "Current: {ts.position:.2}s" }
+                    }
+                }
+
+                // Loop Control
+                div { class: "mb-4",
+                    h3 { class: "text-sm text-gray-400 mb-2", "Loop" }
+                    div { class: "flex gap-2",
+                        button {
+                            class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                            disabled: !is_connected,
+                            onclick: toggle_loop,
+                            "Toggle Loop"
+                        }
+                    }
+                }
+            }
+
+            // Tempo & Playrate Section
+            div { class: "bg-gray-800 rounded-lg p-6 mb-6",
+                h2 { class: "text-xl font-semibold mb-4", "Tempo & Playrate" }
+
+                // Tempo Control
+                div { class: "mb-4",
+                    h3 { class: "text-sm text-gray-400 mb-2", "Tempo" }
+                    div { class: "flex gap-2 items-center",
+                        input {
+                            r#type: "text",
+                            class: "w-24 px-2 py-2 bg-gray-700 rounded text-white",
+                            value: "{tempo_input}",
+                            oninput: move |e| tempo_input.set(e.value()),
+                        }
+                        span { class: "text-gray-400", "BPM" }
+                        button {
+                            class: "px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                            disabled: !is_connected,
+                            onclick: set_tempo,
+                            "Set Tempo"
+                        }
+                        span { class: "text-gray-400 text-sm", "Current: {ts.tempo:.1} BPM" }
+                    }
+                }
+
+                // Playrate Control
+                div {
+                    h3 { class: "text-sm text-gray-400 mb-2", "Playrate (0.25 - 4.0)" }
+                    div { class: "flex gap-2 items-center",
+                        input {
+                            r#type: "text",
+                            class: "w-24 px-2 py-2 bg-gray-700 rounded text-white",
+                            value: "{playrate_input}",
+                            oninput: move |e| playrate_input.set(e.value()),
+                        }
+                        span { class: "text-gray-400", "x" }
+                        button {
+                            class: "px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors",
+                            disabled: !is_connected,
+                            onclick: set_playrate,
+                            "Set Playrate"
+                        }
+                        span { class: "text-gray-400 text-sm", "Current: {ts.playrate:.2}x" }
+                    }
                 }
             }
         }

@@ -2,22 +2,21 @@
 //!
 //! This module provides a Unix socket listener that accepts connections from
 //! the fts-control desktop app. Desktop apps can then:
-//! - Call TransportService/ProjectService to control the DAW
+//! - Call TransportService/ProjectService to control the DAW (via Host's DAW dispatcher)
 //! - Call GatewayCoordinator to take over/release gateway cells
 //! - Receive virtual connections with host identity metadata
 
 use std::path::Path;
 
-use daw_proto::project::ProjectServiceDispatcher;
-use daw_proto::transport::transport::TransportServiceDispatcher;
-use daw_proto::{ProjectInfo, ProjectService, TransportService};
+use crate::forwarder::ArcDispatcher;
+use crate::Host;
 use gateway_proto::{
     GatewayCoordinator, GatewayCoordinatorDispatcher, GatewayInfo, GatewayState, GatewayType,
     TakeOverRequest, TakeOverResponse,
 };
-use host_manager_proto::{HOST_IDENTITY_KEY, HostIdentity};
-use roam::Context;
+use host_manager_proto::{HostIdentity, HOST_IDENTITY_KEY};
 use roam::session::{HandshakeConfig, RoutedDispatcher};
+use roam::Context;
 use roam_local::LocalListener;
 use roam_stream::CobsFramed;
 use roam_wire::MetadataValue;
@@ -73,14 +72,23 @@ async fn handle_connection(
     // Wrap in COBS framing for message delimiting
     let framed = CobsFramed::new(stream);
 
-    // Create dispatchers for the services we expose
-    let transport_dispatcher = TransportServiceDispatcher::new(HostTransportService);
-    let project_dispatcher = ProjectServiceDispatcher::new(HostProjectService);
+    // Get the DAW dispatcher from Host (TransportService + ProjectService)
+    // This is registered by the extension during initialization
+    let daw_dispatcher = Host::get()
+        .daw_dispatcher()
+        .ok_or("DAW dispatcher not registered")?
+        .clone();
+
+    // Create gateway coordinator dispatcher
     let gateway_dispatcher = GatewayCoordinatorDispatcher::new(GatewayCoordinatorImpl);
 
-    // Combine into a routed dispatcher: (project + transport) + gateway
-    let daw_dispatcher = RoutedDispatcher::new(project_dispatcher, transport_dispatcher);
-    let dispatcher = RoutedDispatcher::new(daw_dispatcher, gateway_dispatcher);
+    // Combine dispatchers: DAW services + Gateway coordinator
+    // The DAW dispatcher handles TransportService and ProjectService calls
+    // by routing them to the in-process REAPER API handlers
+    let dispatcher = RoutedDispatcher::new(
+        ArcDispatcher::new(daw_dispatcher.clone()),
+        gateway_dispatcher,
+    );
 
     // Accept the connection
     let (handle, _incoming, driver) =
@@ -101,10 +109,8 @@ async fn handle_connection(
         0u64,
     )];
 
-    // Create dispatcher for the virtual connection
-    let virtual_transport = TransportServiceDispatcher::new(HostTransportService);
-    let virtual_project = ProjectServiceDispatcher::new(HostProjectService);
-    let virtual_dispatcher = RoutedDispatcher::new(virtual_project, virtual_transport);
+    // Create dispatcher for the virtual connection using the same DAW dispatcher
+    let virtual_dispatcher = ArcDispatcher::new(daw_dispatcher);
 
     match handle
         .connect(metadata, Some(Box::new(virtual_dispatcher)))
@@ -125,52 +131,6 @@ async fn handle_connection(
     driver_handle.await?;
 
     Ok(())
-}
-
-/// Implementation of TransportService for desktop app connections.
-///
-/// TODO: Forward to actual DAW cell via Host singleton
-#[derive(Clone)]
-struct HostTransportService;
-
-impl TransportService for HostTransportService {
-    async fn play(&self, _cx: &Context, _project_id: Option<String>) {
-        // TODO: Forward to DAW cell
-        // let daw = Host::get().client_async::<TransportServiceClient>().await;
-        // daw.play(project_id).await;
-        info!("TransportService: play() called");
-    }
-
-    async fn stop(&self, _cx: &Context, _project_id: Option<String>) {
-        // TODO: Forward to DAW cell
-        info!("TransportService: stop() called");
-    }
-}
-
-/// Implementation of ProjectService for desktop app connections.
-///
-/// TODO: Forward to actual DAW cell via Host singleton
-#[derive(Clone)]
-struct HostProjectService;
-
-impl ProjectService for HostProjectService {
-    async fn get_current(&self, _cx: &Context) -> Option<ProjectInfo> {
-        // TODO: Forward to DAW cell
-        info!("ProjectService: get_current() called");
-        None
-    }
-
-    async fn get(&self, _cx: &Context, project_id: String) -> Option<ProjectInfo> {
-        // TODO: Forward to DAW cell
-        info!("ProjectService: get({}) called", project_id);
-        None
-    }
-
-    async fn list(&self, _cx: &Context) -> Vec<ProjectInfo> {
-        // TODO: Forward to DAW cell
-        info!("ProjectService: list() called");
-        vec![]
-    }
 }
 
 /// Implementation of GatewayCoordinator for managing gateway cells.
