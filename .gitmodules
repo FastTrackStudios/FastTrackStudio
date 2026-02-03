@@ -13,3 +13,6 @@
 [submodule "reference/reaper-rs"]
 	path = reference/reaper-rs
 	url = https://github.com/helgoboss/reaper-rs.git
+[submodule "reference/helgobox"]
+	path = reference/helgobox
+	url = https://github.com/helgoboss/helgobox.git
