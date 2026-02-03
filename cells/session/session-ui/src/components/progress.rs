@@ -1,0 +1,590 @@
+//! Progress Bar Components
+//!
+//! Progress visualization components for songs and sections.
+//! Copied from FastTrackStudio for exact styling match.
+
+use dioxus::prelude::*;
+
+/// Represents the loop region as percentages (0-100) within the progress bar
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct LoopIndicatorData {
+    /// Whether looping is enabled
+    pub enabled: bool,
+    /// Loop start position as percentage (0-100)
+    pub start_percent: f64,
+    /// Loop end position as percentage (0-100)
+    pub end_percent: f64,
+}
+
+impl LoopIndicatorData {
+    /// Create a new loop indicator
+    pub fn new(enabled: bool, start_percent: f64, end_percent: f64) -> Self {
+        Self {
+            enabled,
+            start_percent: start_percent.clamp(0.0, 100.0),
+            end_percent: end_percent.clamp(0.0, 100.0),
+        }
+    }
+}
+
+/// Compact progress bar component for song/section cards
+#[component]
+pub fn CompactProgressBar(
+    label: String,
+    progress: f64,
+    bright_color: String,
+    muted_color: String,
+    is_selected: bool,
+    #[props(default = false)] is_inactive: bool,
+    #[props(default = false)] always_black_bg: bool,
+    #[props(default)] on_click: Option<Callback<MouseEvent>>,
+) -> Element {
+    rsx! {
+        div {
+            class: "relative h-12 rounded-lg overflow-hidden cursor-pointer transition-all",
+            class: if is_selected { "ring-2 ring-primary" } else { "" },
+            onclick: move |e| {
+                if let Some(callback) = &on_click {
+                    callback.call(e);
+                }
+            },
+            // Background - dark grey if always_black_bg or inactive, colored otherwise
+            div {
+                class: "absolute inset-0",
+                style: if always_black_bg || is_inactive {
+                    "background-color: var(--color-card);".to_string()
+                } else {
+                    format!("background-color: {}; opacity: 0.3;", muted_color)
+                },
+            }
+            // Filled portion - only show if not inactive
+            if !is_inactive {
+                div {
+                    class: "absolute left-0 top-0 h-full transition-all duration-100 ease-linear",
+                    style: format!(
+                        "width: {}%; background-color: {}; opacity: 0.8;",
+                        progress.clamp(0.0, 100.0),
+                        bright_color
+                    ),
+                }
+            }
+            // Colored band on the right side for songs (when always_black_bg is true)
+            if always_black_bg {
+                div {
+                    class: "absolute right-0 top-0 bottom-0 w-1",
+                    style: format!("background-color: {};", bright_color),
+                }
+            }
+            // Label text
+            div {
+                class: "absolute inset-0 flex items-center px-3 text-sm font-medium pointer-events-none",
+                style: if always_black_bg {
+                    "color: white; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);".to_string()
+                } else if is_inactive {
+                    format!("color: {};", bright_color)
+                } else {
+                    "color: white; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);".to_string()
+                },
+                "{label}"
+            }
+        }
+    }
+}
+
+/// Time signature card component
+/// Displays a time signature as a fraction
+#[component]
+pub fn TimeSignatureCard(
+    position_percent: f64,
+    label: String,
+    top_offset: String,
+    card_key: String,
+    #[props(default = true)] vertical: bool,
+    #[props(default = "sm".to_string())] size: String,
+) -> Element {
+    // Parse time signature for fraction display
+    let (numerator, denominator) = if label.contains('/') {
+        if let Some(slash_pos) = label.find('/') {
+            (
+                label[..slash_pos].trim().to_string(),
+                label[slash_pos + 1..].trim().to_string(),
+            )
+        } else {
+            (label.clone(), String::new())
+        }
+    } else {
+        (String::new(), String::new())
+    };
+
+    // Size presets
+    let (text_size, padding, spacing) = match size.as_str() {
+        "xs" => ("text-xs", "px-0.5 py-0.5", "my-0.5"),
+        "sm" => ("text-xs", "px-1 py-0.5", "my-0.5"),
+        "md" => ("text-sm", "px-1 py-1", "my-0.5"),
+        "lg" => ("text-base", "px-2 py-1", "my-1"),
+        _ => ("text-xs", "px-1 py-0.5", "my-0.5"),
+    };
+
+    let card_class = format!(
+        "{} font-medium text-center whitespace-nowrap {} rounded bg-accent text-accent-foreground border border-border",
+        text_size, padding
+    );
+    let divider_class = format!("border-t border-current w-full {}", spacing);
+
+    rsx! {
+        div {
+            key: "{card_key}",
+            class: "absolute pointer-events-none",
+            style: format!("left: {}%; transform: translateX(-50%); top: {};", position_percent, top_offset),
+            div {
+                class: "{card_class}",
+                if vertical && !denominator.is_empty() {
+                    div {
+                        class: "flex flex-col items-center leading-tight",
+                        span { "{numerator}" }
+                        span { class: "{divider_class}" }
+                        span { "{denominator}" }
+                    }
+                } else if !denominator.is_empty() {
+                    "{numerator}/{denominator}"
+                } else {
+                    "{label}"
+                }
+            }
+        }
+    }
+}
+
+/// Tempo/BPM card component
+#[component]
+pub fn TempoCard(
+    position_percent: f64,
+    label: String,
+    bottom_offset: String,
+    card_key: String,
+    #[props(default = "text-xs".to_string())] text_size: String,
+    #[props(default = "px-2 py-0.5 rounded text-xs font-medium text-white bg-black/70 whitespace-nowrap".to_string())]
+    card_class: String,
+    #[props(default = false)] position_above: bool,
+    #[props(default = false)] left_align: bool,
+) -> Element {
+    let transform = if left_align {
+        ""
+    } else {
+        "transform: translateX(-50%);"
+    };
+    let style = if position_above {
+        format!(
+            "left: {}%; {} top: {};",
+            position_percent, transform, bottom_offset
+        )
+    } else {
+        format!(
+            "left: {}%; {} top: calc(100% + {});",
+            position_percent, transform, bottom_offset
+        )
+    };
+
+    let adjusted_card_class = if left_align && card_class.contains("text-center") {
+        card_class.replace("text-center", "text-left")
+    } else {
+        card_class
+    };
+
+    rsx! {
+        div {
+            key: "{card_key}",
+            class: "absolute pointer-events-none",
+            style: style,
+            div {
+                class: "{adjusted_card_class}",
+                style: if adjusted_card_class.contains("bg-black/70") {
+                    "text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);"
+                } else {
+                    ""
+                },
+                "{label}"
+            }
+        }
+    }
+}
+
+/// Progress bar section definition
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProgressSection {
+    pub start_percent: f64,
+    pub end_percent: f64,
+    pub color: String,
+    pub name: String,
+}
+
+/// Tempo/time signature marker definition
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TempoMarker {
+    pub position_percent: f64,
+    pub is_tempo: bool,
+    pub is_time_sig: bool,
+    pub show_line_only: bool,
+}
+
+/// Full tempo marker with label (for passing to components)
+#[derive(Clone, Debug, PartialEq)]
+pub struct TempoMarkerData {
+    pub position_percent: f64,
+    pub label: String,
+    pub is_tempo: bool,
+    pub is_time_sig: bool,
+    pub show_line_only: bool,
+}
+
+/// Measure indicator definition for section progress bar
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeasureIndicator {
+    pub position_percent: f64,
+    pub measure_number: i32,
+    pub time_signature: Option<(u8, u8)>,
+    pub musical_position: daw_proto::MusicalPosition,
+}
+
+/// Segmented progress bar component with different colored sections
+#[component]
+pub fn SegmentedProgressBar(
+    progress: Signal<f64>,
+    sections: Vec<ProgressSection>,
+    #[props(default)] tempo_markers: Vec<TempoMarkerData>,
+    #[props(default)] song_key: Option<String>,
+    #[props(default)] on_section_click: Option<Callback<usize>>,
+    #[props(default)] loop_indicator: Option<LoopIndicatorData>,
+) -> Element {
+    let current_progress = progress();
+
+    // Track progress changes to detect jumps and disable animations
+    let mut prev_progress = use_signal(|| None::<f64>);
+    let mut prev_song_key = use_signal(|| None::<String>);
+
+    let song_key_for_memo = song_key.clone();
+    let should_animate = use_memo(move || {
+        let prev = prev_progress();
+        let prev_key = prev_song_key();
+        let song_changed = prev_key != song_key_for_memo;
+        let large_jump = if let Some(prev_val) = prev {
+            (current_progress - prev_val).abs() > 5.0
+        } else {
+            false
+        };
+        !song_changed && !large_jump && prev.is_some()
+    });
+
+    let current_progress_for_effect = current_progress;
+    let song_key_for_effect = song_key.clone();
+    use_effect(move || {
+        prev_progress.set(Some(current_progress_for_effect));
+        if prev_song_key() != song_key_for_effect {
+            prev_song_key.set(song_key_for_effect.clone());
+        }
+    });
+
+    // Pre-calculate section data
+    let section_data: Vec<_> = sections
+        .iter()
+        .enumerate()
+        .map(|(index, section)| {
+            let section_start = section.start_percent;
+            let section_end = section.end_percent;
+            let section_width = section.end_percent - section.start_percent;
+
+            let filled_percent = if current_progress <= section_start {
+                0.0
+            } else if current_progress >= section_end {
+                100.0
+            } else {
+                let progress_in_section = current_progress - section_start;
+                (progress_in_section / section_width) * 100.0
+            };
+
+            (
+                index,
+                section_start,
+                section_end,
+                section_width,
+                section.color.clone(),
+                filled_percent,
+                section.name.clone(),
+            )
+        })
+        .collect();
+
+    // Helper function to check if two markers overlap
+    let check_overlap = |pos1: f64, pos2: f64| -> bool { (pos1 - pos2).abs() < 2.0 };
+
+    // Calculate card positions
+    let card_size = "sm";
+    let card_height_rem = match card_size {
+        "xs" => 2.5,
+        "sm" => 3.5,
+        "md" => 4.0,
+        "lg" => 5.0,
+        _ => 3.5,
+    };
+
+    let line_end_rem = -0.75;
+    let line_height = format!("calc(5rem + {}rem)", -line_end_rem);
+    let card_top_offset_rem = line_end_rem - card_height_rem;
+    let card_top_offset_str = format!("{}rem", card_top_offset_rem);
+
+    // Pre-calculate positions for time signature markers
+    let time_sig_with_positions: Vec<_> = tempo_markers
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.is_time_sig && !m.show_line_only)
+        .map(|(orig_idx, marker)| (orig_idx, marker, card_top_offset_str.clone()))
+        .collect();
+
+    // Collect filtered time signature markers (show_line_only)
+    let filtered_time_sig_markers: Vec<_> = tempo_markers
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.is_time_sig && m.show_line_only)
+        .collect();
+
+    // Pre-calculate positions for tempo markers with staggering
+    let tempo_with_positions: Vec<_> = {
+        let tempo_markers_list: Vec<_> = tempo_markers
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.is_tempo)
+            .collect();
+
+        let mut result = Vec::new();
+        for (idx, (orig_idx, marker)) in tempo_markers_list.iter().enumerate() {
+            let needs_stagger = if idx > 0 {
+                tempo_markers_list[..idx].iter().any(|(_, prev_marker)| {
+                    check_overlap(marker.position_percent, prev_marker.position_percent)
+                })
+            } else {
+                false
+            };
+
+            let bottom_offset = if needs_stagger && idx % 2 == 1 {
+                "0.75rem"
+            } else {
+                "0.5rem"
+            };
+            result.push((*orig_idx, *marker, bottom_offset));
+        }
+        result
+    };
+
+    rsx! {
+        div {
+            class: "relative flex flex-col items-center justify-center h-20 w-full",
+            // Tempo/Time Signature labels
+            if !tempo_markers.is_empty() {
+                // Time signature markers
+                for (orig_idx, marker, top_offset) in time_sig_with_positions.iter() {
+                    TimeSignatureCard {
+                        position_percent: marker.position_percent,
+                        label: marker.label.clone(),
+                        top_offset: top_offset.clone(),
+                        card_key: format!("timesig-label-{orig_idx}"),
+                        size: "sm".to_string(),
+                    }
+                }
+                // Tempo/BPM markers
+                for (orig_idx, marker, bottom_offset) in tempo_with_positions.iter() {
+                    TempoCard {
+                        position_percent: marker.position_percent,
+                        label: marker.label.clone(),
+                        bottom_offset: bottom_offset.to_string(),
+                        card_key: format!("tempo-label-{orig_idx}"),
+                        card_class: "text-xs font-medium text-center whitespace-nowrap px-1 py-1 rounded bg-accent text-accent-foreground border border-border".to_string(),
+                        left_align: marker.position_percent < 0.5,
+                    }
+                }
+                // Small lines for filtered time signature markers
+                for (index, marker) in filtered_time_sig_markers.iter() {
+                    if marker.position_percent > 0.5 {
+                        div {
+                            key: "filtered-timesig-line-{index}",
+                            class: "absolute pointer-events-none z-50",
+                            style: format!(
+                                "left: {}%; width: 1px; top: 0; height: 0.5rem; background-color: rgba(255, 255, 255, 0.5); transform: translateX(-50%);",
+                                marker.position_percent
+                            ),
+                        }
+                    }
+                }
+                // Tempo/Time Signature marker lines
+                for (index, marker) in tempo_markers.iter().enumerate() {
+                    if marker.position_percent >= 0.5 {
+                        if marker.is_time_sig && !marker.show_line_only {
+                            div {
+                                key: "tempo-marker-{index}",
+                                class: "absolute pointer-events-none z-50",
+                                style: format!(
+                                    "left: {}%; width: 1px; bottom: 0; height: {}; background-color: rgba(255, 255, 255, 0.7); transform: translateX(-50%);",
+                                    marker.position_percent,
+                                    line_height
+                                ),
+                            }
+                        } else if marker.is_tempo {
+                            div {
+                                key: "tempo-marker-{index}",
+                                class: "absolute pointer-events-none z-50",
+                                style: format!(
+                                    "left: {}%; width: 1px; top: 5rem; height: 2rem; background-color: rgba(255, 255, 255, 0.7); transform: translateX(-50%);",
+                                    marker.position_percent
+                                ),
+                            }
+                        }
+                    }
+                }
+            }
+            // Main segmented progress bar
+            div {
+                class: "relative w-full h-20 rounded-lg overflow-hidden bg-secondary px-4",
+                // Render sections as background layers
+                for (index, section_start, _section_end, section_width, section_color, _filled_percent, _section_name) in section_data.iter() {
+                    div {
+                        key: "{index}",
+                        class: if on_section_click.is_some() {
+                            "absolute h-full z-0 cursor-pointer transition-all duration-200 hover:brightness-110 hover:ring-2 hover:ring-white hover:ring-opacity-50"
+                        } else {
+                            "absolute h-full z-0"
+                        },
+                        style: format!("left: {}%; width: {}%;", section_start, section_width),
+                        onclick: {
+                            let callback_opt = on_section_click.clone();
+                            let idx = *index;
+                            move |_| {
+                                if let Some(callback) = &callback_opt {
+                                    callback.call(idx);
+                                }
+                            }
+                        },
+                        div {
+                            class: "absolute inset-0 h-full transition-all duration-200",
+                            style: format!("background-color: {};", section_color),
+                        }
+                    }
+                }
+                // Section boundary lines
+                for (index, section_start, _section_end, _section_width, _section_color, _filled_percent, _section_name) in section_data.iter() {
+                    if *section_start > 0.0 {
+                        div {
+                            key: "section-boundary-{index}",
+                            class: "absolute pointer-events-none z-20",
+                            style: format!(
+                                "left: {}%; width: 1px; top: 0; bottom: 0; background-color: rgba(255, 255, 255, 0.15);",
+                                section_start
+                            ),
+                        }
+                    }
+                }
+                // Dark overlay covering unfilled portion
+                div {
+                    class: if should_animate() {
+                        "absolute left-0 top-0 h-full transition-all duration-100 ease-linear z-10 pointer-events-none"
+                    } else {
+                        "absolute left-0 top-0 h-full z-10 pointer-events-none"
+                    },
+                    style: {
+                        let progress = current_progress.clamp(0.0, 100.0);
+                        format!(
+                            "left: {}%; width: {}%; background-color: rgba(0, 0, 0, 0.6); border-top-right-radius: 0.5rem; border-bottom-right-radius: 0.5rem;",
+                            progress,
+                            100.0 - progress
+                        )
+                    },
+                }
+                // Section name text
+                for (index, section_start, _section_end, section_width, _section_color, _filled_percent, section_name) in section_data.iter() {
+                    if !section_name.is_empty() {
+                        div {
+                            key: "text-{index}",
+                            class: "absolute h-full pointer-events-none z-30",
+                            style: format!("left: {}%; width: {}%;", section_start, section_width),
+                            div {
+                                class: "absolute inset-0 flex items-center justify-center text-xs font-medium text-white",
+                                style: "text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);",
+                                "{section_name}"
+                            }
+                        }
+                    }
+                }
+                // Loop indicator overlay and markers
+                if let Some(ref loop_ind) = loop_indicator {
+                    if loop_ind.enabled {
+                        // Yellow tinted overlay for loop region
+                        div {
+                            class: "absolute top-0 bottom-0 pointer-events-none z-40",
+                            style: format!(
+                                "left: {}%; width: {}%; background-color: rgba(250, 204, 21, 0.15); border-top: 2px solid #facc15; border-bottom: 2px solid #facc15;",
+                                loop_ind.start_percent,
+                                loop_ind.end_percent - loop_ind.start_percent
+                            ),
+                        }
+                        // Start marker - yellow triangle pointing down
+                        div {
+                            class: "absolute pointer-events-none z-50",
+                            style: format!("left: {}%; top: 0; transform: translateX(-50%);", loop_ind.start_percent),
+                            div {
+                                style: "width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #facc15;",
+                            }
+                        }
+                        // End marker - yellow triangle pointing down
+                        div {
+                            class: "absolute pointer-events-none z-50",
+                            style: format!("left: {}%; top: 0; transform: translateX(-50%);", loop_ind.end_percent),
+                            div {
+                                style: "width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #facc15;",
+                            }
+                        }
+                        // Bottom triangles (pointing up)
+                        div {
+                            class: "absolute pointer-events-none z-50",
+                            style: format!("left: {}%; bottom: 0; transform: translateX(-50%);", loop_ind.start_percent),
+                            div {
+                                style: "width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 8px solid #facc15;",
+                            }
+                        }
+                        div {
+                            class: "absolute pointer-events-none z-50",
+                            style: format!("left: {}%; bottom: 0; transform: translateX(-50%);", loop_ind.end_percent),
+                            div {
+                                style: "width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 8px solid #facc15;",
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Song progress bar component using segmented progress bar
+///
+/// This is a wrapper around SegmentedProgressBar that handles song-specific logic.
+#[component]
+pub fn SongProgressBar(
+    progress: Signal<f64>,
+    sections: Vec<ProgressSection>,
+    #[props(default)] on_section_click: Option<Callback<usize>>,
+    #[props(default)] tempo_markers: Vec<TempoMarkerData>,
+    #[props(default)] song_key: Option<String>,
+    #[props(default)] loop_indicator: Option<LoopIndicatorData>,
+) -> Element {
+    rsx! {
+        div {
+            class: "w-full relative",
+            SegmentedProgressBar {
+                progress: progress,
+                sections: sections.clone(),
+                tempo_markers: tempo_markers,
+                song_key: song_key,
+                on_section_click: on_section_click,
+                loop_indicator: loop_indicator,
+            }
+        }
+    }
+}

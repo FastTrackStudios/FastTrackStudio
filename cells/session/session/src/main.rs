@@ -3,6 +3,11 @@
 //! This cell provides a control surface that connects to a DAW implementation
 //! through daw-control and presents transport controls.
 
+mod setlist_builder;
+mod setlist_service;
+mod song_builder;
+mod song_service;
+
 use actions_proto::{
     ActionCategory, ActionDefinition, ActionId, ActionResult, DefinesActions,
     DefinesActionsDispatcher,
@@ -13,7 +18,11 @@ use roam::session::{ConnectionHandle, Context};
 use roam_telemetry::{
     ExporterConfig, LoggingExporter, OtlpExporter, SpanExporter, TelemetryMiddleware,
 };
-use session_proto::{SessionService, SessionServiceDispatcher};
+use session_proto::{
+    SessionService, SessionServiceDispatcher, SetlistServiceDispatcher, SongServiceDispatcher,
+};
+use setlist_service::SetlistServiceImpl;
+use song_service::SongServiceImpl;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tracing::{info, warn};
@@ -197,14 +206,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     run_cell!("session", |handle| {
         let telemetry = create_telemetry();
 
-        // Create service implementation with access to handle
-        let service_impl = SessionServiceImpl::new(handle.clone());
+        // Create service implementations
+        let session_service = SessionServiceImpl::new(handle.clone());
+        let song_service = SongServiceImpl::new();
+        let setlist_service = SetlistServiceImpl::new();
 
-        // Create dispatchers for both services
-        let session_dispatcher =
-            SessionServiceDispatcher::new(service_impl.clone()).with_middleware(telemetry.clone());
+        // Create dispatchers for all services
+        let session_dispatcher = SessionServiceDispatcher::new(session_service.clone())
+            .with_middleware(telemetry.clone());
         let actions_dispatcher =
-            DefinesActionsDispatcher::new(service_impl).with_middleware(telemetry);
+            DefinesActionsDispatcher::new(session_service).with_middleware(telemetry.clone());
+        let song_dispatcher =
+            SongServiceDispatcher::new(song_service).with_middleware(telemetry.clone());
+        let setlist_dispatcher =
+            SetlistServiceDispatcher::new(setlist_service).with_middleware(telemetry);
 
         // Spawn DAW initialization in background (after ready is signaled)
         let handle_for_init = handle.clone();
@@ -217,7 +232,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
 
-        // Return combined dispatcher
-        RoutedDispatcher::new(session_dispatcher, actions_dispatcher)
+        // Combine all dispatchers
+        // RoutedDispatcher only takes 2, so we need to nest them
+        let session_and_actions = RoutedDispatcher::new(session_dispatcher, actions_dispatcher);
+        let song_and_setlist = RoutedDispatcher::new(song_dispatcher, setlist_dispatcher);
+        RoutedDispatcher::new(session_and_actions, song_and_setlist)
     })
 }
