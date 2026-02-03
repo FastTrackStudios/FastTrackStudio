@@ -106,14 +106,23 @@ pub fn default_cell_dir() -> PathBuf {
 // Pending Cell (Lazy Spawning)
 // ============================================================================
 
+/// A forwarding target with its method IDs.
+#[derive(Clone)]
+pub struct ForwardTarget {
+    /// Name of the target cell
+    pub cell_name: String,
+    /// Method IDs that should be forwarded to this target
+    pub method_ids: Vec<u64>,
+}
+
 /// A cell that has been registered but not yet spawned.
 pub struct PendingCell {
     /// Path to the cell binary
     pub binary_path: PathBuf,
     /// Whether the cell inherits stdio (e.g., TUI)
     pub inherit_stdio: bool,
-    /// Names of other cells this cell needs to call (forwarding targets)
-    pub forward_to: Vec<String>,
+    /// Forwarding targets with their method IDs
+    pub forward_targets: Vec<ForwardTarget>,
 }
 
 // ============================================================================
@@ -125,20 +134,40 @@ pub struct PendingCell {
 /// # Example
 ///
 /// ```ignore
+/// use daw_proto::{TransportServiceDispatcher, ProjectServiceDispatcher};
+/// use session_proto::SetlistServiceDispatcher;
+///
 /// let cell_dir = PathBuf::from("target/debug");
 ///
 /// CellConfig::new("daw-standalone", &cell_dir)
 ///     .register();
 ///
 /// CellConfig::new("session", &cell_dir)
-///     .forwards_to(&["daw-standalone"])
+///     .forwards_to_with_methods("daw-standalone", || {
+///         TransportServiceDispatcher::<()>::method_ids()
+///             .into_iter()
+///             .chain(ProjectServiceDispatcher::<()>::method_ids())
+///             .collect()
+///     })
+///     .register();
+///
+/// CellConfig::new("gateway-ws", &cell_dir)
+///     .forwards_to_with_methods("daw-standalone", || {
+///         TransportServiceDispatcher::<()>::method_ids()
+///             .into_iter()
+///             .chain(ProjectServiceDispatcher::<()>::method_ids())
+///             .collect()
+///     })
+///     .forwards_to_with_methods("session", || {
+///         SetlistServiceDispatcher::<()>::method_ids()
+///     })
 ///     .register();
 /// ```
 pub struct CellConfig {
     name: String,
     binary_path: PathBuf,
     inherit_stdio: bool,
-    forward_to: Vec<String>,
+    forward_targets: Vec<ForwardTarget>,
 }
 
 impl CellConfig {
@@ -150,13 +179,51 @@ impl CellConfig {
             name: name.to_string(),
             binary_path: cell_dir.join(name),
             inherit_stdio: false,
-            forward_to: Vec::new(),
+            forward_targets: Vec::new(),
         }
     }
 
-    /// Set the cells this cell forwards calls to.
+    /// Add a forwarding target with explicit method IDs.
+    ///
+    /// The closure is called to get the method IDs, allowing you to use
+    /// generated dispatcher method_ids() functions.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// CellConfig::new("gateway-ws", &cell_dir)
+    ///     .forwards_to_with_methods("daw-standalone", || {
+    ///         TransportServiceDispatcher::<()>::method_ids()
+    ///     })
+    ///     .forwards_to_with_methods("session", || {
+    ///         SetlistServiceDispatcher::<()>::method_ids()
+    ///     })
+    ///     .register();
+    /// ```
+    pub fn forwards_to_with_methods<F>(mut self, target: &str, method_ids_fn: F) -> Self
+    where
+        F: FnOnce() -> Vec<u64>,
+    {
+        self.forward_targets.push(ForwardTarget {
+            cell_name: target.to_string(),
+            method_ids: method_ids_fn(),
+        });
+        self
+    }
+
+    /// Set the cells this cell forwards calls to (legacy - no method routing).
+    ///
+    /// **DEPRECATED**: Use `forwards_to_with_methods` for explicit method routing.
+    /// This method creates targets with empty method IDs, which falls back to
+    /// the first-available behavior.
+    #[deprecated(note = "Use forwards_to_with_methods for explicit method routing")]
     pub fn forwards_to(mut self, targets: &[&str]) -> Self {
-        self.forward_to = targets.iter().map(|s| s.to_string()).collect();
+        for target in targets {
+            self.forward_targets.push(ForwardTarget {
+                cell_name: target.to_string(),
+                method_ids: Vec::new(),
+            });
+        }
         self
     }
 
@@ -174,7 +241,7 @@ impl CellConfig {
             PendingCell {
                 binary_path: self.binary_path,
                 inherit_stdio: self.inherit_stdio,
-                forward_to: self.forward_to,
+                forward_targets: self.forward_targets,
             },
         );
     }
@@ -371,9 +438,14 @@ impl Host {
     pub fn register_pending_cell(&self, cell_name: String, pending: PendingCell) {
         // Pre-create late-bound handles for all forward targets
         // This ensures they exist before the target cells spawn
-        for target in &pending.forward_to {
-            self.get_or_create_late_bound(target);
-            debug!(cell = %cell_name, target = %target, "Pre-created late-bound handle for forward target");
+        for target in &pending.forward_targets {
+            self.get_or_create_late_bound(&target.cell_name);
+            debug!(
+                cell = %cell_name,
+                target = %target.cell_name,
+                method_count = target.method_ids.len(),
+                "Pre-created late-bound handle for forward target"
+            );
         }
 
         if let Ok(mut cells) = self.pending_cells.lock() {
@@ -495,7 +567,7 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
     let PendingCell {
         binary_path,
         inherit_stdio,
-        forward_to,
+        forward_targets,
     } = pending;
 
     // Get driver handle for dynamic peer creation
@@ -569,15 +641,23 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
     let tracing_dispatcher = HostTracingDispatcher::new(tracing_service);
 
     // Create forwarder for target cells (if any)
-    let forwarder = if !forward_to.is_empty() {
-        debug!(cell = cell_name, targets = ?forward_to, "Creating forwarders for targets");
-        let handles: Vec<_> = forward_to
-            .iter()
-            .map(|target| Host::get().get_or_create_late_bound(target))
-            .collect();
-        crate::forwarder::MultiForwarder::new(handles)
+    // Use MethodRoutedForwarder for explicit method ID routing
+    let forwarder = if !forward_targets.is_empty() {
+        let mut routed_forwarder = crate::forwarder::MethodRoutedForwarder::new();
+        for target in &forward_targets {
+            let handle = Host::get().get_or_create_late_bound(&target.cell_name);
+            info!(
+                cell = cell_name,
+                target = %target.cell_name,
+                method_count = target.method_ids.len(),
+                method_ids = ?target.method_ids,
+                "Adding forwarding target with method IDs"
+            );
+            routed_forwarder.add_target(handle, target.method_ids.clone());
+        }
+        routed_forwarder
     } else {
-        crate::forwarder::MultiForwarder::empty()
+        crate::forwarder::MethodRoutedForwarder::new()
     };
 
     // Compose dispatchers: HostService -> Tracing -> [DAW] -> Forwarder (fallback chain)

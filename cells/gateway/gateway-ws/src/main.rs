@@ -28,11 +28,54 @@ use gateway_proto::{
     GatewayControl, GatewayControlDispatcher, GatewayInfo, GatewayState, GatewayType,
 };
 use roam::session::ConnectionHandle;
-use roam::Context;
-use roam_session::{ForwardingDispatcher, MessageTransport};
+use roam_session::{
+    ChannelRegistry, Context, ForwardingDispatcher, MessageTransport, ServiceDispatcher,
+};
 use roam_stream::{accept_framed, HandshakeConfig};
 use roam_wire::Message as RoamMessage;
+use std::future::Future;
+use std::pin::Pin;
 use tokio::net::TcpListener;
+
+// ============================================================================
+// LoggingForwarder - Wraps ForwardingDispatcher with logging
+// ============================================================================
+
+/// A dispatcher that logs calls before forwarding to ForwardingDispatcher
+struct LoggingForwarder {
+    inner: ForwardingDispatcher,
+}
+
+impl LoggingForwarder {
+    fn new(upstream: ConnectionHandle) -> Self {
+        Self {
+            inner: ForwardingDispatcher::new(upstream),
+        }
+    }
+}
+
+impl ServiceDispatcher for LoggingForwarder {
+    fn method_ids(&self) -> Vec<u64> {
+        self.inner.method_ids()
+    }
+
+    fn dispatch(
+        &self,
+        cx: Context,
+        payload: Vec<u8>,
+        registry: &mut ChannelRegistry,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
+        let method_id = cx.method_id().raw();
+        let request_id = cx.request_id().raw();
+        info!(
+            method_id,
+            request_id,
+            payload_len = payload.len(),
+            "LoggingForwarder: forwarding call to host"
+        );
+        self.inner.dispatch(cx, payload, registry)
+    }
+}
 use tokio::sync::RwLock;
 use tower_http::services::ServeDir;
 use tracing::{debug, info, warn};
@@ -86,14 +129,23 @@ impl MessageTransport for AxumWsTransport {
         loop {
             match self.receiver.next().await {
                 Some(Ok(Message::Binary(data))) => {
+                    debug!(
+                        "AxumWsTransport: received binary message, len={}",
+                        data.len()
+                    );
                     self.last_decoded = data.to_vec();
                     let msg: RoamMessage =
                         facet_postcard::from_slice(&self.last_decoded).map_err(|e| {
                             io::Error::new(io::ErrorKind::InvalidData, format!("postcard: {e}"))
                         })?;
+                    debug!("AxumWsTransport: decoded RoamMessage: {:?}", msg);
                     return Ok(Some(msg));
                 }
                 Some(Ok(Message::Text(text))) => {
+                    debug!(
+                        "AxumWsTransport: received text message (unexpected), len={}",
+                        text.len()
+                    );
                     // Treat text as binary (shouldn't happen for roam protocol)
                     self.last_decoded = text.as_bytes().to_vec();
                     let msg: RoamMessage =
@@ -102,7 +154,8 @@ impl MessageTransport for AxumWsTransport {
                         })?;
                     return Ok(Some(msg));
                 }
-                Some(Ok(Message::Close(_))) => {
+                Some(Ok(Message::Close(frame))) => {
+                    debug!("AxumWsTransport: received close frame: {:?}", frame);
                     return Ok(None);
                 }
                 Some(Ok(Message::Ping(_) | Message::Pong(_))) => {
@@ -110,9 +163,11 @@ impl MessageTransport for AxumWsTransport {
                     continue;
                 }
                 Some(Err(e)) => {
+                    debug!("AxumWsTransport: WebSocket error: {}", e);
                     return Err(io::Error::other(format!("WebSocket error: {e}")));
                 }
                 None => {
+                    debug!("AxumWsTransport: stream ended");
                     // Stream ended
                     return Ok(None);
                 }
@@ -218,9 +273,13 @@ async fn handle_socket(
     // Wrap the axum WebSocket in our transport adapter
     let transport = AxumWsTransport::new(socket);
 
-    // Create ForwardingDispatcher - forwards ALL calls to host transparently
+    // Create LoggingForwarder - forwards ALL calls to host with logging
     // No schema knowledge needed - just forwards raw bytes by method_id
-    let dispatcher = ForwardingDispatcher::new(host_handle);
+    let dispatcher = LoggingForwarder::new(host_handle.clone());
+    info!(
+        "Created LoggingForwarder to host, conn_id={}",
+        host_handle.conn_id()
+    );
 
     // Accept the roam session with the forwarding dispatcher
     let config = HandshakeConfig::default();
