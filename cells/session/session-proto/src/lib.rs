@@ -1,4 +1,11 @@
 //! Session Protocol - Shared types and service definitions for Session cell
+//!
+//! This crate provides:
+//! - Service trait definitions (`SetlistService`, `SongService`, `SessionService`)
+//! - Domain types (`Setlist`, `Song`, `Section`, etc.)
+//! - Generated service clients and dispatchers
+//!
+//! For UI components, see the `session-ui` crate.
 
 use roam::service;
 
@@ -7,6 +14,22 @@ pub use actions_proto::{
     ActionCategory, ActionDefinition, ActionId, ActionResult, DefinesActions, DefinesActionsClient,
     DefinesActionsDispatcher,
 };
+
+// Domain modules
+pub mod services;
+pub mod setlist;
+pub mod song;
+
+// Re-export common types
+pub use services::{
+    MeasureInfo, SetlistEvent, SetlistService, SetlistServiceClient, SetlistServiceDispatcher,
+    SongService, SongServiceClient, SongServiceDispatcher, SongTransportState,
+};
+pub use setlist::{ActiveIndices, Setlist};
+pub use song::{Section, SectionType, Song};
+
+// Re-export position types from daw-proto for convenience
+pub use daw_proto::MusicalPosition;
 
 /// Session service - provides session-specific functionality
 #[service]
