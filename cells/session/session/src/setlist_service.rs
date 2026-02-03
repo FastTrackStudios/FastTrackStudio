@@ -375,13 +375,24 @@ impl SetlistService for SetlistServiceImpl {
             // First, switch to the correct project
             match daw.select_project(&song.project_guid).await {
                 Ok(project) => {
-                    // Then seek to the song's start position
-                    if let Err(e) = project.transport().set_position(song.start_seconds()).await {
-                        warn!("Failed to set position for song {}: {}", index, e);
+                    let transport = project.transport();
+
+                    // Only seek to song start if the project is NOT already playing
+                    // This preserves playback position when switching between songs
+                    let is_playing = transport.is_playing().await.unwrap_or(false);
+                    if !is_playing {
+                        if let Err(e) = transport.set_position(song.start_seconds()).await {
+                            warn!("Failed to set position for song {}: {}", index, e);
+                        } else {
+                            info!(
+                                "Navigated to song {} ({}) in project {}",
+                                index, song.name, song.project_guid
+                            );
+                        }
                     } else {
                         info!(
-                            "Navigated to song {} ({}) in project {}",
-                            index, song.name, song.project_guid
+                            "Song {} ({}) is already playing, preserving position",
+                            index, song.name
                         );
                     }
                 }
@@ -554,18 +565,29 @@ impl SetlistService for SetlistServiceImpl {
             info!("seek_to_song: switching to project {}", song.project_guid);
             match daw.select_project(&song.project_guid).await {
                 Ok(project) => {
-                    info!(
-                        "seek_to_song: switched to project, now seeking to position {}",
-                        song.start_seconds()
-                    );
-                    // Then seek to the song's start position within that project
-                    if let Err(e) = project.transport().set_position(song.start_seconds()).await {
-                        warn!("Failed to seek to song {}: {}", song_index, e);
+                    let transport = project.transport();
+
+                    // Only seek to song start if the project is NOT already playing
+                    // This preserves playback position when switching between songs
+                    let is_playing = transport.is_playing().await.unwrap_or(false);
+                    if is_playing {
+                        info!(
+                            "seek_to_song: project {} is already playing, preserving position",
+                            song.project_guid
+                        );
                     } else {
                         info!(
-                            "Seeked to song {} ({}) in project {}",
-                            song_index, song.name, song.project_guid
+                            "seek_to_song: project not playing, seeking to position {}",
+                            song.start_seconds()
                         );
+                        if let Err(e) = transport.set_position(song.start_seconds()).await {
+                            warn!("Failed to seek to song {}: {}", song_index, e);
+                        } else {
+                            info!(
+                                "Seeked to song {} ({}) in project {}",
+                                song_index, song.name, song.project_guid
+                            );
+                        }
                     }
                 }
                 Err(e) => {

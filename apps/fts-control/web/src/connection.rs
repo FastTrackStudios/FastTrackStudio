@@ -31,18 +31,28 @@ extern "C" {
     fn log(s: &str);
 }
 
-/// Get WebSocket URL from query params or default
+/// Get WebSocket URL from query params or derive from current page hostname
 pub fn get_ws_url() -> String {
     web_sys::window()
-        .and_then(|w| w.location().search().ok())
-        .and_then(|search| {
-            // Parse ?ws=ws://... from URL
-            let params: Vec<_> = search.trim_start_matches('?').split('&').collect();
-            for param in params {
-                if let Some(url) = param.strip_prefix("ws=") {
-                    return Some(url.to_string());
+        .and_then(|w| {
+            let location = w.location();
+
+            // First check for explicit ?ws= override in query params
+            if let Ok(search) = location.search() {
+                let params: Vec<_> = search.trim_start_matches('?').split('&').collect();
+                for param in params {
+                    if let Some(url) = param.strip_prefix("ws=") {
+                        return Some(url.to_string());
+                    }
                 }
             }
+
+            // No override - derive from current page's hostname
+            // Use the same host but port 3030 for the gateway WebSocket
+            if let Ok(hostname) = location.hostname() {
+                return Some(format!("ws://{}:3030/ws", hostname));
+            }
+
             None
         })
         .unwrap_or_else(|| "ws://localhost:3030/ws".to_string())

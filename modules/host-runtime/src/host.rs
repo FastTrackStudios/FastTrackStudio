@@ -23,7 +23,7 @@ use roam_shm::ShmHost;
 use roam_tracing::{HostTracingDispatcher, HostTracingState, TaggedRecord};
 use tokio::process::Command;
 use tokio::sync::Notify;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::cells::{cell_ready_registry, HostServiceImpl};
 
@@ -116,6 +116,7 @@ pub struct ForwardTarget {
 }
 
 /// A cell that has been registered but not yet spawned.
+#[derive(Clone)]
 pub struct PendingCell {
     /// Path to the cell binary
     pub binary_path: PathBuf,
@@ -265,6 +266,10 @@ pub struct Host {
     /// Cells that have been registered but not yet spawned.
     pending_cells: Mutex<HashMap<String, PendingCell>>,
 
+    /// Cells that have been spawned (kept for respawning on death).
+    /// When a cell dies, we can look up its config here and respawn it.
+    spawned_cells: Mutex<HashMap<String, PendingCell>>,
+
     /// Whether quiet mode is enabled (suppress cell output).
     quiet_mode: AtomicBool,
 
@@ -297,6 +302,7 @@ impl Host {
                 exit_notify: Notify::new(),
                 cell_handles: DashMap::new(),
                 pending_cells: Mutex::new(HashMap::new()),
+                spawned_cells: Mutex::new(HashMap::new()),
                 quiet_mode: AtomicBool::new(false),
                 driver_handle: OnceLock::new(),
                 tracing_state: HostTracingState::new(4096),
@@ -454,33 +460,70 @@ impl Host {
         }
     }
 
-    /// Take a pending cell (removes it from pending, for spawning).
+    /// Take a pending cell (removes it from pending, stores in spawned for respawning).
     fn take_pending_cell(&self, cell_name: &str) -> Option<PendingCell> {
         if let Ok(mut cells) = self.pending_cells.lock() {
-            return cells.remove(cell_name);
+            if let Some(pending) = cells.remove(cell_name) {
+                // Store a copy in spawned_cells for potential respawning
+                if let Ok(mut spawned) = self.spawned_cells.lock() {
+                    spawned.insert(cell_name.to_string(), pending.clone());
+                }
+                return Some(pending);
+            }
         }
         None
     }
 
+    /// Get cell config for respawning (clones from spawned_cells).
+    fn get_spawned_cell_config(&self, cell_name: &str) -> Option<PendingCell> {
+        if let Ok(spawned) = self.spawned_cells.lock() {
+            return spawned.get(cell_name).cloned();
+        }
+        None
+    }
+
+    /// Clear the cell handle when a cell dies (allows respawning).
+    fn clear_cell_handle(&self, cell_name: &str) {
+        self.cell_handles.remove(cell_name);
+        // Remove the old late-bound handle so a new one can be created on respawn
+        self.late_bound_handles.remove(cell_name);
+        // Also mark the cell as not ready
+        cell_ready_registry().mark_not_ready(cell_name);
+    }
+
     /// Spawn a pending cell and wait for it to be ready.
+    ///
+    /// This method handles both initial spawning and respawning after death.
+    /// On first spawn, the config is taken from `pending_cells` and stored in `spawned_cells`.
+    /// On respawn, the config is retrieved from `spawned_cells`.
     pub async fn spawn_pending_cell(&self, cell_name: &str) -> Option<ConnectionHandle> {
         debug!(cell = cell_name, "spawn_pending_cell: taking pending cell");
 
-        // Take the pending cell atomically (prevents race conditions)
+        // Try to take from pending_cells first (initial spawn)
         let pending = match self.take_pending_cell(cell_name) {
             Some(p) => p,
             None => {
-                debug!(
-                    cell = cell_name,
-                    "spawn_pending_cell: already spawned by another caller"
-                );
-                wait_for_cell_ready(cell_name, self.cell_timeout_secs).await;
-                return self.get_cell_handle(cell_name);
+                // Not in pending - check if it's a respawn (config in spawned_cells)
+                if let Some(config) = self.get_spawned_cell_config(cell_name) {
+                    debug!(
+                        cell = cell_name,
+                        "spawn_pending_cell: respawning from spawned_cells config"
+                    );
+                    config
+                } else {
+                    // Neither pending nor spawned - might already be running
+                    debug!(
+                        cell = cell_name,
+                        "spawn_pending_cell: already spawned by another caller"
+                    );
+                    wait_for_cell_ready(cell_name, self.cell_timeout_secs).await;
+                    return self.get_cell_handle(cell_name);
+                }
             }
         };
 
         // Spawn the cell process
-        spawn_cell_process(cell_name, pending, self.is_quiet_mode()).await;
+        spawn_cell_process(cell_name.to_string(), pending, self.is_quiet_mode()).await;
 
         // Wait for the cell to be ready
         wait_for_cell_ready(cell_name, self.cell_timeout_secs).await;
@@ -562,8 +605,45 @@ impl Host {
 // Lazy Spawning Helpers
 // ============================================================================
 
+/// Respawn a cell after it died unexpectedly.
+///
+/// This uses `Box::pin` to break the recursive async call chain that would
+/// otherwise cause `Send` bound issues.
+fn respawn_cell_after_death(
+    cell_name: String,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+    Box::pin(async move {
+        // First, clear the old cell state to allow respawning
+        Host::get().clear_cell_handle(&cell_name);
+
+        info!(cell = %cell_name, "Attempting to respawn cell after death...");
+        // Small delay to avoid tight respawn loops, but not too long to delay recovery
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Get the cell config and spawn it - we do this inline to break the
+        // recursive call chain that causes Send issues
+        let host = Host::get();
+        let config = host.get_spawned_cell_config(&cell_name);
+        let quiet_mode = host.is_quiet_mode();
+        let timeout_secs = host.cell_timeout_secs;
+
+        if let Some(pending) = config {
+            spawn_cell_process(cell_name.clone(), pending, quiet_mode).await;
+            wait_for_cell_ready(&cell_name, timeout_secs).await;
+
+            if host.get_cell_handle(&cell_name).is_some() {
+                info!(cell = %cell_name, "Cell respawned successfully");
+            } else {
+                warn!(cell = %cell_name, "Cell respawn completed but handle not found");
+            }
+        } else {
+            warn!(cell = %cell_name, "Failed to respawn cell (config not found in spawned_cells)");
+        }
+    })
+}
+
 /// Spawn a cell process from a PendingCell using dynamic peer creation.
-async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: bool) {
+async fn spawn_cell_process(cell_name: String, pending: PendingCell, quiet_mode: bool) {
     let PendingCell {
         binary_path,
         inherit_stdio,
@@ -575,7 +655,7 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
         Some(h) => h,
         None => {
             error!(
-                cell = cell_name,
+                cell = %cell_name,
                 "No driver handle available for lazy spawning"
             );
             return;
@@ -583,12 +663,17 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
     };
 
     // Create peer dynamically
-    let cell_name_for_death = cell_name.to_string();
+    let cell_name_for_death = cell_name.clone();
     let ticket = match driver_handle
         .create_peer(AddPeerOptions {
-            peer_name: Some(cell_name.to_string()),
+            peer_name: Some(cell_name.clone()),
             on_death: Some(Arc::new(move |peer_id| {
-                error!(cell = %cell_name_for_death, ?peer_id, "Cell died unexpectedly");
+                let cell_name = cell_name_for_death.clone();
+                error!(cell = %cell_name, ?peer_id, "Cell died unexpectedly");
+
+                // Schedule respawn of the cell using a standalone async fn
+                // to avoid recursive future composition issues with Send bounds
+                tokio::spawn(respawn_cell_after_death(cell_name));
             })),
             diagnostic_state: None,
         })
@@ -596,7 +681,7 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
     {
         Ok(t) => t,
         Err(e) => {
-            error!(cell = cell_name, error = ?e, "Failed to create peer dynamically");
+            error!(cell = %cell_name, error = ?e, "Failed to create peer dynamically");
             return;
         }
     };
@@ -605,7 +690,7 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
     let args = ticket.to_args();
 
     debug!(
-        cell = cell_name,
+        cell = %cell_name,
         ?peer_id,
         binary = %binary_path.display(),
         "spawn_cell_process: building command"
@@ -637,7 +722,7 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
     // Create the tracing service dispatcher
     let tracing_service = Host::get()
         .tracing_state()
-        .service_for_peer(peer_id.get() as u64, Some(cell_name.to_string()));
+        .service_for_peer(peer_id.get() as u64, Some(cell_name.clone()));
     let tracing_dispatcher = HostTracingDispatcher::new(tracing_service);
 
     // Create forwarder for target cells (if any)
@@ -647,7 +732,7 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
         for target in &forward_targets {
             let handle = Host::get().get_or_create_late_bound(&target.cell_name);
             info!(
-                cell = cell_name,
+                cell = %cell_name,
                 target = %target.cell_name,
                 method_count = target.method_ids.len(),
                 method_ids = ?target.method_ids,
@@ -669,7 +754,7 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
 
     // Register peer with driver - use separate match arms to handle type differences
     let add_peer_result = if let Some(daw_dispatcher) = Host::get().daw_dispatcher() {
-        debug!(cell = cell_name, "Including DAW dispatcher in chain");
+        debug!(cell = %cell_name, "Including DAW dispatcher in chain");
         let dispatcher = RoutedDispatcher::new(
             with_forwarder,
             crate::forwarder::ArcDispatcher::new(daw_dispatcher.clone()),
@@ -682,17 +767,23 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
     match add_peer_result {
         Ok((handle, _incoming)) => {
             debug!(
-                cell = cell_name,
+                cell = %cell_name,
                 ?peer_id,
                 "spawn_cell_process: peer registered"
             );
             // Store the handle
-            Host::get().register_cell_handle(cell_name.to_string(), handle.clone());
+            Host::get().register_cell_handle(cell_name.clone(), handle.clone());
             // Also bind to late-bound handle so other cells can forward to this one
-            Host::get().bind_late_bound(cell_name, handle);
+            Host::get().bind_late_bound(&cell_name, handle);
+
+            // Note: gateway-ws no longer creates virtual connections for each browser.
+            // Instead, it uses ForwardingDispatcher directly on the root connection,
+            // which remaps channel IDs to isolate each browser's traffic. The root
+            // connection's MethodRoutedForwarder (set up above) handles forwarding
+            // to the appropriate cells.
         }
         Err(e) => {
-            error!(cell = cell_name, ?peer_id, error = ?e, "Failed to register peer");
+            error!(cell = %cell_name, ?peer_id, error = ?e, "Failed to register peer");
             return;
         }
     }
@@ -700,11 +791,11 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
     // Spawn the process using ur_taking_me_with_you so it dies when the host dies
     let child = match ur_taking_me_with_you::spawn_dying_with_parent_async(cmd) {
         Ok(c) => {
-            debug!(cell = cell_name, pid = ?c.id(), "Cell process spawned (will die with parent)");
+            debug!(cell = %cell_name, pid = ?c.id(), "Cell process spawned (will die with parent)");
             c
         }
         Err(e) => {
-            error!(cell = cell_name, error = ?e, "Failed to spawn cell process");
+            error!(cell = %cell_name, error = ?e, "Failed to spawn cell process");
             return;
         }
     };
@@ -713,7 +804,7 @@ async fn spawn_cell_process(cell_name: &str, pending: PendingCell, quiet_mode: b
     drop(ticket);
 
     // Spawn child monitor task
-    let cell_label = cell_name.to_string();
+    let cell_label = cell_name;
     tokio::spawn(async move {
         let mut child = child;
         match child.wait().await {

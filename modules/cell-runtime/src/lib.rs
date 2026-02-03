@@ -12,11 +12,62 @@ pub use roam::session::diagnostic::{
     DiagnosticState, dump_all_diagnostics, register_diagnostic_state,
 };
 pub use roam::session::{ConnectionHandle, RoutedDispatcher, ServiceDispatcher};
+pub use roam::wire as roam_wire;
 pub use roam_shm;
-pub use roam_shm::driver::{establish_guest, establish_guest_with_diagnostics};
+pub use roam_shm::driver::{
+    IncomingConnections, establish_guest, establish_guest_with_diagnostics,
+};
 pub use roam_shm::guest::ShmGuest;
 pub use roam_shm::spawn::SpawnArgs;
 pub use roam_shm::transport::ShmGuestTransport;
+
+// ============================================================================
+// Virtual Connection Acceptor
+// ============================================================================
+
+/// Accept incoming virtual connections from the host.
+///
+/// This function runs in a loop accepting virtual connections. Each virtual
+/// connection gets its own isolated channel ID space, so one client disconnecting
+/// doesn't affect others.
+///
+/// The dispatcher is cloned for each virtual connection, so it should be cheap
+/// to clone (typically just Arc clones).
+pub async fn accept_virtual_connections<D>(mut incoming: IncomingConnections, dispatcher: D)
+where
+    D: ServiceDispatcher + Clone + 'static,
+{
+    tracing::info!("Cell virtual connection acceptor started, waiting for incoming connections...");
+
+    // Keep accepted handles alive - dropping them closes the virtual connection
+    let mut active_handles = Vec::new();
+
+    while let Some(conn) = incoming.recv().await {
+        tracing::info!("Cell received incoming virtual connection request");
+        let dispatcher_clone = dispatcher.clone();
+
+        // Accept the virtual connection with a clone of the dispatcher
+        match conn
+            .accept(
+                roam_wire::Metadata::default(),
+                Some(Box::new(dispatcher_clone)),
+            )
+            .await
+        {
+            Ok(handle) => {
+                let conn_id = handle.conn_id().raw();
+                tracing::info!(conn_id, "Cell accepted incoming virtual connection");
+                // Keep the handle alive so the virtual connection stays open
+                active_handles.push(handle);
+            }
+            Err(e) => {
+                tracing::warn!(error = ?e, "Failed to accept virtual connection");
+            }
+        }
+    }
+
+    tracing::info!("Cell virtual connection acceptor finished");
+}
 pub use roam_tracing;
 pub use roam_tracing::{
     CellTracingDispatcher, CellTracingGuard, CellTracingLayer, CellTracingService,
@@ -273,12 +324,22 @@ macro_rules! run_cell {
             $crate::cell_debug!("[cell] diagnostic state registered");
 
             $crate::cell_debug!("[cell] calling establish_guest_with_diagnostics");
-            let (handle, _incoming, driver) = establish_guest_with_diagnostics(
+            let (handle, incoming, driver) = establish_guest_with_diagnostics(
                 transport,
-                combined_dispatcher,
+                combined_dispatcher.clone(),
                 Some(diagnostic_state),
             );
             $crate::cell_debug!("[cell] establish_guest_with_diagnostics returned");
+
+            // Spawn a task to accept incoming virtual connections from the host.
+            // This allows each browser to get its own isolated connection with separate
+            // channel ID spaces, preventing one browser's disconnect from affecting others.
+            let dispatcher_for_virtual = combined_dispatcher;
+            tokio::spawn(async move {
+                $crate::cell_debug!("[cell] starting virtual connection acceptor");
+                $crate::accept_virtual_connections(incoming, dispatcher_for_virtual).await;
+                $crate::cell_debug!("[cell] virtual connection acceptor finished");
+            });
 
             // Store the real handle
             let _ = handle_cell.set(handle.clone());

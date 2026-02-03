@@ -37,6 +37,13 @@ impl CellReadyRegistry {
         self.ready.insert(cell_name, msg);
     }
 
+    /// Mark a cell as not ready (for respawning after death).
+    pub fn mark_not_ready(&self, cell_name: &str) {
+        let cell_name = cell_name.replace('_', "-");
+        debug!(cell = %cell_name, "Cell marked not ready");
+        self.ready.remove(&cell_name);
+    }
+
     /// Check if a cell is ready.
     pub fn is_ready(&self, cell_name: &str) -> bool {
         self.ready.contains_key(cell_name)

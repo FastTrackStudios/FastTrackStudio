@@ -56,26 +56,26 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre = "0.6"
 futures = "0.3"
 
-# Roam crates from fork with OTLP improvements
-roam = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-codegen = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-frame = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-hash = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-schema = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-service-macros = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-session = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-shm = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields", features = ["tracing"] }
-roam-stream = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-task-local = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-telemetry = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-tracing = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-websocket = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-wire = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-local = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-roam-http-bridge = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-subject-rust = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
-ur-taking-me-with-you = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields", features = ["tokio"] }
-shm-primitives = { git = "https://github.com/Codys-Wright/roam", branch = "fix/otlp-skip-none-fields" }
+# Roam crates from local reference (with forwarding fix)
+roam = { path = "reference/roam/rust/roam" }
+roam-codegen = { path = "reference/roam/rust/roam-codegen" }
+roam-frame = { path = "reference/roam/rust/roam-frame" }
+roam-hash = { path = "reference/roam/rust/roam-hash" }
+roam-schema = { path = "reference/roam/rust/roam-schema" }
+roam-service-macros = { path = "reference/roam/rust/roam-service-macros" }
+roam-session = { path = "reference/roam/rust/roam-session" }
+roam-shm = { path = "reference/roam/rust/roam-shm", features = ["tracing"] }
+roam-stream = { path = "reference/roam/rust/roam-stream" }
+roam-task-local = { path = "reference/roam/rust/roam-task-local" }
+roam-telemetry = { path = "reference/roam/rust/roam-telemetry" }
+roam-tracing = { path = "reference/roam/rust/roam-tracing" }
+roam-websocket = { path = "reference/roam/rust/roam-websocket" }
+roam-wire = { path = "reference/roam/rust/roam-wire" }
+roam-local = { path = "reference/roam/rust/roam-local" }
+roam-http-bridge = { path = "reference/roam/rust/roam-http-bridge" }
+subject-rust = { path = "reference/roam/rust/subject-rust" }
+ur-taking-me-with-you = { path = "reference/roam/rust/ur-taking-me-with-you", features = ["tokio"] }
+shm-primitives = { path = "reference/roam/rust/shm-primitives" }
 
 # Local modules
 integration-tests = { path = "modules/integration-tests" }

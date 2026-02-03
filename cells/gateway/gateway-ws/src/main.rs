@@ -27,55 +27,11 @@ use futures_util::{SinkExt, StreamExt};
 use gateway_proto::{
     GatewayControl, GatewayControlDispatcher, GatewayInfo, GatewayState, GatewayType,
 };
-use roam::session::ConnectionHandle;
-use roam_session::{
-    ChannelRegistry, Context, ForwardingDispatcher, MessageTransport, ServiceDispatcher,
-};
+use roam::session::{ConnectionHandle, Context};
+use roam_session::{ForwardingDispatcher, MessageTransport};
 use roam_stream::{accept_framed, HandshakeConfig};
 use roam_wire::Message as RoamMessage;
-use std::future::Future;
-use std::pin::Pin;
 use tokio::net::TcpListener;
-
-// ============================================================================
-// LoggingForwarder - Wraps ForwardingDispatcher with logging
-// ============================================================================
-
-/// A dispatcher that logs calls before forwarding to ForwardingDispatcher
-struct LoggingForwarder {
-    inner: ForwardingDispatcher,
-}
-
-impl LoggingForwarder {
-    fn new(upstream: ConnectionHandle) -> Self {
-        Self {
-            inner: ForwardingDispatcher::new(upstream),
-        }
-    }
-}
-
-impl ServiceDispatcher for LoggingForwarder {
-    fn method_ids(&self) -> Vec<u64> {
-        self.inner.method_ids()
-    }
-
-    fn dispatch(
-        &self,
-        cx: Context,
-        payload: Vec<u8>,
-        registry: &mut ChannelRegistry,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
-        let method_id = cx.method_id().raw();
-        let request_id = cx.request_id().raw();
-        info!(
-            method_id,
-            request_id,
-            payload_len = payload.len(),
-            "LoggingForwarder: forwarding call to host"
-        );
-        self.inner.dispatch(cx, payload, registry)
-    }
-}
 use tokio::sync::RwLock;
 use tower_http::services::ServeDir;
 use tracing::{debug, info, warn};
@@ -253,10 +209,17 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     State((gateway, host_handle)): State<(Arc<WebSocketGateway>, ConnectionHandle)>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, gateway, host_handle))
+    // Accept "roam" subprotocol if requested (Safari compatibility)
+    // Safari sometimes requires a subprotocol to be explicitly accepted
+    ws.protocols(["roam"])
+        .on_upgrade(move |socket| handle_socket(socket, gateway, host_handle))
 }
 
 /// Handle a WebSocket connection - runs roam RPC and forwards to host
+///
+/// Each browser gets its own **virtual connection** to the host via `handle.connect()`.
+/// This isolates each browser's channel IDs so that when one browser disconnects,
+/// it doesn't affect other browsers' streaming subscriptions.
 async fn handle_socket(
     socket: WebSocket,
     gateway: Arc<WebSocketGateway>,
@@ -273,19 +236,17 @@ async fn handle_socket(
     // Wrap the axum WebSocket in our transport adapter
     let transport = AxumWsTransport::new(socket);
 
-    // Create LoggingForwarder - forwards ALL calls to host with logging
-    // No schema knowledge needed - just forwards raw bytes by method_id
-    let dispatcher = LoggingForwarder::new(host_handle.clone());
-    info!(
-        "Created LoggingForwarder to host, conn_id={}",
-        host_handle.conn_id()
-    );
+    // Use ForwardingDispatcher directly with the root host handle.
+    // ForwardingDispatcher allocates new channel IDs for each upstream call,
+    // so each browser's channels are naturally isolated. No need for
+    // per-browser virtual connections which exhaust connection IDs.
+    let browser_to_host = ForwardingDispatcher::new(host_handle.clone());
 
     // Accept the roam session with the forwarding dispatcher
     let config = HandshakeConfig::default();
-    match accept_framed(transport, config, dispatcher).await {
+    match accept_framed(transport, config, browser_to_host).await {
         Ok((_browser_handle, _incoming, driver)) => {
-            info!("Binary WebSocket client connected");
+            debug!("Binary WebSocket client connected (forwarding to host)");
             // Run the driver until the connection closes
             if let Err(e) = driver.run().await {
                 debug!("WebSocket session ended: {:?}", e);

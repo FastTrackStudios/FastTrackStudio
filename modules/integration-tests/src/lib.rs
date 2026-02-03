@@ -26,7 +26,7 @@
 pub mod harness;
 
 use daw_proto::transport::transport::TransportServiceDispatcher;
-use daw_standalone::StandaloneTransport;
+use daw_standalone::{StandaloneProject, StandaloneTransport};
 use roam_shm::driver::{establish_guest, establish_multi_peer_host};
 use roam_shm::host::ShmHost;
 use roam_shm::layout::SegmentConfig;
@@ -65,7 +65,9 @@ pub fn setup_test() -> TestFixture {
     let peer_id = ticket.peer_id;
     let spawn_args = ticket.into_spawn_args();
 
-    let dispatcher = TransportServiceDispatcher::new(TestTransport::new());
+    // Create project first so we can share its state with transport
+    let project = StandaloneProject::new();
+    let dispatcher = TransportServiceDispatcher::new(TestTransport::new(project.shared_state()));
 
     let guest_transport = ShmGuestTransport::from_spawn_args(spawn_args).unwrap();
     let (guest_handle, _guest_incoming, guest_driver) =
@@ -122,8 +124,9 @@ pub async fn setup_external_test(
     // Give it time to start
     sleep(Duration::from_millis(100)).await;
 
-    // Set up host
-    let dispatcher = TransportServiceDispatcher::new(TestTransport::new());
+    // Set up host - create project first for shared state
+    let project = StandaloneProject::new();
+    let dispatcher = TransportServiceDispatcher::new(TestTransport::new(project.shared_state()));
     let (host_driver, mut handles, _incoming, _driver_handle) =
         establish_multi_peer_host::<TransportServiceDispatcher<TestTransport>, _>(
             host,

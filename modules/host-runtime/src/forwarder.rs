@@ -106,7 +106,7 @@ impl ServiceDispatcher for MethodRoutedForwarder {
 
         // Route to the forwarder registered for this method ID
         if let Some(forwarder) = self.routes.get(&method_id) {
-            tracing::info!(
+            tracing::trace!(
                 method_id,
                 "MethodRoutedForwarder: routing call to registered target"
             );
