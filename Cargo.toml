@@ -15,8 +15,17 @@ members = [
     "apps/fasttrackstudio/*",
     "apps/reaper-extension",
 ]
-exclude = ["reference/roam"]
+exclude = [
+    "reference/roam",
+    "cells/signal/signal",    # Incomplete crate - no Cargo.toml
+    "cells/signal/signal-proto",  # Incomplete crate - no Cargo.toml
+    "cells/sync/sync",        # Incomplete crate
+]
 resolver = "2"
+
+[workspace.lints.rust]
+
+[workspace.lints.clippy]
 
 [workspace.package]
 edition = "2021"
@@ -38,6 +47,8 @@ facet-value = { git = "https://github.com/facet-rs/facet", branch = "main" }
 facet-yaml = { git = "https://github.com/facet-rs/facet", branch = "main" }
 
 # Common dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "2.0"
 tokio = { version = "1.48", features = ["full"] }
 tracing = "0.1"
@@ -78,6 +89,7 @@ session-proto = { path = "cells/session/session-proto" }
 daw-proto = { path = "cells/daw/daw-proto" }
 daw-control = { path = "cells/daw/daw-control" }
 session = { path = "cells/session/session" }
+session-ui = { path = "cells/session/session-ui" }
 gateway-proto = { path = "cells/gateway/gateway-proto" }
 host-manager-proto = { path = "cells/host-manager/host-manager-proto" }
 host-manager = { path = "cells/host-manager/host-manager" }
@@ -99,6 +111,9 @@ crossbeam-channel = "0.5"
 scopeguard = "1.1.0"
 raw-window-handle = "0.4.2"
 palette = "0.7.3"
+
+# Dioxus UI framework
+dioxus = "0.7.3"
 rxrust = { git = "https://github.com/rxRust/rxRust", rev = "349e50b3197e05926e2378ef8fc45cb67ad43b83" }
 
 # macOS dependencies for swell-ui (using exact versions for compatibility)
