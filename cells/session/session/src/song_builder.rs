@@ -5,6 +5,7 @@
 use daw_control::Project;
 use session_proto::{Section, SectionType, Song};
 use tracing::info;
+use uuid::Uuid;
 
 /// Builder for extracting Song structure from DAW projects
 pub struct SongBuilder;
@@ -209,7 +210,7 @@ impl SongBuilder {
         };
 
         Ok(Song {
-            id: None,
+            id: Uuid::new_v4().to_string(),
             name: song_name,
             project_guid: project.guid().to_string(),
             start_seconds: song_start_seconds, // Include count-in in song bounds

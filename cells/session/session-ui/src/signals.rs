@@ -37,6 +37,122 @@ use std::cell::RefCell;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 
+// ============================================================================
+// Latency Tracking
+// ============================================================================
+
+/// Tracks latency for roundtrip measurements (action -> state update received)
+#[derive(Debug, Clone, Default)]
+pub struct LatencyTracker {
+    /// Timestamp when play/pause was triggered (waiting for PlayState change)
+    pub pending_play_toggle: Option<f64>,
+    /// Most recent measured latencies (last N measurements)
+    pub recent_latencies: Vec<LatencyMeasurement>,
+    /// Maximum number of measurements to keep
+    max_history: usize,
+}
+
+/// A single latency measurement
+#[derive(Debug, Clone)]
+pub struct LatencyMeasurement {
+    /// Type of action that was measured
+    pub action: LatencyAction,
+    /// Measured latency in milliseconds
+    pub latency_ms: f64,
+    /// Timestamp when measurement was recorded
+    pub timestamp: f64,
+}
+
+/// Types of actions we track latency for
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LatencyAction {
+    PlayToggle,
+    LoopToggle,
+    Seek,
+}
+
+impl LatencyTracker {
+    pub fn new() -> Self {
+        Self {
+            pending_play_toggle: None,
+            recent_latencies: Vec::new(),
+            max_history: 20,
+        }
+    }
+
+    /// Record that a play/pause action was triggered
+    pub fn start_play_toggle(&mut self) {
+        self.pending_play_toggle = Some(now_ms());
+    }
+
+    /// Complete a play/pause measurement when state change is received
+    pub fn complete_play_toggle(&mut self) -> Option<f64> {
+        if let Some(start) = self.pending_play_toggle.take() {
+            let latency = now_ms() - start;
+            self.record_measurement(LatencyAction::PlayToggle, latency);
+            Some(latency)
+        } else {
+            None
+        }
+    }
+
+    /// Record a latency measurement
+    fn record_measurement(&mut self, action: LatencyAction, latency_ms: f64) {
+        self.recent_latencies.push(LatencyMeasurement {
+            action,
+            latency_ms,
+            timestamp: now_ms(),
+        });
+
+        // Keep only the last N measurements
+        if self.recent_latencies.len() > self.max_history {
+            self.recent_latencies.remove(0);
+        }
+    }
+
+    /// Get average latency for a specific action type
+    pub fn average_latency(&self, action: LatencyAction) -> Option<f64> {
+        let matching: Vec<_> = self
+            .recent_latencies
+            .iter()
+            .filter(|m| m.action == action)
+            .collect();
+
+        if matching.is_empty() {
+            None
+        } else {
+            let sum: f64 = matching.iter().map(|m| m.latency_ms).sum();
+            Some(sum / matching.len() as f64)
+        }
+    }
+
+    /// Get the most recent latency measurement
+    pub fn last_latency(&self) -> Option<&LatencyMeasurement> {
+        self.recent_latencies.last()
+    }
+}
+
+/// Get current time in milliseconds
+#[cfg(target_arch = "wasm32")]
+fn now_ms() -> f64 {
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| p.now())
+        .unwrap_or(0.0)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn now_ms() -> f64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .unwrap_or(0.0)
+}
+
+/// Global latency tracker signal
+pub static LATENCY_TRACKER: GlobalSignal<LatencyTracker> = Signal::global(LatencyTracker::new);
+
 /// Global setlist structure (songs, sections, timing)
 /// Updates when setlist is rebuilt or structure changes
 pub static SETLIST_STRUCTURE: GlobalSignal<Setlist> = Signal::global(|| Setlist::default());

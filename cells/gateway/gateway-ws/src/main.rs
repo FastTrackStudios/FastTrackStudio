@@ -236,17 +236,15 @@ async fn handle_socket(
     // Wrap the axum WebSocket in our transport adapter
     let transport = AxumWsTransport::new(socket);
 
-    // Use ForwardingDispatcher directly with the root host handle.
-    // ForwardingDispatcher allocates new channel IDs for each upstream call,
-    // so each browser's channels are naturally isolated. No need for
-    // per-browser virtual connections which exhaust connection IDs.
+    // Use ForwardingDispatcher to forward all RPC calls to the host.
+    // ForwardingDispatcher remaps channel IDs so each browser's traffic is isolated.
     let browser_to_host = ForwardingDispatcher::new(host_handle.clone());
 
     // Accept the roam session with the forwarding dispatcher
     let config = HandshakeConfig::default();
     match accept_framed(transport, config, browser_to_host).await {
         Ok((_browser_handle, _incoming, driver)) => {
-            debug!("Binary WebSocket client connected (forwarding to host)");
+            debug!("Binary WebSocket client connected (forwarding to host with telemetry)");
             // Run the driver until the connection closes
             if let Err(e) = driver.run().await {
                 debug!("WebSocket session ended: {:?}", e);

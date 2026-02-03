@@ -172,8 +172,8 @@ impl SectionType {
 /// and regions defining its internal structure (sections).
 #[derive(Clone, Debug, PartialEq, Facet)]
 pub struct Song {
-    /// Unique identifier for this song
-    pub id: Option<String>,
+    /// Unique identifier for this song (UUID or custom string)
+    pub id: String,
     /// Song name
     pub name: String,
     /// DAW project GUID this song belongs to

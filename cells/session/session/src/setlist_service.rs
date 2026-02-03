@@ -18,12 +18,16 @@ use tracing::{debug, info, warn};
 pub struct SetlistServiceImpl {
     /// Current setlist state
     setlist: Arc<RwLock<Option<Setlist>>>,
+    /// Currently active song ID (cached locally to avoid RPC calls)
+    /// Using ID instead of index ensures stability when songs are reordered
+    active_song_id: Arc<RwLock<Option<String>>>,
 }
 
 impl SetlistServiceImpl {
     pub fn new() -> Self {
         Self {
             setlist: Arc::new(RwLock::new(None)),
+            active_song_id: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -33,14 +37,23 @@ impl SetlistServiceImpl {
         setlist.as_ref()?.songs.get(index).cloned()
     }
 
-    /// Find the song index for a given project GUID
-    async fn find_song_index_for_project(&self, project_guid: &str) -> Option<usize> {
+    /// Get a specific song by ID (internal helper)
+    async fn get_song_by_id(&self, id: &str) -> Option<Song> {
         let setlist = self.setlist.read().await;
         let setlist = setlist.as_ref()?;
-        setlist
-            .songs
-            .iter()
-            .position(|song| song.project_guid == project_guid)
+        setlist.songs.iter().find(|song| song.id == id).cloned()
+    }
+
+    /// Get the active song from cached local state (no RPC calls)
+    async fn get_cached_active_song(&self) -> Option<Song> {
+        let song_id = self.active_song_id.read().await.clone();
+        let song_id = song_id?;
+        self.get_song_by_id(&song_id).await
+    }
+
+    /// Set the active song by ID (called when navigating)
+    async fn set_active_song_id(&self, id: &str) {
+        *self.active_song_id.write().await = Some(id.to_string());
     }
 
     /// Calculate transport state for a specific song based on its project's transport
@@ -372,6 +385,9 @@ impl SetlistService for SetlistServiceImpl {
         let daw = Daw::get();
 
         if let Some(song) = self.get_song_internal(index).await {
+            // Update the cached active song ID for fast playback commands
+            self.set_active_song_id(&song.id).await;
+
             // First, switch to the correct project
             match daw.select_project(&song.project_guid).await {
                 Ok(project) => {
@@ -554,6 +570,9 @@ impl SetlistService for SetlistServiceImpl {
         let daw = Daw::get();
 
         if let Some(song) = self.get_song_internal(song_index).await {
+            // Update the cached active song ID for fast playback commands
+            self.set_active_song_id(&song.id).await;
+
             info!(
                 "seek_to_song: found song '{}' with project_guid={}, start_seconds={}",
                 song.name,
@@ -748,64 +767,84 @@ impl SetlistService for SetlistServiceImpl {
     async fn toggle_playback(&self, _cx: &Context) {
         debug!("toggle_playback");
 
-        let daw = Daw::get();
-        match daw.current_project().await {
-            Ok(project) => {
-                if let Err(e) = project.transport().play_pause().await {
-                    warn!("Failed to toggle playback: {}", e);
+        // Use cached active song ID for instant lookup (no RPC calls)
+        if let Some(song) = self.get_cached_active_song().await {
+            let daw = Daw::get();
+            match daw.project(&song.project_guid).await {
+                Ok(project) => {
+                    if let Err(e) = project.transport().play_pause().await {
+                        warn!("Failed to toggle playback: {}", e);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to get project {}: {}", song.project_guid, e);
                 }
             }
-            Err(e) => {
-                warn!("Failed to get current project: {}", e);
-            }
+        } else {
+            warn!("No active song to toggle playback (navigate to a song first)");
         }
     }
 
     async fn play(&self, _cx: &Context) {
         debug!("play");
 
-        let daw = Daw::get();
-        match daw.current_project().await {
-            Ok(project) => {
-                if let Err(e) = project.transport().play().await {
-                    warn!("Failed to play: {}", e);
+        // Use cached active song ID for instant lookup (no RPC calls)
+        if let Some(song) = self.get_cached_active_song().await {
+            let daw = Daw::get();
+            match daw.project(&song.project_guid).await {
+                Ok(project) => {
+                    if let Err(e) = project.transport().play().await {
+                        warn!("Failed to play: {}", e);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to get project {}: {}", song.project_guid, e);
                 }
             }
-            Err(e) => {
-                warn!("Failed to get current project: {}", e);
-            }
+        } else {
+            warn!("No active song to play (navigate to a song first)");
         }
     }
 
     async fn pause(&self, _cx: &Context) {
         debug!("pause");
 
-        let daw = Daw::get();
-        match daw.current_project().await {
-            Ok(project) => {
-                if let Err(e) = project.transport().pause().await {
-                    warn!("Failed to pause: {}", e);
+        // Use cached active song ID for instant lookup (no RPC calls)
+        if let Some(song) = self.get_cached_active_song().await {
+            let daw = Daw::get();
+            match daw.project(&song.project_guid).await {
+                Ok(project) => {
+                    if let Err(e) = project.transport().pause().await {
+                        warn!("Failed to pause: {}", e);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to get project {}: {}", song.project_guid, e);
                 }
             }
-            Err(e) => {
-                warn!("Failed to get current project: {}", e);
-            }
+        } else {
+            warn!("No active song to pause (navigate to a song first)");
         }
     }
 
     async fn stop(&self, _cx: &Context) {
         debug!("stop");
 
-        let daw = Daw::get();
-        match daw.current_project().await {
-            Ok(project) => {
-                if let Err(e) = project.transport().stop().await {
-                    warn!("Failed to stop: {}", e);
+        // Use cached active song ID for instant lookup (no RPC calls)
+        if let Some(song) = self.get_cached_active_song().await {
+            let daw = Daw::get();
+            match daw.project(&song.project_guid).await {
+                Ok(project) => {
+                    if let Err(e) = project.transport().stop().await {
+                        warn!("Failed to stop: {}", e);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to get project {}: {}", song.project_guid, e);
                 }
             }
-            Err(e) => {
-                warn!("Failed to get current project: {}", e);
-            }
+        } else {
+            warn!("No active song to stop (navigate to a song first)");
         }
     }
 
@@ -876,6 +915,16 @@ impl SetlistService for SetlistServiceImpl {
                     "Successfully built setlist with {} songs",
                     setlist.songs.len()
                 );
+
+                // Initialize active song to first song if available
+                if let Some(first_song) = setlist.songs.first() {
+                    *self.active_song_id.write().await = Some(first_song.id.clone());
+                    info!(
+                        "Set initial active song to: {} ({})",
+                        first_song.name, first_song.id
+                    );
+                }
+
                 *self.setlist.write().await = Some(setlist);
             }
             Err(e) => {

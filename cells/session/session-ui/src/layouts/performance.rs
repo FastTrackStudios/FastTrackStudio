@@ -106,6 +106,7 @@ pub fn PerformanceLayout() -> Element {
 /// Performance sidebar component
 ///
 /// Displays song list with expandable sections and progress bars.
+/// Shows progress for ALL songs that have transport state (independent playback).
 #[component]
 fn PerformanceSidebar(
     setlist: Setlist,
@@ -113,7 +114,7 @@ fn PerformanceSidebar(
     active_section_index: Option<usize>,
     song_transport: std::collections::HashMap<usize, TransportState>,
 ) -> Element {
-    // Convert setlist to sidebar items
+    // Convert setlist to sidebar items, including per-song playing state
     let sidebar_items: Vec<_> = setlist
         .songs
         .iter()
@@ -121,6 +122,7 @@ fn PerformanceSidebar(
         .map(|(song_idx, song)| {
             let transport = song_transport.get(&song_idx);
             let song_progress = transport.map(|t| song.progress(t.position)).unwrap_or(0.0);
+            let is_song_playing = transport.map(|t| t.is_playing).unwrap_or(false);
 
             let sections = song
                 .sections
@@ -139,13 +141,16 @@ fn PerformanceSidebar(
                 })
                 .collect();
 
-            SongItemData {
-                label: song.name.clone(),
-                progress: song_progress,
-                bright_color: song.bright_color(),
-                muted_color: song.muted_color(),
-                sections,
-            }
+            (
+                SongItemData {
+                    label: song.name.clone(),
+                    progress: song_progress,
+                    bright_color: song.bright_color(),
+                    muted_color: song.muted_color(),
+                    sections,
+                },
+                is_song_playing,
+            )
         })
         .collect();
 
@@ -166,13 +171,14 @@ fn PerformanceSidebar(
             div {
                 class: "space-y-1 pr-4 pb-4",
 
-                for (song_idx, song_data) in sidebar_items.iter().enumerate() {
+                for (song_idx, (song_data, is_song_playing)) in sidebar_items.iter().enumerate() {
                     SongItem {
                         key: "{song_idx}",
                         song_data: song_data.clone(),
                         index: song_idx,
                         is_expanded: active_song_index == Some(song_idx),
-                        is_playing: active_song_index == Some(song_idx),
+                        // Show as playing if THIS song's project is playing (independent transport)
+                        is_playing: *is_song_playing,
                         current_section_index: if active_song_index == Some(song_idx) {
                             active_section_index
                         } else {
@@ -617,6 +623,8 @@ fn PerformanceMainContent(
                 is_playing: is_playing,
                 is_looping: is_looping,
                 on_play_pause: Callback::new(move |_| {
+                    // Start latency tracking before making the call
+                    LATENCY_TRACKER.write().start_play_toggle();
                     spawn(async move {
                         let _ = Session::get().setlist().toggle_playback().await;
                     });

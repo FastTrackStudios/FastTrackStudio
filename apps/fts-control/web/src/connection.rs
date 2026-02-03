@@ -20,8 +20,8 @@ use roam_session::{HandshakeConfig, NoDispatcher};
 use roam_websocket::WsTransport;
 use session_proto::{SetlistServiceClient, Song};
 use session_ui::{
-    ConnectionState, Session, TransportState, ACTIVE_INDICES, PLAYBACK_STATE, SETLIST_STRUCTURE,
-    SONG_TRANSPORT,
+    ConnectionState, Session, TransportState, ACTIVE_INDICES, LATENCY_TRACKER, PLAYBACK_STATE,
+    SETLIST_STRUCTURE, SONG_TRANSPORT,
 };
 use wasm_bindgen::prelude::*;
 
@@ -329,10 +329,26 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
 
                                 // Update global PLAYBACK_STATE based on ACTIVE song's state
                                 if Some(transport.song_index) == active_song_index {
-                                    if transport.is_playing {
-                                        *PLAYBACK_STATE.write() = daw_proto::PlayState::Playing;
+                                    let old_playing = *PLAYBACK_STATE.read();
+                                    let new_playing = if transport.is_playing {
+                                        daw_proto::PlayState::Playing
                                     } else {
-                                        *PLAYBACK_STATE.write() = daw_proto::PlayState::Stopped;
+                                        daw_proto::PlayState::Stopped
+                                    };
+
+                                    // Check if play state actually changed
+                                    if old_playing != new_playing {
+                                        *PLAYBACK_STATE.write() = new_playing;
+
+                                        // Complete latency measurement if we were tracking
+                                        if let Some(latency) =
+                                            LATENCY_TRACKER.write().complete_play_toggle()
+                                        {
+                                            log(&format!(
+                                                "[fts-control] Play toggle latency: {:.1}ms",
+                                                latency
+                                            ));
+                                        }
                                     }
 
                                     // Also update ACTIVE_INDICES progress from transport
