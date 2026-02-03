@@ -17,6 +17,9 @@ roam-websocket.workspace = true
 daw-control.workspace = true
 daw-proto.workspace = true
 
+# Session API (setlist navigation, song control)
+session-proto.workspace = true
+
 # WASM bindings
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
@@ -31,6 +34,7 @@ js-sys = "0.3"
 
 # Async
 futures.workspace = true
+gloo-timers = { version = "0.3", features = ["futures"] }
 
 # Logging
 tracing = "0.1"

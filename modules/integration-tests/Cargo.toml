@@ -17,6 +17,9 @@ host-client = { path = "../host-client" }
 # Gateway
 gateway-proto = { workspace = true }
 
+# Session
+session-proto = { path = "../../cells/session/session-proto" }
+
 # Roam
 roam = { workspace = true }
 roam-shm = { workspace = true }

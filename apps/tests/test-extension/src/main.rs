@@ -6,14 +6,11 @@
 #![deny(unsafe_code)]
 
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
 
 use host_runtime::{
     init_shm_infrastructure, init_tracing, spawn_tracing_consumer, CellConfig, Host,
 };
 use tracing::{info, warn};
-use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -40,10 +37,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn all cells
     spawn_cells().await?;
 
-    info!("Test Extension running with DAW, Session, and Gateway-WS cells. Press Ctrl+C to shutdown.");
-
-    // Start health check loop
-    start_health_check();
+    info!(
+        "Test Extension running with DAW, Session, and Gateway-WS cells. Press Ctrl+C to shutdown."
+    );
 
     // Keep running until Ctrl+C
     tokio::signal::ctrl_c().await?;
@@ -59,14 +55,42 @@ fn register_cells(cell_dir: &PathBuf) {
     // DAW cell - using standalone implementation for testing
     CellConfig::new("daw-standalone", cell_dir).register();
 
-    // Session cell - forwards to DAW
+    // Session cell - forwards to DAW for all DAW services
+    // The session needs access to markers, regions, and tempo map to build songs
     CellConfig::new("session", cell_dir)
-        .forwards_to(&["daw-standalone"])
+        .forwards_to_with_methods("daw-standalone", || {
+            daw_proto::TransportServiceDispatcher::<()>::method_ids()
+                .into_iter()
+                .chain(daw_proto::ProjectServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::MarkerServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::RegionServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::TempoMapServiceDispatcher::<()>::method_ids())
+                .collect()
+        })
         .register();
 
-    // Gateway WebSocket cell - forwards to DAW
+    // Gateway WebSocket cell - forwards to both DAW and Session
+    // Routes method IDs to the correct cell based on which service handles them
     CellConfig::new("gateway-ws", cell_dir)
-        .forwards_to(&["daw-standalone"])
+        .forwards_to_with_methods("daw-standalone", || {
+            // DAW services: Transport, Project, Markers, Regions, TempoMap
+            daw_proto::TransportServiceDispatcher::<()>::method_ids()
+                .into_iter()
+                .chain(daw_proto::ProjectServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::MarkerServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::RegionServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::TempoMapServiceDispatcher::<()>::method_ids())
+                .collect()
+        })
+        .forwards_to_with_methods("session", || {
+            // Session services: Setlist, Song, Session, DefinesActions
+            session_proto::SetlistServiceDispatcher::<()>::method_ids()
+                .into_iter()
+                .chain(session_proto::SongServiceDispatcher::<()>::method_ids())
+                .chain(session_proto::SessionServiceDispatcher::<()>::method_ids())
+                .chain(session_proto::DefinesActionsDispatcher::<()>::method_ids())
+                .collect()
+        })
         .register();
 
     info!("Cells registered for lazy spawning (test configuration)");
@@ -112,27 +136,4 @@ async fn spawn_cells() -> Result<(), Box<dyn std::error::Error>> {
     info!("Gateway-WS cell ready");
 
     Ok(())
-}
-
-/// Start a background health check loop for the session cell.
-fn start_health_check() {
-    tokio::spawn(async move {
-        // Get session client for health checks
-        let session_client =
-            match Host::get().client_async::<session_proto::SessionServiceClient>().await {
-                Some(c) => Arc::new(c),
-                None => {
-                    warn!("Could not get session client for health checks");
-                    return;
-                }
-            };
-
-        loop {
-            match session_client.get_status().await {
-                Ok(status) => info!("Session health check: {}", status),
-                Err(e) => warn!("Session health check failed: {}", e),
-            }
-            sleep(Duration::from_secs(5)).await;
-        }
-    });
 }

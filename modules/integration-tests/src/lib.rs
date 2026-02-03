@@ -25,8 +25,8 @@
 
 pub mod harness;
 
-use daw_proto::TransportService;
 use daw_proto::transport::transport::TransportServiceDispatcher;
+use daw_standalone::StandaloneTransport;
 use roam_shm::driver::{establish_guest, establish_multi_peer_host};
 use roam_shm::host::ShmHost;
 use roam_shm::layout::SegmentConfig;
@@ -34,34 +34,10 @@ use roam_shm::spawn::AddPeerOptions;
 use roam_shm::transport::ShmGuestTransport;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tokio::time::{Duration, sleep};
 
-/// Test implementation of Transport service
-#[derive(Clone)]
-pub struct TestTransport {
-    state: Arc<Mutex<daw_proto::PlayState>>,
-}
-
-impl TestTransport {
-    pub fn new() -> Self {
-        Self {
-            state: Arc::new(Mutex::new(daw_proto::PlayState::Stopped)),
-        }
-    }
-}
-
-impl TransportService for TestTransport {
-    async fn play(&self, _cx: &roam::Context, _project_id: Option<String>) {
-        let mut state = self.state.lock().await;
-        *state = daw_proto::PlayState::Playing;
-    }
-
-    async fn stop(&self, _cx: &roam::Context, _project_id: Option<String>) {
-        let mut state = self.state.lock().await;
-        *state = daw_proto::PlayState::Stopped;
-    }
-}
+/// Test implementation of Transport service - uses StandaloneTransport from daw-standalone
+pub type TestTransport = StandaloneTransport;
 
 /// Test fixture for host-guest testing
 pub struct TestFixture {

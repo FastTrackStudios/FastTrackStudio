@@ -25,6 +25,8 @@ use roam_websocket::WsTransport;
 #[cfg(target_arch = "wasm32")]
 use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
+use session_proto::SetlistServiceClient;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 fn main() {
@@ -131,6 +133,15 @@ mod wasm {
     }
 
     // ========================================================================
+    // Test Helpers
+    // ========================================================================
+
+    /// Small delay for async operations
+    pub async fn delay_ms(ms: u32) {
+        gloo_timers::future::TimeoutFuture::new(ms).await;
+    }
+
+    // ========================================================================
     // Test Runner
     // ========================================================================
 
@@ -182,7 +193,9 @@ mod wasm {
         let mut suite = TestSuite::new();
         let ws_url = get_ws_url();
 
+        // ====================================================================
         // Test: Connection
+        // ====================================================================
         let handle = match connect(&ws_url).await {
             Ok(h) => {
                 suite.pass("connect");
@@ -194,18 +207,21 @@ mod wasm {
             }
         };
 
-        let daw = Daw::new(handle);
+        // ====================================================================
+        // DAW Control Tests
+        // ====================================================================
+        let daw = Daw::new(handle.clone());
 
         // Test: Get current project
         log("[test] Testing get_current_project...");
         let project = match daw.current_project().await {
             Ok(p) => {
-                suite.pass("get_current_project");
+                suite.pass("daw: get_current_project");
                 log(&format!("[test] Got project: {}", p.guid()));
                 Some(p)
             }
             Err(e) => {
-                suite.fail("get_current_project", format!("{e}"));
+                suite.fail("daw: get_current_project", format!("{e}"));
                 None
             }
         };
@@ -214,15 +230,45 @@ mod wasm {
         if let Some(project) = project {
             let transport = project.transport();
 
+            // Test: Get transport state
+            log("[test] Testing get_state...");
+            match transport.get_state().await {
+                Ok(state) => {
+                    suite.pass("daw: get_transport_state");
+                    log(&format!(
+                        "[test] Transport state: playing={:?}, bpm={:.1}",
+                        state.play_state, state.tempo.bpm
+                    ));
+                }
+                Err(e) => {
+                    suite.fail("daw: get_transport_state", format!("{e}"));
+                }
+            }
+
             // Test: Play
             log("[test] Testing play...");
             match transport.play().await {
                 Ok(()) => {
-                    suite.pass("transport_play");
+                    suite.pass("daw: transport_play");
                     log("[test] Play succeeded");
                 }
                 Err(e) => {
-                    suite.fail("transport_play", format!("{e}"));
+                    suite.fail("daw: transport_play", format!("{e}"));
+                }
+            }
+
+            // Small delay to let playback start
+            delay_ms(100).await;
+
+            // Test: Pause
+            log("[test] Testing pause...");
+            match transport.pause().await {
+                Ok(()) => {
+                    suite.pass("daw: transport_pause");
+                    log("[test] Pause succeeded");
+                }
+                Err(e) => {
+                    suite.fail("daw: transport_pause", format!("{e}"));
                 }
             }
 
@@ -230,19 +276,288 @@ mod wasm {
             log("[test] Testing stop...");
             match transport.stop().await {
                 Ok(()) => {
-                    suite.pass("transport_stop");
+                    suite.pass("daw: transport_stop");
                     log("[test] Stop succeeded");
                 }
                 Err(e) => {
-                    suite.fail("transport_stop", format!("{e}"));
+                    suite.fail("daw: transport_stop", format!("{e}"));
+                }
+            }
+
+            // Test: Set position
+            log("[test] Testing set_position...");
+            match transport.set_position(10.0).await {
+                Ok(()) => {
+                    suite.pass("daw: set_position");
+                    log("[test] Set position to 10s succeeded");
+                }
+                Err(e) => {
+                    suite.fail("daw: set_position", format!("{e}"));
                 }
             }
         }
 
+        // ====================================================================
+        // SetlistService Tests
+        // ====================================================================
+        log("[test] ─── SetlistService Tests ───");
+
+        let setlist_client = SetlistServiceClient::new(handle.clone());
+
+        // Test: Build setlist from open projects
+        log("[test] Testing build_from_open_projects...");
+        match setlist_client.build_from_open_projects().await {
+            Ok(()) => {
+                suite.pass("setlist: build_from_open_projects");
+                log("[test] Build setlist succeeded");
+            }
+            Err(e) => {
+                suite.fail("setlist: build_from_open_projects", format!("{e}"));
+            }
+        }
+
+        // Small delay to let setlist build
+        delay_ms(200).await;
+
+        // Test: Get setlist
+        log("[test] Testing get_setlist...");
+        match setlist_client.get_setlist().await {
+            Ok(setlist_opt) => {
+                if let Some(setlist) = setlist_opt {
+                    suite.pass("setlist: get_setlist");
+                    log(&format!(
+                        "[test] Got setlist: {} ({} songs)",
+                        setlist.name, setlist.song_count
+                    ));
+                } else {
+                    // No setlist is okay for standalone - might not have projects
+                    suite.pass("setlist: get_setlist (empty)");
+                    log("[test] No setlist (expected for standalone with no projects)");
+                }
+            }
+            Err(e) => {
+                suite.fail("setlist: get_setlist", format!("{e}"));
+            }
+        }
+
+        // Test: Get songs
+        log("[test] Testing get_songs...");
+        match setlist_client.get_songs().await {
+            Ok(songs) => {
+                suite.pass("setlist: get_songs");
+                log(&format!("[test] Got {} songs", songs.len()));
+                for (i, song) in songs.iter().enumerate() {
+                    log(&format!(
+                        "[test]   {}: {} ({:.1}s)",
+                        i, song.name, song.duration
+                    ));
+                }
+            }
+            Err(e) => {
+                suite.fail("setlist: get_songs", format!("{e}"));
+            }
+        }
+
+        // Test: Get active song
+        log("[test] Testing get_active_song...");
+        match setlist_client.get_active_song().await {
+            Ok(song_opt) => {
+                suite.pass("setlist: get_active_song");
+                if let Some(song) = song_opt {
+                    log(&format!("[test] Active song: {}", song.name));
+                } else {
+                    log("[test] No active song");
+                }
+            }
+            Err(e) => {
+                suite.fail("setlist: get_active_song", format!("{e}"));
+            }
+        }
+
+        // Test: Navigation - go to song 0
+        log("[test] Testing go_to_song(0)...");
+        match setlist_client.go_to_song(0).await {
+            Ok(()) => {
+                suite.pass("setlist: go_to_song");
+                log("[test] Navigated to song 0");
+            }
+            Err(e) => {
+                suite.fail("setlist: go_to_song", format!("{e}"));
+            }
+        }
+
+        delay_ms(100).await;
+
+        // Test: Navigation - go to section 0
+        log("[test] Testing go_to_section(0)...");
+        match setlist_client.go_to_section(0).await {
+            Ok(()) => {
+                suite.pass("setlist: go_to_section");
+                log("[test] Navigated to section 0");
+            }
+            Err(e) => {
+                suite.fail("setlist: go_to_section", format!("{e}"));
+            }
+        }
+
+        delay_ms(100).await;
+
+        // Test: Navigation - next section
+        log("[test] Testing next_section...");
+        match setlist_client.next_section().await {
+            Ok(()) => {
+                suite.pass("setlist: next_section");
+                log("[test] Moved to next section");
+            }
+            Err(e) => {
+                suite.fail("setlist: next_section", format!("{e}"));
+            }
+        }
+
+        delay_ms(100).await;
+
+        // Test: Navigation - previous section
+        log("[test] Testing previous_section...");
+        match setlist_client.previous_section().await {
+            Ok(()) => {
+                suite.pass("setlist: previous_section");
+                log("[test] Moved to previous section");
+            }
+            Err(e) => {
+                suite.fail("setlist: previous_section", format!("{e}"));
+            }
+        }
+
+        delay_ms(100).await;
+
+        // Test: Playback - play via setlist
+        log("[test] Testing setlist play...");
+        match setlist_client.play().await {
+            Ok(()) => {
+                suite.pass("setlist: play");
+                log("[test] Setlist play succeeded");
+            }
+            Err(e) => {
+                suite.fail("setlist: play", format!("{e}"));
+            }
+        }
+
+        delay_ms(100).await;
+
+        // Test: Playback - pause via setlist
+        log("[test] Testing setlist pause...");
+        match setlist_client.pause().await {
+            Ok(()) => {
+                suite.pass("setlist: pause");
+                log("[test] Setlist pause succeeded");
+            }
+            Err(e) => {
+                suite.fail("setlist: pause", format!("{e}"));
+            }
+        }
+
+        delay_ms(100).await;
+
+        // Test: Playback - toggle playback
+        log("[test] Testing toggle_playback...");
+        match setlist_client.toggle_playback().await {
+            Ok(()) => {
+                suite.pass("setlist: toggle_playback");
+                log("[test] Toggle playback succeeded");
+            }
+            Err(e) => {
+                suite.fail("setlist: toggle_playback", format!("{e}"));
+            }
+        }
+
+        delay_ms(100).await;
+
+        // Test: Stop via setlist
+        log("[test] Testing setlist stop...");
+        match setlist_client.stop().await {
+            Ok(()) => {
+                suite.pass("setlist: stop");
+                log("[test] Setlist stop succeeded");
+            }
+            Err(e) => {
+                suite.fail("setlist: stop", format!("{e}"));
+            }
+        }
+
+        // Test: Seek to specific time
+        log("[test] Testing seek_to(5.0)...");
+        match setlist_client.seek_to(5.0).await {
+            Ok(()) => {
+                suite.pass("setlist: seek_to");
+                log("[test] Seek to 5s succeeded");
+            }
+            Err(e) => {
+                suite.fail("setlist: seek_to", format!("{e}"));
+            }
+        }
+
+        // Test: Seek to song and section
+        log("[test] Testing seek_to_section(0, 0)...");
+        match setlist_client.seek_to_section(0, 0).await {
+            Ok(()) => {
+                suite.pass("setlist: seek_to_section");
+                log("[test] Seek to section succeeded");
+            }
+            Err(e) => {
+                suite.fail("setlist: seek_to_section", format!("{e}"));
+            }
+        }
+
+        // Test: Get sections for song 0
+        log("[test] Testing get_sections(0)...");
+        match setlist_client.get_sections(0).await {
+            Ok(sections) => {
+                suite.pass("setlist: get_sections");
+                log(&format!(
+                    "[test] Got {} sections for song 0",
+                    sections.len()
+                ));
+                for (i, section) in sections.iter().enumerate() {
+                    log(&format!(
+                        "[test]   {}: {} ({:.1}s - {:.1}s)",
+                        i, section.name, section.start, section.end
+                    ));
+                }
+            }
+            Err(e) => {
+                suite.fail("setlist: get_sections", format!("{e}"));
+            }
+        }
+
+        // Test: Loop toggle
+        log("[test] Testing toggle_song_loop...");
+        match setlist_client.toggle_song_loop().await {
+            Ok(()) => {
+                suite.pass("setlist: toggle_song_loop");
+                log("[test] Toggle song loop succeeded");
+            }
+            Err(e) => {
+                suite.fail("setlist: toggle_song_loop", format!("{e}"));
+            }
+        }
+
+        // Turn loop off again
+        delay_ms(100).await;
+        let _ = setlist_client.toggle_song_loop().await;
+
+        // ====================================================================
+        // Summary
+        // ====================================================================
+        log(&format!(
+            "[test] ═══════════════════════════════════════════════════"
+        ));
         log(&format!(
             "[test] Tests complete: {}/{} passed",
             suite.passed, suite.total
         ));
+        if suite.failed > 0 {
+            log(&format!("[test] FAILURES: {}", suite.failed));
+        }
 
         suite
     }
@@ -303,30 +618,56 @@ fn App() -> Element {
                         }
                     }
 
-                    // Results list
-                    div { class: "space-y-2",
-                        for result in &suite.results {
-                            div {
-                                class: "flex items-center gap-3 p-2 rounded",
-                                class: if result.passed { "bg-green-900/30" } else { "bg-red-900/30" },
-
-                                // Status indicator
-                                span {
-                                    class: if result.passed { "text-green-400" } else { "text-red-400" },
-                                    if result.passed { "[PASS]" } else { "[FAIL]" }
+                    // Results list - grouped by category
+                    div { class: "space-y-4",
+                        // DAW tests
+                        div {
+                            h2 { class: "text-lg font-semibold text-blue-400 mb-2", "DAW Control" }
+                            div { class: "space-y-1 ml-4",
+                                for result in suite.results.iter().filter(|r| r.name.starts_with("daw:") || r.name == "connect") {
+                                    TestResultItem { result: result.clone() }
                                 }
+                            }
+                        }
 
-                                // Test name
-                                span { class: "flex-1", "{result.name}" }
-
-                                // Error message if failed
-                                if let Some(error) = &result.error {
-                                    span { class: "text-red-300 text-sm", "{error}" }
+                        // Setlist tests
+                        div {
+                            h2 { class: "text-lg font-semibold text-purple-400 mb-2", "SetlistService" }
+                            div { class: "space-y-1 ml-4",
+                                for result in suite.results.iter().filter(|r| r.name.starts_with("setlist:")) {
+                                    TestResultItem { result: result.clone() }
                                 }
                             }
                         }
                     }
                 },
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[component]
+fn TestResultItem(result: TestResult) -> Element {
+    rsx! {
+        div {
+            class: "flex items-center gap-3 p-2 rounded",
+            class: if result.passed { "bg-green-900/30" } else { "bg-red-900/30" },
+
+            // Status indicator
+            span {
+                class: if result.passed { "text-green-400" } else { "text-red-400" },
+                if result.passed { "[PASS]" } else { "[FAIL]" }
+            }
+
+            // Test name (remove prefix for cleaner display)
+            span { class: "flex-1",
+                {result.name.split(": ").last().unwrap_or(&result.name)}
+            }
+
+            // Error message if failed
+            if let Some(error) = &result.error {
+                span { class: "text-red-300 text-sm max-w-md truncate", "{error}" }
             }
         }
     }

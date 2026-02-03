@@ -82,7 +82,7 @@ impl TestHost {
     }
 
     async fn is_playing(&self) -> bool {
-        self.transport.is_playing().await
+        self.transport.currently_playing().await
     }
 
     /// Start the Unix socket server for this host.

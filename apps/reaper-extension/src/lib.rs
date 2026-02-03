@@ -36,6 +36,14 @@ use roam_telemetry::{
 };
 use std::time::Duration;
 
+// Service dispatchers for method ID routing
+use actions_proto::DefinesActionsDispatcher;
+use daw_proto::{
+    MarkerServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
+    TempoMapServiceDispatcher, TransportServiceDispatcher,
+};
+use session_proto::{SessionServiceDispatcher, SetlistServiceDispatcher, SongServiceDispatcher};
+
 // ============================================================================
 // Telemetry Configuration
 // ============================================================================
@@ -300,13 +308,43 @@ fn get_app() -> Option<&'static Fragile<App>> {
 /// Register cells with the Host for lazy spawning
 fn register_cells(cell_dir: &PathBuf) {
     // Session cell - DAW calls are handled by the host's in-process DAW dispatcher
+    // Session needs to forward DAW calls (transport, project, markers, regions, tempo)
     CellConfig::new("session", cell_dir)
         .inherit_stdio(true)
+        .forwards_to_with_methods("daw-reaper", || {
+            daw_proto::TransportServiceDispatcher::<()>::method_ids()
+                .into_iter()
+                .chain(daw_proto::ProjectServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::MarkerServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::RegionServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::TempoMapServiceDispatcher::<()>::method_ids())
+                .collect()
+        })
         .register();
 
-    // Gateway WebSocket cell - DAW calls are handled by the host's in-process DAW dispatcher
+    // Gateway WebSocket cell - forwards to both DAW and Session
+    // Routes method IDs to the correct cell based on which service handles them
     CellConfig::new("gateway-ws", cell_dir)
         .inherit_stdio(true)
+        .forwards_to_with_methods("daw-reaper", || {
+            // DAW services: Transport, Project, Markers, Regions, TempoMap
+            daw_proto::TransportServiceDispatcher::<()>::method_ids()
+                .into_iter()
+                .chain(daw_proto::ProjectServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::MarkerServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::RegionServiceDispatcher::<()>::method_ids())
+                .chain(daw_proto::TempoMapServiceDispatcher::<()>::method_ids())
+                .collect()
+        })
+        .forwards_to_with_methods("session", || {
+            // Session services: Setlist, Song, Session, DefinesActions
+            session_proto::SetlistServiceDispatcher::<()>::method_ids()
+                .into_iter()
+                .chain(session_proto::SongServiceDispatcher::<()>::method_ids())
+                .chain(session_proto::SessionServiceDispatcher::<()>::method_ids())
+                .chain(actions_proto::DefinesActionsDispatcher::<()>::method_ids())
+                .collect()
+        })
         .register();
 
     info!("Cells registered for lazy spawning (session, gateway-ws)");

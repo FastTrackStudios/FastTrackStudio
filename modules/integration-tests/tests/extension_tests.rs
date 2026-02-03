@@ -3,6 +3,7 @@
 //! These tests spawn the full test-extension binary and verify
 //! connections via Unix socket and WebSocket work correctly.
 
+use daw_proto::ProjectContext;
 use integration_tests::harness::TestExtensionHarness;
 
 /// Test connecting to test-extension via Unix socket.
@@ -13,37 +14,24 @@ use integration_tests::harness::TestExtensionHarness;
 /// - Can connect and receive host identity
 /// - Transport controls work (play/stop)
 #[tokio::test]
-async fn test_unix_socket_connection() {
+async fn test_unix_socket_connection() -> eyre::Result<()> {
     // Spawn test-extension
-    let harness = TestExtensionHarness::spawn()
-        .await
-        .expect("Failed to spawn test-extension");
+    let harness = TestExtensionHarness::spawn().await?;
 
     // Wait for it to be ready
-    harness
-        .wait_ready()
-        .await
-        .expect("Extension failed to become ready");
+    harness.wait_ready().await?;
 
     // Connect via Unix socket
-    let conn = harness
-        .connect_unix()
-        .await
-        .expect("Failed to connect via Unix socket");
+    let conn = harness.connect_unix().await?;
 
     // Verify we got a connection (identity may or may not be present depending on host config)
     assert!(conn.is_connected());
 
     // Test transport controls
-    conn.transport()
-        .play(None)
-        .await
-        .expect("play() should succeed");
+    conn.transport().play(ProjectContext::Current).await?;
+    conn.transport().stop(ProjectContext::Current).await?;
 
-    conn.transport()
-        .stop(None)
-        .await
-        .expect("stop() should succeed");
+    Ok(())
 }
 
 /// Test connecting to test-extension via WebSocket.
@@ -54,37 +42,24 @@ async fn test_unix_socket_connection() {
 /// - Can connect via WebSocket
 /// - Transport controls work (play/stop)
 #[tokio::test]
-async fn test_websocket_connection() {
+async fn test_websocket_connection() -> eyre::Result<()> {
     // Spawn test-extension
-    let harness = TestExtensionHarness::spawn()
-        .await
-        .expect("Failed to spawn test-extension");
+    let harness = TestExtensionHarness::spawn().await?;
 
     // Wait for it to be ready
-    harness
-        .wait_ready()
-        .await
-        .expect("Extension failed to become ready");
+    harness.wait_ready().await?;
 
     // Connect via WebSocket
-    let conn = harness
-        .connect_websocket()
-        .await
-        .expect("Failed to connect via WebSocket");
+    let conn = harness.connect_websocket().await?;
 
     // Verify we got a connection
     assert!(conn.is_connected());
 
     // Test transport controls
-    conn.transport()
-        .play(None)
-        .await
-        .expect("play() should succeed");
+    conn.transport().play(ProjectContext::Current).await?;
+    conn.transport().stop(ProjectContext::Current).await?;
 
-    conn.transport()
-        .stop(None)
-        .await
-        .expect("stop() should succeed");
+    Ok(())
 }
 
 /// Test that both Unix socket and WebSocket connections work simultaneously.
@@ -94,59 +69,32 @@ async fn test_websocket_connection() {
 /// - Commands from either connection work
 /// - No interference between connections
 #[tokio::test]
-async fn test_concurrent_connections() {
+async fn test_concurrent_connections() -> eyre::Result<()> {
     // Spawn test-extension
-    let harness = TestExtensionHarness::spawn()
-        .await
-        .expect("Failed to spawn test-extension");
+    let harness = TestExtensionHarness::spawn().await?;
 
     // Wait for it to be ready
-    harness
-        .wait_ready()
-        .await
-        .expect("Extension failed to become ready");
+    harness.wait_ready().await?;
 
     // Connect via both methods
-    let unix_conn = harness
-        .connect_unix()
-        .await
-        .expect("Failed to connect via Unix socket");
-
-    let ws_conn = harness
-        .connect_websocket()
-        .await
-        .expect("Failed to connect via WebSocket");
+    let unix_conn = harness.connect_unix().await?;
+    let ws_conn = harness.connect_websocket().await?;
 
     // Both should be connected
     assert!(unix_conn.is_connected());
     assert!(ws_conn.is_connected());
 
     // Control from Unix connection
-    unix_conn
-        .transport()
-        .play(None)
-        .await
-        .expect("play() from Unix should succeed");
+    unix_conn.transport().play(ProjectContext::Current).await?;
 
     // Control from WebSocket connection
-    ws_conn
-        .transport()
-        .stop(None)
-        .await
-        .expect("stop() from WebSocket should succeed");
+    ws_conn.transport().stop(ProjectContext::Current).await?;
 
     // Both connections should still work
-    ws_conn
-        .transport()
-        .play(None)
-        .await
-        .expect("play() from WebSocket should succeed");
+    ws_conn.transport().play(ProjectContext::Current).await?;
+    unix_conn.transport().stop(ProjectContext::Current).await?;
 
-    unix_conn
-        .transport()
-        .stop(None)
-        .await
-        .expect("stop() from Unix should succeed");
+    Ok(())
 }
 
 /// Test reconnection after disconnecting.
@@ -155,30 +103,17 @@ async fn test_concurrent_connections() {
 /// - Can disconnect and reconnect
 /// - Extension remains stable after client disconnects
 #[tokio::test]
-async fn test_reconnection() {
+async fn test_reconnection() -> eyre::Result<()> {
     // Spawn test-extension
-    let harness = TestExtensionHarness::spawn()
-        .await
-        .expect("Failed to spawn test-extension");
+    let harness = TestExtensionHarness::spawn().await?;
 
     // Wait for it to be ready
-    harness
-        .wait_ready()
-        .await
-        .expect("Extension failed to become ready");
+    harness.wait_ready().await?;
 
     // First connection
     {
-        let conn = harness
-            .connect_unix()
-            .await
-            .expect("Failed to connect via Unix socket");
-
-        conn.transport()
-            .play(None)
-            .await
-            .expect("play() should succeed");
-
+        let conn = harness.connect_unix().await?;
+        conn.transport().play(ProjectContext::Current).await?;
         // Connection dropped here
     }
 
@@ -187,16 +122,11 @@ async fn test_reconnection() {
 
     // Second connection
     {
-        let conn = harness
-            .connect_unix()
-            .await
-            .expect("Failed to reconnect via Unix socket");
-
-        conn.transport()
-            .stop(None)
-            .await
-            .expect("stop() should succeed after reconnect");
+        let conn = harness.connect_unix().await?;
+        conn.transport().stop(ProjectContext::Current).await?;
     }
+
+    Ok(())
 }
 
 /// Test multiple WebSocket connections at once.
@@ -205,43 +135,24 @@ async fn test_reconnection() {
 /// - Gateway can handle multiple browser connections
 /// - All connections can send commands
 #[tokio::test]
-async fn test_multiple_websocket_connections() {
+async fn test_multiple_websocket_connections() -> eyre::Result<()> {
     // Spawn test-extension
-    let harness = TestExtensionHarness::spawn()
-        .await
-        .expect("Failed to spawn test-extension");
+    let harness = TestExtensionHarness::spawn().await?;
 
     // Wait for it to be ready
-    harness
-        .wait_ready()
-        .await
-        .expect("Extension failed to become ready");
+    harness.wait_ready().await?;
 
     // Connect multiple WebSocket clients
-    let ws_conn1 = harness
-        .connect_websocket()
-        .await
-        .expect("Failed to connect first WebSocket");
-
-    let ws_conn2 = harness
-        .connect_websocket()
-        .await
-        .expect("Failed to connect second WebSocket");
+    let ws_conn1 = harness.connect_websocket().await?;
+    let ws_conn2 = harness.connect_websocket().await?;
 
     // Both should be connected
     assert!(ws_conn1.is_connected());
     assert!(ws_conn2.is_connected());
 
     // Commands from both should work
-    ws_conn1
-        .transport()
-        .play(None)
-        .await
-        .expect("play() from first WS should succeed");
+    ws_conn1.transport().play(ProjectContext::Current).await?;
+    ws_conn2.transport().stop(ProjectContext::Current).await?;
 
-    ws_conn2
-        .transport()
-        .stop(None)
-        .await
-        .expect("stop() from second WS should succeed");
+    Ok(())
 }
