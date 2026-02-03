@@ -10,3 +10,6 @@
 [submodule "reference/facet"]
 	path = reference/facet
 	url = https://github.com/facet-rs/facet.git
+[submodule "reference/reaper-rs"]
+	path = reference/reaper-rs
+	url = https://github.com/helgoboss/reaper-rs.git
