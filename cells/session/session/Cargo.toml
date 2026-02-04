@@ -3,6 +3,14 @@ name = "session"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "session"
+path = "src/lib.rs"
+
+[[bin]]
+name = "session"
+path = "src/main.rs"
+
 [dependencies]
 cell-runtime.workspace = true
 session-proto = { path = "../session-proto" }
@@ -19,7 +27,3 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 daw-standalone = { path = "../../daw/daw-standalone" }
-
-[[bin]]
-name = "session"
-path = "src/main.rs"

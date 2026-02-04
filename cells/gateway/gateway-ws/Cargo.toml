@@ -3,6 +3,10 @@ name = "gateway-ws"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "gateway_ws"
+path = "src/lib.rs"
+
 [[bin]]
 name = "gateway-ws"
 path = "src/main.rs"

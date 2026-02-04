@@ -94,6 +94,15 @@ impl WaitPolicy {
     }
 }
 
+/// Response for cell reload request.
+#[derive(Debug, Clone, Facet)]
+pub struct ReloadResponse {
+    /// Whether the reload was initiated successfully.
+    pub success: bool,
+    /// Error message if reload failed.
+    pub error: Option<String>,
+}
+
 /// Host service that all cells can call.
 ///
 /// This provides the cell lifecycle protocol - cells call `ready()` after
@@ -115,4 +124,17 @@ pub trait HostService {
     /// The `policy` configures the wait behavior with exponential backoff.
     /// Use `WaitPolicy::immediate()` for non-blocking checks.
     async fn poll_ready(&self, cell_name: String, policy: WaitPolicy) -> PollReadyResponse;
+
+    /// Request a hot-reload of a specific cell.
+    ///
+    /// This kills the cell process and respawns it from the same binary.
+    /// The cell's RebindableHandle ensures existing forwarders continue to work
+    /// after the reload completes.
+    ///
+    /// # Arguments
+    /// * `cell_name` - The name of the cell to reload (e.g., "session", "gateway-ws")
+    ///
+    /// # Returns
+    /// A response indicating whether the reload was initiated successfully.
+    async fn reload_cell(&self, cell_name: String) -> ReloadResponse;
 }

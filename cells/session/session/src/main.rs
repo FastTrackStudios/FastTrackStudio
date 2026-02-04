@@ -2,11 +2,8 @@
 //!
 //! This cell provides a control surface that connects to a DAW implementation
 //! through daw-control and presents transport controls.
-
-mod setlist_builder;
-mod setlist_service;
-mod song_builder;
-mod song_service;
+//!
+//! This is the cell binary entry point. For library usage, import `session` crate directly.
 
 use actions_proto::{
     ActionCategory, ActionDefinition, ActionId, ActionResult, DefinesActions,
@@ -15,37 +12,17 @@ use actions_proto::{
 use cell_runtime::{HostServiceClient, WaitPolicy, run_cell};
 use daw_control::Daw;
 use roam::session::{ConnectionHandle, Context};
-use roam_telemetry::{
-    ExporterConfig, LoggingExporter, OtlpExporter, SpanExporter, TelemetryMiddleware,
-};
+use roam_telemetry::{ExporterConfig, OtlpExporter, TelemetryMiddleware};
+use session::{SetlistServiceImpl, SongServiceImpl};
 use session_proto::{
     SessionService, SessionServiceDispatcher, SetlistServiceDispatcher, SongServiceDispatcher,
 };
-use setlist_service::SetlistServiceImpl;
-use song_service::SongServiceImpl;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tracing::{info, warn};
 
-/// Composite exporter that sends to both OTLP and console
-#[derive(Clone)]
-struct CompositeExporter {
-    otlp: OtlpExporter,
-    logging: LoggingExporter,
-}
-
-impl SpanExporter for CompositeExporter {
-    fn send(&self, span: roam_telemetry::Span) {
-        self.logging.send(span.clone());
-        self.otlp.send(span);
-    }
-
-    fn service_name(&self) -> &str {
-        "session"
-    }
-}
-
-fn create_telemetry() -> TelemetryMiddleware<CompositeExporter> {
+/// Create telemetry middleware (OTLP only, no console logging)
+fn create_telemetry() -> TelemetryMiddleware<OtlpExporter> {
     let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .unwrap_or_else(|_| "http://localhost:4318/v1/traces".to_string());
 
@@ -58,12 +35,7 @@ fn create_telemetry() -> TelemetryMiddleware<CompositeExporter> {
         timeout: Duration::from_secs(10),
     });
 
-    let logging_exporter = LoggingExporter::new("session");
-
-    TelemetryMiddleware::new(CompositeExporter {
-        otlp: otlp_exporter,
-        logging: logging_exporter,
-    })
+    TelemetryMiddleware::new(otlp_exporter)
 }
 
 /// Session actions defined by this cell
@@ -121,7 +93,7 @@ impl DefinesActions for SessionServiceImpl {
     async fn execute_action(&self, _cx: &Context, action_id: ActionId) -> ActionResult {
         match action_id.as_str() {
             "fts.session.log_hello" => {
-                info!("Hello from session!");
+                info!("Hello from the session cell!");
                 ActionResult::success_with_message("Logged hello from session")
             }
             "fts.session.log_status" => {
@@ -129,6 +101,32 @@ impl DefinesActions for SessionServiceImpl {
                 ActionResult::success_with_message("Logged session status")
             }
             _ => ActionResult::failure(format!("Unknown action: {}", action_id)),
+        }
+    }
+}
+
+/// Try to poll readiness for a specific DAW cell name
+async fn try_poll_daw_ready(host: &HostServiceClient, cell_name: &str) -> bool {
+    // Use a short timeout since we're checking multiple cells
+    let policy = WaitPolicy {
+        max_attempts: 5,
+        initial_backoff_ms: 50,
+        max_backoff_ms: 200,
+        backoff_multiplier: 1.5,
+    };
+
+    match host.poll_ready(cell_name.to_string(), policy).await {
+        Ok(resp) if resp.ready => {
+            info!("DAW cell '{}' is ready", cell_name);
+            true
+        }
+        Ok(_) => {
+            tracing::debug!("DAW cell '{}' not ready", cell_name);
+            false
+        }
+        Err(e) => {
+            tracing::debug!("Failed to poll '{}' readiness: {}", cell_name, e);
+            false
         }
     }
 }
@@ -142,26 +140,22 @@ async fn init_daw_control(handle: ConnectionHandle) {
     }
     info!("daw-control initialized");
 
-    // Wait for DAW cell to be ready using host service
-    info!("Waiting for DAW cell to be ready...");
+    // Wait for DAW to be ready using host service
+    // Note: DAW can be either a separate "daw-standalone" cell or in-process "daw-reaper"
+    // In reaper-extension, DAW services are provided in-process as "daw-reaper"
+    info!("Waiting for DAW to be ready...");
     let host = HostServiceClient::new(handle);
-    let poll_response = match host
-        .poll_ready("daw-standalone".to_string(), WaitPolicy::default())
-        .await
-    {
-        Ok(resp) => resp,
-        Err(e) => {
-            warn!("Failed to poll DAW readiness: {}", e);
-            return;
-        }
-    };
 
-    if !poll_response.ready {
-        warn!("DAW cell did not become ready within timeout");
+    // Try daw-reaper first (in-process REAPER), then daw-standalone (separate cell)
+    let daw_ready = try_poll_daw_ready(&host, "daw-reaper").await
+        || try_poll_daw_ready(&host, "daw-standalone").await;
+
+    if !daw_ready {
+        warn!("No DAW cell became ready within timeout");
         info!("Session cell running without transport control.");
         return;
     }
-    info!("DAW cell is ready!");
+    info!("DAW is ready!");
 
     // Try to get current project with retry logic
     match wait_for_project_with_retry(3, Duration::from_millis(100)).await {

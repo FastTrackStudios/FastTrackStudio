@@ -209,10 +209,8 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     State((gateway, host_handle)): State<(Arc<WebSocketGateway>, ConnectionHandle)>,
 ) -> impl IntoResponse {
-    // Accept "roam" subprotocol if requested (Safari compatibility)
-    // Safari sometimes requires a subprotocol to be explicitly accepted
-    ws.protocols(["roam"])
-        .on_upgrade(move |socket| handle_socket(socket, gateway, host_handle))
+    // Don't require any subprotocol - Safari mobile is strict about protocol negotiation
+    ws.on_upgrade(move |socket| handle_socket(socket, gateway, host_handle))
 }
 
 /// Handle a WebSocket connection - runs roam RPC and forwards to host
@@ -241,7 +239,11 @@ async fn handle_socket(
     let browser_to_host = ForwardingDispatcher::new(host_handle.clone());
 
     // Accept the roam session with the forwarding dispatcher
-    let config = HandshakeConfig::default();
+    // Use higher credit for 60Hz streaming updates
+    let config = HandshakeConfig {
+        max_payload_size: 1024 * 1024,            // 1 MiB
+        initial_channel_credit: 16 * 1024 * 1024, // 16 MiB for high-frequency streaming
+    };
     match accept_framed(transport, config, browser_to_host).await {
         Ok((_browser_handle, _incoming, driver)) => {
             debug!("Binary WebSocket client connected (forwarding to host with telemetry)");

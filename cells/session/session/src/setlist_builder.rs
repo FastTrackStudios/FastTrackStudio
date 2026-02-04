@@ -5,7 +5,7 @@
 use crate::song_builder::SongBuilder;
 use daw_control::Daw;
 use session_proto::Setlist;
-use tracing::{error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Builder for assembling setlists from open DAW projects
 pub struct SetlistBuilder;
@@ -17,21 +17,24 @@ impl SetlistBuilder {
     /// and combines them into a complete Setlist. Projects that don't contain
     /// valid song structure are skipped with a warning.
     pub async fn build_from_open_projects(daw: &Daw) -> eyre::Result<Setlist> {
-        info!("Building setlist from open projects...");
+        debug!("============================================================");
+        debug!("SETLIST BUILDER: Building setlist from open projects...");
+        debug!("============================================================");
 
         // Get all open projects
         let projects = daw.projects().await?;
-        info!("Found {} open projects", projects.len());
+        debug!("Found {} open projects", projects.len());
 
         for (i, project) in projects.iter().enumerate() {
-            info!("  Project {}: {}", i, project.guid());
+            debug!("  Project {}: {}", i, project.guid());
         }
 
         let mut songs = Vec::new();
 
         // Extract song from each project
         for (idx, project) in projects.iter().enumerate() {
-            info!(
+            debug!("------------------------------------------------------------");
+            debug!(
                 "Processing project {}/{}: {}",
                 idx + 1,
                 projects.len(),
@@ -40,8 +43,8 @@ impl SetlistBuilder {
 
             match SongBuilder::build(project).await {
                 Ok(song) => {
-                    info!(
-                        "  ✓ Extracted song: {} ({} sections)",
+                    debug!(
+                        "  Song extracted: {} ({} sections)",
                         song.name,
                         song.sections.len()
                     );
@@ -57,7 +60,7 @@ impl SetlistBuilder {
             }
         }
 
-        info!("Successfully extracted {} songs", songs.len());
+        debug!("Setlist complete: {} songs extracted", songs.len());
 
         // Sort songs by start position (they should already be in project tab order)
         // songs.sort_by(|a, b| {
