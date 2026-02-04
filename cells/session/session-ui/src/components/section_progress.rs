@@ -197,6 +197,37 @@ pub fn SectionProgressBar(
     // Check if we have measure indicators to render
     let has_measures = !measure_sections.is_empty();
 
+    // Pre-calculate phrase boundaries (every 4 measures within this section)
+    // These are thicker lines that extend above and below the progress bar
+    // The grouping resets at the start of each section, so we use the measure index
+    // within the section (0-indexed), not the absolute measure number from REAPER
+    let phrase_boundaries: Vec<(usize, f64)> = measure_indicators
+        .iter()
+        .enumerate()
+        .filter_map(|(index, _measure)| {
+            // index is 0-indexed within this section
+            // We want lines after measures 4, 8, 12... (index 3, 7, 11...)
+            // So we check if (index + 1) % 4 == 0
+            let measure_in_section = index + 1; // 1-indexed measure within section
+            if measure_in_section % 4 == 0 {
+                // Get the end position of this measure (start of next measure, or 100%)
+                let phrase_line_percent = if index + 1 < measure_indicators.len() {
+                    measure_indicators[index + 1].position_percent
+                } else {
+                    100.0
+                };
+                // Only include if not at the very end (100%)
+                if phrase_line_percent < 99.5 {
+                    Some((index, phrase_line_percent))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+
     rsx! {
         div {
             class: "relative flex flex-col items-center justify-center w-full",
@@ -303,6 +334,17 @@ pub fn SectionProgressBar(
                                     measure.position_percent
                                 ),
                             }
+                        }
+                    }
+                    // Thicker phrase lines every 4 measures (extends above and below the bar)
+                    for (index, phrase_percent) in phrase_boundaries.iter() {
+                        div {
+                            key: "phrase-boundary-{index}",
+                            class: "absolute pointer-events-none z-40",
+                            style: format!(
+                                "left: {}%; width: 2px; top: -0.25rem; bottom: -0.25rem; background-color: rgba(255, 255, 255, 0.6); transform: translateX(-50%);",
+                                phrase_percent
+                            ),
                         }
                     }
                 } else {
