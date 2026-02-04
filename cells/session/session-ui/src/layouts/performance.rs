@@ -405,6 +405,7 @@ fn PerformanceMainContent(
                             color: comment.color_hex(),
                             is_count_in: comment.is_count_in,
                             section_only: comment.section_only,
+                            position_seconds: comment.position_seconds,
                         })
                     } else {
                         None
@@ -513,6 +514,7 @@ fn PerformanceMainContent(
                                 color: comment.color_hex(),
                                 is_count_in: comment.is_count_in,
                                 section_only: comment.section_only,
+                                position_seconds: comment.position_seconds,
                             })
                         } else {
                             None
@@ -522,6 +524,20 @@ fn PerformanceMainContent(
             })
         })
         .unwrap_or_default();
+
+    // Build loop indicator data from transport state
+    // The loop_region in TransportState is already in percentages (0.0-1.0)
+    let loop_indicator = transport_state.as_ref().and_then(|t| {
+        if t.is_looping {
+            t.loop_region.map(|(start, end)| LoopIndicatorData {
+                enabled: true,
+                start_percent: start * 100.0, // Convert to percentage (0-100)
+                end_percent: end * 100.0,
+            })
+        } else {
+            None
+        }
+    });
 
     // Capture song_index for closures
     let song_index_for_section_click = active_indices.song_index;
@@ -561,9 +577,29 @@ fn PerformanceMainContent(
                                         });
                                     }
                                 })),
+                                on_comment_click: Some(Callback::new({
+                                    let song_index = active_indices.song_index;
+                                    move |position_seconds: f64| {
+                                        if let Some(song_idx) = song_index {
+                                            spawn(async move {
+                                                tracing::info!(
+                                                    "Seeking to comment at {:.2}s in song {}",
+                                                    position_seconds,
+                                                    song_idx
+                                                );
+                                                let _ = Session::get()
+                                                    .setlist()
+                                                    .seek_to_time(song_idx, position_seconds)
+                                                    .await;
+                                            });
+                                        }
+                                    }
+                                })),
                                 tempo_markers: tempo_markers.clone(),
                                 comment_markers: comment_markers.clone(),
                                 song_key: song_key.clone(),
+                                loop_indicator: loop_indicator.clone(),
+                                queued_target: active_indices.queued_target.clone(),
                             }
                         }
                     }
@@ -600,6 +636,25 @@ fn PerformanceMainContent(
                                         }
                                     }
                                 })),
+                                on_comment_click: Some(Callback::new({
+                                    let song_index = active_indices.song_index;
+                                    move |position_seconds: f64| {
+                                        if let Some(song_idx) = song_index {
+                                            spawn(async move {
+                                                tracing::info!(
+                                                    "Seeking to comment at {:.2}s in song {}",
+                                                    position_seconds,
+                                                    song_idx
+                                                );
+                                                let _ = Session::get()
+                                                    .setlist()
+                                                    .seek_to_time(song_idx, position_seconds)
+                                                    .await;
+                                            });
+                                        }
+                                    }
+                                })),
+                                queued_target: active_indices.queued_target.clone(),
                             }
                         }
                     }
