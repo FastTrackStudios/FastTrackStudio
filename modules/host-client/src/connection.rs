@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use cell_host_proto::HostServiceClient;
 use daw_proto::{ProjectServiceClient, TransportServiceClient};
 use gateway_proto::GatewayCoordinatorClient;
 use host_manager_proto::{HostIdentity, HOST_IDENTITY_KEY};
@@ -35,6 +36,9 @@ pub struct HostConnection {
 
     /// Cached gateway coordinator client.
     gateway_client: Arc<GatewayCoordinatorClient>,
+
+    /// Cached host service client (for admin operations like reload_cell).
+    host_service_client: Arc<HostServiceClient>,
 }
 
 impl HostConnection {
@@ -55,11 +59,17 @@ impl HostConnection {
         // Wrap in COBS framing
         let framed = CobsFramed::new(stream);
 
+        // Configure handshake with higher credit for 60Hz streaming
+        // The negotiated credit is the minimum of both peers, so both sides need high limits
+        let config = HandshakeConfig {
+            max_payload_size: 1024 * 1024,            // 1 MiB
+            initial_channel_credit: 16 * 1024 * 1024, // 16 MiB for high-frequency streaming
+        };
+
         // Initiate the roam connection (we're the client/initiator)
-        let (handle, mut incoming, driver) =
-            initiate_framed(framed, HandshakeConfig::default(), NoDispatcher)
-                .await
-                .map_err(|e| HostClientError::HandshakeFailed(e.to_string()))?;
+        let (handle, mut incoming, driver) = initiate_framed(framed, config, NoDispatcher)
+            .await
+            .map_err(|e| HostClientError::HandshakeFailed(e.to_string()))?;
 
         // Spawn the driver to process messages
         tokio::spawn(async move {
@@ -75,6 +85,7 @@ impl HostConnection {
         let transport_client = Arc::new(TransportServiceClient::new(handle.clone()));
         let project_client = Arc::new(ProjectServiceClient::new(handle.clone()));
         let gateway_client = Arc::new(GatewayCoordinatorClient::new(handle.clone()));
+        let host_service_client = Arc::new(HostServiceClient::new(handle.clone()));
 
         info!(
             "Connected to host: {}",
@@ -90,12 +101,19 @@ impl HostConnection {
             transport_client,
             project_client,
             gateway_client,
+            host_service_client,
         })
     }
 
     /// Connect to a host via WebSocket.
     pub async fn connect_websocket(url: &str) -> Result<Self, HostClientError> {
         info!("Connecting to host via WebSocket: {}", url);
+
+        // Configure handshake with higher credit for 60Hz streaming
+        let config = HandshakeConfig {
+            max_payload_size: 1024 * 1024,            // 1 MiB
+            initial_channel_credit: 16 * 1024 * 1024, // 16 MiB for high-frequency streaming
+        };
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -108,10 +126,9 @@ impl HostConnection {
             })?;
 
             // Initiate the roam connection
-            let (handle, mut incoming, driver) =
-                initiate_framed(transport, HandshakeConfig::default(), NoDispatcher)
-                    .await
-                    .map_err(|e| HostClientError::HandshakeFailed(e.to_string()))?;
+            let (handle, mut incoming, driver) = initiate_framed(transport, config, NoDispatcher)
+                .await
+                .map_err(|e| HostClientError::HandshakeFailed(e.to_string()))?;
 
             // Spawn the driver
             wasm_bindgen_futures::spawn_local(async move {
@@ -127,6 +144,7 @@ impl HostConnection {
             let transport_client = Arc::new(TransportServiceClient::new(handle.clone()));
             let project_client = Arc::new(ProjectServiceClient::new(handle.clone()));
             let gateway_client = Arc::new(GatewayCoordinatorClient::new(handle.clone()));
+            let host_service_client = Arc::new(HostServiceClient::new(handle.clone()));
 
             info!(
                 "Connected to host: {}",
@@ -142,6 +160,7 @@ impl HostConnection {
                 transport_client,
                 project_client,
                 gateway_client,
+                host_service_client,
             })
         }
 
@@ -160,10 +179,9 @@ impl HostConnection {
             let transport = WsTransport::new(ws_stream);
 
             // Initiate the roam connection
-            let (handle, mut incoming, driver) =
-                initiate_framed(transport, HandshakeConfig::default(), NoDispatcher)
-                    .await
-                    .map_err(|e| HostClientError::HandshakeFailed(e.to_string()))?;
+            let (handle, mut incoming, driver) = initiate_framed(transport, config, NoDispatcher)
+                .await
+                .map_err(|e| HostClientError::HandshakeFailed(e.to_string()))?;
 
             // Spawn the driver
             tokio::spawn(async move {
@@ -179,6 +197,7 @@ impl HostConnection {
             let transport_client = Arc::new(TransportServiceClient::new(handle.clone()));
             let project_client = Arc::new(ProjectServiceClient::new(handle.clone()));
             let gateway_client = Arc::new(GatewayCoordinatorClient::new(handle.clone()));
+            let host_service_client = Arc::new(HostServiceClient::new(handle.clone()));
 
             info!(
                 "Connected to host: {}",
@@ -194,6 +213,7 @@ impl HostConnection {
                 transport_client,
                 project_client,
                 gateway_client,
+                host_service_client,
             })
         }
     }
@@ -274,6 +294,13 @@ impl HostConnection {
     /// Get a reference to the gateway coordinator client.
     pub fn gateway(&self) -> &GatewayCoordinatorClient {
         &self.gateway_client
+    }
+
+    /// Get a reference to the host service client.
+    ///
+    /// This provides admin operations like `reload_cell` for hot-reloading cells.
+    pub fn host_service(&self) -> &HostServiceClient {
+        &self.host_service_client
     }
 
     /// Get the underlying connection handle for advanced use cases.

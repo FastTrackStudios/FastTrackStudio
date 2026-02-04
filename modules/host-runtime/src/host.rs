@@ -14,8 +14,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use crate::forwarder::RebindableHandle;
 use dashmap::DashMap;
-use roam::session::{ConnectionHandle, LateBoundHandle, RoutedDispatcher};
+use roam::session::{ConnectionHandle, RoutedDispatcher};
 use roam_shm::driver::MultiPeerHostDriverHandle;
 use roam_shm::layout::SegmentConfig;
 use roam_shm::spawn::AddPeerOptions;
@@ -272,6 +273,10 @@ pub struct Host {
     /// When a cell dies, we can look up its config here and respawn it.
     spawned_cells: Mutex<HashMap<String, PendingCell>>,
 
+    /// Child process handles for spawned cells (for hot-reload kill support).
+    /// Key is cell name, value is the process ID.
+    child_pids: DashMap<String, u32>,
+
     /// Whether quiet mode is enabled (suppress cell output).
     quiet_mode: AtomicBool,
 
@@ -284,10 +289,10 @@ pub struct Host {
     /// Cell startup timeout in seconds.
     cell_timeout_secs: u64,
 
-    /// Late-bound handles for forwarding between cells.
-    /// Key is the target cell name, value is the late-bound handle.
-    /// When a cell is spawned, its handle gets bound to this.
-    late_bound_handles: DashMap<String, LateBoundHandle>,
+    /// Rebindable handles for forwarding between cells.
+    /// Key is the target cell name, value is the rebindable handle.
+    /// When a cell is spawned/reloaded, its handle gets bound to this.
+    rebindable_handles: DashMap<String, RebindableHandle>,
 
     /// Optional DAW dispatcher for handling DAW service calls in-process.
     /// This is used when the DAW implementation (e.g., ReaperTransport) needs
@@ -305,6 +310,7 @@ impl Host {
                 cell_handles: DashMap::new(),
                 pending_cells: Mutex::new(HashMap::new()),
                 spawned_cells: Mutex::new(HashMap::new()),
+                child_pids: DashMap::new(),
                 quiet_mode: AtomicBool::new(false),
                 driver_handle: OnceLock::new(),
                 tracing_state: HostTracingState::new(4096),
@@ -312,27 +318,37 @@ impl Host {
                     .ok()
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(10),
-                late_bound_handles: DashMap::new(),
+                rebindable_handles: DashMap::new(),
                 daw_dispatcher: OnceLock::new(),
             })
         })
     }
 
-    /// Get or create a late-bound handle for forwarding to a cell.
-    /// Returns a clone of the LateBoundHandle (they're Arc-based internally).
-    pub fn get_or_create_late_bound(&self, cell_name: &str) -> LateBoundHandle {
-        self.late_bound_handles
+    /// Get or create a rebindable handle for forwarding to a cell.
+    /// Returns a clone of the RebindableHandle (they're Arc-based internally).
+    pub fn get_or_create_rebindable(&self, cell_name: &str) -> RebindableHandle {
+        self.rebindable_handles
             .entry(cell_name.to_string())
-            .or_insert_with(LateBoundHandle::new)
+            .or_insert_with(RebindableHandle::new)
             .clone()
     }
 
-    /// Bind a cell's connection handle to its late-bound handle.
+    /// Bind a cell's connection handle to its rebindable handle.
     /// This enables other cells that forward to this cell to start working.
-    pub fn bind_late_bound(&self, cell_name: &str, handle: ConnectionHandle) {
-        if let Some(late_bound) = self.late_bound_handles.get(cell_name) {
-            late_bound.set(handle);
-            info!(cell = cell_name, "Late-bound handle bound");
+    /// Can be called multiple times (for hot-reload support).
+    pub fn bind_rebindable(&self, cell_name: &str, handle: ConnectionHandle) {
+        if let Some(rebindable) = self.rebindable_handles.get(cell_name) {
+            rebindable.set(handle);
+            info!(cell = cell_name, "Rebindable handle bound");
+        }
+    }
+
+    /// Clear a cell's rebindable handle (unbind).
+    /// Called when a cell is killed, before respawning.
+    pub fn clear_rebindable(&self, cell_name: &str) {
+        if let Some(rebindable) = self.rebindable_handles.get(cell_name) {
+            rebindable.clear();
+            debug!(cell = cell_name, "Rebindable handle cleared");
         }
     }
 
@@ -359,6 +375,66 @@ impl Host {
     /// Get a cell's connection handle by logical name.
     pub fn get_cell_handle(&self, cell_name: &str) -> Option<ConnectionHandle> {
         self.cell_handles.get(cell_name).map(|r| r.clone())
+    }
+
+    /// Register a cell's process ID (for hot-reload kill support).
+    pub fn register_cell_pid(&self, cell_name: String, pid: u32) {
+        self.child_pids.insert(cell_name, pid);
+    }
+
+    /// Kill a cell process by name (for hot-reload).
+    ///
+    /// Sends SIGKILL to the cell process and clears its handle.
+    /// Returns Ok(()) if the cell was killed or wasn't running.
+    pub async fn kill_cell(&self, cell_name: &str) -> Result<(), String> {
+        // Get and remove the PID
+        if let Some((_, pid)) = self.child_pids.remove(cell_name) {
+            info!(cell = %cell_name, pid = pid, "Killing cell process for hot-reload");
+
+            // Send SIGKILL on Unix
+            #[cfg(unix)]
+            {
+                let result = std::process::Command::new("kill")
+                    .arg("-9")
+                    .arg(pid.to_string())
+                    .status();
+
+                match result {
+                    Ok(status) => {
+                        if status.success() {
+                            debug!(cell = %cell_name, pid = pid, "Cell process killed");
+                        } else {
+                            // Process may have already exited
+                            debug!(cell = %cell_name, pid = pid, "Kill returned non-zero (process may have exited)");
+                        }
+                    }
+                    Err(e) => {
+                        warn!(cell = %cell_name, pid = pid, error = ?e, "Failed to kill cell process");
+                    }
+                }
+            }
+
+            #[cfg(windows)]
+            {
+                let result = std::process::Command::new("taskkill")
+                    .args(["/F", "/PID", &pid.to_string()])
+                    .status();
+
+                match result {
+                    Ok(_) => debug!(cell = %cell_name, pid = pid, "Cell process killed"),
+                    Err(e) => {
+                        warn!(cell = %cell_name, pid = pid, error = ?e, "Failed to kill cell process")
+                    }
+                }
+            }
+        } else {
+            debug!(cell = %cell_name, "No PID found for cell (may not be running)");
+        }
+
+        // Clear the cell handle so it can be respawned
+        self.clear_cell_handle(cell_name);
+
+        Ok(())
     }
 
     // =========================================================================
@@ -447,7 +523,7 @@ impl Host {
         // Pre-create late-bound handles for all forward targets
         // This ensures they exist before the target cells spawn
         for target in &pending.forward_targets {
-            self.get_or_create_late_bound(&target.cell_name);
+            self.get_or_create_rebindable(&target.cell_name);
             debug!(
                 cell = %cell_name,
                 target = %target.cell_name,
@@ -487,8 +563,9 @@ impl Host {
     /// Clear the cell handle when a cell dies (allows respawning).
     fn clear_cell_handle(&self, cell_name: &str) {
         self.cell_handles.remove(cell_name);
-        // Remove the old late-bound handle so a new one can be created on respawn
-        self.late_bound_handles.remove(cell_name);
+        // Clear (don't remove!) the rebindable handle so it can be rebound on respawn
+        // This is crucial for hot-reload - other cells have references to this handle
+        self.clear_rebindable(cell_name);
         // Also mark the cell as not ready
         cell_ready_registry().mark_not_ready(cell_name);
     }
@@ -711,6 +788,13 @@ async fn spawn_cell_process(cell_name: String, pending: PendingCell, quiet_mode:
             .stderr(Stdio::inherit());
         // Enable passthrough tracing so cells log directly to stderr
         cmd.env("TRACING_PASSTHROUGH", "1");
+        // Propagate RUST_LOG to cells for log level filtering
+        if let Ok(rust_log) = std::env::var("RUST_LOG") {
+            cmd.env("RUST_LOG", rust_log);
+        } else {
+            // Default to INFO level if RUST_LOG not set
+            cmd.env("RUST_LOG", "info");
+        }
     } else {
         cmd.stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -732,7 +816,7 @@ async fn spawn_cell_process(cell_name: String, pending: PendingCell, quiet_mode:
     let forwarder = if !forward_targets.is_empty() {
         let mut routed_forwarder = crate::forwarder::MethodRoutedForwarder::new();
         for target in &forward_targets {
-            let handle = Host::get().get_or_create_late_bound(&target.cell_name);
+            let handle = Host::get().get_or_create_rebindable(&target.cell_name);
             info!(
                 cell = %cell_name,
                 target = %target.cell_name,
@@ -750,19 +834,24 @@ async fn spawn_cell_process(cell_name: String, pending: PendingCell, quiet_mode:
     // Compose dispatchers: HostService -> Tracing -> [DAW] -> Forwarder (fallback chain)
     let base_dispatcher = RoutedDispatcher::new(host_service_dispatcher, tracing_dispatcher);
 
-    // Include DAW dispatcher in the chain if set (for in-process REAPER API handling)
-    // This allows guest cells to make DAW service calls that are handled locally
-    let with_forwarder = RoutedDispatcher::new(base_dispatcher, forwarder);
-
-    // Register peer with driver - use separate match arms to handle type differences
+    // Register peer with driver
+    // IMPORTANT: When daw_dispatcher is present, it must come BEFORE the forwarder in the chain.
+    // The forwarder registers DAW method IDs for remote forwarding, but when we have an in-process
+    // DAW dispatcher, we want DAW calls to be handled locally first. RoutedDispatcher checks if
+    // the first dispatcher handles a method ID before falling through, so order matters.
     let add_peer_result = if let Some(daw_dispatcher) = Host::get().daw_dispatcher() {
-        debug!(cell = %cell_name, "Including DAW dispatcher in chain");
-        let dispatcher = RoutedDispatcher::new(
-            with_forwarder,
+        debug!(cell = %cell_name, "Including DAW dispatcher in chain (before forwarder)");
+        // Chain: base -> daw_dispatcher -> forwarder
+        // DAW calls hit daw_dispatcher first (handled locally), non-DAW calls fall through to forwarder
+        let with_daw = RoutedDispatcher::new(
+            base_dispatcher,
             crate::forwarder::ArcDispatcher::new(daw_dispatcher.clone()),
         );
+        let dispatcher = RoutedDispatcher::new(with_daw, forwarder);
         driver_handle.add_peer(peer_id, dispatcher).await
     } else {
+        // No in-process DAW dispatcher, use forwarder for DAW calls (forwarded to remote cell)
+        let with_forwarder = RoutedDispatcher::new(base_dispatcher, forwarder);
         driver_handle.add_peer(peer_id, with_forwarder).await
     };
 
@@ -776,7 +865,7 @@ async fn spawn_cell_process(cell_name: String, pending: PendingCell, quiet_mode:
             // Store the handle
             Host::get().register_cell_handle(cell_name.clone(), handle.clone());
             // Also bind to late-bound handle so other cells can forward to this one
-            Host::get().bind_late_bound(&cell_name, handle);
+            Host::get().bind_rebindable(&cell_name, handle);
 
             // Note: gateway-ws no longer creates virtual connections for each browser.
             // Instead, it uses ForwardingDispatcher directly on the root connection,
@@ -801,6 +890,11 @@ async fn spawn_cell_process(cell_name: String, pending: PendingCell, quiet_mode:
             return;
         }
     };
+
+    // Register the child PID for hot-reload kill support
+    if let Some(pid) = child.id() {
+        Host::get().register_cell_pid(cell_name.clone(), pid);
+    }
 
     // Drop ticket to close doorbell
     drop(ticket);
@@ -899,7 +993,7 @@ impl Host {
                 self.register_cell_handle(cell_name.to_string(), handle.clone());
 
                 // Bind to late-bound handle so other cells can forward to this one
-                self.bind_late_bound(cell_name, handle.clone());
+                self.bind_rebindable(cell_name, handle.clone());
 
                 // Mark the cell as ready
                 cell_ready_registry().mark_ready(cell_host_proto::ReadyMsg {

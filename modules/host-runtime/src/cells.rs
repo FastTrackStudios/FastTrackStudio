@@ -7,10 +7,12 @@
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use cell_host_proto::{HostService, PollReadyResponse, ReadyAck, ReadyMsg, WaitPolicy};
+use cell_host_proto::{
+    HostService, PollReadyResponse, ReadyAck, ReadyMsg, ReloadResponse, WaitPolicy,
+};
 use dashmap::DashMap;
 use roam::session::Context;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 // ============================================================================
 // Cell Ready Registry
@@ -136,5 +138,43 @@ impl HostService for HostServiceImpl {
             "poll_ready: exhausted all attempts"
         );
         PollReadyResponse { ready: false }
+    }
+
+    async fn reload_cell(&self, _cx: &Context, cell_name: String) -> ReloadResponse {
+        use crate::host::Host;
+
+        info!(cell = %cell_name, "reload_cell: initiating hot-reload");
+
+        let host = Host::get();
+
+        // Kill the existing cell
+        if let Err(e) = host.kill_cell(&cell_name).await {
+            warn!(cell = %cell_name, error = %e, "Failed to kill cell for reload");
+            return ReloadResponse {
+                success: false,
+                error: Some(format!("Failed to kill cell: {}", e)),
+            };
+        }
+
+        // Small delay to ensure process cleanup
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Respawn the cell
+        match host.spawn_pending_cell(&cell_name).await {
+            Some(_handle) => {
+                info!(cell = %cell_name, "reload_cell: cell reloaded successfully");
+                ReloadResponse {
+                    success: true,
+                    error: None,
+                }
+            }
+            None => {
+                warn!(cell = %cell_name, "reload_cell: failed to respawn cell");
+                ReloadResponse {
+                    success: false,
+                    error: Some("Failed to respawn cell".to_string()),
+                }
+            }
+        }
     }
 }

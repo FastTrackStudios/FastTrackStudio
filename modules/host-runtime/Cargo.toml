@@ -36,3 +36,8 @@ tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
 ur-taking-me-with-you.workspace = true
+
+# Hot-reload file watching
+crossbeam-channel.workspace = true
+notify = { version = "7.0", default-features = false, features = ["macos_fsevent"] }
+anyhow = "1.0"

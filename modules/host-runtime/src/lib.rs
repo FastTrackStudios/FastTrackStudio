@@ -38,14 +38,18 @@
 //! }
 //! ```
 
+pub mod cell_host;
 pub mod cells;
 pub mod forwarder;
 pub mod host;
+pub mod hot_reload;
 pub mod tracing;
 pub mod unix_server;
 
 // Re-export commonly used types
-pub use cells::CellReadyRegistry;
-pub use forwarder::MultiForwarder;
+pub use cell_host::CellHost;
+pub use cells::{cell_ready_registry, CellReadyRegistry};
+pub use forwarder::{MultiForwarder, RebindableHandle};
 pub use host::{default_cell_dir, init_shm_infrastructure, CellConfig, Host};
+pub use hot_reload::{HotReloadWatcher, WatchEvent};
 pub use tracing::{init_tracing, spawn_tracing_consumer};

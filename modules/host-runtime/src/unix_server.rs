@@ -8,8 +8,10 @@
 
 use std::path::Path;
 
+use crate::cells::{cell_ready_registry, HostServiceImpl};
 use crate::forwarder::ArcDispatcher;
 use crate::Host;
+use cell_host_proto::HostServiceDispatcher;
 use gateway_proto::{
     GatewayCoordinator, GatewayCoordinatorDispatcher, GatewayInfo, GatewayState, GatewayType,
     TakeOverRequest, TakeOverResponse,
@@ -72,50 +74,91 @@ async fn handle_connection(
     // Wrap in COBS framing for message delimiting
     let framed = CobsFramed::new(stream);
 
-    // Get the DAW dispatcher from Host (TransportService + ProjectService)
-    // This is registered by the extension during initialization
-    let daw_dispatcher = Host::get()
-        .daw_dispatcher()
-        .ok_or("DAW dispatcher not registered")?
-        .clone();
-
     // Create gateway coordinator dispatcher
     let gateway_dispatcher = GatewayCoordinatorDispatcher::new(GatewayCoordinatorImpl);
 
-    // Combine dispatchers: DAW services + Gateway coordinator
-    // The DAW dispatcher handles TransportService and ProjectService calls
-    // by routing them to the in-process REAPER API handlers
-    let dispatcher = RoutedDispatcher::new(
-        ArcDispatcher::new(daw_dispatcher.clone()),
-        gateway_dispatcher,
-    );
+    // Create host service dispatcher for admin operations (reload_cell, poll_ready)
+    let host_service = HostServiceImpl::new(cell_ready_registry().clone());
+    let host_service_dispatcher = HostServiceDispatcher::new(host_service);
 
-    // Accept the connection
-    let (handle, _incoming, driver) =
-        roam::session::accept_framed(framed, HandshakeConfig::default(), dispatcher).await?;
+    // Configure handshake with higher credit for 60Hz streaming
+    // Default is 64KB which gets exhausted quickly with real-time updates
+    let config = HandshakeConfig {
+        max_payload_size: 1024 * 1024,            // 1 MiB
+        initial_channel_credit: 16 * 1024 * 1024, // 16 MiB for high-frequency streaming
+    };
 
-    // Spawn driver first so it processes messages
-    let driver_handle = tokio::spawn(async move {
-        if let Err(e) = driver.run().await {
-            warn!("Driver error: {}", e);
+    // Handle based on whether we have an in-process DAW dispatcher
+    // - With DAW dispatcher (REAPER): DAW services are handled in-process
+    // - Without DAW dispatcher (test-extension): Only gateway and host services
+    if let Some(daw_dispatcher) = Host::get().daw_dispatcher() {
+        // REAPER mode: DAW calls handled in-process
+        let with_gateway = RoutedDispatcher::new(
+            ArcDispatcher::new(daw_dispatcher.clone()),
+            gateway_dispatcher,
+        );
+        let dispatcher = RoutedDispatcher::new(with_gateway, host_service_dispatcher);
+
+        let (handle, _incoming, driver) =
+            roam::session::accept_framed(framed, config.clone(), dispatcher).await?;
+
+        let driver_handle = tokio::spawn(async move {
+            if let Err(e) = driver.run().await {
+                warn!("Driver error: {}", e);
+            }
+        });
+
+        // Open virtual connection with DAW dispatcher
+        send_identity_virtual_connection(&handle, &identity, Some(daw_dispatcher.clone())).await;
+
+        driver_handle.await?;
+    } else {
+        // Test mode: No in-process DAW, only gateway coordinator + host service
+        let dispatcher = RoutedDispatcher::new(gateway_dispatcher, host_service_dispatcher);
+
+        let (handle, _incoming, driver) =
+            roam::session::accept_framed(framed, config, dispatcher).await?;
+
+        let driver_handle = tokio::spawn(async move {
+            if let Err(e) = driver.run().await {
+                warn!("Driver error: {}", e);
+            }
+        });
+
+        // Open virtual connection without DAW dispatcher
+        send_identity_virtual_connection(&handle, &identity, None).await;
+
+        driver_handle.await?;
+    }
+
+    Ok(())
+}
+
+/// Send identity to connected client via virtual connection.
+async fn send_identity_virtual_connection(
+    handle: &roam::session::ConnectionHandle,
+    identity: &HostIdentity,
+    daw_dispatcher: Option<crate::host::BoxedDispatcher>,
+) {
+    let identity_bytes = match facet_postcard::to_vec(identity) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            warn!("Failed to serialize identity: {}", e);
+            return;
         }
-    });
+    };
 
-    // Open virtual connection back to desktop with our identity
-    let identity_bytes = facet_postcard::to_vec(&identity)?;
     let metadata = vec![(
         HOST_IDENTITY_KEY.to_string(),
         MetadataValue::Bytes(identity_bytes),
         0u64,
     )];
 
-    // Create dispatcher for the virtual connection using the same DAW dispatcher
-    let virtual_dispatcher = ArcDispatcher::new(daw_dispatcher);
+    // Create dispatcher for the virtual connection if DAW dispatcher is available
+    let virtual_dispatcher: Option<Box<dyn roam::session::ServiceDispatcher>> = daw_dispatcher
+        .map(|d| Box::new(ArcDispatcher::new(d)) as Box<dyn roam::session::ServiceDispatcher>);
 
-    match handle
-        .connect(metadata, Some(Box::new(virtual_dispatcher)))
-        .await
-    {
+    match handle.connect(metadata, virtual_dispatcher).await {
         Ok(_virtual_handle) => {
             info!(
                 "Opened virtual connection with purpose '{}'",
@@ -126,11 +169,6 @@ async fn handle_connection(
             warn!("Failed to open virtual connection: {}", e);
         }
     }
-
-    // Wait for driver to complete
-    driver_handle.await?;
-
-    Ok(())
 }
 
 /// Implementation of GatewayCoordinator for managing gateway cells.
