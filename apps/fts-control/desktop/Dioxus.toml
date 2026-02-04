@@ -1,9 +1,13 @@
 [application]
+name = "FTS Control"
+
+[desktop]
+title = "FTS Control"
 
 [web.app]
 
 # HTML title tag content
-title = "desktop"
+title = "FTS Control"
 
 # include `assets` in web platform
 [web.resource]

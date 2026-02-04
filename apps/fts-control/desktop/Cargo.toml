@@ -7,25 +7,36 @@ edition = "2021"
 [dependencies]
 # UI
 dioxus = { version = "0.7.1", features = ["router"] }
+session-ui = { path = "../../../cells/session/session-ui" }
 
-# Roam - for connecting to host
+# Services (run in-process)
+session = { path = "../../../cells/session/session" }
+session-proto.workspace = true
+gateway-ws = { path = "../../../cells/gateway/gateway-ws" }
+gateway-proto.workspace = true
+
+# Roam - for connecting to host and service dispatch
 roam.workspace = true
 roam-stream.workspace = true
 roam-local.workspace = true
+roam-session.workspace = true
+
+# DAW connection via Unix socket
+host-client.workspace = true
 
 # Protocols
 daw-proto.workspace = true
 daw-control.workspace = true
-gateway-proto.workspace = true
 host-manager-proto.workspace = true
 host-manager.workspace = true
 
 # Async
-tokio.workspace = true
+tokio = { workspace = true, features = ["full"] }
 futures.workspace = true
 
 # Utils
 tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre.workspace = true
 
 [features]
