@@ -3058,6 +3058,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "filetime"
+version = "0.2.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f98844151eee8917efc50bd9e8318cb963ae8b297431495d3f758616ea5c57db"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "libredox",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3243,6 +3254,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dd6caf6059519a65843af8fe2a3ae298b14b80179855aeb4adc2c1934ee619"
 
 [[package]]
+name = "fsevent-sys"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76ee7a02da4d231650c7cea31349b889be2f45ddb3ef3032d2ec8185f6313fd2"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "fts-control-desktop"
 version = "0.1.0"
 dependencies = [
@@ -3252,13 +3272,20 @@ dependencies = [
  "eyre",
  "futures",
  "gateway-proto",
+ "gateway-ws",
+ "host-client",
  "host-manager",
  "host-manager-proto",
  "roam",
  "roam-local",
+ "roam-session",
  "roam-stream",
+ "session",
+ "session-proto",
+ "session-ui",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4115,6 +4142,7 @@ checksum = "1489f81ead4b71a09ddeab6850c0356c0932587637d753f21ee1010ab875b013"
 name = "host-client"
 version = "0.1.0"
 dependencies = [
+ "cell-host-proto",
  "daw-proto",
  "eyre",
  "facet",
@@ -4163,13 +4191,16 @@ dependencies = [
 name = "host-runtime"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "cell-host-proto",
+ "crossbeam-channel",
  "dashmap",
  "daw-proto",
  "facet",
  "facet-postcard",
  "gateway-proto",
  "host-manager-proto",
+ "notify",
  "roam",
  "roam-local",
  "roam-session",
@@ -4565,6 +4596,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "inotify"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdd168d97690d0b8c412d6b6c10360277f4d7ee495c5d0d5d5fe0854923255cc"
+dependencies = [
+ "bitflags 1.3.2",
+ "inotify-sys",
+ "libc",
+]
+
+[[package]]
+name = "inotify-sys"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e05c02b5e89bff3b946cedeca278abc628fe811e604f027c45a8aa3cf793d0eb"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4575,19 +4626,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "instant"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "integration-tests"
 version = "0.1.0"
 dependencies = [
+ "cell-host-proto",
  "daw-control",
  "daw-proto",
  "daw-standalone",
  "eyre",
  "facet",
  "facet-postcard",
+ "filetime",
  "gateway-proto",
  "host-client",
  "host-manager",
  "host-manager-proto",
+ "host-runtime",
  "rand 0.8.5",
  "roam",
  "roam-local",
@@ -4866,6 +4929,26 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.114",
+]
+
+[[package]]
+name = "kqueue"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eac30106d7dce88daf4a3fcb4879ea939476d5074a9b7ddd0fb97fa4bed5596a"
+dependencies = [
+ "kqueue-sys",
+ "libc",
+]
+
+[[package]]
+name = "kqueue-sys"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed9625ffda8729b85e45cf04090035ac368927b8cebc34898e7c120f52e4838b"
+dependencies = [
+ "bitflags 1.3.2",
+ "libc",
 ]
 
 [[package]]
@@ -5482,6 +5565,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a69bcab0ad47271a0234d9422b131806bf3968021e5dc9328caf2d4cd58557fc"
 dependencies = [
  "libc",
+ "log",
  "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.61.2",
 ]
@@ -5674,6 +5758,34 @@ dependencies = [
  "bytecount",
  "memchr",
  "nom 8.0.0",
+]
+
+[[package]]
+name = "notify"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c533b4c39709f9ba5005d8002048266593c1cfaf3c5f0739d5b8ab0c6c504009"
+dependencies = [
+ "bitflags 2.10.0",
+ "filetime",
+ "fsevent-sys",
+ "inotify",
+ "kqueue",
+ "libc",
+ "log",
+ "mio",
+ "notify-types",
+ "walkdir",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "notify-types"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "585d3cb5e12e01aed9e8a1f70d5c6b5e86fe2a6e48fc8cd0b3e0b8df6f6eb174"
+dependencies = [
+ "instant",
 ]
 
 [[package]]
@@ -7142,12 +7254,11 @@ dependencies = [
  "actions-proto",
  "actions-registry",
  "anyhow",
- "camino",
+ "cell-host-proto",
  "crossbeam-channel",
  "daw-proto",
  "daw-reaper",
  "fragile",
- "gateway-proto",
  "host-runtime",
  "reaper-high",
  "reaper-low",
@@ -7155,7 +7266,6 @@ dependencies = [
  "reaper-medium",
  "roam",
  "roam-telemetry",
- "session-proto",
  "swell-ui",
  "tempfile",
  "tokio",
