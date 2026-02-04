@@ -10,9 +10,11 @@ daw-control = { workspace = true }
 daw-standalone = { workspace = true }
 
 # Host management
+cell-host-proto = { workspace = true }
 host-manager-proto = { workspace = true }
 host-manager = { workspace = true }
 host-client = { path = "../host-client" }
+host-runtime = { workspace = true }
 
 # Gateway
 gateway-proto = { workspace = true }
@@ -37,3 +39,4 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 eyre = { workspace = true }
 rand = "0.8"
+filetime = "0.2"
