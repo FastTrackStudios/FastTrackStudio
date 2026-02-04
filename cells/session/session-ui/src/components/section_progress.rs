@@ -3,6 +3,7 @@ use crate::components::{
 };
 use crate::signals::{ACTIVE_INDICES, SETLIST_STRUCTURE};
 use dioxus::prelude::*;
+use session_proto::QueuedTarget;
 
 /// Section progress bar component
 ///
@@ -17,6 +18,8 @@ pub fn SectionProgressBar(
     #[props(default)] comment_markers: Vec<CommentMarker>,
     #[props(default)] song_key: Option<String>,
     #[props(default)] on_measure_click: Option<Callback<daw_proto::MusicalPosition>>,
+    #[props(default)] on_comment_click: Option<Callback<f64>>,
+    #[props(default)] queued_target: Option<QueuedTarget>,
 ) -> Element {
     let current_progress = progress();
 
@@ -262,30 +265,58 @@ pub fn SectionProgressBar(
             // Comment markers (displayed above section progress bar)
             if !comment_markers.is_empty() {
                 for (index, comment) in comment_markers.iter().enumerate() {
-                    div {
-                        key: "section-comment-{index}",
-                        class: "absolute pointer-events-none z-50",
-                        style: format!(
-                            "left: {}%; transform: translateX(-50%); top: -1.5rem;",
-                            comment.position_percent
-                        ),
-                        div {
-                            class: if comment.is_count_in {
-                                "text-[10px] font-bold text-center whitespace-nowrap px-1.5 py-0.5 rounded border"
-                            } else {
-                                "text-[10px] font-medium text-center whitespace-nowrap px-1.5 py-0.5 rounded border"
-                            },
-                            style: if let Some(ref color) = comment.color {
-                                format!(
-                                    "background-color: {}20; border-color: {}; color: {};",
-                                    color, color, color
-                                )
-                            } else if comment.is_count_in {
-                                "background-color: rgba(251, 191, 36, 0.2); border-color: #fbbf24; color: #fbbf24;".to_string()
-                            } else {
-                                "background-color: var(--color-accent); border-color: var(--color-border); color: var(--color-accent-foreground);".to_string()
-                            },
-                            "{comment.text}"
+                    {
+                        // Check if this comment is the queued target
+                        let is_queued = matches!(
+                            &queued_target,
+                            Some(QueuedTarget::Comment { position_seconds, .. })
+                                if (*position_seconds - comment.position_seconds).abs() < 0.1
+                        );
+
+                        rsx! {
+                            div {
+                                key: "section-comment-{index}",
+                                class: if is_queued {
+                                    "absolute z-50 cursor-pointer animate-pulse"
+                                } else if on_comment_click.is_some() {
+                                    "absolute z-50 cursor-pointer hover:scale-105 transition-transform"
+                                } else {
+                                    "absolute pointer-events-none z-50"
+                                },
+                                style: format!(
+                                    "left: {}%; transform: translateX(-50%); top: -1.5rem;",
+                                    comment.position_percent
+                                ),
+                                onclick: {
+                                    let callback_opt = on_comment_click.clone();
+                                    let position_seconds = comment.position_seconds;
+                                    move |_| {
+                                        if let Some(callback) = &callback_opt {
+                                            callback.call(position_seconds);
+                                        }
+                                    }
+                                },
+                                div {
+                                    class: if is_queued {
+                                        "text-[10px] font-bold text-center whitespace-nowrap px-1.5 py-0.5 rounded border ring-2 ring-white ring-opacity-80"
+                                    } else if comment.is_count_in {
+                                        "text-[10px] font-bold text-center whitespace-nowrap px-1.5 py-0.5 rounded border"
+                                    } else {
+                                        "text-[10px] font-medium text-center whitespace-nowrap px-1.5 py-0.5 rounded border"
+                                    },
+                                    style: if let Some(ref color) = comment.color {
+                                        format!(
+                                            "background-color: {}20; border-color: {}; color: {};",
+                                            color, color, color
+                                        )
+                                    } else if comment.is_count_in {
+                                        "background-color: rgba(251, 191, 36, 0.2); border-color: #fbbf24; color: #fbbf24;".to_string()
+                                    } else {
+                                        "background-color: var(--color-accent); border-color: var(--color-border); color: var(--color-accent-foreground);".to_string()
+                                    },
+                                    "{comment.text}"
+                                }
+                            }
                         }
                     }
                 }

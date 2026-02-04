@@ -4,6 +4,7 @@
 //! Copied from FastTrackStudio for exact styling match.
 
 use dioxus::prelude::*;
+use session_proto::QueuedTarget;
 
 /// Represents the loop region as percentages (0-100) within the progress bar
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -261,6 +262,8 @@ pub struct CommentMarker {
     pub is_count_in: bool,
     /// Whether this comment should only appear in the section progress bar
     pub section_only: bool,
+    /// Position in seconds (for seeking when clicked)
+    pub position_seconds: f64,
 }
 
 /// Segmented progress bar component with different colored sections
@@ -272,7 +275,9 @@ pub fn SegmentedProgressBar(
     #[props(default)] comment_markers: Vec<CommentMarker>,
     #[props(default)] song_key: Option<String>,
     #[props(default)] on_section_click: Option<Callback<usize>>,
+    #[props(default)] on_comment_click: Option<Callback<f64>>,
     #[props(default)] loop_indicator: Option<LoopIndicatorData>,
+    #[props(default)] queued_target: Option<QueuedTarget>,
 ) -> Element {
     let current_progress = progress();
 
@@ -475,30 +480,58 @@ pub fn SegmentedProgressBar(
             // Filter out section_only comments - those only appear in SectionProgressBar
             if !comment_markers.is_empty() {
                 for (index, comment) in comment_markers.iter().enumerate().filter(|(_, c)| !c.section_only) {
-                    div {
-                        key: "comment-{index}",
-                        class: "absolute pointer-events-none z-50",
-                        style: format!(
-                            "left: {}%; transform: translateX(-50%); top: -2.5rem;",
-                            comment.position_percent
-                        ),
-                        div {
-                            class: if comment.is_count_in {
-                                "text-xs font-bold text-center whitespace-nowrap px-2 py-1 rounded border-2"
-                            } else {
-                                "text-xs font-medium text-center whitespace-nowrap px-2 py-1 rounded border"
-                            },
-                            style: if let Some(ref color) = comment.color {
-                                format!(
-                                    "background-color: {}20; border-color: {}; color: {};",
-                                    color, color, color
-                                )
-                            } else if comment.is_count_in {
-                                "background-color: rgba(251, 191, 36, 0.2); border-color: #fbbf24; color: #fbbf24;".to_string()
-                            } else {
-                                "background-color: var(--color-accent); border-color: var(--color-border); color: var(--color-accent-foreground);".to_string()
-                            },
-                            "{comment.text}"
+                    {
+                        // Check if this comment is the queued target
+                        let is_queued = matches!(
+                            &queued_target,
+                            Some(QueuedTarget::Comment { position_seconds, .. })
+                                if (*position_seconds - comment.position_seconds).abs() < 0.1
+                        );
+
+                        rsx! {
+                            div {
+                                key: "comment-{index}",
+                                class: if is_queued {
+                                    "absolute z-50 cursor-pointer animate-pulse"
+                                } else if on_comment_click.is_some() {
+                                    "absolute z-50 cursor-pointer hover:scale-105 transition-transform"
+                                } else {
+                                    "absolute pointer-events-none z-50"
+                                },
+                                style: format!(
+                                    "left: {}%; transform: translateX(-50%); top: -2.5rem;",
+                                    comment.position_percent
+                                ),
+                                onclick: {
+                                    let callback_opt = on_comment_click.clone();
+                                    let position_seconds = comment.position_seconds;
+                                    move |_| {
+                                        if let Some(callback) = &callback_opt {
+                                            callback.call(position_seconds);
+                                        }
+                                    }
+                                },
+                                div {
+                                    class: if is_queued {
+                                        "text-xs font-bold text-center whitespace-nowrap px-2 py-1 rounded border-2 ring-2 ring-white ring-opacity-80"
+                                    } else if comment.is_count_in {
+                                        "text-xs font-bold text-center whitespace-nowrap px-2 py-1 rounded border-2"
+                                    } else {
+                                        "text-xs font-medium text-center whitespace-nowrap px-2 py-1 rounded border"
+                                    },
+                                    style: if let Some(ref color) = comment.color {
+                                        format!(
+                                            "background-color: {}20; border-color: {}; color: {};",
+                                            color, color, color
+                                        )
+                                    } else if comment.is_count_in {
+                                        "background-color: rgba(251, 191, 36, 0.2); border-color: #fbbf24; color: #fbbf24;".to_string()
+                                    } else {
+                                        "background-color: var(--color-accent); border-color: var(--color-border); color: var(--color-accent-foreground);".to_string()
+                                    },
+                                    "{comment.text}"
+                                }
+                            }
                         }
                     }
                     // Vertical line from comment to progress bar
@@ -529,26 +562,42 @@ pub fn SegmentedProgressBar(
                 class: "relative w-full h-20 rounded-lg overflow-hidden bg-secondary",
                 // Render sections as background layers
                 for (index, section_start, _section_end, section_width, section_color, _filled_percent, _section_name) in section_data.iter() {
-                    div {
-                        key: "{index}",
-                        class: if on_section_click.is_some() {
-                            "absolute h-full z-0 cursor-pointer transition-all duration-200 hover:brightness-110 hover:ring-2 hover:ring-white hover:ring-opacity-50"
-                        } else {
-                            "absolute h-full z-0"
-                        },
-                        style: format!("left: {}%; width: {}%;", section_start, section_width),
-                        onclick: {
-                            let callback_opt = on_section_click.clone();
-                            let idx = *index;
-                            move |_| {
-                                if let Some(callback) = &callback_opt {
-                                    callback.call(idx);
+                    {
+                        // Check if this section is the queued target
+                        let is_queued = matches!(
+                            &queued_target,
+                            Some(QueuedTarget::Section { section_index, .. }) if *section_index == *index
+                        );
+
+                        rsx! {
+                            div {
+                                key: "{index}",
+                                class: if is_queued {
+                                    "absolute h-full z-0 cursor-pointer animate-pulse"
+                                } else if on_section_click.is_some() {
+                                    "absolute h-full z-0 cursor-pointer transition-all duration-200 hover:brightness-110 hover:ring-2 hover:ring-white hover:ring-opacity-50"
+                                } else {
+                                    "absolute h-full z-0"
+                                },
+                                style: format!("left: {}%; width: {}%;", section_start, section_width),
+                                onclick: {
+                                    let callback_opt = on_section_click.clone();
+                                    let idx = *index;
+                                    move |_| {
+                                        if let Some(callback) = &callback_opt {
+                                            callback.call(idx);
+                                        }
+                                    }
+                                },
+                                div {
+                                    class: if is_queued {
+                                        "absolute inset-0 h-full transition-all duration-200 ring-2 ring-white ring-opacity-80"
+                                    } else {
+                                        "absolute inset-0 h-full transition-all duration-200"
+                                    },
+                                    style: format!("background-color: {};", section_color),
                                 }
                             }
-                        },
-                        div {
-                            class: "absolute inset-0 h-full transition-all duration-200",
-                            style: format!("background-color: {};", section_color),
                         }
                     }
                 }
@@ -654,10 +703,12 @@ pub fn SongProgressBar(
     progress: Signal<f64>,
     sections: Vec<ProgressSection>,
     #[props(default)] on_section_click: Option<Callback<usize>>,
+    #[props(default)] on_comment_click: Option<Callback<f64>>,
     #[props(default)] tempo_markers: Vec<TempoMarkerData>,
     #[props(default)] comment_markers: Vec<CommentMarker>,
     #[props(default)] song_key: Option<String>,
     #[props(default)] loop_indicator: Option<LoopIndicatorData>,
+    #[props(default)] queued_target: Option<QueuedTarget>,
 ) -> Element {
     rsx! {
         div {
@@ -669,7 +720,9 @@ pub fn SongProgressBar(
                 comment_markers: comment_markers,
                 song_key: song_key,
                 on_section_click: on_section_click,
+                on_comment_click: on_comment_click,
                 loop_indicator: loop_indicator,
+                queued_target: queued_target,
             }
         }
     }
