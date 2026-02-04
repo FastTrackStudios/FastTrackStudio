@@ -404,6 +404,7 @@ fn PerformanceMainContent(
                             text: comment.text.clone(),
                             color: comment.color_hex(),
                             is_count_in: comment.is_count_in,
+                            section_only: comment.section_only,
                         })
                     } else {
                         None
@@ -511,6 +512,7 @@ fn PerformanceMainContent(
                                 text: comment.text.clone(),
                                 color: comment.color_hex(),
                                 is_count_in: comment.is_count_in,
+                                section_only: comment.section_only,
                             })
                         } else {
                             None

@@ -259,6 +259,8 @@ pub struct CommentMarker {
     pub color: Option<String>,
     /// Whether this is a count-in marker (special styling)
     pub is_count_in: bool,
+    /// Whether this comment should only appear in the section progress bar
+    pub section_only: bool,
 }
 
 /// Segmented progress bar component with different colored sections
@@ -470,8 +472,9 @@ pub fn SegmentedProgressBar(
                 }
             }
             // Comment markers (displayed above progress bar, similar to time signature cards)
+            // Filter out section_only comments - those only appear in SectionProgressBar
             if !comment_markers.is_empty() {
-                for (index, comment) in comment_markers.iter().enumerate() {
+                for (index, comment) in comment_markers.iter().enumerate().filter(|(_, c)| !c.section_only) {
                     div {
                         key: "comment-{index}",
                         class: "absolute pointer-events-none z-50",

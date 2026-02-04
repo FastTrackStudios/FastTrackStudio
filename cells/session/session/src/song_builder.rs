@@ -300,12 +300,27 @@ impl SongBuilder {
             })
             .map(|m| {
                 let is_count_in = Self::is_count_in_marker(&m.name);
+                // Check for section-only prefix (>)
+                let (text, section_only) = if m.name.trim().starts_with('>') {
+                    (
+                        m.name
+                            .trim()
+                            .strip_prefix('>')
+                            .unwrap_or(&m.name)
+                            .trim()
+                            .to_string(),
+                        true,
+                    )
+                } else {
+                    (m.name.clone(), false)
+                };
                 Comment {
                     id: m.id,
-                    text: m.name.clone(),
+                    text,
                     position_seconds: position_to_seconds(&m.position),
                     color: m.color,
                     is_count_in,
+                    section_only,
                 }
             })
             .collect();

@@ -11,11 +11,14 @@ use facet::Facet;
 /// Comments are markers that aren't structural (not SONGSTART, SONGEND, =START, =END, COUNT-IN).
 /// They serve as reminders or notes displayed above the progress bar.
 /// Examples: "Keys only", "Build energy", "Watch conductor", "Count-In" (when mid-song)
+///
+/// Markers prefixed with `>` are section-only comments (e.g., ">Watch tempo")
+/// and will only appear in the section progress bar, not the main song progress bar.
 #[derive(Clone, Debug, PartialEq, Facet)]
 pub struct Comment {
     /// DAW marker ID (if applicable)
     pub id: Option<u32>,
-    /// Comment text (the marker name)
+    /// Comment text (the marker name, with `>` prefix stripped if present)
     pub text: String,
     /// Position in seconds (absolute project time)
     pub position_seconds: f64,
@@ -24,17 +27,22 @@ pub struct Comment {
     /// Whether this is a count-in marker that appears mid-song
     /// (used for special styling)
     pub is_count_in: bool,
+    /// Whether this comment should only appear in the section progress bar
+    /// (marker was prefixed with `>`)
+    pub section_only: bool,
 }
 
 impl Comment {
     /// Create a new comment
     pub fn new(text: String, position_seconds: f64) -> Self {
+        let (clean_text, section_only) = Self::parse_section_only_prefix(&text);
         Self {
             id: None,
-            text,
+            text: clean_text,
             position_seconds,
             color: None,
             is_count_in: false,
+            section_only,
         }
     }
 
@@ -46,6 +54,18 @@ impl Comment {
             position_seconds,
             color: None,
             is_count_in: true,
+            section_only: false,
+        }
+    }
+
+    /// Parse the `>` prefix from marker text
+    /// Returns (cleaned_text, is_section_only)
+    fn parse_section_only_prefix(text: &str) -> (String, bool) {
+        let trimmed = text.trim();
+        if let Some(rest) = trimmed.strip_prefix('>') {
+            (rest.trim().to_string(), true)
+        } else {
+            (trimmed.to_string(), false)
         }
     }
 
