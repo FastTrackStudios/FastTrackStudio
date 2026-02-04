@@ -6,6 +6,33 @@ use crate::song::Song;
 use daw_proto::TimeRange;
 use facet::Facet;
 
+/// A queued navigation target
+///
+/// Represents a pending seek/navigation that hasn't been confirmed yet.
+/// Only one target can be queued at a time. The queue clears when the
+/// transport position reaches the target.
+#[repr(u8)]
+#[derive(Clone, Debug, PartialEq, Facet)]
+pub enum QueuedTarget {
+    /// Queued navigation to a section
+    Section {
+        song_index: usize,
+        section_index: usize,
+    },
+    /// Queued navigation to a specific time position
+    Time {
+        song_index: usize,
+        position_seconds: f64,
+    },
+    /// Queued navigation to a measure
+    Measure { song_index: usize, measure: i32 },
+    /// Queued navigation to a comment marker
+    Comment {
+        song_index: usize,
+        position_seconds: f64,
+    },
+}
+
 /// A complete setlist
 ///
 /// A setlist is an ordered collection of songs, typically built from
@@ -77,4 +104,6 @@ pub struct ActiveIndices {
     pub looping: bool,
     /// Current loop selection (if any)
     pub loop_selection: Option<TimeRange>,
+    /// Queued navigation target (flashes until confirmed)
+    pub queued_target: Option<QueuedTarget>,
 }
