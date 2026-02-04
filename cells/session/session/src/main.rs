@@ -41,20 +41,87 @@ fn create_telemetry() -> TelemetryMiddleware<OtlpExporter> {
 /// Session actions defined by this cell
 fn session_actions() -> Vec<ActionDefinition> {
     vec![
+        // Transport actions
+        ActionDefinition::new(
+            "fts.session.toggle_playback",
+            "Toggle Playback",
+            "Toggle play/pause state",
+        )
+        .with_category(ActionCategory::Transport)
+        .with_menu_path("FTS/Session/Transport")
+        .with_shortcut("Space"),
+        ActionDefinition::new(
+            "fts.session.toggle_song_loop",
+            "Toggle Song Loop",
+            "Toggle looping for the current song",
+        )
+        .with_category(ActionCategory::Transport)
+        .with_menu_path("FTS/Session/Transport")
+        .with_shortcut("L"),
+        // Smart navigation (section/song)
+        ActionDefinition::new(
+            "fts.session.smart_next",
+            "Smart Next",
+            "Go to next section, or next song if at last section",
+        )
+        .with_category(ActionCategory::Session)
+        .with_menu_path("FTS/Session/Navigate")
+        .with_shortcut("Right"),
+        ActionDefinition::new(
+            "fts.session.smart_previous",
+            "Smart Previous",
+            "Go to previous section, or previous song if at first section",
+        )
+        .with_category(ActionCategory::Session)
+        .with_menu_path("FTS/Session/Navigate")
+        .with_shortcut("Left"),
+        // Song navigation
+        ActionDefinition::new(
+            "fts.session.next_song",
+            "Next Song",
+            "Go to the next song in the setlist",
+        )
+        .with_category(ActionCategory::Session)
+        .with_menu_path("FTS/Session/Navigate")
+        .with_shortcut("Down"),
+        ActionDefinition::new(
+            "fts.session.previous_song",
+            "Previous Song",
+            "Go to the previous song in the setlist",
+        )
+        .with_category(ActionCategory::Session)
+        .with_menu_path("FTS/Session/Navigate")
+        .with_shortcut("Up"),
+        // Section navigation
+        ActionDefinition::new(
+            "fts.session.next_section",
+            "Next Section",
+            "Go to the next section in the current song",
+        )
+        .with_category(ActionCategory::Session)
+        .with_menu_path("FTS/Session/Navigate"),
+        ActionDefinition::new(
+            "fts.session.previous_section",
+            "Previous Section",
+            "Go to the previous section in the current song",
+        )
+        .with_category(ActionCategory::Session)
+        .with_menu_path("FTS/Session/Navigate"),
+        // Debug actions
         ActionDefinition::new(
             "fts.session.log_hello",
             "Log Hello",
             "Logs 'Hello from session!' to demonstrate the action system",
         )
-        .with_category(ActionCategory::Session)
-        .with_menu_path("FTS/Session"),
+        .with_category(ActionCategory::Dev)
+        .with_menu_path("FTS/Session/Dev"),
         ActionDefinition::new(
             "fts.session.log_status",
             "Log Status",
             "Logs current session status",
         )
-        .with_category(ActionCategory::Session)
-        .with_menu_path("FTS/Session"),
+        .with_category(ActionCategory::Dev)
+        .with_menu_path("FTS/Session/Dev"),
     ]
 }
 
@@ -62,11 +129,18 @@ fn session_actions() -> Vec<ActionDefinition> {
 #[derive(Clone)]
 pub struct SessionServiceImpl {
     handle_cell: Arc<OnceLock<ConnectionHandle>>,
+    setlist_service: SetlistServiceImpl,
 }
 
 impl SessionServiceImpl {
-    fn new(handle_cell: Arc<OnceLock<ConnectionHandle>>) -> Self {
-        Self { handle_cell }
+    fn new(
+        handle_cell: Arc<OnceLock<ConnectionHandle>>,
+        setlist_service: SetlistServiceImpl,
+    ) -> Self {
+        Self {
+            handle_cell,
+            setlist_service,
+        }
     }
 
     fn handle(&self) -> &ConnectionHandle {
@@ -90,8 +164,47 @@ impl DefinesActions for SessionServiceImpl {
         session_actions()
     }
 
-    async fn execute_action(&self, _cx: &Context, action_id: ActionId) -> ActionResult {
+    async fn execute_action(&self, cx: &Context, action_id: ActionId) -> ActionResult {
+        use session_proto::SetlistService;
+
         match action_id.as_str() {
+            // Transport actions
+            "fts.session.toggle_playback" => {
+                self.setlist_service.toggle_playback(cx).await;
+                ActionResult::success()
+            }
+            "fts.session.toggle_song_loop" => {
+                self.setlist_service.toggle_song_loop(cx).await;
+                ActionResult::success()
+            }
+            // Smart navigation
+            "fts.session.smart_next" => {
+                self.setlist_service.next_section(cx).await;
+                ActionResult::success()
+            }
+            "fts.session.smart_previous" => {
+                self.setlist_service.previous_section(cx).await;
+                ActionResult::success()
+            }
+            // Song navigation
+            "fts.session.next_song" => {
+                self.setlist_service.next_song(cx).await;
+                ActionResult::success()
+            }
+            "fts.session.previous_song" => {
+                self.setlist_service.previous_song(cx).await;
+                ActionResult::success()
+            }
+            // Section navigation
+            "fts.session.next_section" => {
+                self.setlist_service.next_section(cx).await;
+                ActionResult::success()
+            }
+            "fts.session.previous_section" => {
+                self.setlist_service.previous_section(cx).await;
+                ActionResult::success()
+            }
+            // Debug actions
             "fts.session.log_hello" => {
                 info!("Hello from the session cell!");
                 ActionResult::success_with_message("Logged hello from session")
@@ -201,9 +314,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let telemetry = create_telemetry();
 
         // Create service implementations
-        let session_service = SessionServiceImpl::new(handle.clone());
         let song_service = SongServiceImpl::new();
         let setlist_service = SetlistServiceImpl::new();
+        let session_service = SessionServiceImpl::new(handle.clone(), setlist_service.clone());
 
         // Create dispatchers for all services
         let session_dispatcher = SessionServiceDispatcher::new(session_service.clone())
