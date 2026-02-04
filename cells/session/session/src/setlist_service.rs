@@ -5,7 +5,7 @@ use daw_control::Daw;
 use roam::Tx;
 use roam::session::Context;
 use session_proto::{
-    ActiveIndices, MeasureInfo, Section, Setlist, SetlistEvent, SetlistService, Song,
+    ActiveIndices, MeasureInfo, QueuedTarget, Section, Setlist, SetlistEvent, SetlistService, Song,
     SongTransportState,
 };
 use std::sync::Arc;
@@ -21,6 +21,12 @@ pub struct SetlistServiceImpl {
     /// Currently active song ID (cached locally to avoid RPC calls)
     /// Using ID instead of index ensures stability when songs are reordered
     active_song_id: Arc<RwLock<Option<String>>>,
+    /// Cached active indices (updated by polling loop at 60Hz)
+    /// Used for instant navigation without RPC calls
+    cached_indices: Arc<RwLock<ActiveIndices>>,
+    /// Queued navigation target (flashes in UI until transport reaches it)
+    /// Only one target can be queued at a time
+    queued_target: Arc<RwLock<Option<QueuedTarget>>>,
 }
 
 impl SetlistServiceImpl {
@@ -28,6 +34,75 @@ impl SetlistServiceImpl {
         Self {
             setlist: Arc::new(RwLock::new(None)),
             active_song_id: Arc::new(RwLock::new(None)),
+            cached_indices: Arc::new(RwLock::new(ActiveIndices::default())),
+            queued_target: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Get the cached active indices (updated by polling loop, no RPC calls)
+    async fn get_cached_indices(&self) -> ActiveIndices {
+        self.cached_indices.read().await.clone()
+    }
+
+    /// Update cached indices (called by polling loop)
+    async fn set_cached_indices(&self, indices: ActiveIndices) {
+        *self.cached_indices.write().await = indices;
+    }
+
+    /// Set a queued navigation target
+    async fn queue_target(&self, target: QueuedTarget) {
+        *self.queued_target.write().await = Some(target);
+    }
+
+    /// Clear the queued navigation target
+    async fn clear_queued_target(&self) {
+        *self.queued_target.write().await = None;
+    }
+
+    /// Get the current queued target
+    async fn get_queued_target(&self) -> Option<QueuedTarget> {
+        self.queued_target.read().await.clone()
+    }
+
+    /// Check if the transport has reached the queued target and clear it if so
+    async fn check_and_clear_queue(
+        &self,
+        song_index: usize,
+        section_index: Option<usize>,
+        position_seconds: f64,
+    ) {
+        let queued = self.queued_target.read().await.clone();
+        if let Some(target) = queued {
+            let reached = match &target {
+                QueuedTarget::Section {
+                    song_index: q_song,
+                    section_index: q_section,
+                } => song_index == *q_song && section_index == Some(*q_section),
+                QueuedTarget::Time {
+                    song_index: q_song,
+                    position_seconds: q_pos,
+                } => {
+                    // Consider reached if within 0.1 seconds
+                    song_index == *q_song && (position_seconds - q_pos).abs() < 0.1
+                }
+                QueuedTarget::Measure {
+                    song_index: q_song, ..
+                } => {
+                    // For measures, we'd need to check musical position - for now just check song
+                    song_index == *q_song
+                }
+                QueuedTarget::Comment {
+                    song_index: q_song,
+                    position_seconds: q_pos,
+                } => {
+                    // Consider reached if within 0.1 seconds
+                    song_index == *q_song && (position_seconds - q_pos).abs() < 0.1
+                }
+            };
+
+            if reached {
+                self.clear_queued_target().await;
+            }
         }
     }
 
@@ -63,6 +138,7 @@ impl SetlistServiceImpl {
         position: daw_proto::Position,
         is_playing: bool,
         is_looping: bool,
+        loop_region: Option<daw_proto::LoopRegion>,
         tempo: f64,
         time_sig: (u32, u32),
     ) -> SongTransportState {
@@ -95,6 +171,23 @@ impl SetlistServiceImpl {
             (None, None)
         };
 
+        // Convert loop region from project-absolute to song-relative coordinates
+        let song_loop_region = loop_region.and_then(|region| {
+            // Only include loop region if it overlaps with the song
+            let region_start_relative = region.start_seconds - song_start;
+            let region_end_relative = region.end_seconds - song_start;
+
+            // Check if loop region is within song bounds (with some tolerance)
+            if region_end_relative > 0.0 && region_start_relative < song_duration {
+                Some(daw_proto::LoopRegion::new(
+                    region_start_relative.max(0.0),
+                    region_end_relative.min(song_duration),
+                ))
+            } else {
+                None
+            }
+        });
+
         SongTransportState {
             song_index,
             position,
@@ -103,6 +196,7 @@ impl SetlistServiceImpl {
             section_progress,
             is_playing,
             is_looping,
+            loop_region: song_loop_region,
             bpm: tempo,
             time_sig_num: time_sig.0,
             time_sig_denom: time_sig.1,
@@ -143,6 +237,7 @@ impl SetlistServiceImpl {
                             };
 
                             let is_looping = state.looping;
+                            let loop_region = state.loop_region.clone();
                             let tempo = state.tempo.bpm();
                             let time_sig = (
                                 state.time_signature.numerator(),
@@ -150,7 +245,14 @@ impl SetlistServiceImpl {
                             );
 
                             let song_transport = Self::calculate_song_transport(
-                                song, song_index, position, is_playing, is_looping, tempo, time_sig,
+                                song,
+                                song_index,
+                                position,
+                                is_playing,
+                                is_looping,
+                                loop_region,
+                                tempo,
+                                time_sig,
                             );
 
                             transports.push(song_transport);
@@ -252,6 +354,7 @@ impl SetlistServiceImpl {
                     is_playing,
                     looping,
                     loop_selection: None,
+                    queued_target: None,
                 }
             } else {
                 // In song but not in a specific section
@@ -264,6 +367,7 @@ impl SetlistServiceImpl {
                     is_playing,
                     looping,
                     loop_selection: None,
+                    queued_target: None,
                 }
             }
         } else {
@@ -277,6 +381,7 @@ impl SetlistServiceImpl {
                 is_playing,
                 looping,
                 loop_selection: None,
+                queued_target: None,
             }
         }
     }
@@ -376,14 +481,16 @@ impl SetlistService for SetlistServiceImpl {
     }
 
     async fn get_active_song(&self, _cx: &Context) -> Option<Song> {
-        let active = self.calculate_active_indices().await;
+        // Use cached indices for instant response (updated at 60Hz by polling loop)
+        let active = self.get_cached_indices().await;
         let song_index = active.song_index?;
         let setlist = self.setlist.read().await;
         setlist.as_ref()?.songs.get(song_index).cloned()
     }
 
     async fn get_active_section(&self, _cx: &Context) -> Option<Section> {
-        let active = self.calculate_active_indices().await;
+        // Use cached indices for instant response (updated at 60Hz by polling loop)
+        let active = self.get_cached_indices().await;
         let song_index = active.song_index?;
         let section_index = active.section_index?;
         let setlist = self.setlist.read().await;
@@ -454,7 +561,8 @@ impl SetlistService for SetlistServiceImpl {
     async fn next_song(&self, _cx: &Context) {
         debug!("next_song");
 
-        let active = self.calculate_active_indices().await;
+        // Use cached indices for instant response (updated at 60Hz by polling loop)
+        let active = self.get_cached_indices().await;
         if let Some(current_idx) = active.song_index {
             let next_idx = current_idx + 1;
             self.go_to_song(_cx, next_idx).await;
@@ -464,7 +572,8 @@ impl SetlistService for SetlistServiceImpl {
     async fn previous_song(&self, _cx: &Context) {
         debug!("previous_song");
 
-        let active = self.calculate_active_indices().await;
+        // Use cached indices for instant response (updated at 60Hz by polling loop)
+        let active = self.get_cached_indices().await;
         if let Some(current_idx) = active.song_index {
             if current_idx > 0 {
                 let prev_idx = current_idx - 1;
@@ -477,9 +586,17 @@ impl SetlistService for SetlistServiceImpl {
         debug!("go_to_section: {}", index);
 
         let daw = Daw::get();
-        let active = self.calculate_active_indices().await;
+        // Use cached indices for instant response (updated at 60Hz by polling loop)
+        let active = self.get_cached_indices().await;
 
         if let Some(song_idx) = active.song_index {
+            // Queue the target immediately for visual feedback
+            self.queue_target(QueuedTarget::Section {
+                song_index: song_idx,
+                section_index: index,
+            })
+            .await;
+
             if let Some(song) = self.get_song_internal(song_idx).await {
                 if let Some(section) = song.sections.get(index) {
                     // First, switch to the correct project (in case we're on a different one)
@@ -492,6 +609,8 @@ impl SetlistService for SetlistServiceImpl {
                                 .await
                             {
                                 warn!("Failed to navigate to section {}: {}", index, e);
+                                // Clear queue on failure
+                                self.clear_queued_target().await;
                             } else {
                                 info!(
                                     "Navigated to section {} ({}) in song {} (project {})",
@@ -514,7 +633,8 @@ impl SetlistService for SetlistServiceImpl {
     async fn next_section(&self, _cx: &Context) {
         debug!("next_section");
 
-        let active = self.calculate_active_indices().await;
+        // Use cached indices for instant response (updated at 60Hz by polling loop)
+        let active = self.get_cached_indices().await;
         if let Some(section_idx) = active.section_index {
             let next_idx = section_idx + 1;
             self.go_to_section(_cx, next_idx).await;
@@ -524,11 +644,24 @@ impl SetlistService for SetlistServiceImpl {
     async fn previous_section(&self, _cx: &Context) {
         debug!("previous_section");
 
-        let active = self.calculate_active_indices().await;
+        // Use cached indices for instant response (updated at 60Hz by polling loop)
+        let active = self.get_cached_indices().await;
         if let Some(section_idx) = active.section_index {
-            if section_idx > 0 {
+            // Smart previous: if we're past the beginning of the section (>5% progress),
+            // go to the start of the current section. Only go to previous section
+            // if we're already at/near the beginning.
+            let at_section_start = active
+                .section_progress
+                .map(|p| p < 0.05) // Within first 5% of section
+                .unwrap_or(true);
+
+            if at_section_start && section_idx > 0 {
+                // Already at the start, go to previous section
                 let prev_idx = section_idx - 1;
                 self.go_to_section(_cx, prev_idx).await;
+            } else {
+                // Not at start, go to beginning of current section
+                self.go_to_section(_cx, section_idx).await;
             }
         }
     }
@@ -537,7 +670,8 @@ impl SetlistService for SetlistServiceImpl {
         debug!("seek_to: {}", seconds);
 
         let daw = Daw::get();
-        let active = self.calculate_active_indices().await;
+        // Use cached indices for instant response (updated at 60Hz by polling loop)
+        let active = self.get_cached_indices().await;
 
         if let Some(song_idx) = active.song_index {
             if let Some(song) = self.get_song_internal(song_idx).await {
@@ -562,6 +696,13 @@ impl SetlistService for SetlistServiceImpl {
             song_index, seconds
         );
 
+        // Queue the target immediately for visual feedback (comment marker)
+        self.queue_target(QueuedTarget::Comment {
+            song_index,
+            position_seconds: seconds,
+        })
+        .await;
+
         let daw = Daw::get();
 
         if let Some(song) = self.get_song_internal(song_index).await {
@@ -574,6 +715,8 @@ impl SetlistService for SetlistServiceImpl {
                             "Failed to seek to {} seconds in song {}: {}",
                             seconds, song_index, e
                         );
+                        // Clear queue on failure
+                        self.clear_queued_target().await;
                     } else {
                         info!(
                             "Seeked to {} seconds in song {} ({})",
@@ -1028,23 +1171,19 @@ impl SetlistService for SetlistServiceImpl {
                 }
             };
 
-            // Get initial active song from cache (no RPC)
-            let initial_song_index = {
-                let song_id = this.active_song_id.read().await.clone();
-                song_id.and_then(|id| songs.iter().position(|s| s.id == id))
-            };
+            // Get initial active indices from REAPER's current project (makes RPC calls)
+            // This ensures the UI shows the correct song/section on startup
+            let mut last_indices = this.calculate_active_indices().await;
 
-            // Send initial active indices (derived from cache, no RPC)
-            let mut last_indices = ActiveIndices {
-                song_index: initial_song_index,
-                section_index: None,
-                slide_index: None,
-                song_progress: None,
-                section_progress: None,
-                is_playing: false,
-                looping: false,
-                loop_selection: None,
-            };
+            // Update cached indices so navigation works correctly
+            this.set_cached_indices(last_indices.clone()).await;
+
+            // Also update active_song_id if we found a song
+            if let Some(song_idx) = last_indices.song_index {
+                if let Some(song) = songs.get(song_idx) {
+                    *this.active_song_id.write().await = Some(song.id.clone());
+                }
+            }
             if events
                 .send(&SetlistEvent::ActiveIndicesChanged(last_indices.clone()))
                 .await
@@ -1070,11 +1209,28 @@ impl SetlistService for SetlistServiceImpl {
             let mut last_section_by_song: std::collections::HashMap<usize, Option<usize>> =
                 std::collections::HashMap::new();
 
-            // Fully reactive loop - only processes transport stream updates, no polling
+            // Track last known current project GUID for detecting tab switches
+            let mut last_current_project_guid: Option<String> = {
+                let daw = Daw::get();
+                daw.current_project()
+                    .await
+                    .ok()
+                    .map(|p| p.guid().to_string())
+            };
+
+            // Timer for checking project tab switches (every 500ms)
+            // This is separate from transport updates which come at ~30Hz
+            let mut project_check_interval = tokio::time::interval(Duration::from_millis(500));
+            project_check_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            // Fully reactive loop - processes transport stream updates and periodic project checks
             let mut transport_rx = transport_rx;
 
             loop {
-                match transport_rx.recv().await {
+                tokio::select! {
+                    // Handle transport updates from the broadcast channel
+                    result = transport_rx.recv() => {
+                        match result {
                     Ok(Some(update)) => {
                         // Convert project GUIDs to song indices and build SongTransportState
                         let mut song_transports: Vec<SongTransportState> = Vec::new();
@@ -1101,6 +1257,7 @@ impl SetlistService for SetlistServiceImpl {
                                     position,
                                     is_playing,
                                     proj_state.transport.looping,
+                                    proj_state.transport.loop_region.clone(),
                                     proj_state.transport.tempo.bpm(),
                                     (
                                         proj_state.transport.time_signature.numerator(),
@@ -1159,6 +1316,24 @@ impl SetlistService for SetlistServiceImpl {
                                 .or_else(|| song_transports.first());
 
                             if let Some(transport) = active_transport {
+                                // Get current position in seconds for queue checking
+                                let position_seconds = transport
+                                    .position
+                                    .time
+                                    .map(|t| t.as_seconds())
+                                    .unwrap_or(0.0);
+
+                                // Check if we've reached the queued target
+                                this.check_and_clear_queue(
+                                    transport.song_index,
+                                    transport.section_index,
+                                    position_seconds,
+                                )
+                                .await;
+
+                                // Get current queued target to include in indices
+                                let queued_target = this.get_queued_target().await;
+
                                 let current_indices = ActiveIndices {
                                     song_index: Some(transport.song_index),
                                     section_index: transport.section_index,
@@ -1168,7 +1343,11 @@ impl SetlistService for SetlistServiceImpl {
                                     is_playing: transport.is_playing,
                                     looping: transport.is_looping,
                                     loop_selection: None,
+                                    queued_target,
                                 };
+
+                                // Cache indices for instant navigation (no RPC needed)
+                                this.set_cached_indices(current_indices.clone()).await;
 
                                 // Only send if changed
                                 if current_indices != last_indices {
@@ -1206,6 +1385,60 @@ impl SetlistService for SetlistServiceImpl {
                             e
                         );
                         break;
+                    }
+                        }
+                    }
+
+                    // Periodically check if the current REAPER project tab has changed
+                    _ = project_check_interval.tick() => {
+                        let daw = Daw::get();
+                        if let Ok(current_project) = daw.current_project().await {
+                            let current_guid = current_project.guid().to_string();
+
+                            // Check if project tab changed
+                            if last_current_project_guid.as_ref() != Some(&current_guid) {
+                                debug!("Project tab changed from {:?} to {}", last_current_project_guid, current_guid);
+
+                                // Check if previously active project was paused - if so, stop it
+                                if let Some(prev_guid) = &last_current_project_guid {
+                                    if let Ok(prev_project) = daw.project(prev_guid).await {
+                                        let transport = prev_project.transport();
+                                        if let Ok(state) = transport.get_play_state().await {
+                                            if state == daw_proto::PlayState::Paused {
+                                                // Stop the paused project
+                                                debug!("Stopping paused project {}", prev_guid);
+                                                let _ = transport.stop().await;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Find the song that matches the new current project
+                                if let Some(&song_idx) = guid_to_index.get(&current_guid) {
+                                    // Update active song ID
+                                    if let Some(song) = songs.get(song_idx) {
+                                        *this.active_song_id.write().await = Some(song.id.clone());
+
+                                        // Calculate and send new active indices
+                                        let new_indices = this.calculate_active_indices().await;
+                                        this.set_cached_indices(new_indices.clone()).await;
+
+                                        if new_indices != last_indices {
+                                            if events
+                                                .send(&SetlistEvent::ActiveIndicesChanged(new_indices.clone()))
+                                                .await
+                                                .is_err()
+                                            {
+                                                break;
+                                            }
+                                            last_indices = new_indices;
+                                        }
+                                    }
+                                }
+
+                                last_current_project_guid = Some(current_guid);
+                            }
+                        }
                     }
                 }
             }

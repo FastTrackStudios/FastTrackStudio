@@ -41,6 +41,9 @@ pub struct SongTransportState {
     pub is_playing: bool,
     /// Whether this song's project is looping
     pub is_looping: bool,
+    /// Loop region start/end in seconds (relative to song start)
+    /// Only present when looping is enabled and loop points are set
+    pub loop_region: Option<daw_proto::LoopRegion>,
     /// Current tempo in BPM
     pub bpm: f64,
     /// Time signature numerator
@@ -59,6 +62,7 @@ impl Default for SongTransportState {
             section_progress: None,
             is_playing: false,
             is_looping: false,
+            loop_region: None,
             bpm: 120.0,
             time_sig_num: 4,
             time_sig_denom: 4,
