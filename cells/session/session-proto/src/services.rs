@@ -27,8 +27,10 @@ pub struct MeasureInfo {
 pub struct SongTransportState {
     /// Song index in the setlist
     pub song_index: usize,
-    /// Current position in seconds (absolute, from project start)
-    pub position: f64,
+    /// Current position with time, musical, and MIDI representations
+    /// The musical position comes from REAPER's tempo map and properly
+    /// accounts for tempo and time signature changes throughout the project
+    pub position: daw_proto::Position,
     /// Position as progress within the song (0.0 - 1.0)
     pub progress: f64,
     /// Current section index (if in a section)
@@ -51,7 +53,7 @@ impl Default for SongTransportState {
     fn default() -> Self {
         Self {
             song_index: 0,
-            position: 0.0,
+            position: daw_proto::Position::default(),
             progress: 0.0,
             section_index: None,
             section_progress: None,
@@ -265,4 +267,38 @@ pub trait SetlistService {
 
     /// Subscribe to active indices changes
     async fn subscribe_active(&self, indices: Tx<ActiveIndices>);
+
+    // =========================================================================
+    // Audio Engine (proxy)
+    // =========================================================================
+
+    /// Get audio output latency in seconds
+    ///
+    /// This proxies to the DAW's AudioEngineService. The latency represents
+    /// the delay between when audio is rendered and when it reaches the speakers.
+    /// Clients can use this to compensate visual display during playback.
+    ///
+    /// Returns 0.0 if the audio engine is not running or unavailable.
+    async fn get_audio_latency(&self) -> f64;
+
+    /// Get complete audio latency information
+    ///
+    /// Returns input/output latency, sample rate, and audio engine state.
+    /// Useful for latency display badges.
+    async fn get_audio_latency_info(&self) -> AudioLatencyInfo;
+}
+
+/// Complete audio latency information for display
+#[derive(Clone, Debug, Default, PartialEq, Facet)]
+pub struct AudioLatencyInfo {
+    /// Input latency in samples
+    pub input_samples: u32,
+    /// Output latency in samples
+    pub output_samples: u32,
+    /// Output latency in seconds
+    pub output_seconds: f64,
+    /// Sample rate in Hz
+    pub sample_rate: u32,
+    /// Whether audio engine is running
+    pub is_running: bool,
 }

@@ -22,8 +22,9 @@ pub mod song;
 
 // Re-export common types
 pub use services::{
-    MeasureInfo, SetlistEvent, SetlistService, SetlistServiceClient, SetlistServiceDispatcher,
-    SongService, SongServiceClient, SongServiceDispatcher, SongTransportState,
+    AudioLatencyInfo, MeasureInfo, SetlistEvent, SetlistService, SetlistServiceClient,
+    SetlistServiceDispatcher, SongService, SongServiceClient, SongServiceDispatcher,
+    SongTransportState,
 };
 pub use setlist::{ActiveIndices, Setlist};
 pub use song::{Section, SectionType, Song};

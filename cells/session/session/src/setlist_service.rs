@@ -60,7 +60,7 @@ impl SetlistServiceImpl {
     fn calculate_song_transport(
         song: &Song,
         song_index: usize,
-        position: f64,
+        position: daw_proto::Position,
         is_playing: bool,
         is_looping: bool,
         tempo: f64,
@@ -69,8 +69,11 @@ impl SetlistServiceImpl {
         let song_duration = song.duration();
         let song_start = song.start_seconds();
 
+        // Get position in seconds for progress calculations
+        let position_seconds = position.time.map(|t| t.as_seconds()).unwrap_or(0.0);
+
         // Calculate progress within song
-        let relative_pos = position - song_start;
+        let relative_pos = position_seconds - song_start;
         let progress = if song_duration > 0.0 {
             (relative_pos / song_duration).clamp(0.0, 1.0)
         } else {
@@ -78,18 +81,19 @@ impl SetlistServiceImpl {
         };
 
         // Find section at position
-        let (section_index, section_progress) =
-            if let Some((sec_idx, section)) = song.section_at_position_with_index(position) {
-                let sec_duration = section.duration();
-                let sec_progress = if sec_duration > 0.0 {
-                    ((position - section.start_seconds) / sec_duration).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                };
-                (Some(sec_idx), Some(sec_progress))
+        let (section_index, section_progress) = if let Some((sec_idx, section)) =
+            song.section_at_position_with_index(position_seconds)
+        {
+            let sec_duration = section.duration();
+            let sec_progress = if sec_duration > 0.0 {
+                ((position_seconds - section.start_seconds) / sec_duration).clamp(0.0, 1.0)
             } else {
-                (None, None)
+                0.0
             };
+            (Some(sec_idx), Some(sec_progress))
+        } else {
+            (None, None)
+        };
 
         SongTransportState {
             song_index,
@@ -106,6 +110,9 @@ impl SetlistServiceImpl {
     }
 
     /// Get transport state for ALL songs by querying each project
+    ///
+    /// Uses `get_state()` which returns all transport info in ONE RPC call per project,
+    /// rather than making 5 separate calls (position, is_playing, is_looping, tempo, time_sig).
     async fn get_all_song_transports(&self) -> Vec<SongTransportState> {
         let daw = Daw::get();
         let setlist = self.setlist.read().await;
@@ -121,22 +128,44 @@ impl SetlistServiceImpl {
                 Ok(project) => {
                     let transport = project.transport();
 
-                    // Get transport state
-                    let position = transport.get_position().await.unwrap_or(0.0);
-                    let is_playing = transport.is_playing().await.unwrap_or(false);
-                    let is_looping = transport.is_looping().await.unwrap_or(false);
-                    let tempo = transport.get_tempo().await.unwrap_or(120.0);
-                    let time_sig = transport
-                        .get_time_signature()
-                        .await
-                        .map(|ts| (ts.numerator(), ts.denominator()))
-                        .unwrap_or((4, 4));
+                    // Get full transport state in ONE RPC call
+                    match transport.get_state().await {
+                        Ok(state) => {
+                            let is_playing = state.play_state == daw_proto::PlayState::Playing
+                                || state.play_state == daw_proto::PlayState::Recording;
 
-                    let song_transport = Self::calculate_song_transport(
-                        song, song_index, position, is_playing, is_looping, tempo, time_sig,
-                    );
+                            // Use playhead position when playing, edit cursor when stopped
+                            // The Position includes both time and musical position from REAPER's tempo map
+                            let position = if is_playing {
+                                state.playhead_position.clone()
+                            } else {
+                                state.edit_position.clone()
+                            };
 
-                    transports.push(song_transport);
+                            let is_looping = state.looping;
+                            let tempo = state.tempo.bpm();
+                            let time_sig = (
+                                state.time_signature.numerator(),
+                                state.time_signature.denominator(),
+                            );
+
+                            let song_transport = Self::calculate_song_transport(
+                                song, song_index, position, is_playing, is_looping, tempo, time_sig,
+                            );
+
+                            transports.push(song_transport);
+                        }
+                        Err(e) => {
+                            debug!(
+                                "Could not get transport state for project {}: {}",
+                                song.project_guid, e
+                            );
+                            transports.push(SongTransportState {
+                                song_index,
+                                ..Default::default()
+                            });
+                        }
+                    }
                 }
                 Err(e) => {
                     debug!(
@@ -943,17 +972,20 @@ impl SetlistService for SetlistServiceImpl {
     // =========================================================================
 
     async fn subscribe(&self, _cx: &Context, events: Tx<SetlistEvent>) {
-        info!("SetlistService::subscribe() - starting event stream");
+        info!("SetlistService::subscribe() - starting fully reactive event stream");
 
         // Clone self for the spawned task
         let this = self.clone();
 
         // Spawn the streaming loop so this method returns immediately
         tokio::spawn(async move {
-            // Send initial setlist state
+            // Get songs for GUID -> index mapping
+            let songs: Vec<Song>;
             {
                 let setlist = this.setlist.read().await;
                 if let Some(ref sl) = *setlist {
+                    songs = sl.songs.clone();
+                    // Send initial setlist state
                     if events
                         .send(&SetlistEvent::SetlistChanged(sl.clone()))
                         .await
@@ -964,11 +996,55 @@ impl SetlistService for SetlistServiceImpl {
                         );
                         return;
                     }
+                } else {
+                    info!("SetlistService::subscribe() - no setlist available");
+                    return;
                 }
             }
 
-            // Send initial active indices
-            let mut last_indices = this.calculate_active_indices().await;
+            // Build project GUID -> song index mapping
+            let guid_to_index: std::collections::HashMap<String, usize> = songs
+                .iter()
+                .enumerate()
+                .map(|(idx, song)| (song.project_guid.clone(), idx))
+                .collect();
+
+            // Subscribe to the reactive per-project transport stream
+            let daw = Daw::get();
+            let transport_rx = match daw.current_project().await {
+                Ok(project) => match project.transport().subscribe_all_projects().await {
+                    Ok(rx) => rx,
+                    Err(e) => {
+                        warn!("Failed to subscribe to all projects transport: {}", e);
+                        return;
+                    }
+                },
+                Err(e) => {
+                    warn!(
+                        "Failed to get current project for transport subscription: {}",
+                        e
+                    );
+                    return;
+                }
+            };
+
+            // Get initial active song from cache (no RPC)
+            let initial_song_index = {
+                let song_id = this.active_song_id.read().await.clone();
+                song_id.and_then(|id| songs.iter().position(|s| s.id == id))
+            };
+
+            // Send initial active indices (derived from cache, no RPC)
+            let mut last_indices = ActiveIndices {
+                song_index: initial_song_index,
+                section_index: None,
+                slide_index: None,
+                song_progress: None,
+                section_progress: None,
+                is_playing: false,
+                looping: false,
+                loop_selection: None,
+            };
             if events
                 .send(&SetlistEvent::ActiveIndicesChanged(last_indices.clone()))
                 .await
@@ -978,10 +1054,10 @@ impl SetlistService for SetlistServiceImpl {
                 return;
             }
 
-            // Send initial transport state for all songs
-            let mut last_transports = this.get_all_song_transports().await;
+            // Send initial transport state for all songs (one-time poll)
+            let initial_transports = this.get_all_song_transports().await;
             if events
-                .send(&SetlistEvent::TransportUpdate(last_transports.clone()))
+                .send(&SetlistEvent::TransportUpdate(initial_transports))
                 .await
                 .is_err()
             {
@@ -990,122 +1066,148 @@ impl SetlistService for SetlistServiceImpl {
             }
 
             // Track current song/section for enter/exit events
-            let mut last_song_index = last_indices.song_index;
-            let mut last_section_index = last_indices.section_index;
+            // Keyed by song_index to track section per song
+            let mut last_section_by_song: std::collections::HashMap<usize, Option<usize>> =
+                std::collections::HashMap::new();
 
-            // Poll for changes at 60Hz (same rate as transport)
+            // Fully reactive loop - only processes transport stream updates, no polling
+            let mut transport_rx = transport_rx;
+
             loop {
-                tokio::time::sleep(Duration::from_micros(16667)).await;
+                match transport_rx.recv().await {
+                    Ok(Some(update)) => {
+                        // Convert project GUIDs to song indices and build SongTransportState
+                        let mut song_transports: Vec<SongTransportState> = Vec::new();
 
-                // Get current state
-                let current_indices = this.calculate_active_indices().await;
-                let current_transports = this.get_all_song_transports().await;
+                        for proj_state in update.projects {
+                            if let Some(&song_index) = guid_to_index.get(&proj_state.project_guid) {
+                                let song = &songs[song_index];
+                                let is_playing = proj_state.transport.play_state
+                                    == daw_proto::PlayState::Playing
+                                    || proj_state.transport.play_state
+                                        == daw_proto::PlayState::Recording;
 
-                // Always send transport update (positions change constantly during playback)
-                if current_transports != last_transports {
-                    if events
-                        .send(&SetlistEvent::TransportUpdate(current_transports.clone()))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                    last_transports = current_transports;
-                }
+                                // Use playhead position when playing, edit cursor when stopped
+                                // The Position includes both time and musical position from REAPER's tempo map
+                                let position = if is_playing {
+                                    proj_state.transport.playhead_position.clone()
+                                } else {
+                                    proj_state.transport.edit_position.clone()
+                                };
 
-                // Check for song change (active song switched)
-                if current_indices.song_index != last_song_index {
-                    // Song exited
-                    if let Some(idx) = last_song_index {
-                        if events
-                            .send(&SetlistEvent::SongExited { index: idx })
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
+                                let song_transport = Self::calculate_song_transport(
+                                    song,
+                                    song_index,
+                                    position,
+                                    is_playing,
+                                    proj_state.transport.looping,
+                                    proj_state.transport.tempo.bpm(),
+                                    (
+                                        proj_state.transport.time_signature.numerator(),
+                                        proj_state.transport.time_signature.denominator(),
+                                    ),
+                                );
 
-                    // Song entered
-                    if let Some(idx) = current_indices.song_index {
-                        let setlist = this.setlist.read().await;
-                        if let Some(ref sl) = *setlist {
-                            if let Some(song) = sl.songs.get(idx) {
-                                if events
-                                    .send(&SetlistEvent::SongEntered {
-                                        index: idx,
-                                        song: song.clone(),
-                                    })
-                                    .await
-                                    .is_err()
-                                {
-                                    break;
+                                // Track section changes for this song (derived from transport data)
+                                let current_section = song_transport.section_index;
+                                let last_section =
+                                    last_section_by_song.get(&song_index).copied().flatten();
+
+                                if current_section != last_section {
+                                    // Section changed for this song
+                                    if let Some(sec_idx) = last_section {
+                                        let _ = events
+                                            .send(&SetlistEvent::SectionExited {
+                                                song_index,
+                                                section_index: sec_idx,
+                                            })
+                                            .await;
+                                    }
+
+                                    if let Some(sec_idx) = current_section {
+                                        if let Some(section) = song.sections.get(sec_idx) {
+                                            let _ = events
+                                                .send(&SetlistEvent::SectionEntered {
+                                                    song_index,
+                                                    section_index: sec_idx,
+                                                    section: section.clone(),
+                                                })
+                                                .await;
+                                        }
+                                    }
+
+                                    last_section_by_song.insert(song_index, current_section);
                                 }
+
+                                song_transports.push(song_transport);
                             }
                         }
-                    }
 
-                    // Also send ActiveIndicesChanged when song changes
-                    if events
-                        .send(&SetlistEvent::ActiveIndicesChanged(current_indices.clone()))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
+                        if !song_transports.is_empty() {
+                            // Update ActiveIndices from the first playing song (or first song with updates)
+                            // Find the currently active song based on cached ID
+                            let active_song_index = {
+                                let song_id = this.active_song_id.read().await.clone();
+                                song_id.and_then(|id| songs.iter().position(|s| s.id == id))
+                            };
 
-                    last_song_index = current_indices.song_index;
-                    // Reset section tracking when song changes
-                    last_section_index = None;
-                }
+                            // Find transport for active song, or use first available
+                            let active_transport = active_song_index
+                                .and_then(|idx| {
+                                    song_transports.iter().find(|t| t.song_index == idx)
+                                })
+                                .or_else(|| song_transports.first());
 
-                // Check for section change
-                if current_indices.section_index != last_section_index {
-                    // Section exited
-                    if let (Some(song_idx), Some(sec_idx)) =
-                        (current_indices.song_index, last_section_index)
-                    {
-                        if events
-                            .send(&SetlistEvent::SectionExited {
-                                song_index: song_idx,
-                                section_index: sec_idx,
-                            })
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
+                            if let Some(transport) = active_transport {
+                                let current_indices = ActiveIndices {
+                                    song_index: Some(transport.song_index),
+                                    section_index: transport.section_index,
+                                    slide_index: None,
+                                    song_progress: Some(transport.progress),
+                                    section_progress: transport.section_progress,
+                                    is_playing: transport.is_playing,
+                                    looping: transport.is_looping,
+                                    loop_selection: None,
+                                };
 
-                    // Section entered
-                    if let (Some(song_idx), Some(sec_idx)) =
-                        (current_indices.song_index, current_indices.section_index)
-                    {
-                        let setlist = this.setlist.read().await;
-                        if let Some(ref sl) = *setlist {
-                            if let Some(song) = sl.songs.get(song_idx) {
-                                if let Some(section) = song.sections.get(sec_idx) {
+                                // Only send if changed
+                                if current_indices != last_indices {
                                     if events
-                                        .send(&SetlistEvent::SectionEntered {
-                                            song_index: song_idx,
-                                            section_index: sec_idx,
-                                            section: section.clone(),
-                                        })
+                                        .send(&SetlistEvent::ActiveIndicesChanged(
+                                            current_indices.clone(),
+                                        ))
                                         .await
                                         .is_err()
                                     {
                                         break;
                                     }
+                                    last_indices = current_indices;
                                 }
+                            }
+
+                            // Send transport updates
+                            if events
+                                .send(&SetlistEvent::TransportUpdate(song_transports))
+                                .await
+                                .is_err()
+                            {
+                                break;
                             }
                         }
                     }
-
-                    last_section_index = current_indices.section_index;
+                    Ok(None) => {
+                        // Stream ended
+                        info!("SetlistService::subscribe() - transport stream ended");
+                        break;
+                    }
+                    Err(e) => {
+                        warn!(
+                            "SetlistService::subscribe() - transport stream error: {}",
+                            e
+                        );
+                        break;
+                    }
                 }
-
-                // Update last_indices for next iteration
-                last_indices = current_indices;
             }
 
             info!("SetlistService::subscribe() - stream ended");
@@ -1147,5 +1249,27 @@ impl SetlistService for SetlistServiceImpl {
 
             info!("SetlistService::subscribe_active() - stream ended");
         });
+    }
+
+    async fn get_audio_latency(&self, _cx: &Context) -> f64 {
+        let daw = Daw::get();
+        daw.audio_engine()
+            .get_output_latency_seconds()
+            .await
+            .unwrap_or(0.0)
+    }
+
+    async fn get_audio_latency_info(&self, _cx: &Context) -> session_proto::AudioLatencyInfo {
+        let daw = Daw::get();
+        match daw.audio_engine().get_state().await {
+            Ok(state) => session_proto::AudioLatencyInfo {
+                input_samples: state.latency.input_samples,
+                output_samples: state.latency.output_samples,
+                output_seconds: state.latency.output_seconds,
+                sample_rate: state.latency.sample_rate,
+                is_running: state.is_running,
+            },
+            Err(_) => session_proto::AudioLatencyInfo::default(),
+        }
     }
 }
