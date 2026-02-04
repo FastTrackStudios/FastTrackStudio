@@ -20,8 +20,8 @@ use roam_session::{HandshakeConfig, NoDispatcher};
 use roam_websocket::WsTransport;
 use session_proto::{SetlistServiceClient, Song};
 use session_ui::{
-    ConnectionState, Session, TransportState, ACTIVE_INDICES, LATENCY_TRACKER, PLAYBACK_STATE,
-    SETLIST_STRUCTURE, SONG_TRANSPORT,
+    ConnectionState, LatencyInfo, Session, TransportState, ACTIVE_INDICES, AUDIO_LATENCY_SECONDS,
+    LATENCY_INFO, LATENCY_TRACKER, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_TRANSPORT,
 };
 use wasm_bindgen::prelude::*;
 
@@ -124,8 +124,13 @@ async fn try_connect_and_run(
     log("[fts-control] WebSocket connected, initiating roam handshake...");
 
     // Use roam's initiate_framed for the handshake
+    // Use higher credit for 60Hz streaming updates
+    let config = HandshakeConfig {
+        max_payload_size: 1024 * 1024,            // 1 MiB
+        initial_channel_credit: 16 * 1024 * 1024, // 16 MiB for high-frequency streaming
+    };
     let (handle, _incoming, driver) =
-        roam_session::initiate_framed(transport, HandshakeConfig::default(), NoDispatcher)
+        roam_session::initiate_framed(transport, config, NoDispatcher)
             .await
             .map_err(|e| format!("Handshake failed: {e}"))?;
 
@@ -276,6 +281,115 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
         let session = Session::get();
         let setlist_client = session.setlist();
 
+        // Fetch initial audio latency info
+        match setlist_client.get_audio_latency_info().await {
+            Ok(info) => {
+                let output_ms = info.output_seconds * 1000.0;
+                let input_ms = if info.sample_rate > 0 {
+                    (info.input_samples as f64 / info.sample_rate as f64) * 1000.0
+                } else {
+                    0.0
+                };
+
+                *AUDIO_LATENCY_SECONDS.write() = info.output_seconds;
+                *LATENCY_INFO.write() = LatencyInfo {
+                    input_ms,
+                    output_ms,
+                    network_rtt_ms: 0.0, // Will be measured separately
+                    sample_rate: info.sample_rate,
+                    is_running: info.is_running,
+                };
+
+                log(&format!(
+                    "[fts-control] Audio latency: input={:.1}ms, output={:.1}ms",
+                    input_ms, output_ms
+                ));
+            }
+            Err(e) => {
+                log(&format!("[fts-control] Failed to get audio latency: {}", e));
+            }
+        }
+
+        // Start a background task to periodically refresh audio latency and measure network RTT
+        let setlist_client_clone = setlist_client.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            // Rolling average of network RTT measurements
+            let mut rtt_samples: Vec<f64> = Vec::with_capacity(10);
+
+            loop {
+                // Wait 5 seconds between latency updates
+                gloo_timers::future::TimeoutFuture::new(5000).await;
+
+                // Measure network RTT by timing the get_audio_latency_info call
+                let start = web_sys::window()
+                    .and_then(|w| w.performance())
+                    .map(|p| p.now())
+                    .unwrap_or(0.0);
+
+                if let Ok(info) = setlist_client_clone.get_audio_latency_info().await {
+                    let end = web_sys::window()
+                        .and_then(|w| w.performance())
+                        .map(|p| p.now())
+                        .unwrap_or(0.0);
+
+                    let rtt = end - start;
+
+                    // Add to rolling average (keep last 10 samples)
+                    rtt_samples.push(rtt);
+                    if rtt_samples.len() > 10 {
+                        rtt_samples.remove(0);
+                    }
+
+                    // Calculate average RTT, filtering out spikes (>3x average)
+                    let avg_rtt = if rtt_samples.len() >= 3 {
+                        let sum: f64 = rtt_samples.iter().sum();
+                        let avg = sum / rtt_samples.len() as f64;
+                        // Filter out spikes for final calculation
+                        let filtered: Vec<_> =
+                            rtt_samples.iter().filter(|&&r| r < avg * 3.0).collect();
+                        if filtered.is_empty() {
+                            avg
+                        } else {
+                            filtered.iter().copied().sum::<f64>() / filtered.len() as f64
+                        }
+                    } else {
+                        rtt
+                    };
+
+                    let output_ms = info.output_seconds * 1000.0;
+                    let input_ms = if info.sample_rate > 0 {
+                        (info.input_samples as f64 / info.sample_rate as f64) * 1000.0
+                    } else {
+                        0.0
+                    };
+
+                    // Update AUDIO_LATENCY_SECONDS for transport compensation
+                    let current = *AUDIO_LATENCY_SECONDS.read();
+                    if (info.output_seconds - current).abs() > 0.0001 {
+                        *AUDIO_LATENCY_SECONDS.write() = info.output_seconds;
+                    }
+
+                    // Update full latency info including network RTT
+                    let new_info = LatencyInfo {
+                        input_ms,
+                        output_ms,
+                        network_rtt_ms: avg_rtt,
+                        sample_rate: info.sample_rate,
+                        is_running: info.is_running,
+                    };
+
+                    let current_info = LATENCY_INFO.read().clone();
+                    if new_info != current_info {
+                        *LATENCY_INFO.write() = new_info;
+                        log(&format!(
+                            "[fts-control] Latency updated: input={:.1}ms, output={:.1}ms, network={:.1}ms",
+                            input_ms, output_ms, avg_rtt
+                        ));
+                    }
+                }
+            }
+        });
+
         // Create a channel for receiving setlist events
         let (tx, mut rx) = roam::channel::<session_proto::SetlistEvent>();
 
@@ -311,13 +425,36 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                             // Get current active song index
                             let active_song_index = ACTIVE_INDICES.read().song_index;
 
+                            // Get audio latency for compensation (only applied during playback)
+                            let audio_latency = *AUDIO_LATENCY_SECONDS.read();
+
                             // Update SONG_TRANSPORT for ALL songs
                             let mut song_transport = SONG_TRANSPORT.write();
                             for transport in transports {
+                                // Apply latency compensation to time position during playback
+                                // This shifts the visual position ahead to match audio output
+                                // Note: We only compensate the time portion, not the musical position
+                                let compensated_position =
+                                    if transport.is_playing && audio_latency > 0.0 {
+                                        // Create a new Position with compensated time
+                                        let compensated_time = transport.position.time.map(|t| {
+                                            daw_proto::TimePosition::from_seconds(
+                                                t.as_seconds() + audio_latency,
+                                            )
+                                        });
+                                        daw_proto::Position::new(
+                                            transport.position.musical.clone(),
+                                            compensated_time,
+                                            transport.position.midi.clone(),
+                                        )
+                                    } else {
+                                        transport.position.clone()
+                                    };
+
                                 song_transport.insert(
                                     transport.song_index,
                                     TransportState {
-                                        position: transport.position,
+                                        position: compensated_position,
                                         bpm: transport.bpm,
                                         time_sig_num: transport.time_sig_num as i32,
                                         time_sig_denom: transport.time_sig_denom as i32,

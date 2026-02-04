@@ -38,10 +38,15 @@ pub fn create_mock_transport_states() -> HashMap<usize, TransportState> {
     map.insert(
         0,
         TransportState {
-            position: 78.0, // In Chorus section (60-105)
+            position: daw_proto::Position::new(
+                Some(daw_proto::MusicalPosition::new(20, 1, 0)), // Measure 20
+                Some(daw_proto::TimePosition::from_seconds(78.0)), // In Chorus section (60-105)
+                None,
+            ),
             bpm: 120.0,
             time_sig_num: 4,
             time_sig_denom: 4,
+            is_playing: true,
             is_looping: false,
             loop_region: None,
         },
