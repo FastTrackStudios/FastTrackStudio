@@ -15,7 +15,7 @@
 
 use daw_control::Project;
 use daw_proto::{Marker, Region};
-use session_proto::{Section, SectionType, Song};
+use session_proto::{Comment, Section, SectionType, Song};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -273,6 +273,64 @@ impl SongBuilder {
             Vec::new()
         };
 
+        // Extract comment markers (non-structural markers within song bounds)
+        // Also handle COUNT-IN marker as a comment if it's after the first section starts
+        // (for songs where count-in happens mid-song, e.g., keys-only intro)
+        let first_section_start = sections
+            .first()
+            .map(|s| s.start_seconds)
+            .unwrap_or(song_start_seconds);
+        let count_in_marker_pos = count_in_marker.map(|m| position_to_seconds(&m.position));
+        let count_in_is_mid_song = count_in_marker_pos
+            .map(|pos| pos > first_section_start + 0.01)
+            .unwrap_or(false);
+
+        let mut comments: Vec<Comment> = markers
+            .iter()
+            .filter(|m| {
+                let pos = position_to_seconds(&m.position);
+                // Must be within song bounds
+                let in_bounds = pos >= song_start_seconds && pos <= end_seconds;
+                // Must not be a structural marker (unless it's a mid-song count-in)
+                let is_structural = Self::is_structural_marker(&m.name);
+                // Include if: in bounds AND (not structural OR is mid-song count-in)
+                let is_mid_song_count_in =
+                    Self::is_count_in_marker(&m.name) && count_in_is_mid_song;
+                in_bounds && (!is_structural || is_mid_song_count_in)
+            })
+            .map(|m| {
+                let is_count_in = Self::is_count_in_marker(&m.name);
+                Comment {
+                    id: m.id,
+                    text: m.name.clone(),
+                    position_seconds: position_to_seconds(&m.position),
+                    color: m.color,
+                    is_count_in,
+                }
+            })
+            .collect();
+
+        // Sort comments by position
+        comments.sort_by(|a, b| {
+            a.position_seconds
+                .partial_cmp(&b.position_seconds)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        debug!("Extracted {} comments", comments.len());
+        for comment in &comments {
+            debug!(
+                "  Comment: '{}' at {:.3}s{}",
+                comment.text,
+                comment.position_seconds,
+                if comment.is_count_in {
+                    " (count-in)"
+                } else {
+                    ""
+                }
+            );
+        }
+
         Ok(Song {
             id: Uuid::new_v4().to_string(),
             name: song_name,
@@ -281,6 +339,7 @@ impl SongBuilder {
             end_seconds,
             count_in_seconds,
             sections,
+            comments,
             tempo,
             time_signature: time_sig,
             measure_positions,
@@ -341,6 +400,19 @@ impl SongBuilder {
 
     /// Check if a marker is a special marker (not a section marker)
     fn is_special_marker(name: &str) -> bool {
+        Self::is_count_in_marker(name)
+            || Self::is_songstart_marker(name)
+            || Self::is_songend_marker(name)
+            || name == "=START"
+            || name == "=END"
+            || name.starts_with("=SONGSTART")
+            || name.starts_with("=SONGEND")
+    }
+
+    /// Check if a marker is a structural marker (used for song bounds, not for comments)
+    /// This is similar to is_special_marker but includes COUNT-IN since it can
+    /// appear as a comment when it's mid-song
+    fn is_structural_marker(name: &str) -> bool {
         Self::is_count_in_marker(name)
             || Self::is_songstart_marker(name)
             || Self::is_songend_marker(name)

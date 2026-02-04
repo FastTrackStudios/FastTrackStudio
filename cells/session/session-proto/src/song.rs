@@ -6,6 +6,61 @@
 use daw_proto::{Position, TimeSignature};
 use facet::Facet;
 
+/// A comment marker within a song
+///
+/// Comments are markers that aren't structural (not SONGSTART, SONGEND, =START, =END, COUNT-IN).
+/// They serve as reminders or notes displayed above the progress bar.
+/// Examples: "Keys only", "Build energy", "Watch conductor", "Count-In" (when mid-song)
+#[derive(Clone, Debug, PartialEq, Facet)]
+pub struct Comment {
+    /// DAW marker ID (if applicable)
+    pub id: Option<u32>,
+    /// Comment text (the marker name)
+    pub text: String,
+    /// Position in seconds (absolute project time)
+    pub position_seconds: f64,
+    /// Color for visual representation (from marker color, None for default)
+    pub color: Option<u32>,
+    /// Whether this is a count-in marker that appears mid-song
+    /// (used for special styling)
+    pub is_count_in: bool,
+}
+
+impl Comment {
+    /// Create a new comment
+    pub fn new(text: String, position_seconds: f64) -> Self {
+        Self {
+            id: None,
+            text,
+            position_seconds,
+            color: None,
+            is_count_in: false,
+        }
+    }
+
+    /// Create a count-in comment (for mid-song count-in markers)
+    pub fn count_in(position_seconds: f64) -> Self {
+        Self {
+            id: None,
+            text: "Count-In".to_string(),
+            position_seconds,
+            color: None,
+            is_count_in: true,
+        }
+    }
+
+    /// Get the color as a CSS hex string
+    pub fn color_hex(&self) -> Option<String> {
+        self.color.map(|c| {
+            // REAPER colors are in BGR format, convert to RGB hex
+            let r = (c >> 16) & 0xFF;
+            let g = (c >> 8) & 0xFF;
+            let b = c & 0xFF;
+            format!("#{:02x}{:02x}{:02x}", b, g, r)
+        })
+    }
+}
+
 /// A section within a song (derived from a region or markers)
 ///
 /// Sections represent structural parts of a song like verses, choruses, bridges.
@@ -318,6 +373,8 @@ pub struct Song {
     pub count_in_seconds: Option<f64>,
     /// Sections within this song
     pub sections: Vec<Section>,
+    /// Comment markers within this song (non-structural markers)
+    pub comments: Vec<Comment>,
     /// Tempo at song start (if available)
     pub tempo: Option<f64>,
     /// Time signature at song start (if available)

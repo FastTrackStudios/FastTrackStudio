@@ -367,6 +367,52 @@ fn PerformanceMainContent(
         })
         .unwrap_or_default();
 
+    // Build comment markers from song comments
+    let comment_markers: Vec<CommentMarker> = current_song
+        .as_ref()
+        .map(|song| {
+            // Calculate song duration for percentage calculation
+            // Use actual section bounds (same as progress_sections calculation)
+            let sections_start = song
+                .sections
+                .first()
+                .map(|s| s.start_seconds)
+                .unwrap_or(song.start_seconds);
+            let sections_end = song
+                .sections
+                .last()
+                .map(|s| s.end_seconds)
+                .unwrap_or(song.end_seconds);
+            let sections_duration = sections_end - sections_start;
+
+            if sections_duration <= 0.0 {
+                return Vec::new();
+            }
+
+            song.comments
+                .iter()
+                .filter_map(|comment| {
+                    // Only include comments within the displayable range
+                    if comment.position_seconds >= sections_start
+                        && comment.position_seconds <= sections_end
+                    {
+                        let position_percent = ((comment.position_seconds - sections_start)
+                            / sections_duration)
+                            * 100.0;
+                        Some(CommentMarker {
+                            position_percent: position_percent.clamp(0.0, 100.0),
+                            text: comment.text.clone(),
+                            color: comment.color_hex(),
+                            is_count_in: comment.is_count_in,
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     // Build measure indicators for the current section
     // Measure 1 starts at SONGSTART marker, so count-in measures are 0, -1, -2, etc.
     // We need to know the song's content start (SONGSTART) to calculate correct measure numbers
@@ -439,6 +485,42 @@ fn PerformanceMainContent(
         })
         .unwrap_or_default();
 
+    // Build section-specific comment markers (comments within the current section)
+    let section_comment_markers: Vec<CommentMarker> = current_section
+        .as_ref()
+        .and_then(|section| {
+            current_song.as_ref().map(|song| {
+                let section_duration = section.end_seconds - section.start_seconds;
+                if section_duration <= 0.0 {
+                    return Vec::new();
+                }
+
+                song.comments
+                    .iter()
+                    .filter_map(|comment| {
+                        // Only include comments within this section
+                        if comment.position_seconds >= section.start_seconds
+                            && comment.position_seconds < section.end_seconds
+                        {
+                            let position_percent = ((comment.position_seconds
+                                - section.start_seconds)
+                                / section_duration)
+                                * 100.0;
+                            Some(CommentMarker {
+                                position_percent: position_percent.clamp(0.0, 100.0),
+                                text: comment.text.clone(),
+                                color: comment.color_hex(),
+                                is_count_in: comment.is_count_in,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+        })
+        .unwrap_or_default();
+
     // Capture song_index for closures
     let song_index_for_section_click = active_indices.song_index;
 
@@ -478,6 +560,7 @@ fn PerformanceMainContent(
                                     }
                                 })),
                                 tempo_markers: tempo_markers.clone(),
+                                comment_markers: comment_markers.clone(),
                                 song_key: song_key.clone(),
                             }
                         }
@@ -493,6 +576,7 @@ fn PerformanceMainContent(
                                 progress: section_progress,
                                 sections: progress_sections.clone(),
                                 measure_indicators: measure_indicators.clone(),
+                                comment_markers: section_comment_markers.clone(),
                                 song_key: song_key.clone(),
                                 on_measure_click: Some(Callback::new({
                                     let song_index = active_indices.song_index;

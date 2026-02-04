@@ -248,12 +248,26 @@ pub struct MeasureIndicator {
     pub musical_position: daw_proto::MusicalPosition,
 }
 
+/// Comment marker for displaying notes/reminders above the progress bar
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommentMarker {
+    /// Position as percentage (0-100) within the progress bar
+    pub position_percent: f64,
+    /// Comment text to display
+    pub text: String,
+    /// Optional color (CSS hex string like "#ff0000")
+    pub color: Option<String>,
+    /// Whether this is a count-in marker (special styling)
+    pub is_count_in: bool,
+}
+
 /// Segmented progress bar component with different colored sections
 #[component]
 pub fn SegmentedProgressBar(
     progress: Signal<f64>,
     sections: Vec<ProgressSection>,
     #[props(default)] tempo_markers: Vec<TempoMarkerData>,
+    #[props(default)] comment_markers: Vec<CommentMarker>,
     #[props(default)] song_key: Option<String>,
     #[props(default)] on_section_click: Option<Callback<usize>>,
     #[props(default)] loop_indicator: Option<LoopIndicatorData>,
@@ -455,6 +469,58 @@ pub fn SegmentedProgressBar(
                     }
                 }
             }
+            // Comment markers (displayed above progress bar, similar to time signature cards)
+            if !comment_markers.is_empty() {
+                for (index, comment) in comment_markers.iter().enumerate() {
+                    div {
+                        key: "comment-{index}",
+                        class: "absolute pointer-events-none z-50",
+                        style: format!(
+                            "left: {}%; transform: translateX(-50%); top: -2.5rem;",
+                            comment.position_percent
+                        ),
+                        div {
+                            class: if comment.is_count_in {
+                                "text-xs font-bold text-center whitespace-nowrap px-2 py-1 rounded border-2"
+                            } else {
+                                "text-xs font-medium text-center whitespace-nowrap px-2 py-1 rounded border"
+                            },
+                            style: if let Some(ref color) = comment.color {
+                                format!(
+                                    "background-color: {}20; border-color: {}; color: {};",
+                                    color, color, color
+                                )
+                            } else if comment.is_count_in {
+                                "background-color: rgba(251, 191, 36, 0.2); border-color: #fbbf24; color: #fbbf24;".to_string()
+                            } else {
+                                "background-color: var(--color-accent); border-color: var(--color-border); color: var(--color-accent-foreground);".to_string()
+                            },
+                            "{comment.text}"
+                        }
+                    }
+                    // Vertical line from comment to progress bar
+                    div {
+                        key: "comment-line-{index}",
+                        class: "absolute pointer-events-none z-40",
+                        style: if let Some(ref color) = comment.color {
+                            format!(
+                                "left: {}%; width: 1px; top: -0.75rem; height: 0.75rem; background-color: {}80; transform: translateX(-50%);",
+                                comment.position_percent, color
+                            )
+                        } else if comment.is_count_in {
+                            format!(
+                                "left: {}%; width: 1px; top: -0.75rem; height: 0.75rem; background-color: rgba(251, 191, 36, 0.5); transform: translateX(-50%);",
+                                comment.position_percent
+                            )
+                        } else {
+                            format!(
+                                "left: {}%; width: 1px; top: -0.75rem; height: 0.75rem; background-color: rgba(255, 255, 255, 0.5); transform: translateX(-50%);",
+                                comment.position_percent
+                            )
+                        },
+                    }
+                }
+            }
             // Main segmented progress bar
             div {
                 class: "relative w-full h-20 rounded-lg overflow-hidden bg-secondary",
@@ -586,6 +652,7 @@ pub fn SongProgressBar(
     sections: Vec<ProgressSection>,
     #[props(default)] on_section_click: Option<Callback<usize>>,
     #[props(default)] tempo_markers: Vec<TempoMarkerData>,
+    #[props(default)] comment_markers: Vec<CommentMarker>,
     #[props(default)] song_key: Option<String>,
     #[props(default)] loop_indicator: Option<LoopIndicatorData>,
 ) -> Element {
@@ -596,6 +663,7 @@ pub fn SongProgressBar(
                 progress: progress,
                 sections: sections.clone(),
                 tempo_markers: tempo_markers,
+                comment_markers: comment_markers,
                 song_key: song_key,
                 on_section_click: on_section_click,
                 loop_indicator: loop_indicator,

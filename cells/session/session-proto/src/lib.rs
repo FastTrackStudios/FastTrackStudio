@@ -27,7 +27,7 @@ pub use services::{
     SongTransportState,
 };
 pub use setlist::{ActiveIndices, Setlist};
-pub use song::{Section, SectionType, Song};
+pub use song::{Comment, Section, SectionType, Song};
 
 // Re-export position types from daw-proto for convenience
 pub use daw_proto::MusicalPosition;

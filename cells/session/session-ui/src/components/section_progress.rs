@@ -1,5 +1,5 @@
 use crate::components::{
-    MeasureIndicator, ProgressSection, TempoCard, TempoMarkerData, TimeSignatureCard,
+    CommentMarker, MeasureIndicator, ProgressSection, TempoCard, TempoMarkerData, TimeSignatureCard,
 };
 use crate::signals::{ACTIVE_INDICES, SETLIST_STRUCTURE};
 use dioxus::prelude::*;
@@ -7,13 +7,14 @@ use dioxus::prelude::*;
 /// Section progress bar component
 ///
 /// Shows progress within the current section as a small bar below the main progress bar.
-/// Can display tempo markers, time signature markers, and measure indicators for a zoomed-in view.
+/// Can display tempo markers, time signature markers, measure indicators, and comment markers.
 #[component]
 pub fn SectionProgressBar(
     progress: Signal<f64>,
     sections: Vec<ProgressSection>,
     #[props(default)] tempo_markers: Vec<TempoMarkerData>,
     #[props(default)] measure_indicators: Vec<MeasureIndicator>,
+    #[props(default)] comment_markers: Vec<CommentMarker>,
     #[props(default)] song_key: Option<String>,
     #[props(default)] on_measure_click: Option<Callback<daw_proto::MusicalPosition>>,
 ) -> Element {
@@ -255,6 +256,37 @@ pub fn SectionProgressBar(
                         card_key: format!("section-tempo-label-{orig_idx}"),
                         card_class: "text-xs font-medium text-center whitespace-nowrap px-1 py-1 rounded bg-accent text-accent-foreground border border-border".to_string(),
                         left_align: marker.position_percent < 0.5, // Left-align first marker at 0%
+                    }
+                }
+            }
+            // Comment markers (displayed above section progress bar)
+            if !comment_markers.is_empty() {
+                for (index, comment) in comment_markers.iter().enumerate() {
+                    div {
+                        key: "section-comment-{index}",
+                        class: "absolute pointer-events-none z-50",
+                        style: format!(
+                            "left: {}%; transform: translateX(-50%); top: -1.5rem;",
+                            comment.position_percent
+                        ),
+                        div {
+                            class: if comment.is_count_in {
+                                "text-[10px] font-bold text-center whitespace-nowrap px-1.5 py-0.5 rounded border"
+                            } else {
+                                "text-[10px] font-medium text-center whitespace-nowrap px-1.5 py-0.5 rounded border"
+                            },
+                            style: if let Some(ref color) = comment.color {
+                                format!(
+                                    "background-color: {}20; border-color: {}; color: {};",
+                                    color, color, color
+                                )
+                            } else if comment.is_count_in {
+                                "background-color: rgba(251, 191, 36, 0.2); border-color: #fbbf24; color: #fbbf24;".to_string()
+                            } else {
+                                "background-color: var(--color-accent); border-color: var(--color-border); color: var(--color-accent-foreground);".to_string()
+                            },
+                            "{comment.text}"
+                        }
                     }
                 }
             }
