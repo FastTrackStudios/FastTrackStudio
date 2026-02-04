@@ -451,6 +451,27 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                                         transport.position.clone()
                                     };
 
+                                // Convert loop region from seconds to percentages (0.0-1.0)
+                                // The loop_region in SongTransportState is already relative to song start
+                                let loop_region_percent =
+                                    transport.loop_region.as_ref().and_then(|region| {
+                                        // Get song duration from setlist for percentage calculation
+                                        let setlist = SETLIST_STRUCTURE.read();
+                                        setlist.songs.get(transport.song_index).map(|song| {
+                                            let song_duration = song.duration();
+                                            if song_duration > 0.0 {
+                                                (
+                                                    (region.start_seconds / song_duration)
+                                                        .clamp(0.0, 1.0),
+                                                    (region.end_seconds / song_duration)
+                                                        .clamp(0.0, 1.0),
+                                                )
+                                            } else {
+                                                (0.0, 1.0)
+                                            }
+                                        })
+                                    });
+
                                 song_transport.insert(
                                     transport.song_index,
                                     TransportState {
@@ -460,7 +481,7 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                                         time_sig_denom: transport.time_sig_denom as i32,
                                         is_playing: transport.is_playing,
                                         is_looping: transport.is_looping,
-                                        loop_region: None,
+                                        loop_region: loop_region_percent,
                                     },
                                 );
 

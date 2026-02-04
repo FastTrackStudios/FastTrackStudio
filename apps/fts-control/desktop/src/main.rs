@@ -37,7 +37,8 @@ mod services;
 
 use dioxus::prelude::*;
 use session_ui::{
-    ConnectionState, LatencyInfo, PerformanceLayout, TopBar, AUDIO_LATENCY_SECONDS, LATENCY_INFO,
+    ConnectionState, LatencyInfo, PerformanceLayout, Session, TopBar, AUDIO_LATENCY_SECONDS,
+    LATENCY_INFO,
 };
 use tokio;
 use tracing::info;
@@ -255,6 +256,27 @@ fn App() -> Element {
                                         transport.position.clone()
                                     };
 
+                                // Convert loop region from seconds to percentages (0.0-1.0)
+                                // The loop_region in SongTransportState is already relative to song start
+                                let loop_region_percent =
+                                    transport.loop_region.as_ref().and_then(|region| {
+                                        // Get song duration from setlist for percentage calculation
+                                        let setlist = SETLIST_STRUCTURE.read();
+                                        setlist.songs.get(transport.song_index).map(|song| {
+                                            let song_duration = song.duration();
+                                            if song_duration > 0.0 {
+                                                (
+                                                    (region.start_seconds / song_duration)
+                                                        .clamp(0.0, 1.0),
+                                                    (region.end_seconds / song_duration)
+                                                        .clamp(0.0, 1.0),
+                                                )
+                                            } else {
+                                                (0.0, 1.0)
+                                            }
+                                        })
+                                    });
+
                                 song_transport.insert(
                                     transport.song_index,
                                     TransportState {
@@ -264,7 +286,7 @@ fn App() -> Element {
                                         time_sig_denom: transport.time_sig_denom as i32,
                                         is_playing: transport.is_playing,
                                         is_looping: transport.is_looping,
-                                        loop_region: None,
+                                        loop_region: loop_region_percent,
                                     },
                                 );
 
@@ -335,9 +357,15 @@ fn App() -> Element {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
 
-        // Main app layout
+        // Main app layout with keyboard handler
         div {
-            class: "h-screen flex flex-col bg-background text-foreground",
+            class: "h-screen flex flex-col bg-background text-foreground outline-none",
+            tabindex: "0",
+            autofocus: true,
+            onkeydown: move |e: KeyboardEvent| {
+                // Handle keyboard shortcuts for session actions
+                handle_keyboard_shortcut(e);
+            },
 
             // Top navigation bar (same as web)
             TopBar {
@@ -359,6 +387,67 @@ fn App() -> Element {
                 }
             }
         }
+    }
+}
+
+/// Handle keyboard shortcuts for session actions
+fn handle_keyboard_shortcut(e: KeyboardEvent) {
+    // Don't handle if modifier keys are pressed (except for specific shortcuts)
+    // This prevents interfering with browser/system shortcuts
+    if e.modifiers().ctrl() || e.modifiers().alt() || e.modifiers().meta() {
+        return;
+    }
+
+    match e.key() {
+        // Space - Toggle playback
+        Key::Character(c) if c == " " => {
+            e.prevent_default();
+            spawn(async move {
+                tracing::debug!("Keyboard: Space -> toggle_playback");
+                let _ = Session::get().setlist().toggle_playback().await;
+            });
+        }
+        // L - Toggle loop
+        Key::Character(c) if c.to_lowercase() == "l" => {
+            e.prevent_default();
+            spawn(async move {
+                tracing::debug!("Keyboard: L -> toggle_song_loop");
+                let _ = Session::get().setlist().toggle_song_loop().await;
+            });
+        }
+        // Right arrow - Smart next (next section, then next song)
+        Key::ArrowRight => {
+            e.prevent_default();
+            spawn(async move {
+                tracing::debug!("Keyboard: Right -> next_section (smart next)");
+                let _ = Session::get().setlist().next_section().await;
+            });
+        }
+        // Left arrow - Smart previous (previous section, then previous song)
+        Key::ArrowLeft => {
+            e.prevent_default();
+            spawn(async move {
+                tracing::debug!("Keyboard: Left -> previous_section (smart previous)");
+                let _ = Session::get().setlist().previous_section().await;
+            });
+        }
+        // Down arrow - Next song
+        Key::ArrowDown => {
+            e.prevent_default();
+            spawn(async move {
+                tracing::debug!("Keyboard: Down -> next_song");
+                let _ = Session::get().setlist().next_song().await;
+            });
+        }
+        // Up arrow - Previous song
+        Key::ArrowUp => {
+            e.prevent_default();
+            spawn(async move {
+                tracing::debug!("Keyboard: Up -> previous_song");
+                let _ = Session::get().setlist().previous_song().await;
+            });
+        }
+        _ => {}
     }
 }
 
