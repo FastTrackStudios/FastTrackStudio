@@ -39,6 +39,9 @@ pub fn CompactProgressBar(
     #[props(default = false)] is_inactive: bool,
     #[props(default = false)] always_black_bg: bool,
     #[props(default)] on_click: Option<Callback<MouseEvent>>,
+    /// Optional comment to display in italic after the label
+    #[props(default)]
+    comment: Option<String>,
 ) -> Element {
     rsx! {
         div {
@@ -76,7 +79,7 @@ pub fn CompactProgressBar(
                     style: format!("background-color: {};", bright_color),
                 }
             }
-            // Label text
+            // Label text (with optional italic comment)
             div {
                 class: "absolute inset-0 flex items-center px-3 text-sm font-medium pointer-events-none",
                 style: if always_black_bg {
@@ -86,7 +89,13 @@ pub fn CompactProgressBar(
                 } else {
                     "color: white; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);".to_string()
                 },
-                "{label}"
+                span { "{label}" }
+                if let Some(ref comment_text) = comment {
+                    span {
+                        class: "ml-2 italic opacity-70",
+                        "{comment_text}"
+                    }
+                }
             }
         }
     }
@@ -219,6 +228,8 @@ pub struct ProgressSection {
     pub name: String,
     /// Short name for space-constrained display (e.g., "INT A" instead of "Interlude A")
     pub short_name: String,
+    /// Optional comment/descriptor (e.g., "Woodwinds" from 'Interlude C "Woodwinds"')
+    pub comment: Option<String>,
 }
 
 /// Tempo/time signature marker definition
@@ -307,15 +318,27 @@ pub fn SegmentedProgressBar(
         }
     });
 
-    // Pre-calculate section data
-    // Use short_name when section is narrow (less than ~8% width for typical names)
+    // Pre-calculate section data with intelligent text fitting
+    //
+    // Text width estimation constants (in pixels):
+    // We use generous estimates since text will truncate with ellipsis if needed.
+    // Better to show text that gets truncated than hide it entirely.
+    //
+    // - Assume progress bar is ~1200px wide (common desktop width)
+    // - Use smaller char width estimates to be more lenient
+    // - Minimal padding assumption
+    const ESTIMATED_BAR_WIDTH_PX: f64 = 1200.0;
+    const CHAR_WIDTH_NAME_PX: f64 = 5.5; // text-xs - lenient estimate
+    const CHAR_WIDTH_COMMENT_PX: f64 = 4.5; // text-[10px] - lenient estimate
+    const SECTION_PADDING_PX: f64 = 8.0; // minimal padding
+
     let section_data: Vec<_> = sections
         .iter()
         .enumerate()
         .map(|(index, section)| {
             let section_start = section.start_percent;
             let section_end = section.end_percent;
-            let section_width = section.end_percent - section.start_percent;
+            let section_width_percent = section.end_percent - section.start_percent;
 
             let filled_percent = if current_progress <= section_start {
                 0.0
@@ -323,29 +346,51 @@ pub fn SegmentedProgressBar(
                 100.0
             } else {
                 let progress_in_section = current_progress - section_start;
-                (progress_in_section / section_width) * 100.0
+                (progress_in_section / section_width_percent) * 100.0
             };
 
-            // Use short name for narrow sections
-            // Heuristic: if section width < 8%, use short name
-            // Also use short name if the full name is long (>10 chars) and section is < 12%
-            let use_short = section_width < 8.0
-                || (section.name.len() > 10 && section_width < 12.0)
-                || (section.name.len() > 7 && section_width < 10.0);
-            let display_name = if use_short {
+            // Estimate available pixel width for this section
+            let section_width_px =
+                (section_width_percent / 100.0) * ESTIMATED_BAR_WIDTH_PX - SECTION_PADDING_PX;
+
+            // Calculate text widths
+            let name_width_px = section.name.len() as f64 * CHAR_WIDTH_NAME_PX;
+            let short_name_width_px = section.short_name.len() as f64 * CHAR_WIDTH_NAME_PX;
+
+            // Decide which name to display based on available width
+            let display_name = if name_width_px <= section_width_px {
+                section.name.clone()
+            } else if short_name_width_px <= section_width_px {
                 section.short_name.clone()
             } else {
-                section.name.clone()
+                // Even short name doesn't fit well, but show it anyway
+                section.short_name.clone()
+            };
+
+            // Show comment if it fits within the section width
+            // Since name and comment are stacked vertically, we just check if comment fits
+            let comment = if let Some(ref comment_text) = section.comment {
+                let comment_width_px = comment_text.len() as f64 * CHAR_WIDTH_COMMENT_PX;
+
+                // Show comment if it fits (section_width_px already has padding subtracted)
+                if comment_width_px <= section_width_px {
+                    Some(comment_text.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
             };
 
             (
                 index,
                 section_start,
                 section_end,
-                section_width,
+                section_width_percent,
                 section.color.clone(),
                 filled_percent,
                 display_name,
+                comment,
             )
         })
         .collect();
@@ -561,7 +606,7 @@ pub fn SegmentedProgressBar(
             div {
                 class: "relative w-full h-20 rounded-lg overflow-hidden bg-secondary",
                 // Render sections as background layers
-                for (index, section_start, _section_end, section_width, section_color, _filled_percent, _section_name) in section_data.iter() {
+                for (index, section_start, _section_end, section_width, section_color, _filled_percent, _section_name, _section_comment) in section_data.iter() {
                     {
                         // Check if this section is the queued target
                         let is_queued = matches!(
@@ -602,7 +647,7 @@ pub fn SegmentedProgressBar(
                     }
                 }
                 // Section boundary lines
-                for (index, section_start, _section_end, _section_width, _section_color, _filled_percent, _section_name) in section_data.iter() {
+                for (index, section_start, _section_end, _section_width, _section_color, _filled_percent, _section_name, _section_comment) in section_data.iter() {
                     if *section_start > 0.0 {
                         div {
                             key: "section-boundary-{index}",
@@ -630,17 +675,29 @@ pub fn SegmentedProgressBar(
                         )
                     },
                 }
-                // Section name text
-                for (index, section_start, _section_end, section_width, _section_color, _filled_percent, section_name) in section_data.iter() {
+                // Section name text (with optional comment below)
+                for (index, section_start, _section_end, section_width, _section_color, _filled_percent, section_name, section_comment) in section_data.iter() {
                     if !section_name.is_empty() {
                         div {
                             key: "text-{index}",
-                            class: "absolute h-full pointer-events-none z-30",
+                            class: "absolute h-full pointer-events-none z-30 overflow-hidden",
                             style: format!("left: {}%; width: {}%;", section_start, section_width),
+                            // Stack section name and optional comment vertically
                             div {
-                                class: "absolute inset-0 flex items-center justify-center text-xs font-medium text-white",
+                                class: "absolute inset-0 flex flex-col items-center justify-center gap-0.5 overflow-hidden",
                                 style: "text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);",
-                                "{section_name}"
+                                // Section name
+                                span {
+                                    class: "text-xs font-medium text-white truncate max-w-full",
+                                    "{section_name}"
+                                }
+                                // Comment (smaller, lighter text below)
+                                if let Some(comment) = section_comment {
+                                    span {
+                                        class: "text-[10px] text-white/70 italic truncate max-w-full",
+                                        "{comment}"
+                                    }
+                                }
                             }
                         }
                     }

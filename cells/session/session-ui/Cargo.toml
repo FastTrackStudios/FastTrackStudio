@@ -12,7 +12,7 @@ session-proto = { workspace = true }
 daw-proto = { workspace = true }
 
 # Dioxus UI framework
-dioxus = { version = "0.7.3" }
+dioxus = { version = "0.7.2" }
 
 # Icons
 lucide-dioxus = { version = "2", features = ["all-icons"] }

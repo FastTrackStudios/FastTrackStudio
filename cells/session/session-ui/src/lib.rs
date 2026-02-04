@@ -49,7 +49,7 @@ pub mod layouts;
 pub mod signals;
 
 // Re-export key types for convenience
-pub use layouts::top_bar::{ConnectionState, TopBar};
+pub use layouts::top_bar::{ConnectionState, TopBar, VERSION};
 pub use layouts::PerformanceLayout;
 pub use signals::{
     LatencyAction, LatencyInfo, LatencyMeasurement, LatencyTracker, Session, TransportState,

@@ -131,6 +131,7 @@ fn PerformanceSidebar(
                         progress: section_progress,
                         bright_color: section.bright_color(),
                         muted_color: section.muted_color(),
+                        comment: section.comment.clone(),
                     }
                 })
                 .collect();
@@ -251,6 +252,7 @@ fn PerformanceMainContent(
                         start_percent: start_percent.max(0.0),
                         end_percent: end_percent.min(100.0),
                         color: section.bright_color(),
+                        comment: section.comment.clone(),
                     }
                 })
                 .collect::<Vec<_>>()

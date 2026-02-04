@@ -48,6 +48,8 @@ pub struct SectionItem {
     pub progress: f64,
     pub bright_color: String,
     pub muted_color: String,
+    /// Optional comment/descriptor shown in italic after the label
+    pub comment: Option<String>,
 }
 
 /// Song item data for sidebar
@@ -130,6 +132,7 @@ pub fn SongItem(
                                             on_section_click.call(section_idx);
                                         }))
                                     },
+                                    comment: section.comment.clone(),
                                 }
                             }
                         }

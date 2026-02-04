@@ -7,6 +7,9 @@ use crate::signals::LATENCY_INFO;
 use dioxus::prelude::*;
 use lucide_dioxus::{CircleCheck, CircleX};
 
+/// Application version string
+pub const VERSION: &str = "v0.1.0-alpha";
+
 /// Connection state for the top bar
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum ConnectionState {
@@ -41,9 +44,15 @@ pub fn TopBar(
         div {
             class: "h-12 flex-shrink-0 border-b border-border bg-card flex items-center justify-between px-4",
 
-            // Left section: Connection status + navigation
+            // Left section: Version + Connection status + navigation
             div {
                 class: "flex items-center gap-4",
+
+                // Version label
+                span {
+                    class: "text-xs text-muted-foreground font-mono",
+                    "{VERSION}"
+                }
 
                 // Connection status badge
                 ConnectionStatusBadge {
@@ -58,6 +67,13 @@ pub fn TopBar(
                         label: "Performance",
                         tab_id: "performance",
                         is_active: active_tab == "performance",
+                        on_click: on_tab_click.clone(),
+                    }
+
+                    NavTab {
+                        label: "Chart",
+                        tab_id: "chart",
+                        is_active: active_tab == "chart",
                         on_click: on_tab_click.clone(),
                     }
 

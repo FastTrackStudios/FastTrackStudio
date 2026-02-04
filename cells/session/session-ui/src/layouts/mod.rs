@@ -8,4 +8,4 @@ pub mod performance;
 pub mod top_bar;
 
 pub use performance::PerformanceLayout;
-pub use top_bar::{ConnectionState, TopBar};
+pub use top_bar::{ConnectionState, TopBar, VERSION};
