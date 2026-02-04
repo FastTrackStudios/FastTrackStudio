@@ -16,3 +16,6 @@
 [submodule "reference/helgobox"]
 	path = reference/helgobox
 	url = https://github.com/helgoboss/helgobox.git
+[submodule "reference/sws"]
+	path = reference/sws
+	url = https://github.com/reaper-oss/sws.git
