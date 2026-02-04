@@ -363,8 +363,10 @@ fn App() -> Element {
             tabindex: "0",
             autofocus: true,
             onkeydown: move |e: KeyboardEvent| {
-                // Handle keyboard shortcuts for session actions
-                handle_keyboard_shortcut(e);
+                // Only handle keyboard shortcuts on performance tab
+                if active_tab() == "performance" {
+                    handle_keyboard_shortcut(e);
+                }
             },
 
             // Top navigation bar (same as web)

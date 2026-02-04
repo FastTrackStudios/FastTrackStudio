@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 # UI
-dioxus = { version = "0.7.1", features = ["router"] }
+dioxus = { version = "0.7.2", features = ["router"] }
 session-ui = { path = "../../../cells/session/session-ui" }
 
 # Services (run in-process)
