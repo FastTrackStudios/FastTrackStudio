@@ -2,9 +2,16 @@
 //!
 //! Represents a song as a structured collection of sections derived from
 //! DAW markers and regions.
+//!
+//! This module re-exports section types from keyflow-proto for consistency
+//! across the codebase, while providing session-specific wrappers where needed.
 
 use daw_proto::{Position, TimeSignature};
 use facet::Facet;
+
+// Re-export section types from keyflow-proto as the single source of truth
+pub use keyflow_proto::sections::SectionType;
+pub use keyflow_proto::sections::colors::{SectionColors, colors_for_section_type};
 
 /// A comment marker within a song
 ///
@@ -85,6 +92,9 @@ impl Comment {
 ///
 /// Sections represent structural parts of a song like verses, choruses, bridges.
 /// They are typically extracted from DAW regions or marker pairs.
+///
+/// This is a session-specific wrapper that provides direct access to time positions
+/// for UI rendering. For chart parsing, use `keyflow_proto::sections::Section` directly.
 #[derive(Clone, Debug, PartialEq, Facet)]
 pub struct Section {
     /// DAW region/marker ID (if applicable)
@@ -93,7 +103,7 @@ pub struct Section {
     pub name: String,
     /// Optional comment/description (e.g., "Woodwinds" from 'Interlude C "Woodwinds"')
     pub comment: Option<String>,
-    /// Type of section
+    /// Type of section (from keyflow-proto)
     pub section_type: SectionType,
     /// Start position in seconds
     pub start_seconds: f64,
@@ -135,20 +145,17 @@ impl Section {
     /// - "Interlude A" -> "INT A"
     /// - "Verse 1" -> "VS 1"
     /// - "Chorus 2" -> "CH 2"
-    /// - "Pre-Chorus" -> "PC"
+    /// - "Pre-Chorus" -> "PRE-CH"
     /// - "Bridge 1" -> "BR 1"
     /// - "Outro A" -> "OUT A"
-    ///
-    /// For Other types, attempts to abbreviate to first 3-4 chars + suffix
     pub fn short_display(&self) -> String {
-        let abbrev = self.section_type.short_name();
+        let abbrev = self.section_type.abbreviation();
 
         // Extract any suffix (number or letter) from the name
-        // e.g., "Verse 1" -> "1", "Interlude A" -> "A", "Chorus 3B" -> "3B"
         let suffix = self.extract_suffix();
 
         if suffix.is_empty() {
-            abbrev.to_string()
+            abbrev
         } else {
             format!("{} {}", abbrev, suffix)
         }
@@ -159,10 +166,8 @@ impl Section {
         let name = &self.name;
 
         // Find where the suffix starts - look for trailing numbers/letters after a space
-        // or just trailing alphanumeric at the end
         if let Some(space_idx) = name.rfind(' ') {
             let suffix = name[space_idx + 1..].trim();
-            // Check if this looks like a suffix (number, letter, or combo like "3A")
             if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_alphanumeric()) {
                 return suffix.to_string();
             }
@@ -178,7 +183,6 @@ impl Section {
             .rev()
             .collect();
 
-        // Only return if it's not the whole name and is a reasonable suffix
         if !trailing.is_empty() && trailing.len() < name.len() && trailing.len() <= 3 {
             trailing
         } else {
@@ -186,44 +190,19 @@ impl Section {
         }
     }
 
-    /// Get bright color for UI display
+    /// Get bright color for UI display using keyflow's color palette
     pub fn bright_color(&self) -> String {
-        match &self.section_type {
-            SectionType::CountIn => "#f472b6".to_string(), // pink-400 (count-in)
-            SectionType::Intro => "#3b82f6".to_string(),   // blue
-            SectionType::Verse => "#22c55e".to_string(),   // green
-            SectionType::PreChorus => "#eab308".to_string(), // yellow
-            SectionType::Chorus => "#ef4444".to_string(),  // red
-            SectionType::Bridge => "#a855f7".to_string(),  // purple
-            SectionType::Outro => "#6366f1".to_string(),   // indigo
-            SectionType::Solo => "#f97316".to_string(),    // orange
-            SectionType::Breakdown => "#ec4899".to_string(), // pink (different shade for breakdown)
-            SectionType::Instrumental => "#14b8a6".to_string(), // teal
-            SectionType::Interlude => "#06b6d4".to_string(), // cyan
-            SectionType::Vamp => "#84cc16".to_string(),    // lime
-            SectionType::End => "#374151".to_string(),     // gray-700 (muted, tail section)
-            SectionType::Other(_) => "#64748b".to_string(), // slate
-        }
+        colors_for_section_type(&self.section_type).bright_hex()
     }
 
-    /// Get muted color for UI display
+    /// Get muted color for UI display using keyflow's color palette
     pub fn muted_color(&self) -> String {
-        match &self.section_type {
-            SectionType::CountIn => "#9d174d".to_string(), // pink-800 (count-in)
-            SectionType::Intro => "#1e3a8a".to_string(),   // blue-900
-            SectionType::Verse => "#166534".to_string(),   // green-900
-            SectionType::PreChorus => "#713f12".to_string(), // yellow-900
-            SectionType::Chorus => "#7f1d1d".to_string(),  // red-900
-            SectionType::Bridge => "#581c87".to_string(),  // purple-900
-            SectionType::Outro => "#312e81".to_string(),   // indigo-900
-            SectionType::Solo => "#7c2d12".to_string(),    // orange-900
-            SectionType::Breakdown => "#831843".to_string(), // pink-900 (different shade for breakdown)
-            SectionType::Instrumental => "#134e4a".to_string(), // teal-900
-            SectionType::Interlude => "#164e63".to_string(), // cyan-900
-            SectionType::Vamp => "#365314".to_string(),      // lime-900
-            SectionType::End => "#1f2937".to_string(),       // gray-800 (muted, tail section)
-            SectionType::Other(_) => "#334155".to_string(),  // slate-700
-        }
+        colors_for_section_type(&self.section_type).muted_hex()
+    }
+
+    /// Get the section's semantic colors
+    pub fn colors(&self) -> SectionColors {
+        colors_for_section_type(&self.section_type)
     }
 
     /// Calculate progress percentage (0-100) based on transport position
@@ -236,139 +215,6 @@ impl Section {
 
         let relative_position = (transport_position - self.start_seconds).max(0.0);
         (relative_position / section_duration).min(1.0) * 100.0
-    }
-}
-
-/// Type of section in a song
-#[repr(u8)]
-#[derive(Clone, Debug, PartialEq, Eq, Facet)]
-pub enum SectionType {
-    /// Count-in section - from COUNT-IN marker to SONGSTART
-    /// This is the pre-roll before the song content begins
-    CountIn,
-    Intro,
-    Verse,
-    PreChorus,
-    Chorus,
-    Bridge,
-    Outro,
-    Solo,
-    Breakdown,
-    Instrumental,
-    /// Interlude - transitional section between main parts
-    Interlude,
-    /// Vamp - repeated section, often for improvisation or transitions
-    Vamp,
-    /// Special END section - the tail from SONGEND to =END marker
-    /// This captures reverb/sustain after the musical content ends
-    End,
-    /// Custom section type not in the standard list
-    Other(String),
-}
-
-impl SectionType {
-    /// Parse a section type from a string (case-insensitive)
-    ///
-    /// Recognizes common abbreviations:
-    /// - "COUNT-IN" or "COUNTIN" -> CountIn
-    /// - "V" or "Verse" -> Verse
-    /// - "C" or "Chorus" -> Chorus
-    /// - "PC" or "Pre-Chorus" -> PreChorus
-    /// - "B" or "Bridge" -> Bridge
-    /// - "I" or "Intro" -> Intro
-    /// - "O" or "Outro" -> Outro
-    /// - "INT" or "Interlude" -> Interlude
-    /// - "VAMP" -> Vamp
-    /// - "END" -> End (special tail section)
-    pub fn parse(s: &str) -> Self {
-        let s = s.trim().to_lowercase();
-        match s.as_str() {
-            "count-in" | "countin" | "count in" => SectionType::CountIn,
-            "intro" => SectionType::Intro,
-            "verse" | "v" => SectionType::Verse,
-            "prechorus" | "pre-chorus" | "pc" => SectionType::PreChorus,
-            "chorus" | "c" => SectionType::Chorus,
-            "bridge" | "b" => SectionType::Bridge,
-            "outro" | "o" => SectionType::Outro,
-            "solo" | "s" => SectionType::Solo,
-            "breakdown" | "bd" => SectionType::Breakdown,
-            "instrumental" | "inst" => SectionType::Instrumental,
-            "interlude" | "int" => SectionType::Interlude,
-            "vamp" => SectionType::Vamp,
-            "end" => SectionType::End,
-            _ => SectionType::Other(s.to_string()),
-        }
-    }
-
-    /// Convert to display string
-    pub fn as_str(&self) -> &str {
-        match self {
-            SectionType::CountIn => "Count-In",
-            SectionType::Intro => "Intro",
-            SectionType::Verse => "Verse",
-            SectionType::PreChorus => "Pre-Chorus",
-            SectionType::Chorus => "Chorus",
-            SectionType::Bridge => "Bridge",
-            SectionType::Outro => "Outro",
-            SectionType::Solo => "Solo",
-            SectionType::Breakdown => "Breakdown",
-            SectionType::Instrumental => "Instrumental",
-            SectionType::Interlude => "Interlude",
-            SectionType::Vamp => "Vamp",
-            SectionType::End => "End",
-            SectionType::Other(s) => s,
-        }
-    }
-
-    /// Get abbreviated name for space-constrained UI
-    ///
-    /// Returns short 2-4 character abbreviations:
-    /// - Verse -> VS
-    /// - Chorus -> CH
-    /// - Pre-Chorus -> PC
-    /// - Bridge -> BR
-    /// - Intro -> IN
-    /// - Outro -> OUT
-    /// - Solo -> SOL
-    /// - Breakdown -> BD
-    /// - Instrumental -> INST
-    /// - Interlude -> INT
-    /// - Vamp -> VMP
-    pub fn short_name(&self) -> &str {
-        match self {
-            SectionType::CountIn => "CI",
-            SectionType::Intro => "IN",
-            SectionType::Verse => "VS",
-            SectionType::PreChorus => "PC",
-            SectionType::Chorus => "CH",
-            SectionType::Bridge => "BR",
-            SectionType::Outro => "OUT",
-            SectionType::Solo => "SOL",
-            SectionType::Breakdown => "BD",
-            SectionType::Instrumental => "INST",
-            SectionType::Interlude => "INT",
-            SectionType::Vamp => "VMP",
-            SectionType::End => "END",
-            SectionType::Other(s) => {
-                // For custom types, check common patterns
-                let lower = s.to_lowercase();
-                if lower.starts_with("tag") {
-                    "TAG"
-                } else if lower.starts_with("hook") {
-                    "HK"
-                } else if lower.starts_with("drop") {
-                    "DRP"
-                } else if lower.starts_with("build") {
-                    "BLD"
-                } else if lower.starts_with("riff") {
-                    "RIF"
-                } else {
-                    // Return first 3-4 chars uppercased
-                    // We can't return a dynamic string here, so return the original
-                    s
-                }
-            }
-        }
     }
 }
 

@@ -618,14 +618,16 @@ impl SongBuilder {
     /// - `Interlude C "Woodwinds"` -> (Instrumental, Some(3), "Interlude C", Some("Woodwinds"))
     /// - `Chorus 2 "Big Build"` -> (Chorus, Some(2), "Chorus 2", Some("Big Build"))
     fn parse_section_name(name: &str) -> (SectionType, Option<u32>, String, Option<String>) {
-        // First, extract any quoted comment
+        // First, extract any quoted/bracketed comment
         let (name_without_comment, comment) = Self::extract_comment(name);
 
         let name_upper = name_without_comment.to_uppercase();
         let name_trimmed = name_upper.trim();
 
         let (type_part, number) = Self::extract_type_and_number(name_trimmed);
-        let section_type = Self::parse_section_type(type_part);
+        // Pass the original case name part for Custom types
+        let original_type_part = Self::extract_original_type_part(name_without_comment.trim());
+        let section_type = Self::parse_section_type_with_original(type_part, &original_type_part);
 
         // Use the original name (without comment) preserving case
         let clean_name = name_without_comment.trim().to_string();
@@ -633,21 +635,87 @@ impl SongBuilder {
         (section_type, number, clean_name, comment)
     }
 
-    /// Extract a quoted comment from a section name
+    /// Extract the type part from the original (non-uppercased) name
+    /// This preserves case for Custom section types
+    fn extract_original_type_part(name: &str) -> String {
+        // Try "Type Number" format (e.g., "Verse 1", "CH 2")
+        if let Some(last_space) = name.rfind(' ') {
+            let potential_suffix = &name[last_space + 1..];
+            // Check if it's a number or single letter variant
+            if potential_suffix.parse::<u32>().is_ok()
+                || (potential_suffix.len() == 1
+                    && potential_suffix
+                        .chars()
+                        .next()
+                        .unwrap()
+                        .is_ascii_uppercase())
+            {
+                return name[..last_space].trim().to_string();
+            }
+        }
+
+        // Try concatenated format (e.g., "V1", "CH2")
+        let mut num_start = name.len();
+        for (i, c) in name.chars().rev().enumerate() {
+            let pos = name.len() - 1 - i;
+            if c.is_ascii_digit() {
+                num_start = pos;
+            } else if num_start != name.len() {
+                break;
+            }
+        }
+
+        if num_start < name.len() {
+            name[..num_start].trim().to_string()
+        } else {
+            name.to_string()
+        }
+    }
+
+    /// Extract a comment/descriptor from a section name
     ///
-    /// Looks for text in double quotes at the end of the name.
+    /// Supports multiple delimiter styles:
+    /// - Double quotes: `Interlude C "Woodwinds"` -> ("Interlude C", "Woodwinds")
+    /// - Curly braces: `Riff {Back In}` -> ("Riff", "Back In")
+    /// - Parentheses: `Verse 1 (Acoustic)` -> ("Verse 1", "Acoustic")
+    ///
     /// Returns (name_without_comment, optional_comment)
     fn extract_comment(name: &str) -> (&str, Option<String>) {
         let name = name.trim();
 
-        // Look for a quoted string at the end: `Something "Comment"`
+        // Try double quotes first: `Something "Comment"`
         if let Some(last_quote) = name.rfind('"') {
-            // Find the opening quote
             if let Some(open_quote) = name[..last_quote].rfind('"') {
                 let comment = name[open_quote + 1..last_quote].trim();
                 let name_part = name[..open_quote].trim();
 
                 if !comment.is_empty() {
+                    return (name_part, Some(comment.to_string()));
+                }
+            }
+        }
+
+        // Try curly braces: `Something {Comment}`
+        if let Some(close_brace) = name.rfind('}') {
+            if let Some(open_brace) = name[..close_brace].rfind('{') {
+                let comment = name[open_brace + 1..close_brace].trim();
+                let name_part = name[..open_brace].trim();
+
+                if !comment.is_empty() {
+                    return (name_part, Some(comment.to_string()));
+                }
+            }
+        }
+
+        // Try parentheses: `Something (Comment)`
+        // Only if it looks like a descriptor (not a number like "Verse (1)")
+        if let Some(close_paren) = name.rfind(')') {
+            if let Some(open_paren) = name[..close_paren].rfind('(') {
+                let comment = name[open_paren + 1..close_paren].trim();
+                let name_part = name[..open_paren].trim();
+
+                // Only treat as comment if it's not just a number
+                if !comment.is_empty() && !comment.chars().all(|c| c.is_ascii_digit()) {
                     return (name_part, Some(comment.to_string()));
                 }
             }
@@ -703,60 +771,58 @@ impl SongBuilder {
         (name, None)
     }
 
-    /// Parse section type from the type part of the name
-    fn parse_section_type(type_part: &str) -> SectionType {
+    /// Parse section type from the type part of the name, preserving original case for Custom
+    ///
+    /// Uses keyflow-proto's SectionType parsing with fallback for session-specific patterns.
+    fn parse_section_type_with_original(type_part: &str, original_type_part: &str) -> SectionType {
         let s = type_part.trim().to_lowercase();
 
-        // Handle pre/post modifiers
+        // Handle pre/post modifiers first
         if s.starts_with("pre-") || s.starts_with("pre ") {
-            let rest = s.trim_start_matches("pre-").trim_start_matches("pre ");
-            if rest == "chorus" || rest == "ch" || rest == "c" {
-                return SectionType::PreChorus;
+            let rest = s
+                .trim_start_matches("pre-")
+                .trim_start_matches("pre ")
+                .trim();
+            // Try to parse the inner type
+            if let Ok(inner) = SectionType::parse(rest) {
+                return SectionType::Pre(Box::new(inner));
+            }
+            // Default pre-chorus for ambiguous cases
+            if rest == "chorus" || rest == "ch" || rest == "c" || rest.is_empty() {
+                return SectionType::Pre(Box::new(SectionType::Chorus));
             }
         }
 
+        if s.starts_with("post-") || s.starts_with("post ") {
+            let rest = s
+                .trim_start_matches("post-")
+                .trim_start_matches("post ")
+                .trim();
+            if let Ok(inner) = SectionType::parse(rest) {
+                return SectionType::Post(Box::new(inner));
+            }
+            if rest == "chorus" || rest == "ch" || rest == "c" || rest.is_empty() {
+                return SectionType::Post(Box::new(SectionType::Chorus));
+            }
+        }
+
+        // Try keyflow's parser first (handles most cases including fuzzy matching)
+        if let Ok(section_type) = SectionType::parse(&s) {
+            return section_type;
+        }
+
+        // Handle session-specific variations not in keyflow
         match s.as_str() {
-            // Count-in variations
-            "count-in" | "countin" | "count in" | "count" => SectionType::CountIn,
+            // Pre-chorus shorthand
+            "prechorus" | "pre-chorus" | "pre chorus" | "pc" => {
+                SectionType::Pre(Box::new(SectionType::Chorus))
+            }
 
-            // Intro variations
-            "intro" | "in" => SectionType::Intro,
+            // Build is sometimes used as breakdown
+            "build" => SectionType::Breakdown,
 
-            // Verse variations
-            "verse" | "vs" | "v" => SectionType::Verse,
-
-            // Pre-chorus variations
-            "prechorus" | "pre-chorus" | "pre chorus" | "pc" => SectionType::PreChorus,
-
-            // Chorus variations
-            "chorus" | "ch" | "c" => SectionType::Chorus,
-
-            // Bridge variations
-            "bridge" | "br" | "b" => SectionType::Bridge,
-
-            // Outro variations
-            "outro" | "out" | "o" => SectionType::Outro,
-
-            // Solo variations
-            "solo" | "s" => SectionType::Solo,
-
-            // Breakdown variations
-            "breakdown" | "bd" | "build" => SectionType::Breakdown,
-
-            // Instrumental variations
-            "instrumental" | "inst" => SectionType::Instrumental,
-
-            // Interlude variations
-            "interlude" | "int" => SectionType::Interlude,
-
-            // Vamp variations
-            "vamp" | "vmp" => SectionType::Vamp,
-
-            // End section
-            "end" => SectionType::End,
-
-            // Unknown - use Other with original name
-            _ => SectionType::Other(type_part.to_string()),
+            // Unknown - use Custom with original case preserved
+            _ => SectionType::Custom(original_type_part.to_string()),
         }
     }
 }
@@ -820,13 +886,13 @@ mod tests {
         assert_eq!(comment, None);
 
         let (section_type, number, name, comment) = SongBuilder::parse_section_name("GTR SOLO");
-        assert_eq!(section_type, SectionType::Other("GTR SOLO".to_string()));
+        assert_eq!(section_type, SectionType::Custom("GTR SOLO".to_string()));
         assert_eq!(number, None);
         assert_eq!(name, "GTR SOLO");
         assert_eq!(comment, None);
 
         let (section_type, number, name, comment) = SongBuilder::parse_section_name("SYNTH SOLO");
-        assert_eq!(section_type, SectionType::Other("SYNTH SOLO".to_string()));
+        assert_eq!(section_type, SectionType::Custom("SYNTH SOLO".to_string()));
         assert_eq!(number, None);
         assert_eq!(name, "SYNTH SOLO");
         assert_eq!(comment, None);
@@ -865,6 +931,62 @@ mod tests {
         assert_eq!(number, Some(1));
         assert_eq!(name, "Verse 1");
         assert_eq!(comment, Some("Guitar Solo".to_string()));
+    }
+
+    #[test]
+    fn test_parse_section_name_with_curly_braces() {
+        // Curly braces descriptor: Riff {Back In}
+        // "Riff" is not a standard section type, so it becomes Custom
+        let (section_type, number, name, comment) =
+            SongBuilder::parse_section_name("Riff {Back In}");
+        assert_eq!(section_type, SectionType::Custom("Riff".to_string()));
+        assert_eq!(number, None);
+        assert_eq!(name, "Riff");
+        assert_eq!(comment, Some("Back In".to_string()));
+
+        // Verse with curly braces
+        let (section_type, number, name, comment) =
+            SongBuilder::parse_section_name("Verse 1 {Acoustic}");
+        assert_eq!(section_type, SectionType::Verse);
+        assert_eq!(number, Some(1));
+        assert_eq!(name, "Verse 1");
+        assert_eq!(comment, Some("Acoustic".to_string()));
+
+        // Outro with descriptor
+        let (section_type, number, name, comment) =
+            SongBuilder::parse_section_name("Outro {Fade Out}");
+        assert_eq!(section_type, SectionType::Outro);
+        assert_eq!(number, None);
+        assert_eq!(name, "Outro");
+        assert_eq!(comment, Some("Fade Out".to_string()));
+    }
+
+    #[test]
+    fn test_parse_section_name_with_parentheses() {
+        // Parentheses descriptor
+        let (section_type, number, name, comment) =
+            SongBuilder::parse_section_name("Intro (Keys Only)");
+        assert_eq!(section_type, SectionType::Intro);
+        assert_eq!(number, None);
+        assert_eq!(name, "Intro");
+        assert_eq!(comment, Some("Keys Only".to_string()));
+
+        // Verse with number in parentheses - number is still extracted from name
+        // The (1) is not treated as a comment since it's numeric-only
+        // But the number extraction logic still finds the 1
+        let (section_type, number, name, comment) = SongBuilder::parse_section_name("Verse (1)");
+        assert_eq!(section_type, SectionType::Verse);
+        assert_eq!(number, Some(1)); // Number extracted from (1)
+        assert_eq!(name, "Verse (1)"); // Name preserved (no comment extracted)
+        assert_eq!(comment, None); // Numeric-only parentheses are not comments
+
+        // Bridge with descriptive parentheses
+        let (section_type, number, name, comment) =
+            SongBuilder::parse_section_name("Bridge 2 (Half Time)");
+        assert_eq!(section_type, SectionType::Bridge);
+        assert_eq!(number, Some(2));
+        assert_eq!(name, "Bridge 2");
+        assert_eq!(comment, Some("Half Time".to_string()));
     }
 
     #[test]
