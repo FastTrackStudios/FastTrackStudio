@@ -18,6 +18,7 @@ members = [
 ]
 exclude = [
     "reference/roam",
+    "reference/dioxus",
     "cells/signal/signal",    # Incomplete crate - no Cargo.toml
     "cells/signal/signal-proto",  # Incomplete crate - no Cargo.toml
     "cells/sync/sync",        # Incomplete crate
@@ -101,6 +102,14 @@ color-palette = { path = "crates/color/color-palette" }
 # Dynamic template crates
 dynamic-template-proto = { path = "cells/dynamic-template/dynamic-template-proto" }
 
+# Keyflow/Engraver crates
+keyflow = { path = "cells/keyflow/keyflow" }
+keyflow-proto = { path = "cells/keyflow/keyflow-proto" }
+keyflow-text = { path = "cells/keyflow/keyflow-text" }
+keyflow-midi = { path = "cells/keyflow/keyflow-midi" }
+engraver = { path = "cells/keyflow/engraver" }
+engraver-proto = { path = "cells/keyflow/engraver-proto" }
+
 # Protocol crates
 cell-host-proto = { path = "cells/cell-host/cell-host-proto" }
 session-proto = { path = "cells/session/session-proto" }
@@ -130,8 +139,8 @@ scopeguard = "1.1.0"
 raw-window-handle = "0.4.2"
 palette = "0.7.3"
 
-# Dioxus UI framework
-dioxus = "0.7.3"
+# Dioxus UI framework (pinned to 0.7.2 - native 0.7.3 not yet on crates.io)
+dioxus = "0.7.2"
 rxrust = { git = "https://github.com/rxRust/rxRust", rev = "349e50b3197e05926e2378ef8fc45cb67ad43b83" }
 
 # macOS dependencies for swell-ui (using exact versions for compatibility)
@@ -141,3 +150,6 @@ objc2-foundation = "0.2.0"
 # Windows dependencies (optional, for cross-platform)
 winapi = { version = "0.3", features = ["winuser", "uxtheme"] }
 libloading = "0.9"
+
+# Image crate - pinned to 0.25.6 for blitz-dom compatibility (dioxus-native)
+image = "=0.25.6"
