@@ -19,3 +19,6 @@
 [submodule "reference/sws"]
 	path = reference/sws
 	url = https://github.com/reaper-oss/sws.git
+[submodule "reference/dioxus"]
+	path = reference/dioxus
+	url = https://github.com/DioxusLabs/dioxus.git
