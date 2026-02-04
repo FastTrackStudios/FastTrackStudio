@@ -95,6 +95,9 @@ host-runtime = { path = "modules/host-runtime" }
 monarchy = { path = "crates/monarchy/monarchy" }
 monarchy_derive = { path = "crates/monarchy/monarchy-derive" }
 
+# Color palette crate
+color-palette = { path = "crates/color/color-palette" }
+
 # Dynamic template crates
 dynamic-template-proto = { path = "cells/dynamic-template/dynamic-template-proto" }
 

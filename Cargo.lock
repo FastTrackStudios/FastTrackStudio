@@ -1249,6 +1249,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "color-palette"
+version = "0.1.0"
+dependencies = [
+ "facet",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "color-spantrace"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2683,7 +2691,9 @@ dependencies = [
  "facet",
  "getrandom 0.2.17",
  "helgoboss-midi",
+ "keyflow",
  "keyflow-proto",
+ "keyflow-text",
  "kurbo 0.12.0",
  "log",
  "lopdf 0.36.0",
@@ -4952,6 +4962,7 @@ version = "0.1.0"
 dependencies = [
  "engraver-proto",
  "keyflow-proto",
+ "keyflow-text",
 ]
 
 [[package]]
@@ -4961,6 +4972,7 @@ dependencies = [
  "daw-control",
  "facet",
  "helgoboss-midi",
+ "keyflow-text",
  "roam",
  "serde",
  "thiserror 2.0.18",
@@ -4973,6 +4985,7 @@ name = "keyflow-text"
 version = "0.1.0"
 dependencies = [
  "keyflow-proto",
+ "tracing",
 ]
 
 [[package]]

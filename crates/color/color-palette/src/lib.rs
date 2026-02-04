@@ -1,14 +1,13 @@
-//! Unified color palette library for audio production applications.
+//! Unified color palette library.
 //!
 //! This crate provides:
 //! - A unified [`Color`] type with conversions between formats
 //! - A comprehensive Tailwind-style [`palette`] with 22 color families
-//! - Semantic color mappings for [`instruments`] and song [`sections`]
 //!
 //! # Quick Start
 //!
 //! ```rust
-//! use color_palette::{Color, palette, instruments, sections};
+//! use color_palette::{Color, palette};
 //!
 //! // Create colors in various ways
 //! let blue = Color::hex(0x3B82F6);
@@ -19,13 +18,10 @@
 //! let sky_blue = palette::sky::S500;
 //! let dark_purple = palette::purple::S800;
 //!
-//! // Get semantic colors for instruments
-//! let kick_color = instruments::drums::KICK;
-//! let vocal_color = instruments::color_for_group("Vocals");
-//!
-//! // Get semantic colors for song sections
-//! let verse_colors = sections::section_colors(sections::SectionType::Verse);
-//! println!("Verse bright: {}", verse_colors.bright_css());
+//! // Color manipulation
+//! let lighter = blue.lighten(0.2);
+//! let darker = blue.darken(0.2);
+//! let mixed = blue.mix(red, 0.5);
 //! ```
 //!
 //! # Color Formats
@@ -52,12 +48,5 @@
 
 mod color;
 pub mod palette;
-pub mod semantic;
 
 pub use color::{Color, ColorParseError};
-pub use semantic::instruments;
-pub use semantic::sections;
-
-// Re-export commonly used items at crate root
-pub use semantic::instruments::{color_for_group, color_for_instrument, color_for_path};
-pub use semantic::sections::{section_colors, SectionColors, SectionType};
