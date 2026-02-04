@@ -153,6 +153,38 @@ fn now_ms() -> f64 {
 /// Global latency tracker signal
 pub static LATENCY_TRACKER: GlobalSignal<LatencyTracker> = Signal::global(LatencyTracker::new);
 
+/// Audio output latency in seconds (from DAW audio engine)
+///
+/// This is used to compensate visual display during playback so that
+/// progress bars align with what's actually being heard through the speakers.
+/// Only applied when transport is playing.
+pub static AUDIO_LATENCY_SECONDS: GlobalSignal<f64> = Signal::global(|| 0.0);
+
+/// Complete latency information for display
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LatencyInfo {
+    /// Input latency in milliseconds
+    pub input_ms: f64,
+    /// Output latency in milliseconds
+    pub output_ms: f64,
+    /// Estimated network round-trip latency in milliseconds
+    pub network_rtt_ms: f64,
+    /// Sample rate in Hz
+    pub sample_rate: u32,
+    /// Whether audio engine is running
+    pub is_running: bool,
+}
+
+impl LatencyInfo {
+    /// Total latency for visual compensation (output + half network RTT)
+    pub fn total_compensation_ms(&self) -> f64 {
+        self.output_ms + (self.network_rtt_ms / 2.0)
+    }
+}
+
+/// Complete latency info for UI display
+pub static LATENCY_INFO: GlobalSignal<LatencyInfo> = Signal::global(LatencyInfo::default);
+
 /// Global setlist structure (songs, sections, timing)
 /// Updates when setlist is rebuilt or structure changes
 pub static SETLIST_STRUCTURE: GlobalSignal<Setlist> = Signal::global(|| Setlist::default());
@@ -272,10 +304,10 @@ impl Session {
 // ============================================================================
 
 /// Simplified transport state for UI display
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TransportState {
-    /// Current position in seconds
-    pub position: f64,
+    /// Current position with time, musical, and MIDI representations
+    pub position: daw_proto::Position,
     /// Current tempo in BPM
     pub bpm: f64,
     /// Time signature numerator
@@ -290,9 +322,28 @@ pub struct TransportState {
     pub loop_region: Option<(f64, f64)>,
 }
 
+impl Default for TransportState {
+    fn default() -> Self {
+        Self {
+            position: daw_proto::Position::default(),
+            bpm: 120.0,
+            time_sig_num: 4,
+            time_sig_denom: 4,
+            is_playing: false,
+            is_looping: false,
+            loop_region: None,
+        }
+    }
+}
+
 impl TransportState {
     /// Create a new transport state
-    pub fn new(position: f64, bpm: f64, time_sig_num: i32, time_sig_denom: i32) -> Self {
+    pub fn new(
+        position: daw_proto::Position,
+        bpm: f64,
+        time_sig_num: i32,
+        time_sig_denom: i32,
+    ) -> Self {
         Self {
             position,
             bpm,

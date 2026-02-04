@@ -38,45 +38,36 @@ use session_proto::song::Song;
 /// ```
 #[component]
 pub fn PerformanceLayout() -> Element {
-    // Subscribe to global signals using use_memo to re-read on each render
-    // This ensures we get the latest values when the global signals update
-    let setlist = use_memo(move || SETLIST_STRUCTURE.read().clone());
-    let active_indices = use_memo(move || ACTIVE_INDICES.read().clone());
-    let song_transport = use_memo(move || SONG_TRANSPORT.read().clone());
-    let playback_state = use_memo(move || *PLAYBACK_STATE.read());
+    // Read global signals directly - this ensures proper reactivity
+    // Each read creates a subscription that will trigger re-render on change
+    let setlist = SETLIST_STRUCTURE.read().clone();
+    let indices = ACTIVE_INDICES.read().clone();
+    let song_transport = SONG_TRANSPORT.read().clone();
+    let playback_state = *PLAYBACK_STATE.read();
 
-    // Memoized derived values
-    let current_song = use_memo(move || {
-        let indices = active_indices();
-        let sl = setlist();
+    // Derive current song from indices and setlist
+    let current_song = indices
+        .song_index
+        .and_then(|idx| setlist.songs.get(idx).cloned());
+
+    // Derive current section from indices and current song
+    let current_section = current_song.as_ref().and_then(|song| {
         indices
-            .song_index
-            .and_then(|idx| sl.songs.get(idx).cloned())
+            .section_index
+            .and_then(|idx| song.sections.get(idx).cloned())
     });
 
-    let current_section = use_memo(move || {
-        let indices = active_indices();
-        current_song().and_then(|song| {
-            indices
-                .section_index
-                .and_then(|idx| song.sections.get(idx).cloned())
-        })
-    });
+    let is_playing = matches!(
+        playback_state,
+        daw_proto::PlayState::Playing | daw_proto::PlayState::Recording
+    );
 
-    let is_playing = use_memo(move || {
-        matches!(
-            playback_state(),
-            daw_proto::PlayState::Playing | daw_proto::PlayState::Recording
-        )
-    });
-
-    let is_looping = use_memo(move || active_indices().looping);
+    let is_looping = indices.looping;
 
     // Get current transport state
-    let indices = active_indices();
     let current_transport = indices
         .song_index
-        .and_then(|idx| song_transport().get(&idx).cloned());
+        .and_then(|idx| song_transport.get(&idx).cloned());
 
     rsx! {
         div {
@@ -84,20 +75,20 @@ pub fn PerformanceLayout() -> Element {
 
             // Sidebar (1/3 width)
             PerformanceSidebar {
-                setlist: setlist(),
+                setlist: setlist.clone(),
                 active_song_index: indices.song_index,
                 active_section_index: indices.section_index,
-                song_transport: song_transport(),
+                song_transport: song_transport.clone(),
             }
 
             // Main content (2/3 width)
             PerformanceMainContent {
-                current_song: current_song(),
-                current_section: current_section(),
+                current_song: current_song.clone(),
+                current_section: current_section.clone(),
                 active_indices: indices,
                 transport_state: current_transport,
-                is_playing: is_playing(),
-                is_looping: is_looping(),
+                is_playing: is_playing,
+                is_looping: is_looping,
             }
         }
     }
@@ -121,16 +112,19 @@ fn PerformanceSidebar(
         .enumerate()
         .map(|(song_idx, song)| {
             let transport = song_transport.get(&song_idx);
-            let song_progress = transport.map(|t| song.progress(t.position)).unwrap_or(0.0);
+            let position_seconds = transport
+                .and_then(|t| t.position.time.map(|time| time.as_seconds()))
+                .unwrap_or(0.0);
+            let song_progress = transport
+                .map(|_| song.progress(position_seconds))
+                .unwrap_or(0.0);
             let is_song_playing = transport.map(|t| t.is_playing).unwrap_or(false);
 
             let sections = song
                 .sections
                 .iter()
                 .map(|section| {
-                    let section_progress = transport
-                        .map(|t| section.progress(t.position))
-                        .unwrap_or(0.0);
+                    let section_progress = section.progress(position_seconds);
 
                     SectionItem {
                         label: section.display_name(),
@@ -220,23 +214,40 @@ fn PerformanceMainContent(
     is_looping: bool,
 ) -> Element {
     // Build progress sections from song sections
-    // The song's start_seconds already includes count-in if present
+    // Use actual section bounds to ensure sections fill the entire progress bar
     let progress_sections = current_song
         .as_ref()
         .map(|song| {
-            let song_duration = song.duration();
-            let song_start = song.start_seconds;
+            // Use actual section bounds instead of song bounds to avoid gaps
+            // This ensures the progress bar is fully covered by sections
+            let sections_start = song
+                .sections
+                .first()
+                .map(|s| s.start_seconds)
+                .unwrap_or(song.start_seconds);
+            let sections_end = song
+                .sections
+                .last()
+                .map(|s| s.end_seconds)
+                .unwrap_or(song.end_seconds);
+            let sections_duration = sections_end - sections_start;
+
+            if sections_duration <= 0.0 {
+                return Vec::new();
+            }
 
             song.sections
                 .iter()
                 .map(|section| {
-                    // Calculate percentages relative to song start (which includes count-in)
+                    // Calculate percentages relative to actual section bounds
                     let start_percent =
-                        ((section.start_seconds - song_start) / song_duration) * 100.0;
-                    let end_percent = ((section.end_seconds - song_start) / song_duration) * 100.0;
+                        ((section.start_seconds - sections_start) / sections_duration) * 100.0;
+                    let end_percent =
+                        ((section.end_seconds - sections_start) / sections_duration) * 100.0;
 
                     ProgressSection {
                         name: section.display_name(),
+                        short_name: section.short_display(),
                         start_percent: start_percent.max(0.0),
                         end_percent: end_percent.min(100.0),
                         color: section.bright_color(),
@@ -252,13 +263,31 @@ fn PerformanceMainContent(
     let mut section_progress = use_signal(|| 0.0);
 
     // Calculate progress values from current props (these update on each render)
-    // Progress is relative to song start (which includes count-in if present)
+    // Progress is relative to actual section bounds (same as progress_sections calculation)
     let song_progress_value = current_song
         .as_ref()
         .and_then(|song| {
             transport_state.as_ref().map(|t| {
-                let relative_pos = t.position - song.start_seconds;
-                (relative_pos / song.duration()) * 100.0
+                let position_seconds = t.position.time.map(|time| time.as_seconds()).unwrap_or(0.0);
+                // Use actual section bounds for progress calculation
+                let sections_start = song
+                    .sections
+                    .first()
+                    .map(|s| s.start_seconds)
+                    .unwrap_or(song.start_seconds);
+                let sections_end = song
+                    .sections
+                    .last()
+                    .map(|s| s.end_seconds)
+                    .unwrap_or(song.end_seconds);
+                let sections_duration = sections_end - sections_start;
+
+                if sections_duration <= 0.0 {
+                    return 0.0;
+                }
+
+                let relative_pos = position_seconds - sections_start;
+                (relative_pos / sections_duration) * 100.0
             })
         })
         .unwrap_or(0.0)
@@ -268,13 +297,14 @@ fn PerformanceMainContent(
         .as_ref()
         .and_then(|section| {
             transport_state.as_ref().map(|t| {
+                let position_seconds = t.position.time.map(|time| time.as_seconds()).unwrap_or(0.0);
                 let section_duration = section.end_seconds - section.start_seconds;
                 if section_duration > 0.0
-                    && t.position >= section.start_seconds
-                    && t.position <= section.end_seconds
+                    && position_seconds >= section.start_seconds
+                    && position_seconds <= section.end_seconds
                 {
-                    ((t.position - section.start_seconds) / section_duration) * 100.0
-                } else if t.position > section.end_seconds {
+                    ((position_seconds - section.start_seconds) / section_duration) * 100.0
+                } else if position_seconds > section.end_seconds {
                     100.0
                 } else {
                     0.0
@@ -284,10 +314,10 @@ fn PerformanceMainContent(
         .unwrap_or(0.0);
 
     // Update signals with new values (this will trigger child component updates)
-    if (song_progress() - song_progress_value).abs() > 0.001 {
+    if (song_progress() - song_progress_value).abs() > 0.001_f64 {
         song_progress.set(song_progress_value);
     }
-    if (section_progress() - section_progress_value).abs() > 0.001 {
+    if (section_progress() - section_progress_value).abs() > 0.001_f64 {
         section_progress.set(section_progress_value);
     }
 
@@ -498,35 +528,20 @@ fn PerformanceMainContent(
                             // Transport info badges
                             if let Some(ref transport) = transport_state {
                                 {
-                                    // Calculate time position (MM:SS.mmm)
-                                    let position_seconds = transport.position;
+                                    // Get time position from transport Position struct
+                                    let position_seconds = transport.position.time.map(|t| t.as_seconds()).unwrap_or(0.0);
                                     let minutes = (position_seconds / 60.0).floor() as i32;
                                     let seconds = (position_seconds % 60.0).floor() as i32;
                                     let millis = ((position_seconds % 1.0) * 1000.0).floor() as i32;
                                     let time_str = format!("{}:{:02}.{:03}", minutes, seconds, millis);
 
-                                    // Calculate musical position relative to content start (SONGSTART)
-                                    // Content start is at song.start_seconds + count_in_seconds
-                                    let content_start = current_song
-                                        .as_ref()
-                                        .map(|song| song.start_seconds + song.count_in_seconds.unwrap_or(0.0))
-                                        .unwrap_or(0.0);
-
-                                    let relative_pos = position_seconds - content_start;
-                                    let seconds_per_beat = 60.0 / transport.bpm;
-                                    let beats_per_measure = transport.time_sig_num as f64;
-
-                                    // Calculate measure, beat, subdivision
-                                    // For positions before SONGSTART, measure is 0, -1, -2, etc.
-                                    let total_beats = relative_pos / seconds_per_beat;
-                                    let measure = (total_beats / beats_per_measure).floor() as i32;
-                                    let beat_in_measure = (total_beats % beats_per_measure).floor() as i32;
-                                    let subdivision = (((total_beats % 1.0) * 1000.0).floor() as i32).abs();
-
-                                    // Display measure: 1-indexed for regular, raw for count-in
-                                    let display_measure = if measure >= 0 { measure + 1 } else { measure };
-                                    let display_beat = beat_in_measure.abs() + 1;
-                                    let musical_str = format!("{}.{}.{:03}", display_measure, display_beat, subdivision);
+                                    // Get musical position from transport Position struct
+                                    // This comes from REAPER's TimeMap2_timeToBeats and properly handles tempo changes
+                                    let musical_str = if let Some(ref musical) = transport.position.musical {
+                                        format!("{}.{}.{:03}", musical.measure, musical.beat, musical.subdivision)
+                                    } else {
+                                        "1.1.000".to_string()
+                                    };
 
                                     rsx! {
                                         div {

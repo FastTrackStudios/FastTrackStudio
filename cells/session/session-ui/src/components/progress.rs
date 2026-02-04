@@ -216,6 +216,8 @@ pub struct ProgressSection {
     pub end_percent: f64,
     pub color: String,
     pub name: String,
+    /// Short name for space-constrained display (e.g., "INT A" instead of "Interlude A")
+    pub short_name: String,
 }
 
 /// Tempo/time signature marker definition
@@ -285,6 +287,7 @@ pub fn SegmentedProgressBar(
     });
 
     // Pre-calculate section data
+    // Use short_name when section is narrow (less than ~8% width for typical names)
     let section_data: Vec<_> = sections
         .iter()
         .enumerate()
@@ -302,6 +305,18 @@ pub fn SegmentedProgressBar(
                 (progress_in_section / section_width) * 100.0
             };
 
+            // Use short name for narrow sections
+            // Heuristic: if section width < 8%, use short name
+            // Also use short name if the full name is long (>10 chars) and section is < 12%
+            let use_short = section_width < 8.0
+                || (section.name.len() > 10 && section_width < 12.0)
+                || (section.name.len() > 7 && section_width < 10.0);
+            let display_name = if use_short {
+                section.short_name.clone()
+            } else {
+                section.name.clone()
+            };
+
             (
                 index,
                 section_start,
@@ -309,7 +324,7 @@ pub fn SegmentedProgressBar(
                 section_width,
                 section.color.clone(),
                 filled_percent,
-                section.name.clone(),
+                display_name,
             )
         })
         .collect();
@@ -442,7 +457,7 @@ pub fn SegmentedProgressBar(
             }
             // Main segmented progress bar
             div {
-                class: "relative w-full h-20 rounded-lg overflow-hidden bg-secondary px-4",
+                class: "relative w-full h-20 rounded-lg overflow-hidden bg-secondary",
                 // Render sections as background layers
                 for (index, section_start, _section_end, section_width, section_color, _filled_percent, _section_name) in section_data.iter() {
                     div {
