@@ -39,7 +39,26 @@ html.transparent-mode .bg-background {
 }
 
 /* Chart transparent area - the actual region where WGPU content shows through */
-.chart-transparent-area {
+.chart-transparent-area,
+html.transparent-mode .chart-transparent-area {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/*
+ * Force transparency on the chart preview containers and all their children
+ * that don't explicitly opt out. This ensures the full DOM chain from html
+ * down to the preview div is transparent so WGPU content shows through.
+ */
+html.transparent-mode #chart-render-area,
+html.transparent-mode #chart-editor-preview {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Also force transparency on all ancestor divs in transparent mode
+   that use inline transparent styles (belt-and-suspenders) */
+html.transparent-mode [style*="background: transparent"] {
   background: transparent !important;
   background-color: transparent !important;
 }
