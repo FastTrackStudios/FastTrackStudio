@@ -35,7 +35,7 @@ mod daw_connection;
 mod gateway;
 mod services;
 
-use dioxus::prelude::*;
+use dioxus_native::prelude::*;
 use session_ui::{
     ConnectionState, LatencyInfo, PerformanceLayout, Session, TopBar, AUDIO_LATENCY_SECONDS,
     LATENCY_INFO,
@@ -67,8 +67,8 @@ fn main() {
             .block_on(run_services());
     });
 
-    // Launch Dioxus desktop UI
-    dioxus::launch(App);
+    // Launch Dioxus native UI (GPU-accelerated via Blitz)
+    dioxus_native::launch(App);
 }
 
 #[component]

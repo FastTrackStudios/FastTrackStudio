@@ -1,8 +1,8 @@
 use crate::components::{
     CommentMarker, MeasureIndicator, ProgressSection, TempoCard, TempoMarkerData, TimeSignatureCard,
 };
+use crate::prelude::*;
 use crate::signals::{ACTIVE_INDICES, SETLIST_STRUCTURE};
-use dioxus::prelude::*;
 use session_proto::QueuedTarget;
 
 /// Section progress bar component

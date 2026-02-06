@@ -4,7 +4,7 @@
 //! Copied from FastTrackStudio for exact styling match.
 
 use crate::components::progress::CompactProgressBar;
-use dioxus::prelude::*;
+use crate::prelude::*;
 
 /// Vertical progress bar component for sidebar
 ///

@@ -44,6 +44,17 @@
 //! }
 //! ```
 
+/// Re-export dioxus prelude based on feature flags.
+/// When `native` feature is enabled, uses dioxus-native (GPU-accelerated Blitz renderer).
+/// Otherwise, uses standard dioxus (WebView-based desktop or web).
+pub mod prelude {
+    #[cfg(feature = "native")]
+    pub use dioxus_native::prelude::*;
+
+    #[cfg(not(feature = "native"))]
+    pub use dioxus::prelude::*;
+}
+
 pub mod components;
 pub mod layouts;
 pub mod signals;

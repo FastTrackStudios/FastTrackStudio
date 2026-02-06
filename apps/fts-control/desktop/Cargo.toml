@@ -5,9 +5,9 @@ authors = ["Cody Wright <acodywright@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-# UI
-dioxus = { version = "0.7.2", features = ["router"] }
-session-ui = { path = "../../../cells/session/session-ui" }
+# UI - Native renderer (GPU-accelerated via Blitz, no WebView)
+dioxus-native = { workspace = true }
+session-ui = { path = "../../../cells/session/session-ui", features = ["native"] }
 
 # Services (run in-process)
 session = { path = "../../../cells/session/session" }
@@ -40,7 +40,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre.workspace = true
 
 [features]
-default = ["desktop"]
-web = ["dioxus/web"]
-desktop = ["dioxus/desktop"]
-mobile = ["dioxus/mobile"]
+default = []

@@ -3,8 +3,8 @@
 //! Navigation bar with connection status indicator.
 //! Based on FastTrackStudio desktop app design.
 
+use crate::prelude::*;
 use crate::signals::LATENCY_INFO;
-use dioxus::prelude::*;
 use lucide_dioxus::{CircleCheck, CircleX};
 
 /// Application version string

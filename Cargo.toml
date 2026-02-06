@@ -141,6 +141,8 @@ palette = "0.7.3"
 
 # Dioxus UI framework (pinned to 0.7.2 - native 0.7.3 not yet on crates.io)
 dioxus = "0.7.2"
+# Dioxus native renderer (GPU-accelerated, no WebView)
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz", features = ["prelude", "system-fonts"] }
 rxrust = { git = "https://github.com/rxRust/rxRust", rev = "349e50b3197e05926e2378ef8fc45cb67ad43b83" }
 
 # macOS dependencies for swell-ui (using exact versions for compatibility)

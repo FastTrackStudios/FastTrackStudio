@@ -3,7 +3,7 @@
 //! Displays time signature changes as visual markers on the timeline.
 //! Pure presentation component - all state passed via props.
 
-use dioxus::prelude::*;
+use crate::prelude::*;
 
 /// A time signature marker to display on the timeline
 #[derive(Clone, Debug, PartialEq)]

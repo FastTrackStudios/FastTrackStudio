@@ -11,8 +11,9 @@ session-proto = { workspace = true }
 # DAW types (for PlayState, etc.)
 daw-proto = { workspace = true }
 
-# Dioxus UI framework
-dioxus = { version = "0.7.2" }
+# Dioxus UI framework - use dioxus-native when native feature is enabled
+dioxus = { version = "0.7.2", optional = true }
+dioxus-native = { workspace = true, optional = true }
 
 # Icons
 lucide-dioxus = { version = "2", features = ["all-icons"] }
@@ -22,6 +23,13 @@ tracing = "0.1"
 
 # Error handling
 eyre = "0.6"
+
+[features]
+default = ["web"]
+# Web/desktop (WebView-based) rendering
+web = ["dioxus"]
+# Native GPU-accelerated rendering via Blitz
+native = ["dioxus-native"]
 
 # WASM dependencies for timing
 [target.'cfg(target_arch = "wasm32")'.dependencies]

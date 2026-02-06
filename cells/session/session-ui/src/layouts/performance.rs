@@ -10,8 +10,8 @@
 //! The consuming app must call `Session::init()` during startup.
 
 use crate::components::*;
+use crate::prelude::*;
 use crate::signals::*;
-use dioxus::prelude::*;
 use session_proto::setlist::Setlist;
 use session_proto::song::Song;
 

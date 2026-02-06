@@ -3,7 +3,7 @@
 //! Displays loop region as a visual overlay on the timeline.
 //! Pure presentation component - all state passed via props.
 
-use dioxus::prelude::*;
+use crate::prelude::*;
 
 /// Props for LoopIndicator component
 #[derive(Props, Clone, PartialEq)]

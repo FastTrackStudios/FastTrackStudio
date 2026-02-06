@@ -3,7 +3,7 @@
 //! Transport control bar with grid layout.
 //! Copied from FastTrackStudio for exact styling match.
 
-use dioxus::prelude::*;
+use crate::prelude::*;
 use lucide_dioxus::{
     Pause as PauseIcon, Play as PlayIcon, Repeat2 as LoopIcon, SkipBack as BackIcon,
     SkipForward as ForwardIcon,

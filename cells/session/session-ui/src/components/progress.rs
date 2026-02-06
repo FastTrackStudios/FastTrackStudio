@@ -3,7 +3,7 @@
 //! Progress visualization components for songs and sections.
 //! Copied from FastTrackStudio for exact styling match.
 
-use dioxus::prelude::*;
+use crate::prelude::*;
 use session_proto::QueuedTarget;
 
 /// Represents the loop region as percentages (0-100) within the progress bar
