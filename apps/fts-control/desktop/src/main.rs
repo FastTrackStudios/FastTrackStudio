@@ -6,6 +6,14 @@
 //! - Runs WebSocket gateway for browser access
 //! - Renders the same UI as the web app
 //!
+//! # Renderer Selection
+//!
+//! This app supports two rendering backends:
+//! - `desktop` (default): Uses Wry/WebView - fast, stable, browser-based rendering
+//! - `native`: Uses Blitz/Vello - experimental GPU-accelerated native rendering
+//!
+//! To use native renderer: `cargo run --no-default-features --features native`
+//!
 //! # Architecture
 //!
 //! ```text
@@ -31,15 +39,29 @@
 //!                                                     └─────────┘
 //! ```
 
+mod chart_graphics;
 mod daw_connection;
 mod gateway;
 mod services;
 
+// Conditionally import the right Dioxus prelude based on renderer feature
+#[cfg(feature = "desktop")]
+use dioxus::prelude::*;
+#[cfg(feature = "native")]
 use dioxus_native::prelude::*;
+
+use std::sync::Arc;
+
+#[cfg(feature = "desktop")]
+use chart_graphics::ChartGraphics;
+#[cfg(feature = "desktop")]
+use dioxus::desktop::{tao::window::WindowBuilder, Config};
+
 use session_ui::{
-    ConnectionState, LatencyInfo, PerformanceLayout, Session, TopBar, AUDIO_LATENCY_SECONDS,
-    LATENCY_INFO,
+    ChartAreaBounds, ConnectionState, LatencyInfo, PerformanceLayout, Session, TopBar,
+    AUDIO_LATENCY_SECONDS, CHART_AREA_BOUNDS, LATENCY_INFO, SHOW_CHART_SPLIT,
 };
+
 use tokio;
 use tracing::info;
 
@@ -58,7 +80,10 @@ fn main() {
         )
         .init();
 
-    info!("Starting FTS Control Desktop");
+    #[cfg(feature = "desktop")]
+    info!("Starting FTS Control Desktop (Wry/WebView + WGPU hybrid renderer)");
+    #[cfg(feature = "native")]
+    info!("Starting FTS Control Desktop (Blitz/Native renderer)");
 
     // Start async runtime for services (before UI)
     std::thread::spawn(|| {
@@ -67,7 +92,45 @@ fn main() {
             .block_on(run_services());
     });
 
-    // Launch Dioxus native UI (GPU-accelerated via Blitz)
+    // Launch Dioxus UI with the appropriate renderer
+    #[cfg(feature = "desktop")]
+    {
+        use std::sync::Mutex;
+
+        // Configure hybrid rendering: WGPU surface with Dioxus as transparent overlay
+        let config = Config::new()
+            .with_window(
+                WindowBuilder::new()
+                    .with_title("FTS Control")
+                    .with_transparent(true),
+            )
+            // CRITICAL: Set WebView background to transparent (RGBA with alpha=0)
+            // Without this, the WebView itself has an opaque background even if CSS is transparent
+            .with_background_color((0, 0, 0, 0))
+            .with_on_window(|window, dom| {
+                // Get window size for initialization
+                let size = window.inner_size();
+
+                // Initialize anyrender-based graphics context
+                let mut graphics = ChartGraphics::new(window, size.width, size.height);
+
+                // Render test pattern to verify WGPU is working
+                graphics.render_test();
+
+                // Wrap in Arc<Mutex> for shared mutable access
+                let graphics = Arc::new(Mutex::new(graphics));
+
+                // Provide graphics context to all Dioxus components
+                dom.provide_root_context(graphics);
+            })
+            .with_as_child_window();
+
+        dioxus::LaunchBuilder::desktop()
+            .with_cfg(config)
+            .launch(App);
+    }
+
+    #[cfg(feature = "native")]
     dioxus_native::launch(App);
 }
 
@@ -78,6 +141,44 @@ fn App() -> Element {
 
     // Connection state - tracks DAW connection
     let mut connection_state = use_signal(|| ConnectionState::Connecting);
+
+    // WGPU/Vello chart graphics context (desktop only)
+    #[cfg(feature = "desktop")]
+    let graphics = consume_context::<Arc<std::sync::Mutex<ChartGraphics>>>();
+
+    // Request initial redraw on mount (desktop only)
+    #[cfg(feature = "desktop")]
+    use_effect(|| {
+        dioxus::desktop::window().window.request_redraw();
+    });
+
+    // Handle window resize events to update WGPU surface (desktop only)
+    #[cfg(feature = "desktop")]
+    {
+        use dioxus::desktop::{tao::event::Event as WryEvent, use_wry_event_handler, window};
+
+        let graphics_clone = graphics.clone();
+        use_wry_event_handler(move |event, _| {
+            use dioxus::desktop::tao::event::WindowEvent;
+
+            if let WryEvent::WindowEvent {
+                event: WindowEvent::Resized(new_size),
+                ..
+            } = event
+            {
+                if let Ok(mut gfx) = graphics_clone.lock() {
+                    // Resize WGPU surface to match new window size
+                    gfx.resize(new_size.width, new_size.height);
+
+                    // Re-render the test pattern after resize
+                    gfx.render_test();
+                }
+
+                // Request a redraw
+                window().window.request_redraw();
+            }
+        });
+    }
 
     // Latency polling task - runs within Dioxus context for proper signal updates
     let _latency_task = use_future(move || async move {
@@ -228,20 +329,16 @@ fn App() -> Element {
                         }
 
                         session_proto::SetlistEvent::TransportUpdate(transports) => {
-                            let active_song_index = ACTIVE_INDICES.read().song_index;
+                            // PERFORMANCE: Only write to signals if values actually changed.
+                            // Each .write() triggers re-renders for all subscribers.
 
-                            // Get audio latency for compensation (only applied during playback)
-                            let audio_latency = *AUDIO_LATENCY_SECONDS.read();
+                            let active_song_index = ACTIVE_INDICES.peek().song_index;
+                            let audio_latency = *AUDIO_LATENCY_SECONDS.peek();
 
-                            let mut song_transport = SONG_TRANSPORT.write();
                             for transport in transports {
-                                // Apply latency compensation to time position during playback
-                                // This shifts the visual position ahead to match audio output
-                                // Note: We only compensate the time portion, not the musical position
-                                // since REAPER's tempo map handles that accurately
+                                // Build the new transport state
                                 let compensated_position =
                                     if transport.is_playing && audio_latency > 0.0 {
-                                        // Create a new Position with compensated time
                                         let compensated_time = transport.position.time.map(|t| {
                                             daw_proto::TimePosition::from_seconds(
                                                 t.as_seconds() + audio_latency,
@@ -256,12 +353,9 @@ fn App() -> Element {
                                         transport.position.clone()
                                     };
 
-                                // Convert loop region from seconds to percentages (0.0-1.0)
-                                // The loop_region in SongTransportState is already relative to song start
                                 let loop_region_percent =
                                     transport.loop_region.as_ref().and_then(|region| {
-                                        // Get song duration from setlist for percentage calculation
-                                        let setlist = SETLIST_STRUCTURE.read();
+                                        let setlist = SETLIST_STRUCTURE.peek();
                                         setlist.songs.get(transport.song_index).map(|song| {
                                             let song_duration = song.duration();
                                             if song_duration > 0.0 {
@@ -277,35 +371,64 @@ fn App() -> Element {
                                         })
                                     });
 
-                                song_transport.insert(
-                                    transport.song_index,
-                                    TransportState {
-                                        position: compensated_position,
-                                        bpm: transport.bpm,
-                                        time_sig_num: transport.time_sig_num as i32,
-                                        time_sig_denom: transport.time_sig_denom as i32,
-                                        is_playing: transport.is_playing,
-                                        is_looping: transport.is_looping,
-                                        loop_region: loop_region_percent,
-                                    },
-                                );
+                                let new_transport = TransportState {
+                                    position: compensated_position,
+                                    bpm: transport.bpm,
+                                    time_sig_num: transport.time_sig_num as i32,
+                                    time_sig_denom: transport.time_sig_denom as i32,
+                                    is_playing: transport.is_playing,
+                                    is_looping: transport.is_looping,
+                                    loop_region: loop_region_percent,
+                                };
 
-                                // Update global state for active song
+                                // Only write SONG_TRANSPORT if this song's transport changed
+                                // Must compute needs_update and drop peek() before calling write()
+                                let needs_transport_update = SONG_TRANSPORT
+                                    .peek()
+                                    .get(&transport.song_index)
+                                    .map(|existing| *existing != new_transport)
+                                    .unwrap_or(true);
+
+                                if needs_transport_update {
+                                    SONG_TRANSPORT
+                                        .write()
+                                        .insert(transport.song_index, new_transport);
+                                }
+
+                                // Update ACTIVE_INDICES and PLAYBACK_STATE only for active song
                                 if Some(transport.song_index) == active_song_index {
+                                    // Check if playback state changed
                                     let new_state = if transport.is_playing {
                                         daw_proto::PlayState::Playing
                                     } else {
                                         daw_proto::PlayState::Stopped
                                     };
-                                    *PLAYBACK_STATE.write() = new_state;
 
-                                    // Update progress
-                                    let mut indices = ACTIVE_INDICES.write();
-                                    indices.song_progress = Some(transport.progress);
-                                    indices.section_progress = transport.section_progress;
-                                    indices.section_index = transport.section_index;
-                                    indices.is_playing = transport.is_playing;
-                                    indices.looping = transport.is_looping;
+                                    let needs_playback_update = *PLAYBACK_STATE.peek() != new_state;
+                                    if needs_playback_update {
+                                        *PLAYBACK_STATE.write() = new_state;
+                                    }
+
+                                    // Check if indices actually changed before writing
+                                    // Compute the check, dropping the peek() borrow before write()
+                                    let indices_changed = {
+                                        let current = ACTIVE_INDICES.peek();
+                                        current.song_progress != Some(transport.progress)
+                                            || current.section_progress
+                                                != transport.section_progress
+                                            || current.section_index != transport.section_index
+                                            || current.is_playing != transport.is_playing
+                                            || current.looping != transport.is_looping
+                                    };
+
+                                    if indices_changed {
+                                        let mut indices = ACTIVE_INDICES.write();
+                                        indices.song_progress = Some(transport.progress);
+                                        indices.section_progress = transport.section_progress;
+                                        indices.section_index = transport.section_index;
+                                        indices.is_playing = transport.is_playing;
+                                        indices.looping = transport.is_looping;
+                                    }
                                 }
                             }
                         }
@@ -354,38 +477,54 @@ fn App() -> Element {
     rsx! {
         // Document head
         document::Link { rel: "icon", href: FAVICON }
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
+        // Tailwind CSS first, then main.css to allow overrides for WGPU transparency
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
+        document::Link { rel: "stylesheet", href: MAIN_CSS }
 
         // Main app layout with keyboard handler
-        div {
-            class: "h-screen flex flex-col bg-background text-foreground outline-none",
-            tabindex: "0",
-            autofocus: true,
-            onkeydown: move |e: KeyboardEvent| {
-                // Only handle keyboard shortcuts on performance tab
-                if active_tab() == "performance" {
-                    handle_keyboard_shortcut(e);
-                }
-            },
+        // Use transparent background when on chart tab OR when chart split is enabled
+        {
+            let show_chart_split = *SHOW_CHART_SPLIT.read();
+            let needs_transparency = active_tab() == "chart" || (active_tab() == "performance" && show_chart_split);
 
-            // Top navigation bar (same as web)
-            TopBar {
-                connection_state: connection_state(),
-                active_tab: active_tab(),
-                on_tab_click: Some(Callback::new(move |tab: String| {
-                    active_tab.set(tab);
-                })),
-            }
+            rsx! {
+                div {
+                    class: if needs_transparency {
+                        "h-screen flex flex-col text-foreground outline-none"
+                    } else {
+                        "h-screen flex flex-col bg-background text-foreground outline-none"
+                    },
+                    style: if needs_transparency { "background: transparent !important; background-color: transparent !important;" } else { "" },
+                    tabindex: "0",
+                    autofocus: true,
+                    onkeydown: move |e: KeyboardEvent| {
+                        // Only handle keyboard shortcuts on performance tab
+                        if active_tab() == "performance" {
+                            handle_keyboard_shortcut(e);
+                        }
+                    },
 
-            // Main content area
-            div {
-                class: "flex-1 overflow-hidden",
-                match active_tab().as_str() {
-                    "performance" => rsx! { PerformanceLayout {} },
-                    "setlist" => rsx! { SetlistView {} },
-                    "settings" => rsx! { SettingsView {} },
-                    _ => rsx! { PerformanceLayout {} },
+                    // Top navigation bar (same as web)
+                    TopBar {
+                        connection_state: connection_state(),
+                        active_tab: active_tab(),
+                        on_tab_click: Some(Callback::new(move |tab: String| {
+                            active_tab.set(tab);
+                        })),
+                    }
+
+                    // Main content area
+                    div {
+                        class: "flex-1 overflow-hidden relative",
+                        style: if needs_transparency { "background: transparent !important; background-color: transparent !important;" } else { "" },
+                        match active_tab().as_str() {
+                            "performance" => rsx! { PerformanceWithChartToggle {} },
+                            "chart" => rsx! { ChartView {} },
+                            "setlist" => rsx! { SetlistView {} },
+                            "settings" => rsx! { SettingsView {} },
+                            _ => rsx! { PerformanceWithChartToggle {} },
+                        }
+                    }
                 }
             }
         }
@@ -450,6 +589,201 @@ fn handle_keyboard_shortcut(e: KeyboardEvent) {
             });
         }
         _ => {}
+    }
+}
+
+/// Performance view with optional chart split
+///
+/// Wraps PerformanceLayout and adds a chart toggle button.
+/// The split logic is handled inside PerformanceMainContent via SHOW_CHART_SPLIT signal.
+#[component]
+fn PerformanceWithChartToggle() -> Element {
+    let show_chart = *SHOW_CHART_SPLIT.read();
+
+    // Handle chart rendering and transparency when split is enabled
+    #[cfg(feature = "desktop")]
+    {
+        let graphics = consume_context::<Arc<std::sync::Mutex<ChartGraphics>>>();
+
+        // Query chart area bounds and render bounding box
+        use_effect(move || {
+            if show_chart {
+                // Enable transparent mode
+                document::eval(r#"document.documentElement.classList.add('transparent-mode');"#);
+
+                // Query the chart area bounds after a small delay to ensure DOM is updated
+                let graphics_clone = graphics.clone();
+                spawn(async move {
+                    // Small delay to let the DOM update
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+                    // Query the chart-render-area element bounds
+                    // Note: We need to account for devicePixelRatio on high-DPI displays
+                    // getBoundingClientRect returns CSS pixels, but WGPU uses physical pixels
+                    let result = document::eval(
+                        r#"
+                        const el = document.getElementById('chart-render-area');
+                        if (el) {
+                            const rect = el.getBoundingClientRect();
+                            const dpr = window.devicePixelRatio || 1;
+                            return JSON.stringify({
+                                x: rect.x * dpr,
+                                y: rect.y * dpr,
+                                width: rect.width * dpr,
+                                height: rect.height * dpr,
+                                dpr: dpr,
+                                cssX: rect.x,
+                                cssY: rect.y,
+                                cssWidth: rect.width,
+                                cssHeight: rect.height
+                            });
+                        }
+                        return "null";
+                    "#,
+                    );
+
+                    // Parse the result and update bounds
+                    match result.await {
+                        Ok(value) => {
+                            // Try to get as string first
+                            if let Some(json_str) = value.as_str() {
+                                if json_str != "null" {
+                                    if let Ok(bounds) =
+                                        serde_json::from_str::<serde_json::Value>(json_str)
+                                    {
+                                        // Physical pixel coordinates (scaled by DPR)
+                                        let x = bounds["x"].as_f64().unwrap_or(0.0);
+                                        let y = bounds["y"].as_f64().unwrap_or(0.0);
+                                        let width = bounds["width"].as_f64().unwrap_or(0.0);
+                                        let height = bounds["height"].as_f64().unwrap_or(0.0);
+                                        let dpr = bounds["dpr"].as_f64().unwrap_or(1.0);
+                                        let css_x = bounds["cssX"].as_f64().unwrap_or(0.0);
+                                        let css_y = bounds["cssY"].as_f64().unwrap_or(0.0);
+
+                                        tracing::info!(
+                                            "Chart bounds: physical=({:.0}, {:.0}, {:.0}x{:.0}), css=({:.0}, {:.0}), dpr={:.2}",
+                                            x, y, width, height, css_x, css_y, dpr
+                                        );
+
+                                        // Update the global signal (store physical pixel coordinates)
+                                        *CHART_AREA_BOUNDS.write() =
+                                            ChartAreaBounds::new(x, y, width, height);
+
+                                        // Render bounding box at those coordinates
+                                        if let Ok(mut gfx) = graphics_clone.lock() {
+                                            gfx.render_bounds(x, y, width, height);
+                                        }
+                                        dioxus::desktop::window().window.request_redraw();
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to get chart area bounds: {:?}", e);
+                        }
+                    }
+                });
+            } else {
+                // Disable transparent mode
+                document::eval(r#"document.documentElement.classList.remove('transparent-mode');"#);
+                // Clear bounds
+                *CHART_AREA_BOUNDS.write() = ChartAreaBounds::default();
+            }
+        });
+    }
+
+    rsx! {
+        div {
+            class: "relative h-full w-full",
+            style: if show_chart { "background: transparent !important; background-color: transparent !important;" } else { "" },
+
+            // The PerformanceLayout handles the split internally via SHOW_CHART_SPLIT
+            PerformanceLayout {}
+
+            // Chart toggle button (top-right of main content area)
+            div {
+                class: "absolute top-4 z-50",
+                style: "right: 1rem;",
+                button {
+                    class: if show_chart {
+                        "px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium transition-colors flex items-center gap-2 shadow-lg"
+                    } else {
+                        "px-3 py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-secondary-foreground text-sm font-medium transition-colors flex items-center gap-2 shadow-lg"
+                    },
+                    onclick: move |_| {
+                        let current = *SHOW_CHART_SPLIT.peek();
+                        *SHOW_CHART_SPLIT.write() = !current;
+                    },
+                    // Music note / chart icon
+                    svg {
+                        width: "16",
+                        height: "16",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M9 18V5l12-2v13" }
+                        circle { cx: "6", cy: "18", r: "3" }
+                        circle { cx: "18", cy: "16", r: "3" }
+                    }
+                    if show_chart {
+                        "Hide Chart"
+                    } else {
+                        "Show Chart"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Chart view - transparent background to show WGPU rendering
+#[component]
+fn ChartView() -> Element {
+    // Get graphics context and trigger a render
+    #[cfg(feature = "desktop")]
+    {
+        let graphics = consume_context::<Arc<std::sync::Mutex<ChartGraphics>>>();
+
+        // Enable transparent mode on mount
+        use_effect(move || {
+            // Enable transparent mode on html element
+            document::eval(r#"document.documentElement.classList.add('transparent-mode');"#);
+
+            // Render the test pattern
+            if let Ok(mut gfx) = graphics.lock() {
+                gfx.render_test();
+            }
+            dioxus::desktop::window().window.request_redraw();
+        });
+
+        // Cleanup: remove transparent mode when component unmounts
+        use_drop(move || {
+            document::eval(r#"document.documentElement.classList.remove('transparent-mode');"#);
+        });
+    }
+
+    rsx! {
+        // Transparent container - WGPU content shows through
+        div {
+            class: "w-full h-full",
+            style: "background: transparent;",
+
+            // Optional: floating UI elements on top of the chart
+            div {
+                class: "absolute top-4 right-4 bg-card/80 backdrop-blur-sm rounded-lg p-4 shadow-lg",
+                h3 {
+                    class: "text-lg font-semibold text-foreground mb-2",
+                    "Chart View"
+                }
+                p {
+                    class: "text-sm text-muted-foreground",
+                    "WGPU/Vello rendering active"
+                }
+            }
+        }
     }
 }
 
