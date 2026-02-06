@@ -111,6 +111,7 @@ keyflow-text = { path = "cells/keyflow/keyflow-text" }
 keyflow-midi = { path = "cells/keyflow/keyflow-midi" }
 engraver = { path = "cells/keyflow/engraver" }
 engraver-proto = { path = "cells/keyflow/engraver-proto" }
+keyflow-ui = { path = "cells/keyflow/keyflow-ui" }
 
 # Protocol crates
 cell-host-proto = { path = "cells/cell-host/cell-host-proto" }
