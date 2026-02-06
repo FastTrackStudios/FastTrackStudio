@@ -72,7 +72,7 @@ pub fn TimeSignatureMarker(props: TimeSignatureMarkerProps) -> Element {
     rsx! {
         div {
             class: "time-signature-marker",
-            style: "position: absolute; left: {position}%; top: 0; bottom: 0; pointer-events: none; z-index: 5;",
+            style: "position: absolute; left: {position}%; top: 0; bottom: 0; z-index: 5;",
 
             // Vertical line (dashed)
             div {
@@ -123,7 +123,7 @@ pub fn TimeSignatureMarkersOverlay(
     rsx! {
         div {
             class: "time-signature-markers-overlay",
-            style: "position: relative; width: 100%; height: {height}px; pointer-events: none;",
+            style: "position: relative; width: 100%; height: {height}px;",
 
             for (idx, marker) in significant_markers.iter().enumerate() {
                 TimeSignatureMarker {

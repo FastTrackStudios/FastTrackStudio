@@ -280,7 +280,8 @@ pub struct CommentMarker {
 /// Segmented progress bar component with different colored sections
 #[component]
 pub fn SegmentedProgressBar(
-    progress: Signal<f64>,
+    /// Current progress percentage (0-100)
+    progress: f64,
     sections: Vec<ProgressSection>,
     #[props(default)] tempo_markers: Vec<TempoMarkerData>,
     #[props(default)] comment_markers: Vec<CommentMarker>,
@@ -290,7 +291,7 @@ pub fn SegmentedProgressBar(
     #[props(default)] loop_indicator: Option<LoopIndicatorData>,
     #[props(default)] queued_target: Option<QueuedTarget>,
 ) -> Element {
-    let current_progress = progress();
+    let current_progress = progress;
 
     // Track progress changes to detect jumps and disable animations
     let mut prev_progress = use_signal(|| None::<f64>);
@@ -318,7 +319,8 @@ pub fn SegmentedProgressBar(
         }
     });
 
-    // Pre-calculate section data with intelligent text fitting
+    // Pre-calculate STATIC section data with intelligent text fitting
+    // This is memoized because it only depends on sections prop, not progress
     //
     // Text width estimation constants (in pixels):
     // We use generous estimates since text will truncate with ellipsis if needed.
@@ -332,73 +334,103 @@ pub fn SegmentedProgressBar(
     const CHAR_WIDTH_COMMENT_PX: f64 = 4.5; // text-[10px] - lenient estimate
     const SECTION_PADDING_PX: f64 = 8.0; // minimal padding
 
-    let section_data: Vec<_> = sections
-        .iter()
-        .enumerate()
-        .map(|(index, section)| {
-            let section_start = section.start_percent;
-            let section_end = section.end_percent;
-            let section_width_percent = section.end_percent - section.start_percent;
+    // Memoize static section data - only recalculates when sections change
+    let sections_for_memo = sections.clone();
+    let static_section_data = use_memo(move || {
+        sections_for_memo
+            .iter()
+            .enumerate()
+            .map(|(index, section)| {
+                let section_start = section.start_percent;
+                let section_end = section.end_percent;
+                let section_width_percent = section.end_percent - section.start_percent;
 
-            let filled_percent = if current_progress <= section_start {
-                0.0
-            } else if current_progress >= section_end {
-                100.0
-            } else {
-                let progress_in_section = current_progress - section_start;
-                (progress_in_section / section_width_percent) * 100.0
-            };
+                // Estimate available pixel width for this section
+                let section_width_px =
+                    (section_width_percent / 100.0) * ESTIMATED_BAR_WIDTH_PX - SECTION_PADDING_PX;
 
-            // Estimate available pixel width for this section
-            let section_width_px =
-                (section_width_percent / 100.0) * ESTIMATED_BAR_WIDTH_PX - SECTION_PADDING_PX;
+                // Calculate text widths
+                let name_width_px = section.name.len() as f64 * CHAR_WIDTH_NAME_PX;
+                let short_name_width_px = section.short_name.len() as f64 * CHAR_WIDTH_NAME_PX;
 
-            // Calculate text widths
-            let name_width_px = section.name.len() as f64 * CHAR_WIDTH_NAME_PX;
-            let short_name_width_px = section.short_name.len() as f64 * CHAR_WIDTH_NAME_PX;
+                // Decide which name to display based on available width
+                let display_name = if name_width_px <= section_width_px {
+                    section.name.clone()
+                } else if short_name_width_px <= section_width_px {
+                    section.short_name.clone()
+                } else {
+                    // Even short name doesn't fit well, but show it anyway
+                    section.short_name.clone()
+                };
 
-            // Decide which name to display based on available width
-            let display_name = if name_width_px <= section_width_px {
-                section.name.clone()
-            } else if short_name_width_px <= section_width_px {
-                section.short_name.clone()
-            } else {
-                // Even short name doesn't fit well, but show it anyway
-                section.short_name.clone()
-            };
-
-            // Show comment if it fits within the section width
-            // Since name and comment are stacked vertically, we just check if comment fits
-            let comment = if let Some(ref comment_text) = section.comment {
-                let comment_width_px = comment_text.len() as f64 * CHAR_WIDTH_COMMENT_PX;
-
-                // Show comment if it fits (section_width_px already has padding subtracted)
-                if comment_width_px <= section_width_px {
-                    Some(comment_text.clone())
+                // Show comment if it fits within the section width
+                let comment = if let Some(ref comment_text) = section.comment {
+                    let comment_width_px = comment_text.len() as f64 * CHAR_WIDTH_COMMENT_PX;
+                    if comment_width_px <= section_width_px {
+                        Some(comment_text.clone())
+                    } else {
+                        None
+                    }
                 } else {
                     None
-                }
-            } else {
-                None
-            };
+                };
 
-            (
+                (
+                    index,
+                    section_start,
+                    section_end,
+                    section_width_percent,
+                    section.color.clone(),
+                    display_name,
+                    comment,
+                )
+            })
+            .collect::<Vec<_>>()
+    });
+
+    // Calculate dynamic filled percentages per-frame (this is cheap)
+    let section_data: Vec<_> = static_section_data
+        .read()
+        .iter()
+        .map(
+            |(
                 index,
                 section_start,
                 section_end,
                 section_width_percent,
-                section.color.clone(),
-                filled_percent,
+                color,
                 display_name,
                 comment,
-            )
-        })
+            )| {
+                let filled_percent = if current_progress <= *section_start {
+                    0.0
+                } else if current_progress >= *section_end {
+                    100.0
+                } else {
+                    let progress_in_section = current_progress - section_start;
+                    (progress_in_section / section_width_percent) * 100.0
+                };
+
+                (
+                    *index,
+                    *section_start,
+                    *section_end,
+                    *section_width_percent,
+                    color.clone(),
+                    filled_percent,
+                    display_name.clone(),
+                    comment.clone(),
+                )
+            },
+        )
         .collect();
 
     // Helper function to check if two markers overlap
-    let check_overlap = |pos1: f64, pos2: f64| -> bool { (pos1 - pos2).abs() < 2.0 };
+    fn check_overlap(pos1: f64, pos2: f64) -> bool {
+        (pos1 - pos2).abs() < 2.0
+    }
 
-    // Calculate card positions
+    // Calculate card positions - these are constants
     let card_size = "sm";
     let card_height_rem = match card_size {
         "xs" => 2.5,
@@ -413,24 +445,33 @@ pub fn SegmentedProgressBar(
     let card_top_offset_rem = line_end_rem - card_height_rem;
     let card_top_offset_str = format!("{}rem", card_top_offset_rem);
 
-    // Pre-calculate positions for time signature markers
-    let time_sig_with_positions: Vec<_> = tempo_markers
-        .iter()
-        .enumerate()
-        .filter(|(_, m)| m.is_time_sig && !m.show_line_only)
-        .map(|(orig_idx, marker)| (orig_idx, marker, card_top_offset_str.clone()))
-        .collect();
+    // Memoize marker positions - only recalculate when tempo_markers changes
+    let tempo_markers_for_memo = tempo_markers.clone();
+    let card_top_offset_for_memo = card_top_offset_str.clone();
+    let time_sig_with_positions = use_memo(move || {
+        tempo_markers_for_memo
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.is_time_sig && !m.show_line_only)
+            .map(|(orig_idx, marker)| (orig_idx, marker.clone(), card_top_offset_for_memo.clone()))
+            .collect::<Vec<_>>()
+    });
 
-    // Collect filtered time signature markers (show_line_only)
-    let filtered_time_sig_markers: Vec<_> = tempo_markers
-        .iter()
-        .enumerate()
-        .filter(|(_, m)| m.is_time_sig && m.show_line_only)
-        .collect();
+    // Memoize filtered time signature markers
+    let tempo_markers_for_filtered = tempo_markers.clone();
+    let filtered_time_sig_markers = use_memo(move || {
+        tempo_markers_for_filtered
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.is_time_sig && m.show_line_only)
+            .map(|(idx, m)| (idx, m.clone()))
+            .collect::<Vec<_>>()
+    });
 
-    // Pre-calculate positions for tempo markers with staggering
-    let tempo_with_positions: Vec<_> = {
-        let tempo_markers_list: Vec<_> = tempo_markers
+    // Memoize tempo marker positions with staggering
+    let tempo_markers_for_tempo = tempo_markers.clone();
+    let tempo_with_positions = use_memo(move || {
+        let tempo_markers_list: Vec<_> = tempo_markers_for_tempo
             .iter()
             .enumerate()
             .filter(|(_, m)| m.is_tempo)
@@ -451,10 +492,10 @@ pub fn SegmentedProgressBar(
             } else {
                 "0.5rem"
             };
-            result.push((*orig_idx, *marker, bottom_offset));
+            result.push((*orig_idx, (*marker).clone(), bottom_offset));
         }
         result
-    };
+    });
 
     rsx! {
         div {
@@ -462,7 +503,7 @@ pub fn SegmentedProgressBar(
             // Tempo/Time Signature labels
             if !tempo_markers.is_empty() {
                 // Time signature markers
-                for (orig_idx, marker, top_offset) in time_sig_with_positions.iter() {
+                for (orig_idx, marker, top_offset) in time_sig_with_positions.read().iter() {
                     TimeSignatureCard {
                         position_percent: marker.position_percent,
                         label: marker.label.clone(),
@@ -472,7 +513,7 @@ pub fn SegmentedProgressBar(
                     }
                 }
                 // Tempo/BPM markers
-                for (orig_idx, marker, bottom_offset) in tempo_with_positions.iter() {
+                for (orig_idx, marker, bottom_offset) in tempo_with_positions.read().iter() {
                     TempoCard {
                         position_percent: marker.position_percent,
                         label: marker.label.clone(),
@@ -483,7 +524,7 @@ pub fn SegmentedProgressBar(
                     }
                 }
                 // Small lines for filtered time signature markers
-                for (index, marker) in filtered_time_sig_markers.iter() {
+                for (index, marker) in filtered_time_sig_markers.read().iter() {
                     if marker.position_percent > 0.5 {
                         div {
                             key: "filtered-timesig-line-{index}",
@@ -757,7 +798,8 @@ pub fn SegmentedProgressBar(
 /// This is a wrapper around SegmentedProgressBar that handles song-specific logic.
 #[component]
 pub fn SongProgressBar(
-    progress: Signal<f64>,
+    /// Current progress percentage (0-100)
+    progress: f64,
     sections: Vec<ProgressSection>,
     #[props(default)] on_section_click: Option<Callback<usize>>,
     #[props(default)] on_comment_click: Option<Callback<f64>>,

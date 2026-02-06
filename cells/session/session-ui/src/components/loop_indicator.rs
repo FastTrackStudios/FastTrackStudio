@@ -57,7 +57,7 @@ pub fn LoopIndicator(props: LoopIndicatorProps) -> Element {
     rsx! {
         div {
             class: "loop-indicator",
-            style: "position: absolute; left: {start}%; top: 0; width: {width}%; height: {height_px}px; pointer-events: none; z-index: 3;",
+            style: "position: absolute; left: {start}%; top: 0; width: {width}%; height: {height_px}px; z-index: 3;",
 
             // Loop region overlay (semi-transparent fill)
             div {
@@ -93,7 +93,7 @@ pub fn LoopIndicator(props: LoopIndicatorProps) -> Element {
             if width > 10.0 {
                 div {
                     class: "loop-label",
-                    style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.75rem; font-weight: 600; color: white; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); pointer-events: none;",
+                    style: "position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.75rem; font-weight: 600; color: white;",
                     "LOOP"
                 }
             }

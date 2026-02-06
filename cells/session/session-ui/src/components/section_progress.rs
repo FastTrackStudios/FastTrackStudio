@@ -1,8 +1,8 @@
 use crate::components::{
     CommentMarker, MeasureIndicator, ProgressSection, TempoCard, TempoMarkerData, TimeSignatureCard,
 };
+use crate::prelude::*;
 use crate::signals::{ACTIVE_INDICES, SETLIST_STRUCTURE};
-use dioxus::prelude::*;
 use session_proto::QueuedTarget;
 
 /// Section progress bar component
@@ -11,7 +11,8 @@ use session_proto::QueuedTarget;
 /// Can display tempo markers, time signature markers, measure indicators, and comment markers.
 #[component]
 pub fn SectionProgressBar(
-    progress: Signal<f64>,
+    /// Current progress percentage (0-100)
+    progress: f64,
     sections: Vec<ProgressSection>,
     #[props(default)] tempo_markers: Vec<TempoMarkerData>,
     #[props(default)] measure_indicators: Vec<MeasureIndicator>,
@@ -21,7 +22,7 @@ pub fn SectionProgressBar(
     #[props(default)] on_comment_click: Option<Callback<f64>>,
     #[props(default)] queued_target: Option<QueuedTarget>,
 ) -> Element {
-    let current_progress = progress();
+    let current_progress = progress;
 
     // Track progress changes to detect jumps and disable animations
     let mut prev_progress = use_signal(|| None::<f64>);
