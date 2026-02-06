@@ -203,6 +203,39 @@ pub static SONG_TRANSPORT: GlobalSignal<HashMap<usize, TransportState>> =
 /// Updates when play/pause/stop state changes
 pub static PLAYBACK_STATE: GlobalSignal<PlayState> = Signal::global(|| PlayState::Stopped);
 
+/// Chart split view mode - when true, the main content area shows chart in top half
+/// This is controlled by the desktop app for hybrid WGPU/WebView rendering
+pub static SHOW_CHART_SPLIT: GlobalSignal<bool> = Signal::global(|| false);
+
+/// Chart area bounds in window coordinates (x, y, width, height)
+/// Updated when the chart area is resized or the split view changes
+/// Used by WGPU renderer to know where to draw the chart
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ChartAreaBounds {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl ChartAreaBounds {
+    pub fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.width > 0.0 && self.height > 0.0
+    }
+}
+
+pub static CHART_AREA_BOUNDS: GlobalSignal<ChartAreaBounds> =
+    Signal::global(ChartAreaBounds::default);
+
 // ============================================================================
 // Session singleton
 // ============================================================================
