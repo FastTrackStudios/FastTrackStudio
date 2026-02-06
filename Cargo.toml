@@ -19,6 +19,8 @@ members = [
 exclude = [
     "reference/roam",
     "reference/dioxus",
+    "reference/anyrender",    # Has its own workspace
+    "reference/vello",        # Has its own workspace
     "cells/signal/signal",    # Incomplete crate - no Cargo.toml
     "cells/signal/signal-proto",  # Incomplete crate - no Cargo.toml
     "cells/sync/sync",        # Incomplete crate
@@ -141,8 +143,8 @@ palette = "0.7.3"
 
 # Dioxus UI framework (pinned to 0.7.2 - native 0.7.3 not yet on crates.io)
 dioxus = "0.7.2"
-# Dioxus native renderer (GPU-accelerated, no WebView)
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz", features = ["prelude", "system-fonts"] }
+# Dioxus native renderer (GPU-accelerated, no WebView) - using latest git for performance improvements
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz", rev = "b88144ed", features = ["prelude", "system-fonts"] }
 rxrust = { git = "https://github.com/rxRust/rxRust", rev = "349e50b3197e05926e2378ef8fc45cb67ad43b83" }
 
 # macOS dependencies for swell-ui (using exact versions for compatibility)
@@ -155,3 +157,13 @@ libloading = "0.9"
 
 # Image crate - pinned to 0.25.6 for blitz-dom compatibility (dioxus-native)
 image = "=0.25.6"
+
+# Anyrender - 2D rendering abstraction (WGPU/Vello backend)
+anyrender = { path = "reference/anyrender/crates/anyrender" }
+anyrender_vello = { path = "reference/anyrender/crates/anyrender_vello" }
+wgpu_context = { path = "reference/anyrender/crates/wgpu_context" }
+
+# Linebender graphics crates (matching anyrender's versions)
+peniko = "0.6"
+kurbo = "0.13"
+color = "0.3"

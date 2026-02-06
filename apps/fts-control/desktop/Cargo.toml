@@ -5,9 +5,12 @@ authors = ["Cody Wright <acodywright@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-# UI - Native renderer (GPU-accelerated via Blitz, no WebView)
-dioxus-native = { workspace = true }
-session-ui = { path = "../../../cells/session/session-ui", features = ["native"] }
+# UI - conditionally use Dioxus desktop (Wry/WebView) or native (Blitz/GPU)
+dioxus = { version = "0.7.2", features = ["desktop"], optional = true }
+dioxus-native = { workspace = true, optional = true }
+
+# Session UI components - feature selected based on renderer
+session-ui = { path = "../../../cells/session/session-ui", default-features = false }
 
 # Services (run in-process)
 session = { path = "../../../cells/session/session" }
@@ -38,6 +41,26 @@ futures.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre.workspace = true
+serde_json.workspace = true
+
+# Chart rendering via anyrender (WGPU/Vello backend)
+anyrender.workspace = true
+anyrender_vello.workspace = true
+peniko.workspace = true
+kurbo.workspace = true
+
+# Chart engraver
+engraver-proto = { path = "../../../cells/keyflow/engraver-proto", features = ["engraver"] }
 
 [features]
-default = []
+# Default to desktop (Wry/WebView) renderer - fast and stable
+default = ["desktop"]
+
+# Desktop renderer using Wry/WebView (recommended)
+desktop = ["dioxus", "session-ui/web"]
+
+# Native GPU-accelerated renderer using Blitz (experimental)
+native = ["dioxus-native", "session-ui/native"]
+
+# Enable Blitz's built-in frame time logging (only works with native feature)
+log-frame-times = ["dioxus-native/log-frame-times"]
