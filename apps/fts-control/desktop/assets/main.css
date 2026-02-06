@@ -1,10 +1,54 @@
 /* App-wide styling */
+html,
 body {
-  background-color: #0f1116;
   color: #ffffff;
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   margin: 0;
   padding: 0;
+}
+
+/*
+ * WGPU Hybrid Rendering Setup
+ *
+ * Since WebView background is set to transparent via with_background_color((0,0,0,0)),
+ * we need to ensure UI elements have proper opaque backgrounds by default.
+ * Only the chart area should be transparent to show WGPU content.
+ */
+
+/* Default background for body - ensures app isn't see-through when not showing chart */
+body {
+  background-color: var(--background, #0f1116);
+}
+
+/* Transparent mode - enabled when showing WGPU chart content */
+/* This makes html/body transparent so chart areas can show through */
+html.transparent-mode,
+html.transparent-mode body {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/*
+ * In transparent mode, we need to override Tailwind's bg-background class
+ * for elements in the transparency chain. This allows WGPU to show through.
+ * Elements that should stay opaque use explicit inline styles or chart-opaque-area class.
+ */
+html.transparent-mode .bg-background {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Chart transparent area - the actual region where WGPU content shows through */
+.chart-transparent-area {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Opaque area that covers WGPU (for UI below the chart in split view) */
+/* Uses higher specificity to override the transparent-mode rule above */
+html.transparent-mode .chart-opaque-area,
+.chart-opaque-area {
+  background-color: var(--background, #0f1116) !important;
 }
 
 #hero {
