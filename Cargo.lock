@@ -401,7 +401,7 @@ dependencies = [
  "peniko 0.6.0",
  "pollster 0.4.0",
  "rustc-hash 2.1.1",
- "vello 0.7.0",
+ "vello",
  "wgpu 27.0.1",
  "wgpu_context 0.3.1",
 ]
@@ -418,7 +418,7 @@ dependencies = [
  "peniko 0.6.0",
  "pollster 0.4.0",
  "rustc-hash 2.1.1",
- "vello 0.7.0",
+ "vello",
  "wgpu 27.0.1",
  "wgpu_context 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -3366,7 +3366,7 @@ dependencies = [
  "keyflow",
  "keyflow-proto",
  "keyflow-text",
- "kurbo 0.12.0",
+ "kurbo 0.13.0",
  "log",
  "lopdf 0.36.0",
  "lyon",
@@ -3387,7 +3387,7 @@ dependencies = [
  "tracing-subscriber",
  "usvg 0.45.1",
  "uuid",
- "vello 0.6.0",
+ "vello",
  "wgpu 26.0.1",
  "winit 0.30.12",
 ]
@@ -4061,6 +4061,8 @@ dependencies = [
  "host-client",
  "host-manager",
  "host-manager-proto",
+ "keyflow",
+ "keyflow-ui",
  "kurbo 0.13.0",
  "peniko 0.6.0",
  "roam",
@@ -4074,6 +4076,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "vello",
 ]
 
 [[package]]
@@ -5928,6 +5931,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyflow-ui"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+ "dioxus-native",
+ "engraver-proto",
+ "keyflow",
+ "keyflow-proto",
+ "kurbo 0.13.0",
+ "lucide-dioxus",
+ "tokio",
+ "tracing",
+ "vello",
+]
+
+[[package]]
 name = "khronos-egl"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7772,18 +7791,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0a648c93f502a0bef0a9cb47fa1335994958a2744667d3f82defe513f276741a"
 dependencies = [
  "kurbo 0.11.3",
- "smallvec 1.15.1",
-]
-
-[[package]]
-name = "peniko"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3c76095c9a636173600478e0373218c7b955335048c2bcd12dc6a79657649d8"
-dependencies = [
- "color",
- "kurbo 0.12.0",
- "linebender_resource_handle",
  "smallvec 1.15.1",
 ]
 
@@ -11553,25 +11560,6 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vello"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71acbd6b5f7f19841425845c113a89a54bbf60556ae39e7d0182a6f80ce37f5b"
-dependencies = [
- "bytemuck",
- "futures-intrusive",
- "log",
- "peniko 0.5.0",
- "png",
- "skrifa 0.37.0",
- "static_assertions",
- "thiserror 2.0.18",
- "vello_encoding 0.6.0",
- "vello_shaders 0.6.0",
- "wgpu 26.0.1",
-]
-
-[[package]]
-name = "vello"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72fef40773530322d5c2ffe3c1107e9874bd8239ac137d1c2b6c1edad695146e"
@@ -11584,8 +11572,8 @@ dependencies = [
  "skrifa 0.40.0",
  "static_assertions",
  "thiserror 2.0.18",
- "vello_encoding 0.7.0",
- "vello_shaders 0.7.0",
+ "vello_encoding",
+ "vello_shaders",
  "wgpu 27.0.1",
 ]
 
@@ -11614,19 +11602,6 @@ dependencies = [
  "bytemuck",
  "hashbrown 0.16.1",
  "vello_common",
-]
-
-[[package]]
-name = "vello_encoding"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfd5e0b9fec91df34a09fbcbbed474cec68d05691b590a911c7af83c4860ae42"
-dependencies = [
- "bytemuck",
- "guillotiere",
- "peniko 0.5.0",
- "skrifa 0.37.0",
- "smallvec 1.15.1",
 ]
 
 [[package]]
@@ -11660,19 +11635,6 @@ dependencies = [
 
 [[package]]
 name = "vello_shaders"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c381dde4e7d0d7957df0c0e3f8a7cc0976762d3972d97da5c71464e57ffefd3"
-dependencies = [
- "bytemuck",
- "log",
- "naga 26.0.0",
- "thiserror 2.0.18",
- "vello_encoding 0.6.0",
-]
-
-[[package]]
-name = "vello_shaders"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a765d44d4bd354146e44f9a860f4e92effd91a97302549be9e47f0a18d8128c"
@@ -11681,7 +11643,7 @@ dependencies = [
  "log",
  "naga 27.0.3",
  "thiserror 2.0.18",
- "vello_encoding 0.7.0",
+ "vello_encoding",
 ]
 
 [[package]]

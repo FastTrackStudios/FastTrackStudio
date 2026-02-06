@@ -46,8 +46,13 @@ serde_json.workspace = true
 # Chart rendering via anyrender (WGPU/Vello backend)
 anyrender.workspace = true
 anyrender_vello.workspace = true
+vello = "0.7"
 peniko.workspace = true
 kurbo.workspace = true
+
+# Keyflow chart editor UI
+keyflow-ui = { path = "../../../cells/keyflow/keyflow-ui", default-features = false }
+keyflow = { path = "../../../cells/keyflow/keyflow", features = ["text"] }
 
 # Chart engraver
 engraver-proto = { path = "../../../cells/keyflow/engraver-proto", features = ["engraver"] }
@@ -57,10 +62,10 @@ engraver-proto = { path = "../../../cells/keyflow/engraver-proto", features = ["
 default = ["desktop"]
 
 # Desktop renderer using Wry/WebView (recommended)
-desktop = ["dioxus", "session-ui/web"]
+desktop = ["dioxus", "session-ui/web", "keyflow-ui/web"]
 
 # Native GPU-accelerated renderer using Blitz (experimental)
-native = ["dioxus-native", "session-ui/native"]
+native = ["dioxus-native", "session-ui/native", "keyflow-ui/native"]
 
 # Enable Blitz's built-in frame time logging (only works with native feature)
 log-frame-times = ["dioxus-native/log-frame-times"]

@@ -132,6 +132,77 @@ impl ChartGraphics {
         (self.width, self.height)
     }
 
+    /// Render a pre-built Vello scene from the engraver pipeline.
+    ///
+    /// This bridges the engraver's chart output (a `vello::Scene`) to the
+    /// WGPU surface. The scene is appended at the specified bounds with
+    /// DPI-scaled transform.
+    ///
+    /// # Arguments
+    /// * `chart_scene` - Pre-rendered chart scene from `ChartLayoutManager::render_to_scene`
+    /// * `x`, `y` - Physical pixel position of the chart area
+    /// * `width`, `height` - Physical pixel dimensions of the chart area
+    pub fn render_chart_scene(
+        &mut self,
+        chart_scene: &vello::Scene,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) {
+        tracing::info!(
+            "render_chart_scene: surface={}x{} chart_pos=({:.0},{:.0} {:.0}x{:.0})",
+            self.width,
+            self.height,
+            x,
+            y,
+            width,
+            height
+        );
+
+        self.renderer.render(|painter| {
+            let scene = painter.scene_mut();
+
+            // DEBUG: Red filled border (4px wide bands) at surface coordinates
+            let b = 4.0;
+            // Top edge
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                Color::from_rgb8(255, 0, 0),
+                None,
+                &Rect::new(x, y, x + width, y + b),
+            );
+            // Bottom edge
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                Color::from_rgb8(255, 0, 0),
+                None,
+                &Rect::new(x, y + height - b, x + width, y + height),
+            );
+            // Left edge
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                Color::from_rgb8(255, 0, 0),
+                None,
+                &Rect::new(x, y, x + b, y + height),
+            );
+            // Right edge
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                Color::from_rgb8(255, 0, 0),
+                None,
+                &Rect::new(x + width - b, y, x + width, y + height),
+            );
+
+            // Append the engraver's complete scene
+            scene.append(chart_scene, Some(Affine::translate((x, y))));
+        });
+    }
+
     /// Render a bounding box outline to visualize the chart area.
     ///
     /// This draws a colored rectangle outline at the specified bounds,

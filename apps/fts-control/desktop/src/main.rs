@@ -62,6 +62,13 @@ use session_ui::{
     AUDIO_LATENCY_SECONDS, CHART_AREA_BOUNDS, LATENCY_INFO, SHOW_CHART_SPLIT,
 };
 
+use keyflow_ui::signals::{ChartEditorBounds, PreviewMode};
+use keyflow_ui::{
+    ChartEditorLayout, ChartLayoutManager, RenderStats, CHART_EDITOR_BOUNDS, CHART_PREVIEW_MODE,
+    CHART_RENDER_STATS, CHART_SOURCE, CHART_VIEWPORT,
+};
+use kurbo::Affine;
+
 use tokio;
 use tracing::info;
 
@@ -112,10 +119,7 @@ fn main() {
                 let size = window.inner_size();
 
                 // Initialize anyrender-based graphics context
-                let mut graphics = ChartGraphics::new(window, size.width, size.height);
-
-                // Render test pattern to verify WGPU is working
-                graphics.render_test();
+                let graphics = ChartGraphics::new(window, size.width, size.height);
 
                 // Wrap in Arc<Mutex> for shared mutable access
                 let graphics = Arc::new(Mutex::new(graphics));
@@ -167,11 +171,14 @@ fn App() -> Element {
             } = event
             {
                 if let Ok(mut gfx) = graphics_clone.lock() {
-                    // Resize WGPU surface to match new window size
+                    tracing::info!(
+                        "Window resized: {}x{} (was {}x{})",
+                        new_size.width,
+                        new_size.height,
+                        gfx.size().0,
+                        gfx.size().1
+                    );
                     gfx.resize(new_size.width, new_size.height);
-
-                    // Re-render the test pattern after resize
-                    gfx.render_test();
                 }
 
                 // Request a redraw
@@ -739,50 +746,244 @@ fn PerformanceWithChartToggle() -> Element {
     }
 }
 
-/// Chart view - transparent background to show WGPU rendering
+/// Chart Editor view — split editor with live WGPU chart preview.
+///
+/// Uses `ChartEditorLayout` from keyflow-ui for the Dioxus UI, and
+/// renders the chart via `ChartLayoutManager` → `ChartGraphics` for WGPU.
 #[component]
 fn ChartView() -> Element {
-    // Get graphics context and trigger a render
     #[cfg(feature = "desktop")]
     {
         let graphics = consume_context::<Arc<std::sync::Mutex<ChartGraphics>>>();
 
         // Enable transparent mode on mount
         use_effect(move || {
-            // Enable transparent mode on html element
             document::eval(r#"document.documentElement.classList.add('transparent-mode');"#);
-
-            // Render the test pattern
-            if let Ok(mut gfx) = graphics.lock() {
-                gfx.render_test();
-            }
-            dioxus::desktop::window().window.request_redraw();
         });
 
         // Cleanup: remove transparent mode when component unmounts
         use_drop(move || {
             document::eval(r#"document.documentElement.classList.remove('transparent-mode');"#);
         });
+
+        // Layout effect: watches source + preview mode + bounds width.
+        // Only re-layouts when chart content or layout dimensions change.
+        // Stores the ChartLayoutManager in a signal so the render effect can reuse it.
+        let layout_manager: Signal<Option<std::rc::Rc<std::cell::RefCell<ChartLayoutManager>>>> =
+            use_signal(|| {
+                ChartLayoutManager::new()
+                    .ok()
+                    .map(|m| std::rc::Rc::new(std::cell::RefCell::new(m)))
+            });
+
+        // Generation counter: bumped each time layout changes, so render effect re-fires.
+        let mut layout_generation = use_signal(|| 0u64);
+
+        // Layout effect: re-layout when source or preview mode changes.
+        // Subscribes to CHART_EDITOR_BOUNDS so it fires when bounds first become valid,
+        // but the hash check prevents re-layout when only x/y change.
+        {
+            use_effect(move || {
+                let source = CHART_SOURCE.read().clone();
+                let preview_mode = *CHART_PREVIEW_MODE.read();
+                let bounds = *CHART_EDITOR_BOUNDS.read();
+
+                if !bounds.is_valid() {
+                    return;
+                }
+
+                // parse_and_layout handles all caching:
+                // - Layout hash check (skip if source+mode unchanged)
+                // - Parse cache (skip re-parse if only mode changed)
+                // - Layout computation + scene cache invalidation
+                let snippet_mode = preview_mode == PreviewMode::Snippet;
+                if let Some(ref manager_rc) = *layout_manager.read() {
+                    let mut manager = manager_rc.borrow_mut();
+                    match manager.parse_and_layout(&source, bounds.width, snippet_mode) {
+                        Ok(true) => {
+                            layout_generation.set(layout_generation() + 1);
+                            tracing::info!("Chart layout updated (gen {})", layout_generation());
+                        }
+                        Ok(false) => {} // Nothing changed, caches hit
+                        Err(e) => {
+                            tracing::info!("Chart parse error: {}", e);
+                        }
+                    }
+                }
+            });
+        }
+
+        // FPS tracking: sliding window of frame times (same as vello stats.rs pattern).
+        let fps_state = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(FpsTracker::new())));
+
+        // Render effect: re-renders when layout, viewport, or bounds change.
+        // This is cheap — just builds a Scene and paints it.
+        {
+            let graphics_clone = graphics.clone();
+            let fps_tracker = fps_state.clone();
+            use_effect(move || {
+                let viewport = *CHART_VIEWPORT.read();
+                let _gen = layout_generation(); // Subscribe to layout changes
+
+                // Peek bounds — don't subscribe. Bounds changes don't need re-render
+                // unless they also change the layout (handled by layout effect).
+                let bounds = *CHART_EDITOR_BOUNDS.peek();
+
+                if !bounds.is_valid() {
+                    return;
+                }
+
+                if let Some(ref manager_rc) = *layout_manager.read() {
+                    let mut manager = manager_rc.borrow_mut();
+                    if manager.layout_result().is_none() {
+                        return;
+                    }
+
+                    let frame_start = std::time::Instant::now();
+
+                    let mut scene = vello::Scene::new();
+                    let base_scale = manager.fit_to_width_scale(bounds.width, bounds.dpr);
+                    let pad = 20.0 * bounds.dpr; // 20 CSS px padding, scaled to physical
+                    let transform = Affine::translate((
+                        pad - viewport.scroll_x * bounds.dpr,
+                        pad - viewport.scroll_y * bounds.dpr,
+                    )) * Affine::scale(base_scale * viewport.zoom);
+
+                    manager.render_to_scene(&mut scene, bounds.width, bounds.height, transform);
+
+                    if let Ok(mut gfx) = graphics_clone.lock() {
+                        // Ensure surface matches actual window size (initial size may be stale)
+                        let win_size = dioxus::desktop::window().window.inner_size();
+                        let (sw, sh) = gfx.size();
+                        if sw != win_size.width || sh != win_size.height {
+                            tracing::info!(
+                                "Surface resize: {}x{} -> {}x{}",
+                                sw,
+                                sh,
+                                win_size.width,
+                                win_size.height
+                            );
+                            gfx.resize(win_size.width, win_size.height);
+                        }
+
+                        gfx.render_chart_scene(
+                            &scene,
+                            bounds.x,
+                            bounds.y,
+                            bounds.width,
+                            bounds.height,
+                        );
+                    }
+                    dioxus::desktop::window().window.request_redraw();
+
+                    // Record frame time (don't write signal here — avoid feedback loop)
+                    let frame_time_us = frame_start.elapsed().as_micros() as u64;
+                    fps_tracker.borrow_mut().add_sample(frame_time_us);
+                }
+            });
+        }
+
+        // FPS display update: periodic, decoupled from render to avoid feedback loops.
+        {
+            let fps_tracker_for_display = fps_state.clone();
+            use_future(move || {
+                let tracker = fps_tracker_for_display.clone();
+                async move {
+                    loop {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                        let stats = tracker.borrow().snapshot();
+                        *CHART_RENDER_STATS.write() = stats;
+                    }
+                }
+            });
+        }
+
+        // Query chart preview area bounds — polls until valid, then watches for changes
+        {
+            use_future(move || {
+                async move {
+                    // Poll for bounds until we get valid ones, then keep updating
+                    loop {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                        tracing::trace!("Chart editor: polling for bounds...");
+
+                        let result = document::eval(
+                            r#"
+                            const el = document.getElementById('chart-editor-preview');
+                            if (el) {
+                                const rect = el.getBoundingClientRect();
+                                const dpr = window.devicePixelRatio || 1;
+                                return JSON.stringify({
+                                    x: rect.x * dpr,
+                                    y: rect.y * dpr,
+                                    width: rect.width * dpr,
+                                    height: rect.height * dpr,
+                                    dpr: dpr
+                                });
+                            }
+                            return "null";
+                        "#,
+                        );
+
+                        match result.await {
+                            Ok(value) => {
+                                // Try as string first, then try to_string for non-string JSON
+                                let json_str = value
+                                    .as_str()
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| value.to_string());
+
+                                tracing::trace!("Chart editor bounds eval result: {}", json_str);
+
+                                if json_str != "null" && json_str != "\"null\"" {
+                                    match serde_json::from_str::<serde_json::Value>(&json_str) {
+                                        Ok(parsed) => {
+                                            let x = parsed["x"].as_f64().unwrap_or(0.0);
+                                            let y = parsed["y"].as_f64().unwrap_or(0.0);
+                                            let width = parsed["width"].as_f64().unwrap_or(0.0);
+                                            let height = parsed["height"].as_f64().unwrap_or(0.0);
+                                            let dpr = parsed["dpr"].as_f64().unwrap_or(1.0);
+
+                                            if width > 0.0 && height > 0.0 {
+                                                let current = *CHART_EDITOR_BOUNDS.read();
+                                                // Only update if bounds actually changed
+                                                if (current.x - x).abs() > 1.0
+                                                    || (current.y - y).abs() > 1.0
+                                                    || (current.width - width).abs() > 1.0
+                                                    || (current.height - height).abs() > 1.0
+                                                {
+                                                    tracing::info!(
+                                                        "Chart editor bounds updated: ({:.0}, {:.0}, {:.0}x{:.0}), dpr={:.2}",
+                                                        x, y, width, height, dpr
+                                                    );
+                                                    *CHART_EDITOR_BOUNDS.write() =
+                                                        ChartEditorBounds::new(
+                                                            x, y, width, height, dpr,
+                                                        );
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("Failed to parse bounds JSON: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::debug!("Chart editor bounds eval: {:?}", e);
+                            }
+                        }
+                    }
+                }
+            });
+        }
     }
 
     rsx! {
-        // Transparent container - WGPU content shows through
         div {
             class: "w-full h-full",
-            style: "background: transparent;",
-
-            // Optional: floating UI elements on top of the chart
-            div {
-                class: "absolute top-4 right-4 bg-card/80 backdrop-blur-sm rounded-lg p-4 shadow-lg",
-                h3 {
-                    class: "text-lg font-semibold text-foreground mb-2",
-                    "Chart View"
-                }
-                p {
-                    class: "text-sm text-muted-foreground",
-                    "WGPU/Vello rendering active"
-                }
-            }
+            style: "background: transparent !important;",
+            ChartEditorLayout {}
         }
     }
 }
@@ -907,5 +1108,59 @@ async fn run_services() {
     if let Err(e) = start_gateway(dispatcher, &config.bind_addr, config.static_dir.as_deref()).await
     {
         tracing::error!("Gateway error: {}", e);
+    }
+}
+
+/// Sliding-window FPS tracker, based on vello's examples/with_winit/src/stats.rs.
+/// Tracks frame render times and computes FPS / min / max over a 100-frame window.
+struct FpsTracker {
+    count: usize,
+    sum: u64,
+    min: u64,
+    max: u64,
+    samples: std::collections::VecDeque<u64>,
+}
+
+const FPS_WINDOW_SIZE: usize = 100;
+
+impl FpsTracker {
+    fn new() -> Self {
+        Self {
+            count: 0,
+            sum: 0,
+            min: u64::MAX,
+            max: u64::MIN,
+            samples: std::collections::VecDeque::with_capacity(FPS_WINDOW_SIZE),
+        }
+    }
+
+    fn add_sample(&mut self, frame_time_us: u64) {
+        let oldest = if self.count < FPS_WINDOW_SIZE {
+            self.count += 1;
+            None
+        } else {
+            self.samples.pop_front()
+        };
+        self.sum += frame_time_us;
+        self.samples.push_back(frame_time_us);
+        if let Some(oldest) = oldest {
+            self.sum -= oldest;
+        }
+        self.min = self.min.min(frame_time_us);
+        self.max = self.max.max(frame_time_us);
+    }
+
+    fn snapshot(&self) -> RenderStats {
+        if self.count == 0 {
+            return RenderStats::default();
+        }
+        let frame_time_ms = (self.sum as f64 / self.count as f64) * 0.001;
+        let fps = 1000.0 / frame_time_ms;
+        RenderStats {
+            fps,
+            frame_time_ms,
+            frame_time_min_ms: self.min as f64 * 0.001,
+            frame_time_max_ms: self.max as f64 * 0.001,
+        }
     }
 }
