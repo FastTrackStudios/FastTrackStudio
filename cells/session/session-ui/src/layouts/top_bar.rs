@@ -176,8 +176,8 @@ pub fn LatencyBadge() -> Element {
 
                     // Header
                     div {
-                        class: "text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3",
-                        "Latency Breakdown"
+                        class: "text-xs font-semibold text-muted-foreground tracking-wider mb-3",
+                        "LATENCY BREAKDOWN"
                     }
 
                     // Latency rows

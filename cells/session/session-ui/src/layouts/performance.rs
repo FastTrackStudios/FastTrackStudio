@@ -12,8 +12,9 @@
 use crate::components::*;
 use crate::prelude::*;
 use crate::signals::*;
-use session_proto::setlist::Setlist;
-use session_proto::song::Song;
+
+/// Global signal for navigator sidebar visibility (for performance testing)
+static SHOW_NAVIGATOR: GlobalSignal<bool> = GlobalSignal::new(|| true);
 
 /// Performance view layout
 ///
@@ -38,116 +39,101 @@ use session_proto::song::Song;
 /// ```
 #[component]
 pub fn PerformanceLayout() -> Element {
-    // Read global signals directly - this ensures proper reactivity
-    // Each read creates a subscription that will trigger re-render on change
-    let setlist = SETLIST_STRUCTURE.read().clone();
-    let indices = ACTIVE_INDICES.read().clone();
-    let song_transport = SONG_TRANSPORT.read().clone();
-    let playback_state = *PLAYBACK_STATE.read();
+    // PERFORMANCE: This top-level component should NOT subscribe to any high-frequency signals.
+    // Child components handle their own subscriptions to minimize re-renders.
+    //
+    // Architecture:
+    // - PerformanceSidebar: Subscribes to SONG_TRANSPORT for progress bars
+    // - PerformanceMainContent: Subscribes to transport signals for progress display
+    // - TransportControlBar: Subscribes to PLAYBACK_STATE for play/pause button
 
-    // Derive current song from indices and setlist
-    let current_song = indices
-        .song_index
-        .and_then(|idx| setlist.songs.get(idx).cloned());
-
-    // Derive current section from indices and current song
-    let current_section = current_song.as_ref().and_then(|song| {
-        indices
-            .section_index
-            .and_then(|idx| song.sections.get(idx).cloned())
-    });
-
-    let is_playing = matches!(
-        playback_state,
-        daw_proto::PlayState::Playing | daw_proto::PlayState::Recording
-    );
-
-    let is_looping = indices.looping;
-
-    // Get current transport state
-    let current_transport = indices
-        .song_index
-        .and_then(|idx| song_transport.get(&idx).cloned());
+    let show_navigator = *SHOW_NAVIGATOR.read();
+    let show_chart_split = *SHOW_CHART_SPLIT.read();
 
     rsx! {
         div {
-            class: "flex h-full w-full bg-background text-foreground",
+            // When chart split is enabled, make this container transparent so WGPU shows through
+            class: if show_chart_split {
+                "flex h-full w-full text-foreground"
+            } else {
+                "flex h-full w-full bg-background text-foreground"
+            },
+            style: if show_chart_split { "background: transparent !important; background-color: transparent !important;" } else { "" },
 
-            // Sidebar (1/3 width)
-            PerformanceSidebar {
-                setlist: setlist.clone(),
-                active_song_index: indices.song_index,
-                active_section_index: indices.section_index,
-                song_transport: song_transport.clone(),
+            // Sidebar (1/3 width) - handles its own signal subscriptions
+            // Conditionally rendered for performance testing
+            if show_navigator {
+                PerformanceSidebar {}
             }
 
-            // Main content (2/3 width)
-            PerformanceMainContent {
-                current_song: current_song.clone(),
-                current_section: current_section.clone(),
-                active_indices: indices,
-                transport_state: current_transport,
-                is_playing: is_playing,
-                is_looping: is_looping,
-            }
+            // Main content (2/3 width, or full width if sidebar hidden)
+            PerformanceMainContent {}
         }
     }
+}
+
+/// Static song structure for sidebar - memoized to avoid recalculation
+/// This only contains data that changes when the setlist structure changes,
+/// NOT transport/progress data which updates at 60Hz
+#[derive(Clone, PartialEq)]
+struct SidebarSongStructure {
+    name: String,
+    bright_color: String,
+    muted_color: String,
+    sections: Vec<SidebarSectionStructure>,
+}
+
+#[derive(Clone, PartialEq)]
+struct SidebarSectionStructure {
+    label: String,
+    bright_color: String,
+    muted_color: String,
+    comment: Option<String>,
+    start_seconds: f64,
+    end_seconds: f64,
 }
 
 /// Performance sidebar component
 ///
 /// Displays song list with expandable sections and progress bars.
 /// Shows progress for ALL songs that have transport state (independent playback).
+///
+/// PERFORMANCE: This component only subscribes to ACTIVE_INDICES for selection state.
+/// Transport updates (60Hz) are handled by individual SidebarSongItem components
+/// to avoid re-rendering the entire sidebar.
 #[component]
-fn PerformanceSidebar(
-    setlist: Setlist,
-    active_song_index: Option<usize>,
-    active_section_index: Option<usize>,
-    song_transport: std::collections::HashMap<usize, TransportState>,
-) -> Element {
-    // Convert setlist to sidebar items, including per-song playing state
-    let sidebar_items: Vec<_> = setlist
-        .songs
-        .iter()
-        .enumerate()
-        .map(|(song_idx, song)| {
-            let transport = song_transport.get(&song_idx);
-            let position_seconds = transport
-                .and_then(|t| t.position.time.map(|time| time.as_seconds()))
-                .unwrap_or(0.0);
-            let song_progress = transport
-                .map(|_| song.progress(position_seconds))
-                .unwrap_or(0.0);
-            let is_song_playing = transport.map(|t| t.is_playing).unwrap_or(false);
+fn PerformanceSidebar() -> Element {
+    // Read active indices - updates when song/section selection changes
+    let indices = ACTIVE_INDICES.read();
+    let active_song_index = indices.song_index;
+    let active_section_index = indices.section_index;
+    drop(indices);
 
-            let sections = song
-                .sections
-                .iter()
-                .map(|section| {
-                    let section_progress = section.progress(position_seconds);
-
-                    SectionItem {
+    // Memoize the static song structure - only recalculates when setlist changes
+    let song_structures = use_memo(move || {
+        let setlist = SETLIST_STRUCTURE.read();
+        setlist
+            .songs
+            .iter()
+            .map(|song| SidebarSongStructure {
+                name: song.name.clone(),
+                bright_color: song.bright_color(),
+                muted_color: song.muted_color(),
+                sections: song
+                    .sections
+                    .iter()
+                    .map(|section| SidebarSectionStructure {
                         label: section.display_name(),
-                        progress: section_progress,
                         bright_color: section.bright_color(),
                         muted_color: section.muted_color(),
                         comment: section.comment.clone(),
-                    }
-                })
-                .collect();
-
-            (
-                SongItemData {
-                    label: song.name.clone(),
-                    progress: song_progress,
-                    bright_color: song.bright_color(),
-                    muted_color: song.muted_color(),
-                    sections,
-                },
-                is_song_playing,
-            )
-        })
-        .collect();
+                        start_seconds: section.start_seconds,
+                        end_seconds: section.end_seconds,
+                    })
+                    .collect(),
+            })
+            .collect::<Vec<_>>()
+    });
 
     rsx! {
         div {
@@ -162,41 +148,147 @@ fn PerformanceSidebar(
                 }
             }
 
-            // Song list
+            // Song list - each song item handles its own transport subscription
             div {
                 class: "space-y-1 pr-4 pb-4",
 
-                for (song_idx, (song_data, is_song_playing)) in sidebar_items.iter().enumerate() {
-                    SongItem {
+                for (song_idx, song_structure) in song_structures.read().iter().enumerate() {
+                    SidebarSongItemReactive {
                         key: "{song_idx}",
-                        song_data: song_data.clone(),
-                        index: song_idx,
+                        song_idx: song_idx,
+                        song_structure: song_structure.clone(),
                         is_expanded: active_song_index == Some(song_idx),
-                        // Show as playing if THIS song's project is playing (independent transport)
-                        is_playing: *is_song_playing,
                         current_section_index: if active_song_index == Some(song_idx) {
                             active_section_index
                         } else {
                             None
                         },
-                        on_song_click: Callback::new(move |_| {
-                            tracing::info!("on_song_click callback triggered for song_idx={}", song_idx);
-                            spawn(async move {
-                                tracing::info!("Calling seek_to_song({})", song_idx);
-                                match Session::get().setlist().seek_to_song(song_idx).await {
-                                    Ok(_) => tracing::info!("seek_to_song({}) completed successfully", song_idx),
-                                    Err(e) => tracing::error!("seek_to_song({}) failed: {}", song_idx, e),
-                                }
-                            });
-                        }),
-                        on_section_click: Callback::new(move |section_idx| {
-                            spawn(async move {
-                                let _ = Session::get().setlist().seek_to_section(song_idx, section_idx).await;
-                            });
-                        }),
                     }
                 }
             }
+        }
+    }
+}
+
+/// Reactive song item that subscribes to its own transport updates
+///
+/// PERFORMANCE: Only subscribes to transport if song is expanded or playing.
+/// Collapsed/inactive songs use peek() to avoid 60Hz re-renders.
+/// Section progress is only calculated for expanded songs.
+#[component]
+fn SidebarSongItemReactive(
+    song_idx: usize,
+    song_structure: SidebarSongStructure,
+    is_expanded: bool,
+    current_section_index: Option<usize>,
+) -> Element {
+    // First, peek to check if this song is playing (without subscribing)
+    let is_song_playing = SONG_TRANSPORT
+        .peek()
+        .get(&song_idx)
+        .map(|t| t.is_playing)
+        .unwrap_or(false);
+
+    // PERFORMANCE: Only subscribe to transport updates if we need to show progress
+    // (song is expanded or actively playing). Otherwise, use static 0% progress.
+    let needs_transport = is_expanded || is_song_playing;
+
+    let (song_progress, position_seconds) = if needs_transport {
+        // Subscribe to transport - this component will re-render on updates
+        let transport = SONG_TRANSPORT.read().get(&song_idx).cloned();
+
+        let pos = transport
+            .as_ref()
+            .and_then(|t| t.position.time.map(|time| time.as_seconds()))
+            .unwrap_or(0.0);
+
+        // Calculate song progress
+        let song_start = song_structure
+            .sections
+            .first()
+            .map(|s| s.start_seconds)
+            .unwrap_or(0.0);
+        let song_end = song_structure
+            .sections
+            .last()
+            .map(|s| s.end_seconds)
+            .unwrap_or(0.0);
+        let song_duration = song_end - song_start;
+        let progress = if song_duration > 0.0 && transport.is_some() {
+            ((pos - song_start) / song_duration * 100.0).clamp(0.0, 100.0)
+        } else {
+            0.0
+        };
+
+        (progress, pos)
+    } else {
+        // Inactive song - no transport subscription, static 0% progress
+        (0.0, 0.0)
+    };
+
+    // PERFORMANCE: Only build section data if expanded (sections are hidden otherwise)
+    let sections: Vec<SectionItem> = if is_expanded {
+        song_structure
+            .sections
+            .iter()
+            .map(|section| {
+                let section_duration = section.end_seconds - section.start_seconds;
+                let section_progress = if section_duration > 0.0
+                    && position_seconds >= section.start_seconds
+                    && position_seconds <= section.end_seconds
+                {
+                    ((position_seconds - section.start_seconds) / section_duration * 100.0)
+                        .clamp(0.0, 100.0)
+                } else if position_seconds > section.end_seconds {
+                    100.0
+                } else {
+                    0.0
+                };
+
+                SectionItem {
+                    label: section.label.clone(),
+                    progress: section_progress,
+                    bright_color: section.bright_color.clone(),
+                    muted_color: section.muted_color.clone(),
+                    comment: section.comment.clone(),
+                }
+            })
+            .collect()
+    } else {
+        // Collapsed song - no sections needed (won't be rendered)
+        Vec::new()
+    };
+
+    let song_data = SongItemData {
+        label: song_structure.name.clone(),
+        progress: song_progress,
+        bright_color: song_structure.bright_color.clone(),
+        muted_color: song_structure.muted_color.clone(),
+        sections,
+    };
+
+    rsx! {
+        SongItem {
+            song_data: song_data,
+            index: song_idx,
+            is_expanded: is_expanded,
+            is_playing: is_song_playing,
+            current_section_index: current_section_index,
+            on_song_click: Callback::new(move |_| {
+                tracing::info!("on_song_click callback triggered for song_idx={}", song_idx);
+                spawn(async move {
+                    tracing::info!("Calling seek_to_song({})", song_idx);
+                    match Session::get().setlist().seek_to_song(song_idx).await {
+                        Ok(_) => tracing::info!("seek_to_song({}) completed successfully", song_idx),
+                        Err(e) => tracing::error!("seek_to_song({}) failed: {}", song_idx, e),
+                    }
+                });
+            }),
+            on_section_click: Callback::new(move |section_idx| {
+                spawn(async move {
+                    let _ = Session::get().setlist().seek_to_section(song_idx, section_idx).await;
+                });
+            }),
         }
     }
 }
@@ -205,73 +297,50 @@ fn PerformanceSidebar(
 ///
 /// Displays song title, both progress bars (song and section), transport info badges,
 /// and transport controls at the bottom.
+///
+/// PERFORMANCE: This component subscribes to ACTIVE_INDICES and SONG_TRANSPORT.
+/// Static song data (progress sections, markers) is memoized and only recalculates
+/// when song selection changes.
 #[component]
-fn PerformanceMainContent(
-    current_song: Option<Song>,
-    current_section: Option<session_proto::song::Section>,
-    active_indices: session_proto::setlist::ActiveIndices,
-    transport_state: Option<TransportState>,
-    is_playing: bool,
-    is_looping: bool,
-) -> Element {
-    // Build progress sections from song sections
-    // Use actual section bounds to ensure sections fill the entire progress bar
-    let progress_sections = current_song
-        .as_ref()
-        .map(|song| {
-            // Use actual section bounds instead of song bounds to avoid gaps
-            // This ensures the progress bar is fully covered by sections
-            let sections_start = song
-                .sections
-                .first()
-                .map(|s| s.start_seconds)
-                .unwrap_or(song.start_seconds);
-            let sections_end = song
-                .sections
-                .last()
-                .map(|s| s.end_seconds)
-                .unwrap_or(song.end_seconds);
-            let sections_duration = sections_end - sections_start;
+fn PerformanceMainContent() -> Element {
+    // Read indices - we need song_index and section_index
+    let indices = ACTIVE_INDICES.read();
+    let song_index = indices.song_index;
+    let section_index = indices.section_index;
+    let is_looping = indices.looping;
+    let queued_target = indices.queued_target.clone();
+    drop(indices);
 
-            if sections_duration <= 0.0 {
-                return Vec::new();
-            }
+    // Get transport state for current song
+    let transport_state = song_index.and_then(|idx| SONG_TRANSPORT.read().get(&idx).cloned());
 
-            song.sections
-                .iter()
-                .map(|section| {
-                    // Calculate percentages relative to actual section bounds
-                    let start_percent =
-                        ((section.start_seconds - sections_start) / sections_duration) * 100.0;
-                    let end_percent =
-                        ((section.end_seconds - sections_start) / sections_duration) * 100.0;
+    // Get playback state for transport controls
+    let playback_state = *PLAYBACK_STATE.read();
+    let is_playing = matches!(
+        playback_state,
+        daw_proto::PlayState::Playing | daw_proto::PlayState::Recording
+    );
 
-                    ProgressSection {
-                        name: section.display_name(),
-                        short_name: section.short_display(),
-                        start_percent: start_percent.max(0.0),
-                        end_percent: end_percent.min(100.0),
-                        color: section.bright_color(),
-                        comment: section.comment.clone(),
-                    }
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    // Memoize current song - only changes when song_index changes
+    let current_song = use_memo(move || {
+        let setlist = SETLIST_STRUCTURE.read();
+        song_index.and_then(|idx| setlist.songs.get(idx).cloned())
+    });
 
-    // Calculate song progress percentage - use a signal that we update each render
-    // We need to use use_signal + set pattern because SongProgressBar expects Signal<f64>
-    let mut song_progress = use_signal(|| 0.0);
-    let mut section_progress = use_signal(|| 0.0);
+    // Memoize current section - only changes when song or section index changes
+    let current_section = use_memo(move || {
+        current_song
+            .read()
+            .as_ref()
+            .and_then(|s| section_index.and_then(|idx| s.sections.get(idx).cloned()))
+    });
 
-    // Calculate progress values from current props (these update on each render)
-    // Progress is relative to actual section bounds (same as progress_sections calculation)
-    let song_progress_value = current_song
-        .as_ref()
-        .and_then(|song| {
-            transport_state.as_ref().map(|t| {
-                let position_seconds = t.position.time.map(|time| time.as_seconds()).unwrap_or(0.0);
-                // Use actual section bounds for progress calculation
+    // Memoize progress sections - only recalculates when current song changes
+    let progress_sections = use_memo(move || {
+        current_song
+            .read()
+            .as_ref()
+            .map(|song| {
                 let sections_start = song
                     .sections
                     .first()
@@ -285,48 +354,91 @@ fn PerformanceMainContent(
                 let sections_duration = sections_end - sections_start;
 
                 if sections_duration <= 0.0 {
-                    return 0.0;
+                    return Vec::new();
                 }
 
-                let relative_pos = position_seconds - sections_start;
-                (relative_pos / sections_duration) * 100.0
+                song.sections
+                    .iter()
+                    .map(|section| {
+                        let start_percent =
+                            ((section.start_seconds - sections_start) / sections_duration) * 100.0;
+                        let end_percent =
+                            ((section.end_seconds - sections_start) / sections_duration) * 100.0;
+
+                        ProgressSection {
+                            name: section.display_name(),
+                            short_name: section.short_display(),
+                            start_percent: start_percent.max(0.0),
+                            end_percent: end_percent.min(100.0),
+                            color: section.bright_color(),
+                            comment: section.comment.clone(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
             })
-        })
-        .unwrap_or(0.0)
-        .clamp(0.0, 100.0);
+            .unwrap_or_default()
+    });
 
-    let section_progress_value = current_section
-        .as_ref()
-        .and_then(|section| {
-            transport_state.as_ref().map(|t| {
-                let position_seconds = t.position.time.map(|time| time.as_seconds()).unwrap_or(0.0);
-                let section_duration = section.end_seconds - section.start_seconds;
-                if section_duration > 0.0
-                    && position_seconds >= section.start_seconds
-                    && position_seconds <= section.end_seconds
-                {
-                    ((position_seconds - section.start_seconds) / section_duration) * 100.0
-                } else if position_seconds > section.end_seconds {
-                    100.0
-                } else {
-                    0.0
-                }
+    // Calculate progress values - these depend on transport_state which updates at 60Hz
+    let song_progress = {
+        let song = current_song.read();
+        song.as_ref()
+            .and_then(|song| {
+                transport_state.as_ref().map(|t| {
+                    let position_seconds =
+                        t.position.time.map(|time| time.as_seconds()).unwrap_or(0.0);
+                    let sections_start = song
+                        .sections
+                        .first()
+                        .map(|s| s.start_seconds)
+                        .unwrap_or(song.start_seconds);
+                    let sections_end = song
+                        .sections
+                        .last()
+                        .map(|s| s.end_seconds)
+                        .unwrap_or(song.end_seconds);
+                    let sections_duration = sections_end - sections_start;
+
+                    if sections_duration <= 0.0 {
+                        return 0.0;
+                    }
+
+                    let relative_pos = position_seconds - sections_start;
+                    (relative_pos / sections_duration) * 100.0
+                })
             })
-        })
-        .unwrap_or(0.0);
+            .unwrap_or(0.0)
+            .clamp(0.0, 100.0)
+    };
 
-    // Update signals with new values (this will trigger child component updates)
-    if (song_progress() - song_progress_value).abs() > 0.001_f64 {
-        song_progress.set(song_progress_value);
-    }
-    if (section_progress() - section_progress_value).abs() > 0.001_f64 {
-        section_progress.set(section_progress_value);
-    }
+    let section_progress = {
+        let section = current_section.read();
+        section
+            .as_ref()
+            .and_then(|section| {
+                transport_state.as_ref().map(|t| {
+                    let position_seconds =
+                        t.position.time.map(|time| time.as_seconds()).unwrap_or(0.0);
+                    let section_duration = section.end_seconds - section.start_seconds;
+                    if section_duration > 0.0
+                        && position_seconds >= section.start_seconds
+                        && position_seconds <= section.end_seconds
+                    {
+                        ((position_seconds - section.start_seconds) / section_duration) * 100.0
+                    } else if position_seconds > section.end_seconds {
+                        100.0
+                    } else {
+                        0.0
+                    }
+                })
+            })
+            .unwrap_or(0.0)
+    };
 
-    // Get next song info for display
+    // Get next song info - use peek() since we don't need reactivity for this
     let next_song_info = {
-        let setlist = SETLIST_STRUCTURE.read();
-        active_indices.song_index.and_then(|idx| {
+        let setlist = SETLIST_STRUCTURE.peek();
+        song_index.and_then(|idx| {
             setlist
                 .songs
                 .get(idx + 1)
@@ -335,180 +447,71 @@ fn PerformanceMainContent(
     };
 
     // Song key for animation detection (changes when song changes)
-    let song_key = active_indices.song_index.map(|i| i.to_string());
+    let song_key = song_index.map(|i| i.to_string());
 
-    // Build tempo markers from song data
-    let tempo_markers: Vec<TempoMarkerData> = current_song
-        .as_ref()
-        .map(|song| {
-            let mut markers = Vec::new();
+    // Memoize tempo markers - only recalculates when song changes
+    let tempo_markers = use_memo(move || {
+        current_song
+            .read()
+            .as_ref()
+            .map(|song| {
+                let mut markers = Vec::new();
 
-            // Add initial tempo marker at 0%
-            if let Some(tempo) = song.tempo {
-                markers.push(TempoMarkerData {
-                    position_percent: 0.0,
-                    label: format!("{:.0} bpm", tempo),
-                    is_tempo: true,
-                    is_time_sig: false,
-                    show_line_only: false,
-                });
-            }
+                if let Some(tempo) = song.tempo {
+                    markers.push(TempoMarkerData {
+                        position_percent: 0.0,
+                        label: format!("{:.0} bpm", tempo),
+                        is_tempo: true,
+                        is_time_sig: false,
+                        show_line_only: false,
+                    });
+                }
 
-            // Add initial time signature marker at 0%
-            if let Some(ref ts) = song.time_signature {
-                markers.push(TempoMarkerData {
-                    position_percent: 0.0,
-                    label: format!("{}/{}", ts.numerator, ts.denominator),
-                    is_tempo: false,
-                    is_time_sig: true,
-                    show_line_only: false,
-                });
-            }
+                if let Some(ref ts) = song.time_signature {
+                    markers.push(TempoMarkerData {
+                        position_percent: 0.0,
+                        label: format!("{}/{}", ts.numerator, ts.denominator),
+                        is_tempo: false,
+                        is_time_sig: true,
+                        show_line_only: false,
+                    });
+                }
 
-            markers
-        })
-        .unwrap_or_default();
+                markers
+            })
+            .unwrap_or_default()
+    });
 
-    // Build comment markers from song comments
-    let comment_markers: Vec<CommentMarker> = current_song
-        .as_ref()
-        .map(|song| {
-            // Calculate song duration for percentage calculation
-            // Use actual section bounds (same as progress_sections calculation)
-            let sections_start = song
-                .sections
-                .first()
-                .map(|s| s.start_seconds)
-                .unwrap_or(song.start_seconds);
-            let sections_end = song
-                .sections
-                .last()
-                .map(|s| s.end_seconds)
-                .unwrap_or(song.end_seconds);
-            let sections_duration = sections_end - sections_start;
+    // Memoize comment markers - only recalculates when song changes
+    let comment_markers = use_memo(move || {
+        current_song
+            .read()
+            .as_ref()
+            .map(|song| {
+                let sections_start = song
+                    .sections
+                    .first()
+                    .map(|s| s.start_seconds)
+                    .unwrap_or(song.start_seconds);
+                let sections_end = song
+                    .sections
+                    .last()
+                    .map(|s| s.end_seconds)
+                    .unwrap_or(song.end_seconds);
+                let sections_duration = sections_end - sections_start;
 
-            if sections_duration <= 0.0 {
-                return Vec::new();
-            }
-
-            song.comments
-                .iter()
-                .filter_map(|comment| {
-                    // Only include comments within the displayable range
-                    if comment.position_seconds >= sections_start
-                        && comment.position_seconds <= sections_end
-                    {
-                        let position_percent = ((comment.position_seconds - sections_start)
-                            / sections_duration)
-                            * 100.0;
-                        Some(CommentMarker {
-                            position_percent: position_percent.clamp(0.0, 100.0),
-                            text: comment.text.clone(),
-                            color: comment.color_hex(),
-                            is_count_in: comment.is_count_in,
-                            section_only: comment.section_only,
-                            position_seconds: comment.position_seconds,
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // Build measure indicators for the current section
-    // Measure 1 starts at SONGSTART marker, so count-in measures are 0, -1, -2, etc.
-    // We need to know the song's content start (SONGSTART) to calculate correct measure numbers
-    let measure_indicators: Vec<MeasureIndicator> = current_section
-        .as_ref()
-        .map(|section| {
-            let section_duration = section.end_seconds - section.start_seconds;
-            let section_start = section.start_seconds;
-            if section_duration <= 0.0 {
-                return Vec::new();
-            }
-
-            // Get tempo from transport or song default
-            let bpm = transport_state.as_ref().map(|t| t.bpm).unwrap_or(120.0);
-            let time_sig_num = transport_state
-                .as_ref()
-                .map(|t| t.time_sig_num)
-                .unwrap_or(4);
-            let time_sig_denom = transport_state
-                .as_ref()
-                .map(|t| t.time_sig_denom)
-                .unwrap_or(4);
-
-            let seconds_per_beat = 60.0 / bpm;
-            let seconds_per_measure = seconds_per_beat * time_sig_num as f64;
-            let num_measures = (section_duration / seconds_per_measure).ceil() as i32;
-
-            // Determine the content start (SONGSTART marker position)
-            // If song has count_in_seconds, the content starts at song.start_seconds + count_in_seconds
-            // Otherwise, content starts at song.start_seconds
-            let content_start = current_song
-                .as_ref()
-                .map(|song| song.start_seconds + song.count_in_seconds.unwrap_or(0.0))
-                .unwrap_or(0.0);
-
-            // Calculate measure number relative to content start (SONGSTART = measure 1)
-            // Measures before SONGSTART are 0, -1, -2, etc.
-            let section_start_measure =
-                ((section_start - content_start) / seconds_per_measure).floor() as i32;
-
-            (0..num_measures)
-                .map(|i| {
-                    let position_percent =
-                        (i as f64 * seconds_per_measure / section_duration) * 100.0;
-                    // Calculate measure number relative to content start
-                    // section_start_measure is negative for count-in sections
-                    let measure_from_content_start = section_start_measure + i;
-
-                    // Display number: measure 1 is the first measure at/after SONGSTART
-                    // Count-in shows as 0, -1, -2 (or could show as "Count 1", "Count 2")
-                    let display_number = if measure_from_content_start >= 0 {
-                        measure_from_content_start + 1 // 1-indexed for regular measures
-                    } else {
-                        measure_from_content_start // 0, -1, -2 for count-in
-                    };
-
-                    MeasureIndicator {
-                        position_percent: position_percent.min(100.0),
-                        measure_number: display_number,
-                        time_signature: Some((time_sig_num as u8, time_sig_denom as u8)),
-                        // Store the measure number for goto_measure (0-indexed from SONGSTART)
-                        musical_position: daw_proto::MusicalPosition::new(
-                            measure_from_content_start,
-                            0,
-                            0,
-                        ),
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // Build section-specific comment markers (comments within the current section)
-    let section_comment_markers: Vec<CommentMarker> = current_section
-        .as_ref()
-        .and_then(|section| {
-            current_song.as_ref().map(|song| {
-                let section_duration = section.end_seconds - section.start_seconds;
-                if section_duration <= 0.0 {
+                if sections_duration <= 0.0 {
                     return Vec::new();
                 }
 
                 song.comments
                     .iter()
                     .filter_map(|comment| {
-                        // Only include comments within this section
-                        if comment.position_seconds >= section.start_seconds
-                            && comment.position_seconds < section.end_seconds
+                        if comment.position_seconds >= sections_start
+                            && comment.position_seconds <= sections_end
                         {
-                            let position_percent = ((comment.position_seconds
-                                - section.start_seconds)
-                                / section_duration)
+                            let position_percent = ((comment.position_seconds - sections_start)
+                                / sections_duration)
                                 * 100.0;
                             Some(CommentMarker {
                                 position_percent: position_percent.clamp(0.0, 100.0),
@@ -524,8 +527,121 @@ fn PerformanceMainContent(
                     })
                     .collect()
             })
-        })
-        .unwrap_or_default();
+            .unwrap_or_default()
+    });
+
+    // PERFORMANCE: Extract tempo/time sig values and memoize measure indicators
+    // These only change when tempo/time signature actually changes, not every frame
+    let current_bpm = transport_state.as_ref().map(|t| t.bpm).unwrap_or(120.0);
+    let current_time_sig_num = transport_state
+        .as_ref()
+        .map(|t| t.time_sig_num)
+        .unwrap_or(4);
+    let current_time_sig_denom = transport_state
+        .as_ref()
+        .map(|t| t.time_sig_denom)
+        .unwrap_or(4);
+
+    // Memoize measure indicators - only recalculates when section or tempo/time sig changes
+    let measure_indicators = use_memo(move || {
+        let section = current_section.read();
+        let song = current_song.read();
+        section
+            .as_ref()
+            .map(|section| {
+                let section_duration = section.end_seconds - section.start_seconds;
+                let section_start = section.start_seconds;
+                if section_duration <= 0.0 {
+                    return Vec::new();
+                }
+
+                let bpm = current_bpm;
+                let time_sig_num = current_time_sig_num;
+                let time_sig_denom = current_time_sig_denom;
+
+                let seconds_per_beat = 60.0 / bpm;
+                let seconds_per_measure = seconds_per_beat * time_sig_num as f64;
+                let num_measures = (section_duration / seconds_per_measure).ceil() as i32;
+
+                // Determine the content start (SONGSTART marker position)
+                let content_start = song
+                    .as_ref()
+                    .map(|song| song.start_seconds + song.count_in_seconds.unwrap_or(0.0))
+                    .unwrap_or(0.0);
+
+                // Calculate measure number relative to content start (SONGSTART = measure 1)
+                // Measures before SONGSTART are 0, -1, -2, etc.
+                let section_start_measure =
+                    ((section_start - content_start) / seconds_per_measure).floor() as i32;
+
+                (0..num_measures)
+                    .map(|i| {
+                        let position_percent =
+                            (i as f64 * seconds_per_measure / section_duration) * 100.0;
+                        let measure_from_content_start = section_start_measure + i;
+
+                        let display_number = if measure_from_content_start >= 0 {
+                            measure_from_content_start + 1
+                        } else {
+                            measure_from_content_start
+                        };
+
+                        MeasureIndicator {
+                            position_percent: position_percent.min(100.0),
+                            measure_number: display_number,
+                            time_signature: Some((time_sig_num as u8, time_sig_denom as u8)),
+                            musical_position: daw_proto::MusicalPosition::new(
+                                measure_from_content_start,
+                                0,
+                                0,
+                            ),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    });
+
+    // PERFORMANCE: Memoize section-specific comment markers - only recalculates when section changes
+    let section_comment_markers = use_memo(move || {
+        let section = current_section.read();
+        let song = current_song.read();
+        section
+            .as_ref()
+            .and_then(|section| {
+                song.as_ref().map(|song| {
+                    let section_duration = section.end_seconds - section.start_seconds;
+                    if section_duration <= 0.0 {
+                        return Vec::new();
+                    }
+
+                    song.comments
+                        .iter()
+                        .filter_map(|comment| {
+                            if comment.position_seconds >= section.start_seconds
+                                && comment.position_seconds < section.end_seconds
+                            {
+                                let position_percent = ((comment.position_seconds
+                                    - section.start_seconds)
+                                    / section_duration)
+                                    * 100.0;
+                                Some(CommentMarker {
+                                    position_percent: position_percent.clamp(0.0, 100.0),
+                                    text: comment.text.clone(),
+                                    color: comment.color_hex(),
+                                    is_count_in: comment.is_count_in,
+                                    section_only: comment.section_only,
+                                    position_seconds: comment.position_seconds,
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                })
+            })
+            .unwrap_or_default()
+    });
 
     // Build loop indicator data from transport state
     // The loop_region in TransportState is already in percentages (0.0-1.0)
@@ -542,22 +658,88 @@ fn PerformanceMainContent(
     });
 
     // Capture song_index for closures
-    let song_index_for_section_click = active_indices.song_index;
+    let song_index_for_section_click = song_index;
+
+    // Read navigator visibility for button state
+    let show_navigator = *SHOW_NAVIGATOR.read();
+
+    // Read chart split mode (for desktop hybrid rendering)
+    let show_chart_split = *SHOW_CHART_SPLIT.read();
 
     rsx! {
         div {
-            class: "flex-1 flex flex-col overflow-hidden bg-background",
-            // Scrollable content area
+            class: if show_chart_split {
+                "flex-1 flex flex-col overflow-hidden"
+            } else {
+                "flex-1 flex flex-col overflow-hidden bg-background"
+            },
+            style: if show_chart_split { "background: transparent !important;" } else { "" },
+
+            // Chart area (top half, transparent) - only shown in split mode
+            if show_chart_split {
+                div {
+                    // ID used by desktop app to query bounds via getBoundingClientRect()
+                    id: "chart-render-area",
+                    class: "relative",
+                    // Use fixed height (50%) and explicit transparent background
+                    // flex-1 was causing issues with height calculation
+                    style: "height: 50%; background: transparent !important; background-color: transparent !important;",
+                    // Floating label in the chart area
+                    div {
+                        class: "absolute top-4 left-4 bg-card/80 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg z-10",
+                        p {
+                            class: "text-sm text-muted-foreground",
+                            "WGPU Chart"
+                        }
+                    }
+                }
+            }
+            // Scrollable content area (with background in split mode to cover WGPU)
             div {
-                class: "flex-1 overflow-y-auto",
+                class: if show_chart_split {
+                    "overflow-y-auto chart-opaque-area"
+                } else {
+                    "flex-1 overflow-y-auto"
+                },
+                style: if show_chart_split { "height: 50%; background-color: #0f1116;" } else { "" },
                 div {
                     class: "p-6 relative flex items-center justify-center h-full",
+
+                    // Navigator toggle button (top-left corner)
+                    div {
+                        class: "absolute top-4 left-4 z-50",
+                        button {
+                            class: "px-3 py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-secondary-foreground text-sm font-medium transition-colors flex items-center gap-2",
+                            onclick: move |_| {
+                                let current = *SHOW_NAVIGATOR.peek();
+                                *SHOW_NAVIGATOR.write() = !current;
+                            },
+                            // Sidebar icon
+                            svg {
+                                width: "16",
+                                height: "16",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                                line { x1: "9", y1: "3", x2: "9", y2: "21" }
+                            }
+                            if show_navigator {
+                                "Hide Navigator"
+                            } else {
+                                "Show Navigator"
+                            }
+                        }
+                    }
 
                     // Song Title (positioned above progress bar)
                     div {
                         class: "absolute left-0 right-0",
                         style: "bottom: calc(50% + 4rem);",
-                        if let Some(ref song) = current_song {
+                        if let Some(ref song) = *current_song.read() {
                             SongTitle {
                                 song_name: song.name.clone(),
                             }
@@ -568,10 +750,10 @@ fn PerformanceMainContent(
                     div {
                         key: "{song_key.clone().unwrap_or_else(|| \"none\".to_string())}",
                         class: "w-full px-4",
-                        if !progress_sections.is_empty() {
+                        if !progress_sections.read().is_empty() {
                             SongProgressBar {
                                 progress: song_progress,
-                                sections: progress_sections.clone(),
+                                sections: progress_sections.read().clone(),
                                 on_section_click: Some(Callback::new(move |section_idx: usize| {
                                     if let Some(song_idx) = song_index_for_section_click {
                                         spawn(async move {
@@ -580,7 +762,6 @@ fn PerformanceMainContent(
                                     }
                                 })),
                                 on_comment_click: Some(Callback::new({
-                                    let song_index = active_indices.song_index;
                                     move |position_seconds: f64| {
                                         if let Some(song_idx) = song_index {
                                             spawn(async move {
@@ -597,11 +778,11 @@ fn PerformanceMainContent(
                                         }
                                     }
                                 })),
-                                tempo_markers: tempo_markers.clone(),
-                                comment_markers: comment_markers.clone(),
+                                tempo_markers: tempo_markers.read().clone(),
+                                comment_markers: comment_markers.read().clone(),
                                 song_key: song_key.clone(),
                                 loop_indicator: loop_indicator.clone(),
-                                queued_target: active_indices.queued_target.clone(),
+                                queued_target: queued_target.clone(),
                             }
                         }
                     }
@@ -614,12 +795,11 @@ fn PerformanceMainContent(
                             class: "w-full px-4",
                             SectionProgressBar {
                                 progress: section_progress,
-                                sections: progress_sections.clone(),
-                                measure_indicators: measure_indicators.clone(),
-                                comment_markers: section_comment_markers.clone(),
+                                sections: progress_sections.read().clone(),
+                                measure_indicators: measure_indicators.read().clone(),
+                                comment_markers: section_comment_markers.read().clone(),
                                 song_key: song_key.clone(),
                                 on_measure_click: Some(Callback::new({
-                                    let song_index = active_indices.song_index;
                                     move |musical_position: daw_proto::MusicalPosition| {
                                         if let Some(song_idx) = song_index {
                                             // The measure field contains the absolute measure number
@@ -639,7 +819,6 @@ fn PerformanceMainContent(
                                     }
                                 })),
                                 on_comment_click: Some(Callback::new({
-                                    let song_index = active_indices.song_index;
                                     move |position_seconds: f64| {
                                         if let Some(song_idx) = song_index {
                                             spawn(async move {
@@ -656,7 +835,7 @@ fn PerformanceMainContent(
                                         }
                                     }
                                 })),
-                                queued_target: active_indices.queued_target.clone(),
+                                queued_target: queued_target.clone(),
                             }
                         }
                     }
