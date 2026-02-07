@@ -1,0 +1,15 @@
+[package]
+name = "signal-control"
+description = "Signal Control — ergonomic API facade for rig control services"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+signal = { path = "../signal" }
+roam.workspace = true
+uuid = { version = "1.0", features = ["v4"] }
+tokio = { version = "1", features = ["time"] }
+tracing.workspace = true
+
+[lints]
+workspace = true
