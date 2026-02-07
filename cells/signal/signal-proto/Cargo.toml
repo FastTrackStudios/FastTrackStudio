@@ -1,0 +1,12 @@
+[package]
+name = "signal-proto"
+description = "Signal protocol — domain types for rig control"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+uuid = { version = "1.0", features = ["v4", "v5"] }
+facet = { workspace = true, features = ["uuid"] }
+
+[lints]
+workspace = true
