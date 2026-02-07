@@ -31,8 +31,9 @@ use std::time::Duration;
 
 // Service dispatchers for method ID routing
 use daw_proto::{
-    AudioEngineServiceDispatcher, MarkerServiceDispatcher, ProjectServiceDispatcher,
-    RegionServiceDispatcher, TempoMapServiceDispatcher, TransportServiceDispatcher,
+    AudioEngineServiceDispatcher, MarkerServiceDispatcher, MidiAnalysisServiceDispatcher,
+    MidiServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
+    TempoMapServiceDispatcher, TransportServiceDispatcher,
 };
 
 // ============================================================================
@@ -196,6 +197,8 @@ fn register_daw_dispatcher() {
     let region = daw_reaper::ReaperRegion::new();
     let tempo_map = daw_reaper::ReaperTempoMap::new();
     let audio_engine = daw_reaper::ReaperAudioEngine::new();
+    let midi = daw_reaper::ReaperMidi::new();
+    let midi_analysis = daw_reaper::ReaperMidiAnalysis::new();
 
     // Create dispatchers with telemetry middleware
     let transport_dispatcher =
@@ -206,6 +209,9 @@ fn register_daw_dispatcher() {
     let region_dispatcher = RegionServiceDispatcher::new(region).with_middleware(telemetry.clone());
     let tempo_map_dispatcher =
         TempoMapServiceDispatcher::new(tempo_map).with_middleware(telemetry.clone());
+    let midi_dispatcher = MidiServiceDispatcher::new(midi).with_middleware(telemetry.clone());
+    let midi_analysis_dispatcher =
+        MidiAnalysisServiceDispatcher::new(midi_analysis).with_middleware(telemetry.clone());
     let audio_engine_dispatcher =
         AudioEngineServiceDispatcher::new(audio_engine).with_middleware(telemetry);
 
@@ -215,7 +221,9 @@ fn register_daw_dispatcher() {
     let with_marker = RoutedDispatcher::new(transport_project, marker_dispatcher);
     let with_region = RoutedDispatcher::new(with_marker, region_dispatcher);
     let with_tempo_map = RoutedDispatcher::new(with_region, tempo_map_dispatcher);
-    let daw_dispatcher = RoutedDispatcher::new(with_tempo_map, audio_engine_dispatcher);
+    let with_midi = RoutedDispatcher::new(with_tempo_map, midi_dispatcher);
+    let with_midi_analysis = RoutedDispatcher::new(with_midi, midi_analysis_dispatcher);
+    let daw_dispatcher = RoutedDispatcher::new(with_midi_analysis, audio_engine_dispatcher);
 
     // Register with the Host
     Host::get().set_daw_dispatcher(Arc::new(daw_dispatcher));
@@ -228,7 +236,9 @@ fn register_daw_dispatcher() {
         pid: Some(std::process::id()),
     });
 
-    info!("DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, AudioEngine) with OTLP telemetry");
+    info!(
+        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine) with OTLP telemetry"
+    );
     info!("daw-reaper marked as ready for in-process DAW calls");
 }
 

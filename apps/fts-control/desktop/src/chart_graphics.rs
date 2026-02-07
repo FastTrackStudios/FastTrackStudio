@@ -150,55 +150,9 @@ impl ChartGraphics {
         width: f64,
         height: f64,
     ) {
-        tracing::info!(
-            "render_chart_scene: surface={}x{} chart_pos=({:.0},{:.0} {:.0}x{:.0})",
-            self.width,
-            self.height,
-            x,
-            y,
-            width,
-            height
-        );
-
         self.renderer.render(|painter| {
             let scene = painter.scene_mut();
-
-            // DEBUG: Red filled border (4px wide bands) at surface coordinates
-            let b = 4.0;
-            // Top edge
-            scene.fill(
-                Fill::NonZero,
-                Affine::IDENTITY,
-                Color::from_rgb8(255, 0, 0),
-                None,
-                &Rect::new(x, y, x + width, y + b),
-            );
-            // Bottom edge
-            scene.fill(
-                Fill::NonZero,
-                Affine::IDENTITY,
-                Color::from_rgb8(255, 0, 0),
-                None,
-                &Rect::new(x, y + height - b, x + width, y + height),
-            );
-            // Left edge
-            scene.fill(
-                Fill::NonZero,
-                Affine::IDENTITY,
-                Color::from_rgb8(255, 0, 0),
-                None,
-                &Rect::new(x, y, x + b, y + height),
-            );
-            // Right edge
-            scene.fill(
-                Fill::NonZero,
-                Affine::IDENTITY,
-                Color::from_rgb8(255, 0, 0),
-                None,
-                &Rect::new(x + width - b, y, x + width, y + height),
-            );
-
-            // Append the engraver's complete scene
+            // Append the engraver's complete scene at the chart area position
             scene.append(chart_scene, Some(Affine::translate((x, y))));
         });
     }

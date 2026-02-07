@@ -408,6 +408,12 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                             ));
                             *SETLIST_STRUCTURE.write() = setlist;
                         }
+                        session_proto::SetlistEvent::SongHydrated { index, song } => {
+                            let mut setlist = SETLIST_STRUCTURE.write();
+                            if index < setlist.songs.len() {
+                                setlist.songs[index] = song;
+                            }
+                        }
 
                         session_proto::SetlistEvent::ActiveIndicesChanged(indices) => {
                             // Update ACTIVE_INDICES
