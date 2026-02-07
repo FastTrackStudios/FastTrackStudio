@@ -119,6 +119,13 @@ impl SignalControl {
         self.service.get_current_scene(&Self::cx()).await
     }
 
+    /// Get the current preset's modules materialized for UI display.
+    ///
+    /// Synchronous — reads directly from the mock service's data store.
+    pub fn get_current_modules(&self) -> Vec<signal::module::Module> {
+        self.service.build_current_modules()
+    }
+
     // ── Commands ─────────────────────────────────────────────────────
 
     pub async fn execute(&self, cmd: RigControlCommand) {

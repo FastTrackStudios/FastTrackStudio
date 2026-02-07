@@ -58,13 +58,13 @@ pub enum ModuleViewMode {
     ///
     /// Shows only the `ModuleMacro` knobs that have been configured for rapid
     /// access. Width: ~192px per module.
+    #[default]
     Macro,
 
     /// Signal flow grid (Quad Cortex style).
     ///
     /// Shows blocks on a 14x6 grid with routing lines and I/O jacks.
-    /// This is the primary compact view mode.
-    #[default]
+    /// Note: Grid renderer is not yet implemented.
     Grid,
 }
 
@@ -81,7 +81,7 @@ impl ModuleViewMode {
     /// Get a short icon/symbol for this view mode.
     pub const fn icon(self) -> &'static str {
         match self {
-            Self::Detail => "⚙",  // Gear for full settings
+            Self::Detail => "⚙", // Gear for full settings
             Self::Macro => "◉",  // Circle for knobs
             Self::Grid => "⊞",   // Grid for signal flow
         }

@@ -12,8 +12,8 @@ use roam::{Context, Tx};
 use uuid::Uuid;
 
 use crate::engine::{
-    EngineError, InstanceHandle, InstanceState, PreloadPriority, PresetLoadHandle,
-    PresetReadiness, SwitchOutcome,
+    EngineError, InstanceHandle, InstanceState, PreloadPriority, PresetLoadHandle, PresetReadiness,
+    SwitchOutcome,
 };
 use crate::module::ModuleType;
 
@@ -228,19 +228,14 @@ pub struct RigInfo {
 #[derive(Debug, Clone, Facet)]
 pub enum RigControlCommand {
     // ── Lifecycle ────────────────────────────────────────────────────────
-
     /// Initialize the engine with a rig's module types.
     Initialize { rig_id: Uuid },
     /// Shut down the engine, releasing all resources.
     Shutdown,
 
     // ── Transitions ─────────────────────────────────────────────────────
-
     /// Load a preset with a specific scene (primary entry point).
-    LoadPresetWithScene {
-        preset_id: Uuid,
-        scene_index: usize,
-    },
+    LoadPresetWithScene { preset_id: Uuid, scene_index: usize },
     /// Load a song scene by song and scene index.
     ///
     /// Resolves the song's scene (including song-level module overrides)
@@ -258,7 +253,6 @@ pub enum RigControlCommand {
     },
 
     // ── Preloading ──────────────────────────────────────────────────────
-
     /// Preload a preset+scene in the background.
     Preload {
         preset_id: Uuid,
@@ -267,14 +261,12 @@ pub enum RigControlCommand {
     },
 
     // ── Slot Control ────────────────────────────────────────────────────
-
     /// Disable a specific module slot (mute all output).
     DisableSlot { module_type: ModuleType },
     /// Re-enable a previously disabled module slot.
     EnableSlot { module_type: ModuleType },
 
     // ── Profile/Preset Management ───────────────────────────────────────
-
     /// Load a specific profile
     LoadProfile { profile_id: Uuid },
     /// Load a specific preset (uses scene index 0)
@@ -289,7 +281,6 @@ pub enum RigControlCommand {
     PreviousScene,
 
     // ── Tick ─────────────────────────────────────────────────────────────
-
     /// Process one engine tick (preload queue, tail cleanup).
     Tick,
 }
@@ -303,28 +294,20 @@ pub enum RigControlCommand {
 #[derive(Debug, Clone, Facet)]
 pub enum RigControlEvent {
     // ── Lifecycle ────────────────────────────────────────────────────────
-
     /// Engine was initialized with a rig.
     EngineInitialized { rig_id: Uuid },
     /// Engine was shut down.
     EngineShutdown,
 
     // ── Transitions ─────────────────────────────────────────────────────
-
     /// A preset/scene transition started.
-    TransitionStarted {
-        preset_id: Uuid,
-        scene_index: usize,
-    },
+    TransitionStarted { preset_id: Uuid, scene_index: usize },
     /// A transition completed (all slots activated).
-    TransitionCompleted {
-        result: TransitionResultInfo,
-    },
+    TransitionCompleted { result: TransitionResultInfo },
     /// A transition failed.
     TransitionFailed { reason: String },
 
     // ── Slot State ──────────────────────────────────────────────────────
-
     /// A module slot's state changed (instance loaded, activated, etc.).
     SlotStateChanged {
         module_type: ModuleType,
@@ -336,7 +319,6 @@ pub enum RigControlEvent {
     SlotEnabled { module_type: ModuleType },
 
     // ── Preloading ──────────────────────────────────────────────────────
-
     /// A preload operation started.
     PreloadStarted {
         handle: u64,
@@ -352,24 +334,22 @@ pub enum RigControlEvent {
     /// A preload operation completed (all slots ready).
     PreloadCompleted { handle: u64 },
     /// A preload operation failed.
-    PreloadFailed {
-        handle: u64,
-        reason: String,
-    },
+    PreloadFailed { handle: u64, reason: String },
 
     // ── Profile/Preset/Song Events ──────────────────────────────────────
-
     /// A profile was loaded
     ProfileLoaded { profile: ProfileInfo },
     /// A preset was loaded
-    PresetLoaded { preset: PresetInfo, scene_index: usize },
+    PresetLoaded {
+        preset: PresetInfo,
+        scene_index: usize,
+    },
     /// A song changed
     SongChanged { song_index: usize },
     /// Current scene index changed
     SceneIndexChanged { scene_index: usize },
 
     // ── Tail Cleanup ────────────────────────────────────────────────────
-
     /// A tailing instance was cleaned up.
     TailCleanedUp { module_type: ModuleType },
 }
@@ -446,11 +426,7 @@ pub trait RigControlService {
     async fn subscribe(&self, events: Tx<RigControlEvent>);
 
     /// Subscribe to state changes for specific module slots.
-    async fn subscribe_slots(
-        &self,
-        module_types: Vec<ModuleType>,
-        states: Tx<SlotStateInfo>,
-    );
+    async fn subscribe_slots(&self, module_types: Vec<ModuleType>, states: Tx<SlotStateInfo>);
 }
 
 // endregion: --- Service Trait
@@ -571,11 +547,7 @@ impl ProfileInfo {
     /// Convert from domain Profile to RPC ProfileInfo
     pub fn from_profile(p: &crate::profile::Profile, presets: &[crate::preset::Preset]) -> Self {
         let scene_count = p.scene_templates.len();
-        let scene_names: Vec<String> = p
-            .scene_templates
-            .iter()
-            .map(|st| st.name.clone())
-            .collect();
+        let scene_names: Vec<String> = p.scene_templates.iter().map(|st| st.name.clone()).collect();
 
         let scenes: Vec<ProfileSceneInfo> = p
             .scene_templates
@@ -623,16 +595,16 @@ impl PresetInfo {
     pub fn from_preset(p: &crate::preset::Preset) -> Self {
         // Note: In the domain model, these are called "snapshots" but at the preset level
         // they represent "scenes" (different module configurations within the same routing)
-        let scenes: Vec<PresetSnapshotInfo> = p.snapshots.iter()
+        let scenes: Vec<PresetSnapshotInfo> = p
+            .snapshots
+            .iter()
             .map(|s| PresetSnapshotInfo {
                 id: s.id.as_uuid(),
                 name: s.name.clone(),
             })
             .collect();
 
-        let scene_names: Vec<String> = scenes.iter()
-            .map(|s| s.name.clone())
-            .collect();
+        let scene_names: Vec<String> = scenes.iter().map(|s| s.name.clone()).collect();
 
         // TEMP: Find default scene index by looking up the default_snapshot_id
         // let default_scene_index = p.default_snapshot_id
@@ -685,7 +657,10 @@ impl SongInfo {
 
 impl SetlistInfo {
     /// Convert from a list of songs to RPC SetlistInfo
-    pub fn from_songs(name: impl Into<String>, songs: &[crate::performance::PerformanceSong]) -> Self {
+    pub fn from_songs(
+        name: impl Into<String>,
+        songs: &[crate::performance::PerformanceSong],
+    ) -> Self {
         let song_names: Vec<String> = songs.iter().map(|s| s.name.clone()).collect();
 
         Self {
@@ -743,10 +718,7 @@ impl RigControlData {
 
     /// Find a song by name.
     pub fn song_by_name(&self, name: &str) -> Option<(usize, &PerformanceSong)> {
-        self.songs
-            .iter()
-            .enumerate()
-            .find(|(_, s)| s.name == name)
+        self.songs.iter().enumerate().find(|(_, s)| s.name == name)
     }
 }
 
@@ -791,6 +763,44 @@ impl MockRigControlService {
             songs: defaults.songs,
         };
         Self::new(data)
+    }
+
+    /// Get a reference to the underlying rig data.
+    pub fn data(&self) -> &RigControlData {
+        &self.data
+    }
+
+    /// Build the current preset's modules for UI display.
+    ///
+    /// Iterates the current preset's `module_assignments`, looks up each
+    /// `ModulePreset` in the rig, and constructs `Module` instances with
+    /// blocks and macros copied from the preset.
+    pub fn build_current_modules(&self) -> Vec<crate::module::Module> {
+        let preset_index = *self.current_preset_index.read().unwrap();
+        let Some(preset) = self.data.presets.get(preset_index) else {
+            return Vec::new();
+        };
+        let rig = &self.data.rig;
+
+        let mut modules = Vec::new();
+        for assignment in &preset.module_assignments {
+            if !assignment.enabled {
+                continue;
+            }
+
+            if let Some(mp) = rig.get_module_preset(assignment.module_preset_id) {
+                let mut module = crate::module::Module::new(&mp.name, mp.module_type);
+                for block in &mp.blocks {
+                    module.add_block(block.clone());
+                }
+                for m in &mp.macros {
+                    module.add_macro(m.clone());
+                }
+                modules.push(module);
+            }
+        }
+
+        modules
     }
 
     /// Build slot state info from the engine's internal state for a module type.
@@ -845,9 +855,7 @@ impl MockRigControlService {
                 .iter()
                 .any(|o| o.module_type == song_override.module_type);
             if !already_overridden {
-                merged_scene
-                    .module_overrides
-                    .push(song_override.clone());
+                merged_scene.module_overrides.push(song_override.clone());
             }
         }
         merged_scene
@@ -865,7 +873,11 @@ impl RigControlService for MockRigControlService {
         EngineStateInfo::initialized(slots)
     }
 
-    async fn get_slot_state(&self, _cx: &Context, module_type: ModuleType) -> Option<SlotStateInfo> {
+    async fn get_slot_state(
+        &self,
+        _cx: &Context,
+        module_type: ModuleType,
+    ) -> Option<SlotStateInfo> {
         // MockRigEngine::slot() currently returns None — we need to read
         // the internal state directly. Use engine's slot states helper.
         let states = self.engine.current_slot_states_public();
@@ -960,10 +972,9 @@ impl RigControlService for MockRigControlService {
         let current_song = *self.current_song_index.read().unwrap();
         let current_scene = *self.current_scene_index.read().unwrap();
 
-        self.data
-            .songs
-            .get(current_song)
-            .map(|song| SongInfo::from_song(current_song, song, Some(current_song), Some(current_scene)))
+        self.data.songs.get(current_song).map(|song| {
+            SongInfo::from_song(current_song, song, Some(current_song), Some(current_scene))
+        })
     }
 
     async fn get_current_scene(&self, _cx: &Context) -> Option<ProfileSceneInfo> {
@@ -973,11 +984,7 @@ impl RigControlService for MockRigControlService {
         let song = self.data.songs.get(song_index)?;
         let scene = song.scenes.get(scene_index)?;
 
-        let preset = self
-            .data
-            .presets
-            .iter()
-            .find(|p| p.id == scene.preset_id)?;
+        let preset = self.data.presets.iter().find(|p| p.id == scene.preset_id)?;
 
         Some(ProfileSceneInfo {
             index: scene_index,
@@ -1019,13 +1026,21 @@ impl RigControlService for MockRigControlService {
                     .await;
 
                 // Update current preset index
-                if let Some(index) = self.data.presets.iter().position(|p| p.id.as_uuid() == preset_id) {
+                if let Some(index) = self
+                    .data
+                    .presets
+                    .iter()
+                    .position(|p| p.id.as_uuid() == preset_id)
+                {
                     *self.current_preset_index.write().unwrap() = index;
                 }
 
                 // Broadcast preset loaded event
                 let preset_info = PresetInfo::from_preset(preset);
-                self.broadcast_event(RigControlEvent::PresetLoaded { preset: preset_info, scene_index });
+                self.broadcast_event(RigControlEvent::PresetLoaded {
+                    preset: preset_info,
+                    scene_index,
+                });
             }
             RigControlCommand::LoadSongScene {
                 song_index,
@@ -1057,7 +1072,10 @@ impl RigControlService for MockRigControlService {
 
                 // Also broadcast preset loaded (scenes in songs use scene 0 as the base)
                 let preset_info = PresetInfo::from_preset(preset);
-                self.broadcast_event(RigControlEvent::PresetLoaded { preset: preset_info, scene_index: 0 });
+                self.broadcast_event(RigControlEvent::PresetLoaded {
+                    preset: preset_info,
+                    scene_index: 0,
+                });
             }
             RigControlCommand::SwitchScene { scene_index: _ } => {
                 // Need to know current preset — simplified: search resolved state
@@ -1076,10 +1094,7 @@ impl RigControlService for MockRigControlService {
                     .flat_map(|p| p.snapshots.iter())
                     .find(|s| s.id.as_uuid() == snapshot_id);
                 if let Some(snapshot) = snap {
-                    let _ = self
-                        .engine
-                        .apply_snapshot(module_type, snapshot)
-                        .await;
+                    let _ = self.engine.apply_snapshot(module_type, snapshot).await;
                 }
             }
             RigControlCommand::Preload {
@@ -1089,10 +1104,7 @@ impl RigControlService for MockRigControlService {
             } => {
                 if let Some(preset) = self.data.find_preset(preset_id) {
                     let scene = Scene::new("Preload", preset.id);
-                    let _ = self
-                        .engine
-                        .preload(preset, &scene, &self.data.rig)
-                        .await;
+                    let _ = self.engine.preload(preset, &scene, &self.data.rig).await;
                 }
             }
             RigControlCommand::DisableSlot { module_type } => {
@@ -1102,18 +1114,30 @@ impl RigControlService for MockRigControlService {
                 self.engine.enable_slot(module_type).await;
             }
             RigControlCommand::LoadProfile { profile_id } => {
-                if let Some(index) = self.data.profiles.iter().position(|p| p.id.as_uuid() == profile_id) {
+                if let Some(index) = self
+                    .data
+                    .profiles
+                    .iter()
+                    .position(|p| p.id.as_uuid() == profile_id)
+                {
                     *self.current_profile_index.write().unwrap() = index;
 
                     // Get profile and broadcast event
                     if let Some(profile) = self.data.profiles.get(index) {
                         let profile_info = ProfileInfo::from_profile(profile, &self.data.presets);
-                        self.broadcast_event(RigControlEvent::ProfileLoaded { profile: profile_info });
+                        self.broadcast_event(RigControlEvent::ProfileLoaded {
+                            profile: profile_info,
+                        });
                     }
                 }
             }
             RigControlCommand::LoadPreset { preset_id } => {
-                if let Some(index) = self.data.presets.iter().position(|p| p.id.as_uuid() == preset_id) {
+                if let Some(index) = self
+                    .data
+                    .presets
+                    .iter()
+                    .position(|p| p.id.as_uuid() == preset_id)
+                {
                     *self.current_preset_index.write().unwrap() = index;
                     // Note: In rig-control, presets don't have scenes - they're loaded via songs
                     // This command just tracks which preset is "current" for UI purposes
@@ -1205,10 +1229,7 @@ impl MockRigControlService {
 
         // Fallback: construct a default scene for the preset
         (
-            Scene::new(
-                "Default",
-                crate::id::PresetId::from_uuid(preset_id),
-            ),
+            Scene::new("Default", crate::id::PresetId::from_uuid(preset_id)),
             Vec::new(),
         )
     }
@@ -1242,7 +1263,12 @@ impl MockRigControlService {
         let states = self.engine.current_slot_states_public();
         states
             .into_iter()
-            .map(|ss| (ss.module_type, ss.current.and_then(|rs| rs.target().cloned())))
+            .map(|ss| {
+                (
+                    ss.module_type,
+                    ss.current.and_then(|rs| rs.target().cloned()),
+                )
+            })
             .collect()
     }
 }

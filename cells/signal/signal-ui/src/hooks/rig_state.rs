@@ -8,8 +8,8 @@ use crate::prelude::*;
 use crate::signals::{
     RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_AVAILABLE_SETLISTS, RIG_CONNECTED,
     RIG_CURRENT_PRESET, RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_CURRENT_SCENE, RIG_CURRENT_SETLIST,
-    RIG_CURRENT_SONG, RIG_INFO, RIG_LOADING, RIG_PRELOADED_PRESETS, RIG_PROFILE, RIG_SCENE_INDEX,
-    RIG_SETLIST_SONGS, RIG_SONG_INDEX,
+    RIG_CURRENT_SONG, RIG_INFO, RIG_LOADING, RIG_MODULES, RIG_PRELOADED_PRESETS, RIG_PROFILE,
+    RIG_SCENE_INDEX, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
 use signal_control::{RigControlEvent, SignalControl};
 
@@ -59,6 +59,11 @@ pub fn use_rig_subscription() {
                 }
                 *RIG_CURRENT_PRESET.write() = Some(preset);
             }
+
+            // Materialize modules from the current preset for UI display
+            let modules = ctl.get_current_modules();
+            tracing::info!("{} modules resolved for UI", modules.len());
+            *RIG_MODULES.write() = modules;
 
             let setlists = ctl.get_available_setlists().await;
             tracing::info!("{} setlists available", setlists.len());
@@ -140,6 +145,7 @@ async fn handle_event(ctl: &SignalControl, event: RigControlEvent) {
                 *RIG_CURRENT_PRESET_SNAPSHOT_ID.write() = Some(id);
             }
             *RIG_CURRENT_PRESET.write() = Some(preset);
+            *RIG_MODULES.write() = ctl.get_current_modules();
         }
         RigControlEvent::SongChanged { song_index } => {
             tracing::info!("Song changed to index {}", song_index);
@@ -157,6 +163,7 @@ async fn handle_event(ctl: &SignalControl, event: RigControlEvent) {
             if let Some(preset) = ctl.get_current_preset().await {
                 *RIG_CURRENT_PRESET.write() = Some(preset);
             }
+            *RIG_MODULES.write() = ctl.get_current_modules();
         }
         RigControlEvent::PreloadCompleted { handle: _ } => {
             tracing::debug!("Preload completed");

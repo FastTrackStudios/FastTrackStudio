@@ -8,7 +8,9 @@ use crate::context::rig::{RigService, RigServiceProvider};
 use crate::hooks::rig_actions::use_rig_actions;
 use crate::hooks::rig_state::use_rig_subscription;
 use crate::prelude::*;
-use crate::signals::{RIG_CURRENT_PRESET, RIG_CURRENT_SONG, RIG_INFO, RIG_SCENE_INDEX};
+use crate::signals::{
+    RIG_CURRENT_PRESET, RIG_CURRENT_SONG, RIG_INFO, RIG_MODULES, RIG_SCENE_INDEX,
+};
 
 /// Main layout for the Rig tab.
 ///
@@ -38,6 +40,7 @@ fn RigContent() -> Element {
     let current_preset = RIG_CURRENT_PRESET.read();
     let current_song = RIG_CURRENT_SONG.read();
     let scene_index = *RIG_SCENE_INDEX.read();
+    let modules = RIG_MODULES.read().clone();
 
     // Build header info
     let rig_name = rig_info
@@ -75,6 +78,7 @@ fn RigContent() -> Element {
             // Main content: the guitar rig grid
             div { class: "flex-1 overflow-hidden",
                 GuitarRigGrid {
+                    modules: modules,
                     on_toggle_module_bypass: move |_id| {},
                     on_toggle_block_bypass: move |_id| {},
                     on_macro_change: move |_args| {},

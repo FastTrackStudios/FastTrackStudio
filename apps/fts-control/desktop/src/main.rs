@@ -59,9 +59,9 @@ use dioxus::desktop::{tao::window::WindowBuilder, Config};
 
 use session_ui::{
     ChartAreaBounds, ConnectionState, LatencyInfo, PerformanceLayout, Session, TopBar,
-    ACTIVE_INDICES, AUDIO_LATENCY_SECONDS, CHART_AREA_BOUNDS, LATENCY_INFO,
-    PERF_CHART_BASE_SCALE, PERF_CHART_CLICK, PERF_CHART_HOVER, PERF_CHART_VIEWPORT,
-    SHOW_CHART_SPLIT, SONG_TRANSPORT,
+    ACTIVE_INDICES, AUDIO_LATENCY_SECONDS, CHART_AREA_BOUNDS, LATENCY_INFO, PERF_CHART_BASE_SCALE,
+    PERF_CHART_CLICK, PERF_CHART_HOVER, PERF_CHART_VIEWPORT, SHOW_CHART_SPLIT, SONG_CHARTS,
+    SONG_TRANSPORT,
 };
 
 use keyflow_ui::signals::{ChartEditorBounds, PreviewMode};
@@ -83,16 +83,19 @@ const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 const CHART_LOADING_PLACEHOLDER: &str = "Generating Chart\n\n[Loading]\n| C |";
 
 fn refresh_session_chart_source() {
-    use session_ui::{ACTIVE_INDICES, SETLIST_STRUCTURE};
+    use session_ui::{ACTIVE_INDICES, SETLIST_STRUCTURE, SONG_CHARTS};
 
-    let next_source = ACTIVE_INDICES
-        .peek()
-        .song_index
-        .and_then(|song_index| SETLIST_STRUCTURE.peek().songs.get(song_index).cloned())
+    let active_song_index = ACTIVE_INDICES.peek().song_index;
+    let setlist = SETLIST_STRUCTURE.peek();
+    let charts = SONG_CHARTS.peek();
+
+    let next_source = active_song_index
+        .and_then(|song_index| setlist.songs.get(song_index))
         .map(|song| {
-            song.chart_text.unwrap_or_else(|| {
-                format!("{} (Generating)\n\n[Loading]\n| C |", song.name)
-            })
+            charts
+                .get(&song.project_guid)
+                .map(|chart| chart.chart_text.clone())
+                .unwrap_or_else(|| format!("{} (Generating)\n\n[Loading]\n| C |", song.name))
         })
         .or_else(|| Some(CHART_LOADING_PLACEHOLDER.to_string()));
 
@@ -349,6 +352,14 @@ fn App() -> Element {
                     match event {
                         session_proto::SetlistEvent::SetlistChanged(setlist) => {
                             info!("Setlist changed: {} songs", setlist.songs.len());
+                            let valid_guids: std::collections::HashSet<String> = setlist
+                                .songs
+                                .iter()
+                                .map(|song| song.project_guid.clone())
+                                .collect();
+                            SONG_CHARTS
+                                .write()
+                                .retain(|guid, _| valid_guids.contains(guid));
                             *SETLIST_STRUCTURE.write() = setlist;
                             refresh_session_chart_source();
                         }
@@ -362,13 +373,16 @@ fn App() -> Element {
                         }
 
                         session_proto::SetlistEvent::ActiveIndicesChanged(indices) => {
+                            let prev_song_index = ACTIVE_INDICES.peek().song_index;
                             *ACTIVE_INDICES.write() = indices.clone();
                             *PLAYBACK_STATE.write() = if indices.is_playing {
                                 daw_proto::PlayState::Playing
                             } else {
                                 daw_proto::PlayState::Stopped
                             };
-                            refresh_session_chart_source();
+                            if prev_song_index != indices.song_index {
+                                refresh_session_chart_source();
+                            }
                         }
 
                         session_proto::SetlistEvent::TransportUpdate(transports) => {
@@ -377,101 +391,127 @@ fn App() -> Element {
 
                             let active_song_index = ACTIVE_INDICES.peek().song_index;
                             let audio_latency = *AUDIO_LATENCY_SECONDS.peek();
+                            let mut transport_updates: Vec<(usize, TransportState)> =
+                                Vec::with_capacity(transports.len());
+                            let mut active_transport_update: Option<(
+                                f64,
+                                Option<f64>,
+                                Option<usize>,
+                                bool,
+                                bool,
+                            )> = None;
 
-                            for transport in transports {
-                                // Build the new transport state
-                                let compensated_position =
-                                    if transport.is_playing && audio_latency > 0.0 {
-                                        let compensated_time = transport.position.time.map(|t| {
-                                            daw_proto::TimePosition::from_seconds(
-                                                t.as_seconds() + audio_latency,
+                            {
+                                let setlist = SETLIST_STRUCTURE.peek();
+                                let existing_transports = SONG_TRANSPORT.peek();
+                                for transport in transports {
+                                    // Build the new transport state
+                                    let compensated_position =
+                                        if transport.is_playing && audio_latency > 0.0 {
+                                            let compensated_time =
+                                                transport.position.time.map(|t| {
+                                                    daw_proto::TimePosition::from_seconds(
+                                                        t.as_seconds() + audio_latency,
+                                                    )
+                                                });
+                                            daw_proto::Position::new(
+                                                transport.position.musical.clone(),
+                                                compensated_time,
+                                                transport.position.midi.clone(),
                                             )
+                                        } else {
+                                            transport.position.clone()
+                                        };
+
+                                    let loop_region_percent =
+                                        transport.loop_region.as_ref().and_then(|region| {
+                                            setlist.songs.get(transport.song_index).map(|song| {
+                                                let song_duration = song.duration();
+                                                if song_duration > 0.0 {
+                                                    (
+                                                        (region.start_seconds / song_duration)
+                                                            .clamp(0.0, 1.0),
+                                                        (region.end_seconds / song_duration)
+                                                            .clamp(0.0, 1.0),
+                                                    )
+                                                } else {
+                                                    (0.0, 1.0)
+                                                }
+                                            })
                                         });
-                                        daw_proto::Position::new(
-                                            transport.position.musical.clone(),
-                                            compensated_time,
-                                            transport.position.midi.clone(),
-                                        )
-                                    } else {
-                                        transport.position.clone()
+
+                                    let new_transport = TransportState {
+                                        position: compensated_position,
+                                        bpm: transport.bpm,
+                                        time_sig_num: transport.time_sig_num as i32,
+                                        time_sig_denom: transport.time_sig_denom as i32,
+                                        is_playing: transport.is_playing,
+                                        is_looping: transport.is_looping,
+                                        loop_region: loop_region_percent,
                                     };
 
-                                let loop_region_percent =
-                                    transport.loop_region.as_ref().and_then(|region| {
-                                        let setlist = SETLIST_STRUCTURE.peek();
-                                        setlist.songs.get(transport.song_index).map(|song| {
-                                            let song_duration = song.duration();
-                                            if song_duration > 0.0 {
-                                                (
-                                                    (region.start_seconds / song_duration)
-                                                        .clamp(0.0, 1.0),
-                                                    (region.end_seconds / song_duration)
-                                                        .clamp(0.0, 1.0),
-                                                )
-                                            } else {
-                                                (0.0, 1.0)
-                                            }
-                                        })
-                                    });
+                                    let needs_transport_update = existing_transports
+                                        .get(&transport.song_index)
+                                        .map(|existing| *existing != new_transport)
+                                        .unwrap_or(true);
 
-                                let new_transport = TransportState {
-                                    position: compensated_position,
-                                    bpm: transport.bpm,
-                                    time_sig_num: transport.time_sig_num as i32,
-                                    time_sig_denom: transport.time_sig_denom as i32,
-                                    is_playing: transport.is_playing,
-                                    is_looping: transport.is_looping,
-                                    loop_region: loop_region_percent,
+                                    if needs_transport_update {
+                                        transport_updates.push((transport.song_index, new_transport));
+                                    }
+
+                                    if Some(transport.song_index) == active_song_index {
+                                        active_transport_update = Some((
+                                            transport.progress,
+                                            transport.section_progress,
+                                            transport.section_index,
+                                            transport.is_playing,
+                                            transport.is_looping,
+                                        ));
+                                    }
+                                }
+                            }
+
+                            if !transport_updates.is_empty() {
+                                let mut song_transport = SONG_TRANSPORT.write();
+                                for (song_index, transport_state) in transport_updates {
+                                    song_transport.insert(song_index, transport_state);
+                                }
+                            }
+
+                            if let Some((
+                                song_progress,
+                                section_progress,
+                                section_index,
+                                is_playing,
+                                is_looping,
+                            )) = active_transport_update
+                            {
+                                let new_state = if is_playing {
+                                    daw_proto::PlayState::Playing
+                                } else {
+                                    daw_proto::PlayState::Stopped
                                 };
 
-                                // Only write SONG_TRANSPORT if this song's transport changed
-                                // Must compute needs_update and drop peek() before calling write()
-                                let needs_transport_update = SONG_TRANSPORT
-                                    .peek()
-                                    .get(&transport.song_index)
-                                    .map(|existing| *existing != new_transport)
-                                    .unwrap_or(true);
-
-                                if needs_transport_update {
-                                    SONG_TRANSPORT
-                                        .write()
-                                        .insert(transport.song_index, new_transport);
+                                if *PLAYBACK_STATE.peek() != new_state {
+                                    *PLAYBACK_STATE.write() = new_state;
                                 }
 
-                                // Update ACTIVE_INDICES and PLAYBACK_STATE only for active song
-                                if Some(transport.song_index) == active_song_index {
-                                    // Check if playback state changed
-                                    let new_state = if transport.is_playing {
-                                        daw_proto::PlayState::Playing
-                                    } else {
-                                        daw_proto::PlayState::Stopped
-                                    };
+                                let indices_changed = {
+                                    let current = ACTIVE_INDICES.peek();
+                                    current.song_progress != Some(song_progress)
+                                        || current.section_progress != section_progress
+                                        || current.section_index != section_index
+                                        || current.is_playing != is_playing
+                                        || current.looping != is_looping
+                                };
 
-                                    let needs_playback_update = *PLAYBACK_STATE.peek() != new_state;
-                                    if needs_playback_update {
-                                        *PLAYBACK_STATE.write() = new_state;
-                                    }
-
-                                    // Check if indices actually changed before writing
-                                    // Compute the check, dropping the peek() borrow before write()
-                                    let indices_changed = {
-                                        let current = ACTIVE_INDICES.peek();
-                                        current.song_progress != Some(transport.progress)
-                                            || current.section_progress
-                                                != transport.section_progress
-                                            || current.section_index != transport.section_index
-                                            || current.is_playing != transport.is_playing
-                                            || current.looping != transport.is_looping
-                                    };
-
-                                    if indices_changed {
-                                        let mut indices = ACTIVE_INDICES.write();
-                                        indices.song_progress = Some(transport.progress);
-                                        indices.section_progress = transport.section_progress;
-                                        indices.section_index = transport.section_index;
-                                        indices.is_playing = transport.is_playing;
-                                        indices.looping = transport.is_looping;
-                                    }
+                                if indices_changed {
+                                    let mut indices = ACTIVE_INDICES.write();
+                                    indices.song_progress = Some(song_progress);
+                                    indices.section_progress = section_progress;
+                                    indices.section_index = section_index;
+                                    indices.is_playing = is_playing;
+                                    indices.looping = is_looping;
                                 }
                             }
                         }
@@ -502,6 +542,14 @@ fn App() -> Element {
                             info!("Exited section {}.{}", song_index, section_index);
                         }
 
+                        session_proto::SetlistEvent::SongChartHydrated { index, chart } => {
+                            SONG_CHARTS.write().insert(chart.project_guid.clone(), chart);
+                            let is_active_song = ACTIVE_INDICES.peek().song_index == Some(index);
+                            if is_active_song {
+                                refresh_session_chart_source();
+                            }
+                        }
+
                         session_proto::SetlistEvent::PositionChanged { indices, .. } => {
                             // High-frequency position update - update active indices
                             *ACTIVE_INDICES.write() = indices;
@@ -529,6 +577,21 @@ fn App() -> Element {
         {
             let show_chart_split = *SHOW_CHART_SPLIT.read();
             let needs_transparency = active_tab() == "chart" || (active_tab() == "performance" && show_chart_split);
+
+            // Ensure transparent-mode CSS class on <html> matches the current tab.
+            // Without this, switching away from performance/chart leaves the class
+            // behind because the component unmounts before its effect can clean up.
+            #[cfg(feature = "desktop")]
+            use_effect(move || {
+                let tab = active_tab();
+                let split = *SHOW_CHART_SPLIT.read();
+                let want_transparent = tab == "chart" || (tab == "performance" && split);
+                if want_transparent {
+                    document::eval(r#"document.documentElement.classList.add('transparent-mode');"#);
+                } else {
+                    document::eval(r#"document.documentElement.classList.remove('transparent-mode');"#);
+                }
+            });
 
             rsx! {
                 div {

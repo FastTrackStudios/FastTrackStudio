@@ -54,6 +54,10 @@ pub static RIG_CURRENT_SCENE: GlobalSignal<Option<ProfileSceneInfo>> = Signal::g
 /// Current scene index
 pub static RIG_SCENE_INDEX: GlobalSignal<usize> = Signal::global(|| 0);
 
+/// Current modules materialized from preset for UI display
+pub static RIG_MODULES: GlobalSignal<Vec<signal_control::module::Module>> =
+    Signal::global(Vec::new);
+
 /// Connection status
 pub static RIG_CONNECTED: GlobalSignal<bool> = Signal::global(|| false);
 

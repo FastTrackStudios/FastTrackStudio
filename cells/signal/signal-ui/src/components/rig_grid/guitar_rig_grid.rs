@@ -56,13 +56,16 @@ pub struct GuitarRigGridProps {
 #[component]
 pub fn GuitarRigGrid(props: GuitarRigGridProps) -> Element {
     // State: current view mode
-    let mut current_mode = use_signal(|| ModuleViewMode::Grid);
+    let mut current_mode = use_signal(|| ModuleViewMode::Macro);
 
     // State: per-module view mode preferences (for Macro/Detail modes)
     let mut module_prefs = use_signal(HashMap::<Uuid, ModuleViewMode>::new);
 
     // Get signal flow grid (use provided or sample)
-    let grid = props.signal_flow.clone().unwrap_or_else(SignalFlowGrid::sample_guitar_rig);
+    let grid = props
+        .signal_flow
+        .clone()
+        .unwrap_or_else(SignalFlowGrid::sample_guitar_rig);
 
     rsx! {
         div { class: "flex flex-col h-full bg-background",
