@@ -21,8 +21,7 @@ exclude = [
     "reference/dioxus",
     "reference/anyrender",    # Has its own workspace
     "reference/vello",        # Has its own workspace
-    "cells/signal/signal",    # Incomplete crate - no Cargo.toml
-    "cells/signal/signal-proto",  # Incomplete crate - no Cargo.toml
+
     "cells/sync/sync",        # Incomplete crate
 ]
 resolver = "2"
@@ -120,6 +119,11 @@ daw-proto = { path = "cells/daw/daw-proto" }
 daw-control = { path = "cells/daw/daw-control" }
 session = { path = "cells/session/session" }
 session-ui = { path = "cells/session/session-ui" }
+signal = { path = "cells/signal/signal" }
+signal-proto = { path = "cells/signal/signal-proto" }
+audio-controls = { path = "cells/signal/audio-controls" }
+signal-control = { path = "cells/signal/signal-control" }
+signal-ui = { path = "cells/signal/signal-ui" }
 gateway-proto = { path = "cells/gateway/gateway-proto" }
 host-manager-proto = { path = "cells/host-manager/host-manager-proto" }
 host-manager = { path = "cells/host-manager/host-manager" }

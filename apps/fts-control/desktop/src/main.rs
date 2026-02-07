@@ -59,15 +59,20 @@ use dioxus::desktop::{tao::window::WindowBuilder, Config};
 
 use session_ui::{
     ChartAreaBounds, ConnectionState, LatencyInfo, PerformanceLayout, Session, TopBar,
-    AUDIO_LATENCY_SECONDS, CHART_AREA_BOUNDS, LATENCY_INFO, SHOW_CHART_SPLIT,
+    ACTIVE_INDICES, AUDIO_LATENCY_SECONDS, CHART_AREA_BOUNDS, LATENCY_INFO,
+    PERF_CHART_BASE_SCALE, PERF_CHART_CLICK, PERF_CHART_HOVER, PERF_CHART_VIEWPORT,
+    SHOW_CHART_SPLIT, SONG_TRANSPORT,
 };
 
 use keyflow_ui::signals::{ChartEditorBounds, PreviewMode};
 use keyflow_ui::{
-    ChartEditorLayout, ChartLayoutManager, RenderStats, CHART_EDITOR_BOUNDS, CHART_PREVIEW_MODE,
-    CHART_RENDER_STATS, CHART_SOURCE, CHART_VIEWPORT,
+    ChartEditorLayout, ChartLayoutManager, RenderStats, CHART_BASE_SCALE, CHART_CURSOR_POSITION,
+    CHART_CURSOR_SCENE_CLICK, CHART_CURSOR_TICK, CHART_CURSOR_VISIBLE, CHART_EDITOR_BOUNDS,
+    CHART_HOVER_SCENE_POINT, CHART_PAGE_INFO, CHART_PREVIEW_MODE, CHART_RENDER_STATS, CHART_SOURCE,
+    CHART_VIEWPORT, SESSION_CHART_SOURCE,
 };
 use kurbo::Affine;
+use signal_ui::RigLayout;
 
 use tokio;
 use tracing::info;
@@ -75,6 +80,26 @@ use tracing::info;
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
+const CHART_LOADING_PLACEHOLDER: &str = "Generating Chart\n\n[Loading]\n| C |";
+
+fn refresh_session_chart_source() {
+    use session_ui::{ACTIVE_INDICES, SETLIST_STRUCTURE};
+
+    let next_source = ACTIVE_INDICES
+        .peek()
+        .song_index
+        .and_then(|song_index| SETLIST_STRUCTURE.peek().songs.get(song_index).cloned())
+        .map(|song| {
+            song.chart_text.unwrap_or_else(|| {
+                format!("{} (Generating)\n\n[Loading]\n| C |", song.name)
+            })
+        })
+        .or_else(|| Some(CHART_LOADING_PLACEHOLDER.to_string()));
+
+    if *SESSION_CHART_SOURCE.peek() != next_source {
+        *SESSION_CHART_SOURCE.write() = next_source;
+    }
+}
 
 fn main() {
     // Initialize tracing
@@ -305,6 +330,7 @@ fn App() -> Element {
                     }
                     _ => {}
                 }
+                refresh_session_chart_source();
             }
             Ok(None) => info!("No setlist available"),
             Err(e) => tracing::warn!("Failed to get setlist: {}", e),
@@ -324,6 +350,15 @@ fn App() -> Element {
                         session_proto::SetlistEvent::SetlistChanged(setlist) => {
                             info!("Setlist changed: {} songs", setlist.songs.len());
                             *SETLIST_STRUCTURE.write() = setlist;
+                            refresh_session_chart_source();
+                        }
+                        session_proto::SetlistEvent::SongHydrated { index, song } => {
+                            let mut setlist = SETLIST_STRUCTURE.write();
+                            if index < setlist.songs.len() {
+                                setlist.songs[index] = song;
+                            }
+                            drop(setlist);
+                            refresh_session_chart_source();
                         }
 
                         session_proto::SetlistEvent::ActiveIndicesChanged(indices) => {
@@ -333,6 +368,7 @@ fn App() -> Element {
                             } else {
                                 daw_proto::PlayState::Stopped
                             };
+                            refresh_session_chart_source();
                         }
 
                         session_proto::SetlistEvent::TransportUpdate(transports) => {
@@ -528,6 +564,7 @@ fn App() -> Element {
                             "performance" => rsx! { PerformanceWithChartToggle {} },
                             "chart" => rsx! { ChartView {} },
                             "setlist" => rsx! { SetlistView {} },
+                            "rig" => rsx! { RigLayout {} },
                             "settings" => rsx! { SettingsView {} },
                             _ => rsx! { PerformanceWithChartToggle {} },
                         }
@@ -602,31 +639,55 @@ fn handle_keyboard_shortcut(e: KeyboardEvent) {
 /// Performance view with optional chart split
 ///
 /// Wraps PerformanceLayout and adds a chart toggle button.
-/// The split logic is handled inside PerformanceMainContent via SHOW_CHART_SPLIT signal.
+/// When the chart split is active, renders a 2-line zoomed chart that
+/// auto-follows the cursor position, showing the current system plus
+/// the next one.
 #[component]
 fn PerformanceWithChartToggle() -> Element {
     let show_chart = *SHOW_CHART_SPLIT.read();
 
-    // Handle chart rendering and transparency when split is enabled
     #[cfg(feature = "desktop")]
     {
         let graphics = consume_context::<Arc<std::sync::Mutex<ChartGraphics>>>();
 
-        // Query chart area bounds and render bounding box
+        // --- Chart layout manager (created once, persists across renders) ---
+        let perf_layout_manager: Signal<
+            Option<std::rc::Rc<std::cell::RefCell<ChartLayoutManager>>>,
+        > = use_signal(|| match ChartLayoutManager::new() {
+            Ok(m) => {
+                tracing::debug!("Perf ChartLayoutManager created");
+                Some(std::rc::Rc::new(std::cell::RefCell::new(m)))
+            }
+            Err(e) => {
+                tracing::error!("Failed to create perf ChartLayoutManager: {}", e);
+                None
+            }
+        });
+
+        // Layout generation counter — bumped when layout changes, triggers re-render
+        let mut perf_layout_gen = use_signal(|| 0u64);
+
+        // Transparency management — read signal inside effect for reactivity
         use_effect(move || {
-            if show_chart {
-                // Enable transparent mode
+            let chart_on = *SHOW_CHART_SPLIT.read();
+            if chart_on {
                 document::eval(r#"document.documentElement.classList.add('transparent-mode');"#);
+            } else {
+                document::eval(r#"document.documentElement.classList.remove('transparent-mode');"#);
+                *CHART_AREA_BOUNDS.write() = ChartAreaBounds::default();
+            }
+        });
 
-                // Query the chart area bounds after a small delay to ensure DOM is updated
-                let graphics_clone = graphics.clone();
-                spawn(async move {
-                    // Small delay to let the DOM update
-                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        // --- Bounds polling: continuously query chart-render-area position ---
+        {
+            use_future(move || async move {
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-                    // Query the chart-render-area element bounds
-                    // Note: We need to account for devicePixelRatio on high-DPI displays
-                    // getBoundingClientRect returns CSS pixels, but WGPU uses physical pixels
+                    if !*SHOW_CHART_SPLIT.peek() {
+                        continue;
+                    }
+
                     let result = document::eval(
                         r#"
                         const el = document.getElementById('chart-render-area');
@@ -638,65 +699,282 @@ fn PerformanceWithChartToggle() -> Element {
                                 y: rect.y * dpr,
                                 width: rect.width * dpr,
                                 height: rect.height * dpr,
-                                dpr: dpr,
-                                cssX: rect.x,
-                                cssY: rect.y,
-                                cssWidth: rect.width,
-                                cssHeight: rect.height
+                                dpr: dpr
                             });
                         }
                         return "null";
                     "#,
                     );
 
-                    // Parse the result and update bounds
                     match result.await {
                         Ok(value) => {
-                            // Try to get as string first
-                            if let Some(json_str) = value.as_str() {
-                                if json_str != "null" {
-                                    if let Ok(bounds) =
-                                        serde_json::from_str::<serde_json::Value>(json_str)
-                                    {
-                                        // Physical pixel coordinates (scaled by DPR)
-                                        let x = bounds["x"].as_f64().unwrap_or(0.0);
-                                        let y = bounds["y"].as_f64().unwrap_or(0.0);
-                                        let width = bounds["width"].as_f64().unwrap_or(0.0);
-                                        let height = bounds["height"].as_f64().unwrap_or(0.0);
-                                        let dpr = bounds["dpr"].as_f64().unwrap_or(1.0);
-                                        let css_x = bounds["cssX"].as_f64().unwrap_or(0.0);
-                                        let css_y = bounds["cssY"].as_f64().unwrap_or(0.0);
+                            let json_str = value
+                                .as_str()
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| value.to_string());
 
-                                        tracing::info!(
-                                            "Chart bounds: physical=({:.0}, {:.0}, {:.0}x{:.0}), css=({:.0}, {:.0}), dpr={:.2}",
-                                            x, y, width, height, css_x, css_y, dpr
-                                        );
+                            if json_str != "null" && json_str != "\"null\"" {
+                                if let Ok(parsed) =
+                                    serde_json::from_str::<serde_json::Value>(&json_str)
+                                {
+                                    let x = parsed["x"].as_f64().unwrap_or(0.0);
+                                    let y = parsed["y"].as_f64().unwrap_or(0.0);
+                                    let width = parsed["width"].as_f64().unwrap_or(0.0);
+                                    let height = parsed["height"].as_f64().unwrap_or(0.0);
+                                    let dpr = parsed["dpr"].as_f64().unwrap_or(1.0);
 
-                                        // Update the global signal (store physical pixel coordinates)
-                                        *CHART_AREA_BOUNDS.write() =
-                                            ChartAreaBounds::new(x, y, width, height);
-
-                                        // Render bounding box at those coordinates
-                                        if let Ok(mut gfx) = graphics_clone.lock() {
-                                            gfx.render_bounds(x, y, width, height);
+                                    if width > 0.0 && height > 0.0 {
+                                        let current = *CHART_AREA_BOUNDS.peek();
+                                        if (current.x - x).abs() > 1.0
+                                            || (current.y - y).abs() > 1.0
+                                            || (current.width - width).abs() > 1.0
+                                            || (current.height - height).abs() > 1.0
+                                        {
+                                            *CHART_AREA_BOUNDS.write() =
+                                                ChartAreaBounds::new(x, y, width, height, dpr);
                                         }
-                                        dioxus::desktop::window().window.request_redraw();
                                     }
                                 }
                             }
                         }
+                        Err(_) => {}
+                    }
+                }
+            });
+        }
+
+        // --- Layout effect: parse + layout chart when source changes ---
+        {
+            use_effect(move || {
+                let source = SESSION_CHART_SOURCE
+                    .read()
+                    .clone()
+                    .unwrap_or_else(|| CHART_SOURCE.read().clone());
+                let bounds = *CHART_AREA_BOUNDS.read();
+                let chart_visible = *SHOW_CHART_SPLIT.read();
+
+                tracing::debug!(
+                    "Perf layout effect: visible={}, bounds=({:.0},{:.0} {:.0}x{:.0})",
+                    chart_visible,
+                    bounds.x,
+                    bounds.y,
+                    bounds.width,
+                    bounds.height
+                );
+
+                if !chart_visible || !bounds.is_valid() {
+                    return;
+                }
+
+                // Always use paginated mode (Page) for the performance view
+                if let Some(ref manager_rc) = *perf_layout_manager.read() {
+                    let mut manager = manager_rc.borrow_mut();
+                    match manager.parse_and_layout(&source, bounds.width, false) {
+                        Ok(true) => {
+                            perf_layout_gen.set(perf_layout_gen() + 1);
+                            tracing::debug!(
+                                "Perf chart layout done (gen {}), pages={}",
+                                perf_layout_gen(),
+                                manager.total_pages()
+                            );
+                        }
+                        Ok(false) => {}
                         Err(e) => {
-                            tracing::warn!("Failed to get chart area bounds: {:?}", e);
+                            tracing::warn!("Perf chart parse error: {}", e);
                         }
                     }
-                });
-            } else {
-                // Disable transparent mode
-                document::eval(r#"document.documentElement.classList.remove('transparent-mode');"#);
-                // Clear bounds
-                *CHART_AREA_BOUNDS.write() = ChartAreaBounds::default();
-            }
-        });
+                } else {
+                    tracing::error!("Perf layout: manager is None!");
+                }
+            });
+        }
+
+        // --- Render effect: auto-follow cursor OR manual viewport, render scene ---
+        {
+            let graphics_clone = graphics.clone();
+            use_effect(move || {
+                let current_cursor_tick = *CHART_CURSOR_TICK.read();
+                let _gen = perf_layout_gen(); // Subscribe to layout changes
+                let bounds = *CHART_AREA_BOUNDS.read();
+                let chart_visible = *SHOW_CHART_SPLIT.read();
+                let perf_vp = *PERF_CHART_VIEWPORT.read();
+                let hover_point = *PERF_CHART_HOVER.read();
+                let pending_click = *PERF_CHART_CLICK.read();
+                let active_song_index = ACTIVE_INDICES.read().song_index;
+                let active_transport =
+                    active_song_index.and_then(|idx| SONG_TRANSPORT.read().get(&idx).cloned());
+                let playback_musical = active_transport
+                    .as_ref()
+                    .and_then(|transport| transport.position.musical);
+                let playback_is_playing = active_transport
+                    .as_ref()
+                    .map(|transport| transport.is_playing)
+                    .unwrap_or(false);
+
+                if !chart_visible || !bounds.is_valid() {
+                    return;
+                }
+
+                if let Some(ref manager_rc) = *perf_layout_manager.read() {
+                    let mut manager = manager_rc.borrow_mut();
+                    if manager.layout_result().is_none() {
+                        return;
+                    }
+
+                    let mut cursor_tick = current_cursor_tick;
+
+                    // Follow live DAW playback by resolving current musical position into chart tick.
+                    if playback_is_playing {
+                        if let Some(musical) = playback_musical {
+                            if let Some(playback_tick) = manager.tick_for_musical_position(
+                                musical.measure,
+                                musical.beat,
+                                musical.subdivision,
+                            ) {
+                                cursor_tick = playback_tick;
+                                if playback_tick != current_cursor_tick {
+                                    *CHART_CURSOR_TICK.write() = playback_tick;
+                                }
+                            }
+                        }
+                    }
+
+                    // Click-to-seek from performance chart area.
+                    if let Some((scene_x, scene_y)) = pending_click {
+                        *PERF_CHART_CLICK.write() = None;
+                        if let Some(tick) = manager.tick_at_scene_point(scene_x, scene_y) {
+                            cursor_tick = tick;
+                            if tick != current_cursor_tick {
+                                *CHART_CURSOR_TICK.write() = tick;
+                            }
+
+                            if let Some(song_index) = active_song_index {
+                                if let Some((measure, beat, subdivision)) =
+                                    manager.musical_position_at_tick(tick)
+                                {
+                                    spawn(async move {
+                                        let _ = Session::get()
+                                            .setlist()
+                                            .seek_to_musical_position(
+                                                song_index,
+                                                daw_proto::MusicalPosition::new(
+                                                    measure,
+                                                    beat,
+                                                    subdivision,
+                                                ),
+                                            )
+                                            .await;
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    // Find which page the cursor is on (needed for base_scale in both modes)
+                    let (page_num, sys_idx) =
+                        manager.system_for_tick(cursor_tick).unwrap_or((1, 0));
+
+                    // Compute base_scale: fits page width into viewport at zoom=1.0
+                    let page_width = manager
+                        .layout_result()
+                        .and_then(|r| r.pages.iter().find(|p| p.number == page_num))
+                        .map(|p| p.width)
+                        .unwrap_or(595.0);
+
+                    let pad_physical = 20.0 * bounds.dpr;
+                    let available_width = bounds.width - pad_physical * 2.0;
+                    let base_scale = if available_width > 0.0 && page_width > 0.0 {
+                        available_width / page_width
+                    } else {
+                        bounds.dpr
+                    };
+
+                    // Expose base_scale for mouse coordinate conversion in UI
+                    if (*PERF_CHART_BASE_SCALE.peek() - base_scale).abs() > 0.001 {
+                        *PERF_CHART_BASE_SCALE.write() = base_scale;
+                    }
+
+                    // Compute effective scale (base * user zoom)
+                    let scale = base_scale * perf_vp.zoom;
+
+                    let (scroll_x, scroll_y) = if perf_vp.auto_follow {
+                        // Auto-follow: compute scroll from cursor position
+                        let sy = manager
+                            .scroll_y_for_system(page_num, sys_idx, scale, 1.0, bounds.dpr)
+                            .unwrap_or(0.0);
+
+                        let page_x_offset = manager
+                            .layout_result()
+                            .and_then(|r| {
+                                r.pages
+                                    .iter()
+                                    .find(|p| p.number == page_num)
+                                    .map(|p| p.x_offset)
+                            })
+                            .unwrap_or(0.0);
+                        let sx = page_x_offset * scale / bounds.dpr;
+
+                        // Keep scroll values in sync so switching to manual mode
+                        // preserves the current view position instead of jumping to 0,0
+                        {
+                            let current = PERF_CHART_VIEWPORT.peek();
+                            if (current.scroll_x - sx).abs() > 0.5
+                                || (current.scroll_y - sy).abs() > 0.5
+                            {
+                                drop(current);
+                                let mut vp = PERF_CHART_VIEWPORT.write();
+                                vp.scroll_x = sx;
+                                vp.scroll_y = sy;
+                            }
+                        }
+
+                        (sx, sy)
+                    } else {
+                        // Manual mode: use user's scroll values directly
+                        (perf_vp.scroll_x, perf_vp.scroll_y)
+                    };
+
+                    let transform = Affine::translate((
+                        pad_physical - scroll_x * bounds.dpr,
+                        pad_physical - scroll_y * bounds.dpr,
+                    )) * Affine::scale(scale);
+
+                    let mut scene = vello::Scene::new();
+
+                    let cursor = if *CHART_CURSOR_VISIBLE.peek() {
+                        Some(cursor_tick)
+                    } else {
+                        None
+                    };
+
+                    manager.render_to_scene(
+                        &mut scene,
+                        bounds.width,
+                        bounds.height,
+                        transform,
+                        cursor,
+                        hover_point,
+                    );
+
+                    if let Ok(mut gfx) = graphics_clone.lock() {
+                        let win_size = dioxus::desktop::window().window.inner_size();
+                        let (sw, sh) = gfx.size();
+                        if sw != win_size.width || sh != win_size.height {
+                            gfx.resize(win_size.width, win_size.height);
+                        }
+
+                        gfx.render_chart_scene(
+                            &scene,
+                            bounds.x,
+                            bounds.y,
+                            bounds.width,
+                            bounds.height,
+                        );
+                    }
+                    dioxus::desktop::window().window.request_redraw();
+                }
+            });
+        }
     }
 
     rsx! {
@@ -803,6 +1081,43 @@ fn ChartView() -> Element {
                         Ok(true) => {
                             layout_generation.set(layout_generation() + 1);
                             tracing::info!("Chart layout updated (gen {})", layout_generation());
+
+                            // Eagerly write base_scale so navigation functions have it immediately
+                            let base_scale = manager.fit_to_width_scale(bounds.width, bounds.dpr);
+                            *CHART_BASE_SCALE.write() = base_scale;
+
+                            // Populate page metadata for navigation UI
+                            if let Some(metadata) = manager.page_metadata() {
+                                let total = metadata.len() as u32;
+                                let mut info = CHART_PAGE_INFO.write();
+                                info.total_pages = total.max(1);
+                                info.page_metadata = metadata;
+                                // Clamp current page if layout now has fewer pages
+                                if info.current_page > total {
+                                    info.current_page = total.max(1);
+                                }
+                            }
+
+                            // Apply FullPage zoom on initial layout (when zoom is still default)
+                            if !snippet_mode {
+                                let vp = *CHART_VIEWPORT.peek();
+                                if vp.zoom_level == keyflow_ui::SemanticZoomLevel::FullPage
+                                    && (vp.zoom - 1.0).abs() < 0.01
+                                    && vp.scroll_y.abs() < 0.01
+                                {
+                                    // Compute FullPage zoom: fit entire page in viewport
+                                    if let Some(page) =
+                                        manager.layout_result().and_then(|r| r.pages.first())
+                                    {
+                                        if page.height > 0.0 && base_scale > 0.0 {
+                                            let zoom = bounds.height / (page.height * base_scale);
+                                            let mut vp = CHART_VIEWPORT.write();
+                                            vp.zoom = zoom.clamp(0.1, 8.0);
+                                            vp.zoom_level = keyflow_ui::SemanticZoomLevel::FullPage;
+                                        }
+                                    }
+                                }
+                            }
                         }
                         Ok(false) => {} // Nothing changed, caches hit
                         Err(e) => {
@@ -824,6 +1139,17 @@ fn ChartView() -> Element {
             use_effect(move || {
                 let viewport = *CHART_VIEWPORT.read();
                 let _gen = layout_generation(); // Subscribe to layout changes
+                let active_song_index = ACTIVE_INDICES.read().song_index;
+                let active_transport =
+                    active_song_index.and_then(|idx| SONG_TRANSPORT.read().get(&idx).cloned());
+                let playback_musical = active_transport
+                    .as_ref()
+                    .and_then(|transport| transport.position.musical);
+                let playback_is_playing = active_transport
+                    .as_ref()
+                    .map(|transport| transport.is_playing)
+                    .unwrap_or(false);
+                let current_cursor_tick = *CHART_CURSOR_TICK.read();
 
                 // Peek bounds — don't subscribe. Bounds changes don't need re-render
                 // unless they also change the layout (handled by layout effect).
@@ -849,7 +1175,116 @@ fn ChartView() -> Element {
                         pad - viewport.scroll_y * bounds.dpr,
                     )) * Affine::scale(base_scale * viewport.zoom);
 
-                    manager.render_to_scene(&mut scene, bounds.width, bounds.height, transform);
+                    // Expose base_scale for UI navigation functions
+                    if (*CHART_BASE_SCALE.peek() - base_scale).abs() > 0.001 {
+                        *CHART_BASE_SCALE.write() = base_scale;
+                    }
+
+                    // Derive current page from scroll position (pages are horizontal)
+                    let current_page = manager.current_page_for_scroll(
+                        viewport.scroll_x,
+                        base_scale,
+                        viewport.zoom,
+                        bounds.dpr,
+                    );
+                    {
+                        let info = CHART_PAGE_INFO.peek();
+                        if info.current_page != current_page
+                            || info.zoom_level != viewport.zoom_level
+                        {
+                            drop(info);
+                            let mut info = CHART_PAGE_INFO.write();
+                            info.current_page = current_page;
+                            info.zoom_level = viewport.zoom_level;
+                        }
+                    }
+
+                    let mut cursor_tick = current_cursor_tick;
+
+                    // Follow DAW transport while playback is running.
+                    if playback_is_playing {
+                        if let Some(musical) = playback_musical {
+                            if let Some(playback_tick) = manager.tick_for_musical_position(
+                                musical.measure,
+                                musical.beat,
+                                musical.subdivision,
+                            ) {
+                                cursor_tick = playback_tick;
+                                if playback_tick != current_cursor_tick {
+                                    *CHART_CURSOR_TICK.write() = playback_tick;
+                                }
+                            }
+                        }
+                    }
+
+                    // Process click-to-position: convert scene point → tick
+                    // Copy the value out before any writes to avoid borrow conflicts
+                    let pending_click = *CHART_CURSOR_SCENE_CLICK.peek();
+                    if let Some((scene_x, scene_y)) = pending_click {
+                        // Clear first, then write tick — avoids holding peek borrow across writes
+                        *CHART_CURSOR_SCENE_CLICK.write() = None;
+                        if let Some(tick) = manager.tick_at_scene_point(scene_x, scene_y) {
+                            tracing::info!(
+                                "Click-to-position: scene=({:.1},{:.1}) → tick={}",
+                                scene_x,
+                                scene_y,
+                                tick
+                            );
+                            cursor_tick = tick;
+                            if tick != current_cursor_tick {
+                                *CHART_CURSOR_TICK.write() = tick;
+                            }
+
+                            if let Some(song_index) = active_song_index {
+                                if let Some((measure, beat, subdivision)) =
+                                    manager.musical_position_at_tick(tick)
+                                {
+                                    spawn(async move {
+                                        let _ = Session::get()
+                                            .setlist()
+                                            .seek_to_musical_position(
+                                                song_index,
+                                                daw_proto::MusicalPosition::new(
+                                                    measure,
+                                                    beat,
+                                                    subdivision,
+                                                ),
+                                            )
+                                            .await;
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    // Read cursor state for rendering (subscribe so effect re-fires on click)
+                    let cursor_tick = if *CHART_CURSOR_VISIBLE.peek() {
+                        Some(cursor_tick)
+                    } else {
+                        // Still subscribe even when hidden, so toggling visibility triggers re-render
+                        let _ = *CHART_CURSOR_TICK.read();
+                        None
+                    };
+
+                    // Read hover point for highlight rendering (subscribe so effect re-fires on hover)
+                    let hover_point = *CHART_HOVER_SCENE_POINT.read();
+
+                    manager.render_to_scene(
+                        &mut scene,
+                        bounds.width,
+                        bounds.height,
+                        transform,
+                        cursor_tick,
+                        hover_point,
+                    );
+
+                    // Update musical position display from cursor state
+                    if let Some(tick) = cursor_tick {
+                        let pos = manager.musical_position_for_tick(tick);
+                        if *CHART_CURSOR_POSITION.peek() != pos {
+                            *CHART_CURSOR_POSITION.write() = pos;
+                        }
+                    }
 
                     if let Ok(mut gfx) = graphics_clone.lock() {
                         // Ensure surface matches actual window size (initial size may be stale)

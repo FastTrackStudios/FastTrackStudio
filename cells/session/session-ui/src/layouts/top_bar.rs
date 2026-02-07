@@ -85,6 +85,13 @@ pub fn TopBar(
                     }
 
                     NavTab {
+                        label: "Rig",
+                        tab_id: "rig",
+                        is_active: active_tab == "rig",
+                        on_click: on_tab_click.clone(),
+                    }
+
+                    NavTab {
                         label: "Settings",
                         tab_id: "settings",
                         is_active: active_tab == "settings",
