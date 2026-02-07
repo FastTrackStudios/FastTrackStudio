@@ -210,21 +210,36 @@ pub static SHOW_CHART_SPLIT: GlobalSignal<bool> = Signal::global(|| false);
 /// Chart area bounds in window coordinates (x, y, width, height)
 /// Updated when the chart area is resized or the split view changes
 /// Used by WGPU renderer to know where to draw the chart
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ChartAreaBounds {
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    /// Device pixel ratio (e.g. 2.0 on Retina displays).
+    pub dpr: f64,
+}
+
+impl Default for ChartAreaBounds {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+            dpr: 1.0,
+        }
+    }
 }
 
 impl ChartAreaBounds {
-    pub fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
+    pub fn new(x: f64, y: f64, width: f64, height: f64, dpr: f64) -> Self {
         Self {
             x,
             y,
             width,
             height,
+            dpr,
         }
     }
 
@@ -235,6 +250,51 @@ impl ChartAreaBounds {
 
 pub static CHART_AREA_BOUNDS: GlobalSignal<ChartAreaBounds> =
     Signal::global(ChartAreaBounds::default);
+
+// ============================================================================
+// Performance Chart Viewport
+// ============================================================================
+
+/// Viewport state for the performance chart view (independent of chart editor).
+///
+/// When `auto_follow` is true, the render effect computes scroll automatically
+/// to track the cursor. When false, the user has manually panned/zoomed and
+/// the stored scroll_x/scroll_y/zoom are used directly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PerfChartViewport {
+    pub scroll_x: f64,
+    pub scroll_y: f64,
+    /// Zoom multiplier on top of fit-to-width base scale. 1.0 = fit page width.
+    pub zoom: f64,
+    /// When true, render effect auto-scrolls to follow the cursor.
+    pub auto_follow: bool,
+}
+
+impl Default for PerfChartViewport {
+    fn default() -> Self {
+        Self {
+            scroll_x: 0.0,
+            scroll_y: 0.0,
+            zoom: 1.0,
+            auto_follow: true,
+        }
+    }
+}
+
+pub static PERF_CHART_VIEWPORT: GlobalSignal<PerfChartViewport> =
+    Signal::global(PerfChartViewport::default);
+
+/// Hover point in scene coordinates for the performance chart view.
+/// Separate from CHART_HOVER_SCENE_POINT (which is for the chart editor).
+pub static PERF_CHART_HOVER: GlobalSignal<Option<(f64, f64)>> = Signal::global(|| None);
+
+/// Click point in scene coordinates for the performance chart view.
+/// Written by the UI click handler, consumed by the desktop render loop.
+pub static PERF_CHART_CLICK: GlobalSignal<Option<(f64, f64)>> = Signal::global(|| None);
+
+/// Base scale for the performance chart (fit-to-width scale).
+/// Written by the render effect, read by mouse event handlers for coordinate conversion.
+pub static PERF_CHART_BASE_SCALE: GlobalSignal<f64> = Signal::global(|| 1.0);
 
 // ============================================================================
 // Session singleton

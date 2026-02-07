@@ -24,6 +24,8 @@ eyre.workspace = true
 tracing.workspace = true
 chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
+rayon = "1"
+keyflow = { path = "../../keyflow/keyflow", features = ["text"] }
 
 [dev-dependencies]
 daw-standalone = { path = "../../daw/daw-standalone" }

@@ -12,6 +12,7 @@ use facet::Facet;
 // Re-export section types from keyflow-proto as the single source of truth
 pub use keyflow_proto::sections::SectionType;
 pub use keyflow_proto::sections::colors::{SectionColors, colors_for_section_type};
+pub use keyflow_proto::Chart;
 
 /// A comment marker within a song
 ///
@@ -37,6 +38,21 @@ pub struct Comment {
     /// Whether this comment should only appear in the section progress bar
     /// (marker was prefixed with `>`)
     pub section_only: bool,
+}
+
+/// Chord detected from a MIDI-derived chart source.
+#[derive(Clone, Debug, PartialEq, Facet)]
+pub struct SongDetectedChord {
+    /// Chord symbol text
+    pub symbol: String,
+    /// Start position in PPQ ticks
+    pub start_ppq: i64,
+    /// End position in PPQ ticks
+    pub end_ppq: i64,
+    /// Root pitch in MIDI note numbers
+    pub root_pitch: u8,
+    /// Max velocity observed in chord notes
+    pub velocity: u8,
 }
 
 impl Comment {
@@ -223,7 +239,7 @@ impl Section {
 /// Songs are extracted from DAW projects using markers and regions.
 /// A song typically has a start marker (SONGSTART), end marker (SONGEND),
 /// and regions defining its internal structure (sections).
-#[derive(Clone, Debug, PartialEq, Facet)]
+#[derive(Clone, PartialEq, Facet)]
 pub struct Song {
     /// Unique identifier for this song (UUID or custom string)
     pub id: String,
@@ -247,6 +263,36 @@ pub struct Song {
     pub time_signature: Option<TimeSignature>,
     /// Measure positions within this song (for beat grid display)
     pub measure_positions: Vec<Position>,
+    /// Generated chart text from MIDI analysis (if available)
+    pub chart_text: Option<String>,
+    /// Parsed chart from chart_text for immediate UI use (if available)
+    pub parsed_chart: Option<Chart>,
+    /// Detected chords from the MIDI source used for chart generation
+    pub detected_chords: Vec<SongDetectedChord>,
+    /// Source fingerprint used for cache invalidation/live refresh
+    pub chart_fingerprint: Option<String>,
+}
+
+impl std::fmt::Debug for Song {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Song")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("project_guid", &self.project_guid)
+            .field("start_seconds", &self.start_seconds)
+            .field("end_seconds", &self.end_seconds)
+            .field("count_in_seconds", &self.count_in_seconds)
+            .field("sections", &self.sections)
+            .field("comments", &self.comments)
+            .field("tempo", &self.tempo)
+            .field("time_signature", &self.time_signature)
+            .field("measure_positions", &self.measure_positions)
+            .field("chart_text", &self.chart_text.as_ref().map(|s| s.len()))
+            .field("parsed_chart", &self.parsed_chart.as_ref().map(|_| "parsed"))
+            .field("detected_chords", &self.detected_chords)
+            .field("chart_fingerprint", &self.chart_fingerprint)
+            .finish()
+    }
 }
 
 impl Song {

@@ -4,8 +4,10 @@
 
 use crate::song_builder::SongBuilder;
 use daw_control::Daw;
+use rayon::prelude::*;
 use session_proto::Setlist;
-use tracing::{debug, info, warn};
+use tokio::runtime::Handle;
+use tracing::{debug, warn};
 
 /// Builder for assembling setlists from open DAW projects
 pub struct SetlistBuilder;
@@ -29,19 +31,33 @@ impl SetlistBuilder {
             debug!("  Project {}: {}", i, project.guid());
         }
 
+        let total_projects = projects.len();
+        let tokio_handle = Handle::current();
+
+        // Extract songs in parallel and keep original tab order.
+        let mut results = projects
+            .into_par_iter()
+            .enumerate()
+            .map(|(idx, project)| {
+                let guid = project.guid().to_string();
+                debug!("------------------------------------------------------------");
+                debug!(
+                    "Processing project {}/{}: {}",
+                    idx + 1,
+                    total_projects,
+                    guid
+                );
+
+                let result = tokio_handle.block_on(SongBuilder::build(&project));
+                (idx, guid, result)
+            })
+            .collect::<Vec<_>>();
+
+        results.sort_by_key(|(idx, _, _)| *idx);
+
         let mut songs = Vec::new();
-
-        // Extract song from each project
-        for (idx, project) in projects.iter().enumerate() {
-            debug!("------------------------------------------------------------");
-            debug!(
-                "Processing project {}/{}: {}",
-                idx + 1,
-                projects.len(),
-                project.guid()
-            );
-
-            match SongBuilder::build(project).await {
+        for (_idx, guid, result) in results {
+            match result {
                 Ok(song) => {
                     debug!(
                         "  Song extracted: {} ({} sections)",
@@ -51,11 +67,7 @@ impl SetlistBuilder {
                     songs.push(song);
                 }
                 Err(e) => {
-                    warn!(
-                        "  ✗ Failed to extract song from project {}: {}",
-                        project.guid(),
-                        e
-                    );
+                    warn!("  ✗ Failed to extract song from project {}: {}", guid, e);
                 }
             }
         }

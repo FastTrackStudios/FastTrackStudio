@@ -334,63 +334,59 @@ pub fn SegmentedProgressBar(
     const CHAR_WIDTH_COMMENT_PX: f64 = 4.5; // text-[10px] - lenient estimate
     const SECTION_PADDING_PX: f64 = 8.0; // minimal padding
 
-    // Memoize static section data - only recalculates when sections change
-    let sections_for_memo = sections.clone();
-    let static_section_data = use_memo(move || {
-        sections_for_memo
-            .iter()
-            .enumerate()
-            .map(|(index, section)| {
-                let section_start = section.start_percent;
-                let section_end = section.end_percent;
-                let section_width_percent = section.end_percent - section.start_percent;
+    // Compute static section data from props (text fitting, display names).
+    // Not memoized — recomputes each render so prop changes are always reflected.
+    let static_section_data: Vec<_> = sections
+        .iter()
+        .enumerate()
+        .map(|(index, section)| {
+            let section_start = section.start_percent;
+            let section_end = section.end_percent;
+            let section_width_percent = section.end_percent - section.start_percent;
 
-                // Estimate available pixel width for this section
-                let section_width_px =
-                    (section_width_percent / 100.0) * ESTIMATED_BAR_WIDTH_PX - SECTION_PADDING_PX;
+            // Estimate available pixel width for this section
+            let section_width_px =
+                (section_width_percent / 100.0) * ESTIMATED_BAR_WIDTH_PX - SECTION_PADDING_PX;
 
-                // Calculate text widths
-                let name_width_px = section.name.len() as f64 * CHAR_WIDTH_NAME_PX;
-                let short_name_width_px = section.short_name.len() as f64 * CHAR_WIDTH_NAME_PX;
+            // Calculate text widths
+            let name_width_px = section.name.len() as f64 * CHAR_WIDTH_NAME_PX;
+            let short_name_width_px = section.short_name.len() as f64 * CHAR_WIDTH_NAME_PX;
 
-                // Decide which name to display based on available width
-                let display_name = if name_width_px <= section_width_px {
-                    section.name.clone()
-                } else if short_name_width_px <= section_width_px {
-                    section.short_name.clone()
-                } else {
-                    // Even short name doesn't fit well, but show it anyway
-                    section.short_name.clone()
-                };
+            // Decide which name to display based on available width
+            let display_name = if name_width_px <= section_width_px {
+                section.name.clone()
+            } else if short_name_width_px <= section_width_px {
+                section.short_name.clone()
+            } else {
+                section.short_name.clone()
+            };
 
-                // Show comment if it fits within the section width
-                let comment = if let Some(ref comment_text) = section.comment {
-                    let comment_width_px = comment_text.len() as f64 * CHAR_WIDTH_COMMENT_PX;
-                    if comment_width_px <= section_width_px {
-                        Some(comment_text.clone())
-                    } else {
-                        None
-                    }
+            // Show comment if it fits within the section width
+            let comment = if let Some(ref comment_text) = section.comment {
+                let comment_width_px = comment_text.len() as f64 * CHAR_WIDTH_COMMENT_PX;
+                if comment_width_px <= section_width_px {
+                    Some(comment_text.clone())
                 } else {
                     None
-                };
+                }
+            } else {
+                None
+            };
 
-                (
-                    index,
-                    section_start,
-                    section_end,
-                    section_width_percent,
-                    section.color.clone(),
-                    display_name,
-                    comment,
-                )
-            })
-            .collect::<Vec<_>>()
-    });
+            (
+                index,
+                section_start,
+                section_end,
+                section_width_percent,
+                section.color.clone(),
+                display_name,
+                comment,
+            )
+        })
+        .collect();
 
-    // Calculate dynamic filled percentages per-frame (this is cheap)
+    // Calculate dynamic filled percentages per-frame
     let section_data: Vec<_> = static_section_data
-        .read()
         .iter()
         .map(
             |(

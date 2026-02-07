@@ -321,22 +321,27 @@ fn PerformanceMainContent() -> Element {
         daw_proto::PlayState::Playing | daw_proto::PlayState::Recording
     );
 
-    // Memoize current song - only changes when song_index changes
+    // Memoize current song - reads ACTIVE_INDICES inside so it re-fires on song change
     let current_song = use_memo(move || {
+        let indices = ACTIVE_INDICES.read();
+        let idx = indices.song_index;
         let setlist = SETLIST_STRUCTURE.read();
-        song_index.and_then(|idx| setlist.songs.get(idx).cloned())
+        idx.and_then(|i| setlist.songs.get(i).cloned())
     });
 
-    // Memoize current section - only changes when song or section index changes
+    // Memoize current section - reads ACTIVE_INDICES inside so it re-fires on section change
     let current_section = use_memo(move || {
+        let indices = ACTIVE_INDICES.read();
+        let sec_idx = indices.section_index;
         current_song
             .read()
             .as_ref()
-            .and_then(|s| section_index.and_then(|idx| s.sections.get(idx).cloned()))
+            .and_then(|s| sec_idx.and_then(|idx| s.sections.get(idx).cloned()))
     });
 
-    // Memoize progress sections - only recalculates when current song changes
+    // Memoize progress sections - reads ACTIVE_INDICES to ensure reactivity on song change
     let progress_sections = use_memo(move || {
+        let _indices = ACTIVE_INDICES.read();
         current_song
             .read()
             .as_ref()
@@ -449,8 +454,9 @@ fn PerformanceMainContent() -> Element {
     // Song key for animation detection (changes when song changes)
     let song_key = song_index.map(|i| i.to_string());
 
-    // Memoize tempo markers - only recalculates when song changes
+    // Memoize tempo markers - reads ACTIVE_INDICES to ensure reactivity on song change
     let tempo_markers = use_memo(move || {
+        let _indices = ACTIVE_INDICES.read();
         current_song
             .read()
             .as_ref()
@@ -482,8 +488,9 @@ fn PerformanceMainContent() -> Element {
             .unwrap_or_default()
     });
 
-    // Memoize comment markers - only recalculates when song changes
+    // Memoize comment markers - reads ACTIVE_INDICES to ensure reactivity on song change
     let comment_markers = use_memo(move || {
+        let _indices = ACTIVE_INDICES.read();
         current_song
             .read()
             .as_ref()
@@ -542,8 +549,9 @@ fn PerformanceMainContent() -> Element {
         .map(|t| t.time_sig_denom)
         .unwrap_or(4);
 
-    // Memoize measure indicators - only recalculates when section or tempo/time sig changes
+    // Memoize measure indicators - reads ACTIVE_INDICES to ensure reactivity on song/section change
     let measure_indicators = use_memo(move || {
+        let _indices = ACTIVE_INDICES.read();
         let section = current_section.read();
         let song = current_song.read();
         section
@@ -602,8 +610,9 @@ fn PerformanceMainContent() -> Element {
             .unwrap_or_default()
     });
 
-    // PERFORMANCE: Memoize section-specific comment markers - only recalculates when section changes
+    // Memoize section-specific comment markers - reads ACTIVE_INDICES to ensure reactivity
     let section_comment_markers = use_memo(move || {
+        let _indices = ACTIVE_INDICES.read();
         let section = current_section.read();
         let song = current_song.read();
         section
@@ -677,19 +686,131 @@ fn PerformanceMainContent() -> Element {
 
             // Chart area (top half, transparent) - only shown in split mode
             if show_chart_split {
-                div {
-                    // ID used by desktop app to query bounds via getBoundingClientRect()
-                    id: "chart-render-area",
-                    class: "relative",
-                    // Use fixed height (50%) and explicit transparent background
-                    // flex-1 was causing issues with height calculation
-                    style: "height: 50%; background: transparent !important; background-color: transparent !important;",
-                    // Floating label in the chart area
-                    div {
-                        class: "absolute top-4 left-4 bg-card/80 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg z-10",
-                        p {
-                            class: "text-sm text-muted-foreground",
-                            "WGPU Chart"
+                {
+                    // Local state for drag tracking
+                    let mut dragging = use_signal(|| false);
+                    let mut dragged = use_signal(|| false);
+                    let mut last_mouse = use_signal(|| (0.0f64, 0.0f64));
+
+                    let perf_vp = *PERF_CHART_VIEWPORT.read();
+
+                    rsx! {
+                        div {
+                            // ID used by desktop app to query bounds via getBoundingClientRect()
+                            id: "chart-render-area",
+                            class: "relative cursor-grab",
+                            // Use fixed height (50%) and explicit transparent background
+                            style: "height: 50%; background: transparent !important; background-color: transparent !important;",
+
+                            // Wheel → zoom (disables auto-follow)
+                            onwheel: move |evt| {
+                                let delta_y = evt.delta().strip_units().y;
+                                let mut vp = PERF_CHART_VIEWPORT.write();
+                                let zoom_factor = if delta_y < 0.0 { 1.05 } else { 0.95 };
+                                vp.zoom = (vp.zoom * zoom_factor).clamp(0.1, 8.0);
+                                vp.auto_follow = false;
+                            },
+
+                            // Mouse drag → pan (disables auto-follow)
+                            onmousedown: move |evt| {
+                                dragging.set(true);
+                                dragged.set(false);
+                                let coords = evt.client_coordinates();
+                                last_mouse.set((coords.x, coords.y));
+                            },
+
+                            onmousemove: move |evt| {
+                                let coords = evt.client_coordinates();
+
+                                if *dragging.read() {
+                                    let (lx, ly) = *last_mouse.read();
+                                    let dx = coords.x - lx;
+                                    let dy = coords.y - ly;
+
+                                    if dx.abs() > 1.0 || dy.abs() > 1.0 {
+                                        dragged.set(true);
+                                    }
+
+                                    let mut vp = PERF_CHART_VIEWPORT.write();
+                                    vp.scroll_x -= dx;
+                                    vp.scroll_y -= dy;
+                                    vp.auto_follow = false;
+
+                                    last_mouse.set((coords.x, coords.y));
+                                    *PERF_CHART_HOVER.write() = None;
+                                } else {
+                                    // Hover: convert CSS coords → scene coords
+                                    let bounds = *CHART_AREA_BOUNDS.peek();
+                                    let vp = *PERF_CHART_VIEWPORT.peek();
+                                    let base_scale = *PERF_CHART_BASE_SCALE.peek();
+
+                                    if base_scale > 0.0 && bounds.dpr > 0.0 {
+                                        let scale = base_scale * vp.zoom;
+                                        let pad = 20.0 * bounds.dpr;
+                                        let px_x = coords.x * bounds.dpr - bounds.x;
+                                        let px_y = coords.y * bounds.dpr - bounds.y;
+                                        let scene_x = (px_x - pad + vp.scroll_x * bounds.dpr) / scale;
+                                        let scene_y = (px_y - pad + vp.scroll_y * bounds.dpr) / scale;
+                                        *PERF_CHART_HOVER.write() = Some((scene_x, scene_y));
+                                    }
+                                }
+                            },
+
+                            onmouseup: move |evt| {
+                                if !*dragged.read() {
+                                    // Treat mouse-up without drag as click-to-seek.
+                                    let coords = evt.client_coordinates();
+                                    let bounds = *CHART_AREA_BOUNDS.peek();
+                                    let vp = *PERF_CHART_VIEWPORT.peek();
+                                    let base_scale = *PERF_CHART_BASE_SCALE.peek();
+
+                                    if base_scale > 0.0 && bounds.dpr > 0.0 {
+                                        let scale = base_scale * vp.zoom;
+                                        let pad = 20.0 * bounds.dpr;
+                                        let px_x = coords.x * bounds.dpr - bounds.x;
+                                        let px_y = coords.y * bounds.dpr - bounds.y;
+                                        let scene_x = (px_x - pad + vp.scroll_x * bounds.dpr) / scale;
+                                        let scene_y = (px_y - pad + vp.scroll_y * bounds.dpr) / scale;
+                                        *PERF_CHART_CLICK.write() = Some((scene_x, scene_y));
+                                    }
+                                }
+
+                                dragging.set(false);
+                                dragged.set(false);
+                            },
+
+                            onmouseleave: move |_| {
+                                dragging.set(false);
+                                dragged.set(false);
+                                *PERF_CHART_HOVER.write() = None;
+                            },
+
+                            // Reset button — only visible when not in auto-follow mode
+                            if !perf_vp.auto_follow {
+                                div {
+                                    class: "absolute top-4 left-4 z-10",
+                                    button {
+                                        class: "bg-card/80 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg text-sm text-muted-foreground hover:text-foreground hover:bg-card/90 transition-colors flex items-center gap-2",
+                                        onclick: move |_| {
+                                            *PERF_CHART_VIEWPORT.write() = PerfChartViewport::default();
+                                        },
+                                        // Reset icon (arrow-counterclockwise)
+                                        svg {
+                                            width: "14",
+                                            height: "14",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            path { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }
+                                            path { d: "M3 3v5h5" }
+                                        }
+                                        "Reset View"
+                                    }
+                                }
+                            }
                         }
                     }
                 }

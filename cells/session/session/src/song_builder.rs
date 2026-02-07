@@ -16,7 +16,7 @@
 use daw_control::Project;
 use daw_proto::{Marker, Region};
 use session_proto::{Comment, Section, SectionType, Song};
-use tracing::debug;
+use tracing::{Level, debug};
 use uuid::Uuid;
 
 /// Builder for extracting Song structure from DAW projects
@@ -35,15 +35,14 @@ impl SongBuilder {
     pub async fn build(project: &Project) -> eyre::Result<Song> {
         debug!("SongBuilder::build for project {}", project.guid());
 
-        // Get project info for the name
-        let project_info = project.info().await?;
+        let markers_api = project.markers();
+        let regions_api = project.regions();
+        let (project_info, markers, regions) =
+            tokio::try_join!(project.info(), markers_api.all(), regions_api.all())?;
         let project_name = &project_info.name;
 
         // Parse song name and artist from project name
         let (song_name, _artist) = Self::parse_project_name(project_name);
-
-        let markers = project.markers().all().await?;
-        let regions = project.regions().all().await?;
         let tempo_map = project.tempo_map();
 
         // Find special markers
@@ -53,34 +52,36 @@ impl SongBuilder {
         let songend_marker = markers.iter().find(|m| Self::is_songend_marker(&m.name));
         let absolute_end_marker = markers.iter().find(|m| m.name == "=END");
 
-        // Debug: log found markers with positions
-        debug!(
-            "All markers: {:?}",
-            markers
-                .iter()
-                .map(|m| (&m.name, position_to_seconds(&m.position)))
-                .collect::<Vec<_>>()
-        );
-        debug!(
-            "count_in_marker: {:?}",
-            count_in_marker.map(|m| (&m.name, position_to_seconds(&m.position)))
-        );
-        debug!(
-            "absolute_start_marker (=START): {:?}",
-            absolute_start_marker.map(|m| (&m.name, position_to_seconds(&m.position)))
-        );
-        debug!(
-            "songstart_marker: {:?}",
-            songstart_marker.map(|m| (&m.name, position_to_seconds(&m.position)))
-        );
-        debug!(
-            "songend_marker: {:?}",
-            songend_marker.map(|m| (&m.name, position_to_seconds(&m.position)))
-        );
-        debug!(
-            "absolute_end_marker (=END): {:?}",
-            absolute_end_marker.map(|m| (&m.name, position_to_seconds(&m.position)))
-        );
+        if tracing::enabled!(Level::DEBUG) {
+            // Debug: log found markers with positions
+            debug!(
+                "All markers: {:?}",
+                markers
+                    .iter()
+                    .map(|m| (&m.name, position_to_seconds(&m.position)))
+                    .collect::<Vec<_>>()
+            );
+            debug!(
+                "count_in_marker: {:?}",
+                count_in_marker.map(|m| (&m.name, position_to_seconds(&m.position)))
+            );
+            debug!(
+                "absolute_start_marker (=START): {:?}",
+                absolute_start_marker.map(|m| (&m.name, position_to_seconds(&m.position)))
+            );
+            debug!(
+                "songstart_marker: {:?}",
+                songstart_marker.map(|m| (&m.name, position_to_seconds(&m.position)))
+            );
+            debug!(
+                "songend_marker: {:?}",
+                songend_marker.map(|m| (&m.name, position_to_seconds(&m.position)))
+            );
+            debug!(
+                "absolute_end_marker (=END): {:?}",
+                absolute_end_marker.map(|m| (&m.name, position_to_seconds(&m.position)))
+            );
+        }
 
         // Legacy marker support
         // Note: =START is the absolute start (including count-in), not SONGSTART
@@ -174,16 +175,18 @@ impl SongBuilder {
         };
 
         debug!("Extracted {} sections", sections.len());
-        for (i, section) in sections.iter().enumerate() {
-            debug!(
-                "  Section[{}]: '{}' type={:?} start={:.3} end={:.3} duration={:.3}",
-                i,
-                section.name,
-                section.section_type,
-                section.start_seconds,
-                section.end_seconds,
-                section.end_seconds - section.start_seconds
-            );
+        if tracing::enabled!(Level::DEBUG) {
+            for (i, section) in sections.iter().enumerate() {
+                debug!(
+                    "  Section[{}]: '{}' type={:?} start={:.3} end={:.3} duration={:.3}",
+                    i,
+                    section.name,
+                    section.section_type,
+                    section.start_seconds,
+                    section.end_seconds,
+                    section.end_seconds - section.start_seconds
+                );
+            }
         }
 
         // Add Count-In section at the beginning if there's a count-in
@@ -251,11 +254,13 @@ impl SongBuilder {
 
         // Log final sections list
         debug!("Final sections after adding Count-In/End:");
-        for (i, section) in sections.iter().enumerate() {
-            debug!(
-                "  Final[{}]: '{}' start={:.3} end={:.3}",
-                i, section.name, section.start_seconds, section.end_seconds
-            );
+        if tracing::enabled!(Level::DEBUG) {
+            for (i, section) in sections.iter().enumerate() {
+                debug!(
+                    "  Final[{}]: '{}' start={:.3} end={:.3}",
+                    i, section.name, section.start_seconds, section.end_seconds
+                );
+            }
         }
 
         // Get tempo and time signature at song start
@@ -332,18 +337,20 @@ impl SongBuilder {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        debug!("Extracted {} comments", comments.len());
-        for comment in &comments {
-            debug!(
-                "  Comment: '{}' at {:.3}s{}",
-                comment.text,
-                comment.position_seconds,
-                if comment.is_count_in {
-                    " (count-in)"
-                } else {
-                    ""
-                }
-            );
+        if tracing::enabled!(Level::DEBUG) {
+            debug!("Extracted {} comments", comments.len());
+            for comment in &comments {
+                debug!(
+                    "  Comment: '{}' at {:.3}s{}",
+                    comment.text,
+                    comment.position_seconds,
+                    if comment.is_count_in {
+                        " (count-in)"
+                    } else {
+                        ""
+                    }
+                );
+            }
         }
 
         Ok(Song {
@@ -358,6 +365,10 @@ impl SongBuilder {
             tempo,
             time_signature: time_sig,
             measure_positions,
+            chart_text: None,
+            parsed_chart: None,
+            detected_chords: Vec::new(),
+            chart_fingerprint: None,
         })
     }
 

@@ -63,7 +63,9 @@ pub mod signals;
 pub use layouts::top_bar::{ConnectionState, TopBar, VERSION};
 pub use layouts::PerformanceLayout;
 pub use signals::{
-    ChartAreaBounds, LatencyAction, LatencyInfo, LatencyMeasurement, LatencyTracker, Session,
-    TransportState, ACTIVE_INDICES, AUDIO_LATENCY_SECONDS, CHART_AREA_BOUNDS, LATENCY_INFO,
-    LATENCY_TRACKER, PLAYBACK_STATE, SETLIST_STRUCTURE, SHOW_CHART_SPLIT, SONG_TRANSPORT,
+    ChartAreaBounds, LatencyAction, LatencyInfo, LatencyMeasurement, LatencyTracker,
+    PerfChartViewport, Session, TransportState, ACTIVE_INDICES, AUDIO_LATENCY_SECONDS,
+    CHART_AREA_BOUNDS, LATENCY_INFO, LATENCY_TRACKER, PERF_CHART_BASE_SCALE, PERF_CHART_CLICK,
+    PERF_CHART_HOVER, PERF_CHART_VIEWPORT, PLAYBACK_STATE, SETLIST_STRUCTURE, SHOW_CHART_SPLIT,
+    SONG_TRANSPORT,
 };

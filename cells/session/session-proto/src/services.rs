@@ -76,6 +76,8 @@ impl Default for SongTransportState {
 pub enum SetlistEvent {
     /// Setlist was changed/rebuilt
     SetlistChanged(Setlist),
+    /// A single song entry was hydrated/updated in-place
+    SongHydrated { index: usize, song: Song },
     /// Active indices changed (which song/section is "current")
     ActiveIndicesChanged(ActiveIndices),
     /// Transport state updated for one or more songs
