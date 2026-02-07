@@ -1,0 +1,19 @@
+[package]
+name = "signal"
+description = "Signal — rig control domain types, gapless module engine, mock service, and defaults"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+signal-proto = { path = "../signal-proto" }
+uuid = { version = "1.0", features = ["v4", "v5"] }
+facet = { workspace = true, features = ["uuid"] }
+roam.workspace = true
+async-trait = "0.1"
+tokio = { version = "1", features = ["time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+
+[lints]
+workspace = true
