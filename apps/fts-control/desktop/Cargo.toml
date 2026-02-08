@@ -58,18 +58,28 @@ keyflow = { path = "../../../cells/keyflow/keyflow", features = ["text"] }
 signal-ui = { path = "../../../cells/signal/signal-ui", default-features = false }
 signal-control = { path = "../../../cells/signal/signal-control" }
 
+# Dock modular layout system
+dock-dioxus = { path = "../../../cells/dock/dock-dioxus", default-features = false }
+dock-proto = { path = "../../../cells/dock/dock-proto" }
+
+# Actions system
+actions-proto.workspace = true
+actions-keybindings.workspace = true
+actions-standalone.workspace = true
+
 # Chart engraver
 engraver-proto = { path = "../../../cells/keyflow/engraver-proto", features = ["engraver"] }
+mimalloc = "0.1"
 
 [features]
 # Default to desktop (Wry/WebView) renderer - fast and stable
 default = ["desktop"]
 
 # Desktop renderer using Wry/WebView (recommended)
-desktop = ["dioxus", "session-ui/web", "keyflow-ui/web", "signal-ui/web"]
+desktop = ["dioxus", "session-ui/web", "keyflow-ui/web", "signal-ui/web", "dock-dioxus/web"]
 
 # Native GPU-accelerated renderer using Blitz (experimental)
-native = ["dioxus-native", "session-ui/native", "keyflow-ui/native", "signal-ui/native"]
+native = ["dioxus-native", "session-ui/native", "keyflow-ui/native", "signal-ui/native", "dock-dioxus/native"]
 
 # Enable Blitz's built-in frame time logging (only works with native feature)
 log-frame-times = ["dioxus-native/log-frame-times"]

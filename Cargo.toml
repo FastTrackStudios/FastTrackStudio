@@ -2,6 +2,7 @@
 members = [
     "cells/*/*",
     "crates/*/*",
+    "modules/dawfile/*",
     "modules/cell-runtime",
     "modules/host-client",
     "modules/host-runtime",
@@ -9,6 +10,7 @@ members = [
     "modules/actions/actions-proto",
     "modules/actions/actions-registry",
     "modules/actions/actions-standalone",
+    "modules/actions/actions-keybindings",
     "libs/*",
     "xtask",
     "apps/tests/*",
@@ -21,6 +23,7 @@ exclude = [
     "reference/dioxus",
     "reference/anyrender",    # Has its own workspace
     "reference/vello",        # Has its own workspace
+    "reference/dioxus-mosaic", # Reference submodule
 
     "cells/sync/sync",        # Incomplete crate
 ]
@@ -88,6 +91,7 @@ ur-taking-me-with-you = { path = "reference/roam/rust/ur-taking-me-with-you", fe
 shm-primitives = { path = "reference/roam/rust/shm-primitives" }
 
 # Local modules
+dawfile-reaper = { path = "modules/dawfile/dawfile-reaper" }
 integration-tests = { path = "modules/integration-tests" }
 cell-runtime = { path = "modules/cell-runtime" }
 host-client = { path = "modules/host-client" }
@@ -124,6 +128,8 @@ signal-proto = { path = "cells/signal/signal-proto" }
 audio-controls = { path = "cells/signal/audio-controls" }
 signal-control = { path = "cells/signal/signal-control" }
 signal-ui = { path = "cells/signal/signal-ui" }
+dock-proto = { path = "cells/dock/dock-proto" }
+dock-dioxus = { path = "cells/dock/dock-dioxus" }
 gateway-proto = { path = "cells/gateway/gateway-proto" }
 host-manager-proto = { path = "cells/host-manager/host-manager-proto" }
 host-manager = { path = "cells/host-manager/host-manager" }
@@ -132,6 +138,7 @@ daw-reaper = { path = "cells/daw/daw-reaper" }
 actions-proto = { path = "modules/actions/actions-proto" }
 actions-registry = { path = "modules/actions/actions-registry" }
 actions-standalone = { path = "modules/actions/actions-standalone" }
+actions-keybindings = { path = "modules/actions/actions-keybindings" }
 
 # REAPER extension dependencies
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }

@@ -21,7 +21,8 @@ use roam_websocket::WsTransport;
 use session_proto::{SetlistServiceClient, Song};
 use session_ui::{
     ConnectionState, LatencyInfo, Session, TransportState, ACTIVE_INDICES, AUDIO_LATENCY_SECONDS,
-    LATENCY_INFO, LATENCY_TRACKER, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_TRANSPORT,
+    LATENCY_INFO, LATENCY_TRACKER, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS,
+    SONG_TRANSPORT,
 };
 use wasm_bindgen::prelude::*;
 
@@ -406,6 +407,14 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                                 "[fts-control] Setlist changed: {} songs",
                                 setlist.songs.len()
                             ));
+                            let valid_guids: std::collections::HashSet<String> = setlist
+                                .songs
+                                .iter()
+                                .map(|song| song.project_guid.clone())
+                                .collect();
+                            SONG_CHARTS
+                                .write()
+                                .retain(|guid, _| valid_guids.contains(guid));
                             *SETLIST_STRUCTURE.write() = setlist;
                         }
                         session_proto::SetlistEvent::SongHydrated { index, song } => {
@@ -413,6 +422,9 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                             if index < setlist.songs.len() {
                                 setlist.songs[index] = song;
                             }
+                        }
+                        session_proto::SetlistEvent::SongChartHydrated { chart, .. } => {
+                            SONG_CHARTS.write().insert(chart.project_guid.clone(), chart);
                         }
 
                         session_proto::SetlistEvent::ActiveIndicesChanged(indices) => {
@@ -433,54 +445,61 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
 
                             // Get audio latency for compensation (only applied during playback)
                             let audio_latency = *AUDIO_LATENCY_SECONDS.read();
+                            let mut transport_updates: Vec<(usize, TransportState)> =
+                                Vec::with_capacity(transports.len());
+                            let mut active_transport_update: Option<(
+                                f64,
+                                Option<f64>,
+                                Option<usize>,
+                                bool,
+                                bool,
+                            )> = None;
 
-                            // Update SONG_TRANSPORT for ALL songs
-                            let mut song_transport = SONG_TRANSPORT.write();
-                            for transport in transports {
-                                // Apply latency compensation to time position during playback
-                                // This shifts the visual position ahead to match audio output
-                                // Note: We only compensate the time portion, not the musical position
-                                let compensated_position =
-                                    if transport.is_playing && audio_latency > 0.0 {
-                                        // Create a new Position with compensated time
-                                        let compensated_time = transport.position.time.map(|t| {
-                                            daw_proto::TimePosition::from_seconds(
-                                                t.as_seconds() + audio_latency,
+                            {
+                                let setlist = SETLIST_STRUCTURE.read();
+                                let existing_transports = SONG_TRANSPORT.read();
+                                for transport in transports {
+                                    // Apply latency compensation to time position during playback
+                                    // This shifts the visual position ahead to match audio output
+                                    // Note: We only compensate the time portion, not the musical position
+                                    let compensated_position =
+                                        if transport.is_playing && audio_latency > 0.0 {
+                                            // Create a new Position with compensated time
+                                            let compensated_time =
+                                                transport.position.time.map(|t| {
+                                                    daw_proto::TimePosition::from_seconds(
+                                                        t.as_seconds() + audio_latency,
+                                                    )
+                                                });
+                                            daw_proto::Position::new(
+                                                transport.position.musical.clone(),
+                                                compensated_time,
+                                                transport.position.midi.clone(),
                                             )
+                                        } else {
+                                            transport.position.clone()
+                                        };
+
+                                    // Convert loop region from seconds to percentages (0.0-1.0)
+                                    // The loop_region in SongTransportState is already relative to song start
+                                    let loop_region_percent =
+                                        transport.loop_region.as_ref().and_then(|region| {
+                                            setlist.songs.get(transport.song_index).map(|song| {
+                                                let song_duration = song.duration();
+                                                if song_duration > 0.0 {
+                                                    (
+                                                        (region.start_seconds / song_duration)
+                                                            .clamp(0.0, 1.0),
+                                                        (region.end_seconds / song_duration)
+                                                            .clamp(0.0, 1.0),
+                                                    )
+                                                } else {
+                                                    (0.0, 1.0)
+                                                }
+                                            })
                                         });
-                                        daw_proto::Position::new(
-                                            transport.position.musical.clone(),
-                                            compensated_time,
-                                            transport.position.midi.clone(),
-                                        )
-                                    } else {
-                                        transport.position.clone()
-                                    };
 
-                                // Convert loop region from seconds to percentages (0.0-1.0)
-                                // The loop_region in SongTransportState is already relative to song start
-                                let loop_region_percent =
-                                    transport.loop_region.as_ref().and_then(|region| {
-                                        // Get song duration from setlist for percentage calculation
-                                        let setlist = SETLIST_STRUCTURE.read();
-                                        setlist.songs.get(transport.song_index).map(|song| {
-                                            let song_duration = song.duration();
-                                            if song_duration > 0.0 {
-                                                (
-                                                    (region.start_seconds / song_duration)
-                                                        .clamp(0.0, 1.0),
-                                                    (region.end_seconds / song_duration)
-                                                        .clamp(0.0, 1.0),
-                                                )
-                                            } else {
-                                                (0.0, 1.0)
-                                            }
-                                        })
-                                    });
-
-                                song_transport.insert(
-                                    transport.song_index,
-                                    TransportState {
+                                    let next_state = TransportState {
                                         position: compensated_position,
                                         bpm: transport.bpm,
                                         time_sig_num: transport.time_sig_num as i32,
@@ -488,40 +507,81 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                                         is_playing: transport.is_playing,
                                         is_looping: transport.is_looping,
                                         loop_region: loop_region_percent,
-                                    },
-                                );
-
-                                // Update global PLAYBACK_STATE based on ACTIVE song's state
-                                if Some(transport.song_index) == active_song_index {
-                                    let old_playing = *PLAYBACK_STATE.read();
-                                    let new_playing = if transport.is_playing {
-                                        daw_proto::PlayState::Playing
-                                    } else {
-                                        daw_proto::PlayState::Stopped
                                     };
 
-                                    // Check if play state actually changed
-                                    if old_playing != new_playing {
-                                        *PLAYBACK_STATE.write() = new_playing;
+                                    let changed = existing_transports
+                                        .get(&transport.song_index)
+                                        .map(|existing| *existing != next_state)
+                                        .unwrap_or(true);
 
-                                        // Complete latency measurement if we were tracking
-                                        if let Some(latency) =
-                                            LATENCY_TRACKER.write().complete_play_toggle()
-                                        {
-                                            log(&format!(
-                                                "[fts-control] Play toggle latency: {:.1}ms",
-                                                latency
-                                            ));
-                                        }
+                                    if changed {
+                                        transport_updates.push((transport.song_index, next_state));
                                     }
 
-                                    // Also update ACTIVE_INDICES progress from transport
+                                    if Some(transport.song_index) == active_song_index {
+                                        active_transport_update = Some((
+                                            transport.progress,
+                                            transport.section_progress,
+                                            transport.section_index,
+                                            transport.is_playing,
+                                            transport.is_looping,
+                                        ));
+                                    }
+                                }
+                            }
+
+                            if !transport_updates.is_empty() {
+                                let mut song_transport = SONG_TRANSPORT.write();
+                                for (song_index, state) in transport_updates {
+                                    song_transport.insert(song_index, state);
+                                }
+                            }
+
+                            if let Some((
+                                song_progress,
+                                section_progress,
+                                section_index,
+                                is_playing,
+                                is_looping,
+                            )) = active_transport_update
+                            {
+                                let old_playing = *PLAYBACK_STATE.read();
+                                let new_playing = if is_playing {
+                                    daw_proto::PlayState::Playing
+                                } else {
+                                    daw_proto::PlayState::Stopped
+                                };
+
+                                if old_playing != new_playing {
+                                    *PLAYBACK_STATE.write() = new_playing;
+
+                                    // Complete latency measurement if we were tracking
+                                    if let Some(latency) =
+                                        LATENCY_TRACKER.write().complete_play_toggle()
+                                    {
+                                        log(&format!(
+                                            "[fts-control] Play toggle latency: {:.1}ms",
+                                            latency
+                                        ));
+                                    }
+                                }
+
+                                let indices_changed = {
+                                    let current = ACTIVE_INDICES.read();
+                                    current.song_progress != Some(song_progress)
+                                        || current.section_progress != section_progress
+                                        || current.section_index != section_index
+                                        || current.is_playing != is_playing
+                                        || current.looping != is_looping
+                                };
+
+                                if indices_changed {
                                     let mut indices = ACTIVE_INDICES.write();
-                                    indices.song_progress = Some(transport.progress);
-                                    indices.section_progress = transport.section_progress;
-                                    indices.section_index = transport.section_index;
-                                    indices.is_playing = transport.is_playing;
-                                    indices.looping = transport.is_looping;
+                                    indices.song_progress = Some(song_progress);
+                                    indices.section_progress = section_progress;
+                                    indices.section_index = section_index;
+                                    indices.is_playing = is_playing;
+                                    indices.looping = is_looping;
                                 }
                             }
                         }
