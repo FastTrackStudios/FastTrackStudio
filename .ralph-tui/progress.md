@@ -14,6 +14,8 @@
 - **PanelId string bridge**: `PanelId::as_str()` returns stable kebab-case identifiers, `PanelId::from_str_id()` does reverse lookup, `PanelId::register_all()` seeds a PanelRegistry with all built-in panels.
 - **SeaORM entity pattern**: Each entity file uses `#[derive(DeriveEntityModel)]` on a `Model` struct and `#[derive(DeriveRelation)]` on a `Relation` enum. SeaORM auto-generates `Entity`, `Column`, `ActiveModel`, `PrimaryKey` types. Relations use `Related<T>` trait impls. Migrations use `sea-orm-migration` with `MigratorTrait`.
 - **SeaORM migration ordering**: FK-referenced tables must be created before dependent tables. Order: users → presets → snapshots/module_chunks/ratings/preset_versions → sync_metadata.
+- **oauth2 v5 typestate**: `BasicClient` defaults all endpoint generics to `EndpointNotSet`. After calling `set_auth_uri()`/`set_token_uri()`, the client type changes to `EndpointSet` for those positions. Methods like `authorize_url()`, `exchange_code()`, `exchange_refresh_token()` only exist on clients with `EndpointSet` for the relevant endpoints. Use a type alias like `type ConfiguredClient = BasicClient<EndpointSet, ..., EndpointSet>` for the return type.
+- **oauth2 v5 TokenResponse trait**: The `access_token()`, `refresh_token()`, and `expires_in()` methods come from the `TokenResponse` trait which must be explicitly imported: `use oauth2::TokenResponse;`.
 
 ---
 
@@ -137,4 +139,28 @@
   - ModeStack uses owned `HashMap<ModeId, ModeDefinition>` instead of references to avoid lifetime propagation
   - `switch_base()` exits modes top-to-bottom (sub-modes first), then enters the new base
   - `pop()` is a safe no-op when only the base mode remains (stack.len() <= 1)
+---
+
+## 2026-02-08 - roam-test-8xs.36
+- What was implemented:
+  - US-030: Fixed and completed auth system in `cells/sync/` (sync-proto, sync, sync-ui)
+  - Fixed oauth2 v5 typestate API: `build_client()` return type changed from `BasicClient` (all `EndpointNotSet`) to `ConfiguredClient` type alias with correct `EndpointSet` positions
+  - Added `use oauth2::TokenResponse` import for `access_token()`/`refresh_token()`/`expires_in()` methods
+  - Created missing `service/sync_status.rs` implementing `SyncStatusService` trait
+  - Fixed clippy: replaced manual `Default` impls with `#[derive(Default)]` + `#[default]` on `AuthState` and `SyncState`
+  - Fixed unused `AuthToken` import in `service/auth.rs`
+  - Added 36 unit tests across both crates (6 in sync-proto, 30 in sync)
+- Files changed:
+  - `cells/sync/sync-proto/src/auth.rs` (clippy fix: derive Default + 6 tests)
+  - `cells/sync/sync-proto/src/sync_status.rs` (clippy fix: derive Default)
+  - `cells/sync/sync/src/oauth.rs` (fixed oauth2 v5 API: ConfiguredClient type alias, TokenResponse import, type annotations + 7 tests)
+  - `cells/sync/sync/src/service/auth.rs` (removed unused import + 7 tests)
+  - `cells/sync/sync/src/service/sync_status.rs` (new — SyncStatusServiceImpl + 5 tests)
+  - `cells/sync/sync/src/schema.rs` (3 tests)
+  - `cells/sync/sync/src/token_store.rs` (8 tests)
+- **Learnings:**
+  - oauth2 v5 uses compile-time typestate: `BasicClient<HasAuthUrl, HasDeviceAuthUrl, HasIntrospectionUrl, HasRevocationUrl, HasTokenUrl>` where each is `EndpointSet` or `EndpointNotSet`
+  - `TokenResponse` trait must be explicitly imported for `access_token()`/`refresh_token()`/`expires_in()` — they're trait methods, not inherent methods
+  - Type annotations needed on closures like `.map(|d: std::time::Duration| ...)` when the compiler can't infer through long method chains
+  - `#[derive(Default)]` with `#[default]` on enum variants is cleaner than manual impl and satisfies clippy `derivable_impls` lint
 ---
