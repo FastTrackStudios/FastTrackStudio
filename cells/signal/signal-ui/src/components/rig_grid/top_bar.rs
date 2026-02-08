@@ -7,6 +7,7 @@
 //! - Current preset name display
 //! - Connection status indicator
 
+use crate::hooks::graph_history::use_graph_history;
 use crate::hooks::parameter_capture::use_parameter_capture;
 use crate::prelude::*;
 use crate::signals::{RIG_CONNECTED, RIG_CURRENT_PRESET, RIG_LOADING};
@@ -46,6 +47,9 @@ pub fn GuitarRigTopBar(props: GuitarRigTopBarProps) -> Element {
     let preset = RIG_CURRENT_PRESET.read();
     let connected = *RIG_CONNECTED.read();
     let loading = *RIG_LOADING.read();
+
+    // Undo/redo
+    let history = use_graph_history();
 
     // Snapshot naming dialog state
     let mut snapshot_dialog_open = use_signal(|| false);
@@ -99,6 +103,57 @@ pub fn GuitarRigTopBar(props: GuitarRigTopBarProps) -> Element {
                         }
                     }
                     span { "Modules" }
+                }
+
+                // Separator
+                div { class: "w-px h-6 bg-zinc-700" }
+
+                // Undo / Redo buttons
+                {
+                    let undo_cb = history.undo.clone();
+                    let redo_cb = history.redo.clone();
+                    rsx! {
+                        button {
+                            class: "p-2 rounded-lg hover:bg-zinc-800 transition-colors \
+                                    disabled:opacity-30 disabled:cursor-not-allowed",
+                            disabled: !history.can_undo,
+                            title: "Undo (Cmd+Z)",
+                            onclick: move |_| undo_cb.call(()),
+                            // Undo arrow icon (↺)
+                            svg {
+                                class: "w-4 h-4 text-zinc-400",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                view_box: "0 0 24 24",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4",
+                                }
+                            }
+                        }
+                        button {
+                            class: "p-2 rounded-lg hover:bg-zinc-800 transition-colors \
+                                    disabled:opacity-30 disabled:cursor-not-allowed",
+                            disabled: !history.can_redo,
+                            title: "Redo (Cmd+Shift+Z)",
+                            onclick: move |_| redo_cb.call(()),
+                            // Redo arrow icon (↻)
+                            svg {
+                                class: "w-4 h-4 text-zinc-400",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                view_box: "0 0 24 24",
+                                path {
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    d: "M21 10H11a5 5 0 00-5 5v2M21 10l-4-4M21 10l-4 4",
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Separator

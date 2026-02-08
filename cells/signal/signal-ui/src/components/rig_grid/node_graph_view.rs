@@ -18,7 +18,7 @@
 //! browser, rig layout, and other components to share the same graph state.
 
 use crate::prelude::*;
-use crate::signals::{RIG_NODE_GRAPH, RIG_SELECTED_ENTITY, SelectedEntity};
+use crate::signals::{GRAPH_HISTORY, RIG_NODE_GRAPH};
 use dioxus::prelude::dioxus_elements::geometry::WheelDelta;
 use uuid::Uuid;
 
@@ -27,7 +27,6 @@ use super::node_graph::{NodeGraph, NodePosition};
 use super::node_graph_module::ModuleContainer;
 use super::node_graph_node::NodeBlock;
 use super::node_graph_wire::{resolve_all_wires, wire_path_d, WirePath};
-use super::parameter_editor::ParameterEditorModal;
 
 // ── Selection ────────────────────────────────────────────────────────
 
@@ -128,21 +127,8 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
     let mut selection = use_signal(|| Selection::None);
     let mut snap_enabled = use_signal(|| true);
     let mut context_menu = use_signal(|| Option::<ContextMenu>::None);
-    let mut editing_node_id = use_signal(|| Option::<Uuid>::None);
 
     let compact = props.compact;
-
-    // ── Sync local selection → global signal ─────────────────────
-    // This lets the NodePropertyPanel (and other dock panels) react
-    // to what the user clicked on the canvas.
-    use_effect(move || {
-        let entity = match selection() {
-            Selection::Module(id) => Some(SelectedEntity::Module(id)),
-            Selection::Node(id)   => Some(SelectedEntity::Node(id)),
-            _                     => None,
-        };
-        *RIG_SELECTED_ENTITY.write() = entity;
-    });
 
     // ── Read graph from global signal ────────────────────────────
     // Compact mode uses the same full-size graph, just auto-zoomed to fit.
@@ -159,8 +145,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
         last_compact.set(compact);
         let vp_w = 1200.0;
         let vp_h = 700.0;
-        let (fit_zoom, fit_pan_x, fit_pan_y) =
-            calculate_fit(canvas_w, canvas_h, vp_w, vp_h);
+        let (fit_zoom, fit_pan_x, fit_pan_y) = calculate_fit(canvas_w, canvas_h, vp_w, vp_h);
         zoom.set(fit_zoom);
         pan_x.set(fit_pan_x);
         pan_y.set(fit_pan_y);
@@ -194,6 +179,26 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                 context_menu.set(None);
 
                 let key = evt.key();
+                let modifiers = evt.modifiers();
+                let has_cmd_or_ctrl = modifiers.meta() || modifiers.ctrl();
+
+                // Undo: Cmd+Z / Ctrl+Z (without Shift)
+                if has_cmd_or_ctrl && !modifiers.shift() && matches!(&key, Key::Character(c) if c == "z" || c == "Z") {
+                    let mut history = GRAPH_HISTORY.write();
+                    let mut graph = RIG_NODE_GRAPH.write();
+                    history.undo(&mut graph);
+                    return;
+                }
+                // Redo: Cmd+Shift+Z / Ctrl+Y
+                if (has_cmd_or_ctrl && modifiers.shift() && matches!(&key, Key::Character(c) if c == "z" || c == "Z"))
+                    || (has_cmd_or_ctrl && matches!(&key, Key::Character(c) if c == "y" || c == "Y"))
+                {
+                    let mut history = GRAPH_HISTORY.write();
+                    let mut graph = RIG_NODE_GRAPH.write();
+                    history.redo(&mut graph);
+                    return;
+                }
+
                 match key {
                     Key::Delete | Key::Backspace => {
                         match selection() {
@@ -213,13 +218,9 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                         }
                     }
                     Key::Escape => {
-                        if editing_node_id().is_some() {
-                            editing_node_id.set(None);
-                        } else {
-                            selection.set(Selection::None);
-                            wire_draft.set(None);
-                            hovered_port.set(None);
-                        }
+                        selection.set(Selection::None);
+                        wire_draft.set(None);
+                        hovered_port.set(None);
                     }
                     Key::Character(ref c) if c == "f" || c == "F" => {
                         let g = RIG_NODE_GRAPH.read();
@@ -458,13 +459,6 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                                     hovered_port.set(None);
                                 }
                             },
-                            on_node_double_click: {
-                                move |node_id: Uuid| {
-                                    if !compact {
-                                        editing_node_id.set(Some(node_id));
-                                    }
-                                }
-                            },
                             wire_draft_active: has_wire_draft && !compact,
                             hovered_port: hovered_port(),
                         }
@@ -480,12 +474,6 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                                 move |_: Uuid| {
                                     context_menu.set(None);
                                     selection.set(Selection::Node(node_id));
-                                }
-                            },
-                            on_double_click: {
-                                let node_id = node.id;
-                                move |_: Uuid| {
-                                    editing_node_id.set(Some(node_id));
                                 }
                             },
                             on_header_drag_start: {
@@ -765,13 +753,6 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                 } else {
                     rsx! {}
                 }
-            }
-
-            // ── Parameter Editor Modal ──────────────────────
-            ParameterEditorModal {
-                is_open: editing_node_id().is_some(),
-                node_id: editing_node_id().unwrap_or_default(),
-                on_close: move |_: ()| editing_node_id.set(None),
             }
         }
     }

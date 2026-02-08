@@ -89,19 +89,9 @@ pub static RIG_NODE_GRAPH: GlobalSignal<crate::components::rig_grid::node_graph:
 pub static RIG_SNAPSHOTS: GlobalSignal<Vec<crate::components::rig_grid::node_graph::RigSnapshot>> =
     Signal::global(Vec::new);
 
-/// Currently selected entity on the node graph canvas.
+/// Undo/redo history for node graph operations.
 ///
-/// Set by `NodeGraphView` when the user clicks a node or module. Read by
-/// `NodePropertyPanel` to display the selected entity's properties.
-/// `None` means nothing is selected.
-pub static RIG_SELECTED_ENTITY: GlobalSignal<Option<SelectedEntity>> =
-    Signal::global(|| None);
-
-/// What kind of entity is selected on the node graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SelectedEntity {
-    /// A standalone node or a node inside a module.
-    Node(Uuid),
-    /// A module container.
-    Module(Uuid),
-}
+/// Shared globally so that any component (top bar buttons, keyboard shortcuts
+/// in the canvas view, etc.) can trigger undo/redo against the same stack.
+pub static GRAPH_HISTORY: GlobalSignal<crate::components::rig_grid::node_graph::GraphHistory> =
+    Signal::global(crate::components::rig_grid::node_graph::GraphHistory::new);
