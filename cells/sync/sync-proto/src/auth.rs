@@ -19,9 +19,10 @@ impl std::fmt::Display for AuthProvider {
 
 /// Current authentication state
 #[repr(u8)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum AuthState {
     /// No user is authenticated
+    #[default]
     Unauthenticated,
     /// OAuth flow is in progress (waiting for callback)
     Authenticating,
@@ -29,12 +30,6 @@ pub enum AuthState {
     Authenticated,
     /// Authentication failed with an error
     Error(String),
-}
-
-impl Default for AuthState {
-    fn default() -> Self {
-        Self::Unauthenticated
-    }
 }
 
 /// OAuth2 token pair (access + optional refresh)
@@ -65,4 +60,83 @@ pub struct OAuthCallbackParams {
     pub code: String,
     /// CSRF state parameter for validation
     pub state: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
+    #[test]
+    fn test_auth_provider_display() -> Result<()> {
+        // -- Exec & Check
+        assert_eq!(AuthProvider::GitHub.to_string(), "GitHub");
+        assert_eq!(AuthProvider::Google.to_string(), "Google");
+        Ok(())
+    }
+
+    #[test]
+    fn test_auth_state_default() -> Result<()> {
+        // -- Exec
+        let state = AuthState::default();
+
+        // -- Check
+        assert_eq!(state, AuthState::Unauthenticated);
+        Ok(())
+    }
+
+    #[test]
+    fn test_auth_token_not_expired_when_no_expiry() -> Result<()> {
+        // -- Setup
+        let token = AuthToken {
+            access_token: "abc".into(),
+            refresh_token: None,
+            expires_at: None,
+        };
+
+        // -- Check
+        assert!(!token.is_expired());
+        Ok(())
+    }
+
+    #[test]
+    fn test_auth_token_expired_when_past() -> Result<()> {
+        // -- Setup
+        let token = AuthToken {
+            access_token: "abc".into(),
+            refresh_token: None,
+            expires_at: Some(0), // Unix epoch — well in the past
+        };
+
+        // -- Check
+        assert!(token.is_expired());
+        Ok(())
+    }
+
+    #[test]
+    fn test_auth_token_not_expired_when_future() -> Result<()> {
+        // -- Setup
+        let far_future = chrono::Utc::now().timestamp() + 3600;
+        let token = AuthToken {
+            access_token: "abc".into(),
+            refresh_token: Some("refresh".into()),
+            expires_at: Some(far_future),
+        };
+
+        // -- Check
+        assert!(!token.is_expired());
+        Ok(())
+    }
+
+    #[test]
+    fn test_auth_provider_copy_clone() -> Result<()> {
+        // -- Setup
+        let provider = AuthProvider::GitHub;
+        let copied = provider;
+
+        // -- Check
+        assert_eq!(provider, copied);
+        Ok(())
+    }
 }

@@ -185,3 +185,130 @@ impl TokenStore for MockTokenStore {
 }
 
 // endregion: --- MockTokenStore
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
+    fn make_token() -> AuthToken {
+        AuthToken {
+            access_token: "access_123".into(),
+            refresh_token: Some("refresh_456".into()),
+            expires_at: Some(1_700_000_000),
+        }
+    }
+
+    #[test]
+    fn test_mock_token_store_save_and_load() -> Result<()> {
+        // -- Setup
+        let store = MockTokenStore::new();
+        let token = make_token();
+
+        // -- Exec
+        store.save_token(&token)?;
+        let loaded = store.load_token()?;
+
+        // -- Check
+        assert_eq!(loaded, Some(token));
+        Ok(())
+    }
+
+    #[test]
+    fn test_mock_token_store_load_empty() -> Result<()> {
+        // -- Setup
+        let store = MockTokenStore::new();
+
+        // -- Exec & Check
+        assert_eq!(store.load_token()?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mock_token_store_delete() -> Result<()> {
+        // -- Setup
+        let store = MockTokenStore::new();
+        store.save_token(&make_token())?;
+
+        // -- Exec
+        store.delete_token()?;
+
+        // -- Check
+        assert_eq!(store.load_token()?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mock_token_store_provider_roundtrip() -> Result<()> {
+        // -- Setup
+        let store = MockTokenStore::new();
+
+        // -- Exec
+        store.save_provider("GitHub")?;
+
+        // -- Check
+        assert_eq!(store.load_provider()?, Some("GitHub".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_mock_token_store_provider_empty() -> Result<()> {
+        // -- Setup
+        let store = MockTokenStore::new();
+
+        // -- Check
+        assert_eq!(store.load_provider()?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mock_token_store_delete_clears_provider() -> Result<()> {
+        // -- Setup
+        let store = MockTokenStore::new();
+        store.save_token(&make_token())?;
+        store.save_provider("Google")?;
+
+        // -- Exec
+        store.delete_token()?;
+
+        // -- Check
+        assert_eq!(store.load_token()?, None);
+        assert_eq!(store.load_provider()?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mock_token_store_overwrite() -> Result<()> {
+        // -- Setup
+        let store = MockTokenStore::new();
+        store.save_token(&make_token())?;
+
+        let new_token = AuthToken {
+            access_token: "new_access".into(),
+            refresh_token: None,
+            expires_at: None,
+        };
+
+        // -- Exec
+        store.save_token(&new_token)?;
+
+        // -- Check
+        assert_eq!(store.load_token()?, Some(new_token));
+        Ok(())
+    }
+
+    #[test]
+    fn test_stored_token_roundtrip() -> Result<()> {
+        // -- Setup
+        let token = make_token();
+
+        // -- Exec
+        let stored = StoredToken::from(&token);
+        let restored = AuthToken::from(stored);
+
+        // -- Check
+        assert_eq!(restored, token);
+        Ok(())
+    }
+}

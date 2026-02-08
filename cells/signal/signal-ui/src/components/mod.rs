@@ -8,6 +8,9 @@ pub use morph_slider::MorphSlider;
 // Re-export snapshot slots
 pub use snapshot_slots::{SnapshotSlots, SnapshotSlotsPanel, SnapshotSlotsState, SnapshotSlot, RIG_SNAPSHOT_SLOTS};
 
+// Re-export morph slider
+pub use morph_slider::MorphSlider;
+
 // Re-export commonly used components
 pub use rig_grid::{
     GuitarRigGrid, ModuleViewMode, RigViewMode, block_type_color,
