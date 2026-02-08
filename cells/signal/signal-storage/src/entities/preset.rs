@@ -17,7 +17,6 @@ pub struct Model {
     pub data: Json,
     pub is_public: bool,
     pub is_deleted: bool,
-    pub is_favorite: bool,
     pub version: i64,
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
