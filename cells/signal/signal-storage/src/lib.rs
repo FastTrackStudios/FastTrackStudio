@@ -8,6 +8,8 @@
 pub mod entities;
 pub mod error;
 pub mod migration;
+pub mod tagging;
 
 pub use error::{StorageError, StorageResult};
 pub use migration::Migrator;
+pub use tagging::{PresetCategory, TaggingService};

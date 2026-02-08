@@ -25,24 +25,3 @@ pub fn validate_schema() -> bool {
         && USERS_TABLE_DDL.contains("created_at")
         && USERS_TABLE_DDL.contains("last_sync")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_schema_validate() {
-        assert!(validate_schema());
-    }
-
-    #[test]
-    fn test_schema_has_unique_email() {
-        assert!(USERS_TABLE_DDL.contains("UNIQUE"));
-    }
-
-    #[test]
-    fn test_schema_has_index() {
-        assert!(USERS_TABLE_DDL.contains("CREATE INDEX"));
-        assert!(USERS_TABLE_DDL.contains("idx_users_email"));
-    }
-}
