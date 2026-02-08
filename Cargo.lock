@@ -10614,6 +10614,8 @@ dependencies = [
  "lucide-dioxus",
  "nucleo-matcher",
  "roam",
+ "serde",
+ "serde_json",
  "signal-control",
  "tokio",
  "tracing",

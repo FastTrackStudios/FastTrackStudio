@@ -12,7 +12,49 @@
 - **Lost work across worktrees**: Bead marked complete doesn't mean the code exists on current branch. Always verify files exist before depending on prior beads.
 - **Workspace test workaround**: `cargo test -p dock-proto` may fail due to broken workspace members (sync-proto missing src). Use `--manifest-path` to test isolated crates.
 - **PanelId string bridge**: `PanelId::as_str()` returns stable kebab-case identifiers, `PanelId::from_str_id()` does reverse lookup, `PanelId::register_all()` seeds a PanelRegistry with all built-in panels.
+- **SeaORM entity pattern**: Each entity file uses `#[derive(DeriveEntityModel)]` on a `Model` struct and `#[derive(DeriveRelation)]` on a `Relation` enum. SeaORM auto-generates `Entity`, `Column`, `ActiveModel`, `PrimaryKey` types. Relations use `Related<T>` trait impls. Migrations use `sea-orm-migration` with `MigratorTrait`.
+- **SeaORM migration ordering**: FK-referenced tables must be created before dependent tables. Order: users → presets → snapshots/module_chunks/ratings/preset_versions → sync_metadata.
+- **Serde remote derive for foreign types**: When a type from another crate lacks serde derives (e.g., `BlockType` using `Facet`), use `#[serde(remote = "ForeignType")]` on a local shadow enum mirroring its variants, then annotate fields with `#[serde(with = "ShadowDef")]`.
 
+---
+
+## 2026-02-08 - roam-test-8xs.29
+- What was implemented:
+  - US-025: Rewrote `cells/signal/signal-storage/` from sea-query + sqlx to SeaORM entities and migrations
+  - 7 SeaORM entity models with `DeriveEntityModel`: user, preset, snapshot, module_chunk, rating, sync_metadata, preset_version
+  - 7 versioned migrations with `MigratorTrait` + `MigrationTrait` (up/down methods)
+  - Full relation graph: User→Presets, Preset→Snapshots/ModuleChunks/Ratings/Versions, Rating→User+Preset, PresetVersion→User+Preset
+  - Unique constraints: user email, rating (user+preset), preset_version (preset+version), sync_metadata (entity_type+entity_id)
+  - Foreign keys with appropriate cascade/set-null delete actions
+  - Error type updated from `sqlx::Error` to `sea_orm::DbErr`
+  - Removed old sea-query/sqlx modules (cloud.rs, config.rs, schema.rs, service.rs)
+- Files changed:
+  - `cells/signal/signal-storage/Cargo.toml` (replaced sea-query/sqlx with sea-orm/sea-orm-migration)
+  - `cells/signal/signal-storage/src/lib.rs` (rewired to entities + migration modules)
+  - `cells/signal/signal-storage/src/error.rs` (updated Database variant from sqlx::Error to DbErr)
+  - `cells/signal/signal-storage/src/entities/mod.rs` (new)
+  - `cells/signal/signal-storage/src/entities/user.rs` (new)
+  - `cells/signal/signal-storage/src/entities/preset.rs` (new)
+  - `cells/signal/signal-storage/src/entities/snapshot.rs` (new)
+  - `cells/signal/signal-storage/src/entities/module_chunk.rs` (new)
+  - `cells/signal/signal-storage/src/entities/rating.rs` (new)
+  - `cells/signal/signal-storage/src/entities/sync_metadata.rs` (new)
+  - `cells/signal/signal-storage/src/entities/preset_version.rs` (new)
+  - `cells/signal/signal-storage/src/migration/mod.rs` (new — Migrator with 7 migrations)
+  - `cells/signal/signal-storage/src/migration/m20250101_000001_create_users.rs` (new)
+  - `cells/signal/signal-storage/src/migration/m20250101_000002_create_presets.rs` (new)
+  - `cells/signal/signal-storage/src/migration/m20250101_000003_create_snapshots.rs` (new)
+  - `cells/signal/signal-storage/src/migration/m20250101_000004_create_module_chunks.rs` (new)
+  - `cells/signal/signal-storage/src/migration/m20250101_000005_create_ratings.rs` (new)
+  - `cells/signal/signal-storage/src/migration/m20250101_000006_create_sync_metadata.rs` (new)
+  - `cells/signal/signal-storage/src/migration/m20250101_000007_create_preset_versions.rs` (new)
+  - Removed: cloud.rs, config.rs, schema.rs, service.rs (old sea-query/sqlx implementation)
+- **Learnings:**
+  - SeaORM's `DeriveEntityModel` generates Entity/Column/ActiveModel/PrimaryKey — no manual column enum needed
+  - `DeriveRelation` on an empty enum is valid for standalone entities (sync_metadata)
+  - Migration `DeriveIden` enums are local to each migration file — referencing FKs requires re-declaring the target table's Iden enum locally
+  - SeaORM v1.1 re-exports sea-query types through `sea_orm_migration::prelude::*`, so migrations don't need a separate sea-query dep
+  - `--no-deps` on clippy is essential because signal-proto's pre-existing warnings would cause `-D warnings` to fail
 ---
 
 ## 2026-02-07 - roam-test-8xs.35
@@ -96,4 +138,31 @@
   - ModeStack uses owned `HashMap<ModeId, ModeDefinition>` instead of references to avoid lifetime propagation
   - `switch_base()` exits modes top-to-bottom (sub-modes first), then enters the new base
   - `pop()` is a safe no-op when only the base mode remains (stack.len() <= 1)
+---
+
+## 2026-02-08 - roam-test-8xs.6
+- What was implemented:
+  - US-001: Graph state persistence to local storage
+  - Added `serde` + `serde_json` workspace dependencies to `signal-ui`
+  - Added `#[derive(Serialize, Deserialize)]` to `NodeGraph`, `GraphModule`, `Node`, `Wire`, `NodePosition`, `NodeSize`, `NodeWidget`, `NodePort`
+  - Created `BlockTypeDef` serde remote derive to bridge `signal-proto::BlockType` (which uses Facet, not serde) — fields use `#[serde(with = "BlockTypeDef")]`
+  - Created `GraphPersistence` trait with `save()` and `load()` methods
+  - Created `GraphPersistenceError` enum (Io/Json variants) with Display + Error impls
+  - Created `FileGraphPersistence` struct storing graph as `.signal/graph.json`
+  - Created `load_or_default_graph()` function: loads persisted graph, falls back to `sample_guitar_rig()`
+  - Updated `RIG_NODE_GRAPH` GlobalSignal to use `load_or_default_graph` instead of `sample_guitar_rig()`
+  - Created `use_graph_persistence()` Dioxus hook that auto-saves on graph changes via `use_effect`
+  - Registered hook in `hooks/mod.rs` and re-exported from `lib.rs`
+- Files changed:
+  - `cells/signal/signal-ui/Cargo.toml` (added serde, serde_json deps)
+  - `cells/signal/signal-ui/src/components/rig_grid/node_graph.rs` (serde derives, BlockTypeDef bridge, GraphPersistence trait, FileGraphPersistence, load_or_default_graph)
+  - `cells/signal/signal-ui/src/signals.rs` (updated RIG_NODE_GRAPH init to use load_or_default_graph)
+  - `cells/signal/signal-ui/src/hooks/graph_persistence.rs` (new — use_graph_persistence hook)
+  - `cells/signal/signal-ui/src/hooks/mod.rs` (added graph_persistence module + re-export)
+  - `cells/signal/signal-ui/src/lib.rs` (added use_graph_persistence re-export)
+- **Learnings:**
+  - `#[serde(remote = "BlockType")]` with a local shadow enum is the cleanest way to bridge a foreign type that lacks serde derives
+  - `Signal::global(fn_name)` accepts a bare function pointer — no need for a closure wrapping
+  - Dioxus `use_effect` auto-tracks signal reads: reading `RIG_NODE_GRAPH` inside the effect body automatically re-runs the effect when the signal changes, making it perfect for auto-save
+  - `cargo check -p signal-ui` fails due to upstream `roam-session` breakage (not our code) — the signal-ui sources themselves have no errors
 ---

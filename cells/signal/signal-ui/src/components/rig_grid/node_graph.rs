@@ -3,117 +3,44 @@
 //! Represents audio processing nodes positioned on an infinite 2D canvas
 //! with wire connections between them. Similar to Gig Performer, Reaktor, etc.
 
+use serde::{Deserialize, Serialize};
 use signal_control::block::BlockType;
-use signal_proto::normalized::NormalizedF64;
 use uuid::Uuid;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ParameterType
-// ─────────────────────────────────────────────────────────────────────────────
+// region: --- BlockType serde bridge
 
-/// The kind of control a parameter uses for editing.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ParameterType {
-    /// Smooth continuous value (rendered as knob or slider).
-    Continuous,
-    /// Discrete stepped value (rendered as stepped slider).
-    Stepped,
-    /// On/off toggle (rendered as toggle switch).
-    Toggle,
-    /// Choice from a list of options (rendered as dropdown).
-    Choice(Vec<String>),
+/// Serde remote derive for `signal_proto::BlockType` which uses `Facet`, not serde.
+/// This teaches serde how to (de)serialize the foreign type without modifying signal-proto.
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "BlockType")]
+enum BlockTypeDef {
+    Input,
+    Compressor,
+    Drive,
+    Amp,
+    Cabinet,
+    Eq,
+    Modulation,
+    Delay,
+    Reverb,
+    Gate,
+    Volume,
+    Pitch,
+    Tremolo,
+    Limiter,
+    Send,
+    Special,
+    Freeze,
+    Custom,
+    DeEsser,
+    Saturator,
+    Tuner,
 }
 
-impl Default for ParameterType {
-    fn default() -> Self {
-        Self::Continuous
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// NodeParameter
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// A parameter attached to a processing node.
-///
-/// Mirrors [`ParameterOverride`](signal_proto::preset::block_override::ParameterOverride)
-/// but lives in the UI layer so node graphs can carry current parameter state
-/// for snapshot capture and display.
-#[derive(Debug, Clone, PartialEq)]
-pub struct NodeParameter {
-    /// Unique parameter identifier (e.g. "drive", "eq_low_freq").
-    pub id: String,
-    /// Human-readable name.
-    pub name: String,
-    /// Current normalized value in [0.0, 1.0].
-    pub value: NormalizedF64,
-    /// Minimum display value (for labels, default 0.0).
-    pub min: f64,
-    /// Maximum display value (for labels, default 1.0).
-    pub max: f64,
-    /// Unit label (e.g. "dB", "Hz", "%").
-    pub unit: String,
-    /// What kind of control to render.
-    pub param_type: ParameterType,
-}
-
-impl NodeParameter {
-    /// Create a new node parameter with defaults (Continuous, 0–1, no unit).
-    pub fn new(id: impl Into<String>, name: impl Into<String>, value: NormalizedF64) -> Self {
-        Self {
-            id: id.into(),
-            name: name.into(),
-            value,
-            min: 0.0,
-            max: 1.0,
-            unit: String::new(),
-            param_type: ParameterType::default(),
-        }
-    }
-
-    /// Set the display range.
-    pub fn with_range(mut self, min: f64, max: f64) -> Self {
-        self.min = min;
-        self.max = max;
-        self
-    }
-
-    /// Set the unit label.
-    pub fn with_unit(mut self, unit: impl Into<String>) -> Self {
-        self.unit = unit.into();
-        self
-    }
-
-    /// Set the parameter type.
-    pub fn with_param_type(mut self, param_type: ParameterType) -> Self {
-        self.param_type = param_type;
-        self
-    }
-
-    /// Format the current value for display using min/max range and unit.
-    pub fn display_value(&self) -> String {
-        match &self.param_type {
-            ParameterType::Toggle => {
-                if self.value.get() >= 0.5 { "On".to_string() } else { "Off".to_string() }
-            }
-            ParameterType::Choice(choices) => {
-                let idx = (self.value.get() * (choices.len() as f64 - 1.0)).round() as usize;
-                choices.get(idx).cloned().unwrap_or_default()
-            }
-            _ => {
-                let real = self.min + self.value.get() * (self.max - self.min);
-                if self.unit.is_empty() {
-                    format!("{real:.1}")
-                } else {
-                    format!("{real:.1} {}", self.unit)
-                }
-            }
-        }
-    }
-}
+// endregion: --- BlockType serde bridge
 
 /// 2D position on the canvas (in canvas coordinates).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct NodePosition {
     pub x: f64,
     pub y: f64,
@@ -126,7 +53,7 @@ impl NodePosition {
 }
 
 /// Size of a node (in canvas coordinates).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct NodeSize {
     pub width: f64,
     pub height: f64,
@@ -165,7 +92,7 @@ impl Default for NodeSize {
 }
 
 /// Widget type to render inside a node.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum NodeWidget {
     /// Simple label/text display.
     #[default]
@@ -193,7 +120,7 @@ pub enum NodeWidget {
 }
 
 /// Input/output port on a node.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodePort {
     /// Port identifier (unique within the node).
     pub id: String,
@@ -231,7 +158,7 @@ impl NodePort {
 }
 
 /// A signal processing node on the canvas.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     /// Unique node ID.
     pub id: Uuid,
@@ -240,6 +167,7 @@ pub struct Node {
     /// Short label (optional, for compact display).
     pub short_label: Option<String>,
     /// Block type for color coding and behavior.
+    #[serde(with = "BlockTypeDef")]
     pub block_type: BlockType,
     /// Position on the canvas.
     pub position: NodePosition,
@@ -249,8 +177,6 @@ pub struct Node {
     pub widget: NodeWidget,
     /// Whether the node is bypassed.
     pub bypassed: bool,
-    /// Current parameter values for this node.
-    pub parameters: Vec<NodeParameter>,
     /// Input ports.
     pub inputs: Vec<NodePort>,
     /// Output ports.
@@ -273,7 +199,6 @@ impl Node {
             size: NodeSize::default(),
             widget: NodeWidget::Label,
             bypassed: false,
-            parameters: Vec::new(),
             // Default stereo in/out
             inputs: vec![
                 NodePort::input("in_l", "In L"),
@@ -303,11 +228,6 @@ impl Node {
 
     pub fn with_short_label(mut self, label: impl Into<String>) -> Self {
         self.short_label = Some(label.into());
-        self
-    }
-
-    pub fn with_parameters(mut self, parameters: Vec<NodeParameter>) -> Self {
-        self.parameters = parameters;
         self
     }
 
@@ -353,7 +273,7 @@ impl Node {
 }
 
 /// Wire connection between two node ports.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Wire {
     /// Unique wire ID.
     pub id: Uuid,
@@ -395,13 +315,14 @@ impl Wire {
 /// A module container that groups multiple nodes on the node graph canvas.
 ///
 /// Renamed from `Module` to avoid collision with `signal_control::module::Module`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GraphModule {
     /// Unique module ID.
     pub id: Uuid,
     /// Module name for display.
     pub name: String,
     /// Block type for color coding.
+    #[serde(with = "BlockTypeDef")]
     pub block_type: BlockType,
     /// Position on the canvas.
     pub position: NodePosition,
@@ -543,7 +464,7 @@ impl GraphModule {
 }
 
 /// The complete node graph.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct NodeGraph {
     /// Modules in the graph.
     pub modules: Vec<GraphModule>,
@@ -851,25 +772,7 @@ impl NodeGraph {
         let mut eq_module = GraphModule::new("EQ", BlockType::Eq, NodePosition::new(380.0, y_offset));
         let eq = Node::new("EQ", BlockType::Eq, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::xlarge())
-            .with_widget(NodeWidget::EqGraph)
-            .with_parameters(vec![
-                NodeParameter::new("low_freq", "Low Freq", NormalizedF64::new(0.2))
-                    .with_range(20.0, 500.0).with_unit("Hz"),
-                NodeParameter::new("low_gain", "Low Gain", NormalizedF64::new(0.5))
-                    .with_range(-12.0, 12.0).with_unit("dB"),
-                NodeParameter::new("mid_freq", "Mid Freq", NormalizedF64::new(0.5))
-                    .with_range(200.0, 5000.0).with_unit("Hz"),
-                NodeParameter::new("mid_gain", "Mid Gain", NormalizedF64::new(0.5))
-                    .with_range(-12.0, 12.0).with_unit("dB"),
-                NodeParameter::new("mid_q", "Mid Q", NormalizedF64::new(0.3))
-                    .with_range(0.1, 10.0),
-                NodeParameter::new("high_freq", "High Freq", NormalizedF64::new(0.8))
-                    .with_range(2000.0, 20000.0).with_unit("Hz"),
-                NodeParameter::new("high_gain", "High Gain", NormalizedF64::new(0.5))
-                    .with_range(-12.0, 12.0).with_unit("dB"),
-                NodeParameter::new("output", "Output", NormalizedF64::new(0.5))
-                    .with_range(-12.0, 12.0).with_unit("dB"),
-            ]);
+            .with_widget(NodeWidget::EqGraph);
         eq_module.add_node(eq);
         eq_module.auto_size(20.0);
         let eq_id = graph.add_module(eq_module);
@@ -878,21 +781,7 @@ impl NodeGraph {
         let mut dynamics_module = GraphModule::new("Dynamics", BlockType::Compressor, NodePosition::new(830.0, y_offset));
         let comp = Node::new("Compressor", BlockType::Compressor, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::large())
-            .with_widget(NodeWidget::CompressorGraph)
-            .with_parameters(vec![
-                NodeParameter::new("threshold", "Threshold", NormalizedF64::new(0.6))
-                    .with_range(-60.0, 0.0).with_unit("dB"),
-                NodeParameter::new("ratio", "Ratio", NormalizedF64::new(0.3))
-                    .with_range(1.0, 20.0).with_unit(":1"),
-                NodeParameter::new("attack", "Attack", NormalizedF64::new(0.2))
-                    .with_range(0.1, 100.0).with_unit("ms"),
-                NodeParameter::new("release", "Release", NormalizedF64::new(0.4))
-                    .with_range(10.0, 1000.0).with_unit("ms"),
-                NodeParameter::new("makeup", "Makeup", NormalizedF64::new(0.3))
-                    .with_range(0.0, 24.0).with_unit("dB"),
-                NodeParameter::new("sidechain", "Sidechain", NormalizedF64::new(0.0))
-                    .with_param_type(ParameterType::Toggle),
-            ]);
+            .with_widget(NodeWidget::CompressorGraph);
         dynamics_module.add_node(comp);
         dynamics_module.auto_size(20.0);
         let dynamics_id = graph.add_module(dynamics_module);
@@ -940,18 +829,7 @@ impl NodeGraph {
 
         let drive1 = Node::new("Drive 1", BlockType::Drive, NodePosition::new(200.0, 50.0))
             .with_size(NodeSize::medium())
-            .with_widget(NodeWidget::DriveGraph)
-            .with_parameters(vec![
-                NodeParameter::new("drive", "Drive", NormalizedF64::new(0.6)),
-                NodeParameter::new("tone", "Tone", NormalizedF64::new(0.5)),
-                NodeParameter::new("level", "Level", NormalizedF64::new(0.7)),
-                NodeParameter::new("mode", "Mode", NormalizedF64::new(0.0))
-                    .with_param_type(ParameterType::Choice(vec![
-                        "Clean".into(), "Crunch".into(), "Lead".into(), "High Gain".into(),
-                    ])),
-                NodeParameter::new("bass_boost", "Bass Boost", NormalizedF64::new(0.0))
-                    .with_param_type(ParameterType::Toggle),
-            ]);
+            .with_widget(NodeWidget::DriveGraph);
         let drive1_id = drive_module.add_node(drive1);
 
         let drive2 = Node::new("Drive 2", BlockType::Drive, NodePosition::new(450.0, 50.0))
@@ -989,32 +867,12 @@ impl NodeGraph {
 
         let pre_delay = Node::new("Delay", BlockType::Delay, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::large())
-            .with_widget(NodeWidget::DelayGraph)
-            .with_parameters(vec![
-                NodeParameter::new("time", "Time", NormalizedF64::new(0.4))
-                    .with_range(1.0, 2000.0).with_unit("ms"),
-                NodeParameter::new("feedback", "Feedback", NormalizedF64::new(0.35)),
-                NodeParameter::new("mix", "Mix", NormalizedF64::new(0.3)),
-                NodeParameter::new("subdivide", "Note", NormalizedF64::new(0.5))
-                    .with_param_type(ParameterType::Choice(vec![
-                        "1/4".into(), "1/8".into(), "1/8 dot".into(), "1/16".into(),
-                    ])),
-                NodeParameter::new("sync", "Tempo Sync", NormalizedF64::new(1.0))
-                    .with_param_type(ParameterType::Toggle),
-            ]);
+            .with_widget(NodeWidget::DelayGraph);
         let pre_delay_id = prefx_module.add_node(pre_delay);
 
         let spring_verb = Node::new("Spring", BlockType::Reverb, NodePosition::new(350.0, 50.0))
             .with_size(NodeSize::large())
-            .with_widget(NodeWidget::ReverbGraph)
-            .with_parameters(vec![
-                NodeParameter::new("decay", "Decay", NormalizedF64::new(0.5))
-                    .with_range(0.1, 10.0).with_unit("s"),
-                NodeParameter::new("predelay", "Pre-Delay", NormalizedF64::new(0.15))
-                    .with_range(0.0, 200.0).with_unit("ms"),
-                NodeParameter::new("damping", "Damping", NormalizedF64::new(0.4)),
-                NodeParameter::new("mix", "Mix", NormalizedF64::new(0.25)),
-            ]);
+            .with_widget(NodeWidget::ReverbGraph);
         let spring_verb_id = prefx_module.add_node(spring_verb);
 
         // Internal routing
@@ -1245,391 +1103,106 @@ impl NodeGraph {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Snapshot Types
-// ─────────────────────────────────────────────────────────────────────────────
+// region: --- GraphPersistence
 
-/// Captured parameter state for a single node.
-#[derive(Debug, Clone, PartialEq)]
-pub struct NodeSnapshot {
-    /// The node this snapshot was captured from.
-    pub node_id: Uuid,
-    /// Node name at capture time (for display).
-    pub node_name: String,
-    /// Captured parameter values as (param_id, normalized_value) pairs.
-    pub parameters: Vec<(String, f64)>,
+/// Trait for saving and loading a `NodeGraph` to/from persistent storage.
+pub trait GraphPersistence {
+    /// Persist the graph to storage.
+    fn save(&self, graph: &NodeGraph) -> Result<(), GraphPersistenceError>;
+
+    /// Load the graph from storage, returning `None` if no persisted graph exists.
+    fn load(&self) -> Result<Option<NodeGraph>, GraphPersistenceError>;
 }
 
-/// Captured state of all nodes within a single module.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ModuleSnapshot {
-    /// The module this snapshot was captured from.
-    pub module_id: Uuid,
-    /// Module name at capture time.
-    pub module_name: String,
-    /// Captured state for each node in the module.
-    pub nodes: Vec<NodeSnapshot>,
+/// Errors that can occur during graph persistence.
+#[derive(Debug)]
+pub enum GraphPersistenceError {
+    /// I/O error reading/writing the storage file.
+    Io(std::io::Error),
+    /// JSON serialization/deserialization error.
+    Json(serde_json::Error),
 }
 
-/// Captured state of the entire rig (all modules and standalone nodes).
-#[derive(Debug, Clone, PartialEq)]
-pub struct RigSnapshot {
-    /// Unique snapshot ID.
-    pub id: Uuid,
-    /// User-assigned name for this snapshot.
-    pub name: String,
-    /// Captured state for each module.
-    pub modules: Vec<ModuleSnapshot>,
-    /// Captured state for standalone nodes (not in any module).
-    pub standalone_nodes: Vec<NodeSnapshot>,
+impl std::fmt::Display for GraphPersistenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "graph persistence I/O error: {e}"),
+            Self::Json(e) => write!(f, "graph persistence JSON error: {e}"),
+        }
+    }
 }
 
-impl RigSnapshot {
-    /// Create a new rig snapshot with the given name.
-    pub fn new(name: impl Into<String>) -> Self {
+impl std::error::Error for GraphPersistenceError {}
+
+impl From<std::io::Error> for GraphPersistenceError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<serde_json::Error> for GraphPersistenceError {
+    fn from(e: serde_json::Error) -> Self {
+        Self::Json(e)
+    }
+}
+
+/// File-based graph persistence that stores the graph as `.signal/graph.json`.
+///
+/// The `.signal/` directory is created relative to a configurable base path
+/// (defaults to the current working directory).
+pub struct FileGraphPersistence {
+    path: std::path::PathBuf,
+}
+
+impl FileGraphPersistence {
+    /// Default storage path: `.signal/graph.json` relative to cwd.
+    pub fn new() -> Self {
         Self {
-            id: Uuid::new_v4(),
-            name: name.into(),
-            modules: Vec::new(),
-            standalone_nodes: Vec::new(),
+            path: std::path::PathBuf::from(".signal/graph.json"),
         }
     }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Capture Functions
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Capture the current parameter values from a single node.
-///
-/// Returns a list of `(param_id, normalized_value)` pairs — one per parameter
-/// on the node. Returns an empty vec if the node has no parameters.
-pub fn capture_node_parameters(graph: &NodeGraph, node_id: Uuid) -> Vec<(Uuid, f64)> {
-    graph
-        .find_node(node_id)
-        .map(|node| {
-            node.parameters
-                .iter()
-                .map(|p| (node.id, p.value.get()))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Capture a snapshot of all node parameters within a module.
-///
-/// Returns `None` if the module is not found.
-pub fn capture_module_snapshot(graph: &NodeGraph, module_id: Uuid) -> Option<ModuleSnapshot> {
-    let module = graph.find_module(module_id)?;
-    let nodes = module
-        .nodes
-        .iter()
-        .map(|node| NodeSnapshot {
-            node_id: node.id,
-            node_name: node.name.clone(),
-            parameters: node
-                .parameters
-                .iter()
-                .map(|p| (p.id.clone(), p.value.get()))
-                .collect(),
-        })
-        .collect();
-
-    Some(ModuleSnapshot {
-        module_id: module.id,
-        module_name: module.name.clone(),
-        nodes,
-    })
-}
-
-/// Capture a snapshot of the entire rig — all modules and standalone nodes.
-pub fn capture_rig_snapshot(graph: &NodeGraph, name: impl Into<String>) -> RigSnapshot {
-    let modules = graph
-        .modules
-        .iter()
-        .map(|module| ModuleSnapshot {
-            module_id: module.id,
-            module_name: module.name.clone(),
-            nodes: module
-                .nodes
-                .iter()
-                .map(|node| NodeSnapshot {
-                    node_id: node.id,
-                    node_name: node.name.clone(),
-                    parameters: node
-                        .parameters
-                        .iter()
-                        .map(|p| (p.id.clone(), p.value.get()))
-                        .collect(),
-                })
-                .collect(),
-        })
-        .collect();
-
-    let standalone_nodes = graph
-        .nodes
-        .iter()
-        .map(|node| NodeSnapshot {
-            node_id: node.id,
-            node_name: node.name.clone(),
-            parameters: node
-                .parameters
-                .iter()
-                .map(|p| (p.id.clone(), p.value.get()))
-                .collect(),
-        })
-        .collect();
-
-    RigSnapshot {
-        id: Uuid::new_v4(),
-        name: name.into(),
-        modules,
-        standalone_nodes,
+    /// Use a custom file path for graph storage.
+    pub fn with_path(path: impl Into<std::path::PathBuf>) -> Self {
+        Self { path: path.into() }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
-
-    // -- Helpers
-
-    fn sample_node_with_params(name: &str, position: NodePosition) -> Node {
-        Node::new(name, BlockType::Drive, position).with_parameters(vec![
-            NodeParameter::new("drive", "Drive", NormalizedF64::new(0.7)),
-            NodeParameter::new("tone", "Tone", NormalizedF64::new(0.5)),
-            NodeParameter::new("level", "Level", NormalizedF64::new(0.8)),
-        ])
+impl Default for FileGraphPersistence {
+    fn default() -> Self {
+        Self::new()
     }
+}
 
-    // -- NodeParameter
-
-    #[test]
-    fn test_node_parameter_new() -> Result<()> {
-        // -- Setup & Fixtures
-        let param = NodeParameter::new("drive", "Drive", NormalizedF64::new(0.7));
-
-        // -- Check
-        assert_eq!(param.id, "drive");
-        assert_eq!(param.name, "Drive");
-        assert!((param.value.get() - 0.7).abs() < f64::EPSILON);
-        Ok(())
-    }
-
-    #[test]
-    fn test_node_parameter_value_clamped() -> Result<()> {
-        // -- Setup & Fixtures
-        let param = NodeParameter::new("gain", "Gain", NormalizedF64::new(1.5));
-
-        // -- Check
-        assert_eq!(param.value.get(), 1.0);
-        Ok(())
-    }
-
-    // -- Node with parameters
-
-    #[test]
-    fn test_node_with_parameters() -> Result<()> {
-        // -- Setup & Fixtures
-        let node = sample_node_with_params("Drive", NodePosition::new(0.0, 0.0));
-
-        // -- Check
-        assert_eq!(node.parameters.len(), 3);
-        assert_eq!(node.parameters[0].id, "drive");
-        assert_eq!(node.parameters[1].id, "tone");
-        assert_eq!(node.parameters[2].id, "level");
-        Ok(())
-    }
-
-    #[test]
-    fn test_node_default_has_no_parameters() -> Result<()> {
-        // -- Setup & Fixtures
-        let node = Node::new("Test", BlockType::Input, NodePosition::new(0.0, 0.0));
-
-        // -- Check
-        assert!(node.parameters.is_empty());
-        Ok(())
-    }
-
-    // -- capture_node_parameters
-
-    #[test]
-    fn test_capture_node_parameters_found() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-        let node = sample_node_with_params("Drive", NodePosition::new(0.0, 0.0));
-        let node_id = node.id;
-        graph.add_node(node);
-
-        // -- Exec
-        let captured = capture_node_parameters(&graph, node_id);
-
-        // -- Check
-        assert_eq!(captured.len(), 3);
-        for (id, _value) in &captured {
-            assert_eq!(*id, node_id);
+impl GraphPersistence for FileGraphPersistence {
+    fn save(&self, graph: &NodeGraph) -> Result<(), GraphPersistenceError> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
         }
-        assert!((captured[0].1 - 0.7).abs() < f64::EPSILON);
+        let json = serde_json::to_string_pretty(graph)?;
+        std::fs::write(&self.path, json)?;
         Ok(())
     }
 
-    #[test]
-    fn test_capture_node_parameters_not_found() -> Result<()> {
-        // -- Setup & Fixtures
-        let graph = NodeGraph::new();
-
-        // -- Exec
-        let captured = capture_node_parameters(&graph, Uuid::new_v4());
-
-        // -- Check
-        assert!(captured.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn test_capture_node_parameters_in_module() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-        let node = sample_node_with_params("Drive", NodePosition::new(10.0, 50.0));
-        let node_id = node.id;
-        let mut module = GraphModule::new("Test Module", BlockType::Drive, NodePosition::new(0.0, 0.0));
-        module.add_node(node);
-        graph.add_module(module);
-
-        // -- Exec
-        let captured = capture_node_parameters(&graph, node_id);
-
-        // -- Check
-        assert_eq!(captured.len(), 3);
-        Ok(())
-    }
-
-    // -- capture_module_snapshot
-
-    #[test]
-    fn test_capture_module_snapshot_found() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-        let node1 = sample_node_with_params("Drive 1", NodePosition::new(10.0, 50.0));
-        let node2 = sample_node_with_params("Drive 2", NodePosition::new(200.0, 50.0));
-        let mut module = GraphModule::new("Drive Stage", BlockType::Drive, NodePosition::new(0.0, 0.0));
-        module.add_node(node1);
-        module.add_node(node2);
-        let module_id = module.id;
-        graph.add_module(module);
-
-        // -- Exec
-        let snapshot = capture_module_snapshot(&graph, module_id);
-
-        // -- Check
-        let snapshot = snapshot.unwrap();
-        assert_eq!(snapshot.module_id, module_id);
-        assert_eq!(snapshot.module_name, "Drive Stage");
-        assert_eq!(snapshot.nodes.len(), 2);
-        assert_eq!(snapshot.nodes[0].parameters.len(), 3);
-        assert_eq!(snapshot.nodes[1].parameters.len(), 3);
-        Ok(())
-    }
-
-    #[test]
-    fn test_capture_module_snapshot_not_found() -> Result<()> {
-        // -- Setup & Fixtures
-        let graph = NodeGraph::new();
-
-        // -- Exec
-        let snapshot = capture_module_snapshot(&graph, Uuid::new_v4());
-
-        // -- Check
-        assert!(snapshot.is_none());
-        Ok(())
-    }
-
-    // -- capture_rig_snapshot
-
-    #[test]
-    fn test_capture_rig_snapshot_empty_graph() -> Result<()> {
-        // -- Setup & Fixtures
-        let graph = NodeGraph::new();
-
-        // -- Exec
-        let snapshot = capture_rig_snapshot(&graph, "Empty Rig");
-
-        // -- Check
-        assert_eq!(snapshot.name, "Empty Rig");
-        assert!(snapshot.modules.is_empty());
-        assert!(snapshot.standalone_nodes.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn test_capture_rig_snapshot_full_graph() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-
-        // Add a module with nodes
-        let node1 = sample_node_with_params("Drive", NodePosition::new(10.0, 50.0));
-        let mut module = GraphModule::new("Drive Module", BlockType::Drive, NodePosition::new(0.0, 0.0));
-        module.add_node(node1);
-        graph.add_module(module);
-
-        // Add a standalone node
-        let standalone = sample_node_with_params("Standalone EQ", NodePosition::new(500.0, 0.0));
-        graph.add_node(standalone);
-
-        // -- Exec
-        let snapshot = capture_rig_snapshot(&graph, "Full Rig Capture");
-
-        // -- Check
-        assert_eq!(snapshot.name, "Full Rig Capture");
-        assert_eq!(snapshot.modules.len(), 1);
-        assert_eq!(snapshot.modules[0].module_name, "Drive Module");
-        assert_eq!(snapshot.modules[0].nodes.len(), 1);
-        assert_eq!(snapshot.standalone_nodes.len(), 1);
-        assert_eq!(snapshot.standalone_nodes[0].node_name, "Standalone EQ");
-        Ok(())
-    }
-
-    #[test]
-    fn test_capture_rig_snapshot_preserves_parameter_values() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-        let node = Node::new("Custom", BlockType::Eq, NodePosition::new(0.0, 0.0))
-            .with_parameters(vec![
-                NodeParameter::new("freq", "Frequency", NormalizedF64::new(0.3)),
-                NodeParameter::new("gain", "Gain", NormalizedF64::new(0.9)),
-            ]);
-        graph.add_node(node);
-
-        // -- Exec
-        let snapshot = capture_rig_snapshot(&graph, "Value Test");
-
-        // -- Check
-        let node_snap = &snapshot.standalone_nodes[0];
-        assert_eq!(node_snap.parameters.len(), 2);
-        assert_eq!(node_snap.parameters[0].0, "freq");
-        assert!((node_snap.parameters[0].1 - 0.3).abs() < f64::EPSILON);
-        assert_eq!(node_snap.parameters[1].0, "gain");
-        assert!((node_snap.parameters[1].1 - 0.9).abs() < f64::EPSILON);
-        Ok(())
-    }
-
-    #[test]
-    fn test_rig_snapshot_unique_ids() -> Result<()> {
-        // -- Setup & Fixtures
-        let graph = NodeGraph::new();
-
-        // -- Exec
-        let snap1 = capture_rig_snapshot(&graph, "Snap 1");
-        let snap2 = capture_rig_snapshot(&graph, "Snap 2");
-
-        // -- Check
-        assert_ne!(snap1.id, snap2.id);
-        Ok(())
+    fn load(&self) -> Result<Option<NodeGraph>, GraphPersistenceError> {
+        if !self.path.exists() {
+            return Ok(None);
+        }
+        let contents = std::fs::read_to_string(&self.path)?;
+        let graph: NodeGraph = serde_json::from_str(&contents)?;
+        Ok(Some(graph))
     }
 }
+
+/// Load the persisted graph from `.signal/graph.json`, falling back to
+/// `sample_guitar_rig()` if no persisted graph exists or if loading fails.
+pub fn load_or_default_graph() -> NodeGraph {
+    let persistence = FileGraphPersistence::new();
+    match persistence.load() {
+        Ok(Some(graph)) => graph,
+        Ok(None) => NodeGraph::sample_guitar_rig(),
+        Err(_) => NodeGraph::sample_guitar_rig(),
+    }
+}
+
+// endregion: --- GraphPersistence
