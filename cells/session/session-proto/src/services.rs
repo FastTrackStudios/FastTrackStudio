@@ -3,7 +3,7 @@
 //! These traits define the RPC interfaces for song and setlist operations.
 
 use crate::setlist::{ActiveIndices, Setlist};
-use crate::song::{Section, Song};
+use crate::song::{Section, Song, SongChartHydration};
 use daw_proto::MusicalPosition;
 use facet::Facet;
 use roam::Tx;
@@ -78,6 +78,8 @@ pub enum SetlistEvent {
     SetlistChanged(Setlist),
     /// A single song entry was hydrated/updated in-place
     SongHydrated { index: usize, song: Song },
+    /// Chart/chord payload for a song was hydrated/updated.
+    SongChartHydrated { index: usize, chart: SongChartHydration },
     /// Active indices changed (which song/section is "current")
     ActiveIndicesChanged(ActiveIndices),
     /// Transport state updated for one or more songs

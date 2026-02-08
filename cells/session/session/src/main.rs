@@ -6,7 +6,7 @@
 //! This is the cell binary entry point. For library usage, import `session` crate directly.
 
 use actions_proto::{
-    ActionCategory, ActionDefinition, ActionId, ActionResult, DefinesActions,
+    ActionDefinition, ActionId, ActionResult, DefinesActions,
     DefinesActionsDispatcher,
 };
 use cell_runtime::{HostServiceClient, WaitPolicy, run_cell};
@@ -15,7 +15,8 @@ use roam::session::{ConnectionHandle, Context};
 use roam_telemetry::{ExporterConfig, OtlpExporter, TelemetryMiddleware};
 use session::{SetlistServiceImpl, SongServiceImpl};
 use session_proto::{
-    SessionService, SessionServiceDispatcher, SetlistServiceDispatcher, SongServiceDispatcher,
+    SessionService, SessionServiceDispatcher, SetlistService, SetlistServiceDispatcher,
+    SongServiceDispatcher,
 };
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -38,91 +39,51 @@ fn create_telemetry() -> TelemetryMiddleware<OtlpExporter> {
     TelemetryMiddleware::new(otlp_exporter)
 }
 
-/// Session actions defined by this cell
-fn session_actions() -> Vec<ActionDefinition> {
-    vec![
-        // Transport actions
-        ActionDefinition::new(
-            "fts.session.toggle_playback",
-            "Toggle Playback",
-            "Toggle play/pause state",
-        )
-        .with_category(ActionCategory::Transport)
-        .with_menu_path("FTS/Session/Transport")
-        .with_shortcut("Space"),
-        ActionDefinition::new(
-            "fts.session.toggle_song_loop",
-            "Toggle Song Loop",
-            "Toggle looping for the current song",
-        )
-        .with_category(ActionCategory::Transport)
-        .with_menu_path("FTS/Session/Transport")
-        .with_shortcut("L"),
-        // Smart navigation (section/song)
-        ActionDefinition::new(
-            "fts.session.smart_next",
-            "Smart Next",
-            "Go to next section, or next song if at last section",
-        )
-        .with_category(ActionCategory::Session)
-        .with_menu_path("FTS/Session/Navigate")
-        .with_shortcut("Right"),
-        ActionDefinition::new(
-            "fts.session.smart_previous",
-            "Smart Previous",
-            "Go to previous section, or previous song if at first section",
-        )
-        .with_category(ActionCategory::Session)
-        .with_menu_path("FTS/Session/Navigate")
-        .with_shortcut("Left"),
-        // Song navigation
-        ActionDefinition::new(
-            "fts.session.next_song",
-            "Next Song",
-            "Go to the next song in the setlist",
-        )
-        .with_category(ActionCategory::Session)
-        .with_menu_path("FTS/Session/Navigate")
-        .with_shortcut("Down"),
-        ActionDefinition::new(
-            "fts.session.previous_song",
-            "Previous Song",
-            "Go to the previous song in the setlist",
-        )
-        .with_category(ActionCategory::Session)
-        .with_menu_path("FTS/Session/Navigate")
-        .with_shortcut("Up"),
-        // Section navigation
-        ActionDefinition::new(
-            "fts.session.next_section",
-            "Next Section",
-            "Go to the next section in the current song",
-        )
-        .with_category(ActionCategory::Session)
-        .with_menu_path("FTS/Session/Navigate"),
-        ActionDefinition::new(
-            "fts.session.previous_section",
-            "Previous Section",
-            "Go to the previous section in the current song",
-        )
-        .with_category(ActionCategory::Session)
-        .with_menu_path("FTS/Session/Navigate"),
-        // Debug actions
-        ActionDefinition::new(
-            "fts.session.log_hello",
-            "Log Hello",
-            "Logs 'Hello from session!' to demonstrate the action system",
-        )
-        .with_category(ActionCategory::Dev)
-        .with_menu_path("FTS/Session/Dev"),
-        ActionDefinition::new(
-            "fts.session.log_status",
-            "Log Status",
-            "Logs current session status",
-        )
-        .with_category(ActionCategory::Dev)
-        .with_menu_path("FTS/Session/Dev"),
-    ]
+// Action handlers — definitions come from session::session_actions (lib.rs).
+// This macro generates only `SessionServiceImpl::dispatch_action()`.
+actions_proto::impl_action_dispatch! {
+    for SessionServiceImpl, use session::session_actions {
+        TOGGLE_PLAYBACK => handler(self_, cx) {
+            self_.setlist_service.toggle_playback(cx).await;
+            ActionResult::success()
+        }
+        TOGGLE_SONG_LOOP => handler(self_, cx) {
+            self_.setlist_service.toggle_song_loop(cx).await;
+            ActionResult::success()
+        }
+        SMART_NEXT => handler(self_, cx) {
+            self_.setlist_service.next_section(cx).await;
+            ActionResult::success()
+        }
+        SMART_PREVIOUS => handler(self_, cx) {
+            self_.setlist_service.previous_section(cx).await;
+            ActionResult::success()
+        }
+        NEXT_SONG => handler(self_, cx) {
+            self_.setlist_service.next_song(cx).await;
+            ActionResult::success()
+        }
+        PREVIOUS_SONG => handler(self_, cx) {
+            self_.setlist_service.previous_song(cx).await;
+            ActionResult::success()
+        }
+        NEXT_SECTION => handler(self_, cx) {
+            self_.setlist_service.next_section(cx).await;
+            ActionResult::success()
+        }
+        PREVIOUS_SECTION => handler(self_, cx) {
+            self_.setlist_service.previous_section(cx).await;
+            ActionResult::success()
+        }
+        LOG_HELLO => handler(self_, _cx) {
+            info!("Hello from the session cell!");
+            ActionResult::success_with_message("Logged hello from session")
+        }
+        LOG_STATUS => handler(self_, _cx) {
+            info!("Session status: healthy");
+            ActionResult::success_with_message("Logged session status")
+        }
+    }
 }
 
 /// Implementation of SessionService and DefinesActions
@@ -161,60 +122,13 @@ impl SessionService for SessionServiceImpl {
 
 impl DefinesActions for SessionServiceImpl {
     async fn get_actions(&self, _cx: &Context) -> Vec<ActionDefinition> {
-        session_actions()
+        session::session_actions::definitions()
     }
 
     async fn execute_action(&self, cx: &Context, action_id: ActionId) -> ActionResult {
-        use session_proto::SetlistService;
-
-        match action_id.as_str() {
-            // Transport actions
-            "fts.session.toggle_playback" => {
-                self.setlist_service.toggle_playback(cx).await;
-                ActionResult::success()
-            }
-            "fts.session.toggle_song_loop" => {
-                self.setlist_service.toggle_song_loop(cx).await;
-                ActionResult::success()
-            }
-            // Smart navigation
-            "fts.session.smart_next" => {
-                self.setlist_service.next_section(cx).await;
-                ActionResult::success()
-            }
-            "fts.session.smart_previous" => {
-                self.setlist_service.previous_section(cx).await;
-                ActionResult::success()
-            }
-            // Song navigation
-            "fts.session.next_song" => {
-                self.setlist_service.next_song(cx).await;
-                ActionResult::success()
-            }
-            "fts.session.previous_song" => {
-                self.setlist_service.previous_song(cx).await;
-                ActionResult::success()
-            }
-            // Section navigation
-            "fts.session.next_section" => {
-                self.setlist_service.next_section(cx).await;
-                ActionResult::success()
-            }
-            "fts.session.previous_section" => {
-                self.setlist_service.previous_section(cx).await;
-                ActionResult::success()
-            }
-            // Debug actions
-            "fts.session.log_hello" => {
-                info!("Hello from the session cell!");
-                ActionResult::success_with_message("Logged hello from session")
-            }
-            "fts.session.log_status" => {
-                info!("Session status: healthy");
-                ActionResult::success_with_message("Logged session status")
-            }
-            _ => ActionResult::failure(format!("Unknown action: {}", action_id)),
-        }
+        self.dispatch_action(cx, &action_id)
+            .await
+            .unwrap_or_else(|| ActionResult::failure(format!("Unknown action: {}", action_id)))
     }
 }
 

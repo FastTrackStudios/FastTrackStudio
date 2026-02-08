@@ -27,18 +27,18 @@ pub fn TransportControlBar(
 
     rsx! {
         div {
-            class: "h-36 flex-shrink-0 border-t border-border bg-card grid grid-cols-4 divide-x divide-border",
+            class: "h-full w-full bg-card grid grid-cols-4 divide-x divide-border",
 
             // Back Button
             div {
-                class: "flex items-center justify-center gap-2 cursor-pointer hover:bg-accent transition-colors",
+                class: "flex items-center justify-center gap-3 cursor-pointer hover:bg-accent transition-colors text-lg font-medium",
                 onclick: move |_| {
                     if !playing {
                         on_back.call(());
                     }
                 },
                 BackIcon {
-                    size: 20,
+                    size: 28,
                     color: "currentColor",
                 }
                 "Back"
@@ -47,21 +47,21 @@ pub fn TransportControlBar(
             // Play/Pause Button
             div {
                 class: if playing {
-                    "flex items-center justify-center gap-2 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                    "flex items-center justify-center gap-3 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-lg font-medium"
                 } else {
-                    "flex items-center justify-center gap-2 cursor-pointer border border-border hover:bg-accent transition-colors"
+                    "flex items-center justify-center gap-3 cursor-pointer border border-border hover:bg-accent transition-colors text-lg font-medium"
                 },
                 onclick: move |_| {
                     on_play_pause.call(());
                 },
                 if playing {
                     PauseIcon {
-                        size: 20,
+                        size: 28,
                         color: "currentColor",
                     }
                 } else {
                     PlayIcon {
-                        size: 20,
+                        size: 28,
                         color: "currentColor",
                     }
                 }
@@ -71,15 +71,15 @@ pub fn TransportControlBar(
             // Loop Button
             div {
                 class: if looping {
-                    "flex items-center justify-center gap-2 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                    "flex items-center justify-center gap-3 cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-lg font-medium"
                 } else {
-                    "flex items-center justify-center gap-2 cursor-pointer border border-border hover:bg-accent transition-colors"
+                    "flex items-center justify-center gap-3 cursor-pointer border border-border hover:bg-accent transition-colors text-lg font-medium"
                 },
                 onclick: move |_| {
                     on_loop_toggle.call(());
                 },
                 LoopIcon {
-                    size: 20,
+                    size: 28,
                     color: "currentColor",
                 }
                 "Loop"
@@ -87,7 +87,7 @@ pub fn TransportControlBar(
 
             // Advance Button
             div {
-                class: "flex items-center justify-center gap-2 cursor-pointer hover:bg-accent transition-colors",
+                class: "flex items-center justify-center gap-3 cursor-pointer hover:bg-accent transition-colors text-lg font-medium",
                 onclick: move |_| {
                     if !playing {
                         on_forward.call(());
@@ -95,7 +95,7 @@ pub fn TransportControlBar(
                 },
                 "Advance"
                 ForwardIcon {
-                    size: 20,
+                    size: 28,
                     color: "currentColor",
                 }
             }

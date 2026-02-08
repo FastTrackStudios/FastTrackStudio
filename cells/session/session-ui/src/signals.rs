@@ -27,8 +27,8 @@
 //! ```
 
 use crate::prelude::*;
-use daw_proto::PlayState;
-use session_proto::{ActiveIndices, Setlist, SetlistServiceClient};
+use daw_proto::{MusicalPosition, PlayState};
+use session_proto::{ActiveIndices, Setlist, SetlistServiceClient, SongChartHydration};
 use std::collections::HashMap;
 
 #[cfg(target_arch = "wasm32")]
@@ -197,6 +197,25 @@ pub static ACTIVE_INDICES: GlobalSignal<ActiveIndices> =
 /// Per-song transport state (playhead position, tempo, time signature)
 /// Key is song index, updates when transport state changes for that song
 pub static SONG_TRANSPORT: GlobalSignal<HashMap<usize, TransportState>> =
+    Signal::global(HashMap::new);
+
+/// Active song musical transport position (measure/beat/subdivision).
+///
+/// This is a lightweight signal for chart cursor rendering so the renderer
+/// doesn't need to subscribe to the full `SONG_TRANSPORT` map.
+pub static ACTIVE_PLAYBACK_MUSICAL: GlobalSignal<Option<MusicalPosition>> =
+    Signal::global(|| None);
+
+/// Whether active song transport is currently playing.
+///
+/// Kept separate from full transport state to minimize render fanout.
+pub static ACTIVE_PLAYBACK_IS_PLAYING: GlobalSignal<bool> = Signal::global(|| false);
+
+/// Hydrated chart payload cache keyed by `project_guid`.
+///
+/// Kept separate from `SETLIST_STRUCTURE` so chart text blobs are not cloned
+/// through structural setlist update events.
+pub static SONG_CHARTS: GlobalSignal<HashMap<String, SongChartHydration>> =
     Signal::global(HashMap::new);
 
 /// Global playback state

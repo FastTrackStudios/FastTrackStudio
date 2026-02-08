@@ -55,6 +55,22 @@ pub struct SongDetectedChord {
     pub velocity: u8,
 }
 
+/// Delta payload for chart hydration updates.
+///
+/// This is sent separately from base `Song` structure updates so high-frequency
+/// setlist and transport flows do not clone large chart text blobs.
+#[derive(Clone, Debug, PartialEq, Facet)]
+pub struct SongChartHydration {
+    /// DAW project GUID for this chart source.
+    pub project_guid: String,
+    /// Generated chart source text.
+    pub chart_text: String,
+    /// Detected chords from the source MIDI.
+    pub detected_chords: Vec<SongDetectedChord>,
+    /// Source fingerprint used for cache invalidation/live refresh.
+    pub chart_fingerprint: String,
+}
+
 impl Comment {
     /// Create a new comment
     pub fn new(text: String, position_seconds: f64) -> Self {

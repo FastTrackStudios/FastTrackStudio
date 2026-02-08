@@ -61,11 +61,12 @@ pub mod signals;
 
 // Re-export key types for convenience
 pub use layouts::top_bar::{ConnectionState, TopBar, VERSION};
-pub use layouts::PerformanceLayout;
+pub use layouts::{PerformanceLayout, PerformanceSidebar, TransportPanel};
 pub use signals::{
     ChartAreaBounds, LatencyAction, LatencyInfo, LatencyMeasurement, LatencyTracker,
-    PerfChartViewport, Session, TransportState, ACTIVE_INDICES, AUDIO_LATENCY_SECONDS,
-    CHART_AREA_BOUNDS, LATENCY_INFO, LATENCY_TRACKER, PERF_CHART_BASE_SCALE, PERF_CHART_CLICK,
-    PERF_CHART_HOVER, PERF_CHART_VIEWPORT, PLAYBACK_STATE, SETLIST_STRUCTURE, SHOW_CHART_SPLIT,
+    PerfChartViewport, Session, TransportState, ACTIVE_INDICES, ACTIVE_PLAYBACK_IS_PLAYING,
+    ACTIVE_PLAYBACK_MUSICAL, AUDIO_LATENCY_SECONDS, CHART_AREA_BOUNDS, LATENCY_INFO,
+    LATENCY_TRACKER, PERF_CHART_BASE_SCALE, PERF_CHART_CLICK, PERF_CHART_HOVER,
+    PERF_CHART_VIEWPORT, PLAYBACK_STATE, SETLIST_STRUCTURE, SHOW_CHART_SPLIT, SONG_CHARTS,
     SONG_TRANSPORT,
 };

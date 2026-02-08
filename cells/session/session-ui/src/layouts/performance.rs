@@ -13,14 +13,10 @@ use crate::components::*;
 use crate::prelude::*;
 use crate::signals::*;
 
-/// Global signal for navigator sidebar visibility (for performance testing)
-static SHOW_NAVIGATOR: GlobalSignal<bool> = GlobalSignal::new(|| true);
-
 /// Performance view layout
 ///
 /// Complete performance view with:
-/// - Left sidebar: Song/section navigator with progress bars
-/// - Right main area: Large progress visualization with transport controls
+/// - Large progress visualization with transport controls
 ///
 /// This component subscribes to global signals and provides a complete
 /// performance view interface that apps can use directly.
@@ -43,30 +39,12 @@ pub fn PerformanceLayout() -> Element {
     // Child components handle their own subscriptions to minimize re-renders.
     //
     // Architecture:
-    // - PerformanceSidebar: Subscribes to SONG_TRANSPORT for progress bars
     // - PerformanceMainContent: Subscribes to transport signals for progress display
     // - TransportControlBar: Subscribes to PLAYBACK_STATE for play/pause button
 
-    let show_navigator = *SHOW_NAVIGATOR.read();
-    let show_chart_split = *SHOW_CHART_SPLIT.read();
-
     rsx! {
         div {
-            // When chart split is enabled, make this container transparent so WGPU shows through
-            class: if show_chart_split {
-                "flex h-full w-full text-foreground"
-            } else {
-                "flex h-full w-full bg-background text-foreground"
-            },
-            style: if show_chart_split { "background: transparent !important; background-color: transparent !important;" } else { "" },
-
-            // Sidebar (1/3 width) - handles its own signal subscriptions
-            // Conditionally rendered for performance testing
-            if show_navigator {
-                PerformanceSidebar {}
-            }
-
-            // Main content (2/3 width, or full width if sidebar hidden)
+            class: "flex h-full w-full bg-background text-foreground",
             PerformanceMainContent {}
         }
     }
@@ -102,7 +80,7 @@ struct SidebarSectionStructure {
 /// Transport updates (60Hz) are handled by individual SidebarSongItem components
 /// to avoid re-rendering the entire sidebar.
 #[component]
-fn PerformanceSidebar() -> Element {
+pub fn PerformanceSidebar() -> Element {
     // Read active indices - updates when song/section selection changes
     let indices = ACTIVE_INDICES.read();
     let active_song_index = indices.song_index;
@@ -137,7 +115,7 @@ fn PerformanceSidebar() -> Element {
 
     rsx! {
         div {
-            class: "w-1/3 border-r border-border bg-sidebar overflow-y-auto",
+            class: "h-full w-full bg-sidebar overflow-y-auto",
 
             // Header
             div {
@@ -293,6 +271,54 @@ fn SidebarSongItemReactive(
     }
 }
 
+/// Standalone transport control panel for the dock system.
+///
+/// Reads playback state and loop state from global signals, wires up
+/// callbacks to `Session::get().setlist()` service methods.
+#[component]
+pub fn TransportPanel() -> Element {
+    let indices = ACTIVE_INDICES.read();
+    let is_looping = indices.looping;
+    drop(indices);
+
+    let playback_state = *PLAYBACK_STATE.read();
+    let is_playing = matches!(
+        playback_state,
+        daw_proto::PlayState::Playing | daw_proto::PlayState::Recording
+    );
+
+    rsx! {
+        div {
+            class: "h-full w-full flex flex-col bg-background",
+            TransportControlBar {
+                is_playing: is_playing,
+                is_looping: is_looping,
+                on_play_pause: Callback::new(move |_| {
+                    LATENCY_TRACKER.write().start_play_toggle();
+                    spawn(async move {
+                        let _ = Session::get().setlist().toggle_playback().await;
+                    });
+                }),
+                on_loop_toggle: Callback::new(move |_| {
+                    spawn(async move {
+                        let _ = Session::get().setlist().toggle_song_loop().await;
+                    });
+                }),
+                on_back: Callback::new(move |_| {
+                    spawn(async move {
+                        let _ = Session::get().setlist().previous_section().await;
+                    });
+                }),
+                on_forward: Callback::new(move |_| {
+                    spawn(async move {
+                        let _ = Session::get().setlist().next_section().await;
+                    });
+                }),
+            }
+        }
+    }
+}
+
 /// Main performance content area
 ///
 /// Displays song title, both progress bars (song and section), transport info badges,
@@ -307,19 +333,11 @@ fn PerformanceMainContent() -> Element {
     let indices = ACTIVE_INDICES.read();
     let song_index = indices.song_index;
     let section_index = indices.section_index;
-    let is_looping = indices.looping;
     let queued_target = indices.queued_target.clone();
     drop(indices);
 
     // Get transport state for current song
     let transport_state = song_index.and_then(|idx| SONG_TRANSPORT.read().get(&idx).cloned());
-
-    // Get playback state for transport controls
-    let playback_state = *PLAYBACK_STATE.read();
-    let is_playing = matches!(
-        playback_state,
-        daw_proto::PlayState::Playing | daw_proto::PlayState::Recording
-    );
 
     // Memoize current song - reads ACTIVE_INDICES inside so it re-fires on song change
     let current_song = use_memo(move || {
@@ -669,192 +687,15 @@ fn PerformanceMainContent() -> Element {
     // Capture song_index for closures
     let song_index_for_section_click = song_index;
 
-    // Read navigator visibility for button state
-    let show_navigator = *SHOW_NAVIGATOR.read();
-
-    // Read chart split mode (for desktop hybrid rendering)
-    let show_chart_split = *SHOW_CHART_SPLIT.read();
-
     rsx! {
         div {
-            class: if show_chart_split {
-                "flex-1 flex flex-col overflow-hidden"
-            } else {
-                "flex-1 flex flex-col overflow-hidden bg-background"
-            },
-            style: if show_chart_split { "background: transparent !important;" } else { "" },
+            class: "flex-1 flex flex-col overflow-hidden bg-background",
 
-            // Chart area (top half, transparent) - only shown in split mode
-            if show_chart_split {
-                {
-                    // Local state for drag tracking
-                    let mut dragging = use_signal(|| false);
-                    let mut dragged = use_signal(|| false);
-                    let mut last_mouse = use_signal(|| (0.0f64, 0.0f64));
-
-                    let perf_vp = *PERF_CHART_VIEWPORT.read();
-
-                    rsx! {
-                        div {
-                            // ID used by desktop app to query bounds via getBoundingClientRect()
-                            id: "chart-render-area",
-                            class: "relative cursor-grab",
-                            // Use fixed height (50%) and explicit transparent background
-                            style: "height: 50%; background: transparent !important; background-color: transparent !important;",
-
-                            // Wheel → zoom (disables auto-follow)
-                            onwheel: move |evt| {
-                                let delta_y = evt.delta().strip_units().y;
-                                let mut vp = PERF_CHART_VIEWPORT.write();
-                                let zoom_factor = if delta_y < 0.0 { 1.05 } else { 0.95 };
-                                vp.zoom = (vp.zoom * zoom_factor).clamp(0.1, 8.0);
-                                vp.auto_follow = false;
-                            },
-
-                            // Mouse drag → pan (disables auto-follow)
-                            onmousedown: move |evt| {
-                                dragging.set(true);
-                                dragged.set(false);
-                                let coords = evt.client_coordinates();
-                                last_mouse.set((coords.x, coords.y));
-                            },
-
-                            onmousemove: move |evt| {
-                                let coords = evt.client_coordinates();
-
-                                if *dragging.read() {
-                                    let (lx, ly) = *last_mouse.read();
-                                    let dx = coords.x - lx;
-                                    let dy = coords.y - ly;
-
-                                    if dx.abs() > 1.0 || dy.abs() > 1.0 {
-                                        dragged.set(true);
-                                    }
-
-                                    let mut vp = PERF_CHART_VIEWPORT.write();
-                                    vp.scroll_x -= dx;
-                                    vp.scroll_y -= dy;
-                                    vp.auto_follow = false;
-
-                                    last_mouse.set((coords.x, coords.y));
-                                    *PERF_CHART_HOVER.write() = None;
-                                } else {
-                                    // Hover: convert CSS coords → scene coords
-                                    let bounds = *CHART_AREA_BOUNDS.peek();
-                                    let vp = *PERF_CHART_VIEWPORT.peek();
-                                    let base_scale = *PERF_CHART_BASE_SCALE.peek();
-
-                                    if base_scale > 0.0 && bounds.dpr > 0.0 {
-                                        let scale = base_scale * vp.zoom;
-                                        let pad = 20.0 * bounds.dpr;
-                                        let px_x = coords.x * bounds.dpr - bounds.x;
-                                        let px_y = coords.y * bounds.dpr - bounds.y;
-                                        let scene_x = (px_x - pad + vp.scroll_x * bounds.dpr) / scale;
-                                        let scene_y = (px_y - pad + vp.scroll_y * bounds.dpr) / scale;
-                                        *PERF_CHART_HOVER.write() = Some((scene_x, scene_y));
-                                    }
-                                }
-                            },
-
-                            onmouseup: move |evt| {
-                                if !*dragged.read() {
-                                    // Treat mouse-up without drag as click-to-seek.
-                                    let coords = evt.client_coordinates();
-                                    let bounds = *CHART_AREA_BOUNDS.peek();
-                                    let vp = *PERF_CHART_VIEWPORT.peek();
-                                    let base_scale = *PERF_CHART_BASE_SCALE.peek();
-
-                                    if base_scale > 0.0 && bounds.dpr > 0.0 {
-                                        let scale = base_scale * vp.zoom;
-                                        let pad = 20.0 * bounds.dpr;
-                                        let px_x = coords.x * bounds.dpr - bounds.x;
-                                        let px_y = coords.y * bounds.dpr - bounds.y;
-                                        let scene_x = (px_x - pad + vp.scroll_x * bounds.dpr) / scale;
-                                        let scene_y = (px_y - pad + vp.scroll_y * bounds.dpr) / scale;
-                                        *PERF_CHART_CLICK.write() = Some((scene_x, scene_y));
-                                    }
-                                }
-
-                                dragging.set(false);
-                                dragged.set(false);
-                            },
-
-                            onmouseleave: move |_| {
-                                dragging.set(false);
-                                dragged.set(false);
-                                *PERF_CHART_HOVER.write() = None;
-                            },
-
-                            // Reset button — only visible when not in auto-follow mode
-                            if !perf_vp.auto_follow {
-                                div {
-                                    class: "absolute top-4 left-4 z-10",
-                                    button {
-                                        class: "bg-card/80 backdrop-blur-sm rounded-lg px-3 py-2 shadow-lg text-sm text-muted-foreground hover:text-foreground hover:bg-card/90 transition-colors flex items-center gap-2",
-                                        onclick: move |_| {
-                                            *PERF_CHART_VIEWPORT.write() = PerfChartViewport::default();
-                                        },
-                                        // Reset icon (arrow-counterclockwise)
-                                        svg {
-                                            width: "14",
-                                            height: "14",
-                                            view_box: "0 0 24 24",
-                                            fill: "none",
-                                            stroke: "currentColor",
-                                            stroke_width: "2",
-                                            stroke_linecap: "round",
-                                            stroke_linejoin: "round",
-                                            path { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }
-                                            path { d: "M3 3v5h5" }
-                                        }
-                                        "Reset View"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            // Scrollable content area (with background in split mode to cover WGPU)
+            // Scrollable content area
             div {
-                class: if show_chart_split {
-                    "overflow-y-auto chart-opaque-area"
-                } else {
-                    "flex-1 overflow-y-auto"
-                },
-                style: if show_chart_split { "height: 50%; background-color: #0f1116;" } else { "" },
+                class: "flex-1 overflow-y-auto",
                 div {
                     class: "p-6 relative flex items-center justify-center h-full",
-
-                    // Navigator toggle button (top-left corner)
-                    div {
-                        class: "absolute top-4 left-4 z-50",
-                        button {
-                            class: "px-3 py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-secondary-foreground text-sm font-medium transition-colors flex items-center gap-2",
-                            onclick: move |_| {
-                                let current = *SHOW_NAVIGATOR.peek();
-                                *SHOW_NAVIGATOR.write() = !current;
-                            },
-                            // Sidebar icon
-                            svg {
-                                width: "16",
-                                height: "16",
-                                view_box: "0 0 24 24",
-                                fill: "none",
-                                stroke: "currentColor",
-                                stroke_width: "2",
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
-                                line { x1: "9", y1: "3", x2: "9", y2: "21" }
-                            }
-                            if show_navigator {
-                                "Hide Navigator"
-                            } else {
-                                "Show Navigator"
-                            }
-                        }
-                    }
 
                     // Song Title (positioned above progress bar)
                     div {
@@ -1076,33 +917,6 @@ fn PerformanceMainContent() -> Element {
                 }
             }
 
-            // Transport control bar at bottom
-            TransportControlBar {
-                is_playing: is_playing,
-                is_looping: is_looping,
-                on_play_pause: Callback::new(move |_| {
-                    // Start latency tracking before making the call
-                    LATENCY_TRACKER.write().start_play_toggle();
-                    spawn(async move {
-                        let _ = Session::get().setlist().toggle_playback().await;
-                    });
-                }),
-                on_loop_toggle: Callback::new(move |_| {
-                    spawn(async move {
-                        let _ = Session::get().setlist().toggle_song_loop().await;
-                    });
-                }),
-                on_back: Callback::new(move |_| {
-                    spawn(async move {
-                        let _ = Session::get().setlist().previous_section().await;
-                    });
-                }),
-                on_forward: Callback::new(move |_| {
-                    spawn(async move {
-                        let _ = Session::get().setlist().next_section().await;
-                    });
-                }),
-            }
         }
     }
 }
