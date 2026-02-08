@@ -1,0 +1,26 @@
+[package]
+name = "sync"
+description = "Sync cell — OAuth2 authentication, token management, and sync services"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+sync-proto = { path = "../sync-proto" }
+async-trait = "0.1"
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing.workspace = true
+thiserror.workspace = true
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { workspace = true }
+serde_json.workspace = true
+oauth2 = "5"
+reqwest = { version = "0.12", features = ["json"] }
+keyring = { version = "3", features = ["apple-native", "linux-native"] }
+url = "2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+
+[lints]
+workspace = true

@@ -51,6 +51,8 @@ pub mod node_graph_module;
 pub mod node_graph_node;
 pub mod node_graph_view;
 pub mod node_graph_wire;
+pub mod node_property_panel;
+pub mod parameter_editor;
 
 // Re-export main components
 pub use block_colors::block_type_color;
@@ -75,5 +77,11 @@ pub use top_bar::GuitarRigTopBar;
 // Signal flow grid
 pub use signal_flow_grid::SignalFlowGridView;
 // Node-based system
-pub use node_graph::{GraphModule, Node, NodeGraph, NodePosition, NodeSize, NodeWidget, Wire};
+pub use node_graph::{
+    capture_module_snapshot, capture_node_parameters, capture_rig_snapshot, GraphModule,
+    ModuleSnapshot, Node, NodeGraph, NodeParameter, NodePosition, NodeSize, NodeSnapshot,
+    NodeWidget, ParameterType, RigSnapshot, Wire,
+};
 pub use node_graph_view::NodeGraphView;
+pub use node_property_panel::NodePropertyPanel;
+pub use parameter_editor::ParameterEditorModal;

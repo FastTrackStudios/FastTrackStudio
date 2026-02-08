@@ -19,9 +19,7 @@ members = [
     "apps/fasttrackstudio/*",
     "apps/reaper-extension",
 ]
-exclude = [
-    "cells/sync/sync",        # Incomplete crate
-]
+exclude = []
 resolver = "2"
 
 [workspace.lints.rust]
@@ -124,6 +122,9 @@ audio-controls = { path = "cells/signal/audio-controls" }
 signal-control = { path = "cells/signal/signal-control" }
 signal-storage = { path = "cells/signal/signal-storage" }
 signal-ui = { path = "cells/signal/signal-ui" }
+sync-proto = { path = "cells/sync/sync-proto" }
+sync = { path = "cells/sync/sync" }
+sync-ui = { path = "cells/sync/sync-ui" }
 dock-proto = { path = "cells/dock/dock-proto" }
 dock-dioxus = { path = "cells/dock/dock-dioxus" }
 gateway-proto = { path = "cells/gateway/gateway-proto" }

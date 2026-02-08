@@ -47,7 +47,7 @@ use std::sync::Arc;
 use eyre::Result;
 use host_manager_proto::{HostIdentity, HOST_IDENTITY_KEY};
 use roam::session::{ConnectionHandle, HandshakeConfig, IncomingConnections};
-use roam_stream::CobsFramed;
+use roam_stream::LengthPrefixedFramed;
 use roam_wire::MetadataValue;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
@@ -144,10 +144,13 @@ impl HostManager {
     /// The host will open a virtual connection back with its identity.
     pub async fn connect<P: AsRef<Path>>(&mut self, socket_path: P, priority: u32) -> Result<()> {
         let path = socket_path.as_ref();
-        info!("Connecting to host at {:?} with priority {}", path, priority);
+        info!(
+            "Connecting to host at {:?} with priority {}",
+            path, priority
+        );
 
         let stream = roam_local::connect(path).await?;
-        let framed = CobsFramed::new(stream);
+        let framed = LengthPrefixedFramed::new(stream);
 
         let (handle, incoming, driver) = roam::session::initiate_framed(
             framed,
@@ -162,7 +165,14 @@ impl HostManager {
         let hosts_by_instance = self.hosts_by_instance.clone();
         let live_hosts = self.live_hosts.clone();
         let incoming_task = tokio::spawn(async move {
-            Self::handle_incoming_connections(incoming, hosts_by_instance, live_hosts, handle, priority).await;
+            Self::handle_incoming_connections(
+                incoming,
+                hosts_by_instance,
+                live_hosts,
+                handle,
+                priority,
+            )
+            .await;
         });
         self.tasks.push(incoming_task);
 
@@ -221,7 +231,10 @@ impl HostManager {
                                     drop(hosts);
                                     let mut live = live_hosts.lock().await;
                                     live.insert(key.clone(), host_name.clone());
-                                    info!("Host '{}' is now LIVE for instance '{}'", host_name, key);
+                                    info!(
+                                        "Host '{}' is now LIVE for instance '{}'",
+                                        host_name, key
+                                    );
                                 }
                             }
                             Err(e) => {
@@ -297,9 +310,16 @@ impl HostManager {
     ///
     /// Returns an error if the host doesn't exist or is unhealthy.
     pub async fn set_live_host(&self, instance_key: &str, host_name: &str) -> Result<()> {
-        let host = self.get_host(instance_key, host_name).await.ok_or_else(|| {
-            eyre::eyre!("Host '{}' not found in instance '{}'", host_name, instance_key)
-        })?;
+        let host = self
+            .get_host(instance_key, host_name)
+            .await
+            .ok_or_else(|| {
+                eyre::eyre!(
+                    "Host '{}' not found in instance '{}'",
+                    host_name,
+                    instance_key
+                )
+            })?;
 
         if !host.is_healthy().await {
             return Err(eyre::eyre!("Host '{}' is not healthy", host_name));
@@ -307,7 +327,10 @@ impl HostManager {
 
         let mut live = self.live_hosts.lock().await;
         live.insert(instance_key.to_string(), host_name.to_string());
-        info!("Set '{}' as LIVE for instance '{}'", host_name, instance_key);
+        info!(
+            "Set '{}' as LIVE for instance '{}'",
+            host_name, instance_key
+        );
         Ok(())
     }
 
@@ -343,7 +366,10 @@ impl HostManager {
             }
         }
 
-        warn!("No healthy hosts remaining for instance '{}'!", instance_key);
+        warn!(
+            "No healthy hosts remaining for instance '{}'!",
+            instance_key
+        );
         live.remove(instance_key);
     }
 }

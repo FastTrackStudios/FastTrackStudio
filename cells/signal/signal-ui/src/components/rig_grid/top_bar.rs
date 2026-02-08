@@ -7,6 +7,7 @@
 //! - Current preset name display
 //! - Connection status indicator
 
+use crate::hooks::parameter_capture::use_parameter_capture;
 use crate::prelude::*;
 use crate::signals::{RIG_CONNECTED, RIG_CURRENT_PRESET, RIG_LOADING};
 
@@ -45,6 +46,11 @@ pub fn GuitarRigTopBar(props: GuitarRigTopBarProps) -> Element {
     let preset = RIG_CURRENT_PRESET.read();
     let connected = *RIG_CONNECTED.read();
     let loading = *RIG_LOADING.read();
+
+    // Snapshot naming dialog state
+    let mut snapshot_dialog_open = use_signal(|| false);
+    let mut snapshot_name = use_signal(|| String::new());
+    let save_snapshot = use_parameter_capture();
 
     rsx! {
         div { class: "h-14 flex items-center justify-between px-4 bg-zinc-900 border-b border-zinc-800",
@@ -140,11 +146,44 @@ pub fn GuitarRigTopBar(props: GuitarRigTopBarProps) -> Element {
                 }
             }
 
-            // Right section: Connection status + STOMP mode
+            // Right section: Save Snapshot + Connection status + STOMP mode
             div { class: "flex items-center gap-3",
+                // Save Snapshot button
+                button {
+                    class: "flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 \
+                            text-sm font-medium text-zinc-300 transition-colors",
+                    onclick: move |_| {
+                        snapshot_name.set(String::new());
+                        snapshot_dialog_open.set(true);
+                    },
+                    title: "Save current rig state as a snapshot",
+                    // Camera/snapshot icon
+                    svg {
+                        class: "w-4 h-4",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        view_box: "0 0 24 24",
+                        path {
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            d: "M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z",
+                        }
+                        path {
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            d: "M15 13a3 3 0 11-6 0 3 3 0 016 0z",
+                        }
+                    }
+                    span { "Save Snapshot" }
+                }
+
+                // Separator
+                div { class: "w-px h-6 bg-zinc-700" }
+
                 // Stomp mode indicator (Quad Cortex style)
                 div { class: "flex items-center gap-2 text-xs text-zinc-500",
-                    span { "⚡ STOMP" }
+                    span { "STOMP" }
                 }
 
                 // Separator
@@ -169,6 +208,21 @@ pub fn GuitarRigTopBar(props: GuitarRigTopBarProps) -> Element {
                         }
                     }
                 }
+            }
+        }
+
+        // Snapshot naming dialog (overlay)
+        if snapshot_dialog_open() {
+            SnapshotNamingDialog {
+                name: snapshot_name(),
+                on_name_change: move |new_name: String| snapshot_name.set(new_name),
+                on_save: move |name: String| {
+                    if !name.trim().is_empty() {
+                        save_snapshot.call(name);
+                        snapshot_dialog_open.set(false);
+                    }
+                },
+                on_cancel: move |_| snapshot_dialog_open.set(false),
             }
         }
     }
@@ -225,6 +279,85 @@ fn ModuleViewModeButton(props: ModuleViewModeButtonProps) -> Element {
             onclick: move |_| props.on_click.call(mode),
             span { class: "mr-1", "{props.mode.icon()}" }
             span { "{props.mode.display_name()}" }
+        }
+    }
+}
+
+// ─── Snapshot Naming Dialog ──────────────────────────────────────────────
+
+/// Props for the snapshot naming dialog.
+#[derive(Props, Clone, PartialEq)]
+struct SnapshotNamingDialogProps {
+    /// Current name value.
+    name: String,
+    /// Callback when the name changes.
+    on_name_change: Callback<String>,
+    /// Callback when the user confirms (receives the final name).
+    on_save: Callback<String>,
+    /// Callback when the user cancels.
+    on_cancel: Callback<()>,
+}
+
+/// Modal dialog for naming a snapshot before saving.
+#[component]
+fn SnapshotNamingDialog(props: SnapshotNamingDialogProps) -> Element {
+    let name_for_save = props.name.clone();
+
+    rsx! {
+        // Backdrop
+        div {
+            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/50",
+            onclick: move |_| props.on_cancel.call(()),
+
+            // Dialog box (stop click propagation)
+            div {
+                class: "bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-6 w-96",
+                onclick: move |e| e.stop_propagation(),
+
+                // Title
+                h3 { class: "text-lg font-semibold text-zinc-100 mb-4",
+                    "Save Snapshot"
+                }
+
+                // Name input
+                div { class: "mb-4",
+                    label { class: "block text-sm text-zinc-400 mb-1",
+                        r#for: "snapshot-name",
+                        "Snapshot Name"
+                    }
+                    input {
+                        class: "w-full px-3 py-2 bg-zinc-800 border border-zinc-600 rounded-lg \
+                                text-zinc-200 text-sm placeholder-zinc-500 \
+                                focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500",
+                        id: "snapshot-name",
+                        r#type: "text",
+                        placeholder: "e.g. Verse Clean, Solo Lead...",
+                        value: "{props.name}",
+                        autofocus: true,
+                        oninput: move |e| props.on_name_change.call(e.value()),
+                    }
+                }
+
+                // Actions
+                div { class: "flex justify-end gap-2",
+                    button {
+                        class: "px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 \
+                                hover:bg-zinc-800 transition-colors",
+                        onclick: move |_| props.on_cancel.call(()),
+                        "Cancel"
+                    }
+                    button {
+                        class: "px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white \
+                                hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                        disabled: name_for_save.trim().is_empty(),
+                        onclick: {
+                            let name = props.name.clone();
+                            move |_| props.on_save.call(name.clone())
+                        },
+                        "Save"
+                    }
+                }
+            }
         }
     }
 }

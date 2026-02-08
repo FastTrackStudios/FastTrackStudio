@@ -18,6 +18,7 @@ pub mod layout;
 pub mod panel;
 pub mod persistence;
 pub mod preset;
+pub mod registry;
 pub mod tab_group;
 pub mod tree;
 
@@ -30,5 +31,6 @@ pub use layout::{DockLayout, FlatNode};
 pub use panel::PanelId;
 pub use persistence::{load_presets_from_file, save_presets_to_file};
 pub use preset::{DockPreset, PresetCollection};
+pub use registry::{DockPosition, PanelConstraints, PanelDescriptor, PanelRegistry};
 pub use tab_group::TabGroup;
 pub use tree::{DockNode, SplitDirection};

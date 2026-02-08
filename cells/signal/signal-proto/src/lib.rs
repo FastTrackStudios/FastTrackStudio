@@ -16,6 +16,7 @@ pub mod id;
 pub mod layer;
 pub mod module;
 pub mod module_preset;
+pub mod morph;
 pub mod non_empty;
 pub mod normalized;
 pub mod parameter;

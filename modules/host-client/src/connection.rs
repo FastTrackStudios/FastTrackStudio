@@ -47,7 +47,7 @@ impl HostConnection {
     pub async fn connect_unix(path: &std::path::Path) -> Result<Self, HostClientError> {
         use roam_local::LocalStream;
         use roam_session::initiate_framed;
-        use roam_stream::CobsFramed;
+        use roam_stream::LengthPrefixedFramed;
 
         info!("Connecting to host via Unix socket: {}", path.display());
 
@@ -56,14 +56,15 @@ impl HostConnection {
             HostClientError::ConnectionFailed(format!("Unix socket connection failed: {}", e))
         })?;
 
-        // Wrap in COBS framing
-        let framed = CobsFramed::new(stream);
+        // Wrap in length-prefixed framing
+        let framed = LengthPrefixedFramed::new(stream);
 
         // Configure handshake with higher credit for 60Hz streaming
         // The negotiated credit is the minimum of both peers, so both sides need high limits
         let config = HandshakeConfig {
             max_payload_size: 1024 * 1024,            // 1 MiB
             initial_channel_credit: 16 * 1024 * 1024, // 16 MiB for high-frequency streaming
+            ..Default::default()
         };
 
         // Initiate the roam connection (we're the client/initiator)
@@ -113,6 +114,7 @@ impl HostConnection {
         let config = HandshakeConfig {
             max_payload_size: 1024 * 1024,            // 1 MiB
             initial_channel_credit: 16 * 1024 * 1024, // 16 MiB for high-frequency streaming
+            ..Default::default()
         };
 
         #[cfg(target_arch = "wasm32")]

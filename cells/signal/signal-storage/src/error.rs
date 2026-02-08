@@ -1,5 +1,6 @@
 //! Storage error types.
 
+use sea_orm::DbErr;
 use uuid::Uuid;
 
 /// Result type alias for storage operations.
@@ -10,7 +11,7 @@ pub type StorageResult<T> = Result<T, StorageError>;
 pub enum StorageError {
     /// Database query or connection error.
     #[error("database error: {0}")]
-    Database(#[from] sqlx::Error),
+    Database(#[from] DbErr),
 
     /// Entity not found.
     #[error("{entity} not found: {id}")]
@@ -35,4 +36,8 @@ pub enum StorageError {
     /// Connection pool exhausted or unavailable.
     #[error("connection unavailable: {0}")]
     ConnectionUnavailable(String),
+
+    /// Business rule violation (e.g., rating own preset).
+    #[error("{0}")]
+    BusinessRule(String),
 }

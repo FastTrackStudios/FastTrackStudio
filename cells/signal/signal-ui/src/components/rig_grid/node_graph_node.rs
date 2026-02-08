@@ -48,6 +48,9 @@ pub(crate) struct NodeBlockProps {
     /// Callback when port hover ends.
     #[props(default)]
     pub on_port_hover_end: Option<Callback<()>>,
+    /// Callback when the node is double-clicked (opens parameter editor).
+    #[props(default)]
+    pub on_double_click: Option<Callback<Uuid>>,
     /// Whether a wire draft is currently active (enables port hover highlighting).
     #[props(default)]
     pub wire_draft_active: bool,
@@ -75,6 +78,7 @@ pub(crate) fn NodeBlock(props: NodeBlockProps) -> Element {
 
     let on_header_drag = props.on_header_drag_start.clone();
     let on_select = props.on_select.clone();
+    let on_dbl_click = props.on_double_click.clone();
     let node_id = node.id;
     let header_cursor = if props.wire_draft_active { "crosshair" } else { "grab" };
 
@@ -106,6 +110,13 @@ pub(crate) fn NodeBlock(props: NodeBlockProps) -> Element {
             onmousedown: move |evt| {
                 evt.stop_propagation();
                 if let Some(ref cb) = on_select {
+                    cb.call(node_id);
+                }
+            },
+            // Double-click to open parameter editor
+            ondblclick: move |evt| {
+                evt.stop_propagation();
+                if let Some(ref cb) = on_dbl_click {
                     cb.call(node_id);
                 }
             },

@@ -1,0 +1,13 @@
+[package]
+name = "sync-proto"
+description = "Sync protocol — auth types and service definitions for cloud sync"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[lints]
+workspace = true

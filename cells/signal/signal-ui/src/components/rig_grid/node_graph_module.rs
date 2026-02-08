@@ -47,6 +47,9 @@ pub(crate) struct ModuleContainerProps {
     /// Callback when the module is right-clicked (for context menu).
     #[props(default)]
     pub on_context_menu: Option<EventHandler<MouseEvent>>,
+    /// Callback when an internal node is double-clicked (opens parameter editor).
+    #[props(default)]
+    pub on_node_double_click: Option<Callback<Uuid>>,
     /// Whether a wire draft is currently active (enables port hover highlighting).
     #[props(default)]
     pub wire_draft_active: bool,
@@ -156,6 +159,7 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
                     offset_x: 0.0,
                     offset_y: title_height,
                     compact: props.compact,
+                    on_double_click: props.on_node_double_click.clone(),
                     on_port_drag_start: props.on_port_drag_start.clone(),
                     on_port_hover: props.on_port_hover.clone(),
                     on_port_hover_end: props.on_port_hover_end.clone(),
