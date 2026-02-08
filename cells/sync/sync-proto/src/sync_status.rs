@@ -2,7 +2,7 @@
 
 /// Current sync operation state
 #[repr(u8)]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncState {
     /// No sync in progress, everything up to date
     Idle,
@@ -13,8 +13,13 @@ pub enum SyncState {
     /// Sync encountered an error
     Error(String),
     /// Not connected / not authenticated
-    #[default]
     Offline,
+}
+
+impl Default for SyncState {
+    fn default() -> Self {
+        Self::Offline
+    }
 }
 
 /// Service for querying and subscribing to sync status
