@@ -40,7 +40,7 @@ pub struct GuitarRigRightSidebarProps {
 #[component]
 pub fn GuitarRigRightSidebar(props: GuitarRigRightSidebarProps) -> Element {
     rsx! {
-        div { class: "w-64 flex flex-col bg-zinc-900 border-l border-zinc-800",
+        div { class: "h-full w-full flex flex-col bg-card border-l border-border",
             // === SCENES PANEL (top) ===
             div { class: "flex-1 flex flex-col min-h-0 border-b border-zinc-800",
                 // Song header with scene info
@@ -107,6 +107,94 @@ pub fn GuitarRigRightSidebar(props: GuitarRigRightSidebarProps) -> Element {
         }
     }
 }
+
+// ─── Standalone panel views (scenes-only, songs-only) ────────────────
+
+/// Scenes-only panel — song header + scene list + navigation.
+///
+/// Standalone component for the SongParts dock panel.
+#[component]
+pub fn SceneListPanel(
+    on_scene_click: Callback<usize>,
+    on_prev_scene: Callback<()>,
+    on_next_scene: Callback<()>,
+) -> Element {
+    rsx! {
+        div { class: "h-full w-full flex flex-col bg-card",
+            SongHeader {}
+
+            div { class: "flex-1 overflow-y-auto p-2",
+                h3 { class: "text-xs font-semibold text-muted-foreground mb-2 px-2 uppercase tracking-wider",
+                    "Scenes"
+                }
+                SceneList { on_scene_click: on_scene_click.clone() }
+            }
+
+            div { class: "p-2 border-t border-border flex gap-2",
+                button {
+                    class: "flex-1 px-2 py-1.5 bg-muted hover:bg-accent rounded text-xs font-medium \
+                            text-muted-foreground hover:text-foreground transition-colors",
+                    onclick: move |_| on_prev_scene.call(()),
+                    "← Prev"
+                }
+                button {
+                    class: "flex-1 px-2 py-1.5 bg-muted hover:bg-accent rounded text-xs font-medium \
+                            text-muted-foreground hover:text-foreground transition-colors",
+                    onclick: move |_| on_next_scene.call(()),
+                    "Next →"
+                }
+            }
+        }
+    }
+}
+
+/// Songs-only panel — setlist dropdown + song list + navigation.
+///
+/// Standalone component for the SongSelector dock panel.
+#[component]
+pub fn SongListPanel(
+    on_song_click: Callback<usize>,
+    on_prev_song: Callback<()>,
+    on_next_song: Callback<()>,
+    on_setlist_change: Callback<Uuid>,
+) -> Element {
+    rsx! {
+        div { class: "h-full w-full flex flex-col bg-card",
+            // Setlist header
+            div { class: "p-2 border-b border-border",
+                div { class: "flex items-center gap-2 px-2",
+                    span { class: "text-xs font-semibold text-muted-foreground uppercase tracking-wider",
+                        "Setlist:"
+                    }
+                    SetlistDropdown { on_select: on_setlist_change.clone() }
+                }
+            }
+
+            // Song list
+            div { class: "flex-1 overflow-y-auto p-2",
+                SongList { on_song_click: on_song_click.clone() }
+            }
+
+            // Navigation
+            div { class: "p-2 border-t border-border flex gap-2",
+                button {
+                    class: "flex-1 px-2 py-1.5 bg-muted hover:bg-accent rounded text-xs font-medium \
+                            text-muted-foreground hover:text-foreground transition-colors",
+                    onclick: move |_| on_prev_song.call(()),
+                    "← Prev Song"
+                }
+                button {
+                    class: "flex-1 px-2 py-1.5 bg-muted hover:bg-accent rounded text-xs font-medium \
+                            text-muted-foreground hover:text-foreground transition-colors",
+                    onclick: move |_| on_next_song.call(()),
+                    "Next Song →"
+                }
+            }
+        }
+    }
+}
+
+// ─── Internal sub-components ─────────────────────────────────────────
 
 /// Song header showing current song context.
 #[component]
@@ -273,10 +361,7 @@ fn SetlistDropdown(props: SetlistDropdownProps) -> Element {
         .map(|s| s.name.clone())
         .unwrap_or_else(|| "No Setlist".to_string());
 
-    let song_count = current_setlist
-        .as_ref()
-        .map(|s| s.song_count)
-        .unwrap_or(0);
+    let song_count = current_setlist.as_ref().map(|s| s.song_count).unwrap_or(0);
 
     rsx! {
         div { class: "relative flex-1",

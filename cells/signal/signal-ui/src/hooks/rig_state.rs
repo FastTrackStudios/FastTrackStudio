@@ -3,28 +3,30 @@
 //! Subscribes to the rig service via `SignalControl` and populates
 //! the global signals that UI components read from.
 
-use crate::context::rig::use_rig_service;
 use crate::prelude::*;
 use crate::signals::{
     RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_AVAILABLE_SETLISTS, RIG_CONNECTED,
     RIG_CURRENT_PRESET, RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_CURRENT_SCENE, RIG_CURRENT_SETLIST,
     RIG_CURRENT_SONG, RIG_INFO, RIG_LOADING, RIG_MODULES, RIG_PRELOADED_PRESETS, RIG_PROFILE,
-    RIG_SCENE_INDEX, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
+    RIG_SCENE_INDEX, RIG_SERVICE, RIG_SETLIST_SONGS, RIG_SONG_INDEX,
 };
 use signal_control::{RigControlEvent, SignalControl};
 
 /// Hook that subscribes to rig service events and updates global signals.
 ///
+/// Reads `SignalControl` from the `RIG_SERVICE` global signal.
+///
 /// 1. Fetches initial rig state
 /// 2. Subscribes to rig events via `SignalControl::subscribe()`
 /// 3. Updates global signals when events arrive
 ///
-/// Call this in a component that wraps your rig UI (e.g. `RigContent`).
+/// Call this once at app startup (e.g. in `RigLayout` or the root component).
 pub fn use_rig_subscription() {
-    let ctx = use_rig_service();
-
     use_effect(move || {
-        let ctl = ctx.service.ctl().clone();
+        let Some(ctl) = RIG_SERVICE.read().clone() else {
+            tracing::warn!("use_rig_subscription: RIG_SERVICE not initialized");
+            return;
+        };
 
         spawn(async move {
             tracing::info!("use_rig_subscription: starting");

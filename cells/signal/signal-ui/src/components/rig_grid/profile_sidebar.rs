@@ -4,7 +4,9 @@
 //! Similar to the profiles section in the left sidebar but as a dedicated right sidebar.
 
 use crate::prelude::*;
-use crate::signals::{RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET, RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_PROFILE};
+use crate::signals::{
+    RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET, RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_PROFILE,
+};
 use crate::{ProfileInfo, ProfileSceneInfo};
 use uuid::Uuid;
 
@@ -33,7 +35,7 @@ pub fn GuitarRigProfileSidebar(props: GuitarRigProfileSidebarProps) -> Element {
     let current_snapshot_id = *RIG_CURRENT_PRESET_SNAPSHOT_ID.read();
 
     rsx! {
-        div { class: "w-64 flex flex-col bg-zinc-900 border-l border-zinc-800",
+        div { class: "h-full w-full flex flex-col bg-card border-l border-border",
             // Header
             div { class: "p-3 border-b border-zinc-800 flex-shrink-0",
                 div { class: "flex items-center justify-between",

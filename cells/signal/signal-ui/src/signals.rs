@@ -58,8 +58,29 @@ pub static RIG_SCENE_INDEX: GlobalSignal<usize> = Signal::global(|| 0);
 pub static RIG_MODULES: GlobalSignal<Vec<signal_control::module::Module>> =
     Signal::global(Vec::new);
 
+/// The rig service client — stored globally so any dock panel can dispatch actions
+/// without needing a context provider wrapper.
+pub static RIG_SERVICE: GlobalSignal<Option<signal_control::SignalControl>> =
+    Signal::global(|| None);
+
+/// Initialize the rig service with a mock guitar rig.
+/// Call once at app startup before any rig panels render.
+pub fn init_rig_service() {
+    if RIG_SERVICE.read().is_some() {
+        return; // already initialized
+    }
+    *RIG_SERVICE.write() = Some(signal_control::SignalControl::mock_guitar());
+}
+
 /// Connection status
 pub static RIG_CONNECTED: GlobalSignal<bool> = Signal::global(|| false);
 
 /// Loading status
 pub static RIG_LOADING: GlobalSignal<bool> = Signal::global(|| false);
+
+/// The node graph for the Flow/FlowCompact view.
+///
+/// Initialized with `sample_guitar_rig()` on first access. Modified by
+/// drag interactions, wire creation/deletion, and the module browser.
+pub static RIG_NODE_GRAPH: GlobalSignal<crate::components::rig_grid::node_graph::NodeGraph> =
+    Signal::global(|| crate::components::rig_grid::node_graph::NodeGraph::sample_guitar_rig());

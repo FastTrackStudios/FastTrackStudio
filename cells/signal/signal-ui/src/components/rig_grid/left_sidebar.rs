@@ -112,7 +112,7 @@ pub fn GuitarRigLeftSidebar(props: GuitarRigLeftSidebarProps) -> Element {
     };
 
     rsx! {
-        div { class: "w-64 flex flex-col bg-zinc-900 border-r border-zinc-800",
+        div { class: "h-full w-full flex flex-col bg-card border-r border-border",
             // === PRESETS SECTION ===
             div { class: "{preset_section_class}",
                 // Header with search

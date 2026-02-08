@@ -3,9 +3,8 @@
 //! Wraps `SignalControl` methods into Dioxus `Callback`s that UI
 //! components can invoke directly (e.g. `actions.next_scene.call(())`).
 
-use crate::context::rig::use_rig_service;
 use crate::prelude::*;
-use crate::signals::{RIG_CURRENT_PRESET, RIG_PROFILE};
+use crate::signals::{RIG_CURRENT_PRESET, RIG_PROFILE, RIG_SERVICE};
 use signal_control::{PreloadPriority, RigControlCommand, SignalControl};
 use uuid::Uuid;
 
@@ -36,10 +35,16 @@ pub struct RigActions {
 
 /// Hook that provides rig action callbacks.
 ///
+/// Reads `SignalControl` from the `RIG_SERVICE` global signal.
 /// All commands are dispatched asynchronously via `SignalControl`.
+///
+/// # Panics
+/// Panics if `RIG_SERVICE` has not been initialized (call `init_rig_service()` first).
 pub fn use_rig_actions() -> RigActions {
-    let ctx = use_rig_service();
-    let ctl = ctx.service.ctl().clone();
+    let ctl = RIG_SERVICE
+        .read()
+        .clone()
+        .expect("RIG_SERVICE not initialized — call init_rig_service() first");
 
     RigActions {
         load_profile: {
