@@ -16,8 +16,8 @@
 - **SeaORM migration ordering**: FK-referenced tables must be created before dependent tables. Order: users → presets → snapshots/module_chunks/ratings/preset_versions → sync_metadata.
 - **oauth2 v5 typestate**: `BasicClient` defaults all endpoint generics to `EndpointNotSet`. After calling `set_auth_uri()`/`set_token_uri()`, the client type changes to `EndpointSet` for those positions. Methods like `authorize_url()`, `exchange_code()`, `exchange_refresh_token()` only exist on clients with `EndpointSet` for the relevant endpoints. Use a type alias like `type ConfiguredClient = BasicClient<EndpointSet, ..., EndpointSet>` for the return type.
 - **oauth2 v5 TokenResponse trait**: The `access_token()`, `refresh_token()`, and `expires_in()` methods come from the `TokenResponse` trait which must be explicitly imported: `use oauth2::TokenResponse;`.
-- **Morph in normalized space**: Since all parameter values are `NormalizedF64` [0,1], interpolation can happen directly without denormalize/renormalize. The `ParamFormat` skew curve is only needed for display, not for morphing.
-- **roam-session blocks signal-ui check**: `cargo check -p signal-ui` fails due to upstream `roam-session` breakage (facet_path API changes). Use `cargo check -p signal-proto` to verify signal domain logic in isolation.
+- **SeaORM ActiveValue from Model**: When converting `Model` to `ActiveModel` via `.into()`, fields become `ActiveValue::Unchanged(val)`. Don't call `.as_ref().copied()` on them — extract the value from the `Model` before converting.
+- **Sync engine architecture**: `SyncEngine` lives in the `sync` crate (orchestration), not `signal-storage` (data layer). It uses `DatabaseConnection` from SeaORM to access both local SQLite and cloud PostgreSQL. The `sync_metadata` table in signal-storage tracks per-entity sync state.
 
 ---
 
@@ -167,29 +167,30 @@
   - `#[derive(Default)]` with `#[default]` on enum variants is cleaner than manual impl and satisfies clippy `derivable_impls` lint
 ---
 
-## 2026-02-08 - roam-test-8xs.24
+## 2026-02-08 - roam-test-8xs.25
 - What was implemented:
-  - US-015: Parameter morphing between snapshots
-  - `SnapshotMorpher` struct managing A/B snapshots with `morph_position: f64` (0.0=A, 1.0=B)
-  - Linear interpolation (`lerp`) for continuous parameters in normalized [0,1] space
-  - Bypass state snap at t=0.5 threshold (non-morphable boolean parameter)
-  - Structural change detection: compares `variation_assignments` between A and B snapshots
-  - `MorphResult` struct with interpolated `block_overrides` and `custom_overrides`
-  - `MorphWarning` enum: `StructuralDifference`, `MissingSnapshot`
-  - `MorphSlider` Dioxus component with A/B assignment dropdowns and warning display
-  - `compute()` returns `None` when structural changes prevent morphing
-  - `compute_at(position)` for preview/animation at arbitrary positions
-  - `swap()` inverts A↔B and morph position so sound doesn't change
-  - 28 unit tests covering lerp, morpher lifecycle, structural detection, parameter interpolation, bypass snapping, multi-block morphing, custom overrides
+  - US-031: Sync engine with conflict resolution in `cells/sync/` (sync-proto, sync)
+  - `SyncEngine` struct: orchestrates local ↔ cloud sync via SeaORM `DatabaseConnection`
+  - Delta sync: only transfers entities where `sync_metadata.sync_status != "synced"`
+  - Conflict detection: entities in `conflict` state get resolved per configured strategy
+  - 4 conflict strategies: `LastWriteWins` (timestamp comparison), `Merge` (JSON top-level key merge), `AskUser` (deferred to UI), `KeepBoth` (duplicate with suffixed name)
+  - Offline queueing: changes recorded while disconnected, drained on next sync
+  - `BackgroundSync`: tokio background task with configurable interval (default 5 min), manual trigger support, graceful shutdown
+  - `SyncEngineService` trait impl for the engine
+  - Sync protocol types: `SyncStatus`, `ConflictStrategy`, `EntityType`, `EntityChange`, `ConflictInfo`, `ConflictResolution`, `SyncProgress`
+  - `SyncError` enum for sync-specific error conditions
+  - 20 new tests (16 engine + JSON merge tests, 3 background sync tests, 1 conflict strategy test) — 55 total in sync crate
 - Files changed:
-  - `cells/signal/signal-proto/src/morph.rs` (new — 520+ lines with 28 tests)
-  - `cells/signal/signal-proto/src/lib.rs` (added `morph` module)
-  - `cells/signal/signal-ui/src/components/morph_slider.rs` (new — MorphSlider component with A/B dropdowns)
-  - `cells/signal/signal-ui/src/components/mod.rs` (added morph_slider module + re-export)
-  - `cells/signal/signal-ui/src/lib.rs` (added MorphSlider re-export)
+  - `cells/sync/sync-proto/src/sync_status.rs` (extended with sync engine types: SyncStatus, ConflictStrategy, EntityType, EntityChange, ConflictInfo, ConflictResolution, SyncProgress, SyncEngineService trait)
+  - `cells/sync/sync-proto/src/lib.rs` (re-export new types)
+  - `cells/sync/sync/Cargo.toml` (added signal-storage, sea-orm deps; sea-orm-migration in dev-deps)
+  - `cells/sync/sync/src/lib.rs` (added engine + background modules and re-exports)
+  - `cells/sync/sync/src/error.rs` (added SyncError enum)
+  - `cells/sync/sync/src/engine.rs` (new — ~550 lines, SyncEngine impl + 16 tests)
+  - `cells/sync/sync/src/background.rs` (new — ~130 lines, BackgroundSync + 3 tests)
 - **Learnings:**
-  - Morphing in normalized [0,1] space is correct — the `ParamFormat` skew curve is a display concern, not an interpolation concern. Lerp between normalized values preserves the curve's intent.
-  - Union-merge strategy for block overrides: when a block exists in only one snapshot, its overrides still appear in the result. This is sound because the morpher produces a complete override set.
-  - `cargo check -p signal-ui` fails due to upstream `roam-session` breakage (not our code). Use `cargo check -p signal-proto` to verify domain logic. The signal-ui Dioxus component cannot be checked until roam-session is fixed upstream.
-  - Pre-existing doctest failure in `patch.rs` references `rig_control` crate — use `--lib` flag to skip doctests
+  - SeaORM `ActiveValue::Unchanged(val)` from `Model.into()` wraps the raw value — don't chain `.as_ref().copied()` on it; extract from Model first
+  - `merge_json` is a pragmatic approach: top-level key merge with local-wins on overlap. Full recursive merge would need a diff algorithm
+  - Background sync uses `tokio::select!` with `Notify` for both shutdown and manual trigger — cleaner than channels for single-signal cases
+  - In-memory SQLite (`sqlite::memory:`) with SeaORM migrations makes excellent test fixtures for integration tests
 ---

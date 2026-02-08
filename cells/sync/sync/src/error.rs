@@ -1,4 +1,7 @@
-//! Auth error types
+//! Auth and sync error types
+
+use sync_proto::EntityType;
+use uuid::Uuid;
 
 pub type AuthResult<T> = Result<T, AuthError>;
 
@@ -31,3 +34,26 @@ impl From<reqwest::Error> for AuthError {
         Self::Network(e.to_string())
     }
 }
+
+// region: --- SyncError
+
+/// Errors that can occur during sync operations.
+#[derive(Debug, thiserror::Error)]
+pub enum SyncError {
+    #[error("database error: {0}")]
+    Database(sea_orm::DbErr),
+
+    #[error("sync engine is offline: {0}")]
+    Offline(String),
+
+    #[error("{0:?} entity not found: {1}")]
+    NotFound(EntityType, Uuid),
+
+    #[error("conflict resolution failed: {0}")]
+    ConflictResolution(String),
+
+    #[error("serialization error: {0}")]
+    Serialization(String),
+}
+
+// endregion: --- SyncError
