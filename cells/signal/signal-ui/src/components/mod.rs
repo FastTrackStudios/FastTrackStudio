@@ -1,6 +1,9 @@
+pub mod crossfade_indicator;
 pub mod morph_slider;
 pub mod rig_grid;
 
+// Re-export crossfade indicator
+pub use crossfade_indicator::CrossfadeIndicator;
 // Re-export morph slider
 pub use morph_slider::MorphSlider;
 
@@ -13,6 +16,4 @@ pub use rig_grid::{
     GuitarRigTopBar, GuitarRigLeftSidebar, GuitarRigRightSidebar, GuitarRigProfileSidebar, ModuleBrowserModal,
     // Node-based system
     Node, NodeGraph, NodePosition, NodeSize, NodeWidget,
-    // Property panel
-    NodePropertyPanel,
 };

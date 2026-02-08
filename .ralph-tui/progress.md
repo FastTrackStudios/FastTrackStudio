@@ -1,7 +1,5 @@
 ## Codebase Patterns
 
-- **Global signal selection bridge**: To share selection state between independent Dioxus components (e.g., NodeGraphView → NodePropertyPanel), use `GlobalSignal<Option<SelectedEntity>>` + `use_effect` in the source to sync local state to the global signal. Reading components reactively re-render when the signal changes.
-- **Dock panel wrapping**: Standalone dock panels follow a pattern: `init_rig_service()` + `use_rig_subscription()` + inner component. The wrapper exists so that any dock panel can be rendered independently without needing a parent to set up the rig service.
 - **Sea-query feature flags**: Must enable `with-uuid`, `with-chrono`, `with-json` on both `sea-query` and `sea-query-binder` for Uuid/DateTime/JsonValue conversions to work.
 - **Workspace glob resolution**: The `cells/*/*` glob in workspace members auto-discovers new crates — no explicit member listing needed.
 - **Worktree submodule gotcha**: `git submodule update --init` can delete recently created directories in worktrees. Write files AFTER submodule initialization.
@@ -20,6 +18,7 @@
 - **oauth2 v5 TokenResponse trait**: The `access_token()`, `refresh_token()`, and `expires_in()` methods come from the `TokenResponse` trait which must be explicitly imported: `use oauth2::TokenResponse;`.
 - **Morph in normalized space**: Since all parameter values are `NormalizedF64` [0,1], interpolation can happen directly without denormalize/renormalize. The `ParamFormat` skew curve is only needed for display, not for morphing.
 - **roam-session blocks signal-ui check**: `cargo check -p signal-ui` fails due to upstream `roam-session` breakage (facet_path API changes). Use `cargo check -p signal-proto` to verify signal domain logic in isolation.
+- **Phase state machine needs sequential if-chains**: When a time-based state machine can advance through multiple phases in a single tick (large delta), use sequential `if` checks instead of `match` arms. A `match` only evaluates one arm per invocation, so a phase change inside one arm won't be caught by subsequent arms in the same call.
 
 ---
 
@@ -224,30 +223,28 @@
   - GlobalSignal for snapshot storage follows existing RIG_NODE_GRAPH/RIG_CURRENT_PRESET pattern; Vec<RigSnapshot> is simple and sufficient without IndexMap/HashMap since snapshot count stays small
 ---
 
-## 2026-02-08 - roam-test-8xs.9
+## 2026-02-08 - roam-test-8xs.14
 - What was implemented:
-  - US-004: Node property panel in sidebar
-  - `NodePropertyPanel` component with reactive selection display
-  - `SelectedEntity` enum (Node/Module) + `RIG_SELECTED_ENTITY` global signal
-  - `use_effect` bridge in `NodeGraphView` to sync local Selection → global signal
-  - Node view: editable name, block type badge, bypass toggle, position/size, parameter sliders, port list with connection status, "Open Full Editor" button
-  - Module view: same plus internal nodes list with click-to-select navigation
-  - Empty state: placeholder when nothing selected
-  - `NodePropertyDockPanel` standalone dock panel wrapper
-  - Layout integration: property panel replaces right sidebar when selection active
-  - 11 unit tests for SelectedEntity, graph lookups, port connections, bypass/parameter mutation
+  - US-016: Snapshot crossfade for structural changes
+  - `CrossfadeCurve` enum: Linear, EqualPower (sqrt, constant power), SCurve (cubic Hermite 3t²-2t³) with `apply()` and `apply_complement()` methods
+  - `CrossfadePhase` enum: Idle → FadingOut → Swapping → FadingIn → Complete
+  - `ModuleTransition` enum: Morph (shared modules, gain=1.0), FadeIn (new modules, gain 0→1), FadeOut (removed modules, gain 1→0)
+  - `CrossfadeState` struct: snapshot of phase, progress, source/target gains, per-module transitions, morph result
+  - `CrossfadeTransition` struct: full crossfade orchestrator with duration (0-500ms, default 50ms), curve selection, `start(source, target)`, `tick(delta_ms)`, `reset()`
+  - Module analysis: classifies sections as shared/source-only/target-only based on `variation_assignments`
+  - Leverages existing `SnapshotMorpher` for parameter interpolation of shared modules during crossfade
+  - `CrossfadeIndicator` Dioxus component: animated progress bar with phase label, source→target names, curve/duration info
+  - 28 unit tests covering curves, state machine lifecycle, module transitions, gains, and parameter morphing
 - Files changed:
-  - `cells/signal/signal-ui/src/components/rig_grid/node_property_panel.rs` (new — 470+ lines with 11 tests)
-  - `cells/signal/signal-ui/src/signals.rs` (added RIG_SELECTED_ENTITY, SelectedEntity enum)
-  - `cells/signal/signal-ui/src/components/rig_grid/node_graph_view.rs` (added use_effect to sync selection to global signal)
-  - `cells/signal/signal-ui/src/components/rig_grid/mod.rs` (added node_property_panel module + re-export)
-  - `cells/signal/signal-ui/src/components/mod.rs` (added NodePropertyPanel re-export)
-  - `cells/signal/signal-ui/src/layouts/rig_layout.rs` (integrated panel in RigLayout, added NodePropertyDockPanel)
-  - `cells/signal/signal-ui/src/lib.rs` (added NodePropertyDockPanel re-export)
+  - `cells/signal/signal-proto/src/crossfade.rs` (new — 870+ lines with 28 tests)
+  - `cells/signal/signal-proto/src/lib.rs` (added crossfade module)
+  - `cells/signal/signal-ui/src/components/crossfade_indicator.rs` (new — CrossfadeIndicator Dioxus component)
+  - `cells/signal/signal-ui/src/components/mod.rs` (added crossfade_indicator module + re-export)
+  - `cells/signal/signal-ui/src/lib.rs` (added CrossfadeIndicator re-export)
 - **Learnings:**
-  - `use_effect` in Dioxus is the correct way to sync a local signal to a global one — it runs reactively whenever the dependency changes, avoiding manual sync calls scattered throughout event handlers
-  - The `RIG_NODE_GRAPH` global signal holds all node data; both the canvas view and property panel read from it. Writes via `RIG_NODE_GRAPH.write()` automatically trigger reactive re-renders in all reading components
-  - Dioxus `<input type="range">` with `opacity-0` overlaid on a styled `<div>` is a clean pattern for custom slider appearance while retaining native interaction
-  - `cargo check -p signal-ui` still fails with the 14 upstream roam-session errors. No new errors from our code confirmed by grepping compiler output
-  - Module's internal node list provides "drill-down" — clicking a node inside the module switches the global selection from Module to Node, which changes the property panel to show that node's parameters
+  - Equal-power crossfade: `sqrt(t)` and `sqrt(1-t)` satisfy `in² + out² = 1` (constant power); linear crossfades cause a 3dB dip at midpoint
+  - Phase state machines with `tick(delta)` must use sequential `if` chains, not `match` arms, to handle large deltas that skip through multiple phases in one call
+  - `PatchVariationAssignment::new` takes 3 args including `Option<VariationId>` — the convenience `with_variation` wraps the `Some()`
+  - `cargo check -p signal-ui` still blocked by roam-session; `cargo check -p signal-proto` is the verification path
+  - `fts-control-desktop` crate doesn't exist in this worktree — that acceptance criterion cannot be tested
 ---
