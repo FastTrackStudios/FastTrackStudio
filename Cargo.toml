@@ -19,12 +19,6 @@ members = [
     "apps/reaper-extension",
 ]
 exclude = [
-    "reference/roam",
-    "reference/dioxus",
-    "reference/anyrender",    # Has its own workspace
-    "reference/vello",        # Has its own workspace
-    "reference/dioxus-mosaic", # Reference submodule
-
     "cells/sync/sync",        # Incomplete crate
 ]
 resolver = "2"
@@ -69,26 +63,26 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre = "0.6"
 futures = "0.3"
 
-# Roam crates from local reference (with forwarding fix)
-roam = { path = "reference/roam/rust/roam" }
-roam-codegen = { path = "reference/roam/rust/roam-codegen" }
-roam-frame = { path = "reference/roam/rust/roam-frame" }
-roam-hash = { path = "reference/roam/rust/roam-hash" }
-roam-schema = { path = "reference/roam/rust/roam-schema" }
-roam-service-macros = { path = "reference/roam/rust/roam-service-macros" }
-roam-session = { path = "reference/roam/rust/roam-session" }
-roam-shm = { path = "reference/roam/rust/roam-shm", features = ["tracing"] }
-roam-stream = { path = "reference/roam/rust/roam-stream" }
-roam-task-local = { path = "reference/roam/rust/roam-task-local" }
-roam-telemetry = { path = "reference/roam/rust/roam-telemetry" }
-roam-tracing = { path = "reference/roam/rust/roam-tracing" }
-roam-websocket = { path = "reference/roam/rust/roam-websocket" }
-roam-wire = { path = "reference/roam/rust/roam-wire" }
-roam-local = { path = "reference/roam/rust/roam-local" }
-roam-http-bridge = { path = "reference/roam/rust/roam-http-bridge" }
-subject-rust = { path = "reference/roam/rust/subject-rust" }
-ur-taking-me-with-you = { path = "reference/roam/rust/ur-taking-me-with-you", features = ["tokio"] }
-shm-primitives = { path = "reference/roam/rust/shm-primitives" }
+# Roam crates (bearcove upstream)
+roam = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-codegen = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-frame = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-hash = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-schema = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-service-macros = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-session = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-shm = { git = "https://github.com/bearcove/roam.git", branch = "main", features = ["tracing"] }
+roam-stream = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-task-local = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-telemetry = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-tracing = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-websocket = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-wire = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-local = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-http-bridge = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+subject-rust = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+ur-taking-me-with-you = { git = "https://github.com/bearcove/roam.git", branch = "main", features = ["tokio"] }
+shm-primitives = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 
 # Local modules
 dawfile-reaper = { path = "modules/dawfile/dawfile-reaper" }
@@ -171,9 +165,9 @@ libloading = "0.9"
 image = "=0.25.6"
 
 # Anyrender - 2D rendering abstraction (WGPU/Vello backend)
-anyrender = { path = "reference/anyrender/crates/anyrender" }
-anyrender_vello = { path = "reference/anyrender/crates/anyrender_vello" }
-wgpu_context = { path = "reference/anyrender/crates/wgpu_context" }
+anyrender = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "main" }
+anyrender_vello = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "main" }
+wgpu_context = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "main" }
 
 # Linebender graphics crates (matching anyrender's versions)
 peniko = "0.6"
