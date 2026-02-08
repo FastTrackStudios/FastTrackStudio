@@ -20,9 +20,11 @@ use crate::tags::{Taggable, Tags};
 pub mod block_override;
 pub mod builder;
 pub mod config;
+pub mod snapshot_diff;
 
 pub use block_override::*;
 pub use config::*;
+pub use snapshot_diff::*;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Preset
