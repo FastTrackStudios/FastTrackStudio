@@ -3,7 +3,6 @@ maxIterations = 10
 agent = "claude"
 tracker = "beads-bv"
 autoCommit = true
-subagentTracingDetail = "minimal"
 
 [agentOptions]
 [trackerOptions]
