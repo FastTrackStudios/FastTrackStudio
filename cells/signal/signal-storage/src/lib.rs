@@ -8,8 +8,6 @@
 pub mod entities;
 pub mod error;
 pub mod migration;
-pub mod versioning;
 
 pub use error::{StorageError, StorageResult};
 pub use migration::Migrator;
-pub use versioning::VersioningService;
