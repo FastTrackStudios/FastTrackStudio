@@ -12,10 +12,7 @@ pub mod sync_status;
 pub mod user;
 
 pub use auth::{AuthProvider, AuthState, AuthToken, OAuthCallbackParams};
-pub use sync_status::{
-    ConflictInfo, ConflictResolution, ConflictStrategy, EntityChange, EntityType, SyncEngineService,
-    SyncProgress, SyncState, SyncStatus, SyncStatusService,
-};
+pub use sync_status::{SyncState, SyncStatusService};
 pub use user::User;
 
 // region: --- AuthService

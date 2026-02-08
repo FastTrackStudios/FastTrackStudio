@@ -6,7 +6,6 @@
 //! - `ProfileBrowserPanel` — Profile selector with scenes
 //! - `SongPartsPanel` — Scenes list for current song
 //! - `SongSelectorPanel` — Setlist + song list
-//! - `SnapshotBrowserPanel` — Snapshot browser with instant recall
 //!
 //! All panels read from global signals and use `use_rig_actions()` for
 //! dispatching commands — no context provider needed.
@@ -14,16 +13,16 @@
 use crate::components::rig_grid::guitar_rig_grid::GuitarRigGrid;
 use crate::components::rig_grid::left_sidebar::GuitarRigLeftSidebar;
 use crate::components::rig_grid::module_browser_modal::ModuleBrowserModal;
+use crate::components::rig_grid::node_property_panel::NodePropertyPanel;
 use crate::components::rig_grid::profile_sidebar::GuitarRigProfileSidebar;
 use crate::components::rig_grid::right_sidebar::{
     GuitarRigRightSidebar, SceneListPanel, SongListPanel,
 };
-use crate::components::rig_grid::snapshot_browser::SnapshotBrowser;
 use crate::components::rig_grid::view_mode::{ModuleViewMode, RigViewMode};
 use crate::hooks::rig_actions::use_rig_actions;
 use crate::hooks::rig_state::use_rig_subscription;
 use crate::prelude::*;
-use crate::signals::{init_rig_service, RIG_NODE_GRAPH};
+use crate::signals::{init_rig_service, RIG_NODE_GRAPH, RIG_SELECTED_ENTITY};
 
 /// Main layout for the Rig tab (legacy monolithic view).
 ///
@@ -44,6 +43,7 @@ pub fn RigLayout() -> Element {
 
     // Determine which right sidebar to show based on rig view mode
     let show_right_sidebar = matches!(rig_view_mode(), RigViewMode::Song | RigViewMode::Profile);
+    let has_selection = RIG_SELECTED_ENTITY.read().is_some();
 
     rsx! {
         div { class: "h-full w-full flex flex-col bg-background overflow-hidden",
@@ -73,7 +73,12 @@ pub fn RigLayout() -> Element {
                     GuitarRigGrid { view_mode: module_view_mode() }
                 }
 
-                if show_right_sidebar {
+                // Right panel area: property panel when selected, otherwise sidebar
+                if has_selection {
+                    div { class: "w-64 flex-shrink-0",
+                        NodePropertyPanel {}
+                    }
+                } else if show_right_sidebar {
                     match rig_view_mode() {
                         RigViewMode::Song => rsx! {
                             GuitarRigRightSidebar {
@@ -207,19 +212,16 @@ pub fn SongSelectorPanel() -> Element {
     }
 }
 
-/// Snapshot browser panel — lists snapshots for the current preset.
+/// Node property panel — shows editable properties for the selected node/module.
 ///
-/// Double-click a snapshot to instantly apply (recall) it.
-/// Shows the currently active snapshot with a green highlight.
+/// Standalone dock panel wrapper around `NodePropertyPanel`. Reads from
+/// `RIG_SELECTED_ENTITY` and `RIG_NODE_GRAPH` global signals.
 #[component]
-pub fn SnapshotBrowserPanel() -> Element {
+pub fn NodePropertyDockPanel() -> Element {
     init_rig_service();
     use_rig_subscription();
-    let actions = use_rig_actions();
 
     rsx! {
-        SnapshotBrowser {
-            on_activate_snapshot: actions.activate_snapshot,
-        }
+        NodePropertyPanel {}
     }
 }

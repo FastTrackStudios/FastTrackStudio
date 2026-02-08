@@ -15,11 +15,14 @@ pub mod signals;
 
 // Re-exports for desktop app
 pub use components::MorphSlider;
+pub use components::{
+    PresetRatingBadge, ReviewCard, ReviewData, ReviewList, StarRating, StarRatingInput,
+};
 pub use context::rig::{use_rig_service, RigService, RigServiceProvider};
 pub use hooks::rig_actions::{use_rig_actions, RigActions};
 pub use hooks::rig_state::use_rig_subscription;
 pub use layouts::rig_layout::{
-    PresetBrowserPanel, ProfileBrowserPanel, RigGridPanel, RigLayout, SnapshotBrowserPanel,
+    NodePropertyDockPanel, PresetBrowserPanel, ProfileBrowserPanel, RigGridPanel, RigLayout,
     SongPartsPanel, SongSelectorPanel,
 };
 pub use signal_control::SignalControl;
