@@ -29,6 +29,7 @@ pub mod rig;
 pub mod routing;
 pub mod section;
 pub mod selection;
+pub mod snapshot;
 pub mod source;
 pub mod tags;
 

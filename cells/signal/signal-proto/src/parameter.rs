@@ -317,6 +317,139 @@ impl ParameterValue {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ParameterType
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// High-level classification of a parameter's input behavior.
+///
+/// While [`ParamFormat`] encodes the math for normalization/denormalization,
+/// `ParameterType` describes how the parameter *behaves* from a UI and plugin
+/// perspective. A `Continuous` parameter is a smooth slider; a `Stepped` one
+/// snaps to labelled positions; a `Toggle` is on/off; a `Choice` presents
+/// a list of exclusive options.
+#[derive(Debug, Clone, PartialEq, Facet)]
+#[repr(u8)]
+pub enum ParameterType {
+    /// Smooth, continuous range (typical for knobs/sliders).
+    Continuous,
+    /// Discrete named steps (e.g. gain stages: "Low", "Medium", "High").
+    Stepped(Vec<String>),
+    /// Boolean on/off toggle.
+    Toggle,
+    /// Exclusive list of named options (similar to Stepped, but semantically a menu).
+    Choice(Vec<String>),
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ParameterUnit
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Physical or logical unit for a parameter's display value.
+///
+/// Complements [`ParamFormat`] by providing a unit label without coupling to
+/// the normalization math. Useful for display, serialization, and VST bridges.
+#[derive(Debug, Clone, PartialEq, Facet)]
+#[repr(u8)]
+pub enum ParameterUnit {
+    Decibels,
+    Hertz,
+    Percent,
+    Milliseconds,
+    Seconds,
+    None,
+    Custom(String),
+}
+
+impl ParameterUnit {
+    /// Unit suffix for display formatting.
+    pub fn suffix(&self) -> &str {
+        match self {
+            Self::Decibels => "dB",
+            Self::Hertz => "Hz",
+            Self::Percent => "%",
+            Self::Milliseconds => "ms",
+            Self::Seconds => "s",
+            Self::None => "",
+            Self::Custom(s) => s,
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Parameter
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A live parameter combining specification with current value.
+///
+/// While [`ParamSpec`] is the blueprint and [`ParameterValue`] is the sparse
+/// runtime value, `Parameter` is the full picture: identity, constraints,
+/// current value, and precomputed display string. This is the type handed
+/// to UI components and the VST parameter bridge.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct Parameter {
+    /// Unique identifier (e.g. `"drive"`, `"eq_low_freq"`).
+    pub id: String,
+    /// Human-readable name (e.g. `"Drive"`, `"Low Frequency"`).
+    pub name: String,
+    /// Current normalized value in [0.0, 1.0].
+    pub value: NormalizedF64,
+    /// Default normalized value in [0.0, 1.0].
+    pub default_value: NormalizedF64,
+    /// Minimum real-world value.
+    pub min: f64,
+    /// Maximum real-world value.
+    pub max: f64,
+    /// Physical or logical unit.
+    pub unit: ParameterUnit,
+    /// Behavioral classification.
+    pub param_type: ParameterType,
+    /// Precomputed display string for the current value (e.g. `"-12.0 dB"`).
+    pub display_value: String,
+}
+
+impl Parameter {
+    /// Create a new parameter with the given spec-level fields.
+    ///
+    /// `value` is set to `default_value`; `display_value` starts empty and
+    /// should be populated by the caller or via [`Self::with_display_value`].
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        default_value: f64,
+        min: f64,
+        max: f64,
+        unit: ParameterUnit,
+        param_type: ParameterType,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            value: NormalizedF64::new(default_value),
+            default_value: NormalizedF64::new(default_value),
+            min,
+            max,
+            unit,
+            param_type,
+            display_value: String::new(),
+        }
+    }
+
+    /// Set the current normalized value.
+    #[must_use]
+    pub fn with_value(mut self, value: f64) -> Self {
+        self.value = NormalizedF64::new(value);
+        self
+    }
+
+    /// Set the precomputed display string.
+    #[must_use]
+    pub fn with_display_value(mut self, display: impl Into<String>) -> Self {
+        self.display_value = display.into();
+        self
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -580,5 +713,93 @@ mod tests {
         let fmt = ParamFormat::Enum { options: vec![] };
         assert_eq!(fmt.denormalize(0.5), 0.0);
         assert_eq!(fmt.normalize(0.0), 0.0);
+    }
+
+    // ParameterType
+
+    #[test]
+    fn parameter_type_variants() {
+        let cont = ParameterType::Continuous;
+        let stepped = ParameterType::Stepped(vec!["Low".into(), "High".into()]);
+        let toggle = ParameterType::Toggle;
+        let choice = ParameterType::Choice(vec!["A".into(), "B".into(), "C".into()]);
+
+        // Ensure distinct via Debug output (exhaustive construction proves variants exist)
+        assert_ne!(format!("{cont:?}"), format!("{stepped:?}"));
+        assert_ne!(format!("{toggle:?}"), format!("{choice:?}"));
+    }
+
+    // ParameterUnit
+
+    #[test]
+    fn parameter_unit_suffix() {
+        assert_eq!(ParameterUnit::Decibels.suffix(), "dB");
+        assert_eq!(ParameterUnit::Hertz.suffix(), "Hz");
+        assert_eq!(ParameterUnit::Percent.suffix(), "%");
+        assert_eq!(ParameterUnit::Milliseconds.suffix(), "ms");
+        assert_eq!(ParameterUnit::Seconds.suffix(), "s");
+        assert_eq!(ParameterUnit::None.suffix(), "");
+        assert_eq!(ParameterUnit::Custom("BPM".into()).suffix(), "BPM");
+    }
+
+    // Parameter
+
+    #[test]
+    fn parameter_creation() {
+        let param = Parameter::new(
+            "drive",
+            "Drive",
+            0.5,
+            -60.0,
+            0.0,
+            ParameterUnit::Decibels,
+            ParameterType::Continuous,
+        );
+
+        assert_eq!(param.id, "drive");
+        assert_eq!(param.name, "Drive");
+        assert!((param.value.get() - 0.5).abs() < f64::EPSILON);
+        assert!((param.default_value.get() - 0.5).abs() < f64::EPSILON);
+        assert!((param.min - (-60.0)).abs() < f64::EPSILON);
+        assert!((param.max - 0.0).abs() < f64::EPSILON);
+        assert_eq!(param.unit, ParameterUnit::Decibels);
+        assert_eq!(param.param_type, ParameterType::Continuous);
+        assert!(param.display_value.is_empty());
+    }
+
+    #[test]
+    fn parameter_builder_methods() {
+        let param = Parameter::new(
+            "gain",
+            "Gain",
+            0.75,
+            0.0,
+            100.0,
+            ParameterUnit::Percent,
+            ParameterType::Continuous,
+        )
+        .with_value(0.5)
+        .with_display_value("50.0%");
+
+        assert!((param.value.get() - 0.5).abs() < f64::EPSILON);
+        assert_eq!(param.display_value, "50.0%");
+        // default_value unchanged
+        assert!((param.default_value.get() - 0.75).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parameter_value_clamping_in_parameter() {
+        let param = Parameter::new(
+            "vol",
+            "Volume",
+            0.0,
+            0.0,
+            1.0,
+            ParameterUnit::None,
+            ParameterType::Continuous,
+        )
+        .with_value(1.5);
+
+        assert_eq!(param.value.get(), 1.0);
     }
 }
