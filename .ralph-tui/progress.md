@@ -16,8 +16,8 @@
 - **SeaORM migration ordering**: FK-referenced tables must be created before dependent tables. Order: users → presets → snapshots/module_chunks/ratings/preset_versions → sync_metadata.
 - **oauth2 v5 typestate**: `BasicClient` defaults all endpoint generics to `EndpointNotSet`. After calling `set_auth_uri()`/`set_token_uri()`, the client type changes to `EndpointSet` for those positions. Methods like `authorize_url()`, `exchange_code()`, `exchange_refresh_token()` only exist on clients with `EndpointSet` for the relevant endpoints. Use a type alias like `type ConfiguredClient = BasicClient<EndpointSet, ..., EndpointSet>` for the return type.
 - **oauth2 v5 TokenResponse trait**: The `access_token()`, `refresh_token()`, and `expires_in()` methods come from the `TokenResponse` trait which must be explicitly imported: `use oauth2::TokenResponse;`.
-- **Facet enum repr**: `facet` derive macro requires `#[repr(u8)]` or `#[repr(C)]` on all enums. Forgetting this gives "Facet requires enums to have an explicit representation" error.
-- **Pre-existing doctest failure**: `patch.rs` has a doctest referencing `rig_control` crate that doesn't exist. `cargo test -p signal-proto --lib` avoids this.
+- **Morph in normalized space**: Since all parameter values are `NormalizedF64` [0,1], interpolation can happen directly without denormalize/renormalize. The `ParamFormat` skew curve is only needed for display, not for morphing.
+- **roam-session blocks signal-ui check**: `cargo check -p signal-ui` fails due to upstream `roam-session` breakage (facet_path API changes). Use `cargo check -p signal-proto` to verify signal domain logic in isolation.
 
 ---
 
@@ -167,23 +167,29 @@
   - `#[derive(Default)]` with `#[default]` on enum variants is cleaner than manual impl and satisfies clippy `derivable_impls` lint
 ---
 
-## 2026-02-08 - roam-test-8xs.23
+## 2026-02-08 - roam-test-8xs.24
 - What was implemented:
-  - US-014: Snapshot diffing for signal-proto
-  - `ParameterChange` struct: tracks block_id, param_id, from_value, to_value with magnitude() helper
-  - `BypassChange` struct: tracks block bypass state transitions (including None → Some for added overrides)
-  - `ModuleChange` enum: Added/Removed/PresetChanged variants for structural module assignment changes
-  - `SnapshotDiff` struct: combines changed_params, bypass_changes, module_changes with `can_morph()`, `is_empty()`, `total_changes()` helpers
-  - `diff_snapshots()`: compares two preset `Snapshot`s' BlockOverrides for parameter and bypass changes (HashMap-based O(n) algorithm)
-  - `diff_module_assignments()`: compares two `ModuleAssignment` slices to detect structural changes (added/removed/swapped modules)
-  - Key design: same module preset with different module snapshot is NOT a structural change (can morph)
-  - 17 comprehensive tests covering: identical snapshots, param value changes, multi-block changes, param added/removed, bypass changes, magnitude calculation, structural changes (added/removed/preset-changed modules), empty assignments
+  - US-015: Parameter morphing between snapshots
+  - `SnapshotMorpher` struct managing A/B snapshots with `morph_position: f64` (0.0=A, 1.0=B)
+  - Linear interpolation (`lerp`) for continuous parameters in normalized [0,1] space
+  - Bypass state snap at t=0.5 threshold (non-morphable boolean parameter)
+  - Structural change detection: compares `variation_assignments` between A and B snapshots
+  - `MorphResult` struct with interpolated `block_overrides` and `custom_overrides`
+  - `MorphWarning` enum: `StructuralDifference`, `MissingSnapshot`
+  - `MorphSlider` Dioxus component with A/B assignment dropdowns and warning display
+  - `compute()` returns `None` when structural changes prevent morphing
+  - `compute_at(position)` for preview/animation at arbitrary positions
+  - `swap()` inverts A↔B and morph position so sound doesn't change
+  - 28 unit tests covering lerp, morpher lifecycle, structural detection, parameter interpolation, bypass snapping, multi-block morphing, custom overrides
 - Files changed:
-  - `cells/signal/signal-proto/src/preset/snapshot_diff.rs` (new — 380+ lines with 17 tests)
-  - `cells/signal/signal-proto/src/preset/mod.rs` (added snapshot_diff module and re-export)
+  - `cells/signal/signal-proto/src/morph.rs` (new — 520+ lines with 28 tests)
+  - `cells/signal/signal-proto/src/lib.rs` (added `morph` module)
+  - `cells/signal/signal-ui/src/components/morph_slider.rs` (new — MorphSlider component with A/B dropdowns)
+  - `cells/signal/signal-ui/src/components/mod.rs` (added morph_slider module + re-export)
+  - `cells/signal/signal-ui/src/lib.rs` (added MorphSlider re-export)
 - **Learnings:**
-  - Facet derive macro requires `#[repr(u8)]` or `#[repr(C)]` on all enums — even those with associated data
-  - Pre-existing doctest failure in `patch.rs` (references `rig_control` crate). Use `cargo test -p signal-proto --lib` to skip doctests
-  - Adapted PRD's raw `Uuid` types to codebase's typed IDs (`BlockId`, `ModuleType`) for consistency with type-safety design philosophy
-  - Used HashMap for O(n) diffing instead of nested iteration for cleaner code when comparing sparse BlockOverride sets
+  - Morphing in normalized [0,1] space is correct — the `ParamFormat` skew curve is a display concern, not an interpolation concern. Lerp between normalized values preserves the curve's intent.
+  - Union-merge strategy for block overrides: when a block exists in only one snapshot, its overrides still appear in the result. This is sound because the morpher produces a complete override set.
+  - `cargo check -p signal-ui` fails due to upstream `roam-session` breakage (not our code). Use `cargo check -p signal-proto` to verify domain logic. The signal-ui Dioxus component cannot be checked until roam-session is fixed upstream.
+  - Pre-existing doctest failure in `patch.rs` references `rig_control` crate — use `--lib` flag to skip doctests
 ---
