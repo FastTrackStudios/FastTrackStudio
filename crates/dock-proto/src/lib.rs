@@ -13,6 +13,7 @@
 pub mod builder;
 pub mod defaults;
 pub mod drop_zone;
+pub mod history;
 pub mod id;
 pub mod layout;
 pub mod panel;
@@ -33,4 +34,5 @@ pub use persistence::{load_presets_from_file, save_presets_to_file};
 pub use preset::{DockPreset, PresetCollection};
 pub use registry::{DockPosition, PanelConstraints, PanelDescriptor, PanelRegistry};
 pub use tab_group::TabGroup;
+pub use history::LayoutHistory;
 pub use tree::{DockNode, SplitDirection};
