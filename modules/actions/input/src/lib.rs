@@ -11,7 +11,7 @@ pub mod event;
 pub mod key;
 pub mod mode;
 
-pub use command::{InputArgs, InputCommand};
-pub use event::{InputEvent, KeyEvent, MouseButton, MouseAction, MouseEvent, ScrollEvent};
-pub use key::KeyChord;
+pub use command::{ActionId, InputArgs, InputCommand};
+pub use event::{InputEvent, KeyEvent, MouseAction, MouseButton, MouseEvent, ScrollEvent};
+pub use key::{KeyChord, KeyCode, Modifiers};
 pub use mode::{ModeDefinition, ModeId, ModeStack};

@@ -4,6 +4,10 @@
 - **Workspace glob resolution**: The `cells/*/*` glob in workspace members auto-discovers new crates — no explicit member listing needed.
 - **Worktree submodule gotcha**: `git submodule update --init` can delete recently created directories in worktrees. Write files AFTER submodule initialization.
 - **Pre-existing signal-proto warnings**: `signal-proto` has 8 unused import/variable warnings that cause `cargo clippy -p signal-storage -- -D warnings` to fail. The signal-storage code itself is warning-free.
+- **Upstream roam-session breakage**: `roam-session` has breaking changes from `facet-path` API changes (`PathAccessError`, `walk_shape`, `ShapeVisitor` removed). Any crate depending on `actions-proto` → `roam` → `roam-session` will fail to compile. The `input` crate avoids this by defining its own `ActionId`, `KeyCode`, `Modifiers` locally.
+- **Test structure**: Use `// -- Setup & Fixtures`, `// -- Exec`, `// -- Check` sections. Define `type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;` in test modules.
+- **Region markers**: Use `// region: --- Name` and `// endregion: --- Name` for large code sections.
+- **Builder pattern**: Use `with_*` methods on structs for fluent construction (e.g., `ModeDefinition::new(...).with_sticky(true)`).
 
 ---
 
@@ -29,4 +33,23 @@
   - Worktree submodule init can nuke recently created directories — always init submodules first
   - JSON blob storage for complex nested types (Preset with snapshots, block overrides) is pragmatic; avoids complex relational mapping
   - `sea_query::Iden` derive handles CamelCase → snake_case column naming automatically
+---
+
+## 2026-02-07 - roam-test-rlo.3
+- Implemented ModeStack and mode transitions in `modules/actions/input/src/mode.rs`
+- Created the `input` crate from scratch since US-001 hadn't been completed yet
+- Files created:
+  - `modules/actions/input/Cargo.toml` (edition 2024, depends only on `tracing`)
+  - `modules/actions/input/src/lib.rs` (re-exports all public types)
+  - `modules/actions/input/src/key.rs` (KeyChord, KeyCode, Modifiers - local copies)
+  - `modules/actions/input/src/event.rs` (InputEvent, KeyEvent, MouseEvent, ScrollEvent)
+  - `modules/actions/input/src/command.rs` (InputCommand, InputArgs, ActionId - local copy)
+  - `modules/actions/input/src/mode.rs` (ModeId, ModeDefinition, ModeStack with 10 tests)
+- Root `Cargo.toml` updated: added workspace member and dependency for `input`
+- **Learnings:**
+  - `actions-proto` and `actions-keybindings` cannot be depended on due to upstream `roam-session` breakage from `facet-path` API changes
+  - Defined local `ActionId`, `KeyCode`, `Modifiers` types to decouple from broken upstream chain
+  - ModeStack uses owned `HashMap<ModeId, ModeDefinition>` instead of references to avoid lifetime propagation
+  - `switch_base()` exits modes top-to-bottom (sub-modes first), then enters the new base
+  - `pop()` is a safe no-op when only the base mode remains (stack.len() <= 1)
 ---
