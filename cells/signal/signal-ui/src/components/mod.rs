@@ -1,11 +1,12 @@
-pub mod crossfade_indicator;
 pub mod morph_slider;
 pub mod rig_grid;
+pub mod snapshot_slots;
 
-// Re-export crossfade indicator
-pub use crossfade_indicator::CrossfadeIndicator;
 // Re-export morph slider
 pub use morph_slider::MorphSlider;
+
+// Re-export snapshot slots
+pub use snapshot_slots::{SnapshotSlots, SnapshotSlotsPanel, SnapshotSlotsState, SnapshotSlot, RIG_SNAPSHOT_SLOTS};
 
 // Re-export commonly used components
 pub use rig_grid::{

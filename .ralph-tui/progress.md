@@ -18,7 +18,6 @@
 - **oauth2 v5 TokenResponse trait**: The `access_token()`, `refresh_token()`, and `expires_in()` methods come from the `TokenResponse` trait which must be explicitly imported: `use oauth2::TokenResponse;`.
 - **Morph in normalized space**: Since all parameter values are `NormalizedF64` [0,1], interpolation can happen directly without denormalize/renormalize. The `ParamFormat` skew curve is only needed for display, not for morphing.
 - **roam-session blocks signal-ui check**: `cargo check -p signal-ui` fails due to upstream `roam-session` breakage (facet_path API changes). Use `cargo check -p signal-proto` to verify signal domain logic in isolation.
-- **Phase state machine needs sequential if-chains**: When a time-based state machine can advance through multiple phases in a single tick (large delta), use sequential `if` checks instead of `match` arms. A `match` only evaluates one arm per invocation, so a phase change inside one arm won't be caught by subsequent arms in the same call.
 
 ---
 
@@ -195,56 +194,26 @@
   - Pre-existing doctest failure in `patch.rs` references `rig_control` crate — use `--lib` flag to skip doctests
 ---
 
-## 2026-02-08 - roam-test-8xs.21
+## 2026-02-08 - roam-test-8xs.16
 - What was implemented:
-  - US-012: Parameter capture for internal nodes
-  - `NodeParameter` struct: UI-level parameter type with id, name, and `NormalizedF64` value
-  - Added `parameters: Vec<NodeParameter>` field to `Node` struct with `with_parameters()` builder
-  - `NodeSnapshot`, `ModuleSnapshot`, `RigSnapshot` types for hierarchical state capture
-  - `capture_node_parameters()`: extracts `Vec<(Uuid, f64)>` from a single node
-  - `capture_module_snapshot()`: captures all node parameters within a module
-  - `capture_rig_snapshot()`: captures entire rig state (all modules + standalone nodes)
-  - `RIG_SNAPSHOTS: GlobalSignal<Vec<RigSnapshot>>` for storing saved snapshots
-  - `use_parameter_capture()` hook returning `Callback<String>` for snapshot creation
-  - "Save Snapshot" button in `GuitarRigTopBar` with camera icon
-  - `SnapshotNamingDialog` modal component with text input, save/cancel actions
-  - 12 unit tests covering parameter creation, capture functions, snapshot uniqueness, and value preservation
+  - US-018: Snapshot slots UI (Snapshooter-style) with 8 slots per page, save/apply/rename, page navigation
+  - `SnapshotSlot` struct with display_name/is_filled helpers and optional custom name
+  - `SnapshotSlotsState` with multi-page slot management, save_to_slot, prev/next page navigation
+  - `RIG_SNAPSHOT_SLOTS` global signal for cross-panel access
+  - `SnapshotSlots` Dioxus component with 2-column grid, inline rename editing, save/apply buttons with visual state
+  - `SnapshotSlotsPanel` standalone dock panel with save/apply wiring to rig service
+  - `SnapshotSlotsLayoutPanel` layout-level panel wrapper
+  - Visual indicators: green border for active snapshot, green save button when filled, checkmark icon on last-applied
+  - Page navigation with auto-creation of new pages
+  - Keyboard shortcut hints in footer (1-8 apply, Shift+1-8 save)
 - Files changed:
-  - `cells/signal/signal-ui/src/components/rig_grid/node_graph.rs` (added NodeParameter, Node.parameters field, snapshot types, capture functions, 12 tests)
-  - `cells/signal/signal-ui/src/components/rig_grid/mod.rs` (updated re-exports for new types and functions)
-  - `cells/signal/signal-ui/src/components/rig_grid/top_bar.rs` (added Save Snapshot button + SnapshotNamingDialog component)
-  - `cells/signal/signal-ui/src/signals.rs` (added RIG_SNAPSHOTS global signal)
-  - `cells/signal/signal-ui/src/hooks/parameter_capture.rs` (new — use_parameter_capture hook + get_saved_snapshots)
-  - `cells/signal/signal-ui/src/hooks/mod.rs` (added parameter_capture module + re-export)
+  - `cells/signal/signal-ui/src/components/snapshot_slots.rs` (new — SnapshotSlot, SnapshotSlotsState, SnapshotSlots, SnapshotSlotsPanel)
+  - `cells/signal/signal-ui/src/components/mod.rs` (added snapshot_slots module + re-exports)
+  - `cells/signal/signal-ui/src/lib.rs` (added SnapshotSlots re-exports + SnapshotSlotsLayoutPanel)
+  - `cells/signal/signal-ui/src/layouts/rig_layout.rs` (added SnapshotSlotsLayoutPanel dock panel)
 - **Learnings:**
-  - NodeParameter uses string IDs (matching BlockParameter.id/ParameterOverride.param_id pattern) for compatibility with existing snapshot/morph infrastructure
-  - Capture functions operate on immutable `&NodeGraph` references — thread-safe for reading from GlobalSignal
-  - `cargo check -p signal-ui` still blocked by roam-session facet_path breakage; verified all new code compiles via signal-proto check and manual syntax review
-  - GlobalSignal for snapshot storage follows existing RIG_NODE_GRAPH/RIG_CURRENT_PRESET pattern; Vec<RigSnapshot> is simple and sufficient without IndexMap/HashMap since snapshot count stays small
----
-
-## 2026-02-08 - roam-test-8xs.14
-- What was implemented:
-  - US-016: Snapshot crossfade for structural changes
-  - `CrossfadeCurve` enum: Linear, EqualPower (sqrt, constant power), SCurve (cubic Hermite 3t²-2t³) with `apply()` and `apply_complement()` methods
-  - `CrossfadePhase` enum: Idle → FadingOut → Swapping → FadingIn → Complete
-  - `ModuleTransition` enum: Morph (shared modules, gain=1.0), FadeIn (new modules, gain 0→1), FadeOut (removed modules, gain 1→0)
-  - `CrossfadeState` struct: snapshot of phase, progress, source/target gains, per-module transitions, morph result
-  - `CrossfadeTransition` struct: full crossfade orchestrator with duration (0-500ms, default 50ms), curve selection, `start(source, target)`, `tick(delta_ms)`, `reset()`
-  - Module analysis: classifies sections as shared/source-only/target-only based on `variation_assignments`
-  - Leverages existing `SnapshotMorpher` for parameter interpolation of shared modules during crossfade
-  - `CrossfadeIndicator` Dioxus component: animated progress bar with phase label, source→target names, curve/duration info
-  - 28 unit tests covering curves, state machine lifecycle, module transitions, gains, and parameter morphing
-- Files changed:
-  - `cells/signal/signal-proto/src/crossfade.rs` (new — 870+ lines with 28 tests)
-  - `cells/signal/signal-proto/src/lib.rs` (added crossfade module)
-  - `cells/signal/signal-ui/src/components/crossfade_indicator.rs` (new — CrossfadeIndicator Dioxus component)
-  - `cells/signal/signal-ui/src/components/mod.rs` (added crossfade_indicator module + re-export)
-  - `cells/signal/signal-ui/src/lib.rs` (added CrossfadeIndicator re-export)
-- **Learnings:**
-  - Equal-power crossfade: `sqrt(t)` and `sqrt(1-t)` satisfy `in² + out² = 1` (constant power); linear crossfades cause a 3dB dip at midpoint
-  - Phase state machines with `tick(delta)` must use sequential `if` chains, not `match` arms, to handle large deltas that skip through multiple phases in one call
-  - `PatchVariationAssignment::new` takes 3 args including `Option<VariationId>` — the convenience `with_variation` wraps the `Some()`
-  - `cargo check -p signal-ui` still blocked by roam-session; `cargo check -p signal-proto` is the verification path
-  - `fts-control-desktop` crate doesn't exist in this worktree — that acceptance criterion cannot be tested
+  - Snapshot slots are UI-local state, not backend state — they reference `PresetSnapshotInfo` but are a convenience layer
+  - GlobalSignal pattern works well for cross-panel state that doesn't need service persistence
+  - `cargo check -p signal-ui` and `cargo build -p fts-control-desktop` both fail due to upstream `roam-session` breakage (14 errors in roam-session, 0 in our code)
+  - Inline editing in Dioxus: use `use_signal` for editing state, commit on Enter/FocusOut, cancel on Escape
 ---
