@@ -1,6 +1,6 @@
 //! Dock Protocol — domain types for modular layout/docking system.
 //!
-//! Pure domain types with serde serialization. Zero UI dependencies.
+//! Pure domain types with facet serialization. Zero UI dependencies.
 //!
 //! - Layout tree: binary splits + tile leaves with tab groups
 //! - Panel registry: known panel types

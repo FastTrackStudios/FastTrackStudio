@@ -1,6 +1,6 @@
 //! Tab groups — multiple panels sharing a single tile area with tab switching.
 
-use serde::{Deserialize, Serialize};
+use facet::Facet;
 
 use crate::panel::PanelId;
 
@@ -8,7 +8,7 @@ use crate::panel::PanelId;
 ///
 /// When the group has a single panel, no tab bar is shown.
 /// When it has multiple panels, a tab bar appears at the top of the tile.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct TabGroup {
     /// Ordered list of panels in this tab group.
     pub panels: Vec<PanelId>,

@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use facet::Facet;
 
 use crate::id::{NodeId, TileId};
 use crate::panel::PanelId;
@@ -13,7 +13,8 @@ use crate::tab_group::TabGroup;
 use crate::tree::{DockNode, SplitDirection};
 
 /// Internal flat node representation stored in the HashMap.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Facet)]
+#[repr(C)]
 pub enum FlatNode {
     Split {
         direction: SplitDirection,
@@ -31,7 +32,7 @@ pub enum FlatNode {
 ///
 /// Stores nodes in a HashMap for O(1) lookups and mutations.
 /// The root field points to the top-level node.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Facet)]
 pub struct DockLayout {
     nodes: HashMap<NodeId, FlatNode>,
     root: Option<NodeId>,
@@ -558,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn serde_json_roundtrip() {
+    fn facet_json_roundtrip() {
         let layout = DockLayout::from_tree(DockNode::horizontal(
             DockNode::tile(PanelId::Navigator),
             DockNode::vertical(
@@ -569,8 +570,8 @@ mod tests {
             25.0,
         ));
 
-        let json = serde_json::to_string(&layout).unwrap();
-        let restored: DockLayout = serde_json::from_str(&json).unwrap();
+        let json = facet_json::to_string(&layout).unwrap();
+        let restored: DockLayout = facet_json::from_str(&json).unwrap();
 
         assert_eq!(restored.node_count(), layout.node_count());
         assert!(restored.contains_panel(PanelId::Navigator));

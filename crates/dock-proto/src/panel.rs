@@ -4,10 +4,11 @@
 //! will display. Adding a new panel = adding a variant here + adding a
 //! match arm in the app's panel renderer callback.
 
-use serde::{Deserialize, Serialize};
+use facet::Facet;
 
 /// All known panel types in the application.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[repr(u8)]
 pub enum PanelId {
     // Session panels
     Performance,
