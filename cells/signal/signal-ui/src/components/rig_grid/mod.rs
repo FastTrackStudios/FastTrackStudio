@@ -41,6 +41,7 @@ pub mod module_header;
 pub mod module_macro_view;
 pub mod profile_sidebar;
 pub mod right_sidebar;
+pub mod snapshot_browser;
 pub mod top_bar;
 pub mod view_mode;
 // Signal flow grid renderer
@@ -71,6 +72,7 @@ pub use left_sidebar::GuitarRigLeftSidebar;
 pub use module_browser_modal::ModuleBrowserModal;
 pub use profile_sidebar::GuitarRigProfileSidebar;
 pub use right_sidebar::{GuitarRigRightSidebar, SceneListPanel, SongListPanel};
+pub use snapshot_browser::SnapshotBrowser;
 pub use top_bar::GuitarRigTopBar;
 
 // Signal flow grid

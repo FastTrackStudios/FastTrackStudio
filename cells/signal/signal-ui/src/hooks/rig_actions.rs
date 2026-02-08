@@ -4,7 +4,10 @@
 //! components can invoke directly (e.g. `actions.next_scene.call(())`).
 
 use crate::prelude::*;
-use crate::signals::{RIG_CURRENT_PRESET, RIG_PROFILE, RIG_SERVICE};
+use crate::signals::{
+    RIG_CURRENT_PRESET, RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_LAST_APPLIED_SNAPSHOT, RIG_PROFILE,
+    RIG_SERVICE,
+};
 use signal_control::{PreloadPriority, RigControlCommand, SignalControl};
 use uuid::Uuid;
 
@@ -160,12 +163,45 @@ pub fn use_rig_actions() -> RigActions {
                 });
             })
         },
-        activate_snapshot: Callback::new(move |snapshot_id: Uuid| {
-            tracing::debug!(
-                "activate_snapshot({:?}) — use load_preset_with_snapshot instead",
-                snapshot_id
-            );
-        }),
+        activate_snapshot: {
+            let ctl = ctl.clone();
+            Callback::new(move |snapshot_id: Uuid| {
+                let ctl = ctl.clone();
+                spawn(async move {
+                    // Find the current preset and resolve the scene index for this snapshot
+                    let preset = RIG_CURRENT_PRESET.read().clone();
+                    if let Some(preset) = preset {
+                        if let Some(scene_index) =
+                            preset.scenes.iter().position(|s| s.id == snapshot_id)
+                        {
+                            tracing::info!(
+                                "activate_snapshot: applying '{}' (scene {})",
+                                preset.scenes[scene_index].name,
+                                scene_index,
+                            );
+
+                            ctl.load_preset_with_scene(preset.id, scene_index).await;
+
+                            // Update tracking signals
+                            *RIG_LAST_APPLIED_SNAPSHOT.write() = Some(snapshot_id);
+                            *RIG_CURRENT_PRESET_SNAPSHOT_ID.write() = Some(snapshot_id);
+
+                            if let Some(updated_preset) = ctl.get_current_preset().await {
+                                *RIG_CURRENT_PRESET.write() = Some(updated_preset);
+                            }
+                        } else {
+                            tracing::warn!(
+                                "activate_snapshot: snapshot {:?} not found in preset '{}'",
+                                snapshot_id,
+                                preset.name,
+                            );
+                        }
+                    } else {
+                        tracing::warn!("activate_snapshot: no preset loaded");
+                    }
+                });
+            })
+        },
         go_to_scene: {
             let ctl = ctl.clone();
             Callback::new(move |scene_index: usize| {

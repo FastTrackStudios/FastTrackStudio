@@ -6,7 +6,7 @@
 //! - `ProfileBrowserPanel` — Profile selector with scenes
 //! - `SongPartsPanel` — Scenes list for current song
 //! - `SongSelectorPanel` — Setlist + song list
-//! - `SnapshotSlotsLayoutPanel` — Quick-access snapshot save/recall grid
+//! - `SnapshotBrowserPanel` — Snapshot browser with instant recall
 //!
 //! All panels read from global signals and use `use_rig_actions()` for
 //! dispatching commands — no context provider needed.
@@ -18,6 +18,7 @@ use crate::components::rig_grid::profile_sidebar::GuitarRigProfileSidebar;
 use crate::components::rig_grid::right_sidebar::{
     GuitarRigRightSidebar, SceneListPanel, SongListPanel,
 };
+use crate::components::rig_grid::snapshot_browser::SnapshotBrowser;
 use crate::components::rig_grid::view_mode::{ModuleViewMode, RigViewMode};
 use crate::hooks::rig_actions::use_rig_actions;
 use crate::hooks::rig_state::use_rig_subscription;
@@ -206,16 +207,19 @@ pub fn SongSelectorPanel() -> Element {
     }
 }
 
-/// Snapshot slots panel — quick-access snapshot save/recall grid.
+/// Snapshot browser panel — lists snapshots for the current preset.
 ///
-/// Standalone dock panel wrapper. Delegates to `SnapshotSlotsPanel`
-/// from the components module which handles save/apply wiring.
+/// Double-click a snapshot to instantly apply (recall) it.
+/// Shows the currently active snapshot with a green highlight.
 #[component]
-pub fn SnapshotSlotsLayoutPanel() -> Element {
+pub fn SnapshotBrowserPanel() -> Element {
     init_rig_service();
     use_rig_subscription();
+    let actions = use_rig_actions();
 
     rsx! {
-        crate::components::snapshot_slots::SnapshotSlotsPanel {}
+        SnapshotBrowser {
+            on_activate_snapshot: actions.activate_snapshot,
+        }
     }
 }

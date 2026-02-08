@@ -194,30 +194,23 @@
   - Pre-existing doctest failure in `patch.rs` references `rig_control` crate — use `--lib` flag to skip doctests
 ---
 
-## 2026-02-08 - roam-test-8xs.21
+## 2026-02-08 - roam-test-8xs.22
 - What was implemented:
-  - US-012: Parameter capture for internal nodes
-  - `NodeParameter` struct: UI-level parameter type with id, name, and `NormalizedF64` value
-  - Added `parameters: Vec<NodeParameter>` field to `Node` struct with `with_parameters()` builder
-  - `NodeSnapshot`, `ModuleSnapshot`, `RigSnapshot` types for hierarchical state capture
-  - `capture_node_parameters()`: extracts `Vec<(Uuid, f64)>` from a single node
-  - `capture_module_snapshot()`: captures all node parameters within a module
-  - `capture_rig_snapshot()`: captures entire rig state (all modules + standalone nodes)
-  - `RIG_SNAPSHOTS: GlobalSignal<Vec<RigSnapshot>>` for storing saved snapshots
-  - `use_parameter_capture()` hook returning `Callback<String>` for snapshot creation
-  - "Save Snapshot" button in `GuitarRigTopBar` with camera icon
-  - `SnapshotNamingDialog` modal component with text input, save/cancel actions
-  - 12 unit tests covering parameter creation, capture functions, snapshot uniqueness, and value preservation
+  - US-013: Snapshot recall (instant apply) — full implementation
+  - Added `RIG_LAST_APPLIED_SNAPSHOT` global signal for tracking the last recalled snapshot
+  - Wired `activate_snapshot` callback (was a no-op) to actually apply snapshots via `load_preset_with_scene`
+  - Created `SnapshotBrowser` component with double-click-to-apply, active snapshot highlight, and loading feedback
+  - Created `SnapshotBrowserPanel` standalone dock panel wrapper
+  - Exported `SnapshotBrowserPanel` from `signal-ui` crate root
 - Files changed:
-  - `cells/signal/signal-ui/src/components/rig_grid/node_graph.rs` (added NodeParameter, Node.parameters field, snapshot types, capture functions, 12 tests)
-  - `cells/signal/signal-ui/src/components/rig_grid/mod.rs` (updated re-exports for new types and functions)
-  - `cells/signal/signal-ui/src/components/rig_grid/top_bar.rs` (added Save Snapshot button + SnapshotNamingDialog component)
-  - `cells/signal/signal-ui/src/signals.rs` (added RIG_SNAPSHOTS global signal)
-  - `cells/signal/signal-ui/src/hooks/parameter_capture.rs` (new — use_parameter_capture hook + get_saved_snapshots)
-  - `cells/signal/signal-ui/src/hooks/mod.rs` (added parameter_capture module + re-export)
+  - `cells/signal/signal-ui/src/signals.rs` — added `RIG_LAST_APPLIED_SNAPSHOT`
+  - `cells/signal/signal-ui/src/hooks/rig_actions.rs` — wired `activate_snapshot` callback
+  - `cells/signal/signal-ui/src/components/rig_grid/snapshot_browser.rs` — new file
+  - `cells/signal/signal-ui/src/components/rig_grid/mod.rs` — registered module
+  - `cells/signal/signal-ui/src/layouts/rig_layout.rs` — added `SnapshotBrowserPanel`
+  - `cells/signal/signal-ui/src/lib.rs` — exported `SnapshotBrowserPanel`
 - **Learnings:**
-  - NodeParameter uses string IDs (matching BlockParameter.id/ParameterOverride.param_id pattern) for compatibility with existing snapshot/morph infrastructure
-  - Capture functions operate on immutable `&NodeGraph` references — thread-safe for reading from GlobalSignal
-  - `cargo check -p signal-ui` still blocked by roam-session facet_path breakage; verified all new code compiles via signal-proto check and manual syntax review
-  - GlobalSignal for snapshot storage follows existing RIG_NODE_GRAPH/RIG_CURRENT_PRESET pattern; Vec<RigSnapshot> is simple and sufficient without IndexMap/HashMap since snapshot count stays small
+  - Preset-level snapshots map 1:1 to scene indices in `PresetInfo.scenes`. The `activate_snapshot` action resolves snapshot UUID → scene index, then calls `load_preset_with_scene` to apply.
+  - The low-level `RigControlCommand::ApplySnapshot` is for per-module-slot snapshot application (takes `ModuleType`). For UI-level "recall snapshot", use `load_preset_with_scene` which applies across all modules.
+  - `cargo check -p signal-ui` still blocked by upstream `roam-session` breakage — all 14 errors are exclusively in `roam-session`, zero from our code.
 ---

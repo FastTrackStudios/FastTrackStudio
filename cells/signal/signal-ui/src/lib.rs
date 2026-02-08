@@ -19,8 +19,8 @@ pub use context::rig::{use_rig_service, RigService, RigServiceProvider};
 pub use hooks::rig_actions::{use_rig_actions, RigActions};
 pub use hooks::rig_state::use_rig_subscription;
 pub use layouts::rig_layout::{
-    PresetBrowserPanel, ProfileBrowserPanel, RigGridPanel, RigLayout, SongPartsPanel,
-    SongSelectorPanel,
+    PresetBrowserPanel, ProfileBrowserPanel, RigGridPanel, RigLayout, SnapshotBrowserPanel,
+    SongPartsPanel, SongSelectorPanel,
 };
 pub use signal_control::SignalControl;
 pub use signals::*;
