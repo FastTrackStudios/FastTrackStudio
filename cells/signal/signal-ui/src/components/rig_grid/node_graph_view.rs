@@ -18,7 +18,7 @@
 //! browser, rig layout, and other components to share the same graph state.
 
 use crate::prelude::*;
-use crate::signals::{GRAPH_HISTORY, RIG_NODE_GRAPH};
+use crate::signals::{RIG_NODE_GRAPH, RIG_SELECTED_ENTITY, SelectedEntity};
 use dioxus::prelude::dioxus_elements::geometry::WheelDelta;
 use uuid::Uuid;
 
@@ -130,6 +130,18 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
 
     let compact = props.compact;
 
+    // ── Sync local selection → global signal ─────────────────────
+    // This lets the NodePropertyPanel (and other dock panels) react
+    // to what the user clicked on the canvas.
+    use_effect(move || {
+        let entity = match selection() {
+            Selection::Module(id) => Some(SelectedEntity::Module(id)),
+            Selection::Node(id)   => Some(SelectedEntity::Node(id)),
+            _                     => None,
+        };
+        *RIG_SELECTED_ENTITY.write() = entity;
+    });
+
     // ── Read graph from global signal ────────────────────────────
     // Compact mode uses the same full-size graph, just auto-zoomed to fit.
     let current_graph = RIG_NODE_GRAPH.read().clone();
@@ -145,7 +157,8 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
         last_compact.set(compact);
         let vp_w = 1200.0;
         let vp_h = 700.0;
-        let (fit_zoom, fit_pan_x, fit_pan_y) = calculate_fit(canvas_w, canvas_h, vp_w, vp_h);
+        let (fit_zoom, fit_pan_x, fit_pan_y) =
+            calculate_fit(canvas_w, canvas_h, vp_w, vp_h);
         zoom.set(fit_zoom);
         pan_x.set(fit_pan_x);
         pan_y.set(fit_pan_y);
@@ -179,26 +192,6 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                 context_menu.set(None);
 
                 let key = evt.key();
-                let modifiers = evt.modifiers();
-                let has_cmd_or_ctrl = modifiers.meta() || modifiers.ctrl();
-
-                // Undo: Cmd+Z / Ctrl+Z (without Shift)
-                if has_cmd_or_ctrl && !modifiers.shift() && matches!(&key, Key::Character(c) if c == "z" || c == "Z") {
-                    let mut history = GRAPH_HISTORY.write();
-                    let mut graph = RIG_NODE_GRAPH.write();
-                    history.undo(&mut graph);
-                    return;
-                }
-                // Redo: Cmd+Shift+Z / Ctrl+Y
-                if (has_cmd_or_ctrl && modifiers.shift() && matches!(&key, Key::Character(c) if c == "z" || c == "Z"))
-                    || (has_cmd_or_ctrl && matches!(&key, Key::Character(c) if c == "y" || c == "Y"))
-                {
-                    let mut history = GRAPH_HISTORY.write();
-                    let mut graph = RIG_NODE_GRAPH.write();
-                    history.redo(&mut graph);
-                    return;
-                }
-
                 match key {
                     Key::Delete | Key::Backspace => {
                         match selection() {

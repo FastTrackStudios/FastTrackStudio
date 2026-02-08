@@ -183,7 +183,11 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn new(name: impl Into<String>, block_type: BlockType, position: NodePosition) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        block_type: BlockType,
+        position: NodePosition,
+    ) -> Self {
         let name = name.into();
         Self {
             id: Uuid::new_v4(),
@@ -256,11 +260,7 @@ impl Node {
 
     /// Get the position of a port (for wire connection).
     pub fn port_position(&self, port_id: &str, is_input: bool) -> Option<NodePosition> {
-        let ports = if is_input {
-            &self.inputs
-        } else {
-            &self.outputs
-        };
+        let ports = if is_input { &self.inputs } else { &self.outputs };
         let port_index = ports.iter().position(|p| p.id == port_id)?;
         let port_count = ports.len();
 
@@ -345,7 +345,11 @@ pub struct GraphModule {
 }
 
 impl GraphModule {
-    pub fn new(name: impl Into<String>, block_type: BlockType, position: NodePosition) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        block_type: BlockType,
+        position: NodePosition,
+    ) -> Self {
         Self {
             id: Uuid::new_v4(),
             name: name.into(),
@@ -410,11 +414,7 @@ impl GraphModule {
 
     /// Get the position of a port (for wire connection).
     pub fn port_position(&self, port_id: &str, is_input: bool) -> Option<NodePosition> {
-        let ports = if is_input {
-            &self.inputs
-        } else {
-            &self.outputs
-        };
+        let ports = if is_input { &self.inputs } else { &self.outputs };
         let port_index = ports.iter().position(|p| p.id == port_id)?;
         let port_count = ports.len();
 
@@ -736,11 +736,7 @@ impl NodeGraph {
         }
 
         // Place below existing content with some gap
-        let x = if leftmost_x == f64::MAX {
-            100.0
-        } else {
-            leftmost_x
-        };
+        let x = if leftmost_x == f64::MAX { 100.0 } else { leftmost_x };
         NodePosition::new(x, max_bottom + 40.0)
     }
 
@@ -751,20 +747,12 @@ impl NodeGraph {
         let mut y_offset = 100.0;
 
         // === SOURCE MODULE (contains Guitar Input, Input Gate, Input Volume) ===
-        let mut source_module = GraphModule::new(
-            "Source",
-            BlockType::Input,
-            NodePosition::new(50.0, y_offset),
-        )
-        .with_size(NodeSize::new(300.0, 280.0));
+        let mut source_module = GraphModule::new("Source", BlockType::Input, NodePosition::new(50.0, y_offset))
+            .with_size(NodeSize::new(300.0, 280.0));
 
-        let input = Node::new(
-            "Guitar Input",
-            BlockType::Input,
-            NodePosition::new(20.0, 50.0),
-        )
-        .with_size(NodeSize::small())
-        .with_short_label("IN");
+        let input = Node::new("Guitar Input", BlockType::Input, NodePosition::new(20.0, 50.0))
+            .with_size(NodeSize::small())
+            .with_short_label("IN");
         let input_id = source_module.add_node(input);
 
         let input_gate = Node::new("Gate", BlockType::Gate, NodePosition::new(20.0, 140.0))
@@ -785,8 +773,7 @@ impl NodeGraph {
         let source_id = graph.add_module(source_module);
 
         // === EQ BLOCK (standalone module) ===
-        let mut eq_module =
-            GraphModule::new("EQ", BlockType::Eq, NodePosition::new(380.0, y_offset));
+        let mut eq_module = GraphModule::new("EQ", BlockType::Eq, NodePosition::new(380.0, y_offset));
         let eq = Node::new("EQ", BlockType::Eq, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::xlarge())
             .with_widget(NodeWidget::EqGraph);
@@ -795,37 +782,21 @@ impl NodeGraph {
         let eq_id = graph.add_module(eq_module);
 
         // === DYNAMICS MODULE (standalone) ===
-        let mut dynamics_module = GraphModule::new(
-            "Dynamics",
-            BlockType::Compressor,
-            NodePosition::new(830.0, y_offset),
-        );
-        let comp = Node::new(
-            "Compressor",
-            BlockType::Compressor,
-            NodePosition::new(10.0, 50.0),
-        )
-        .with_size(NodeSize::large())
-        .with_widget(NodeWidget::CompressorGraph);
+        let mut dynamics_module = GraphModule::new("Dynamics", BlockType::Compressor, NodePosition::new(830.0, y_offset));
+        let comp = Node::new("Compressor", BlockType::Compressor, NodePosition::new(10.0, 50.0))
+            .with_size(NodeSize::large())
+            .with_widget(NodeWidget::CompressorGraph);
         dynamics_module.add_node(comp);
         dynamics_module.auto_size(20.0);
         let dynamics_id = graph.add_module(dynamics_module);
 
         // === SPECIAL MODULE (contains Envelope, Wah, Pitch, Doubler) ===
         y_offset += 280.0;
-        let mut special_module = GraphModule::new(
-            "Special",
-            BlockType::Modulation,
-            NodePosition::new(50.0, y_offset),
-        )
-        .with_size(NodeSize::new(950.0, 150.0));
+        let mut special_module = GraphModule::new("Special", BlockType::Modulation, NodePosition::new(50.0, y_offset))
+            .with_size(NodeSize::new(950.0, 150.0));
 
-        let envelope = Node::new(
-            "Envelope",
-            BlockType::Modulation,
-            NodePosition::new(20.0, 50.0),
-        )
-        .with_size(NodeSize::medium());
+        let envelope = Node::new("Envelope", BlockType::Modulation, NodePosition::new(20.0, 50.0))
+            .with_size(NodeSize::medium());
         let envelope_id = special_module.add_node(envelope);
 
         let wah = Node::new("Wah", BlockType::Modulation, NodePosition::new(250.0, 50.0))
@@ -836,12 +807,8 @@ impl NodeGraph {
             .with_size(NodeSize::medium());
         let pitch_id = special_module.add_node(pitch);
 
-        let doubler = Node::new(
-            "Doubler",
-            BlockType::Modulation,
-            NodePosition::new(710.0, 50.0),
-        )
-        .with_size(NodeSize::medium());
+        let doubler = Node::new("Doubler", BlockType::Modulation, NodePosition::new(710.0, 50.0))
+            .with_size(NodeSize::medium());
         let doubler_id = special_module.add_node(doubler);
 
         // Internal routing (serial chain)
@@ -857,9 +824,8 @@ impl NodeGraph {
 
         // === DRIVE MODULE (contains Boost, Drive 1, Drive 2, Drive 3) ===
         y_offset += 180.0;
-        let mut drive_module =
-            GraphModule::new("Drive", BlockType::Drive, NodePosition::new(50.0, y_offset))
-                .with_size(NodeSize::new(1100.0, 180.0));
+        let mut drive_module = GraphModule::new("Drive", BlockType::Drive, NodePosition::new(50.0, y_offset))
+            .with_size(NodeSize::new(1100.0, 180.0));
 
         let boost = Node::new("Boost", BlockType::Drive, NodePosition::new(20.0, 60.0))
             .with_size(NodeSize::small());
@@ -893,11 +859,7 @@ impl NodeGraph {
 
         // === VOLUME PEDAL (standalone) ===
         y_offset += 210.0;
-        let mut vol_pedal_module = GraphModule::new(
-            "Volume",
-            BlockType::Volume,
-            NodePosition::new(50.0, y_offset),
-        );
+        let mut vol_pedal_module = GraphModule::new("Volume", BlockType::Volume, NodePosition::new(50.0, y_offset));
         let vol_pedal = Node::new("Volume", BlockType::Volume, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::small());
         vol_pedal_module.add_node(vol_pedal);
@@ -905,11 +867,7 @@ impl NodeGraph {
         let vol_pedal_id = graph.add_module(vol_pedal_module);
 
         // === PRE-FX MODULE (contains Pre Delay, Spring Verb) ===
-        let mut prefx_module = GraphModule::new(
-            "Pre-FX",
-            BlockType::Delay,
-            NodePosition::new(260.0, y_offset),
-        );
+        let mut prefx_module = GraphModule::new("Pre-FX", BlockType::Delay, NodePosition::new(260.0, y_offset));
 
         let pre_delay = Node::new("Delay", BlockType::Delay, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::large())
@@ -934,9 +892,8 @@ impl NodeGraph {
         //                Room
         //   Amp2  Cab2 ↗
         y_offset += 230.0;
-        let mut ampcab_module =
-            GraphModule::new("Amp/Cab", BlockType::Amp, NodePosition::new(50.0, y_offset))
-                .with_size(NodeSize::new(870.0, 300.0));
+        let mut ampcab_module = GraphModule::new("Amp/Cab", BlockType::Amp, NodePosition::new(50.0, y_offset))
+            .with_size(NodeSize::new(870.0, 300.0));
 
         // Parallel path 1 (top): Amp1 -> Cab1
         let amp1 = Node::new("Amp 1", BlockType::Amp, NodePosition::new(20.0, 50.0))
@@ -982,8 +939,7 @@ impl NodeGraph {
 
         // === POST EQ (standalone) ===
         y_offset += 210.0;
-        let mut post_eq_module =
-            GraphModule::new("Post EQ", BlockType::Eq, NodePosition::new(50.0, y_offset));
+        let mut post_eq_module = GraphModule::new("Post EQ", BlockType::Eq, NodePosition::new(50.0, y_offset));
         let post_eq = Node::new("EQ", BlockType::Eq, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::xlarge())
             .with_widget(NodeWidget::EqGraph);
@@ -993,38 +949,22 @@ impl NodeGraph {
 
         // === MODULATION MODULE (contains Chorus, Flanger, Phaser) ===
         y_offset += 260.0;
-        let mut mod_module = GraphModule::new(
-            "Modulation",
-            BlockType::Modulation,
-            NodePosition::new(50.0, y_offset),
-        )
-        .with_size(NodeSize::new(730.0, 160.0));
+        let mut mod_module = GraphModule::new("Modulation", BlockType::Modulation, NodePosition::new(50.0, y_offset))
+            .with_size(NodeSize::new(730.0, 160.0));
 
-        let chorus = Node::new(
-            "Chorus",
-            BlockType::Modulation,
-            NodePosition::new(20.0, 50.0),
-        )
-        .with_size(NodeSize::medium())
-        .with_widget(NodeWidget::ModulationGraph);
+        let chorus = Node::new("Chorus", BlockType::Modulation, NodePosition::new(20.0, 50.0))
+            .with_size(NodeSize::medium())
+            .with_widget(NodeWidget::ModulationGraph);
         let chorus_id = mod_module.add_node(chorus);
 
-        let flanger = Node::new(
-            "Flanger",
-            BlockType::Modulation,
-            NodePosition::new(260.0, 50.0),
-        )
-        .with_size(NodeSize::medium())
-        .with_widget(NodeWidget::ModulationGraph);
+        let flanger = Node::new("Flanger", BlockType::Modulation, NodePosition::new(260.0, 50.0))
+            .with_size(NodeSize::medium())
+            .with_widget(NodeWidget::ModulationGraph);
         let flanger_id = mod_module.add_node(flanger);
 
-        let phaser = Node::new(
-            "Phaser",
-            BlockType::Modulation,
-            NodePosition::new(500.0, 50.0),
-        )
-        .with_size(NodeSize::medium())
-        .with_widget(NodeWidget::ModulationGraph);
+        let phaser = Node::new("Phaser", BlockType::Modulation, NodePosition::new(500.0, 50.0))
+            .with_size(NodeSize::medium())
+            .with_widget(NodeWidget::ModulationGraph);
         let phaser_id = mod_module.add_node(phaser);
 
         // Internal routing (serial chain)
@@ -1038,8 +978,7 @@ impl NodeGraph {
 
         // === TIME MODULE (contains Delay, Reverb, Freeze) ===
         y_offset += 190.0;
-        let mut time_module =
-            GraphModule::new("Time", BlockType::Delay, NodePosition::new(50.0, y_offset));
+        let mut time_module = GraphModule::new("Time", BlockType::Delay, NodePosition::new(50.0, y_offset));
 
         let delay = Node::new("Delay", BlockType::Delay, NodePosition::new(20.0, 50.0))
             .with_size(NodeSize::large())
@@ -1066,32 +1005,20 @@ impl NodeGraph {
 
         // === MOTION MODULE (contains Tremolo, Vibrato, Rotary) ===
         y_offset += 230.0;
-        let mut motion_module = GraphModule::new(
-            "Motion",
-            BlockType::Tremolo,
-            NodePosition::new(50.0, y_offset),
-        )
-        .with_size(NodeSize::new(730.0, 160.0));
+        let mut motion_module = GraphModule::new("Motion", BlockType::Tremolo, NodePosition::new(50.0, y_offset))
+            .with_size(NodeSize::new(730.0, 160.0));
 
         let tremolo = Node::new("Tremolo", BlockType::Tremolo, NodePosition::new(20.0, 50.0))
             .with_size(NodeSize::medium())
             .with_widget(NodeWidget::ModulationGraph);
         let tremolo_id = motion_module.add_node(tremolo);
 
-        let vibrato = Node::new(
-            "Vibrato",
-            BlockType::Modulation,
-            NodePosition::new(260.0, 50.0),
-        )
-        .with_size(NodeSize::medium());
+        let vibrato = Node::new("Vibrato", BlockType::Modulation, NodePosition::new(260.0, 50.0))
+            .with_size(NodeSize::medium());
         let vibrato_id = motion_module.add_node(vibrato);
 
-        let rotary = Node::new(
-            "Rotary",
-            BlockType::Modulation,
-            NodePosition::new(500.0, 50.0),
-        )
-        .with_size(NodeSize::medium());
+        let rotary = Node::new("Rotary", BlockType::Modulation, NodePosition::new(500.0, 50.0))
+            .with_size(NodeSize::medium());
         let rotary_id = motion_module.add_node(rotary);
 
         // Internal routing
@@ -1105,28 +1032,26 @@ impl NodeGraph {
 
         // === MASTER MODULE (contains Master EQ, Multiband Comp, Output) ===
         y_offset += 190.0;
-        let mut master_module =
-            GraphModule::new("Master", BlockType::Eq, NodePosition::new(50.0, y_offset));
+        let mut master_module = GraphModule::new("Master", BlockType::Eq, NodePosition::new(50.0, y_offset));
 
         let master_eq = Node::new("Master EQ", BlockType::Eq, NodePosition::new(20.0, 50.0))
             .with_size(NodeSize::xlarge())
             .with_widget(NodeWidget::EqGraph);
         let master_eq_id = master_module.add_node(master_eq);
 
-        let master_comp = Node::new(
-            "Multiband",
-            BlockType::Compressor,
-            NodePosition::new(440.0, 50.0),
-        )
-        .with_size(NodeSize::large())
-        .with_widget(NodeWidget::CompressorGraph);
+        let master_comp = Node::new("Multiband", BlockType::Compressor, NodePosition::new(440.0, 50.0))
+            .with_size(NodeSize::large())
+            .with_widget(NodeWidget::CompressorGraph);
         let master_comp_id = master_module.add_node(master_comp);
 
         let output = Node::new("Output", BlockType::Volume, NodePosition::new(790.0, 90.0))
             .with_size(NodeSize::small())
             .with_short_label("OUT")
             .with_ports(
-                vec![NodePort::input("in_l", "L"), NodePort::input("in_r", "R")],
+                vec![
+                    NodePort::input("in_l", "L"),
+                    NodePort::input("in_r", "R"),
+                ],
                 vec![],
             );
         let output_id = master_module.add_node(output);
@@ -1326,282 +1251,6 @@ pub fn capture_rig_snapshot(graph: &NodeGraph, name: impl Into<String>) -> RigSn
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Undo / Redo
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Maximum number of operations stored in the undo history.
-const MAX_HISTORY: usize = 50;
-
-/// A reversible graph operation.
-///
-/// Each variant stores enough data to both apply **and** reverse the change.
-/// Operations that mutate the `NodeGraph` are recorded here so `GraphHistory`
-/// can replay them in either direction.
-#[derive(Debug, Clone, PartialEq)]
-pub enum GraphOperation {
-    /// A module was moved from `old_pos` to `new_pos`.
-    MoveModule {
-        module_id: Uuid,
-        old_pos: NodePosition,
-        new_pos: NodePosition,
-    },
-    /// A standalone node was moved.
-    MoveNode {
-        node_id: Uuid,
-        old_pos: NodePosition,
-        new_pos: NodePosition,
-    },
-    /// A wire was added to the graph.
-    AddWire { wire: Wire },
-    /// A wire was removed from the graph.
-    RemoveWire { wire: Wire },
-    /// A module was added.
-    AddModule { module: GraphModule },
-    /// A module (and its connected wires) was removed.
-    RemoveModule {
-        module: GraphModule,
-        connected_wires: Vec<Wire>,
-    },
-    /// A standalone node was added.
-    AddNode { node: Node },
-    /// A standalone node (and its connected wires) was removed.
-    RemoveNode {
-        node: Node,
-        connected_wires: Vec<Wire>,
-    },
-    /// A module's or node's bypass state was toggled.
-    BypassToggle {
-        entity_id: Uuid,
-        /// `true` if the entity is a module, `false` if standalone node.
-        is_module: bool,
-    },
-    /// A parameter value was changed.
-    ParameterChange {
-        node_id: Uuid,
-        param_id: String,
-        old_value: f64,
-        new_value: f64,
-    },
-}
-
-impl GraphOperation {
-    /// Apply this operation to the graph (redo direction).
-    pub fn apply(&self, graph: &mut NodeGraph) {
-        match self {
-            GraphOperation::MoveModule {
-                module_id, new_pos, ..
-            } => {
-                if let Some(m) = graph.find_module_mut(*module_id) {
-                    m.position = *new_pos;
-                }
-            }
-            GraphOperation::MoveNode {
-                node_id, new_pos, ..
-            } => {
-                if let Some(n) = graph.find_node_mut(*node_id) {
-                    n.position = *new_pos;
-                }
-            }
-            GraphOperation::AddWire { wire } => {
-                graph.wires.push(wire.clone());
-            }
-            GraphOperation::RemoveWire { wire } => {
-                graph.wires.retain(|w| w.id != wire.id);
-            }
-            GraphOperation::AddModule { module } => {
-                graph.modules.push(module.clone());
-            }
-            GraphOperation::RemoveModule { module, .. } => {
-                graph.modules.retain(|m| m.id != module.id);
-                graph
-                    .wires
-                    .retain(|w| w.from_node != module.id && w.to_node != module.id);
-            }
-            GraphOperation::AddNode { node } => {
-                graph.nodes.push(node.clone());
-            }
-            GraphOperation::RemoveNode { node, .. } => {
-                graph.nodes.retain(|n| n.id != node.id);
-                graph
-                    .wires
-                    .retain(|w| w.from_node != node.id && w.to_node != node.id);
-            }
-            GraphOperation::BypassToggle {
-                entity_id,
-                is_module,
-            } => {
-                if *is_module {
-                    if let Some(m) = graph.find_module_mut(*entity_id) {
-                        m.bypassed = !m.bypassed;
-                    }
-                } else if let Some(n) = graph.find_node_mut(*entity_id) {
-                    n.bypassed = !n.bypassed;
-                }
-            }
-            GraphOperation::ParameterChange {
-                node_id,
-                param_id,
-                new_value,
-                ..
-            } => {
-                if let Some(n) = graph.find_node_mut(*node_id) {
-                    if let Some(p) = n.parameters.iter_mut().find(|p| p.id == *param_id) {
-                        p.value = NormalizedF64::new(*new_value);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Reverse this operation on the graph (undo direction).
-    pub fn undo(&self, graph: &mut NodeGraph) {
-        match self {
-            GraphOperation::MoveModule {
-                module_id, old_pos, ..
-            } => {
-                if let Some(m) = graph.find_module_mut(*module_id) {
-                    m.position = *old_pos;
-                }
-            }
-            GraphOperation::MoveNode {
-                node_id, old_pos, ..
-            } => {
-                if let Some(n) = graph.find_node_mut(*node_id) {
-                    n.position = *old_pos;
-                }
-            }
-            GraphOperation::AddWire { wire } => {
-                graph.wires.retain(|w| w.id != wire.id);
-            }
-            GraphOperation::RemoveWire { wire } => {
-                graph.wires.push(wire.clone());
-            }
-            GraphOperation::AddModule { module } => {
-                graph.modules.retain(|m| m.id != module.id);
-            }
-            GraphOperation::RemoveModule {
-                module,
-                connected_wires,
-            } => {
-                graph.modules.push(module.clone());
-                for wire in connected_wires {
-                    graph.wires.push(wire.clone());
-                }
-            }
-            GraphOperation::AddNode { node } => {
-                graph.nodes.retain(|n| n.id != node.id);
-            }
-            GraphOperation::RemoveNode {
-                node,
-                connected_wires,
-            } => {
-                graph.nodes.push(node.clone());
-                for wire in connected_wires {
-                    graph.wires.push(wire.clone());
-                }
-            }
-            GraphOperation::BypassToggle {
-                entity_id,
-                is_module,
-            } => {
-                // Toggle is its own inverse.
-                if *is_module {
-                    if let Some(m) = graph.find_module_mut(*entity_id) {
-                        m.bypassed = !m.bypassed;
-                    }
-                } else if let Some(n) = graph.find_node_mut(*entity_id) {
-                    n.bypassed = !n.bypassed;
-                }
-            }
-            GraphOperation::ParameterChange {
-                node_id,
-                param_id,
-                old_value,
-                ..
-            } => {
-                if let Some(n) = graph.find_node_mut(*node_id) {
-                    if let Some(p) = n.parameters.iter_mut().find(|p| p.id == *param_id) {
-                        p.value = NormalizedF64::new(*old_value);
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Bounded undo/redo history for graph operations.
-///
-/// Stores up to [`MAX_HISTORY`] operations. Pushing a new operation clears
-/// the redo stack (standard branching-discard behaviour).
-#[derive(Debug, Clone, Default)]
-pub struct GraphHistory {
-    undo_stack: Vec<GraphOperation>,
-    redo_stack: Vec<GraphOperation>,
-}
-
-impl GraphHistory {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Record a new operation. Clears the redo stack and enforces the capacity
-    /// limit by removing the oldest operation when full.
-    pub fn push_operation(&mut self, op: GraphOperation) {
-        self.redo_stack.clear();
-        if self.undo_stack.len() >= MAX_HISTORY {
-            self.undo_stack.remove(0);
-        }
-        self.undo_stack.push(op);
-    }
-
-    /// Undo the most recent operation, applying the inverse to `graph`.
-    ///
-    /// Returns `true` if an operation was undone.
-    pub fn undo(&mut self, graph: &mut NodeGraph) -> bool {
-        if let Some(op) = self.undo_stack.pop() {
-            op.undo(graph);
-            self.redo_stack.push(op);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Redo the most recently undone operation, re-applying it to `graph`.
-    ///
-    /// Returns `true` if an operation was redone.
-    pub fn redo(&mut self, graph: &mut NodeGraph) -> bool {
-        if let Some(op) = self.redo_stack.pop() {
-            op.apply(graph);
-            self.undo_stack.push(op);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Whether the undo stack is non-empty.
-    pub fn can_undo(&self) -> bool {
-        !self.undo_stack.is_empty()
-    }
-
-    /// Whether the redo stack is non-empty.
-    pub fn can_redo(&self) -> bool {
-        !self.redo_stack.is_empty()
-    }
-
-    /// Number of operations on the undo stack.
-    pub fn undo_len(&self) -> usize {
-        self.undo_stack.len()
-    }
-
-    /// Number of operations on the redo stack.
-    pub fn redo_len(&self) -> usize {
-        self.redo_stack.len()
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1711,8 +1360,7 @@ mod tests {
         let mut graph = NodeGraph::new();
         let node = sample_node_with_params("Drive", NodePosition::new(10.0, 50.0));
         let node_id = node.id;
-        let mut module =
-            GraphModule::new("Test Module", BlockType::Drive, NodePosition::new(0.0, 0.0));
+        let mut module = GraphModule::new("Test Module", BlockType::Drive, NodePosition::new(0.0, 0.0));
         module.add_node(node);
         graph.add_module(module);
 
@@ -1732,8 +1380,7 @@ mod tests {
         let mut graph = NodeGraph::new();
         let node1 = sample_node_with_params("Drive 1", NodePosition::new(10.0, 50.0));
         let node2 = sample_node_with_params("Drive 2", NodePosition::new(200.0, 50.0));
-        let mut module =
-            GraphModule::new("Drive Stage", BlockType::Drive, NodePosition::new(0.0, 0.0));
+        let mut module = GraphModule::new("Drive Stage", BlockType::Drive, NodePosition::new(0.0, 0.0));
         module.add_node(node1);
         module.add_node(node2);
         let module_id = module.id;
@@ -1789,11 +1436,7 @@ mod tests {
 
         // Add a module with nodes
         let node1 = sample_node_with_params("Drive", NodePosition::new(10.0, 50.0));
-        let mut module = GraphModule::new(
-            "Drive Module",
-            BlockType::Drive,
-            NodePosition::new(0.0, 0.0),
-        );
+        let mut module = GraphModule::new("Drive Module", BlockType::Drive, NodePosition::new(0.0, 0.0));
         module.add_node(node1);
         graph.add_module(module);
 
@@ -1818,8 +1461,8 @@ mod tests {
     fn test_capture_rig_snapshot_preserves_parameter_values() -> Result<()> {
         // -- Setup & Fixtures
         let mut graph = NodeGraph::new();
-        let node =
-            Node::new("Custom", BlockType::Eq, NodePosition::new(0.0, 0.0)).with_parameters(vec![
+        let node = Node::new("Custom", BlockType::Eq, NodePosition::new(0.0, 0.0))
+            .with_parameters(vec![
                 NodeParameter::new("freq", "Frequency", NormalizedF64::new(0.3)),
                 NodeParameter::new("gain", "Gain", NormalizedF64::new(0.9)),
             ]);
@@ -1851,389 +1494,4 @@ mod tests {
         assert_ne!(snap1.id, snap2.id);
         Ok(())
     }
-
-    // region: --- GraphHistory
-
-    #[test]
-    fn test_history_new_is_empty() -> Result<()> {
-        // -- Setup & Fixtures
-        let history = GraphHistory::new();
-
-        // -- Check
-        assert!(!history.can_undo());
-        assert!(!history.can_redo());
-        assert_eq!(history.undo_len(), 0);
-        assert_eq!(history.redo_len(), 0);
-        Ok(())
-    }
-
-    #[test]
-    fn test_history_push_enables_undo() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut history = GraphHistory::new();
-        let module = GraphModule::new("Test", BlockType::Drive, NodePosition::new(0.0, 0.0));
-        let op = GraphOperation::MoveModule {
-            module_id: module.id,
-            old_pos: NodePosition::new(0.0, 0.0),
-            new_pos: NodePosition::new(100.0, 200.0),
-        };
-
-        // -- Exec
-        history.push_operation(op);
-
-        // -- Check
-        assert!(history.can_undo());
-        assert!(!history.can_redo());
-        assert_eq!(history.undo_len(), 1);
-        Ok(())
-    }
-
-    #[test]
-    fn test_history_undo_move_module() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-        let module = GraphModule::new("Test", BlockType::Drive, NodePosition::new(0.0, 0.0));
-        let module_id = module.id;
-        graph.add_module(module);
-
-        // Move the module in the graph
-        graph.find_module_mut(module_id).unwrap().position = NodePosition::new(100.0, 200.0);
-
-        let mut history = GraphHistory::new();
-        history.push_operation(GraphOperation::MoveModule {
-            module_id,
-            old_pos: NodePosition::new(0.0, 0.0),
-            new_pos: NodePosition::new(100.0, 200.0),
-        });
-
-        // -- Exec
-        let undone = history.undo(&mut graph);
-
-        // -- Check
-        assert!(undone);
-        let m = graph.find_module(module_id).unwrap();
-        assert_eq!(m.position, NodePosition::new(0.0, 0.0));
-        assert!(history.can_redo());
-        assert!(!history.can_undo());
-        Ok(())
-    }
-
-    #[test]
-    fn test_history_redo_move_module() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-        let module = GraphModule::new("Test", BlockType::Drive, NodePosition::new(0.0, 0.0));
-        let module_id = module.id;
-        graph.add_module(module);
-
-        graph.find_module_mut(module_id).unwrap().position = NodePosition::new(100.0, 200.0);
-
-        let mut history = GraphHistory::new();
-        history.push_operation(GraphOperation::MoveModule {
-            module_id,
-            old_pos: NodePosition::new(0.0, 0.0),
-            new_pos: NodePosition::new(100.0, 200.0),
-        });
-        history.undo(&mut graph);
-
-        // -- Exec
-        let redone = history.redo(&mut graph);
-
-        // -- Check
-        assert!(redone);
-        let m = graph.find_module(module_id).unwrap();
-        assert_eq!(m.position, NodePosition::new(100.0, 200.0));
-        assert!(history.can_undo());
-        assert!(!history.can_redo());
-        Ok(())
-    }
-
-    #[test]
-    fn test_history_push_clears_redo() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-        let module = GraphModule::new("Test", BlockType::Drive, NodePosition::new(0.0, 0.0));
-        let module_id = module.id;
-        graph.add_module(module);
-
-        let mut history = GraphHistory::new();
-        history.push_operation(GraphOperation::MoveModule {
-            module_id,
-            old_pos: NodePosition::new(0.0, 0.0),
-            new_pos: NodePosition::new(50.0, 50.0),
-        });
-        history.undo(&mut graph);
-        assert!(history.can_redo());
-
-        // -- Exec: push a new op after undo
-        history.push_operation(GraphOperation::MoveModule {
-            module_id,
-            old_pos: NodePosition::new(0.0, 0.0),
-            new_pos: NodePosition::new(200.0, 200.0),
-        });
-
-        // -- Check: redo is gone
-        assert!(!history.can_redo());
-        assert_eq!(history.undo_len(), 1);
-        Ok(())
-    }
-
-    #[test]
-    fn test_history_capacity_limit() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut history = GraphHistory::new();
-        let module_id = Uuid::new_v4();
-
-        // -- Exec: push more than MAX_HISTORY operations
-        for i in 0..=MAX_HISTORY {
-            history.push_operation(GraphOperation::MoveModule {
-                module_id,
-                old_pos: NodePosition::new(i as f64, 0.0),
-                new_pos: NodePosition::new(i as f64 + 1.0, 0.0),
-            });
-        }
-
-        // -- Check: capacity is capped at MAX_HISTORY
-        assert_eq!(history.undo_len(), MAX_HISTORY);
-        Ok(())
-    }
-
-    #[test]
-    fn test_history_undo_empty_returns_false() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut history = GraphHistory::new();
-        let mut graph = NodeGraph::new();
-
-        // -- Exec
-        let undone = history.undo(&mut graph);
-
-        // -- Check
-        assert!(!undone);
-        Ok(())
-    }
-
-    #[test]
-    fn test_history_redo_empty_returns_false() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut history = GraphHistory::new();
-        let mut graph = NodeGraph::new();
-
-        // -- Exec
-        let redone = history.redo(&mut graph);
-
-        // -- Check
-        assert!(!redone);
-        Ok(())
-    }
-
-    #[test]
-    fn test_history_add_remove_wire_roundtrip() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-        let node_a = Node::new("A", BlockType::Input, NodePosition::new(0.0, 0.0));
-        let node_b = Node::new("B", BlockType::Eq, NodePosition::new(200.0, 0.0));
-        let a_id = graph.add_node(node_a);
-        let b_id = graph.add_node(node_b);
-
-        let wire = Wire::new(a_id, "out_l", b_id, "in_l");
-        let wire_id = wire.id;
-        graph.wires.push(wire.clone());
-
-        let mut history = GraphHistory::new();
-        history.push_operation(GraphOperation::AddWire { wire });
-
-        // -- Exec: undo should remove the wire
-        history.undo(&mut graph);
-
-        // -- Check
-        assert!(!graph.wires.iter().any(|w| w.id == wire_id));
-
-        // -- Exec: redo should re-add it
-        history.redo(&mut graph);
-        assert!(graph.wires.iter().any(|w| w.id == wire_id));
-        Ok(())
-    }
-
-    #[test]
-    fn test_history_bypass_toggle_is_self_inverse() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-        let module = GraphModule::new("Amp", BlockType::Amp, NodePosition::new(0.0, 0.0));
-        let module_id = module.id;
-        graph.add_module(module);
-        assert!(!graph.find_module(module_id).unwrap().bypassed);
-
-        let mut history = GraphHistory::new();
-        // Record a bypass toggle (forward: bypass ON)
-        graph.find_module_mut(module_id).unwrap().bypassed = true;
-        history.push_operation(GraphOperation::BypassToggle {
-            entity_id: module_id,
-            is_module: true,
-        });
-
-        // -- Exec: undo toggles back to OFF
-        history.undo(&mut graph);
-
-        // -- Check
-        assert!(!graph.find_module(module_id).unwrap().bypassed);
-
-        // -- Exec: redo toggles back to ON
-        history.redo(&mut graph);
-        assert!(graph.find_module(module_id).unwrap().bypassed);
-        Ok(())
-    }
-
-    #[test]
-    fn test_history_parameter_change_roundtrip() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-        let node = sample_node_with_params("Drive", NodePosition::new(0.0, 0.0));
-        let node_id = node.id;
-        graph.add_node(node);
-
-        let mut history = GraphHistory::new();
-        // Change "drive" param from 0.7 → 0.3
-        graph
-            .find_node_mut(node_id)
-            .unwrap()
-            .parameters
-            .iter_mut()
-            .find(|p| p.id == "drive")
-            .unwrap()
-            .value = NormalizedF64::new(0.3);
-
-        history.push_operation(GraphOperation::ParameterChange {
-            node_id,
-            param_id: "drive".to_string(),
-            old_value: 0.7,
-            new_value: 0.3,
-        });
-
-        // -- Exec: undo restores 0.7
-        history.undo(&mut graph);
-
-        // -- Check
-        let val = graph
-            .find_node(node_id)
-            .unwrap()
-            .parameters
-            .iter()
-            .find(|p| p.id == "drive")
-            .unwrap()
-            .value
-            .get();
-        assert!((val - 0.7).abs() < f64::EPSILON);
-
-        // -- Exec: redo applies 0.3 again
-        history.redo(&mut graph);
-        let val = graph
-            .find_node(node_id)
-            .unwrap()
-            .parameters
-            .iter()
-            .find(|p| p.id == "drive")
-            .unwrap()
-            .value
-            .get();
-        assert!((val - 0.3).abs() < f64::EPSILON);
-        Ok(())
-    }
-
-    #[test]
-    fn test_history_remove_module_restores_wires() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-        let module = GraphModule::new("EQ", BlockType::Eq, NodePosition::new(0.0, 0.0));
-        let module_id = module.id;
-        graph.add_module(module.clone());
-
-        let other = GraphModule::new("Comp", BlockType::Compressor, NodePosition::new(300.0, 0.0));
-        let other_id = other.id;
-        graph.add_module(other);
-
-        let wire = Wire::new(module_id, "out_l", other_id, "in_l");
-        graph.wires.push(wire.clone());
-
-        // Record removal with connected wires
-        let connected_wires = graph
-            .wires
-            .iter()
-            .filter(|w| w.from_node == module_id || w.to_node == module_id)
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let mut history = GraphHistory::new();
-        history.push_operation(GraphOperation::RemoveModule {
-            module: module.clone(),
-            connected_wires,
-        });
-        // Actually remove it
-        graph.remove_module(module_id);
-
-        // -- Check: module and wire are gone
-        assert!(graph.find_module(module_id).is_none());
-        assert!(graph.wires.is_empty());
-
-        // -- Exec: undo should restore both
-        history.undo(&mut graph);
-        assert!(graph.find_module(module_id).is_some());
-        assert_eq!(graph.wires.len(), 1);
-        Ok(())
-    }
-
-    #[test]
-    fn test_history_multiple_undo_redo_sequence() -> Result<()> {
-        // -- Setup & Fixtures
-        let mut graph = NodeGraph::new();
-        let module = GraphModule::new("Test", BlockType::Drive, NodePosition::new(0.0, 0.0));
-        let module_id = module.id;
-        graph.add_module(module);
-
-        let mut history = GraphHistory::new();
-
-        // Op 1: move to (100, 100)
-        graph.find_module_mut(module_id).unwrap().position = NodePosition::new(100.0, 100.0);
-        history.push_operation(GraphOperation::MoveModule {
-            module_id,
-            old_pos: NodePosition::new(0.0, 0.0),
-            new_pos: NodePosition::new(100.0, 100.0),
-        });
-
-        // Op 2: move to (200, 200)
-        graph.find_module_mut(module_id).unwrap().position = NodePosition::new(200.0, 200.0);
-        history.push_operation(GraphOperation::MoveModule {
-            module_id,
-            old_pos: NodePosition::new(100.0, 100.0),
-            new_pos: NodePosition::new(200.0, 200.0),
-        });
-
-        // -- Exec: undo twice
-        history.undo(&mut graph);
-        assert_eq!(
-            graph.find_module(module_id).unwrap().position,
-            NodePosition::new(100.0, 100.0)
-        );
-
-        history.undo(&mut graph);
-        assert_eq!(
-            graph.find_module(module_id).unwrap().position,
-            NodePosition::new(0.0, 0.0)
-        );
-
-        // -- Exec: redo twice
-        history.redo(&mut graph);
-        assert_eq!(
-            graph.find_module(module_id).unwrap().position,
-            NodePosition::new(100.0, 100.0)
-        );
-
-        history.redo(&mut graph);
-        assert_eq!(
-            graph.find_module(module_id).unwrap().position,
-            NodePosition::new(200.0, 200.0)
-        );
-        Ok(())
-    }
-
-    // endregion: --- GraphHistory
 }
