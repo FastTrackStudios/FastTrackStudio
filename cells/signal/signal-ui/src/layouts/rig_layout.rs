@@ -15,6 +15,7 @@ use crate::components::rig_grid::left_sidebar::GuitarRigLeftSidebar;
 use crate::components::rig_grid::module_browser_modal::ModuleBrowserModal;
 use crate::components::rig_grid::node_property_panel::NodePropertyPanel;
 use crate::components::rig_grid::profile_sidebar::GuitarRigProfileSidebar;
+use crate::components::rig_grid::version_history_panel::VersionHistoryPanel;
 use crate::components::rig_grid::right_sidebar::{
     GuitarRigRightSidebar, SceneListPanel, SongListPanel,
 };
@@ -223,5 +224,19 @@ pub fn NodePropertyDockPanel() -> Element {
 
     rsx! {
         NodePropertyPanel {}
+    }
+}
+
+/// Version history panel — shows preset version history with restore and diff.
+///
+/// Standalone dock panel wrapper around `VersionHistoryPanel`. Reads from
+/// `RIG_CURRENT_PRESET` and `RIG_PRESET_VERSIONS` global signals.
+#[component]
+pub fn VersionHistoryDockPanel() -> Element {
+    init_rig_service();
+    use_rig_subscription();
+
+    rsx! {
+        VersionHistoryPanel {}
     }
 }

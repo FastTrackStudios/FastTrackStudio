@@ -41,7 +41,6 @@ pub mod module_header;
 pub mod module_macro_view;
 pub mod profile_sidebar;
 pub mod right_sidebar;
-pub mod snapshot_browser;
 pub mod top_bar;
 pub mod view_mode;
 // Signal flow grid renderer
@@ -53,6 +52,7 @@ pub mod node_graph_node;
 pub mod node_graph_view;
 pub mod node_graph_wire;
 pub mod node_property_panel;
+pub mod version_history_panel;
 
 // Re-export main components
 pub use block_colors::block_type_color;
@@ -72,7 +72,6 @@ pub use left_sidebar::GuitarRigLeftSidebar;
 pub use module_browser_modal::ModuleBrowserModal;
 pub use profile_sidebar::GuitarRigProfileSidebar;
 pub use right_sidebar::{GuitarRigRightSidebar, SceneListPanel, SongListPanel};
-pub use snapshot_browser::SnapshotBrowser;
 pub use top_bar::GuitarRigTopBar;
 
 // Signal flow grid
@@ -85,3 +84,4 @@ pub use node_graph::{
 };
 pub use node_graph_view::NodeGraphView;
 pub use node_property_panel::NodePropertyPanel;
+pub use version_history_panel::VersionHistoryPanel;

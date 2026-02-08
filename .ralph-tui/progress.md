@@ -20,41 +20,10 @@
 - **oauth2 v5 TokenResponse trait**: The `access_token()`, `refresh_token()`, and `expires_in()` methods come from the `TokenResponse` trait which must be explicitly imported: `use oauth2::TokenResponse;`.
 - **Morph in normalized space**: Since all parameter values are `NormalizedF64` [0,1], interpolation can happen directly without denormalize/renormalize. The `ParamFormat` skew curve is only needed for display, not for morphing.
 - **roam-session blocks signal-ui check**: `cargo check -p signal-ui` fails due to upstream `roam-session` breakage (facet_path API changes). Use `cargo check -p signal-proto` to verify signal domain logic in isolation.
-- **SeaORM aggregate functions**: sea-query 0.32.x `Expr::col().avg()` does not exist. For aggregates, fetch all rows and compute in Rust, or use raw SQL. Simpler and more portable for small result sets like ratings.
+- **SQLite enforces FKs via SeaORM**: SeaORM enables `PRAGMA foreign_keys = ON` by default in SQLite. Tests with FK columns (e.g., `created_by -> users.id`) must insert the referenced row first or leave the FK column as `None`.
+- **Debounce via timestamp check**: Rather than timers/tokio::time, compare `Utc::now() - latest.created_at` against a threshold. Stateless, works across process restarts, no async runtime dependency.
+- **JSON diff for version comparison**: Recursive descent through `serde_json::Value` objects/arrays produces `FieldChange` structs with dot-separated paths (e.g., `blocks.amp.gain`). Handles Added/Removed/Modified at any nesting depth.
 
----
-
-## 2026-02-08 - roam-test-8xs.27
-- What was implemented:
-  - US-027: Preset ratings and reviews
-  - Rating service in `signal-storage/src/service.rs` with 4 CRUD functions:
-    - `rate_preset(db, user_id, preset_id, score, review)` — create/upsert rating with self-rating prevention
-    - `get_ratings(db, preset_id)` — fetch all ratings for a preset, newest first
-    - `get_average_rating(db, preset_id)` — compute average score and count
-    - `delete_rating(db, user_id, preset_id)` — remove a user's rating
-  - `BusinessRule` error variant in `StorageError` for self-rating prevention
-  - `RatingInfo` and `RatingStats` DTOs for clean API boundaries
-  - Star rating UI components in `signal-ui/src/components/star_rating.rs`:
-    - `StarRating` — read-only star display (filled/empty unicode stars)
-    - `StarRatingInput` — interactive input with hover preview and disabled state
-    - `PresetRatingBadge` — compact "★ 4.2 (12)" for preset browser lists
-  - Review display components in `signal-ui/src/components/review_list.rs`:
-    - `ReviewCard` — single review with star rating, author, date, text excerpt
-    - `ReviewList` — scrollable list with count header and "show more" hint
-  - 12 integration tests covering all service operations including edge cases
-- Files changed:
-  - `cells/signal/signal-storage/src/service.rs` (new — rating CRUD with 12 tests)
-  - `cells/signal/signal-storage/src/lib.rs` (added service module + re-exports)
-  - `cells/signal/signal-storage/src/error.rs` (added BusinessRule variant)
-  - `cells/signal/signal-ui/src/components/star_rating.rs` (new — 3 components)
-  - `cells/signal/signal-ui/src/components/review_list.rs` (new — 2 components)
-  - `cells/signal/signal-ui/src/components/mod.rs` (added star_rating + review_list modules)
-  - `cells/signal/signal-ui/src/lib.rs` (added rating component re-exports)
-- **Learnings:**
-  - sea-query 0.32.x does NOT have `Expr::col().avg()` — the method doesn't exist on `SimpleExpr`. For aggregates on small datasets, fetching all rows and computing in Rust is simpler and avoids sea-query version quirks
-  - SeaORM upsert pattern: find-then-update is simpler than ON CONFLICT for single-row operations, and works across SQLite and PostgreSQL without dialect differences
-  - Self-rating prevention must be at the service layer (not DB constraint) because it requires a cross-table lookup of `preset.author_id`
-  - Unicode star characters ★ (U+2605 filled) and ☆ (U+2606 empty) render well in Tailwind-styled Dioxus components
 ---
 
 ## 2026-02-08 - roam-test-8xs.29
@@ -284,4 +253,40 @@
   - Dioxus `<input type="range">` with `opacity-0` overlaid on a styled `<div>` is a clean pattern for custom slider appearance while retaining native interaction
   - `cargo check -p signal-ui` still fails with the 14 upstream roam-session errors. No new errors from our code confirmed by grepping compiler output
   - Module's internal node list provides "drill-down" — clicking a node inside the module switches the global selection from Module to Node, which changes the property panel to show that node's parameters
+---
+
+## 2026-02-08 - roam-test-8xs.28
+- What was implemented:
+  - US-028: Preset versioning and history
+  - `VersioningService` struct in `signal-storage/src/versioning.rs` with full CRUD:
+    - `create_version()` with debounce check (minimum interval between auto-created versions)
+    - `create_version_force()` bypassing debounce for explicit saves
+    - `list_versions()` ordered newest-first
+    - `get_version()` by preset_id + version number
+    - `restore_version()` creates new version with restored data + message
+    - `diff_versions()` computing JSON-level field changes between two versions
+    - `latest_version()` and `version_count()` helpers
+    - `prune_versions()` keeps last N versions (default 50) per preset
+  - `VersionInfo` summary type + `VersionDiff`/`FieldChange`/`ChangeKind` diff types
+  - Recursive `diff_json()` function producing dot-separated path changes (Added/Removed/Modified)
+  - Builder API: `with_max_versions()`, `with_debounce_secs()`
+  - `VersionHistoryPanel` Dioxus component with version list, selection, diff comparison, restore action bar
+  - `VersionHistoryDockPanel` standalone dock panel wrapper
+  - `RIG_PRESET_VERSIONS` global signal for UI state
+  - `PresetVersionEntry` and `VersionChange`/`VersionChangeKind` UI types
+  - 22 unit tests (8 pure diff tests + 14 service integration tests with in-memory SQLite)
+- Files changed:
+  - `cells/signal/signal-storage/src/versioning.rs` (new — 920+ lines with 22 tests)
+  - `cells/signal/signal-storage/src/lib.rs` (added versioning module + re-export)
+  - `cells/signal/signal-ui/src/components/rig_grid/version_history_panel.rs` (new — 270+ lines with 4 tests)
+  - `cells/signal/signal-ui/src/components/rig_grid/mod.rs` (added version_history_panel module + re-export)
+  - `cells/signal/signal-ui/src/components/mod.rs` (added VersionHistoryPanel re-export)
+  - `cells/signal/signal-ui/src/layouts/rig_layout.rs` (added VersionHistoryDockPanel wrapper + import)
+  - `cells/signal/signal-ui/src/lib.rs` (added VersionHistoryDockPanel re-export)
+- **Learnings:**
+  - SQLite via SeaORM enforces FKs by default — nullable FK columns still need valid referenced rows or None
+  - Debouncing via timestamp comparison (`Utc::now() - latest.created_at`) is simpler than timer-based approaches and stateless across restarts
+  - Dioxus RSX format strings don't support inline `if` expressions in text nodes — compute the string beforehand
+  - Recursive JSON diff produces clean dot-separated paths that are useful for both programmatic comparison and UI display
+  - The `preset_versions` entity/migration from roam-test-8xs.29 provided the schema foundation; this bead added the service layer on top
 ---
