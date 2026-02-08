@@ -43,7 +43,7 @@ pub const fn block_type_color(block_type: BlockType) -> BlockColor {
         // Dynamics - Blue family
         BlockType::Compressor => BlockColor::new("#3B82F6", "#EFF6FF", "#2563EB"),
         BlockType::Gate => BlockColor::new("#3B82F6", "#EFF6FF", "#2563EB"),
-        BlockType::Limiter => BlockColor::new("#2563EB", "#EFF6FF", "#1D4ED8"),
+        BlockType::Limiter => BlockColor::new("#3B82F6", "#EFF6FF", "#2563EB"),
         BlockType::DeEsser => BlockColor::new("#60A5FA", "#EFF6FF", "#3B82F6"),
 
         // Drive/Saturation - Orange/Red family
@@ -53,8 +53,8 @@ pub const fn block_type_color(block_type: BlockType) -> BlockColor {
         // Amp - Gold
         BlockType::Amp => BlockColor::new("#EAB308", "#FEFCE8", "#CA8A04"),
 
-        // Cabinet - Brown
-        BlockType::Cabinet => BlockColor::new("#92400E", "#FEF3C7", "#78350F"),
+        // Cabinet - Warm Brown (brighter for dark backgrounds)
+        BlockType::Cabinet => BlockColor::new("#B45309", "#FEF3C7", "#92400E"),
 
         // EQ - Green
         BlockType::Eq => BlockColor::new("#22C55E", "#F0FDF4", "#16A34A"),

@@ -8,10 +8,7 @@ use signal_control::id::BlockId;
 use signal_control::module::Module;
 use uuid::Uuid;
 
-use super::module_compact_view::ModuleCompactView;
-use super::module_detail_view::ModuleDetailView;
 use super::module_header::{ModuleHeader, ModulePresetOption};
-use super::module_macro_view::ModuleMacroView;
 use super::view_mode::ModuleViewMode;
 
 /// Props for the module group.
@@ -52,9 +49,7 @@ pub fn ModuleGroup(props: ModuleGroupProps) -> Element {
 
     // Calculate width class based on view mode
     let width_class = match props.view_mode {
-        ModuleViewMode::Detail => "w-80", // 320px
-        ModuleViewMode::Macro => "w-48",  // 192px
-        ModuleViewMode::Grid => "w-32",   // 128px (compact pills for module view)
+        ModuleViewMode::Flow | ModuleViewMode::FlowCompact => "w-full",
     };
 
     // Container styling based on enabled state
@@ -84,41 +79,8 @@ pub fn ModuleGroup(props: ModuleGroupProps) -> Element {
                 on_preset_select: props.on_preset_select.clone(),
             }
 
-            // View-mode-dependent content
-            div { class: "flex-1 overflow-y-auto max-h-96",
-                match props.view_mode {
-                    ModuleViewMode::Grid => rsx! {
-                        // Grid mode shows compact pills (individual module view)
-                        ModuleCompactView {
-                            blocks: module.blocks.clone(),
-                            on_toggle_bypass: props.on_toggle_block_bypass.clone(),
-                        }
-                    },
-                    ModuleViewMode::Macro => rsx! {
-                        ModuleMacroView {
-                            macros: module.macros.clone(),
-                            on_macro_change: props.on_macro_change.clone(),
-                        }
-                    },
-                    ModuleViewMode::Detail => rsx! {
-                        ModuleDetailView {
-                            blocks: module.blocks.clone(),
-                            on_toggle_bypass: props.on_toggle_block_bypass.clone(),
-                            on_param_change: props.on_param_change.clone(),
-                        }
-                    },
-                }
-            }
-
-            // Footer with level control (optional, shown in Macro/Detail modes)
-            if props.view_mode != ModuleViewMode::Grid {
-                ModuleLevelControl {
-                    level: module.level.get(),
-                    on_change: move |_new_level| {
-                        // TODO: Wire up level change callback
-                    },
-                }
-            }
+            // Flow modes are handled at the GuitarRigGrid level
+            // ModuleGroup is retained for potential future use but renders no content
         }
     }
 }

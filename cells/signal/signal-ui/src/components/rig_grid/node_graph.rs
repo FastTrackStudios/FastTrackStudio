@@ -278,9 +278,11 @@ impl Wire {
     }
 }
 
-/// A module container that groups multiple nodes.
+/// A module container that groups multiple nodes on the node graph canvas.
+///
+/// Renamed from `Module` to avoid collision with `signal_control::module::Module`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Module {
+pub struct GraphModule {
     /// Unique module ID.
     pub id: Uuid,
     /// Module name for display.
@@ -303,7 +305,7 @@ pub struct Module {
     pub outputs: Vec<NodePort>,
 }
 
-impl Module {
+impl GraphModule {
     pub fn new(
         name: impl Into<String>,
         block_type: BlockType,
@@ -399,28 +401,28 @@ impl Module {
     }
 
     /// Calculate and set the module size to fit all internal nodes with padding.
+    ///
+    /// Node positions are in module-local coordinates where (0,0) is the
+    /// top-left of the content area (below the 40px title bar). The module
+    /// height must include the title bar + the max node bottom edge + padding.
     pub fn auto_size(&mut self, padding: f64) {
         if self.nodes.is_empty() {
             return;
         }
 
-        // Find bounding box of all nodes
-        let mut min_x = f64::MAX;
-        let mut min_y = f64::MAX;
-        let mut max_x = f64::MIN;
-        let mut max_y = f64::MIN;
+        // Find the rightmost and bottommost edges of all nodes
+        let mut max_x = 0.0f64;
+        let mut max_y = 0.0f64;
 
         for node in &self.nodes {
-            min_x = min_x.min(node.position.x);
-            min_y = min_y.min(node.position.y);
             max_x = max_x.max(node.position.x + node.size.width);
             max_y = max_y.max(node.position.y + node.size.height);
         }
 
-        // Calculate module size with padding
-        // Account for title bar height (40px) in the top padding
-        let content_width = max_x - min_x + (padding * 2.0);
-        let content_height = max_y - min_y + padding + 50.0; // Extra padding at bottom, account for title
+        // Width: max right edge + right padding
+        let content_width = max_x + padding;
+        // Height: title bar (40px) + max bottom edge + bottom padding
+        let content_height = 40.0 + max_y + padding;
 
         self.size = NodeSize::new(content_width, content_height);
     }
@@ -430,7 +432,7 @@ impl Module {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct NodeGraph {
     /// Modules in the graph.
-    pub modules: Vec<Module>,
+    pub modules: Vec<GraphModule>,
     /// Standalone nodes (not in any module).
     pub nodes: Vec<Node>,
     /// Wires connecting modules/nodes.
@@ -443,24 +445,24 @@ impl NodeGraph {
     }
 
     /// Add a module to the graph.
-    pub fn add_module(&mut self, module: Module) -> Uuid {
+    pub fn add_module(&mut self, module: GraphModule) -> Uuid {
         let id = module.id;
         self.modules.push(module);
         id
     }
 
     /// Find a module by ID.
-    pub fn find_module(&self, id: Uuid) -> Option<&Module> {
+    pub fn find_module(&self, id: Uuid) -> Option<&GraphModule> {
         self.modules.iter().find(|m| m.id == id)
     }
 
     /// Find a module by ID (mutable).
-    pub fn find_module_mut(&mut self, id: Uuid) -> Option<&mut Module> {
+    pub fn find_module_mut(&mut self, id: Uuid) -> Option<&mut GraphModule> {
         self.modules.iter_mut().find(|m| m.id == id)
     }
 
     /// Find a module at a given position.
-    pub fn module_at(&self, x: f64, y: f64) -> Option<&Module> {
+    pub fn module_at(&self, x: f64, y: f64) -> Option<&GraphModule> {
         // Search in reverse order (top module first)
         self.modules.iter().rev().find(|m| m.contains_point(x, y))
     }
@@ -472,11 +474,53 @@ impl NodeGraph {
         id
     }
 
+    /// Remove a module by ID and all its connected wires.
+    pub fn remove_module(&mut self, id: Uuid) {
+        self.modules.retain(|m| m.id != id);
+        self.wires.retain(|w| w.from_node != id && w.to_node != id);
+    }
+
     /// Remove a node by ID.
     pub fn remove_node(&mut self, id: Uuid) {
         self.nodes.retain(|n| n.id != id);
         // Remove all wires connected to this node
         self.wires.retain(|w| w.from_node != id && w.to_node != id);
+    }
+
+    /// Check if a wire already exists between these two ports.
+    pub fn has_wire(&self, from_node: Uuid, from_port: &str, to_node: Uuid, to_port: &str) -> bool {
+        self.wires.iter().any(|w| {
+            w.from_node == from_node
+                && w.from_port == from_port
+                && w.to_node == to_node
+                && w.to_port == to_port
+        })
+    }
+
+    /// Validate and add a wire. Returns None if the wire is invalid.
+    ///
+    /// Rejects: self-loops, duplicate wires.
+    pub fn try_connect(
+        &mut self,
+        from_node: Uuid,
+        from_port: impl Into<String>,
+        to_node: Uuid,
+        to_port: impl Into<String>,
+    ) -> Option<Uuid> {
+        // Reject self-loops
+        if from_node == to_node {
+            return None;
+        }
+        let from_port = from_port.into();
+        let to_port = to_port.into();
+        // Reject duplicates
+        if self.has_wire(from_node, &from_port, to_node, &to_port) {
+            return None;
+        }
+        let wire = Wire::new(from_node, from_port, to_node, to_port);
+        let id = wire.id;
+        self.wires.push(wire);
+        Some(id)
     }
 
     /// Find a node by ID (searches both standalone nodes and nodes in modules).
@@ -534,6 +578,129 @@ impl NodeGraph {
         self.wires.retain(|w| w.id != id);
     }
 
+    /// Automatically arrange modules vertically with proper spacing.
+    ///
+    /// Groups modules that share a similar y position into "rows",
+    /// then repositions each row so modules don't overlap vertically.
+    /// Modules within the same row keep their relative x positions.
+    pub fn compact_layout(&mut self, gap: f64) {
+        if self.modules.is_empty() {
+            return;
+        }
+
+        // Sort module indices by y position
+        let mut indices: Vec<usize> = (0..self.modules.len()).collect();
+        indices.sort_by(|a, b| {
+            self.modules[*a]
+                .position
+                .y
+                .partial_cmp(&self.modules[*b].position.y)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Group into rows: modules within 50px of each other are on the same row
+        let row_threshold = 50.0;
+        let mut rows: Vec<Vec<usize>> = Vec::new();
+
+        for idx in indices {
+            let this_y = self.modules[idx].position.y;
+            let same_row = rows.last().map_or(false, |row| {
+                let row_y = self.modules[row[0]].position.y;
+                (this_y - row_y).abs() < row_threshold
+            });
+
+            if same_row {
+                rows.last_mut().unwrap().push(idx);
+            } else {
+                rows.push(vec![idx]);
+            }
+        }
+
+        // Reposition each row with proper vertical spacing
+        let mut y = 50.0;
+        for row in &rows {
+            // Set all modules in this row to the same y
+            for &idx in row {
+                self.modules[idx].position.y = y;
+            }
+            // Advance y by the tallest module in this row + gap
+            let max_height = row
+                .iter()
+                .map(|&idx| self.modules[idx].size.height)
+                .fold(0.0f64, f64::max);
+            y += max_height + gap;
+        }
+    }
+
+    /// Get the appropriate widget and size for a block type.
+    pub fn widget_for_block_type(block_type: BlockType) -> (NodeWidget, NodeSize) {
+        match block_type {
+            BlockType::Eq => (NodeWidget::EqGraph, NodeSize::xlarge()),
+            BlockType::Compressor => (NodeWidget::CompressorGraph, NodeSize::large()),
+            BlockType::Gate => (NodeWidget::GateGraph, NodeSize::medium()),
+            BlockType::Delay => (NodeWidget::DelayGraph, NodeSize::large()),
+            BlockType::Reverb => (NodeWidget::ReverbGraph, NodeSize::large()),
+            BlockType::Drive | BlockType::Saturator => (NodeWidget::DriveGraph, NodeSize::medium()),
+            BlockType::Modulation | BlockType::Tremolo | BlockType::Pitch => {
+                (NodeWidget::ModulationGraph, NodeSize::medium())
+            }
+            BlockType::Amp | BlockType::Cabinet => (NodeWidget::AmpCab, NodeSize::medium()),
+            BlockType::Tuner => (NodeWidget::Tuner, NodeSize::small()),
+            BlockType::Freeze => (NodeWidget::Label, NodeSize::medium()),
+            _ => (NodeWidget::Label, NodeSize::small()),
+        }
+    }
+
+    /// Create a new module with a single node for a given block type.
+    ///
+    /// Automatically assigns the correct widget, size, and port configuration.
+    /// The module is positioned at `position` and auto-sized to fit its node.
+    pub fn create_module_for_block_type(
+        name: impl Into<String>,
+        block_type: BlockType,
+        position: NodePosition,
+    ) -> GraphModule {
+        let name = name.into();
+        let (widget, size) = Self::widget_for_block_type(block_type);
+
+        let node = Node::new(&name, block_type, NodePosition::new(10.0, 50.0))
+            .with_size(size)
+            .with_widget(widget);
+
+        let mut module = GraphModule::new(&name, block_type, position);
+        module.add_node(node);
+        module.auto_size(20.0);
+        module
+    }
+
+    /// Find an open position to place a new module, avoiding overlap with
+    /// existing modules. Searches below and to the right of existing content.
+    pub fn find_open_position(&self) -> NodePosition {
+        if self.modules.is_empty() && self.nodes.is_empty() {
+            return NodePosition::new(100.0, 100.0);
+        }
+
+        // Find the bottom-most module
+        let mut max_bottom = 0.0f64;
+        let mut leftmost_x = f64::MAX;
+
+        for module in &self.modules {
+            let bottom = module.position.y + module.size.height;
+            max_bottom = max_bottom.max(bottom);
+            leftmost_x = leftmost_x.min(module.position.x);
+        }
+
+        for node in &self.nodes {
+            let bottom = node.position.y + node.size.height;
+            max_bottom = max_bottom.max(bottom);
+            leftmost_x = leftmost_x.min(node.position.x);
+        }
+
+        // Place below existing content with some gap
+        let x = if leftmost_x == f64::MAX { 100.0 } else { leftmost_x };
+        NodePosition::new(x, max_bottom + 40.0)
+    }
+
     /// Create a comprehensive guitar rig node graph with all modules.
     pub fn sample_guitar_rig() -> Self {
         let mut graph = Self::new();
@@ -541,7 +708,7 @@ impl NodeGraph {
         let mut y_offset = 100.0;
 
         // === SOURCE MODULE (contains Guitar Input, Input Gate, Input Volume) ===
-        let mut source_module = Module::new("Source", BlockType::Input, NodePosition::new(50.0, y_offset))
+        let mut source_module = GraphModule::new("Source", BlockType::Input, NodePosition::new(50.0, y_offset))
             .with_size(NodeSize::new(300.0, 280.0));
 
         let input = Node::new("Guitar Input", BlockType::Input, NodePosition::new(20.0, 50.0))
@@ -567,7 +734,7 @@ impl NodeGraph {
         let source_id = graph.add_module(source_module);
 
         // === EQ BLOCK (standalone module) ===
-        let mut eq_module = Module::new("EQ", BlockType::Eq, NodePosition::new(380.0, y_offset));
+        let mut eq_module = GraphModule::new("EQ", BlockType::Eq, NodePosition::new(380.0, y_offset));
         let eq = Node::new("EQ", BlockType::Eq, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::xlarge())
             .with_widget(NodeWidget::EqGraph);
@@ -576,7 +743,7 @@ impl NodeGraph {
         let eq_id = graph.add_module(eq_module);
 
         // === DYNAMICS MODULE (standalone) ===
-        let mut dynamics_module = Module::new("Dynamics", BlockType::Compressor, NodePosition::new(830.0, y_offset));
+        let mut dynamics_module = GraphModule::new("Dynamics", BlockType::Compressor, NodePosition::new(830.0, y_offset));
         let comp = Node::new("Compressor", BlockType::Compressor, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::large())
             .with_widget(NodeWidget::CompressorGraph);
@@ -586,7 +753,7 @@ impl NodeGraph {
 
         // === SPECIAL MODULE (contains Envelope, Wah, Pitch, Doubler) ===
         y_offset += 280.0;
-        let mut special_module = Module::new("Special", BlockType::Modulation, NodePosition::new(50.0, y_offset))
+        let mut special_module = GraphModule::new("Special", BlockType::Modulation, NodePosition::new(50.0, y_offset))
             .with_size(NodeSize::new(950.0, 150.0));
 
         let envelope = Node::new("Envelope", BlockType::Modulation, NodePosition::new(20.0, 50.0))
@@ -618,7 +785,7 @@ impl NodeGraph {
 
         // === DRIVE MODULE (contains Boost, Drive 1, Drive 2, Drive 3) ===
         y_offset += 180.0;
-        let mut drive_module = Module::new("Drive", BlockType::Drive, NodePosition::new(50.0, y_offset))
+        let mut drive_module = GraphModule::new("Drive", BlockType::Drive, NodePosition::new(50.0, y_offset))
             .with_size(NodeSize::new(1100.0, 180.0));
 
         let boost = Node::new("Boost", BlockType::Drive, NodePosition::new(20.0, 60.0))
@@ -653,7 +820,7 @@ impl NodeGraph {
 
         // === VOLUME PEDAL (standalone) ===
         y_offset += 210.0;
-        let mut vol_pedal_module = Module::new("Volume", BlockType::Volume, NodePosition::new(50.0, y_offset));
+        let mut vol_pedal_module = GraphModule::new("Volume", BlockType::Volume, NodePosition::new(50.0, y_offset));
         let vol_pedal = Node::new("Volume", BlockType::Volume, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::small());
         vol_pedal_module.add_node(vol_pedal);
@@ -661,7 +828,7 @@ impl NodeGraph {
         let vol_pedal_id = graph.add_module(vol_pedal_module);
 
         // === PRE-FX MODULE (contains Pre Delay, Spring Verb) ===
-        let mut prefx_module = Module::new("Pre-FX", BlockType::Delay, NodePosition::new(260.0, y_offset));
+        let mut prefx_module = GraphModule::new("Pre-FX", BlockType::Delay, NodePosition::new(260.0, y_offset));
 
         let pre_delay = Node::new("Delay", BlockType::Delay, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::large())
@@ -686,7 +853,7 @@ impl NodeGraph {
         //                Room
         //   Amp2  Cab2 ↗
         y_offset += 230.0;
-        let mut ampcab_module = Module::new("Amp/Cab", BlockType::Amp, NodePosition::new(50.0, y_offset))
+        let mut ampcab_module = GraphModule::new("Amp/Cab", BlockType::Amp, NodePosition::new(50.0, y_offset))
             .with_size(NodeSize::new(870.0, 300.0));
 
         // Parallel path 1 (top): Amp1 -> Cab1
@@ -733,7 +900,7 @@ impl NodeGraph {
 
         // === POST EQ (standalone) ===
         y_offset += 210.0;
-        let mut post_eq_module = Module::new("Post EQ", BlockType::Eq, NodePosition::new(50.0, y_offset));
+        let mut post_eq_module = GraphModule::new("Post EQ", BlockType::Eq, NodePosition::new(50.0, y_offset));
         let post_eq = Node::new("EQ", BlockType::Eq, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::xlarge())
             .with_widget(NodeWidget::EqGraph);
@@ -743,7 +910,7 @@ impl NodeGraph {
 
         // === MODULATION MODULE (contains Chorus, Flanger, Phaser) ===
         y_offset += 260.0;
-        let mut mod_module = Module::new("Modulation", BlockType::Modulation, NodePosition::new(50.0, y_offset))
+        let mut mod_module = GraphModule::new("Modulation", BlockType::Modulation, NodePosition::new(50.0, y_offset))
             .with_size(NodeSize::new(730.0, 160.0));
 
         let chorus = Node::new("Chorus", BlockType::Modulation, NodePosition::new(20.0, 50.0))
@@ -772,7 +939,7 @@ impl NodeGraph {
 
         // === TIME MODULE (contains Delay, Reverb, Freeze) ===
         y_offset += 190.0;
-        let mut time_module = Module::new("Time", BlockType::Delay, NodePosition::new(50.0, y_offset));
+        let mut time_module = GraphModule::new("Time", BlockType::Delay, NodePosition::new(50.0, y_offset));
 
         let delay = Node::new("Delay", BlockType::Delay, NodePosition::new(20.0, 50.0))
             .with_size(NodeSize::large())
@@ -799,7 +966,7 @@ impl NodeGraph {
 
         // === MOTION MODULE (contains Tremolo, Vibrato, Rotary) ===
         y_offset += 230.0;
-        let mut motion_module = Module::new("Motion", BlockType::Tremolo, NodePosition::new(50.0, y_offset))
+        let mut motion_module = GraphModule::new("Motion", BlockType::Tremolo, NodePosition::new(50.0, y_offset))
             .with_size(NodeSize::new(730.0, 160.0));
 
         let tremolo = Node::new("Tremolo", BlockType::Tremolo, NodePosition::new(20.0, 50.0))
@@ -826,7 +993,7 @@ impl NodeGraph {
 
         // === MASTER MODULE (contains Master EQ, Multiband Comp, Output) ===
         y_offset += 190.0;
-        let mut master_module = Module::new("Master", BlockType::Eq, NodePosition::new(50.0, y_offset));
+        let mut master_module = GraphModule::new("Master", BlockType::Eq, NodePosition::new(50.0, y_offset));
 
         let master_eq = Node::new("Master EQ", BlockType::Eq, NodePosition::new(20.0, 50.0))
             .with_size(NodeSize::xlarge())
@@ -893,6 +1060,9 @@ impl NodeGraph {
         // Motion -> Master
         graph.connect(motion_id, "out_l", master_id, "in_l");
         graph.connect(motion_id, "out_r", master_id, "in_r");
+
+        // Auto-arrange modules so nothing overlaps
+        graph.compact_layout(30.0);
 
         graph
     }
