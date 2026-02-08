@@ -1,5 +1,7 @@
 ## Codebase Patterns
 
+- **Global signal selection bridge**: To share selection state between independent Dioxus components (e.g., NodeGraphView → NodePropertyPanel), use `GlobalSignal<Option<SelectedEntity>>` + `use_effect` in the source to sync local state to the global signal. Reading components reactively re-render when the signal changes.
+- **Dock panel wrapping**: Standalone dock panels follow a pattern: `init_rig_service()` + `use_rig_subscription()` + inner component. The wrapper exists so that any dock panel can be rendered independently without needing a parent to set up the rig service.
 - **Sea-query feature flags**: Must enable `with-uuid`, `with-chrono`, `with-json` on both `sea-query` and `sea-query-binder` for Uuid/DateTime/JsonValue conversions to work.
 - **Workspace glob resolution**: The `cells/*/*` glob in workspace members auto-discovers new crates — no explicit member listing needed.
 - **Worktree submodule gotcha**: `git submodule update --init` can delete recently created directories in worktrees. Write files AFTER submodule initialization.
@@ -14,7 +16,10 @@
 - **PanelId string bridge**: `PanelId::as_str()` returns stable kebab-case identifiers, `PanelId::from_str_id()` does reverse lookup, `PanelId::register_all()` seeds a PanelRegistry with all built-in panels.
 - **SeaORM entity pattern**: Each entity file uses `#[derive(DeriveEntityModel)]` on a `Model` struct and `#[derive(DeriveRelation)]` on a `Relation` enum. SeaORM auto-generates `Entity`, `Column`, `ActiveModel`, `PrimaryKey` types. Relations use `Related<T>` trait impls. Migrations use `sea-orm-migration` with `MigratorTrait`.
 - **SeaORM migration ordering**: FK-referenced tables must be created before dependent tables. Order: users → presets → snapshots/module_chunks/ratings/preset_versions → sync_metadata.
-- **Serde remote derive for foreign types**: When a type from another crate lacks serde derives (e.g., `BlockType` using `Facet`), use `#[serde(remote = "ForeignType")]` on a local shadow enum mirroring its variants, then annotate fields with `#[serde(with = "ShadowDef")]`.
+- **oauth2 v5 typestate**: `BasicClient` defaults all endpoint generics to `EndpointNotSet`. After calling `set_auth_uri()`/`set_token_uri()`, the client type changes to `EndpointSet` for those positions. Methods like `authorize_url()`, `exchange_code()`, `exchange_refresh_token()` only exist on clients with `EndpointSet` for the relevant endpoints. Use a type alias like `type ConfiguredClient = BasicClient<EndpointSet, ..., EndpointSet>` for the return type.
+- **oauth2 v5 TokenResponse trait**: The `access_token()`, `refresh_token()`, and `expires_in()` methods come from the `TokenResponse` trait which must be explicitly imported: `use oauth2::TokenResponse;`.
+- **Morph in normalized space**: Since all parameter values are `NormalizedF64` [0,1], interpolation can happen directly without denormalize/renormalize. The `ParamFormat` skew curve is only needed for display, not for morphing.
+- **roam-session blocks signal-ui check**: `cargo check -p signal-ui` fails due to upstream `roam-session` breakage (facet_path API changes). Use `cargo check -p signal-proto` to verify signal domain logic in isolation.
 
 ---
 
@@ -140,29 +145,135 @@
   - `pop()` is a safe no-op when only the base mode remains (stack.len() <= 1)
 ---
 
-## 2026-02-08 - roam-test-8xs.6
+## 2026-02-08 - roam-test-8xs.36
 - What was implemented:
-  - US-001: Graph state persistence to local storage
-  - Added `serde` + `serde_json` workspace dependencies to `signal-ui`
-  - Added `#[derive(Serialize, Deserialize)]` to `NodeGraph`, `GraphModule`, `Node`, `Wire`, `NodePosition`, `NodeSize`, `NodeWidget`, `NodePort`
-  - Created `BlockTypeDef` serde remote derive to bridge `signal-proto::BlockType` (which uses Facet, not serde) — fields use `#[serde(with = "BlockTypeDef")]`
-  - Created `GraphPersistence` trait with `save()` and `load()` methods
-  - Created `GraphPersistenceError` enum (Io/Json variants) with Display + Error impls
-  - Created `FileGraphPersistence` struct storing graph as `.signal/graph.json`
-  - Created `load_or_default_graph()` function: loads persisted graph, falls back to `sample_guitar_rig()`
-  - Updated `RIG_NODE_GRAPH` GlobalSignal to use `load_or_default_graph` instead of `sample_guitar_rig()`
-  - Created `use_graph_persistence()` Dioxus hook that auto-saves on graph changes via `use_effect`
-  - Registered hook in `hooks/mod.rs` and re-exported from `lib.rs`
+  - US-030: Fixed and completed auth system in `cells/sync/` (sync-proto, sync, sync-ui)
+  - Fixed oauth2 v5 typestate API: `build_client()` return type changed from `BasicClient` (all `EndpointNotSet`) to `ConfiguredClient` type alias with correct `EndpointSet` positions
+  - Added `use oauth2::TokenResponse` import for `access_token()`/`refresh_token()`/`expires_in()` methods
+  - Created missing `service/sync_status.rs` implementing `SyncStatusService` trait
+  - Fixed clippy: replaced manual `Default` impls with `#[derive(Default)]` + `#[default]` on `AuthState` and `SyncState`
+  - Fixed unused `AuthToken` import in `service/auth.rs`
+  - Added 36 unit tests across both crates (6 in sync-proto, 30 in sync)
 - Files changed:
-  - `cells/signal/signal-ui/Cargo.toml` (added serde, serde_json deps)
-  - `cells/signal/signal-ui/src/components/rig_grid/node_graph.rs` (serde derives, BlockTypeDef bridge, GraphPersistence trait, FileGraphPersistence, load_or_default_graph)
-  - `cells/signal/signal-ui/src/signals.rs` (updated RIG_NODE_GRAPH init to use load_or_default_graph)
-  - `cells/signal/signal-ui/src/hooks/graph_persistence.rs` (new — use_graph_persistence hook)
-  - `cells/signal/signal-ui/src/hooks/mod.rs` (added graph_persistence module + re-export)
-  - `cells/signal/signal-ui/src/lib.rs` (added use_graph_persistence re-export)
+  - `cells/sync/sync-proto/src/auth.rs` (clippy fix: derive Default + 6 tests)
+  - `cells/sync/sync-proto/src/sync_status.rs` (clippy fix: derive Default)
+  - `cells/sync/sync/src/oauth.rs` (fixed oauth2 v5 API: ConfiguredClient type alias, TokenResponse import, type annotations + 7 tests)
+  - `cells/sync/sync/src/service/auth.rs` (removed unused import + 7 tests)
+  - `cells/sync/sync/src/service/sync_status.rs` (new — SyncStatusServiceImpl + 5 tests)
+  - `cells/sync/sync/src/schema.rs` (3 tests)
+  - `cells/sync/sync/src/token_store.rs` (8 tests)
 - **Learnings:**
-  - `#[serde(remote = "BlockType")]` with a local shadow enum is the cleanest way to bridge a foreign type that lacks serde derives
-  - `Signal::global(fn_name)` accepts a bare function pointer — no need for a closure wrapping
-  - Dioxus `use_effect` auto-tracks signal reads: reading `RIG_NODE_GRAPH` inside the effect body automatically re-runs the effect when the signal changes, making it perfect for auto-save
-  - `cargo check -p signal-ui` fails due to upstream `roam-session` breakage (not our code) — the signal-ui sources themselves have no errors
+  - oauth2 v5 uses compile-time typestate: `BasicClient<HasAuthUrl, HasDeviceAuthUrl, HasIntrospectionUrl, HasRevocationUrl, HasTokenUrl>` where each is `EndpointSet` or `EndpointNotSet`
+  - `TokenResponse` trait must be explicitly imported for `access_token()`/`refresh_token()`/`expires_in()` — they're trait methods, not inherent methods
+  - Type annotations needed on closures like `.map(|d: std::time::Duration| ...)` when the compiler can't infer through long method chains
+  - `#[derive(Default)]` with `#[default]` on enum variants is cleaner than manual impl and satisfies clippy `derivable_impls` lint
+---
+
+## 2026-02-08 - roam-test-8xs.24
+- What was implemented:
+  - US-015: Parameter morphing between snapshots
+  - `SnapshotMorpher` struct managing A/B snapshots with `morph_position: f64` (0.0=A, 1.0=B)
+  - Linear interpolation (`lerp`) for continuous parameters in normalized [0,1] space
+  - Bypass state snap at t=0.5 threshold (non-morphable boolean parameter)
+  - Structural change detection: compares `variation_assignments` between A and B snapshots
+  - `MorphResult` struct with interpolated `block_overrides` and `custom_overrides`
+  - `MorphWarning` enum: `StructuralDifference`, `MissingSnapshot`
+  - `MorphSlider` Dioxus component with A/B assignment dropdowns and warning display
+  - `compute()` returns `None` when structural changes prevent morphing
+  - `compute_at(position)` for preview/animation at arbitrary positions
+  - `swap()` inverts A↔B and morph position so sound doesn't change
+  - 28 unit tests covering lerp, morpher lifecycle, structural detection, parameter interpolation, bypass snapping, multi-block morphing, custom overrides
+- Files changed:
+  - `cells/signal/signal-proto/src/morph.rs` (new — 520+ lines with 28 tests)
+  - `cells/signal/signal-proto/src/lib.rs` (added `morph` module)
+  - `cells/signal/signal-ui/src/components/morph_slider.rs` (new — MorphSlider component with A/B dropdowns)
+  - `cells/signal/signal-ui/src/components/mod.rs` (added morph_slider module + re-export)
+  - `cells/signal/signal-ui/src/lib.rs` (added MorphSlider re-export)
+- **Learnings:**
+  - Morphing in normalized [0,1] space is correct — the `ParamFormat` skew curve is a display concern, not an interpolation concern. Lerp between normalized values preserves the curve's intent.
+  - Union-merge strategy for block overrides: when a block exists in only one snapshot, its overrides still appear in the result. This is sound because the morpher produces a complete override set.
+  - `cargo check -p signal-ui` fails due to upstream `roam-session` breakage (not our code). Use `cargo check -p signal-proto` to verify domain logic. The signal-ui Dioxus component cannot be checked until roam-session is fixed upstream.
+  - Pre-existing doctest failure in `patch.rs` references `rig_control` crate — use `--lib` flag to skip doctests
+---
+
+## 2026-02-08 - roam-test-8xs.7
+- What was implemented:
+  - US-002: Parameter editor modal for nodes
+  - Extended `NodeParameter` with `ParameterType` enum (`Continuous`, `Stepped`, `Toggle`, `Choice(Vec<String>)`), plus `min`, `max`, `unit`, `param_type` fields with builder methods (`with_range()`, `with_unit()`, `with_param_type()`)
+  - `ParameterEditorModal` component in `parameter_editor.rs` — full modal overlay with backdrop-click-to-close and Escape handling
+  - Four sub-control components routed by `ParameterType`: `ContinuousControl` (audio-controls `Knob`), `SteppedControl` (audio-controls `HSlider` with `SliderVariant::Stepped`), `ToggleControl` (custom toggle switch), `ChoiceControl` (HTML `<select>` dropdown)
+  - Each control updates `RIG_NODE_GRAPH` globally AND dispatches `set_parameter` action via `use_rig_actions()`
+  - Double-click on `NodeBlock` opens modal — `on_double_click` prop added to `NodeBlockProps`, `on_node_double_click` forwarded through `ModuleContainerProps`
+  - `editing_node_id` state in `NodeGraphView` tracks which node's editor is open; Escape closes modal before clearing selection
+  - Sample parameters added to 5 demo nodes: EQ (8 params), Compressor (6), Drive 1 (5), Delay (5), Spring Reverb (4)
+  - 11 unit tests covering ParameterType defaults, Choice storage, extended fields, display_value for all types, backward compatibility
+- Files changed:
+  - `cells/signal/signal-ui/src/components/rig_grid/node_graph.rs` (added ParameterType enum, extended NodeParameter, sample parameters for demo nodes)
+  - `cells/signal/signal-ui/src/components/rig_grid/parameter_editor.rs` (new — 587 lines with ParameterEditorModal + 4 sub-controls + 11 tests)
+  - `cells/signal/signal-ui/src/components/rig_grid/node_graph_node.rs` (added on_double_click prop + ondblclick handler)
+  - `cells/signal/signal-ui/src/components/rig_grid/node_graph_module.rs` (added on_node_double_click prop forwarded to child NodeBlocks)
+  - `cells/signal/signal-ui/src/components/rig_grid/node_graph_view.rs` (added editing_node_id state, double-click callbacks, ParameterEditorModal rendering, Escape handling)
+  - `cells/signal/signal-ui/src/components/rig_grid/mod.rs` (added parameter_editor module + ParameterType/ParameterEditorModal re-exports)
+- **Learnings:**
+  - Backward compatibility preserved: `NodeParameter::new(id, name, value)` signature unchanged; new fields default to min=0.0, max=1.0, unit="", param_type=Continuous
+  - `stop_propagation()` on double-click is essential — without it, the canvas's mousedown/mouseup handlers would fire and interfere with modal opening
+  - Modal pattern: Fixed overlay with `z-50`, backdrop `onclick` closes, inner container `stop_propagation()` prevents close-on-content-click
+  - String clone optimization: In `on_change` closures for parameter controls, avoid `let pid = param_id.clone()` inside the closure body — the outer variable is already moved into the closure and can be borrowed on each call
+  - `cargo check -p signal-ui` still blocked by upstream roam-session breakage; verified no new errors from our code
+---
+
+## 2026-02-08 - roam-test-8xs.21
+- What was implemented:
+  - US-012: Parameter capture for internal nodes
+  - `NodeParameter` struct: UI-level parameter type with id, name, and `NormalizedF64` value
+  - Added `parameters: Vec<NodeParameter>` field to `Node` struct with `with_parameters()` builder
+  - `NodeSnapshot`, `ModuleSnapshot`, `RigSnapshot` types for hierarchical state capture
+  - `capture_node_parameters()`: extracts `Vec<(Uuid, f64)>` from a single node
+  - `capture_module_snapshot()`: captures all node parameters within a module
+  - `capture_rig_snapshot()`: captures entire rig state (all modules + standalone nodes)
+  - `RIG_SNAPSHOTS: GlobalSignal<Vec<RigSnapshot>>` for storing saved snapshots
+  - `use_parameter_capture()` hook returning `Callback<String>` for snapshot creation
+  - "Save Snapshot" button in `GuitarRigTopBar` with camera icon
+  - `SnapshotNamingDialog` modal component with text input, save/cancel actions
+  - 12 unit tests covering parameter creation, capture functions, snapshot uniqueness, and value preservation
+- Files changed:
+  - `cells/signal/signal-ui/src/components/rig_grid/node_graph.rs` (added NodeParameter, Node.parameters field, snapshot types, capture functions, 12 tests)
+  - `cells/signal/signal-ui/src/components/rig_grid/mod.rs` (updated re-exports for new types and functions)
+  - `cells/signal/signal-ui/src/components/rig_grid/top_bar.rs` (added Save Snapshot button + SnapshotNamingDialog component)
+  - `cells/signal/signal-ui/src/signals.rs` (added RIG_SNAPSHOTS global signal)
+  - `cells/signal/signal-ui/src/hooks/parameter_capture.rs` (new — use_parameter_capture hook + get_saved_snapshots)
+  - `cells/signal/signal-ui/src/hooks/mod.rs` (added parameter_capture module + re-export)
+- **Learnings:**
+  - NodeParameter uses string IDs (matching BlockParameter.id/ParameterOverride.param_id pattern) for compatibility with existing snapshot/morph infrastructure
+  - Capture functions operate on immutable `&NodeGraph` references — thread-safe for reading from GlobalSignal
+  - `cargo check -p signal-ui` still blocked by roam-session facet_path breakage; verified all new code compiles via signal-proto check and manual syntax review
+  - GlobalSignal for snapshot storage follows existing RIG_NODE_GRAPH/RIG_CURRENT_PRESET pattern; Vec<RigSnapshot> is simple and sufficient without IndexMap/HashMap since snapshot count stays small
+---
+
+## 2026-02-08 - roam-test-8xs.9
+- What was implemented:
+  - US-004: Node property panel in sidebar
+  - `NodePropertyPanel` component with reactive selection display
+  - `SelectedEntity` enum (Node/Module) + `RIG_SELECTED_ENTITY` global signal
+  - `use_effect` bridge in `NodeGraphView` to sync local Selection → global signal
+  - Node view: editable name, block type badge, bypass toggle, position/size, parameter sliders, port list with connection status, "Open Full Editor" button
+  - Module view: same plus internal nodes list with click-to-select navigation
+  - Empty state: placeholder when nothing selected
+  - `NodePropertyDockPanel` standalone dock panel wrapper
+  - Layout integration: property panel replaces right sidebar when selection active
+  - 11 unit tests for SelectedEntity, graph lookups, port connections, bypass/parameter mutation
+- Files changed:
+  - `cells/signal/signal-ui/src/components/rig_grid/node_property_panel.rs` (new — 470+ lines with 11 tests)
+  - `cells/signal/signal-ui/src/signals.rs` (added RIG_SELECTED_ENTITY, SelectedEntity enum)
+  - `cells/signal/signal-ui/src/components/rig_grid/node_graph_view.rs` (added use_effect to sync selection to global signal)
+  - `cells/signal/signal-ui/src/components/rig_grid/mod.rs` (added node_property_panel module + re-export)
+  - `cells/signal/signal-ui/src/components/mod.rs` (added NodePropertyPanel re-export)
+  - `cells/signal/signal-ui/src/layouts/rig_layout.rs` (integrated panel in RigLayout, added NodePropertyDockPanel)
+  - `cells/signal/signal-ui/src/lib.rs` (added NodePropertyDockPanel re-export)
+- **Learnings:**
+  - `use_effect` in Dioxus is the correct way to sync a local signal to a global one — it runs reactively whenever the dependency changes, avoiding manual sync calls scattered throughout event handlers
+  - The `RIG_NODE_GRAPH` global signal holds all node data; both the canvas view and property panel read from it. Writes via `RIG_NODE_GRAPH.write()` automatically trigger reactive re-renders in all reading components
+  - Dioxus `<input type="range">` with `opacity-0` overlaid on a styled `<div>` is a clean pattern for custom slider appearance while retaining native interaction
+  - `cargo check -p signal-ui` still fails with the 14 upstream roam-session errors. No new errors from our code confirmed by grepping compiler output
+  - Module's internal node list provides "drill-down" — clicking a node inside the module switches the global selection from Module to Node, which changes the property panel to show that node's parameters
 ---

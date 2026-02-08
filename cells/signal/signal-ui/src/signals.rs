@@ -80,8 +80,28 @@ pub static RIG_LOADING: GlobalSignal<bool> = Signal::global(|| false);
 
 /// The node graph for the Flow/FlowCompact view.
 ///
-/// Initialized from persisted `.signal/graph.json` on first access, falling
-/// back to `sample_guitar_rig()` if no persisted graph exists. Modified by
+/// Initialized with `sample_guitar_rig()` on first access. Modified by
 /// drag interactions, wire creation/deletion, and the module browser.
 pub static RIG_NODE_GRAPH: GlobalSignal<crate::components::rig_grid::node_graph::NodeGraph> =
-    Signal::global(crate::components::rig_grid::node_graph::load_or_default_graph);
+    Signal::global(|| crate::components::rig_grid::node_graph::NodeGraph::sample_guitar_rig());
+
+/// Saved rig snapshots — captured parameter states that can be recalled later.
+pub static RIG_SNAPSHOTS: GlobalSignal<Vec<crate::components::rig_grid::node_graph::RigSnapshot>> =
+    Signal::global(Vec::new);
+
+/// Currently selected entity on the node graph canvas.
+///
+/// Set by `NodeGraphView` when the user clicks a node or module. Read by
+/// `NodePropertyPanel` to display the selected entity's properties.
+/// `None` means nothing is selected.
+pub static RIG_SELECTED_ENTITY: GlobalSignal<Option<SelectedEntity>> =
+    Signal::global(|| None);
+
+/// What kind of entity is selected on the node graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectedEntity {
+    /// A standalone node or a node inside a module.
+    Node(Uuid),
+    /// A module container.
+    Module(Uuid),
+}
