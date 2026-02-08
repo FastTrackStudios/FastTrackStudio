@@ -8,10 +8,8 @@
 - **Test structure**: Use `// -- Setup & Fixtures`, `// -- Exec`, `// -- Check` sections. Define `type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;` in test modules.
 - **Region markers**: Use `// region: --- Name` and `// endregion: --- Name` for large code sections.
 - **Builder pattern**: Use `with_*` methods on structs for fluent construction (e.g., `ModeDefinition::new(...).with_sticky(true)`).
-- **Edition 2024 match ergonomics**: No explicit `ref` in patterns matching on `&T` — the compiler infers borrows automatically. Use `Some(KeyTrie::Leaf(LeafAction::Operator(s)))` not `ref s`.
-- **Lost work across worktrees**: Bead marked complete doesn't mean the code exists on current branch. Always verify files exist before depending on prior beads.
-- **Workspace test workaround**: `cargo test -p dock-proto` may fail due to broken workspace members (sync-proto missing src). Use `--manifest-path` to test isolated crates.
-- **PanelId string bridge**: `PanelId::as_str()` returns stable kebab-case identifiers, `PanelId::from_str_id()` does reverse lookup, `PanelId::register_all()` seeds a PanelRegistry with all built-in panels.
+- **Let-chains in Rust 2024**: Clippy enforces collapsing nested `if let` into let-chains (`if let Some(x) = y && let Foo(z) = x.bar`). Use this pattern instead of nested ifs.
+- **Removing unused imports**: When removing an import from production code, check if tests use `super::*` and rely on that import — add it to the test module's `use` block instead.
 
 ---
 
@@ -39,46 +37,6 @@
   - `sea_query::Iden` derive handles CamelCase → snake_case column naming automatically
 ---
 
-## 2026-02-08 - roam-test-rlo.4
-- What was implemented:
-  - US-004: Sequence accumulator with timeout for multi-key bindings
-  - Also implemented US-002's KeyTrie (prerequisite lost due to worktree race)
-  - `trie.rs`: `KeyTrie` enum (Leaf/Node), `TrieNode` with insert/get/merge, `LeafAction` with 8 variants (Action, SwitchMode, PushMode, Operator, Motion, TextObject, Sequence, Unbind)
-  - `sequence.rs`: `SequenceState` accumulator with feed/timeout_expired/is_pending/pending_display/reset. `SequenceResult` enum: Matched/Pending/NoMatch/Timeout
-  - `format_chord()` helper for human-readable key display (e.g., `<C-g>`)
-- Files changed:
-  - `modules/actions/input/src/trie.rs` (new — 340+ lines with 10 tests)
-  - `modules/actions/input/src/sequence.rs` (new — 260+ lines with 10 tests)
-  - `modules/actions/input/src/lib.rs` (added trie + sequence modules and re-exports)
-  - `cells/sync/sync-ui/src/lib.rs` (stub — fixed broken workspace member)
-  - `cells/sync/sync/src/lib.rs` (stub — fixed broken workspace member)
-- **Learnings:**
-  - Edition 2024 disallows explicit `ref` in patterns matching on `&T` — compiler infers borrows automatically
-  - Bead "closed" doesn't mean code exists on current branch — worktree workers operate on separate branches, code can be lost if not merged
-  - `SequenceResult` uses lifetime `'a` for `Pending(&'a TrieNode)` to avoid cloning trie nodes; `Timeout` variant uses `'static` since it only carries owned `Vec<KeyChord>`
-  - Broken workspace members (sync-ui, sync missing src/) need stub lib.rs for `cargo clippy -p input` to work since it resolves the full workspace manifest
----
-
-## 2026-02-08 - roam-test-d78.4
-- What was implemented:
-  - US-004: Dynamic panel registry trait for dock-proto
-  - `PanelConstraints` struct with builder API (min/max/preferred width/height, resize priority)
-  - `DockPosition` enum (Left, Right, Bottom, Center, Float)
-  - `PanelDescriptor` struct with builder API (id, display_name, icon, category, default_position, constraints)
-  - `PanelRegistry` struct: HashMap-backed with register(), unregister(), get(), all(), all_ids(), by_category(), contains(), len(), is_empty()
-  - `PanelId::as_str()` / `from_str_id()` for string-based ID bridge
-  - `PanelId::register_all()` seeds registry with all 15 built-in panels
-  - `From<PanelId> for String` and `Display for PanelId` impls
-- Files changed:
-  - `cells/dock/dock-proto/src/registry.rs` (new — 450+ lines with 15 tests)
-  - `cells/dock/dock-proto/src/panel.rs` (added as_str, from_str_id, register_all, Display, Into<String>)
-  - `cells/dock/dock-proto/src/lib.rs` (added registry module + re-exports)
-- **Learnings:**
-  - Migrating `TabGroup.panels: Vec<PanelId>` to `Vec<String>` would break serde compatibility and the entire dock-dioxus layer — better to keep type-safe PanelId internally and bridge via `Into<String>`
-  - `cargo test -p dock-proto` fails in workspace mode due to broken sync-proto member; use `--manifest-path` instead
-  - PanelId categories: Session (5), Signal (6), DAW (2), Utility (2) — matches the existing enum comment groupings
----
-
 ## 2026-02-07 - roam-test-rlo.3
 - Implemented ModeStack and mode transitions in `modules/actions/input/src/mode.rs`
 - Created the `input` crate from scratch since US-001 hadn't been completed yet
@@ -98,30 +56,27 @@
   - `pop()` is a safe no-op when only the base mode remains (stack.len() <= 1)
 ---
 
-## 2026-02-08 - roam-test-d78.3
-- Implemented `LayoutHistory` for undo/redo of dock layout changes
-- Created `cells/dock/dock-proto/src/history.rs` with snapshot-based undo/redo
-  - `LayoutHistory::new()` / `with_max_depth(n)` — configurable depth (default 50, min 1)
-  - `push(before, after)` — records change, clears redo stack
-  - `undo(current) -> bool` — restores before-state, moves entry to redo stack
-  - `redo(current) -> bool` — restores after-state, moves entry back to undo stack
-  - `can_undo()`, `can_redo()`, `undo_depth()`, `redo_depth()`, `clear()`
-- Files changed:
-  - `cells/dock/dock-proto/src/history.rs` (new — 230 lines, 10 unit tests + 1 doc-test)
-  - `cells/dock/dock-proto/src/lib.rs` (added `pub mod history` + `pub use LayoutHistory`)
-- 10 tests covering: split+undo, undo+redo, mutation-clears-redo, depth cap, empty stack edge cases, multiple undo/redo, clear, min depth clamp
-- All quality gates pass: `cargo check`, `cargo clippy -- -D warnings`, `cargo test` (31 tests + 2 doc-tests)
+## 2026-02-08 - roam-test-rlo.5
+- What was implemented:
+  - `InputProcessor` core state machine in `modules/actions/input/src/processor.rs`
+  - `KeyTrie` prefix tree for multi-key sequence lookup in `src/trie.rs`
+  - `ActionContext` lightweight context for when-clause evaluation in `src/context.rs`
+  - `SequenceState` accumulator for pending key sequences (internal to processor)
+  - Full Escape handling: cancels pending sequences, pops sub-modes, or switches to Normal
+  - Insert mode passthrough: unmatched character keys in passthrough modes → InsertText
+  - Mode transition side effects: SwitchMode/PushMode/PopMode commands trigger ModeStack transitions and emit on_enter/on_exit actions
+  - Timeout support: `timeout_expired()`, `needs_timeout()`, `pending_display()`
+  - 11 unit tests for processor (single key, two-key sequence, mode switch, insert passthrough, escape, timeout, non-key events, unmatched keys, sequence miss)
+  - 4 unit tests for trie (single key, multi-key, modifiers, mode switch binding)
+- Files created:
+  - `modules/actions/input/src/processor.rs` (InputProcessor, SequenceState, 11 tests)
+  - `modules/actions/input/src/trie.rs` (KeyTrie, TrieLookup, 4 tests)
+  - `modules/actions/input/src/context.rs` (ActionContext)
+- Files modified:
+  - `modules/actions/input/src/lib.rs` (added module declarations and re-exports)
 - **Learnings:**
-  - `DockLayout` doesn't derive `PartialEq` — structural comparison via panel containment checks works for tests
-  - Snapshot-based history (storing `before`/`after` clones) is pragmatic when the diff system (US-002) isn't yet implemented; public API is designed to be refactored to diff-based without breaking changes
-  - `drain(..excess)` removes oldest entries efficiently for depth trimming
-  - US-002 (LayoutDiff) is a prerequisite per PRD but not yet implemented; history works independently with clones
----
-
-## 2026-02-08 - roam-test-rlo.1 (verification only)
-- Already implemented in previous iteration (roam-test-rlo.3, commit 0104792)
-- Verified: `cargo check -p input`, `cargo clippy -p input -- -D warnings`, `cargo test -p input` all pass
-- No changes needed — all acceptance criteria met
-- **Learnings:**
-  - When a bead's work was completed by a prior iteration (rlo.3 created the crate that rlo.1 specifies), verify and close immediately
+  - Clippy in Rust 2024 enforces let-chains — nested `if let` patterns must be collapsed
+  - `super::*` in test modules inherits production imports; removing an import from production code can break tests
+  - Trie with `Clone`-based matching (returning owned values) avoids lifetime propagation through the processor
+  - `execute_command` returns the original SwitchMode/PushMode command PLUS the on_enter/on_exit actions, so the caller gets the full command stream
 ---

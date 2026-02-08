@@ -2,13 +2,13 @@
 //!
 //! Each dock entity gets its own newtype wrapper around `Uuid`.
 
-use serde::{Deserialize, Serialize};
+use facet::Facet;
 use uuid::Uuid;
 
 macro_rules! typed_id {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
         pub struct $name(Uuid);
 
         impl $name {

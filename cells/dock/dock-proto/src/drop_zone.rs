@@ -3,12 +3,13 @@
 //! When a panel is dragged over a tile, the tile area is divided into
 //! four edge zones. Dropping on a zone creates a split in that direction.
 
-use serde::{Deserialize, Serialize};
+use facet::Facet;
 
 use crate::tree::SplitDirection;
 
 /// Which edge of a tile the cursor is hovering over during a drag.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[repr(u8)]
 pub enum DropZone {
     /// Top edge — creates vertical split, dragged panel on top.
     Top,

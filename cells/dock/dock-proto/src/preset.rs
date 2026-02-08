@@ -2,13 +2,13 @@
 //!
 //! Equivalent to REAPER screensets: save/load/cycle complete layout configurations.
 
-use serde::{Deserialize, Serialize};
+use facet::Facet;
 
 use crate::id::PresetId;
 use crate::layout::DockLayout;
 
 /// A named dock layout preset (equivalent to a REAPER screenset).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Facet)]
 pub struct DockPreset {
     pub id: PresetId,
     pub name: String,
@@ -47,7 +47,7 @@ impl DockPreset {
 }
 
 /// Collection of dock presets with an active selection.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Facet)]
 pub struct PresetCollection {
     pub presets: Vec<DockPreset>,
     pub active_index: usize,

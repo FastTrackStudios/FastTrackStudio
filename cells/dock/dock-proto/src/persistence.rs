@@ -7,23 +7,23 @@ use crate::layout::DockLayout;
 use crate::preset::PresetCollection;
 
 /// Serialize a preset collection to a pretty-printed JSON string.
-pub fn presets_to_json(presets: &PresetCollection) -> Result<String, serde_json::Error> {
-    serde_json::to_string_pretty(presets)
+pub fn presets_to_json(presets: &PresetCollection) -> Result<String, Box<dyn std::error::Error>> {
+    Ok(facet_json::to_string_pretty(presets)?)
 }
 
 /// Deserialize a preset collection from a JSON string.
-pub fn presets_from_json(json: &str) -> Result<PresetCollection, serde_json::Error> {
-    serde_json::from_str(json)
+pub fn presets_from_json(json: &str) -> Result<PresetCollection, Box<dyn std::error::Error>> {
+    Ok(facet_json::from_str(json)?)
 }
 
 /// Serialize a single layout to a JSON string.
-pub fn layout_to_json(layout: &DockLayout) -> Result<String, serde_json::Error> {
-    serde_json::to_string_pretty(layout)
+pub fn layout_to_json(layout: &DockLayout) -> Result<String, Box<dyn std::error::Error>> {
+    Ok(facet_json::to_string_pretty(layout)?)
 }
 
 /// Deserialize a single layout from a JSON string.
-pub fn layout_from_json(json: &str) -> Result<DockLayout, serde_json::Error> {
-    serde_json::from_str(json)
+pub fn layout_from_json(json: &str) -> Result<DockLayout, Box<dyn std::error::Error>> {
+    Ok(facet_json::from_str(json)?)
 }
 
 /// Save presets to a file. Creates parent directories if needed.

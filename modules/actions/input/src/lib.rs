@@ -7,15 +7,17 @@
 #![deny(unsafe_code)]
 
 pub mod command;
+pub mod context;
 pub mod event;
 pub mod key;
 pub mod mode;
-pub mod sequence;
+pub mod processor;
 pub mod trie;
 
 pub use command::{ActionId, InputArgs, InputCommand};
+pub use context::ActionContext;
 pub use event::{InputEvent, KeyEvent, MouseAction, MouseButton, MouseEvent, ScrollEvent};
 pub use key::{KeyChord, KeyCode, Modifiers};
 pub use mode::{ModeDefinition, ModeId, ModeStack};
-pub use sequence::{SequenceResult, SequenceState};
-pub use trie::{KeyTrie, LeafAction, TrieNode};
+pub use processor::InputProcessor;
+pub use trie::{KeyTrie, TrieLookup};

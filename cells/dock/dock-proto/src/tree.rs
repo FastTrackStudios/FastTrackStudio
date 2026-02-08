@@ -4,14 +4,15 @@
 //! [`DockLayout`](crate::layout::DockLayout) stores nodes in a HashMap
 //! for O(1) access and mutation.
 
-use serde::{Deserialize, Serialize};
+use facet::Facet;
 
 use crate::id::TileId;
 use crate::panel::PanelId;
 use crate::tab_group::TabGroup;
 
 /// Direction of a split in the layout tree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[repr(u8)]
 pub enum SplitDirection {
     /// Left | Right
     Horizontal,
@@ -22,7 +23,8 @@ pub enum SplitDirection {
 /// A node in the layout tree.
 ///
 /// Binary tree: each node is either a Split (two children) or a Tile (leaf).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Facet)]
+#[repr(C)]
 pub enum DockNode {
     /// A split dividing space between two child nodes.
     Split {
