@@ -1,23 +1,13 @@
-//! Signal Storage — database-backed storage for presets, snapshots, and rig configurations.
+//! Signal Storage — SeaORM entities and migrations for signal preset storage.
 //!
-//! Provides a [`StorageService`] trait with implementations for:
-//! - [`LocalStorage`] — SQLite backend for fast local persistence with FTS5 search
-//! - [`CloudStorage`] — PostgreSQL backend for cloud sync and sharing
-//!
-//! Uses [sea-query](https://docs.rs/sea-query) for database-agnostic query building
-//! and [sqlx](https://docs.rs/sqlx) for async execution.
+//! Provides:
+//! - [`entities`] — SeaORM entity models for all storage tables
+//! - [`migration`] — Versioned database migrations via sea-orm-migration
+//! - [`StorageError`] — Unified error type for storage operations
 
-pub mod cloud;
-pub mod config;
+pub mod entities;
 pub mod error;
-pub mod local;
-pub mod local_config;
-pub mod schema;
-pub mod service;
+pub mod migration;
 
-pub use cloud::CloudStorage;
-pub use config::{CloudConfig, CloudProvider};
 pub use error::{StorageError, StorageResult};
-pub use local::LocalStorage;
-pub use local_config::LocalConfig;
-pub use service::{PresetFilter, PresetSummary, StorageService};
+pub use migration::Migrator;

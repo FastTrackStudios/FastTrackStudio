@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use sync_proto::{AuthProvider, AuthState, AuthToken, OAuthCallbackParams, User};
+use sync_proto::{AuthProvider, AuthState, OAuthCallbackParams, User};
 
 use crate::error::{AuthError, AuthResult};
 use crate::oauth::{self, AuthorizationRequest, OAuthConfig};
@@ -200,5 +200,132 @@ impl<T: TokenStore> AuthServiceImpl<T> {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::token_store::MockTokenStore;
+
+    type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
+
+    fn make_service() -> AuthServiceImpl<MockTokenStore> {
+        AuthServiceImpl::new(Arc::new(MockTokenStore::new()))
+            .with_github(OAuthConfig {
+                client_id: "test-gh-id".into(),
+                client_secret: Some("test-gh-secret".into()),
+                redirect_uri: "http://localhost:8080/callback".into(),
+            })
+            .with_google(OAuthConfig {
+                client_id: "test-google-id".into(),
+                client_secret: Some("test-google-secret".into()),
+                redirect_uri: "http://localhost:8080/callback".into(),
+            })
+    }
+
+    #[tokio::test]
+    async fn test_auth_service_initial_state() -> Result<()> {
+        // -- Setup
+        let service = make_service();
+
+        // -- Check
+        assert_eq!(service.get_auth_state().await, AuthState::Unauthenticated);
+        assert!(service.get_current_user().await.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_auth_service_login_returns_url() -> Result<()> {
+        // -- Setup
+        let service = make_service();
+
+        // -- Exec
+        let url = service.login(AuthProvider::GitHub).await?;
+
+        // -- Check
+        assert!(url.contains("github.com"));
+        assert_eq!(service.get_auth_state().await, AuthState::Authenticating);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_auth_service_login_unconfigured_provider() -> Result<()> {
+        // -- Setup: service with no providers configured
+        let service = AuthServiceImpl::new(Arc::new(MockTokenStore::new()));
+
+        // -- Exec
+        let result = service.login(AuthProvider::GitHub).await;
+
+        // -- Check
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_auth_service_callback_without_login() -> Result<()> {
+        // -- Setup
+        let service = make_service();
+        let params = OAuthCallbackParams {
+            code: "some-code".into(),
+            state: "some-state".into(),
+        };
+
+        // -- Exec
+        let result = service.handle_callback(params).await;
+
+        // -- Check: should fail with NoSession since no login was initiated
+        assert!(matches!(result, Err(AuthError::NoSession)));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_auth_service_callback_csrf_mismatch() -> Result<()> {
+        // -- Setup
+        let service = make_service();
+        service.login(AuthProvider::GitHub).await?;
+
+        let params = OAuthCallbackParams {
+            code: "some-code".into(),
+            state: "wrong-state".into(),
+        };
+
+        // -- Exec
+        let result = service.handle_callback(params).await;
+
+        // -- Check
+        assert!(matches!(result, Err(AuthError::InvalidState)));
+        assert_eq!(
+            service.get_auth_state().await,
+            AuthState::Error("CSRF state mismatch".into())
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_auth_service_logout() -> Result<()> {
+        // -- Setup
+        let service = make_service();
+
+        // -- Exec
+        service.logout().await?;
+
+        // -- Check
+        assert_eq!(service.get_auth_state().await, AuthState::Unauthenticated);
+        assert!(service.get_current_user().await.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_auth_service_restore_session_empty_store() -> Result<()> {
+        // -- Setup
+        let service = make_service();
+
+        // -- Exec
+        let user = service.restore_session().await;
+
+        // -- Check: no token stored, returns None
+        assert!(user.is_none());
+        Ok(())
     }
 }
