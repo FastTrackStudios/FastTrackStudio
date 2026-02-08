@@ -41,6 +41,11 @@
 use facet::Facet;
 use roam::service;
 
+pub mod ids;
+pub mod macros;
+pub mod search;
+pub mod when;
+
 /// Unique identifier for an action.
 ///
 /// Action IDs follow the pattern `{namespace}.{cell}.{action}`.
@@ -146,6 +151,8 @@ pub struct ActionDefinition {
     pub menu_path: Option<String>,
     /// Keyboard shortcut hint (e.g., "Cmd+Shift+P") - display only
     pub shortcut_hint: Option<String>,
+    /// When-clause expression string. None = always active.
+    pub when: Option<String>,
 }
 
 impl ActionDefinition {
@@ -162,6 +169,7 @@ impl ActionDefinition {
             category: ActionCategory::General,
             menu_path: None,
             shortcut_hint: None,
+            when: None,
         }
     }
 
@@ -181,6 +189,25 @@ impl ActionDefinition {
     pub fn with_shortcut(mut self, shortcut: impl Into<String>) -> Self {
         self.shortcut_hint = Some(shortcut.into());
         self
+    }
+
+    /// Set a when-clause expression (e.g., "tab:performance").
+    pub fn with_when(mut self, expr: impl Into<String>) -> Self {
+        self.when = Some(expr.into());
+        self
+    }
+
+    /// Check if this action is active given the current context.
+    ///
+    /// Returns true if there is no when-clause or if the clause evaluates to true.
+    pub fn is_active(&self, ctx: &when::ActionContext) -> bool {
+        match &self.when {
+            None => true,
+            Some(expr_str) => match when::WhenExpr::parse(expr_str) {
+                Ok(expr) => expr.evaluate(ctx),
+                Err(_) => true, // Malformed when-clause: fail-open
+            },
+        }
     }
 
     /// Get the REAPER command ID for this action
