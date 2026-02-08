@@ -11,6 +11,7 @@ members = [
     "modules/actions/actions-registry",
     "modules/actions/actions-standalone",
     "modules/actions/actions-keybindings",
+    "modules/actions/input",
     "libs/*",
     "xtask",
     "apps/tests/*",
@@ -121,6 +122,7 @@ signal = { path = "cells/signal/signal" }
 signal-proto = { path = "cells/signal/signal-proto" }
 audio-controls = { path = "cells/signal/audio-controls" }
 signal-control = { path = "cells/signal/signal-control" }
+signal-storage = { path = "cells/signal/signal-storage" }
 signal-ui = { path = "cells/signal/signal-ui" }
 dock-proto = { path = "cells/dock/dock-proto" }
 dock-dioxus = { path = "cells/dock/dock-dioxus" }
@@ -133,6 +135,7 @@ actions-proto = { path = "modules/actions/actions-proto" }
 actions-registry = { path = "modules/actions/actions-registry" }
 actions-standalone = { path = "modules/actions/actions-standalone" }
 actions-keybindings = { path = "modules/actions/actions-keybindings" }
+input = { path = "modules/actions/input" }
 
 # REAPER extension dependencies
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }

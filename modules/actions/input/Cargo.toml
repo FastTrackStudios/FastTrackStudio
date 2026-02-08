@@ -1,0 +1,8 @@
+[package]
+name = "input"
+version = "0.1.0"
+edition = "2024"
+description = "Universal input processing with trie-based key dispatch and modal editing"
+
+[dependencies]
+tracing.workspace = true

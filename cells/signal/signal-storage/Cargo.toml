@@ -1,0 +1,41 @@
+[package]
+name = "signal-storage"
+description = "Database storage for signal presets, snapshots, and rig configurations"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+signal-proto = { workspace = true }
+
+# Database
+sea-query = { version = "0.32", features = ["backend-postgres", "backend-sqlite", "with-uuid", "with-chrono", "with-json"] }
+sea-query-binder = { version = "0.7", features = ["sqlx-postgres", "sqlx-sqlite", "with-uuid", "with-chrono", "with-json"] }
+sqlx = { version = "0.8", features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "postgres",
+    "sqlite",
+    "uuid",
+    "json",
+    "chrono",
+] }
+
+# Async
+tokio = { workspace = true }
+async-trait = "0.1"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+
+[lints]
+workspace = true
