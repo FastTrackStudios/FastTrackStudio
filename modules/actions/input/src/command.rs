@@ -5,8 +5,8 @@ use crate::mode::ModeId;
 
 /// Unique identifier for an action.
 ///
-/// Mirrors `ActionId` from `actions-proto`. Once the upstream `roam-session`
-/// dependency is fixed, this can be replaced with a re-export.
+/// Kept local for now so `input` remains buildable while upstream `actions-proto`
+/// is temporarily incompatible in this workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ActionId(pub String);
 
