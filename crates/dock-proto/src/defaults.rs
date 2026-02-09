@@ -62,7 +62,7 @@ pub fn default_presets() -> PresetCollection {
                 .build(),
         )
         .with_hotkey("F7"),
-        // F8: Rig — [preset browser / profile browser] | rig grid | [song parts / song selector]
+        // F8: Rig — [preset browser / profile browser] | [rig grid / scene grid] | [song parts / song selector]
         DockPreset::builtin(
             "Rig",
             B::horizontal()
@@ -75,7 +75,13 @@ pub fn default_presets() -> PresetCollection {
                 )
                 .right(
                     B::horizontal()
-                        .left(B::tile(RigGrid))
+                        .left(
+                            B::vertical()
+                                .top(B::tile(RigGrid))
+                                .bottom(B::tile(SceneGrid))
+                                .ratio(75.0)
+                                .build_node(),
+                        )
                         .right(
                             B::vertical()
                                 .top(B::tile(SongParts))
