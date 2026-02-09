@@ -52,6 +52,7 @@ pub mod node_graph_node;
 pub mod node_graph_view;
 pub mod node_graph_wire;
 pub mod node_property_panel;
+pub mod scene_grid;
 pub mod version_history_panel;
 
 // Re-export main components
@@ -84,4 +85,5 @@ pub use node_graph::{
 };
 pub use node_graph_view::NodeGraphView;
 pub use node_property_panel::NodePropertyPanel;
+pub use scene_grid::SceneGridPanel;
 pub use version_history_panel::VersionHistoryPanel;

@@ -30,6 +30,12 @@ pub struct GuitarRigTopBarProps {
     pub rig_view_mode: RigViewMode,
     /// Callback when rig view mode changes.
     pub on_rig_view_mode_change: Callback<RigViewMode>,
+    /// Whether the scene grid panel is open.
+    #[props(default = false)]
+    pub scene_grid_open: bool,
+    /// Callback to toggle the scene grid panel.
+    #[props(default)]
+    pub on_toggle_scene_grid: Callback<()>,
 }
 
 /// Top bar for the guitar rig page.
@@ -129,6 +135,40 @@ pub fn GuitarRigTopBar(props: GuitarRigTopBarProps) -> Element {
                             on_click: props.on_module_view_mode_change.clone(),
                         }
                     }
+                }
+
+                // Separator
+                div { class: "w-px h-6 bg-zinc-700" }
+
+                // Scene grid toggle button
+                button {
+                    class: if props.scene_grid_open {
+                        "flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-700 hover:bg-green-600 \
+                         text-sm font-medium text-white transition-colors"
+                    } else {
+                        "flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 \
+                         text-sm font-medium text-zinc-300 transition-colors"
+                    },
+                    onclick: move |_| props.on_toggle_scene_grid.call(()),
+                    title: if props.scene_grid_open { "Hide scene grid" } else { "Show scene grid" },
+                    // Grid-like icon (2x4)
+                    svg {
+                        class: "w-4 h-4",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        view_box: "0 0 24 24",
+                        // Two rows of four squares
+                        rect { x: "2", y: "4", width: "4", height: "6", rx: "1" }
+                        rect { x: "8", y: "4", width: "4", height: "6", rx: "1" }
+                        rect { x: "14", y: "4", width: "4", height: "6", rx: "1" }
+                        rect { x: "20", y: "4", width: "2", height: "6", rx: "0.5" }
+                        rect { x: "2", y: "14", width: "4", height: "6", rx: "1" }
+                        rect { x: "8", y: "14", width: "4", height: "6", rx: "1" }
+                        rect { x: "14", y: "14", width: "4", height: "6", rx: "1" }
+                        rect { x: "20", y: "14", width: "2", height: "6", rx: "0.5" }
+                    }
+                    span { "Scenes" }
                 }
             }
 

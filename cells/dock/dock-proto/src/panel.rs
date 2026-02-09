@@ -24,6 +24,7 @@ pub enum PanelId {
     ProfileBrowser,
     SongParts,
     SongSelector,
+    SceneGrid,
 
     // DAW panels
     Transport,
@@ -61,6 +62,7 @@ impl PanelId {
             Self::ProfileBrowser => "profile-browser",
             Self::SongParts => "song-parts",
             Self::SongSelector => "song-selector",
+            Self::SceneGrid => "scene-grid",
             Self::Transport => "transport",
             Self::Mixer => "mixer",
             Self::Navigator => "navigator",
@@ -83,6 +85,7 @@ impl PanelId {
             "profile-browser" => Some(Self::ProfileBrowser),
             "song-parts" => Some(Self::SongParts),
             "song-selector" => Some(Self::SongSelector),
+            "scene-grid" => Some(Self::SceneGrid),
             "transport" => Some(Self::Transport),
             "mixer" => Some(Self::Mixer),
             "navigator" => Some(Self::Navigator),
@@ -100,19 +103,28 @@ impl PanelId {
 
         for &panel in Self::all() {
             let category = match panel {
-                Self::Performance | Self::ChartEditor | Self::ChartPreview
-                | Self::Setlist | Self::Settings => "Session",
-                Self::RigGrid | Self::RigNodeGraph | Self::PresetBrowser
-                | Self::ProfileBrowser | Self::SongParts | Self::SongSelector => "Signal",
+                Self::Performance
+                | Self::ChartEditor
+                | Self::ChartPreview
+                | Self::Setlist
+                | Self::Settings => "Session",
+                Self::RigGrid
+                | Self::RigNodeGraph
+                | Self::PresetBrowser
+                | Self::ProfileBrowser
+                | Self::SongParts
+                | Self::SongSelector
+                | Self::SceneGrid => "Signal",
                 Self::Transport | Self::Mixer => "DAW",
                 Self::Navigator | Self::Inspector => "Utility",
             };
 
             let default_position = match panel {
-                Self::Navigator | Self::Setlist | Self::PresetBrowser
-                | Self::ProfileBrowser => DockPosition::Left,
+                Self::Navigator | Self::Setlist | Self::PresetBrowser | Self::ProfileBrowser => {
+                    DockPosition::Left
+                }
                 Self::Inspector => DockPosition::Right,
-                Self::Transport | Self::Mixer => DockPosition::Bottom,
+                Self::Transport | Self::Mixer | Self::SceneGrid => DockPosition::Bottom,
                 _ => DockPosition::Center,
             };
 
@@ -139,6 +151,7 @@ impl PanelId {
             Self::ProfileBrowser => "Profile Browser",
             Self::SongParts => "Song Parts",
             Self::SongSelector => "Song Selector",
+            Self::SceneGrid => "Scene Grid",
             Self::Transport => "Transport",
             Self::Mixer => "Mixer",
             Self::Navigator => "Navigator",
@@ -160,6 +173,7 @@ impl PanelId {
             Self::ProfileBrowser => "user",
             Self::SongParts => "layers",
             Self::SongSelector => "list-music",
+            Self::SceneGrid => "layout-grid",
             Self::Transport => "disc",
             Self::Mixer => "sliders-horizontal",
             Self::Navigator => "compass",
@@ -180,6 +194,7 @@ impl PanelId {
             Self::ProfileBrowser,
             Self::SongParts,
             Self::SongSelector,
+            Self::SceneGrid,
             Self::Transport,
             Self::Mixer,
             Self::Navigator,

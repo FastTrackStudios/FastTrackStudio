@@ -20,7 +20,7 @@ pub use hooks::rig_actions::{use_rig_actions, RigActions};
 pub use hooks::rig_state::use_rig_subscription;
 pub use layouts::rig_layout::{
     NodePropertyDockPanel, PresetBrowserPanel, ProfileBrowserPanel, RigGridPanel, RigLayout,
-    SongPartsPanel, SongSelectorPanel, VersionHistoryDockPanel,
+    SceneGridDockPanel, SongPartsPanel, SongSelectorPanel, VersionHistoryDockPanel,
 };
 pub use signal_control::SignalControl;
 pub use signals::*;

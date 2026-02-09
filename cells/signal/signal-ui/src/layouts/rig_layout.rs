@@ -15,10 +15,11 @@ use crate::components::rig_grid::left_sidebar::GuitarRigLeftSidebar;
 use crate::components::rig_grid::module_browser_modal::ModuleBrowserModal;
 use crate::components::rig_grid::node_property_panel::NodePropertyPanel;
 use crate::components::rig_grid::profile_sidebar::GuitarRigProfileSidebar;
-use crate::components::rig_grid::version_history_panel::VersionHistoryPanel;
 use crate::components::rig_grid::right_sidebar::{
     GuitarRigRightSidebar, SceneListPanel, SongListPanel,
 };
+use crate::components::rig_grid::scene_grid::SceneGridPanel;
+use crate::components::rig_grid::version_history_panel::VersionHistoryPanel;
 use crate::components::rig_grid::view_mode::{ModuleViewMode, RigViewMode};
 use crate::hooks::rig_actions::use_rig_actions;
 use crate::hooks::rig_state::use_rig_subscription;
@@ -41,6 +42,7 @@ pub fn RigLayout() -> Element {
     let mut module_view_mode = use_signal(|| ModuleViewMode::Flow);
     let mut rig_view_mode = use_signal(|| RigViewMode::Song);
     let mut module_browser_open = use_signal(|| false);
+    let mut scene_grid_open = use_signal(|| false);
 
     // Determine which right sidebar to show based on rig view mode
     let show_right_sidebar = matches!(rig_view_mode(), RigViewMode::Song | RigViewMode::Profile);
@@ -57,48 +59,73 @@ pub fn RigLayout() -> Element {
                 on_module_view_mode_change: move |mode| module_view_mode.set(mode),
                 rig_view_mode: rig_view_mode(),
                 on_rig_view_mode_change: move |mode| rig_view_mode.set(mode),
+                scene_grid_open: scene_grid_open(),
+                on_toggle_scene_grid: move |_| scene_grid_open.set(!scene_grid_open()),
             }
 
-            // Body: sidebars + main content
-            div { class: "flex-1 flex overflow-hidden",
-                GuitarRigLeftSidebar {
-                    is_open: sidebar_open(),
-                    rig_view_mode: rig_view_mode(),
-                    on_preset_select: actions.load_preset.clone(),
-                    on_preset_snapshot_select: Some(actions.load_preset_snapshot.clone()),
-                    on_profile_select: actions.load_profile.clone(),
-                    on_profile_scene_select: Some(actions.load_profile_scene.clone()),
-                }
-
-                div { class: "flex-1 overflow-hidden",
-                    GuitarRigGrid { view_mode: module_view_mode() }
-                }
-
-                // Right panel area: property panel when selected, otherwise sidebar
-                if has_selection {
-                    div { class: "w-64 flex-shrink-0",
-                        NodePropertyPanel {}
+            // Body: sidebars + main content + optional bottom scene grid
+            div { class: "flex-1 flex flex-col overflow-hidden",
+                // Main row: left sidebar + graph + right sidebar
+                div { class: "flex-1 flex overflow-hidden",
+                    GuitarRigLeftSidebar {
+                        is_open: sidebar_open(),
+                        rig_view_mode: rig_view_mode(),
+                        on_preset_select: actions.load_preset.clone(),
+                        on_preset_snapshot_select: Some(actions.load_preset_snapshot.clone()),
+                        on_profile_select: actions.load_profile.clone(),
+                        on_profile_scene_select: Some(actions.load_profile_scene.clone()),
                     }
-                } else if show_right_sidebar {
-                    match rig_view_mode() {
-                        RigViewMode::Song => rsx! {
-                            GuitarRigRightSidebar {
-                                on_scene_click: actions.go_to_scene.clone(),
-                                on_song_click: actions.go_to_song.clone(),
-                                on_prev_scene: actions.prev_scene.clone(),
-                                on_next_scene: actions.next_scene.clone(),
-                                on_prev_song: actions.prev_song.clone(),
-                                on_next_song: actions.next_song.clone(),
-                                on_setlist_change: actions.load_setlist.clone(),
-                            }
-                        },
-                        RigViewMode::Profile => rsx! {
-                            GuitarRigProfileSidebar {
-                                on_profile_select: actions.load_profile.clone(),
-                                on_profile_scene_select: Some(actions.load_profile_scene.clone()),
-                            }
-                        },
-                        _ => rsx! {},
+
+                    div { class: "flex-1 overflow-hidden",
+                        GuitarRigGrid { view_mode: module_view_mode() }
+                    }
+
+                    // Right panel area: property panel when selected, otherwise sidebar
+                    if has_selection {
+                        div { class: "w-64 flex-shrink-0",
+                            NodePropertyPanel {}
+                        }
+                    } else if show_right_sidebar {
+                        match rig_view_mode() {
+                            RigViewMode::Song => rsx! {
+                                GuitarRigRightSidebar {
+                                    on_scene_click: actions.go_to_scene.clone(),
+                                    on_song_click: actions.go_to_song.clone(),
+                                    on_prev_scene: actions.prev_scene.clone(),
+                                    on_next_scene: actions.next_scene.clone(),
+                                    on_prev_song: actions.prev_song.clone(),
+                                    on_next_song: actions.next_song.clone(),
+                                    on_setlist_change: actions.load_setlist.clone(),
+                                }
+                            },
+                            RigViewMode::Profile => rsx! {
+                                GuitarRigProfileSidebar {
+                                    on_profile_select: actions.load_profile.clone(),
+                                    on_profile_scene_select: Some(actions.load_profile_scene.clone()),
+                                }
+                            },
+                            _ => rsx! {},
+                        }
+                    }
+                }
+
+                // Scene grid toggle bar + collapsible panel
+                div { class: "flex-shrink-0 border-t border-border bg-background",
+                    // Toggle button bar
+                    button {
+                        class: "w-full flex items-center justify-center gap-2 px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors",
+                        onclick: move |_| scene_grid_open.set(!scene_grid_open()),
+                        span { class: "text-[10px]",
+                            if scene_grid_open() { "\u{25BC}" } else { "\u{25B2}" }
+                        }
+                        "Scenes"
+                    }
+
+                    // Collapsible scene grid
+                    if scene_grid_open() {
+                        div { class: "h-48 overflow-hidden",
+                            SceneGridPanel { view_mode: rig_view_mode() }
+                        }
                     }
                 }
             }
@@ -238,5 +265,19 @@ pub fn VersionHistoryDockPanel() -> Element {
 
     rsx! {
         VersionHistoryPanel {}
+    }
+}
+
+/// Scene grid dock panel — Quad Cortex-style 4x2 scene tile grid.
+///
+/// Defaults to Song mode. Shows song scenes, profile scene templates,
+/// or preset snapshots depending on the view mode.
+#[component]
+pub fn SceneGridDockPanel() -> Element {
+    init_rig_service();
+    use_rig_subscription();
+
+    rsx! {
+        SceneGridPanel { view_mode: RigViewMode::Song }
     }
 }

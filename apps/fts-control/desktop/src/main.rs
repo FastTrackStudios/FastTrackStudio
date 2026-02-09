@@ -76,17 +76,17 @@ use keyflow_ui::{
 };
 use kurbo::Affine;
 use signal_ui::{
-    PresetBrowserPanel, ProfileBrowserPanel, RigGridPanel, RigLayout, SongPartsPanel,
-    SongSelectorPanel,
+    PresetBrowserPanel, ProfileBrowserPanel, RigGridPanel, RigLayout, SceneGridDockPanel,
+    SongPartsPanel, SongSelectorPanel,
 };
 
 use dock_dioxus::{init_dock_presets, DockProvider, DockRoot, PanelRenderer, PresetBar};
 use dock_proto::PanelId;
 
-use actions_proto::ActionDefinition;
 use actions_proto::ids::standalone as standalone_ids;
+use actions_proto::ActionDefinition;
 use input::{
-    config::{load_default_config, ContextLayerConfig},
+    config::{default_user_config_path, load_default_config, load_user_config},
     InputCommand, KeymapConfig,
 };
 use input_dioxus::{use_input_processor, ACTION_CONTEXT};
@@ -114,43 +114,10 @@ struct PaletteEntry {
 }
 
 fn build_input_config() -> KeymapConfig {
-    let base = load_default_config().unwrap_or_default();
-    let mut overlay = KeymapConfig::default();
+    let mut merged = load_default_config().unwrap_or_default();
 
-    overlay.keymap_context.insert(
-        "normal".to_string(),
-        vec![ContextLayerConfig {
-            when: "tab:performance".to_string(),
-            bindings: HashMap::from([
-                (
-                    "Space".to_string(),
-                    session_actions::TOGGLE_PLAYBACK.as_str().to_string(),
-                ),
-                (
-                    "L".to_string(),
-                    session_actions::TOGGLE_SONG_LOOP.as_str().to_string(),
-                ),
-                (
-                    "Right".to_string(),
-                    session_actions::SMART_NEXT.as_str().to_string(),
-                ),
-                (
-                    "Left".to_string(),
-                    session_actions::SMART_PREVIOUS.as_str().to_string(),
-                ),
-                (
-                    "Down".to_string(),
-                    session_actions::NEXT_SONG.as_str().to_string(),
-                ),
-                (
-                    "Up".to_string(),
-                    session_actions::PREVIOUS_SONG.as_str().to_string(),
-                ),
-            ]),
-        }],
-    );
-
-    overlay.keymap.insert(
+    let mut app_overlay = KeymapConfig::default();
+    app_overlay.keymap.insert(
         "normal".to_string(),
         HashMap::from([
             (
@@ -167,8 +134,13 @@ fn build_input_config() -> KeymapConfig {
             ),
         ]),
     );
+    merged = KeymapConfig::merge(merged, app_overlay);
 
-    KeymapConfig::merge(base, overlay)
+    if let Ok(Some(user)) = load_user_config() {
+        merged = KeymapConfig::merge(merged, user);
+    }
+
+    merged
 }
 
 fn collect_mappings_by_action(config: &KeymapConfig) -> HashMap<String, Vec<String>> {
@@ -321,6 +293,38 @@ fn App() -> Element {
     let input_handle = Rc::new(input_handle);
     let palette_entries = use_hook(|| Rc::new(build_palette_entries(&input_config)));
 
+    // Poll user keymap for changes and hot-reload bindings at runtime.
+    let _input_reload_task = {
+        let input_handle_reload = input_handle.clone();
+        use_future(move || {
+            let input_handle = input_handle_reload.clone();
+            async move {
+                let Some(user_path) = default_user_config_path() else {
+                    return;
+                };
+                let mut last_modified = std::fs::metadata(&user_path)
+                    .and_then(|m| m.modified())
+                    .ok();
+
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+                    let current_modified = std::fs::metadata(&user_path)
+                        .and_then(|m| m.modified())
+                        .ok();
+                    if current_modified == last_modified {
+                        continue;
+                    }
+                    last_modified = current_modified;
+
+                    let next_config = build_input_config();
+                    input_handle.reload_config(next_config);
+                    tracing::info!(path = %user_path.display(), "Reloaded input keymap config");
+                }
+            }
+        })
+    };
+
     // Initialize action context with default tab on first render
     use_hook(|| {
         let mut ctx = ACTION_CONTEXT.write();
@@ -347,6 +351,7 @@ fn App() -> Element {
             PanelId::ProfileBrowser => rsx! { ProfileBrowserPanel {} },
             PanelId::SongParts => rsx! { SongPartsPanel {} },
             PanelId::SongSelector => rsx! { SongSelectorPanel {} },
+            PanelId::SceneGrid => rsx! { SceneGridDockPanel {} },
             PanelId::Settings => rsx! { SettingsView {} },
             _ => rsx! {
                 div {
@@ -771,6 +776,9 @@ fn App() -> Element {
                 }
             });
 
+            let input_handle_key = input_handle.clone();
+            let input_handle_wheel = input_handle.clone();
+
             rsx! {
                 div {
                     class: if needs_transparency {
@@ -791,13 +799,23 @@ fn App() -> Element {
                             return;
                         }
 
-                        let commands = input_handle.handle_key(&e);
+                        let commands = input_handle_key.handle_key(&e);
                         let handled = dispatch_input_commands(commands);
                         ACTION_CONTEXT
                             .write()
-                            .set_mode(input_handle.current_mode().as_str());
+                            .set_mode(input_handle_key.current_mode().as_str());
 
                         if handled {
+                            e.prevent_default();
+                        }
+                    },
+                    onwheel: move |e: WheelEvent| {
+                        if *COMMAND_PALETTE_OPEN.read() {
+                            return;
+                        }
+
+                        let commands = input_handle_wheel.handle_wheel(&e);
+                        if dispatch_input_commands(commands) {
                             e.prevent_default();
                         }
                     },
@@ -1094,7 +1112,8 @@ fn dispatch_action(action_id: &str) {
             });
         }
         id if id == standalone_ids::COMMAND_PALETTE.as_str() => {
-            tracing::info!("Command palette triggered (not yet implemented)");
+            *COMMAND_PALETTE_OPEN.write() = true;
+            *COMMAND_PALETTE_QUERY.write() = String::new();
         }
         id if id == standalone_ids::TOGGLE_DARK_MODE.as_str() => {
             tracing::info!("Toggle dark mode triggered (not yet implemented)");
