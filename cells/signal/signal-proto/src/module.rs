@@ -74,6 +74,37 @@ impl ModuleType {
             Self::Master => "Master",
         }
     }
+
+    /// Map a REAPER container name to a `ModuleType`.
+    ///
+    /// Case-insensitive matching with common aliases for each module type.
+    /// Returns `None` for unrecognized names.
+    pub fn from_container_name(name: &str) -> Option<Self> {
+        match name.to_ascii_uppercase().trim() {
+            // Vocal chain
+            "RESCUE" => Some(Self::Rescue),
+            "CORRECTION" | "PITCH" | "TUNE" => Some(Self::Correction),
+            "TONAL" => Some(Self::Tonal),
+            "VOCAL MODULATION" | "VOCAL MOD" | "VOX MOD" => Some(Self::VocalModulation),
+            "SENDS" | "SEND" => Some(Self::Sends),
+
+            // Instrument chain
+            "SOURCE" | "INPUT" | "SRC" => Some(Self::Source),
+            "EQ" | "EQUALIZER" => Some(Self::Eq),
+            "DYNAMICS" | "DYN" | "COMP" | "COMPRESSOR" => Some(Self::Dynamics),
+            "SPECIAL" | "UTILITY" => Some(Self::Special),
+            "DRIVE" | "OD" | "DISTORTION" | "DIST" | "OVERDRIVE" => Some(Self::Drive),
+            "PRE-FX" | "PREFX" | "PRE FX" | "PRE" => Some(Self::PreFx),
+            "VOLUME" | "VOL" => Some(Self::Volume),
+            "AMP" | "AMPLIFIER" => Some(Self::Amp),
+            "POST-EQ" | "POSTEQ" | "POST EQ" => Some(Self::PostEq),
+            "MODULATION" | "MOD" => Some(Self::Modulation),
+            "TIME" | "DELAY" | "REVERB" | "ECHO" => Some(Self::Time),
+            "MOTION" | "TREMOLO" | "TREM" => Some(Self::Motion),
+            "MASTER" | "OUTPUT" | "OUT" => Some(Self::Master),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ModuleType {
@@ -389,5 +420,140 @@ mod tests {
         assert_eq!(trigger.channel.get(), 1);
         assert_eq!(trigger.control, MidiControl::Cc(64));
         assert_eq!(trigger.mode, TriggerMode::Toggle);
+    }
+
+    #[test]
+    fn from_container_name_instrument_chain() {
+        assert_eq!(
+            ModuleType::from_container_name("DRIVE"),
+            Some(ModuleType::Drive)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("AMP"),
+            Some(ModuleType::Amp)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("TIME"),
+            Some(ModuleType::Time)
+        );
+        assert_eq!(ModuleType::from_container_name("EQ"), Some(ModuleType::Eq));
+        assert_eq!(
+            ModuleType::from_container_name("DYNAMICS"),
+            Some(ModuleType::Dynamics)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("MODULATION"),
+            Some(ModuleType::Modulation)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("MASTER"),
+            Some(ModuleType::Master)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("SOURCE"),
+            Some(ModuleType::Source)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("PRE-FX"),
+            Some(ModuleType::PreFx)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("MOTION"),
+            Some(ModuleType::Motion)
+        );
+    }
+
+    #[test]
+    fn from_container_name_case_insensitive() {
+        assert_eq!(
+            ModuleType::from_container_name("drive"),
+            Some(ModuleType::Drive)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("Drive"),
+            Some(ModuleType::Drive)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("dRiVe"),
+            Some(ModuleType::Drive)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("amp"),
+            Some(ModuleType::Amp)
+        );
+    }
+
+    #[test]
+    fn from_container_name_aliases() {
+        // Drive aliases
+        assert_eq!(
+            ModuleType::from_container_name("OD"),
+            Some(ModuleType::Drive)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("DISTORTION"),
+            Some(ModuleType::Drive)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("OVERDRIVE"),
+            Some(ModuleType::Drive)
+        );
+
+        // Amp aliases
+        assert_eq!(
+            ModuleType::from_container_name("AMPLIFIER"),
+            Some(ModuleType::Amp)
+        );
+
+        // Time aliases
+        assert_eq!(
+            ModuleType::from_container_name("DELAY"),
+            Some(ModuleType::Time)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("REVERB"),
+            Some(ModuleType::Time)
+        );
+
+        // Dynamics aliases
+        assert_eq!(
+            ModuleType::from_container_name("DYN"),
+            Some(ModuleType::Dynamics)
+        );
+        assert_eq!(
+            ModuleType::from_container_name("COMP"),
+            Some(ModuleType::Dynamics)
+        );
+
+        // Source aliases
+        assert_eq!(
+            ModuleType::from_container_name("INPUT"),
+            Some(ModuleType::Source)
+        );
+
+        // Master aliases
+        assert_eq!(
+            ModuleType::from_container_name("OUTPUT"),
+            Some(ModuleType::Master)
+        );
+
+        // Modulation aliases
+        assert_eq!(
+            ModuleType::from_container_name("MOD"),
+            Some(ModuleType::Modulation)
+        );
+
+        // Motion aliases
+        assert_eq!(
+            ModuleType::from_container_name("TREMOLO"),
+            Some(ModuleType::Motion)
+        );
+    }
+
+    #[test]
+    fn from_container_name_unrecognized() {
+        assert_eq!(ModuleType::from_container_name("FOOBAR"), None);
+        assert_eq!(ModuleType::from_container_name(""), None);
+        assert_eq!(ModuleType::from_container_name("My Custom Container"), None);
     }
 }
