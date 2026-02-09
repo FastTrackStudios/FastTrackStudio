@@ -96,7 +96,39 @@ pub fn default_presets() -> PresetCollection {
                 .build(),
         )
         .with_hotkey("F8"),
-        // F9: Full — multi-panel overview with all key views
+        // F9: Mixer — FX chain tree + DAW mixer + FX parameter browser
+        DockPreset::builtin(
+            "Mixer",
+            B::horizontal()
+                .left(B::tile(FxChainTree))
+                .right(
+                    B::horizontal()
+                        .left(B::tile(Mixer))
+                        .right(B::tile(FxBrowser))
+                        .ratio(70.0)
+                        .build_node(),
+                )
+                .ratio(20.0)
+                .build(),
+        )
+        .with_hotkey("F9"),
+        // F10: DAW — track control panel + arrangement + mixer
+        DockPreset::builtin(
+            "DAW",
+            B::vertical()
+                .top(
+                    B::horizontal()
+                        .left(B::tile(TrackControlPanel))
+                        .right(B::tile(ArrangementView))
+                        .ratio(15.0)
+                        .build_node(),
+                )
+                .bottom(B::tile(Mixer))
+                .ratio(75.0)
+                .build(),
+        )
+        .with_hotkey("F10"),
+        // F11: Full — multi-panel overview with all key views
         DockPreset::builtin(
             "Full",
             B::horizontal()
@@ -123,6 +155,6 @@ pub fn default_presets() -> PresetCollection {
                 .ratio(50.0)
                 .build(),
         )
-        .with_hotkey("F9"),
+        .with_hotkey("F11"),
     ])
 }
