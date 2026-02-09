@@ -247,6 +247,7 @@ async fn standalone_handle_socket<D: ServiceDispatcher + Clone + Send + Sync + '
     let config = HandshakeConfig {
         max_payload_size: 1024 * 1024,            // 1 MiB
         initial_channel_credit: 16 * 1024 * 1024, // 16 MiB for high-frequency streaming
+        max_concurrent_requests: 64,
     };
     match accept_framed(transport, config, gateway.dispatcher.clone()).await {
         Ok((_handle, _incoming, driver)) => {

@@ -1,0 +1,13 @@
+{
+  "modes": {
+    "normal": { "display_name": "NORMAL" },
+    "insert": { "display_name": "INSERT", "passthrough_text": true }
+  },
+  "keymap": {
+    "normal": {
+      "i": "mode:insert",
+      "j": "cursor.down",
+      "k": "cursor.up"
+    }
+  }
+}

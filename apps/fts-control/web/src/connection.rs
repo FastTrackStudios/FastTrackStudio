@@ -21,8 +21,7 @@ use roam_websocket::WsTransport;
 use session_proto::{SetlistServiceClient, Song};
 use session_ui::{
     ConnectionState, LatencyInfo, Session, TransportState, ACTIVE_INDICES, AUDIO_LATENCY_SECONDS,
-    LATENCY_INFO, LATENCY_TRACKER, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS,
-    SONG_TRANSPORT,
+    LATENCY_INFO, LATENCY_TRACKER, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT,
 };
 use wasm_bindgen::prelude::*;
 
@@ -129,6 +128,7 @@ async fn try_connect_and_run(
     let config = HandshakeConfig {
         max_payload_size: 1024 * 1024,            // 1 MiB
         initial_channel_credit: 16 * 1024 * 1024, // 16 MiB for high-frequency streaming
+        max_concurrent_requests: 64,
     };
     let (handle, _incoming, driver) =
         roam_session::initiate_framed(transport, config, NoDispatcher)
@@ -424,7 +424,9 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                             }
                         }
                         session_proto::SetlistEvent::SongChartHydrated { chart, .. } => {
-                            SONG_CHARTS.write().insert(chart.project_guid.clone(), chart);
+                            SONG_CHARTS
+                                .write()
+                                .insert(chart.project_guid.clone(), chart);
                         }
 
                         session_proto::SetlistEvent::ActiveIndicesChanged(indices) => {
@@ -462,23 +464,23 @@ fn start_transport_sync_task(connection_lost: Rc<Cell<bool>>) {
                                     // Apply latency compensation to time position during playback
                                     // This shifts the visual position ahead to match audio output
                                     // Note: We only compensate the time portion, not the musical position
-                                    let compensated_position =
-                                        if transport.is_playing && audio_latency > 0.0 {
-                                            // Create a new Position with compensated time
-                                            let compensated_time =
-                                                transport.position.time.map(|t| {
-                                                    daw_proto::TimePosition::from_seconds(
-                                                        t.as_seconds() + audio_latency,
-                                                    )
-                                                });
-                                            daw_proto::Position::new(
-                                                transport.position.musical.clone(),
-                                                compensated_time,
-                                                transport.position.midi.clone(),
+                                    let compensated_position = if transport.is_playing
+                                        && audio_latency > 0.0
+                                    {
+                                        // Create a new Position with compensated time
+                                        let compensated_time = transport.position.time.map(|t| {
+                                            daw_proto::TimePosition::from_seconds(
+                                                t.as_seconds() + audio_latency,
                                             )
-                                        } else {
-                                            transport.position.clone()
-                                        };
+                                        });
+                                        daw_proto::Position::new(
+                                            transport.position.musical.clone(),
+                                            compensated_time,
+                                            transport.position.midi.clone(),
+                                        )
+                                    } else {
+                                        transport.position.clone()
+                                    };
 
                                     // Convert loop region from seconds to percentages (0.0-1.0)
                                     // The loop_region in SongTransportState is already relative to song start

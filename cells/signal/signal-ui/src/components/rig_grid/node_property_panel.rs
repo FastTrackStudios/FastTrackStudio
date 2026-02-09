@@ -381,7 +381,7 @@ fn ParameterSlider(props: ParameterSliderProps) -> Element {
                         let pid = param_id.clone();
                         RIG_NODE_GRAPH.write().find_node_mut(node_id).map(|n| {
                             if let Some(p) = n.parameters.iter_mut().find(|p| p.id == pid) {
-                                p.value = signal_proto::normalized::NormalizedF64::new(clamped);
+                                p.value = signal_control::normalized::NormalizedF64::new(clamped);
                             }
                         });
                     }
@@ -612,11 +612,15 @@ mod tests {
     fn test_graph_find_node_for_panel() -> Result<()> {
         // -- Setup & Fixtures
         let mut graph = NodeGraph::new();
-        let node = Node::new("Test Drive", BlockType::Drive, NodePosition::new(100.0, 200.0))
-            .with_parameters(vec![
-                NodeParameter::new("drive", "Drive", NormalizedF64::new(0.7)),
-                NodeParameter::new("tone", "Tone", NormalizedF64::new(0.5)),
-            ]);
+        let node = Node::new(
+            "Test Drive",
+            BlockType::Drive,
+            NodePosition::new(100.0, 200.0),
+        )
+        .with_parameters(vec![
+            NodeParameter::new("drive", "Drive", NormalizedF64::new(0.7)),
+            NodeParameter::new("tone", "Tone", NormalizedF64::new(0.5)),
+        ]);
         let node_id = node.id;
         graph.add_node(node);
 
@@ -636,7 +640,11 @@ mod tests {
     fn test_graph_find_module_for_panel() -> Result<()> {
         // -- Setup & Fixtures
         let mut graph = NodeGraph::new();
-        let mut module = GraphModule::new("Drive Stage", BlockType::Drive, NodePosition::new(50.0, 80.0));
+        let mut module = GraphModule::new(
+            "Drive Stage",
+            BlockType::Drive,
+            NodePosition::new(50.0, 80.0),
+        );
         let node = Node::new("Drive 1", BlockType::Drive, NodePosition::new(10.0, 50.0));
         module.add_node(node);
         let module_id = module.id;
@@ -658,13 +666,20 @@ mod tests {
     fn test_graph_find_node_in_module_for_panel() -> Result<()> {
         // -- Setup & Fixtures
         let mut graph = NodeGraph::new();
-        let node = Node::new("Internal Drive", BlockType::Drive, NodePosition::new(10.0, 50.0))
-            .with_bypassed(true)
-            .with_parameters(vec![
-                NodeParameter::new("gain", "Gain", NormalizedF64::new(0.9)),
-            ]);
+        let node = Node::new(
+            "Internal Drive",
+            BlockType::Drive,
+            NodePosition::new(10.0, 50.0),
+        )
+        .with_bypassed(true)
+        .with_parameters(vec![NodeParameter::new(
+            "gain",
+            "Gain",
+            NormalizedF64::new(0.9),
+        )]);
         let node_id = node.id;
-        let mut module = GraphModule::new("Container", BlockType::Drive, NodePosition::new(0.0, 0.0));
+        let mut module =
+            GraphModule::new("Container", BlockType::Drive, NodePosition::new(0.0, 0.0));
         module.add_node(node);
         graph.add_module(module);
 
@@ -695,21 +710,24 @@ mod tests {
         graph.connect(a_id, "out_l", b_id, "in_l");
 
         // -- Check: node B's in_l is connected
-        let b_in_l_connected = graph.wires.iter().any(|w| {
-            w.to_node == b_id && w.to_port == "in_l"
-        });
+        let b_in_l_connected = graph
+            .wires
+            .iter()
+            .any(|w| w.to_node == b_id && w.to_port == "in_l");
         assert!(b_in_l_connected);
 
         // -- Check: node B's in_r is NOT connected
-        let b_in_r_connected = graph.wires.iter().any(|w| {
-            w.to_node == b_id && w.to_port == "in_r"
-        });
+        let b_in_r_connected = graph
+            .wires
+            .iter()
+            .any(|w| w.to_node == b_id && w.to_port == "in_r");
         assert!(!b_in_r_connected);
 
         // -- Check: node A's out_l is connected
-        let a_out_l_connected = graph.wires.iter().any(|w| {
-            w.from_node == a_id && w.from_port == "out_l"
-        });
+        let a_out_l_connected = graph
+            .wires
+            .iter()
+            .any(|w| w.from_node == a_id && w.from_port == "out_l");
         assert!(a_out_l_connected);
 
         Ok(())
@@ -739,9 +757,11 @@ mod tests {
         // -- Setup & Fixtures
         let mut graph = NodeGraph::new();
         let node = Node::new("Drive", BlockType::Drive, NodePosition::new(0.0, 0.0))
-            .with_parameters(vec![
-                NodeParameter::new("drive", "Drive", NormalizedF64::new(0.5)),
-            ]);
+            .with_parameters(vec![NodeParameter::new(
+                "drive",
+                "Drive",
+                NormalizedF64::new(0.5),
+            )]);
         let node_id = node.id;
         graph.add_node(node);
 

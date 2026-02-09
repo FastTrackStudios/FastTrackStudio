@@ -34,7 +34,7 @@ pub fn search_actions<'a>(
         // Empty query: return all (filtered by context), score 0
         return actions
             .iter()
-            .filter(|a| ctx.map_or(true, |c| a.is_active(c)))
+            .filter(|a| ctx.is_none_or(|c| a.is_active(c)))
             .map(|a| SearchResult {
                 definition: a,
                 score: 0,
@@ -45,7 +45,7 @@ pub fn search_actions<'a>(
 
     let mut results: Vec<SearchResult<'a>> = actions
         .iter()
-        .filter(|a| ctx.map_or(true, |c| a.is_active(c)))
+        .filter(|a| ctx.is_none_or(|c| a.is_active(c)))
         .filter_map(|action| {
             let (score, name_matches) = score_action(action, &query_lower);
             if score > 0 {
@@ -65,10 +65,10 @@ pub fn search_actions<'a>(
 }
 
 /// Filter actions by category.
-pub fn filter_by_category<'a>(
-    actions: &'a [ActionDefinition],
+pub fn filter_by_category(
+    actions: &[ActionDefinition],
     category: ActionCategory,
-) -> Vec<&'a ActionDefinition> {
+) -> Vec<&ActionDefinition> {
     actions.iter().filter(|a| a.category == category).collect()
 }
 
@@ -78,11 +78,11 @@ fn score_action(action: &ActionDefinition, query_lower: &str) -> (u32, Vec<usize
 
     // Check name
     let name_lower = action.name.to_lowercase();
-    if let Some((score, matches)) = score_field(&name_lower, query_lower, true) {
-        if score > best_score {
-            best_score = score;
-            best_matches = matches;
-        }
+    if let Some((score, matches)) = score_field(&name_lower, query_lower, true)
+        && score > best_score
+    {
+        best_score = score;
+        best_matches = matches;
     }
 
     // Check action ID

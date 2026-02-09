@@ -66,6 +66,8 @@ dock-proto = { path = "../../../cells/dock/dock-proto" }
 actions-proto.workspace = true
 actions-keybindings.workspace = true
 actions-standalone.workspace = true
+input-dioxus.workspace = true
+input.workspace = true
 
 # Chart engraver
 engraver-proto = { path = "../../../cells/keyflow/engraver-proto", features = ["engraver"] }

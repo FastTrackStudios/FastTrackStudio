@@ -243,6 +243,7 @@ async fn handle_socket(
     let config = HandshakeConfig {
         max_payload_size: 1024 * 1024,            // 1 MiB
         initial_channel_credit: 16 * 1024 * 1024, // 16 MiB for high-frequency streaming
+        max_concurrent_requests: 64,
     };
     match accept_framed(transport, config, browser_to_host).await {
         Ok((_browser_handle, _incoming, driver)) => {

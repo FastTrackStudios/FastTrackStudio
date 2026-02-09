@@ -3,8 +3,9 @@
 //! Represents audio processing nodes positioned on an infinite 2D canvas
 //! with wire connections between them. Similar to Gig Performer, Reaktor, etc.
 
+use facet::Facet;
 use signal_control::block::BlockType;
-use signal_proto::normalized::NormalizedF64;
+use signal_control::normalized::NormalizedF64;
 use uuid::Uuid;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -16,7 +17,7 @@ use uuid::Uuid;
 /// Mirrors [`ParameterOverride`](signal_proto::preset::block_override::ParameterOverride)
 /// but lives in the UI layer so node graphs can carry current parameter state
 /// for snapshot capture and display.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct NodeParameter {
     /// Unique parameter identifier (e.g. "drive", "eq_low_freq").
     pub id: String,
@@ -38,7 +39,7 @@ impl NodeParameter {
 }
 
 /// 2D position on the canvas (in canvas coordinates).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Facet)]
 pub struct NodePosition {
     pub x: f64,
     pub y: f64,
@@ -51,7 +52,7 @@ impl NodePosition {
 }
 
 /// Size of a node (in canvas coordinates).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Facet)]
 pub struct NodeSize {
     pub width: f64,
     pub height: f64,
@@ -90,7 +91,8 @@ impl Default for NodeSize {
 }
 
 /// Widget type to render inside a node.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Facet)]
+#[repr(u8)]
 pub enum NodeWidget {
     /// Simple label/text display.
     #[default]
@@ -118,7 +120,7 @@ pub enum NodeWidget {
 }
 
 /// Input/output port on a node.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct NodePort {
     /// Port identifier (unique within the node).
     pub id: String,
@@ -156,7 +158,7 @@ impl NodePort {
 }
 
 /// A signal processing node on the canvas.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct Node {
     /// Unique node ID.
     pub id: Uuid,
@@ -183,11 +185,7 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn new(
-        name: impl Into<String>,
-        block_type: BlockType,
-        position: NodePosition,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, block_type: BlockType, position: NodePosition) -> Self {
         let name = name.into();
         Self {
             id: Uuid::new_v4(),
@@ -260,7 +258,11 @@ impl Node {
 
     /// Get the position of a port (for wire connection).
     pub fn port_position(&self, port_id: &str, is_input: bool) -> Option<NodePosition> {
-        let ports = if is_input { &self.inputs } else { &self.outputs };
+        let ports = if is_input {
+            &self.inputs
+        } else {
+            &self.outputs
+        };
         let port_index = ports.iter().position(|p| p.id == port_id)?;
         let port_count = ports.len();
 
@@ -278,7 +280,7 @@ impl Node {
 }
 
 /// Wire connection between two node ports.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct Wire {
     /// Unique wire ID.
     pub id: Uuid,
@@ -320,7 +322,7 @@ impl Wire {
 /// A module container that groups multiple nodes on the node graph canvas.
 ///
 /// Renamed from `Module` to avoid collision with `signal_control::module::Module`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct GraphModule {
     /// Unique module ID.
     pub id: Uuid,
@@ -345,11 +347,7 @@ pub struct GraphModule {
 }
 
 impl GraphModule {
-    pub fn new(
-        name: impl Into<String>,
-        block_type: BlockType,
-        position: NodePosition,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, block_type: BlockType, position: NodePosition) -> Self {
         Self {
             id: Uuid::new_v4(),
             name: name.into(),
@@ -414,7 +412,11 @@ impl GraphModule {
 
     /// Get the position of a port (for wire connection).
     pub fn port_position(&self, port_id: &str, is_input: bool) -> Option<NodePosition> {
-        let ports = if is_input { &self.inputs } else { &self.outputs };
+        let ports = if is_input {
+            &self.inputs
+        } else {
+            &self.outputs
+        };
         let port_index = ports.iter().position(|p| p.id == port_id)?;
         let port_count = ports.len();
 
@@ -468,7 +470,7 @@ impl GraphModule {
 }
 
 /// The complete node graph.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Facet)]
 pub struct NodeGraph {
     /// Modules in the graph.
     pub modules: Vec<GraphModule>,
@@ -736,7 +738,11 @@ impl NodeGraph {
         }
 
         // Place below existing content with some gap
-        let x = if leftmost_x == f64::MAX { 100.0 } else { leftmost_x };
+        let x = if leftmost_x == f64::MAX {
+            100.0
+        } else {
+            leftmost_x
+        };
         NodePosition::new(x, max_bottom + 40.0)
     }
 
@@ -747,12 +753,20 @@ impl NodeGraph {
         let mut y_offset = 100.0;
 
         // === SOURCE MODULE (contains Guitar Input, Input Gate, Input Volume) ===
-        let mut source_module = GraphModule::new("Source", BlockType::Input, NodePosition::new(50.0, y_offset))
-            .with_size(NodeSize::new(300.0, 280.0));
+        let mut source_module = GraphModule::new(
+            "Source",
+            BlockType::Input,
+            NodePosition::new(50.0, y_offset),
+        )
+        .with_size(NodeSize::new(300.0, 280.0));
 
-        let input = Node::new("Guitar Input", BlockType::Input, NodePosition::new(20.0, 50.0))
-            .with_size(NodeSize::small())
-            .with_short_label("IN");
+        let input = Node::new(
+            "Guitar Input",
+            BlockType::Input,
+            NodePosition::new(20.0, 50.0),
+        )
+        .with_size(NodeSize::small())
+        .with_short_label("IN");
         let input_id = source_module.add_node(input);
 
         let input_gate = Node::new("Gate", BlockType::Gate, NodePosition::new(20.0, 140.0))
@@ -773,7 +787,8 @@ impl NodeGraph {
         let source_id = graph.add_module(source_module);
 
         // === EQ BLOCK (standalone module) ===
-        let mut eq_module = GraphModule::new("EQ", BlockType::Eq, NodePosition::new(380.0, y_offset));
+        let mut eq_module =
+            GraphModule::new("EQ", BlockType::Eq, NodePosition::new(380.0, y_offset));
         let eq = Node::new("EQ", BlockType::Eq, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::xlarge())
             .with_widget(NodeWidget::EqGraph);
@@ -782,21 +797,37 @@ impl NodeGraph {
         let eq_id = graph.add_module(eq_module);
 
         // === DYNAMICS MODULE (standalone) ===
-        let mut dynamics_module = GraphModule::new("Dynamics", BlockType::Compressor, NodePosition::new(830.0, y_offset));
-        let comp = Node::new("Compressor", BlockType::Compressor, NodePosition::new(10.0, 50.0))
-            .with_size(NodeSize::large())
-            .with_widget(NodeWidget::CompressorGraph);
+        let mut dynamics_module = GraphModule::new(
+            "Dynamics",
+            BlockType::Compressor,
+            NodePosition::new(830.0, y_offset),
+        );
+        let comp = Node::new(
+            "Compressor",
+            BlockType::Compressor,
+            NodePosition::new(10.0, 50.0),
+        )
+        .with_size(NodeSize::large())
+        .with_widget(NodeWidget::CompressorGraph);
         dynamics_module.add_node(comp);
         dynamics_module.auto_size(20.0);
         let dynamics_id = graph.add_module(dynamics_module);
 
         // === SPECIAL MODULE (contains Envelope, Wah, Pitch, Doubler) ===
         y_offset += 280.0;
-        let mut special_module = GraphModule::new("Special", BlockType::Modulation, NodePosition::new(50.0, y_offset))
-            .with_size(NodeSize::new(950.0, 150.0));
+        let mut special_module = GraphModule::new(
+            "Special",
+            BlockType::Modulation,
+            NodePosition::new(50.0, y_offset),
+        )
+        .with_size(NodeSize::new(950.0, 150.0));
 
-        let envelope = Node::new("Envelope", BlockType::Modulation, NodePosition::new(20.0, 50.0))
-            .with_size(NodeSize::medium());
+        let envelope = Node::new(
+            "Envelope",
+            BlockType::Modulation,
+            NodePosition::new(20.0, 50.0),
+        )
+        .with_size(NodeSize::medium());
         let envelope_id = special_module.add_node(envelope);
 
         let wah = Node::new("Wah", BlockType::Modulation, NodePosition::new(250.0, 50.0))
@@ -807,8 +838,12 @@ impl NodeGraph {
             .with_size(NodeSize::medium());
         let pitch_id = special_module.add_node(pitch);
 
-        let doubler = Node::new("Doubler", BlockType::Modulation, NodePosition::new(710.0, 50.0))
-            .with_size(NodeSize::medium());
+        let doubler = Node::new(
+            "Doubler",
+            BlockType::Modulation,
+            NodePosition::new(710.0, 50.0),
+        )
+        .with_size(NodeSize::medium());
         let doubler_id = special_module.add_node(doubler);
 
         // Internal routing (serial chain)
@@ -824,8 +859,9 @@ impl NodeGraph {
 
         // === DRIVE MODULE (contains Boost, Drive 1, Drive 2, Drive 3) ===
         y_offset += 180.0;
-        let mut drive_module = GraphModule::new("Drive", BlockType::Drive, NodePosition::new(50.0, y_offset))
-            .with_size(NodeSize::new(1100.0, 180.0));
+        let mut drive_module =
+            GraphModule::new("Drive", BlockType::Drive, NodePosition::new(50.0, y_offset))
+                .with_size(NodeSize::new(1100.0, 180.0));
 
         let boost = Node::new("Boost", BlockType::Drive, NodePosition::new(20.0, 60.0))
             .with_size(NodeSize::small());
@@ -859,7 +895,11 @@ impl NodeGraph {
 
         // === VOLUME PEDAL (standalone) ===
         y_offset += 210.0;
-        let mut vol_pedal_module = GraphModule::new("Volume", BlockType::Volume, NodePosition::new(50.0, y_offset));
+        let mut vol_pedal_module = GraphModule::new(
+            "Volume",
+            BlockType::Volume,
+            NodePosition::new(50.0, y_offset),
+        );
         let vol_pedal = Node::new("Volume", BlockType::Volume, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::small());
         vol_pedal_module.add_node(vol_pedal);
@@ -867,7 +907,11 @@ impl NodeGraph {
         let vol_pedal_id = graph.add_module(vol_pedal_module);
 
         // === PRE-FX MODULE (contains Pre Delay, Spring Verb) ===
-        let mut prefx_module = GraphModule::new("Pre-FX", BlockType::Delay, NodePosition::new(260.0, y_offset));
+        let mut prefx_module = GraphModule::new(
+            "Pre-FX",
+            BlockType::Delay,
+            NodePosition::new(260.0, y_offset),
+        );
 
         let pre_delay = Node::new("Delay", BlockType::Delay, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::large())
@@ -892,8 +936,9 @@ impl NodeGraph {
         //                Room
         //   Amp2  Cab2 ↗
         y_offset += 230.0;
-        let mut ampcab_module = GraphModule::new("Amp/Cab", BlockType::Amp, NodePosition::new(50.0, y_offset))
-            .with_size(NodeSize::new(870.0, 300.0));
+        let mut ampcab_module =
+            GraphModule::new("Amp/Cab", BlockType::Amp, NodePosition::new(50.0, y_offset))
+                .with_size(NodeSize::new(870.0, 300.0));
 
         // Parallel path 1 (top): Amp1 -> Cab1
         let amp1 = Node::new("Amp 1", BlockType::Amp, NodePosition::new(20.0, 50.0))
@@ -939,7 +984,8 @@ impl NodeGraph {
 
         // === POST EQ (standalone) ===
         y_offset += 210.0;
-        let mut post_eq_module = GraphModule::new("Post EQ", BlockType::Eq, NodePosition::new(50.0, y_offset));
+        let mut post_eq_module =
+            GraphModule::new("Post EQ", BlockType::Eq, NodePosition::new(50.0, y_offset));
         let post_eq = Node::new("EQ", BlockType::Eq, NodePosition::new(10.0, 50.0))
             .with_size(NodeSize::xlarge())
             .with_widget(NodeWidget::EqGraph);
@@ -949,22 +995,38 @@ impl NodeGraph {
 
         // === MODULATION MODULE (contains Chorus, Flanger, Phaser) ===
         y_offset += 260.0;
-        let mut mod_module = GraphModule::new("Modulation", BlockType::Modulation, NodePosition::new(50.0, y_offset))
-            .with_size(NodeSize::new(730.0, 160.0));
+        let mut mod_module = GraphModule::new(
+            "Modulation",
+            BlockType::Modulation,
+            NodePosition::new(50.0, y_offset),
+        )
+        .with_size(NodeSize::new(730.0, 160.0));
 
-        let chorus = Node::new("Chorus", BlockType::Modulation, NodePosition::new(20.0, 50.0))
-            .with_size(NodeSize::medium())
-            .with_widget(NodeWidget::ModulationGraph);
+        let chorus = Node::new(
+            "Chorus",
+            BlockType::Modulation,
+            NodePosition::new(20.0, 50.0),
+        )
+        .with_size(NodeSize::medium())
+        .with_widget(NodeWidget::ModulationGraph);
         let chorus_id = mod_module.add_node(chorus);
 
-        let flanger = Node::new("Flanger", BlockType::Modulation, NodePosition::new(260.0, 50.0))
-            .with_size(NodeSize::medium())
-            .with_widget(NodeWidget::ModulationGraph);
+        let flanger = Node::new(
+            "Flanger",
+            BlockType::Modulation,
+            NodePosition::new(260.0, 50.0),
+        )
+        .with_size(NodeSize::medium())
+        .with_widget(NodeWidget::ModulationGraph);
         let flanger_id = mod_module.add_node(flanger);
 
-        let phaser = Node::new("Phaser", BlockType::Modulation, NodePosition::new(500.0, 50.0))
-            .with_size(NodeSize::medium())
-            .with_widget(NodeWidget::ModulationGraph);
+        let phaser = Node::new(
+            "Phaser",
+            BlockType::Modulation,
+            NodePosition::new(500.0, 50.0),
+        )
+        .with_size(NodeSize::medium())
+        .with_widget(NodeWidget::ModulationGraph);
         let phaser_id = mod_module.add_node(phaser);
 
         // Internal routing (serial chain)
@@ -978,7 +1040,8 @@ impl NodeGraph {
 
         // === TIME MODULE (contains Delay, Reverb, Freeze) ===
         y_offset += 190.0;
-        let mut time_module = GraphModule::new("Time", BlockType::Delay, NodePosition::new(50.0, y_offset));
+        let mut time_module =
+            GraphModule::new("Time", BlockType::Delay, NodePosition::new(50.0, y_offset));
 
         let delay = Node::new("Delay", BlockType::Delay, NodePosition::new(20.0, 50.0))
             .with_size(NodeSize::large())
@@ -1005,20 +1068,32 @@ impl NodeGraph {
 
         // === MOTION MODULE (contains Tremolo, Vibrato, Rotary) ===
         y_offset += 230.0;
-        let mut motion_module = GraphModule::new("Motion", BlockType::Tremolo, NodePosition::new(50.0, y_offset))
-            .with_size(NodeSize::new(730.0, 160.0));
+        let mut motion_module = GraphModule::new(
+            "Motion",
+            BlockType::Tremolo,
+            NodePosition::new(50.0, y_offset),
+        )
+        .with_size(NodeSize::new(730.0, 160.0));
 
         let tremolo = Node::new("Tremolo", BlockType::Tremolo, NodePosition::new(20.0, 50.0))
             .with_size(NodeSize::medium())
             .with_widget(NodeWidget::ModulationGraph);
         let tremolo_id = motion_module.add_node(tremolo);
 
-        let vibrato = Node::new("Vibrato", BlockType::Modulation, NodePosition::new(260.0, 50.0))
-            .with_size(NodeSize::medium());
+        let vibrato = Node::new(
+            "Vibrato",
+            BlockType::Modulation,
+            NodePosition::new(260.0, 50.0),
+        )
+        .with_size(NodeSize::medium());
         let vibrato_id = motion_module.add_node(vibrato);
 
-        let rotary = Node::new("Rotary", BlockType::Modulation, NodePosition::new(500.0, 50.0))
-            .with_size(NodeSize::medium());
+        let rotary = Node::new(
+            "Rotary",
+            BlockType::Modulation,
+            NodePosition::new(500.0, 50.0),
+        )
+        .with_size(NodeSize::medium());
         let rotary_id = motion_module.add_node(rotary);
 
         // Internal routing
@@ -1032,26 +1107,28 @@ impl NodeGraph {
 
         // === MASTER MODULE (contains Master EQ, Multiband Comp, Output) ===
         y_offset += 190.0;
-        let mut master_module = GraphModule::new("Master", BlockType::Eq, NodePosition::new(50.0, y_offset));
+        let mut master_module =
+            GraphModule::new("Master", BlockType::Eq, NodePosition::new(50.0, y_offset));
 
         let master_eq = Node::new("Master EQ", BlockType::Eq, NodePosition::new(20.0, 50.0))
             .with_size(NodeSize::xlarge())
             .with_widget(NodeWidget::EqGraph);
         let master_eq_id = master_module.add_node(master_eq);
 
-        let master_comp = Node::new("Multiband", BlockType::Compressor, NodePosition::new(440.0, 50.0))
-            .with_size(NodeSize::large())
-            .with_widget(NodeWidget::CompressorGraph);
+        let master_comp = Node::new(
+            "Multiband",
+            BlockType::Compressor,
+            NodePosition::new(440.0, 50.0),
+        )
+        .with_size(NodeSize::large())
+        .with_widget(NodeWidget::CompressorGraph);
         let master_comp_id = master_module.add_node(master_comp);
 
         let output = Node::new("Output", BlockType::Volume, NodePosition::new(790.0, 90.0))
             .with_size(NodeSize::small())
             .with_short_label("OUT")
             .with_ports(
-                vec![
-                    NodePort::input("in_l", "L"),
-                    NodePort::input("in_r", "R"),
-                ],
+                vec![NodePort::input("in_l", "L"), NodePort::input("in_r", "R")],
                 vec![],
             );
         let output_id = master_module.add_node(output);
@@ -1112,7 +1189,7 @@ impl NodeGraph {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Captured parameter state for a single node.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct NodeSnapshot {
     /// The node this snapshot was captured from.
     pub node_id: Uuid,
@@ -1123,7 +1200,7 @@ pub struct NodeSnapshot {
 }
 
 /// Captured state of all nodes within a single module.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct ModuleSnapshot {
     /// The module this snapshot was captured from.
     pub module_id: Uuid,
@@ -1134,7 +1211,7 @@ pub struct ModuleSnapshot {
 }
 
 /// Captured state of the entire rig (all modules and standalone nodes).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct RigSnapshot {
     /// Unique snapshot ID.
     pub id: Uuid,
@@ -1360,7 +1437,8 @@ mod tests {
         let mut graph = NodeGraph::new();
         let node = sample_node_with_params("Drive", NodePosition::new(10.0, 50.0));
         let node_id = node.id;
-        let mut module = GraphModule::new("Test Module", BlockType::Drive, NodePosition::new(0.0, 0.0));
+        let mut module =
+            GraphModule::new("Test Module", BlockType::Drive, NodePosition::new(0.0, 0.0));
         module.add_node(node);
         graph.add_module(module);
 
@@ -1380,7 +1458,8 @@ mod tests {
         let mut graph = NodeGraph::new();
         let node1 = sample_node_with_params("Drive 1", NodePosition::new(10.0, 50.0));
         let node2 = sample_node_with_params("Drive 2", NodePosition::new(200.0, 50.0));
-        let mut module = GraphModule::new("Drive Stage", BlockType::Drive, NodePosition::new(0.0, 0.0));
+        let mut module =
+            GraphModule::new("Drive Stage", BlockType::Drive, NodePosition::new(0.0, 0.0));
         module.add_node(node1);
         module.add_node(node2);
         let module_id = module.id;
@@ -1436,7 +1515,11 @@ mod tests {
 
         // Add a module with nodes
         let node1 = sample_node_with_params("Drive", NodePosition::new(10.0, 50.0));
-        let mut module = GraphModule::new("Drive Module", BlockType::Drive, NodePosition::new(0.0, 0.0));
+        let mut module = GraphModule::new(
+            "Drive Module",
+            BlockType::Drive,
+            NodePosition::new(0.0, 0.0),
+        );
         module.add_node(node1);
         graph.add_module(module);
 
@@ -1461,8 +1544,8 @@ mod tests {
     fn test_capture_rig_snapshot_preserves_parameter_values() -> Result<()> {
         // -- Setup & Fixtures
         let mut graph = NodeGraph::new();
-        let node = Node::new("Custom", BlockType::Eq, NodePosition::new(0.0, 0.0))
-            .with_parameters(vec![
+        let node =
+            Node::new("Custom", BlockType::Eq, NodePosition::new(0.0, 0.0)).with_parameters(vec![
                 NodeParameter::new("freq", "Frequency", NormalizedF64::new(0.3)),
                 NodeParameter::new("gain", "Gain", NormalizedF64::new(0.9)),
             ]);

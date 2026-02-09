@@ -86,6 +86,7 @@ async fn handle_connection(
     let config = HandshakeConfig {
         max_payload_size: 1024 * 1024,            // 1 MiB
         initial_channel_credit: 16 * 1024 * 1024, // 16 MiB for high-frequency streaming
+        max_concurrent_requests: 64,
     };
 
     // Handle based on whether we have an in-process DAW dispatcher

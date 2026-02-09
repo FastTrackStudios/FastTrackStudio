@@ -24,6 +24,14 @@ pub enum KeyTrie {
     Node(TrieNode),
 }
 
+/// Result of looking up an accumulated key sequence.
+#[derive(Debug, Clone)]
+pub enum TrieLookup {
+    Match(LeafAction),
+    Prefix,
+    Miss,
+}
+
 /// An interior trie node holding child bindings.
 #[derive(Debug, Clone)]
 pub struct TrieNode {
@@ -139,6 +147,89 @@ impl TrieNode {
         if !other.name.is_empty() {
             self.name = other.name;
         }
+    }
+}
+
+impl KeyTrie {
+    /// Create an empty root trie.
+    pub fn new() -> Self {
+        Self::Node(TrieNode::new("root"))
+    }
+
+    /// Bind a single-key action.
+    pub fn bind(&mut self, chord: KeyChord, action: ActionId) {
+        self.bind_leaf(vec![chord], LeafAction::Action(action));
+    }
+
+    /// Bind a sequence to an action.
+    pub fn bind_sequence(&mut self, sequence: Vec<KeyChord>, action: ActionId) {
+        self.bind_leaf(sequence, LeafAction::Action(action));
+    }
+
+    /// Bind a single key to a mode switch.
+    pub fn bind_mode_switch(&mut self, chord: KeyChord, mode: ModeId) {
+        self.bind_leaf(vec![chord], LeafAction::SwitchMode(mode));
+    }
+
+    /// Bind an arbitrary leaf action.
+    pub fn bind_leaf(&mut self, sequence: Vec<KeyChord>, action: LeafAction) {
+        if sequence.is_empty() {
+            return;
+        }
+        let root = self.ensure_root_node();
+        root.insert(&sequence, action);
+    }
+
+    /// Resolve a sequence against this trie.
+    pub fn lookup(&self, sequence: &[KeyChord]) -> TrieLookup {
+        if sequence.is_empty() {
+            return TrieLookup::Miss;
+        }
+
+        let mut current = match self {
+            KeyTrie::Node(node) => node,
+            KeyTrie::Leaf(_) => return TrieLookup::Miss,
+        };
+
+        for (idx, chord) in sequence.iter().enumerate() {
+            let Some(next) = current.get(chord) else {
+                return TrieLookup::Miss;
+            };
+            let is_last = idx + 1 == sequence.len();
+            match next {
+                KeyTrie::Leaf(action) => {
+                    return if is_last {
+                        TrieLookup::Match(action.clone())
+                    } else {
+                        TrieLookup::Miss
+                    };
+                }
+                KeyTrie::Node(node) => {
+                    if is_last {
+                        return TrieLookup::Prefix;
+                    }
+                    current = node;
+                }
+            }
+        }
+
+        TrieLookup::Miss
+    }
+
+    fn ensure_root_node(&mut self) -> &mut TrieNode {
+        if let KeyTrie::Leaf(_) = self {
+            *self = KeyTrie::Node(TrieNode::new("root"));
+        }
+        match self {
+            KeyTrie::Node(node) => node,
+            KeyTrie::Leaf(_) => unreachable!("leaf replaced with node above"),
+        }
+    }
+}
+
+impl Default for KeyTrie {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

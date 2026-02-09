@@ -52,6 +52,7 @@ use dioxus_native::prelude::*;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use std::{collections::HashMap, rc::Rc};
 
 #[cfg(feature = "desktop")]
 use chart_graphics::ChartGraphics;
@@ -82,9 +83,9 @@ use signal_ui::{
 use dock_dioxus::{init_dock_presets, DockProvider, DockRoot, PanelRenderer, PresetBar};
 use dock_proto::PanelId;
 
-use actions_keybindings::{ActionDispatcher, KeyCode, Modifiers};
 use actions_proto::ids::standalone as standalone_ids;
-use actions_proto::when::ActionContext;
+use input::{config::load_default_config, ContextLayerConfig, InputCommand, KeymapConfig};
+use input_dioxus::{use_input_processor, InputHandle, ACTION_CONTEXT};
 use session::session_actions;
 
 use tokio;
@@ -93,117 +94,44 @@ use tracing::{debug, info};
 #[global_allocator]
 static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-/// Global action context tracking active tab, mode, etc.
-static ACTION_CONTEXT: GlobalSignal<ActionContext> = Signal::global(ActionContext::new);
-
 /// Whether the dock layout system is active (vs. classic tab navigation).
 static DOCK_MODE: GlobalSignal<bool> = Signal::global(|| true);
 
-/// Build the action dispatcher with keybindings and handlers for all actions.
-///
-/// Registers both session actions (transport, navigation) and standalone
-/// actions (settings, dark mode, command palette). Each action's shortcut
-/// and when-clause come from its definition; the handler closure is registered
-/// separately here.
-fn build_action_dispatcher() -> ActionDispatcher {
-    let mut dispatcher = ActionDispatcher::new();
+fn build_input_config() -> KeymapConfig {
+    let base = load_default_config().unwrap_or_default();
+    let mut overlay = KeymapConfig::default();
 
-    // Register action definitions (parses shortcuts + when-clauses)
-    dispatcher.register_actions(&session_actions::definitions());
-    dispatcher.register_actions(&actions_standalone::common_action_definitions());
+    overlay.keymap_context.insert(
+        "normal".to_string(),
+        vec![ContextLayerConfig {
+            when: "tab:performance".to_string(),
+            bindings: HashMap::from([
+                ("Space".to_string(), session_actions::TOGGLE_PLAYBACK.as_str().to_string()),
+                ("L".to_string(), session_actions::TOGGLE_SONG_LOOP.as_str().to_string()),
+                ("Right".to_string(), session_actions::SMART_NEXT.as_str().to_string()),
+                ("Left".to_string(), session_actions::SMART_PREVIOUS.as_str().to_string()),
+                ("Down".to_string(), session_actions::NEXT_SONG.as_str().to_string()),
+                ("Up".to_string(), session_actions::PREVIOUS_SONG.as_str().to_string()),
+            ]),
+        }],
+    );
 
-    // Session action handlers
-    dispatcher.on(session_actions::TOGGLE_PLAYBACK, || {
-        spawn(async move {
-            let _ = Session::get().setlist().toggle_playback().await;
-        });
-    });
-    dispatcher.on(session_actions::TOGGLE_SONG_LOOP, || {
-        spawn(async move {
-            let _ = Session::get().setlist().toggle_song_loop().await;
-        });
-    });
-    dispatcher.on(session_actions::SMART_NEXT, || {
-        spawn(async move {
-            let _ = Session::get().setlist().next_section().await;
-        });
-    });
-    dispatcher.on(session_actions::SMART_PREVIOUS, || {
-        spawn(async move {
-            let _ = Session::get().setlist().previous_section().await;
-        });
-    });
-    dispatcher.on(session_actions::NEXT_SONG, || {
-        spawn(async move {
-            let _ = Session::get().setlist().next_song().await;
-        });
-    });
-    dispatcher.on(session_actions::PREVIOUS_SONG, || {
-        spawn(async move {
-            let _ = Session::get().setlist().previous_song().await;
-        });
-    });
-    dispatcher.on(session_actions::NEXT_SECTION, || {
-        spawn(async move {
-            let _ = Session::get().setlist().next_section().await;
-        });
-    });
-    dispatcher.on(session_actions::PREVIOUS_SECTION, || {
-        spawn(async move {
-            let _ = Session::get().setlist().previous_section().await;
-        });
-    });
+    overlay.keymap.insert(
+        "normal".to_string(),
+        HashMap::from([
+            ("Cmd+Comma".to_string(), standalone_ids::OPEN_SETTINGS.as_str().to_string()),
+            (
+                "Cmd+Shift+D".to_string(),
+                standalone_ids::TOGGLE_DARK_MODE.as_str().to_string(),
+            ),
+            (
+                "Cmd+Shift+P".to_string(),
+                standalone_ids::COMMAND_PALETTE.as_str().to_string(),
+            ),
+        ]),
+    );
 
-    // Standalone action handlers
-    dispatcher.on(standalone_ids::COMMAND_PALETTE, || {
-        tracing::info!("Command palette triggered (not yet implemented)");
-    });
-    dispatcher.on(standalone_ids::TOGGLE_DARK_MODE, || {
-        tracing::info!("Toggle dark mode triggered (not yet implemented)");
-    });
-    dispatcher.on(standalone_ids::OPEN_SETTINGS, || {
-        tracing::info!("Open settings triggered (not yet implemented)");
-    });
-
-    dispatcher
-}
-
-/// Convert a Dioxus Key event into our key types.
-fn dioxus_key_to_keycode(key: &Key) -> Option<KeyCode> {
-    match key {
-        Key::Character(c) => Some(KeyCode::Character(c.to_lowercase())),
-        Key::ArrowUp => Some(KeyCode::ArrowUp),
-        Key::ArrowDown => Some(KeyCode::ArrowDown),
-        Key::ArrowLeft => Some(KeyCode::ArrowLeft),
-        Key::ArrowRight => Some(KeyCode::ArrowRight),
-        Key::Enter => Some(KeyCode::Enter),
-        Key::Escape => Some(KeyCode::Escape),
-        Key::Tab => Some(KeyCode::Tab),
-        Key::Backspace => Some(KeyCode::Backspace),
-        Key::Delete => Some(KeyCode::Delete),
-        Key::F1 => Some(KeyCode::F(1)),
-        Key::F2 => Some(KeyCode::F(2)),
-        Key::F3 => Some(KeyCode::F(3)),
-        Key::F4 => Some(KeyCode::F(4)),
-        Key::F5 => Some(KeyCode::F(5)),
-        Key::F6 => Some(KeyCode::F(6)),
-        Key::F7 => Some(KeyCode::F(7)),
-        Key::F8 => Some(KeyCode::F(8)),
-        Key::F9 => Some(KeyCode::F(9)),
-        Key::F10 => Some(KeyCode::F(10)),
-        Key::F11 => Some(KeyCode::F(11)),
-        Key::F12 => Some(KeyCode::F(12)),
-        _ => None,
-    }
-}
-
-fn dioxus_modifiers(m: &dioxus::prelude::Modifiers) -> Modifiers {
-    Modifiers {
-        ctrl: m.ctrl(),
-        alt: m.alt(),
-        shift: m.shift(),
-        meta: m.meta(),
-    }
+    KeymapConfig::merge(base, overlay)
 }
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -300,12 +228,16 @@ fn App() -> Element {
     // Track active tab
     let mut active_tab = use_signal(|| "performance".to_string());
 
-    // Build keybinding dispatcher once (persists across renders, shared via Rc for closures)
-    let dispatcher = use_hook(|| std::rc::Rc::new(build_action_dispatcher()));
+    // Build input config and processor once (persists across renders).
+    let input_config = use_hook(build_input_config);
+    let input_handle = use_input_processor(input_config.clone());
+    let input_handle = Rc::new(input_handle);
 
     // Initialize action context with default tab on first render
     use_hook(|| {
-        ACTION_CONTEXT.write().set_tab("performance");
+        let mut ctx = ACTION_CONTEXT.write();
+        ctx.set_tab("performance");
+        ctx.set_mode("normal");
     });
 
     // Initialize dock layout presets (loads from disk or uses built-in defaults)
@@ -762,7 +694,20 @@ fn App() -> Element {
                     tabindex: "0",
                     autofocus: true,
                     onkeydown: move |e: KeyboardEvent| {
-                        handle_keyboard_shortcut(e, &dispatcher);
+                        if handle_dock_preset_shortcut(&e) {
+                            e.prevent_default();
+                            return;
+                        }
+
+                        let commands = input_handle.handle_key(&e);
+                        let handled = dispatch_input_commands(commands);
+                        ACTION_CONTEXT
+                            .write()
+                            .set_mode(input_handle.current_mode().as_str());
+
+                        if handled {
+                            e.prevent_default();
+                        }
                     },
 
                     // Dock provider wraps the entire UI so all panels can access the renderer
@@ -806,6 +751,18 @@ fn App() -> Element {
                                 }
                             }
                         }
+
+                        // Input status overlay (mode / pending sequence / macro recording)
+                        div {
+                            class: "absolute bottom-2 right-2 z-20 rounded border border-zinc-700 bg-zinc-900/85 px-2 py-1 text-xs text-zinc-100 pointer-events-none",
+                            "{input_handle.current_mode().as_str().to_uppercase()}"
+                            if input_handle.is_recording() {
+                                span { class: "ml-2 text-red-300", "REC" }
+                            }
+                            if let Some(pending) = input_handle.pending_display() {
+                                span { class: "ml-2 text-amber-300", "{pending}" }
+                            }
+                        }
                     }
                 }
             }
@@ -813,11 +770,7 @@ fn App() -> Element {
     }
 }
 
-/// Handle keyboard shortcuts via the action dispatcher.
-///
-/// Converts Dioxus keyboard events into our key types, then delegates
-/// to the dispatcher which resolves keybinding → action → handler.
-fn handle_keyboard_shortcut(e: KeyboardEvent, dispatcher: &ActionDispatcher) {
+fn handle_dock_preset_shortcut(e: &KeyboardEvent) -> bool {
     // Dock mode: F5-F9 switch screenset presets (no modifiers)
     if *DOCK_MODE.peek() {
         let mods = e.modifiers();
@@ -847,20 +800,101 @@ fn handle_keyboard_shortcut(e: KeyboardEvent, dispatcher: &ActionDispatcher) {
                     *dock_dioxus::DOCK_LAYOUT.write() = preset.layout.clone();
                     *dock_dioxus::DOCK_ACTIVE_PRESET_INDEX.write() = idx;
                 }
-                return;
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn dispatch_input_commands(commands: Vec<InputCommand>) -> bool {
+    let mut handled = false;
+
+    for command in commands {
+        match command {
+            InputCommand::Unhandled(_) => {}
+            InputCommand::Action(action) => {
+                dispatch_action(action.as_str());
+                handled = true;
+            }
+            InputCommand::ActionWithArgs { action, .. } => {
+                dispatch_action(action.as_str());
+                handled = true;
+            }
+            InputCommand::SwitchMode(mode) | InputCommand::PushMode(mode) => {
+                ACTION_CONTEXT.write().set_mode(mode.as_str());
+                handled = true;
+            }
+            InputCommand::PopMode => {
+                handled = true;
+            }
+            InputCommand::Pending { .. } => {
+                handled = true;
+            }
+            InputCommand::InsertText(_) => {
+                handled = true;
             }
         }
     }
 
-    let Some(key_code) = dioxus_key_to_keycode(&e.key()) else {
-        return;
-    };
-    let modifiers = dioxus_modifiers(&e.modifiers());
-    let ctx = ACTION_CONTEXT.read();
+    handled
+}
 
-    if dispatcher.handle_key_event(&key_code, &modifiers, &ctx) {
-        e.prevent_default();
-    }
+fn dispatch_action(action_id: &str) {
+    match action_id {
+        id if id == session_actions::TOGGLE_PLAYBACK.as_str() => {
+            spawn(async move {
+                let _ = Session::get().setlist().toggle_playback().await;
+            });
+        }
+        id if id == session_actions::TOGGLE_SONG_LOOP.as_str() => {
+            spawn(async move {
+                let _ = Session::get().setlist().toggle_song_loop().await;
+            });
+        }
+        id if id == session_actions::SMART_NEXT.as_str() => {
+            spawn(async move {
+                let _ = Session::get().setlist().next_section().await;
+            });
+        }
+        id if id == session_actions::SMART_PREVIOUS.as_str() => {
+            spawn(async move {
+                let _ = Session::get().setlist().previous_section().await;
+            });
+        }
+        id if id == session_actions::NEXT_SONG.as_str() => {
+            spawn(async move {
+                let _ = Session::get().setlist().next_song().await;
+            });
+        }
+        id if id == session_actions::PREVIOUS_SONG.as_str() => {
+            spawn(async move {
+                let _ = Session::get().setlist().previous_song().await;
+            });
+        }
+        id if id == session_actions::NEXT_SECTION.as_str() => {
+            spawn(async move {
+                let _ = Session::get().setlist().next_section().await;
+            });
+        }
+        id if id == session_actions::PREVIOUS_SECTION.as_str() => {
+            spawn(async move {
+                let _ = Session::get().setlist().previous_section().await;
+            });
+        }
+        id if id == standalone_ids::COMMAND_PALETTE.as_str() => {
+            tracing::info!("Command palette triggered (not yet implemented)");
+        }
+        id if id == standalone_ids::TOGGLE_DARK_MODE.as_str() => {
+            tracing::info!("Toggle dark mode triggered (not yet implemented)");
+        }
+        id if id == standalone_ids::OPEN_SETTINGS.as_str() => {
+            tracing::info!("Open settings triggered (not yet implemented)");
+        }
+        _ => {
+            tracing::debug!(action_id, "No handler registered for input action");
+        }
+    };
 }
 
 // Used by ChartPreviewPanel (inside #[component] macro expansion)

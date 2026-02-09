@@ -28,7 +28,7 @@
 
 use roam::session::{ConnectionHandle, HandshakeConfig, ServiceDispatcher};
 use roam_session::RoutedDispatcher;
-use roam_stream::CobsFramed;
+use roam_stream::LengthPrefixedFramed;
 use session::{SetlistServiceImpl, SongServiceImpl};
 use session_proto::{SetlistServiceClient, SetlistServiceDispatcher, SongServiceDispatcher};
 use tracing::info;
@@ -89,15 +89,16 @@ impl LocalServices {
         // Create the dispatcher for the server side
         let dispatcher = self.create_dispatcher();
 
-        // Wrap both sides in COBS framing
-        let client_framed = CobsFramed::new(client_stream);
-        let server_framed = CobsFramed::new(server_stream);
+        // Wrap both sides in length-prefixed framing
+        let client_framed = LengthPrefixedFramed::new(client_stream);
+        let server_framed = LengthPrefixedFramed::new(server_stream);
 
         // Use larger credit for high-frequency streaming (60Hz transport updates)
         // Default is 64KB which can exhaust quickly
         let config = HandshakeConfig {
             max_payload_size: 1024 * 1024,            // 1 MiB (default)
             initial_channel_credit: 16 * 1024 * 1024, // 16 MiB - effectively infinite for local
+            max_concurrent_requests: 64,
         };
 
         // Start the server side (accepts connection and handles requests)

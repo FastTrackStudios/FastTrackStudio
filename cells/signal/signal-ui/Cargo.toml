@@ -10,6 +10,9 @@ audio-controls = { path = "../audio-controls" }
 uuid = { version = "1.0", features = ["v4"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+facet = { workspace = true }
+facet-json = { workspace = true }
+signal-storage = { path = "../signal-storage" }
 
 # UI framework (conditional on feature)
 dioxus = { workspace = true, optional = true }

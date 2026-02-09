@@ -9,3 +9,6 @@ actions-proto = { workspace = true, optional = true }
 actions-keybindings = { workspace = true, optional = true }
 facet = { workspace = true, optional = true }
 tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

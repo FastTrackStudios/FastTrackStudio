@@ -29,6 +29,10 @@ pub enum StorageError {
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    /// Raw SQLite query error (from sqlx, not sea-orm).
+    #[error("sqlite error: {0}")]
+    Sqlite(#[from] sqlx::Error),
+
     /// Configuration error.
     #[error("configuration error: {0}")]
     Config(String),
