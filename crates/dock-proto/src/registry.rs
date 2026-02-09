@@ -7,14 +7,13 @@
 //! The existing [`PanelId`](crate::panel::PanelId) enum continues to work
 //! via its `Into<String>` impl for backward compatibility.
 
+use facet::Facet;
 use std::collections::HashMap;
-
-use serde::{Deserialize, Serialize};
 
 // region: --- Types
 
-/// Default position hint for where a panel prefers to be placed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[repr(u8)]
 pub enum DockPosition {
     Left,
     Right,
@@ -25,7 +24,7 @@ pub enum DockPosition {
 
 /// Size constraints for a panel, used by the layout engine during resize
 /// negotiation and constraint solving.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct PanelConstraints {
     pub min_width: Option<f64>,
     pub max_width: Option<f64>,
@@ -96,7 +95,7 @@ impl PanelConstraints {
 ///
 /// This is the runtime metadata for a panel. The dock system uses it for
 /// display names, icons, default placement, and constraint negotiation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Facet)]
 pub struct PanelDescriptor {
     /// Unique string identifier for this panel.
     pub id: String,
@@ -323,10 +322,7 @@ mod tests {
         reg.register(sample_descriptor("my-panel", "Old"));
 
         // -- Exec
-        reg.register(
-            PanelDescriptor::new("my-panel", "Updated Name")
-                .with_category("New"),
-        );
+        reg.register(PanelDescriptor::new("my-panel", "Updated Name").with_category("New"));
 
         // -- Check
         let desc = reg.get("my-panel").unwrap();
