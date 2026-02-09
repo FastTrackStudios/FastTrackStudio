@@ -42,6 +42,7 @@ pub use signal_proto::normalized::*;
 
 // ── Engine ──────────────────────────────────────────────────────────────────
 pub mod diff;
+pub mod discovery;
 pub mod engine;
 pub mod mock;
 pub mod resolver;
