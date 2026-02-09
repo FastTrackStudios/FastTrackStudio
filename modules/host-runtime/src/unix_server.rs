@@ -20,7 +20,7 @@ use host_manager_proto::{HostIdentity, HOST_IDENTITY_KEY};
 use roam::session::{HandshakeConfig, RoutedDispatcher};
 use roam::Context;
 use roam_local::LocalListener;
-use roam_stream::CobsFramed;
+use roam_stream::LengthPrefixedFramed;
 use roam_wire::MetadataValue;
 use tracing::{info, warn};
 
@@ -72,7 +72,7 @@ async fn handle_connection(
     identity: HostIdentity,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Wrap in COBS framing for message delimiting
-    let framed = CobsFramed::new(stream);
+    let framed = LengthPrefixedFramed::new(stream);
 
     // Create gateway coordinator dispatcher
     let gateway_dispatcher = GatewayCoordinatorDispatcher::new(GatewayCoordinatorImpl);

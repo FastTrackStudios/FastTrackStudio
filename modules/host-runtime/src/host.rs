@@ -48,10 +48,10 @@ pub async fn init_shm_infrastructure() -> Result<tempfile::TempDir, Box<dyn std:
     let temp_dir = tempfile::tempdir()?;
     let shm_path = temp_dir.path().join("daw-hub.shm");
 
-    // Create SHM host with increased slot count for high-frequency streaming (60Hz)
-    // Default is 16 slots per guest which gets exhausted with multiple 60Hz streams
+    // Create SHM host with increased buffer capacity for high-frequency streaming (60Hz)
+    // Default is 64 KB bipbuf per direction; 4x handles multiple 60Hz streams
     let mut config = SegmentConfig::default();
-    config.slots_per_guest = 64; // 4x default to handle streaming load
+    config.bipbuf_capacity = 262144; // 256 KB (4x default)
     let shm_host = ShmHost::create(&shm_path, config)?;
     info!("SHM host created at: {}", shm_path.display());
 
