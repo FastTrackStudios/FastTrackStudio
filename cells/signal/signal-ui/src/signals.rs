@@ -75,6 +75,68 @@ pub fn init_rig_service() {
     *RIG_SERVICE.write() = Some(signal_control::SignalControl::mock_guitar());
 }
 
+/// Bind the rig to a live DAW FX chain. Fetches the FxTree, runs discovery,
+/// and populates `RIG_MODULES` from the discovered modules.
+///
+/// Call this when a DAW is connected and the user selects a track.
+pub async fn bind_fx_chain(
+    chain: &daw_control::FxChain,
+    track_guid: &str,
+    track_name: &str,
+) -> eyre::Result<()> {
+    let binding = signal_control::fx_binding::FxRigBinding::from_chain(chain, track_guid).await?;
+    let modules = binding.to_signal_modules();
+    let n_modules = binding.modules().len();
+    let n_unassigned = binding.unassigned().len();
+
+    *RIG_MODULES.write() = modules;
+    *RIG_FX_BINDING_STATUS.write() = format!(
+        "Bound: {} ({} modules, {} unassigned)",
+        track_name, n_modules, n_unassigned
+    );
+    *RIG_FX_BINDING.write() = Some(binding);
+    Ok(())
+}
+
+/// Refresh the FX binding — re-fetches the FxTree and re-runs discovery.
+///
+/// Call this when the FX chain may have changed (e.g. after adding/removing FX).
+pub async fn refresh_fx_binding(chain: &daw_control::FxChain) -> eyre::Result<()> {
+    // Clone the binding out to avoid holding the write guard across await points
+    let mut binding = match RIG_FX_BINDING.read().clone() {
+        Some(b) => b,
+        None => return Ok(()),
+    };
+
+    binding.refresh(chain).await?;
+    let modules = binding.to_signal_modules();
+    let n_modules = binding.modules().len();
+    let n_unassigned = binding.unassigned().len();
+    let track_guid = binding.track_guid.clone();
+
+    *RIG_MODULES.write() = modules;
+    *RIG_FX_BINDING_STATUS.write() = format!(
+        "Bound: {} ({} modules, {} unassigned)",
+        track_guid, n_modules, n_unassigned
+    );
+    *RIG_FX_BINDING.write() = Some(binding);
+    Ok(())
+}
+
+/// Unbind the FX chain, clearing the binding and its status.
+pub fn unbind_fx_chain() {
+    *RIG_FX_BINDING.write() = None;
+    *RIG_FX_BINDING_STATUS.write() = "Not bound".to_string();
+}
+
+/// FX chain binding — when set, modules are populated from the live DAW FX chain
+/// instead of (or merged with) mock data.
+pub static RIG_FX_BINDING: GlobalSignal<Option<signal_control::fx_binding::FxRigBinding>> =
+    Signal::global(|| None);
+
+/// Human-readable binding status: "Not bound", "Bound: TrackName (N modules)", etc.
+pub static RIG_FX_BINDING_STATUS: GlobalSignal<String> = Signal::global(|| "Not bound".to_string());
+
 /// Connection status
 pub static RIG_CONNECTED: GlobalSignal<bool> = Signal::global(|| false);
 

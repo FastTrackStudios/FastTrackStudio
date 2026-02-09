@@ -1,3 +1,4 @@
+pub mod fx_binding_status;
 pub mod morph_slider;
 pub mod rig_grid;
 
@@ -6,15 +7,29 @@ pub use morph_slider::MorphSlider;
 
 // Re-export commonly used components
 pub use rig_grid::{
-    GuitarRigGrid, ModuleViewMode, RigViewMode, block_type_color,
-    GridBlock, GridPosition, GridConnection,
-    GRID_COLS, GRID_ROWS,
+    block_type_color,
+    GridBlock,
+    GridConnection,
+    GridPosition,
+    GuitarRigGrid,
+    GuitarRigLeftSidebar,
+    GuitarRigProfileSidebar,
+    GuitarRigRightSidebar,
     // Page layout components
-    GuitarRigTopBar, GuitarRigLeftSidebar, GuitarRigRightSidebar, GuitarRigProfileSidebar, ModuleBrowserModal,
+    GuitarRigTopBar,
+    ModuleBrowserModal,
+    ModuleViewMode,
     // Node-based system
-    Node, NodeGraph, NodePosition, NodeSize, NodeWidget,
+    Node,
+    NodeGraph,
+    NodePosition,
     // Property panel
     NodePropertyPanel,
+    NodeSize,
+    NodeWidget,
+    RigViewMode,
     // Version history
     VersionHistoryPanel,
+    GRID_COLS,
+    GRID_ROWS,
 };

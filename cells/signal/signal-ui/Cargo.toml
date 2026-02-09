@@ -6,7 +6,9 @@ edition.workspace = true
 
 [dependencies]
 signal-control = { path = "../signal-control" }
+daw-control = { path = "../../daw/daw-control" }
 audio-controls = { path = "../audio-controls" }
+eyre = { workspace = true }
 uuid = { version = "1.0", features = ["v4"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -14,6 +14,7 @@ pub mod prelude;
 pub mod signals;
 
 // Re-exports for desktop app
+pub use components::fx_binding_status::FxBindingStatus;
 pub use components::MorphSlider;
 pub use context::rig::{use_rig_service, RigService, RigServiceProvider};
 pub use hooks::rig_actions::{use_rig_actions, RigActions};
