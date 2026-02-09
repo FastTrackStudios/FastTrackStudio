@@ -31,9 +31,9 @@ use std::time::Duration;
 
 // Service dispatchers for method ID routing
 use daw_proto::{
-    AudioEngineServiceDispatcher, MarkerServiceDispatcher, MidiAnalysisServiceDispatcher,
-    MidiServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
-    TempoMapServiceDispatcher, TransportServiceDispatcher,
+    AudioEngineServiceDispatcher, FxServiceDispatcher, MarkerServiceDispatcher,
+    MidiAnalysisServiceDispatcher, MidiServiceDispatcher, ProjectServiceDispatcher,
+    RegionServiceDispatcher, TempoMapServiceDispatcher, TransportServiceDispatcher,
 };
 
 // ============================================================================
@@ -187,6 +187,11 @@ fn register_daw_dispatcher() {
     daw_reaper::init_transport_broadcaster();
     info!("Transport broadcaster initialized for low-latency streaming");
 
+    // Initialize FX event broadcaster for reactive FX chain observation
+    // The timer callback will call poll_and_broadcast_fx() to push FX events
+    daw_reaper::init_fx_broadcaster();
+    info!("FX event broadcaster initialized for reactive observation");
+
     // Create telemetry middleware for OTLP export
     let telemetry = create_telemetry();
 
@@ -199,6 +204,7 @@ fn register_daw_dispatcher() {
     let audio_engine = daw_reaper::ReaperAudioEngine::new();
     let midi = daw_reaper::ReaperMidi::new();
     let midi_analysis = daw_reaper::ReaperMidiAnalysis::new();
+    let fx = daw_reaper::ReaperFx::new();
 
     // Create dispatchers with telemetry middleware
     let transport_dispatcher =
@@ -213,7 +219,8 @@ fn register_daw_dispatcher() {
     let midi_analysis_dispatcher =
         MidiAnalysisServiceDispatcher::new(midi_analysis).with_middleware(telemetry.clone());
     let audio_engine_dispatcher =
-        AudioEngineServiceDispatcher::new(audio_engine).with_middleware(telemetry);
+        AudioEngineServiceDispatcher::new(audio_engine).with_middleware(telemetry.clone());
+    let fx_dispatcher = FxServiceDispatcher::new(fx).with_middleware(telemetry);
 
     // Compose all dispatchers together using RoutedDispatcher chaining
     // The RoutedDispatcher chains dispatchers: first tries left, falls through to right
@@ -223,7 +230,8 @@ fn register_daw_dispatcher() {
     let with_tempo_map = RoutedDispatcher::new(with_region, tempo_map_dispatcher);
     let with_midi = RoutedDispatcher::new(with_tempo_map, midi_dispatcher);
     let with_midi_analysis = RoutedDispatcher::new(with_midi, midi_analysis_dispatcher);
-    let daw_dispatcher = RoutedDispatcher::new(with_midi_analysis, audio_engine_dispatcher);
+    let with_audio_engine = RoutedDispatcher::new(with_midi_analysis, audio_engine_dispatcher);
+    let daw_dispatcher = RoutedDispatcher::new(with_audio_engine, fx_dispatcher);
 
     // Register with the Host
     Host::get().set_daw_dispatcher(Arc::new(daw_dispatcher));
@@ -237,7 +245,7 @@ fn register_daw_dispatcher() {
     });
 
     info!(
-        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine) with OTLP telemetry"
+        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx) with OTLP telemetry"
     );
     info!("daw-reaper marked as ready for in-process DAW calls");
 }
@@ -277,6 +285,9 @@ extern "C" fn timer_callback() {
         // Poll transport state and broadcast to subscribers
         // This runs directly on main thread, avoiding async round-trip latency
         daw_reaper::poll_and_broadcast();
+
+        // Poll FX chain state and broadcast events for monitored chains
+        daw_reaper::poll_and_broadcast_fx();
     }
 }
 
