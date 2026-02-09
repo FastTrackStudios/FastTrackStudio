@@ -23,6 +23,8 @@
 //! }
 //! ```
 
+pub mod daw_bridge;
+
 use std::sync::Arc;
 use uuid::Uuid;
 

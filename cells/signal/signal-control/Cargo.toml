@@ -6,10 +6,13 @@ edition.workspace = true
 
 [dependencies]
 signal = { path = "../signal" }
+daw-control = { path = "../../daw/daw-control" }
+daw-proto = { path = "../../daw/daw-proto" }
 roam.workspace = true
 uuid = { version = "1.0", features = ["v4"] }
 tokio = { version = "1", features = ["time"] }
 tracing.workspace = true
+eyre.workspace = true
 
 [lints]
 workspace = true
