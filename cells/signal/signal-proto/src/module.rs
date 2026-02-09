@@ -14,6 +14,7 @@ use crate::block::Block;
 use crate::id::{BlockId, ModuleId};
 use crate::normalized::{MidiChannel, NormalizedF64, Order};
 use crate::tags::{Taggable, Tags};
+use daw_proto::FxNodeId;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ModuleType
@@ -146,6 +147,9 @@ pub struct ModuleBlock {
     pub order: Order,
     pub midi_trigger: Option<MidiTriggerConfig>,
     pub tags: Tags,
+    /// When bound to a DAW FX chain, the FxNodeId of the plugin or
+    /// nested container this block maps to.
+    pub fx_node_id: Option<FxNodeId>,
 }
 
 impl ModuleBlock {
@@ -157,6 +161,7 @@ impl ModuleBlock {
             order,
             midi_trigger: None,
             tags: Tags::new(),
+            fx_node_id: None,
         }
     }
 
@@ -218,6 +223,9 @@ pub struct Module {
     pub send_mode: SendMode,
     pub split_sync: bool,
     pub tags: Tags,
+    /// When bound to a DAW FX chain, the FxNodeId of the container
+    /// this module maps to.
+    pub fx_node_id: Option<FxNodeId>,
 }
 
 impl Module {
@@ -234,6 +242,7 @@ impl Module {
             send_mode: SendMode::default(),
             split_sync: false,
             tags: Tags::new(),
+            fx_node_id: None,
         }
     }
 
@@ -288,7 +297,10 @@ mod tests {
     use crate::block::PluginId;
 
     fn test_block() -> Block {
-        Block::new("Test Block", PluginId::vst3("com.test.plugin", "Test Plugin"))
+        Block::new(
+            "Test Block",
+            PluginId::vst3("com.test.plugin", "Test Plugin"),
+        )
     }
 
     #[test]
@@ -340,7 +352,10 @@ mod tests {
     #[test]
     fn display_names() {
         assert_eq!(ModuleType::Rescue.display_name(), "Rescue");
-        assert_eq!(ModuleType::VocalModulation.display_name(), "Vocal Modulation");
+        assert_eq!(
+            ModuleType::VocalModulation.display_name(),
+            "Vocal Modulation"
+        );
         assert_eq!(ModuleType::Eq.display_name(), "EQ");
         assert_eq!(ModuleType::PreFx.display_name(), "Pre FX");
         assert_eq!(ModuleType::PostEq.display_name(), "Post EQ");
@@ -375,5 +390,4 @@ mod tests {
         assert_eq!(trigger.control, MidiControl::Cc(64));
         assert_eq!(trigger.mode, TriggerMode::Toggle);
     }
-
 }
