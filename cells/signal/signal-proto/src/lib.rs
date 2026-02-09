@@ -10,6 +10,7 @@
 
 pub mod block;
 pub mod category;
+pub mod container;
 pub mod crossfade;
 pub mod defaults;
 pub mod director;
