@@ -24,6 +24,7 @@
 //! ```
 
 pub mod daw_bridge;
+pub mod fx_binding;
 
 use std::sync::Arc;
 use uuid::Uuid;
