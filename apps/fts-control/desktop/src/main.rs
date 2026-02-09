@@ -83,9 +83,13 @@ use signal_ui::{
 use dock_dioxus::{init_dock_presets, DockProvider, DockRoot, PanelRenderer, PresetBar};
 use dock_proto::PanelId;
 
+use actions_proto::ActionDefinition;
 use actions_proto::ids::standalone as standalone_ids;
-use input::{config::load_default_config, ContextLayerConfig, InputCommand, KeymapConfig};
-use input_dioxus::{use_input_processor, InputHandle, ACTION_CONTEXT};
+use input::{
+    config::{load_default_config, ContextLayerConfig},
+    InputCommand, KeymapConfig,
+};
+use input_dioxus::{use_input_processor, ACTION_CONTEXT};
 use session::session_actions;
 
 use tokio;
@@ -96,6 +100,18 @@ static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 /// Whether the dock layout system is active (vs. classic tab navigation).
 static DOCK_MODE: GlobalSignal<bool> = Signal::global(|| true);
+static COMMAND_PALETTE_OPEN: GlobalSignal<bool> = Signal::global(|| false);
+static COMMAND_PALETTE_QUERY: GlobalSignal<String> = Signal::global(String::new);
+
+#[derive(Clone)]
+struct PaletteEntry {
+    id: String,
+    name: String,
+    description: String,
+    shortcut: String,
+    when_clause: String,
+    mappings: Vec<String>,
+}
 
 fn build_input_config() -> KeymapConfig {
     let base = load_default_config().unwrap_or_default();
@@ -106,12 +122,30 @@ fn build_input_config() -> KeymapConfig {
         vec![ContextLayerConfig {
             when: "tab:performance".to_string(),
             bindings: HashMap::from([
-                ("Space".to_string(), session_actions::TOGGLE_PLAYBACK.as_str().to_string()),
-                ("L".to_string(), session_actions::TOGGLE_SONG_LOOP.as_str().to_string()),
-                ("Right".to_string(), session_actions::SMART_NEXT.as_str().to_string()),
-                ("Left".to_string(), session_actions::SMART_PREVIOUS.as_str().to_string()),
-                ("Down".to_string(), session_actions::NEXT_SONG.as_str().to_string()),
-                ("Up".to_string(), session_actions::PREVIOUS_SONG.as_str().to_string()),
+                (
+                    "Space".to_string(),
+                    session_actions::TOGGLE_PLAYBACK.as_str().to_string(),
+                ),
+                (
+                    "L".to_string(),
+                    session_actions::TOGGLE_SONG_LOOP.as_str().to_string(),
+                ),
+                (
+                    "Right".to_string(),
+                    session_actions::SMART_NEXT.as_str().to_string(),
+                ),
+                (
+                    "Left".to_string(),
+                    session_actions::SMART_PREVIOUS.as_str().to_string(),
+                ),
+                (
+                    "Down".to_string(),
+                    session_actions::NEXT_SONG.as_str().to_string(),
+                ),
+                (
+                    "Up".to_string(),
+                    session_actions::PREVIOUS_SONG.as_str().to_string(),
+                ),
             ]),
         }],
     );
@@ -119,7 +153,10 @@ fn build_input_config() -> KeymapConfig {
     overlay.keymap.insert(
         "normal".to_string(),
         HashMap::from([
-            ("Cmd+Comma".to_string(), standalone_ids::OPEN_SETTINGS.as_str().to_string()),
+            (
+                "Cmd+Comma".to_string(),
+                standalone_ids::OPEN_SETTINGS.as_str().to_string(),
+            ),
             (
                 "Cmd+Shift+D".to_string(),
                 standalone_ids::TOGGLE_DARK_MODE.as_str().to_string(),
@@ -132,6 +169,56 @@ fn build_input_config() -> KeymapConfig {
     );
 
     KeymapConfig::merge(base, overlay)
+}
+
+fn collect_mappings_by_action(config: &KeymapConfig) -> HashMap<String, Vec<String>> {
+    let mut by_action: HashMap<String, Vec<String>> = HashMap::new();
+
+    for (mode, bindings) in &config.keymap {
+        for (keys, action) in bindings {
+            by_action
+                .entry(action.clone())
+                .or_default()
+                .push(format!("{mode}: {keys}"));
+        }
+    }
+
+    for (mode, layers) in &config.keymap_context {
+        for layer in layers {
+            for (keys, action) in &layer.bindings {
+                by_action
+                    .entry(action.clone())
+                    .or_default()
+                    .push(format!("{mode} [{}]: {keys}", layer.when));
+            }
+        }
+    }
+
+    by_action
+}
+
+fn build_palette_entries(config: &KeymapConfig) -> Vec<PaletteEntry> {
+    let mut actions: Vec<ActionDefinition> = session_actions::definitions();
+    actions.extend(actions_standalone::common_action_definitions());
+
+    let mappings = collect_mappings_by_action(config);
+    let mut entries = Vec::with_capacity(actions.len());
+    for action in actions {
+        entries.push(PaletteEntry {
+            id: action.id.as_str().to_string(),
+            name: action.name,
+            description: action.description,
+            shortcut: action.shortcut_hint.unwrap_or_default(),
+            when_clause: action.when.unwrap_or_default(),
+            mappings: mappings
+                .get(action.id.as_str())
+                .cloned()
+                .unwrap_or_default(),
+        });
+    }
+
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    entries
 }
 
 const FAVICON: Asset = asset!("/assets/favicon.ico");
@@ -232,6 +319,7 @@ fn App() -> Element {
     let input_config = use_hook(build_input_config);
     let input_handle = use_input_processor(input_config.clone());
     let input_handle = Rc::new(input_handle);
+    let palette_entries = use_hook(|| Rc::new(build_palette_entries(&input_config)));
 
     // Initialize action context with default tab on first render
     use_hook(|| {
@@ -694,6 +782,10 @@ fn App() -> Element {
                     tabindex: "0",
                     autofocus: true,
                     onkeydown: move |e: KeyboardEvent| {
+                        if *COMMAND_PALETTE_OPEN.read() {
+                            return;
+                        }
+
                         if handle_dock_preset_shortcut(&e) {
                             e.prevent_default();
                             return;
@@ -761,6 +853,125 @@ fn App() -> Element {
                             }
                             if let Some(pending) = input_handle.pending_display() {
                                 span { class: "ml-2 text-amber-300", "{pending}" }
+                            }
+                        }
+
+                        if *COMMAND_PALETTE_OPEN.read() {
+                            {
+                                let query = COMMAND_PALETTE_QUERY.read().clone();
+                                let filtered: Vec<_> = palette_entries
+                                    .iter()
+                                    .filter(|entry| {
+                                        if query.is_empty() {
+                                            true
+                                        } else {
+                                            let q = query.to_lowercase();
+                                            entry.name.to_lowercase().contains(&q)
+                                                || entry.id.to_lowercase().contains(&q)
+                                                || entry.description.to_lowercase().contains(&q)
+                                                || entry
+                                                    .mappings
+                                                    .iter()
+                                                    .any(|m| m.to_lowercase().contains(&q))
+                                        }
+                                    })
+                                    .take(40)
+                                    .collect();
+
+                                rsx! {
+                                    div {
+                                        class: "absolute inset-0 z-30 flex items-start justify-center bg-black/50",
+                                        onclick: move |_| {
+                                            *COMMAND_PALETTE_OPEN.write() = false;
+                                        },
+                                        div {
+                                            class: "mt-16 w-[min(900px,95vw)] max-h-[70vh] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl",
+                                            onclick: move |e| e.stop_propagation(),
+                                            div {
+                                                class: "border-b border-zinc-700 p-2",
+                                                input {
+                                                    class: "w-full rounded bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none",
+                                                    r#type: "text",
+                                                    value: "{query}",
+                                                    placeholder: "Search actions, ids, or key mappings...",
+                                                    autofocus: true,
+                                                    oninput: move |e| {
+                                                        *COMMAND_PALETTE_QUERY.write() = e.value();
+                                                    },
+                                                    onkeydown: move |e| {
+                                                        if matches!(e.key(), Key::Escape) {
+                                                            *COMMAND_PALETTE_OPEN.write() = false;
+                                                            e.stop_propagation();
+                                                            return;
+                                                        }
+                                                        if matches!(e.key(), Key::Enter) {
+                                                            let query = COMMAND_PALETTE_QUERY.read().clone();
+                                                            if let Some(first) = palette_entries
+                                                                .iter()
+                                                                .filter(|entry| {
+                                                                    if query.is_empty() {
+                                                                        true
+                                                                    } else {
+                                                                        let q = query.to_lowercase();
+                                                                        entry.name.to_lowercase().contains(&q)
+                                                                            || entry.id.to_lowercase().contains(&q)
+                                                                            || entry.description.to_lowercase().contains(&q)
+                                                                            || entry
+                                                                                .mappings
+                                                                                .iter()
+                                                                                .any(|m| m.to_lowercase().contains(&q))
+                                                                    }
+                                                                })
+                                                                .next()
+                                                            {
+                                                                dispatch_action(&first.id);
+                                                            }
+                                                            *COMMAND_PALETTE_OPEN.write() = false;
+                                                            *COMMAND_PALETTE_QUERY.write() = String::new();
+                                                            e.stop_propagation();
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            div {
+                                                class: "max-h-[60vh] overflow-y-auto p-2",
+                                                for entry in filtered {
+                                                    div {
+                                                        class: "mb-2 rounded border border-zinc-800 bg-zinc-950/80 p-3 hover:border-zinc-600 cursor-pointer",
+                                                        onclick: {
+                                                            let id = entry.id.clone();
+                                                            move |_| {
+                                                                dispatch_action(&id);
+                                                                *COMMAND_PALETTE_OPEN.write() = false;
+                                                                *COMMAND_PALETTE_QUERY.write() = String::new();
+                                                            }
+                                                        },
+                                                        div {
+                                                            class: "flex items-center justify-between gap-3",
+                                                            div { class: "text-sm font-medium text-zinc-100", "{entry.name}" }
+                                                            if !entry.shortcut.is_empty() {
+                                                                div { class: "text-xs text-emerald-300", "{entry.shortcut}" }
+                                                            }
+                                                        }
+                                                        div { class: "mt-1 text-xs text-zinc-400", "{entry.id}" }
+                                                        if !entry.description.is_empty() {
+                                                            div { class: "mt-1 text-xs text-zinc-300", "{entry.description}" }
+                                                        }
+                                                        if !entry.when_clause.is_empty() {
+                                                            div { class: "mt-1 text-xs text-amber-300", "when: {entry.when_clause}" }
+                                                        }
+                                                        if !entry.mappings.is_empty() {
+                                                            div { class: "mt-2 text-xs text-cyan-300", "mapped:" }
+                                                            for mapping in &entry.mappings {
+                                                                div { class: "text-xs text-cyan-200", "{mapping}" }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1153,7 +1364,6 @@ fn ChartView() -> Element {
 
                     let frame_start = std::time::Instant::now();
 
-                    let mut scene = vello::Scene::new();
                     let base_scale = manager.fit_to_width_scale(bounds.width, bounds.dpr);
                     let pad = 20.0 * bounds.dpr; // 20 CSS px padding, scaled to physical
                     let transform = Affine::translate((
@@ -1258,15 +1468,6 @@ fn ChartView() -> Element {
                     // Read hover point for highlight rendering (subscribe so effect re-fires on hover)
                     let hover_point = *CHART_HOVER_SCENE_POINT.read();
 
-                    manager.render_to_scene(
-                        &mut scene,
-                        bounds.width,
-                        bounds.height,
-                        transform,
-                        cursor_tick,
-                        hover_point,
-                    );
-
                     // Update musical position display from cursor state
                     if let Some(tick) = cursor_tick {
                         let pos = manager.musical_position_for_tick(tick);
@@ -1290,13 +1491,18 @@ fn ChartView() -> Element {
                             gfx.resize(win_size.width, win_size.height);
                         }
 
-                        gfx.render_chart_scene(
-                            &scene,
-                            bounds.x,
-                            bounds.y,
-                            bounds.width,
-                            bounds.height,
-                        );
+                        let dock_offset = Affine::translate((bounds.x, bounds.y));
+                        gfx.render_chart(|painter| {
+                            manager.render_to_scene(
+                                painter,
+                                bounds.width,
+                                bounds.height,
+                                dock_offset,
+                                transform,
+                                cursor_tick,
+                                hover_point,
+                            );
+                        });
                     }
                     dioxus::desktop::window().window.request_redraw();
 
@@ -1482,11 +1688,8 @@ fn ChartPreviewPanel() -> Element {
 
         // Layout generation counter — bumped when layout changes, triggers re-render
         let mut perf_layout_gen = use_signal(|| 0u64);
-        let perf_static_scene_cache = use_hook(|| {
-            std::rc::Rc::new(std::cell::RefCell::new(
-                None::<(PerfStaticSceneKey, vello::Scene)>,
-            ))
-        });
+        let perf_static_scene_cache =
+            use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(None::<PerfStaticSceneKey>)));
         let perf_cursor_frame_clock = use_signal(|| 0u64);
         let perf_cursor_motion = use_hook(|| {
             std::rc::Rc::new(std::cell::RefCell::new(PerfCursorMotionState::default()))
@@ -1794,54 +1997,16 @@ fn ChartPreviewPanel() -> Element {
                     let needs_static_rebuild = {
                         let cache = static_scene_cache.borrow();
                         match cache.as_ref() {
-                            Some((cached_key, _)) => !cached_key.approx_eq(current_key),
+                            Some(cached_key) => !cached_key.approx_eq(current_key),
                             None => true,
                         }
                     };
 
-                    let mut static_build_ms = 0.0;
                     if needs_static_rebuild {
-                        let static_started = Instant::now();
-                        let mut static_scene = vello::Scene::new();
-                        manager.render_static_layer_to_scene(
-                            &mut static_scene,
-                            bounds.width,
-                            bounds.height,
-                            transform,
-                        );
-                        *static_scene_cache.borrow_mut() = Some((current_key, static_scene));
-                        static_build_ms = static_started.elapsed().as_secs_f64() * 1000.0;
+                        *static_scene_cache.borrow_mut() = Some(current_key);
                     }
 
-                    let mut scene = vello::Scene::new();
-                    {
-                        let cache = static_scene_cache.borrow();
-                        if let Some((_, static_scene)) = cache.as_ref() {
-                            scene.append(static_scene, None);
-                        } else {
-                            manager.render_static_layer_to_scene(
-                                &mut scene,
-                                bounds.width,
-                                bounds.height,
-                                transform,
-                            );
-                        }
-                    }
-                    let overlay_started = Instant::now();
-                    manager.render_overlay_layer_to_scene(
-                        &mut scene,
-                        bounds.width,
-                        bounds.height,
-                        transform,
-                        cursor,
-                        if playback_is_playing {
-                            None
-                        } else {
-                            hover_point
-                        },
-                    );
-                    let overlay_ms = overlay_started.elapsed().as_secs_f64() * 1000.0;
-
+                    let render_start = Instant::now();
                     if let Ok(mut gfx) = graphics_clone.lock() {
                         let win_size = dioxus::desktop::window().window.inner_size();
                         let (sw, sh) = gfx.size();
@@ -1849,19 +2014,38 @@ fn ChartPreviewPanel() -> Element {
                             gfx.resize(win_size.width, win_size.height);
                         }
 
-                        gfx.render_chart_scene(
-                            &scene,
-                            bounds.x,
-                            bounds.y,
-                            bounds.width,
-                            bounds.height,
-                        );
+                        let dock_offset = Affine::translate((bounds.x, bounds.y));
+                        gfx.render_chart(|painter| {
+                            manager.render_static_layer_to_scene(
+                                painter,
+                                bounds.width,
+                                bounds.height,
+                                dock_offset,
+                                transform,
+                            );
+                            manager.render_overlay_layer_to_scene(
+                                painter,
+                                bounds.width,
+                                bounds.height,
+                                dock_offset,
+                                transform,
+                                cursor,
+                                if playback_is_playing {
+                                    None
+                                } else {
+                                    hover_point
+                                },
+                            );
+                        });
                     }
+                    let render_ms = render_start.elapsed().as_secs_f64() * 1000.0;
                     dioxus::desktop::window().window.request_redraw();
 
                     let frame_ms = frame_started.elapsed().as_secs_f64() * 1000.0;
                     let mut accum = render_accumulator.borrow_mut();
-                    accum.record(static_build_ms, overlay_ms, frame_ms, needs_static_rebuild);
+                    // static_build_ms is now combined in render_ms; pass 0 for overlay
+                    // since layers are no longer timed separately
+                    accum.record(render_ms, 0.0, frame_ms, needs_static_rebuild);
                     if let Some((
                         frames,
                         avg_frame_ms,

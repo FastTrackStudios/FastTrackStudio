@@ -132,29 +132,15 @@ impl ChartGraphics {
         (self.width, self.height)
     }
 
-    /// Render a pre-built Vello scene from the engraver pipeline.
+    /// Render chart content through the anyrender PaintScene abstraction.
     ///
-    /// This bridges the engraver's chart output (a `vello::Scene`) to the
-    /// WGPU surface. The scene is appended at the specified bounds with
-    /// DPI-scaled transform.
-    ///
-    /// # Arguments
-    /// * `chart_scene` - Pre-rendered chart scene from `ChartLayoutManager::render_to_scene`
-    /// * `x`, `y` - Physical pixel position of the chart area
-    /// * `width`, `height` - Physical pixel dimensions of the chart area
-    pub fn render_chart_scene(
-        &mut self,
-        chart_scene: &vello::Scene,
-        x: f64,
-        y: f64,
-        width: f64,
-        height: f64,
-    ) {
-        self.renderer.render(|painter| {
-            let scene = painter.scene_mut();
-            // Append the engraver's complete scene at the chart area position
-            scene.append(chart_scene, Some(Affine::translate((x, y))));
-        });
+    /// The draw function receives a `PaintScene` painter to draw chart content
+    /// directly to the WGPU surface.
+    pub fn render_chart<F>(&mut self, draw_fn: F)
+    where
+        F: FnOnce(&mut <VelloWindowRenderer as WindowRenderer>::ScenePainter<'_>),
+    {
+        self.renderer.render(draw_fn);
     }
 
     /// Render a bounding box outline to visualize the chart area.
