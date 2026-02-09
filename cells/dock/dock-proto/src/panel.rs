@@ -25,10 +25,14 @@ pub enum PanelId {
     SongParts,
     SongSelector,
     SceneGrid,
+    FxBrowser,
 
     // DAW panels
     Transport,
     Mixer,
+    FxChainTree,
+    TrackControlPanel,
+    ArrangementView,
 
     // Utility panels
     Navigator,
@@ -63,8 +67,12 @@ impl PanelId {
             Self::SongParts => "song-parts",
             Self::SongSelector => "song-selector",
             Self::SceneGrid => "scene-grid",
+            Self::FxBrowser => "fx-browser",
             Self::Transport => "transport",
             Self::Mixer => "mixer",
+            Self::FxChainTree => "fx-chain-tree",
+            Self::TrackControlPanel => "track-control-panel",
+            Self::ArrangementView => "arrangement-view",
             Self::Navigator => "navigator",
             Self::Inspector => "inspector",
         }
@@ -86,8 +94,12 @@ impl PanelId {
             "song-parts" => Some(Self::SongParts),
             "song-selector" => Some(Self::SongSelector),
             "scene-grid" => Some(Self::SceneGrid),
+            "fx-browser" => Some(Self::FxBrowser),
             "transport" => Some(Self::Transport),
             "mixer" => Some(Self::Mixer),
+            "fx-chain-tree" => Some(Self::FxChainTree),
+            "track-control-panel" => Some(Self::TrackControlPanel),
+            "arrangement-view" => Some(Self::ArrangementView),
             "navigator" => Some(Self::Navigator),
             "inspector" => Some(Self::Inspector),
             _ => None,
@@ -114,26 +126,39 @@ impl PanelId {
                 | Self::ProfileBrowser
                 | Self::SongParts
                 | Self::SongSelector
-                | Self::SceneGrid => "Signal",
-                Self::Transport | Self::Mixer => "DAW",
+                | Self::SceneGrid
+                | Self::FxBrowser => "Signal",
+                Self::Transport
+                | Self::Mixer
+                | Self::FxChainTree
+                | Self::TrackControlPanel
+                | Self::ArrangementView => "DAW",
                 Self::Navigator | Self::Inspector => "Utility",
             };
 
             let default_position = match panel {
-                Self::Navigator | Self::Setlist | Self::PresetBrowser | Self::ProfileBrowser => {
-                    DockPosition::Left
-                }
-                Self::Inspector => DockPosition::Right,
+                Self::Navigator
+                | Self::Setlist
+                | Self::PresetBrowser
+                | Self::ProfileBrowser
+                | Self::TrackControlPanel => DockPosition::Left,
+                Self::Inspector | Self::FxBrowser => DockPosition::Right,
                 Self::Transport | Self::Mixer | Self::SceneGrid => DockPosition::Bottom,
+                Self::FxChainTree => DockPosition::Left,
+                Self::ArrangementView => DockPosition::Center,
                 _ => DockPosition::Center,
             };
 
-            registry.register(
-                PanelDescriptor::new(panel.as_str(), panel.display_name())
-                    .with_icon(panel.icon_name())
-                    .with_category(category)
-                    .with_default_position(default_position),
-            );
+            let mut descriptor = PanelDescriptor::new(panel.as_str(), panel.display_name())
+                .with_icon(panel.icon_name())
+                .with_category(category)
+                .with_default_position(default_position);
+
+            if matches!(panel, Self::Transport) {
+                descriptor = descriptor.with_visibility_when("tab:performance");
+            }
+
+            registry.register(descriptor);
         }
     }
 
@@ -152,8 +177,12 @@ impl PanelId {
             Self::SongParts => "Song Parts",
             Self::SongSelector => "Song Selector",
             Self::SceneGrid => "Scene Grid",
+            Self::FxBrowser => "FX Parameters",
             Self::Transport => "Transport",
             Self::Mixer => "Mixer",
+            Self::FxChainTree => "FX Chain",
+            Self::TrackControlPanel => "Track Control Panel",
+            Self::ArrangementView => "Arrangement",
             Self::Navigator => "Navigator",
             Self::Inspector => "Inspector",
         }
@@ -174,8 +203,12 @@ impl PanelId {
             Self::SongParts => "layers",
             Self::SongSelector => "list-music",
             Self::SceneGrid => "layout-grid",
+            Self::FxBrowser => "plug",
             Self::Transport => "disc",
             Self::Mixer => "sliders-horizontal",
+            Self::FxChainTree => "list-tree",
+            Self::TrackControlPanel => "list",
+            Self::ArrangementView => "layout-dashboard",
             Self::Navigator => "compass",
             Self::Inspector => "search",
         }
@@ -195,8 +228,12 @@ impl PanelId {
             Self::SongParts,
             Self::SongSelector,
             Self::SceneGrid,
+            Self::FxBrowser,
             Self::Transport,
             Self::Mixer,
+            Self::FxChainTree,
+            Self::TrackControlPanel,
+            Self::ArrangementView,
             Self::Navigator,
             Self::Inspector,
             Self::Settings,

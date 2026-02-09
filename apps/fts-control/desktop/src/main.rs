@@ -67,6 +67,7 @@ use session_ui::{
     SONG_CHARTS,
 };
 
+use daw_ui::{ArrangementView, FxBrowserDockPanel, FxChainTree, MixerPanel, TrackControlPanel};
 use keyflow_ui::signals::{ChartEditorBounds, PreviewMode};
 use keyflow_ui::{
     ChartEditorLayout, ChartLayoutManager, RenderStats, CHART_BASE_SCALE, CHART_CURSOR_POSITION,
@@ -76,8 +77,8 @@ use keyflow_ui::{
 };
 use kurbo::Affine;
 use signal_ui::{
-    PresetBrowserPanel, ProfileBrowserPanel, RigGridPanel, RigLayout, SceneGridDockPanel,
-    SongPartsPanel, SongSelectorPanel,
+    PresetBrowserPanel, ProfileBrowserPanel, RigGridPanel, SceneGridDockPanel, SongPartsPanel,
+    SongSelectorPanel,
 };
 
 use dock_dioxus::{init_dock_presets, DockProvider, DockRoot, PanelRenderer, PresetBar};
@@ -352,6 +353,11 @@ fn App() -> Element {
             PanelId::SongParts => rsx! { SongPartsPanel {} },
             PanelId::SongSelector => rsx! { SongSelectorPanel {} },
             PanelId::SceneGrid => rsx! { SceneGridDockPanel {} },
+            PanelId::FxBrowser => rsx! { FxBrowserDockPanel {} },
+            PanelId::Mixer => rsx! { MixerPanel {} },
+            PanelId::FxChainTree => rsx! { FxChainTree {} },
+            PanelId::TrackControlPanel => rsx! { TrackControlPanel {} },
+            PanelId::ArrangementView => rsx! { ArrangementView {} },
             PanelId::Settings => rsx! { SettingsView {} },
             _ => rsx! {
                 div {
@@ -855,7 +861,8 @@ fn App() -> Element {
                                     "performance" => rsx! { PerformanceWithChartToggle {} },
                                     "chart" => rsx! { ChartView {} },
                                     "setlist" => rsx! { SetlistView {} },
-                                    "rig" => rsx! { RigLayout {} },
+                                    "rig" => rsx! { RigGridPanel {} },
+                                    "fx" => rsx! { FxBrowserDockPanel {} },
                                     "settings" => rsx! { SettingsView {} },
                                     _ => rsx! { PerformanceWithChartToggle {} },
                                 }
@@ -1010,6 +1017,8 @@ fn handle_dock_preset_shortcut(e: &KeyboardEvent) -> bool {
                 Key::F7 => Some(2),
                 Key::F8 => Some(3),
                 Key::F9 => Some(4),
+                Key::F10 => Some(5),
+                Key::F11 => Some(6),
                 _ => None,
             };
             if let Some(idx) = preset_index {
@@ -1026,6 +1035,13 @@ fn handle_dock_preset_shortcut(e: &KeyboardEvent) -> bool {
                 // Load target preset
                 let presets = dock_dioxus::DOCK_PRESETS.read();
                 if let Some(preset) = presets.presets.get(idx) {
+                    {
+                        let mut workspace = dock_dioxus::DOCK_WORKSPACE.write();
+                        let main_window = workspace.main_window;
+                        if let Some(main) = workspace.windows.get_mut(&main_window) {
+                            main.layout = preset.layout.clone();
+                        }
+                    }
                     *dock_dioxus::DOCK_LAYOUT.write() = preset.layout.clone();
                     *dock_dioxus::DOCK_ACTIVE_PRESET_INDEX.write() = idx;
                 }
