@@ -173,6 +173,7 @@ fn ParameterTableView(props: ParameterTableViewProps) -> Element {
     // Clone data into owned values so closures can be 'static
     let fx_states = param_snap.fx_states.clone();
     let fx_count = fx_states.len();
+
     // Pre-collect all FX GUIDs for "Collapse All" button
     let all_fx_guids: HashSet<String> = fx_states.iter().map(|s| s.fx_guid.clone()).collect();
 
