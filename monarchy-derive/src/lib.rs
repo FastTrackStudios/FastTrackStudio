@@ -406,10 +406,10 @@ pub fn derive_metadata_builder(input: TokenStream) -> TokenStream {
         .iter()
         .filter_map(|field| {
             let field_name = field.ident.as_ref()?;
-            let field_enum_name = Ident::new(&format!("{}Field", struct_name), Span::call_site());
+            let _field_enum_name = Ident::new(&format!("{}Field", struct_name), Span::call_site());
 
             // Get the field enum variant name (PascalCase)
-            let variant_name = Ident::new(
+            let _variant_name = Ident::new(
                 &field_name.to_string().to_case(Case::Pascal),
                 field_name.span(),
             );
