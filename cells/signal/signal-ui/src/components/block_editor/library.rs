@@ -22,53 +22,213 @@ pub struct BlockTypeDefinition {
     pub icon: &'static str,
     pub color: &'static str,
     pub description: &'static str,
+    pub category: &'static str,
 }
 
 /// The predefined block types available in the Block Editor.
+///
+/// Organized by signal chain order: Input → Dynamics → Drive → Amp → Cab → EQ →
+/// Modulation → Motion → Time → Special → Utility.
 pub fn predefined_block_types() -> Vec<BlockTypeDefinition> {
     vec![
+        // ── Drive ────────────────────────────
         BlockTypeDefinition {
-            block_type: BlockType::Eq,
-            display_name: "EQ",
-            icon: "equalizer",
-            color: "text-sky-400",
-            description: "Equalization — shape frequency response",
-        },
-        BlockTypeDefinition {
-            block_type: BlockType::Volume,
+            block_type: BlockType::Boost,
             display_name: "Boost",
-            icon: "trending-up",
-            color: "text-lime-400",
-            description: "Clean boost — drive the front of your signal",
-        },
-        BlockTypeDefinition {
-            block_type: BlockType::Compressor,
-            display_name: "Compressor",
-            icon: "activity",
-            color: "text-violet-400",
-            description: "Dynamics control — tame peaks and add sustain",
+            icon: "zap",
+            color: "text-orange-300",
+            description: "Clean gain stage",
+            category: "Drive",
         },
         BlockTypeDefinition {
             block_type: BlockType::Drive,
             display_name: "Drive",
             icon: "flame",
             color: "text-orange-400",
-            description: "Overdrive / Distortion / Fuzz",
+            description: "OD / Distortion / Fuzz",
+            category: "Drive",
         },
+        // ── Amp + Cab ────────────────────────
         BlockTypeDefinition {
             block_type: BlockType::Amp,
             display_name: "Amp",
             icon: "speaker",
             color: "text-amber-400",
-            description: "Amplifier modeling — tube, solid state, digital",
+            description: "Amplifier modeling",
+            category: "Amp",
         },
         BlockTypeDefinition {
             block_type: BlockType::Cabinet,
             display_name: "Cab",
             icon: "box",
             color: "text-yellow-400",
-            description: "Cabinet / IR loader — speaker simulation",
+            description: "Cabinet / IR loader",
+            category: "Amp",
         },
+        // ── Dynamics ─────────────────────────
+        BlockTypeDefinition {
+            block_type: BlockType::Compressor,
+            display_name: "Compressor",
+            icon: "activity",
+            color: "text-blue-400",
+            description: "Dynamics control",
+            category: "Dynamics",
+        },
+        BlockTypeDefinition {
+            block_type: BlockType::Gate,
+            display_name: "Gate",
+            icon: "shield",
+            color: "text-blue-400",
+            description: "Noise gate",
+            category: "Dynamics",
+        },
+        BlockTypeDefinition {
+            block_type: BlockType::Limiter,
+            display_name: "Limiter",
+            icon: "shield",
+            color: "text-blue-500",
+            description: "Peak limiter",
+            category: "Dynamics",
+        },
+        // ── EQ ───────────────────────────────
+        BlockTypeDefinition {
+            block_type: BlockType::Eq,
+            display_name: "EQ",
+            icon: "equalizer",
+            color: "text-emerald-400",
+            description: "Shape frequency response",
+            category: "EQ",
+        },
+        BlockTypeDefinition {
+            block_type: BlockType::Crossover,
+            display_name: "Crossover",
+            icon: "git-branch",
+            color: "text-emerald-300",
+            description: "Frequency band splitter",
+            category: "EQ",
+        },
+        // ── Modulation ───────────────────────
+        BlockTypeDefinition {
+            block_type: BlockType::Chorus,
+            display_name: "Chorus",
+            icon: "waves",
+            color: "text-purple-400",
+            description: "Chorus modulation",
+            category: "Modulation",
+        },
+        BlockTypeDefinition {
+            block_type: BlockType::Flanger,
+            display_name: "Flanger",
+            icon: "waves",
+            color: "text-purple-400",
+            description: "Flanger modulation",
+            category: "Modulation",
+        },
+        BlockTypeDefinition {
+            block_type: BlockType::Phaser,
+            display_name: "Phaser",
+            icon: "waves",
+            color: "text-purple-400",
+            description: "Phase shifting",
+            category: "Modulation",
+        },
+        // ── Motion ───────────────────────────
+        BlockTypeDefinition {
+            block_type: BlockType::Tremolo,
+            display_name: "Tremolo",
+            icon: "ripple",
+            color: "text-violet-300",
+            description: "Volume modulation",
+            category: "Motion",
+        },
+        BlockTypeDefinition {
+            block_type: BlockType::Vibrato,
+            display_name: "Vibrato",
+            icon: "ripple",
+            color: "text-violet-300",
+            description: "Pitch wobble",
+            category: "Motion",
+        },
+        BlockTypeDefinition {
+            block_type: BlockType::Rotary,
+            display_name: "Rotary",
+            icon: "refresh-cw",
+            color: "text-violet-300",
+            description: "Leslie cabinet sim",
+            category: "Motion",
+        },
+        // ── Time ─────────────────────────────
+        BlockTypeDefinition {
+            block_type: BlockType::Delay,
+            display_name: "Delay",
+            icon: "clock",
+            color: "text-cyan-400",
+            description: "Echo / tape delay",
+            category: "Time",
+        },
+        BlockTypeDefinition {
+            block_type: BlockType::Reverb,
+            display_name: "Reverb",
+            icon: "cloud",
+            color: "text-sky-400",
+            description: "Room / hall / plate",
+            category: "Time",
+        },
+        BlockTypeDefinition {
+            block_type: BlockType::Freeze,
+            display_name: "Freeze",
+            icon: "snowflake",
+            color: "text-cyan-300",
+            description: "Infinite sustain",
+            category: "Time",
+        },
+        // ── Special ──────────────────────────
+        BlockTypeDefinition {
+            block_type: BlockType::Pitch,
+            display_name: "Pitch",
+            icon: "trending-up",
+            color: "text-indigo-400",
+            description: "Pitch shift / harmony",
+            category: "Special",
+        },
+        BlockTypeDefinition {
+            block_type: BlockType::Wah,
+            display_name: "Wah",
+            icon: "move",
+            color: "text-pink-400",
+            description: "Wah / auto-wah",
+            category: "Special",
+        },
+        BlockTypeDefinition {
+            block_type: BlockType::Filter,
+            display_name: "Filter",
+            icon: "filter",
+            color: "text-pink-400",
+            description: "Envelope / resonant filter",
+            category: "Special",
+        },
+        BlockTypeDefinition {
+            block_type: BlockType::Doubler,
+            display_name: "Doubler",
+            icon: "copy",
+            color: "text-pink-300",
+            description: "Stereo doubling",
+            category: "Special",
+        },
+    ]
+}
+
+/// Get all unique categories in display order.
+pub fn block_type_categories() -> Vec<&'static str> {
+    vec![
+        "Drive",
+        "Amp",
+        "Dynamics",
+        "EQ",
+        "Modulation",
+        "Motion",
+        "Time",
+        "Special",
     ]
 }
 
@@ -119,6 +279,7 @@ pub struct BlockSnapshotSlot {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// All block presets in the library, grouped implicitly by block_type.
+/// Used as a local write-back cache; DB is the source of truth.
 pub static BLOCK_LIBRARY: GlobalSignal<Vec<BlockPresetSlot>> = Signal::global(Vec::new);
 
 /// Currently selected block type in the left sidebar.
@@ -136,6 +297,19 @@ pub static SELECTED_FX_GUIDS: GlobalSignal<HashSet<String>> = Signal::global(Has
 /// Status message for the block editor.
 pub static BLOCK_EDITOR_STATUS: GlobalSignal<String> =
     Signal::global(|| "Select a block type to begin".to_string());
+
+/// DB-loaded block presets for the currently selected type.
+/// This is the primary read source; BLOCK_LIBRARY is the legacy in-memory fallback.
+pub static DB_BLOCK_PRESETS: GlobalSignal<Vec<signal_control::block_preset::Model>> =
+    Signal::global(Vec::new);
+
+/// DB-loaded block snapshots for the currently selected preset.
+pub static DB_BLOCK_SNAPSHOTS: GlobalSignal<Vec<signal_control::block_snapshot::Model>> =
+    Signal::global(Vec::new);
+
+/// Per-type preset counts from DB (for badge display in the type browser).
+pub static DB_BLOCK_TYPE_COUNTS: GlobalSignal<std::collections::HashMap<String, usize>> =
+    Signal::global(std::collections::HashMap::new);
 
 // Manual PartialEq: compare by UUID only (DawParameterSnapshot doesn't impl PartialEq).
 impl PartialEq for BlockPresetSlot {
