@@ -13,6 +13,8 @@ mod m20250101_000006_create_sync_metadata;
 mod m20250101_000007_create_preset_versions;
 mod m20250101_000008_add_preset_favorite;
 mod m20250101_000009_create_daw_snapshots;
+mod m20250101_000010_create_block_presets;
+mod m20250101_000011_create_module_presets;
 
 pub struct Migrator;
 
@@ -29,6 +31,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000007_create_preset_versions::Migration),
             Box::new(m20250101_000008_add_preset_favorite::Migration),
             Box::new(m20250101_000009_create_daw_snapshots::Migration),
+            Box::new(m20250101_000010_create_block_presets::Migration),
+            Box::new(m20250101_000011_create_module_presets::Migration),
         ]
     }
 }
