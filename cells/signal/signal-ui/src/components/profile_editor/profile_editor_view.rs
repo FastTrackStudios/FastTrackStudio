@@ -4,66 +4,64 @@
 //! Center: Scene template table with preset/snapshot assignments, reordering
 //! Right: Available presets picker for scene assignment
 
+use crate::components::shared::EntityEditor;
 use crate::prelude::*;
 use crate::signals::RIG_SERVICE;
 use signal_control::{preset_entity, profile_entity, scene_template};
 use uuid::Uuid;
 
-// ── Global Signals ───────────────────────────────────────────────────────────
-
-static PROFILE_LIST: GlobalSignal<Vec<profile_entity::Model>> = Signal::global(Vec::new);
-static SELECTED_PROFILE_ID: GlobalSignal<Option<Uuid>> = Signal::global(|| None);
-static SCENE_TEMPLATES: GlobalSignal<Vec<scene_template::Model>> = Signal::global(Vec::new);
-static AVAILABLE_PRESETS: GlobalSignal<Vec<preset_entity::Model>> = Signal::global(Vec::new);
-static PROFILE_STATUS: GlobalSignal<String> = Signal::global(String::new);
-
-// ── Async Refresh Helpers ────────────────────────────────────────────────────
-
-async fn refresh_profiles() {
-    let Some(ctl) = RIG_SERVICE.read().clone() else {
-        return;
-    };
-    match ctl.list_profiles().await {
-        Ok(profiles) => *PROFILE_LIST.write() = profiles,
-        Err(e) => warn!("Failed to load profiles: {e}"),
-    }
-}
-
-async fn refresh_scene_templates(profile_id: Uuid) {
-    let Some(ctl) = RIG_SERVICE.read().clone() else {
-        return;
-    };
-    match ctl.list_scene_templates(profile_id).await {
-        Ok(templates) => {
-            let mut sorted = templates;
-            sorted.sort_by_key(|t| t.sort_order);
-            *SCENE_TEMPLATES.write() = sorted;
-        }
-        Err(e) => warn!("Failed to load scene templates: {e}"),
-    }
-}
-
-async fn refresh_available_presets() {
-    let Some(ctl) = RIG_SERVICE.read().clone() else {
-        return;
-    };
-    match ctl.list_rig_presets().await {
-        Ok(presets) => *AVAILABLE_PRESETS.write() = presets,
-        Err(e) => warn!("Failed to load presets: {e}"),
-    }
-}
-
 // ── Main Component ───────────────────────────────────────────────────────────
 
 #[component]
 pub fn ProfileEditorView() -> Element {
-    // Clone data out of signals so read guards are dropped before event handlers
-    // can trigger writes (prevents AlreadyBorrowed panics during re-render).
-    let profiles = PROFILE_LIST.cloned();
-    let selected_id = *SELECTED_PROFILE_ID.read();
-    let scenes = SCENE_TEMPLATES.cloned();
-    let presets = AVAILABLE_PRESETS.cloned();
-    let status = PROFILE_STATUS.cloned();
+    // All editor state is component-local — fresh on each mount, no stale globals.
+    let mut profile_list = use_signal(Vec::<profile_entity::Model>::new);
+    let mut selected_profile_id = use_signal(|| None::<Uuid>);
+    let mut scene_templates = use_signal(Vec::<scene_template::Model>::new);
+    let mut available_presets = use_signal(Vec::<preset_entity::Model>::new);
+    let mut profile_status = use_signal(String::new);
+
+    // ── Async Refresh Helpers (capture local signals) ────────────────────────
+
+    let refresh_profiles = move || {
+        spawn(async move {
+            let Some(ctl) = RIG_SERVICE.read().clone() else {
+                return;
+            };
+            match ctl.list_profiles().await {
+                Ok(profiles) => profile_list.set(profiles),
+                Err(e) => warn!("Failed to load profiles: {e}"),
+            }
+        })
+    };
+
+    let refresh_scene_templates = move |profile_id: Uuid| {
+        spawn(async move {
+            let Some(ctl) = RIG_SERVICE.read().clone() else {
+                return;
+            };
+            match ctl.list_scene_templates(profile_id).await {
+                Ok(templates) => {
+                    let mut sorted = templates;
+                    sorted.sort_by_key(|t| t.sort_order);
+                    scene_templates.set(sorted);
+                }
+                Err(e) => warn!("Failed to load scene templates: {e}"),
+            }
+        })
+    };
+
+    let refresh_available_presets = move || {
+        spawn(async move {
+            let Some(ctl) = RIG_SERVICE.read().clone() else {
+                return;
+            };
+            match ctl.list_rig_presets().await {
+                Ok(presets) => available_presets.set(presets),
+                Err(e) => warn!("Failed to load presets: {e}"),
+            }
+        })
+    };
 
     // Local state for dialogs
     let mut show_new_dialog = use_signal(|| false);
@@ -75,32 +73,32 @@ pub fn ProfileEditorView() -> Element {
 
     // Load data on mount
     use_effect(move || {
-        spawn(async move {
-            refresh_profiles().await;
-            refresh_available_presets().await;
-        });
+        refresh_profiles();
+        refresh_available_presets();
     });
 
     // Load scene templates when profile selection changes
     use_effect(move || {
-        let pid = *SELECTED_PROFILE_ID.read();
+        let pid = *selected_profile_id.read();
         if let Some(id) = pid {
-            spawn(async move {
-                refresh_scene_templates(id).await;
-            });
+            refresh_scene_templates(id);
         } else {
-            SCENE_TEMPLATES.write().clear();
+            scene_templates.write().clear();
         }
     });
+
+    // Clone data out of signals so read guards are dropped before event handlers.
+    let profiles = profile_list.cloned();
+    let selected_id = *selected_profile_id.read();
+    let scenes = scene_templates.cloned();
+    let presets = available_presets.cloned();
+    let status = profile_status.cloned();
 
     let selected_profile = selected_id.and_then(|id| profiles.iter().find(|p| p.id == id));
 
     rsx! {
-        div { class: "flex h-full w-full overflow-hidden bg-card",
-            // ══════════════════════════════════════════════════════════════
-            // LEFT PANEL — Profile List
-            // ══════════════════════════════════════════════════════════════
-            div { class: "w-56 flex flex-col border-r border-border/30 bg-zinc-900/20 flex-shrink-0 h-full",
+        EntityEditor {
+            left: rsx! {
                 // Header
                 div { class: "px-4 py-3 border-b border-border/30 flex-shrink-0",
                     div { class: "flex items-center justify-between",
@@ -132,7 +130,7 @@ pub fn ProfileEditorView() -> Element {
                                         "px-3 py-2.5 cursor-pointer border-l-2 border-transparent hover:bg-zinc-800/40 transition-colors"
                                     },
                                     onclick: move |_| {
-                                        *SELECTED_PROFILE_ID.write() = Some(pid);
+                                        selected_profile_id.set(Some(pid));
                                     },
                                     div { class: "flex items-center justify-between",
                                         span { class: "text-xs font-medium text-zinc-200 truncate", "{pname}" }
@@ -158,10 +156,12 @@ pub fn ProfileEditorView() -> Element {
                                                             if let Err(e) = ctl.delete_profile(pid).await {
                                                                 warn!("Delete profile failed: {e}");
                                                             }
-                                                            if *SELECTED_PROFILE_ID.read() == Some(pid) {
-                                                                *SELECTED_PROFILE_ID.write() = None;
+                                                            if *selected_profile_id.read() == Some(pid) {
+                                                                selected_profile_id.set(None);
                                                             }
-                                                            refresh_profiles().await;
+                                                            if let Ok(list) = ctl.list_profiles().await {
+                                                                profile_list.set(list);
+                                                            }
                                                         });
                                                     },
                                                     span { class: "text-[9px]", "\u{2715}" }
@@ -200,13 +200,15 @@ pub fn ProfileEditorView() -> Element {
                                             let rig_id = Uuid::nil(); // Default rig
                                             match ctl.create_profile(&val, rig_id, None).await {
                                                 Ok(id) => {
-                                                    *PROFILE_STATUS.write() = format!("Created '{val}'");
-                                                    refresh_profiles().await;
-                                                    *SELECTED_PROFILE_ID.write() = Some(id);
+                                                    profile_status.set(format!("Created '{val}'"));
+                                                    if let Ok(list) = ctl.list_profiles().await {
+                                                        profile_list.set(list);
+                                                    }
+                                                    selected_profile_id.set(Some(id));
                                                 }
                                                 Err(e) => {
                                                     warn!("Create profile failed: {e}");
-                                                    *PROFILE_STATUS.write() = format!("Failed: {e}");
+                                                    profile_status.set(format!("Failed: {e}"));
                                                 }
                                             }
                                         });
@@ -229,12 +231,8 @@ pub fn ProfileEditorView() -> Element {
                         }
                     }
                 }
-            }
-
-            // ══════════════════════════════════════════════════════════════
-            // CENTER PANEL — Scene Templates
-            // ══════════════════════════════════════════════════════════════
-            div { class: "flex-1 flex flex-col min-h-0 min-w-0",
+            },
+            center: rsx! {
                 if let Some(profile) = selected_profile {
                     // Profile header
                     div { class: "px-4 py-2.5 border-b border-border/30 flex items-center gap-3 flex-shrink-0 bg-zinc-900/30",
@@ -280,13 +278,14 @@ pub fn ProfileEditorView() -> Element {
                                         let val = rename_name().trim().to_string();
                                         if !val.is_empty() {
                                             show_rename_dialog.set(false);
-                                            if let Some(pid) = *SELECTED_PROFILE_ID.read() {
+                                            if let Some(pid) = *selected_profile_id.read() {
                                                 spawn(async move {
                                                     let Some(ctl) = RIG_SERVICE.read().clone() else { return };
                                                     if let Err(e) = ctl.update_profile(pid, Some(&val), None, None, None, None).await {
                                                         warn!("Rename failed: {e}");
+                                                    } else if let Ok(list) = ctl.list_profiles().await {
+                                                        profile_list.set(list);
                                                     }
-                                                    refresh_profiles().await;
                                                 });
                                             }
                                         }
@@ -313,14 +312,18 @@ pub fn ProfileEditorView() -> Element {
                                         let val = new_scene_name().trim().to_string();
                                         if !val.is_empty() {
                                             show_add_scene_dialog.set(false);
-                                            if let Some(pid) = *SELECTED_PROFILE_ID.read() {
-                                                let sort_order = SCENE_TEMPLATES.read().len() as i32;
+                                            if let Some(pid) = *selected_profile_id.read() {
+                                                let sort_order = scene_templates.read().len() as i32;
                                                 spawn(async move {
                                                     let Some(ctl) = RIG_SERVICE.read().clone() else { return };
                                                     // Use a nil preset_id — user will assign later
                                                     match ctl.add_scene_template(pid, &val, Uuid::nil(), None, sort_order).await {
                                                         Ok(_id) => {
-                                                            refresh_scene_templates(pid).await;
+                                                            if let Ok(templates) = ctl.list_scene_templates(pid).await {
+                                                                let mut sorted = templates;
+                                                                sorted.sort_by_key(|t| t.sort_order);
+                                                                scene_templates.set(sorted);
+                                                            }
                                                         }
                                                         Err(e) => warn!("Add scene failed: {e}"),
                                                     }
@@ -404,14 +407,18 @@ pub fn ProfileEditorView() -> Element {
                                                         class: "p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 transition-colors",
                                                         title: "Move up",
                                                         onclick: move |_| {
-                                                            let mut ids: Vec<Uuid> = SCENE_TEMPLATES.read().iter().map(|s| s.id).collect();
+                                                            let mut ids: Vec<Uuid> = scene_templates.read().iter().map(|s| s.id).collect();
                                                             ids.swap(idx, idx - 1);
                                                             spawn(async move {
                                                                 let Some(ctl) = RIG_SERVICE.read().clone() else { return };
                                                                 if let Err(e) = ctl.reorder_scene_templates(profile_id, &ids).await {
                                                                     warn!("Reorder failed: {e}");
                                                                 }
-                                                                refresh_scene_templates(profile_id).await;
+                                                                if let Ok(templates) = ctl.list_scene_templates(profile_id).await {
+                                                                    let mut sorted = templates;
+                                                                    sorted.sort_by_key(|t| t.sort_order);
+                                                                    scene_templates.set(sorted);
+                                                                }
                                                             });
                                                         },
                                                         span { class: "text-[9px]", "\u{2191}" }
@@ -426,14 +433,18 @@ pub fn ProfileEditorView() -> Element {
                                                                 class: "p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 transition-colors",
                                                                 title: "Move down",
                                                                 onclick: move |_| {
-                                                                    let mut ids: Vec<Uuid> = SCENE_TEMPLATES.read().iter().map(|s| s.id).collect();
+                                                                    let mut ids: Vec<Uuid> = scene_templates.read().iter().map(|s| s.id).collect();
                                                                     ids.swap(idx, idx + 1);
                                                                     spawn(async move {
                                                                         let Some(ctl) = RIG_SERVICE.read().clone() else { return };
                                                                         if let Err(e) = ctl.reorder_scene_templates(profile_id, &ids).await {
                                                                             warn!("Reorder failed: {e}");
                                                                         }
-                                                                        refresh_scene_templates(profile_id).await;
+                                                                        if let Ok(templates) = ctl.list_scene_templates(profile_id).await {
+                                                                            let mut sorted = templates;
+                                                                            sorted.sort_by_key(|t| t.sort_order);
+                                                                            scene_templates.set(sorted);
+                                                                        }
                                                                     });
                                                                 },
                                                                 span { class: "text-[9px]", "\u{2193}" }
@@ -453,7 +464,11 @@ pub fn ProfileEditorView() -> Element {
                                                             if let Err(e) = ctl.delete_scene_template(scene_id).await {
                                                                 warn!("Delete scene failed: {e}");
                                                             }
-                                                            refresh_scene_templates(profile_id).await;
+                                                            if let Ok(templates) = ctl.list_scene_templates(profile_id).await {
+                                                                let mut sorted = templates;
+                                                                sorted.sort_by_key(|t| t.sort_order);
+                                                                scene_templates.set(sorted);
+                                                            }
                                                         });
                                                     },
                                                     span { class: "text-[9px]", "\u{2715}" }
@@ -466,12 +481,6 @@ pub fn ProfileEditorView() -> Element {
                         }
                     }
 
-                    // Status bar
-                    if !status.is_empty() {
-                        div { class: "px-4 py-1 border-t border-border/30 flex-shrink-0",
-                            span { class: "text-[9px] text-zinc-600 font-mono", "{status}" }
-                        }
-                    }
                 } else {
                     // No profile selected
                     div { class: "flex-1 flex items-center justify-center",
@@ -484,12 +493,8 @@ pub fn ProfileEditorView() -> Element {
                         }
                     }
                 }
-            }
-
-            // ══════════════════════════════════════════════════════════════
-            // RIGHT PANEL — Preset Picker for Scene Assignment
-            // ══════════════════════════════════════════════════════════════
-            div { class: "w-56 flex flex-col border-l border-border/30 bg-zinc-900/20 flex-shrink-0 h-full",
+            },
+            right: Some(rsx! {
                 // Header
                 div { class: "px-4 py-3 border-b border-border/30 flex-shrink-0",
                     span { class: "text-xs font-bold text-zinc-400 uppercase tracking-[0.15em]",
@@ -516,7 +521,7 @@ pub fn ProfileEditorView() -> Element {
                                         title: "Click to assign to selected scene template",
                                         onclick: move |_| {
                                             // For now, show which preset was clicked
-                                            *PROFILE_STATUS.write() = format!("Selected preset: {pname}");
+                                            profile_status.set(format!("Selected preset: {pname}"));
                                         },
                                         div { class: "flex items-center gap-2",
                                             div { class: "w-2 h-2 rounded-full bg-amber-500/40 flex-shrink-0" }
@@ -539,7 +544,12 @@ pub fn ProfileEditorView() -> Element {
                         p { class: "text-[9px] text-zinc-500", "4. Use in Songs for live performance" }
                     }
                 }
-            }
+            }),
+            status: rsx! {
+                if !status.is_empty() {
+                    span { class: "text-[9px] text-zinc-600 font-mono", "{status}" }
+                }
+            },
         }
     }
 }

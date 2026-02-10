@@ -4,22 +4,11 @@
 //! Center: Song scene table with preset/snapshot assignments, reordering
 //! Right: Available presets picker + setlist composition
 
+use crate::components::shared::EntityEditor;
 use crate::prelude::*;
 use crate::signals::RIG_SERVICE;
 use signal_control::{performance_song, preset_entity, setlist, setlist_song, song_scene};
 use uuid::Uuid;
-
-// ── Global Signals ───────────────────────────────────────────────────────────
-
-static SONG_LIST: GlobalSignal<Vec<performance_song::Model>> = Signal::global(Vec::new);
-static SELECTED_SONG_ID: GlobalSignal<Option<Uuid>> = Signal::global(|| None);
-static SONG_SCENES: GlobalSignal<Vec<song_scene::Model>> = Signal::global(Vec::new);
-static SETLIST_LIST: GlobalSignal<Vec<setlist::Model>> = Signal::global(Vec::new);
-static SELECTED_SETLIST_ID: GlobalSignal<Option<Uuid>> = Signal::global(|| None);
-static SETLIST_SONGS: GlobalSignal<Vec<setlist_song::Model>> = Signal::global(Vec::new);
-static SONG_AVAILABLE_PRESETS: GlobalSignal<Vec<preset_entity::Model>> = Signal::global(Vec::new);
-static SONG_STATUS: GlobalSignal<String> = Signal::global(String::new);
-static BROWSER_TAB: GlobalSignal<BrowserTab> = Signal::global(BrowserTab::default);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum BrowserTab {
@@ -28,83 +17,21 @@ enum BrowserTab {
     Setlists,
 }
 
-// ── Async Refresh Helpers ────────────────────────────────────────────────────
-
-async fn refresh_songs() {
-    let Some(ctl) = RIG_SERVICE.read().clone() else {
-        return;
-    };
-    match ctl.list_songs().await {
-        Ok(songs) => *SONG_LIST.write() = songs,
-        Err(e) => warn!("Failed to load songs: {e}"),
-    }
-}
-
-async fn refresh_song_scenes(song_id: Uuid) {
-    let Some(ctl) = RIG_SERVICE.read().clone() else {
-        return;
-    };
-    match ctl.list_song_scenes(song_id).await {
-        Ok(scenes) => {
-            let mut sorted = scenes;
-            sorted.sort_by_key(|s| s.sort_order);
-            *SONG_SCENES.write() = sorted;
-        }
-        Err(e) => warn!("Failed to load song scenes: {e}"),
-    }
-}
-
-async fn refresh_setlists() {
-    let Some(ctl) = RIG_SERVICE.read().clone() else {
-        return;
-    };
-    match ctl.list_setlists().await {
-        Ok(setlists) => *SETLIST_LIST.write() = setlists,
-        Err(e) => warn!("Failed to load setlists: {e}"),
-    }
-}
-
-async fn refresh_setlist_songs(setlist_id: Uuid) {
-    let Some(ctl) = RIG_SERVICE.read().clone() else {
-        return;
-    };
-    match ctl.list_setlist_songs(setlist_id).await {
-        Ok(songs) => {
-            let mut sorted = songs;
-            sorted.sort_by_key(|s| s.sort_order);
-            *SETLIST_SONGS.write() = sorted;
-        }
-        Err(e) => warn!("Failed to load setlist songs: {e}"),
-    }
-}
-
-async fn refresh_song_presets() {
-    let Some(ctl) = RIG_SERVICE.read().clone() else {
-        return;
-    };
-    match ctl.list_rig_presets().await {
-        Ok(presets) => *SONG_AVAILABLE_PRESETS.write() = presets,
-        Err(e) => warn!("Failed to load presets: {e}"),
-    }
-}
-
 // ── Main Component ───────────────────────────────────────────────────────────
 
 #[component]
 pub fn SongEditorView() -> Element {
-    // Clone data out of signals so read guards are dropped before event handlers
-    // can trigger writes (prevents AlreadyBorrowed panics during re-render).
-    let songs = SONG_LIST.cloned();
-    let selected_song_id = *SELECTED_SONG_ID.read();
-    let scenes = SONG_SCENES.cloned();
-    let setlists = SETLIST_LIST.cloned();
-    let selected_setlist_id = *SELECTED_SETLIST_ID.read();
-    let setlist_songs_list = SETLIST_SONGS.cloned();
-    let presets = SONG_AVAILABLE_PRESETS.cloned();
-    let status = SONG_STATUS.cloned();
-    let browser_tab = *BROWSER_TAB.read();
+    // All editor state is component-local — fresh on each mount, no stale globals.
+    let mut song_list = use_signal(Vec::<performance_song::Model>::new);
+    let mut selected_song_id = use_signal(|| None::<Uuid>);
+    let mut song_scenes = use_signal(Vec::<song_scene::Model>::new);
+    let mut setlist_list = use_signal(Vec::<setlist::Model>::new);
+    let mut selected_setlist_id = use_signal(|| None::<Uuid>);
+    let mut setlist_songs = use_signal(Vec::<setlist_song::Model>::new);
+    let mut song_available_presets = use_signal(Vec::<preset_entity::Model>::new);
+    let mut song_status = use_signal(String::new);
+    let mut browser_tab = use_signal(BrowserTab::default);
 
-    // Local state
     let mut show_new_song_dialog = use_signal(|| false);
     let mut new_song_name = use_signal(String::new);
     let mut show_new_setlist_dialog = use_signal(|| false);
@@ -112,66 +39,138 @@ pub fn SongEditorView() -> Element {
     let mut show_add_scene_dialog = use_signal(|| false);
     let mut new_scene_name = use_signal(String::new);
 
+    // ── Async Refresh Helpers (capture local signals) ────────────────────────
+
+    let refresh_songs = move || {
+        spawn(async move {
+            let Some(ctl) = RIG_SERVICE.read().clone() else {
+                return;
+            };
+            match ctl.list_songs().await {
+                Ok(songs) => song_list.set(songs),
+                Err(e) => warn!("Failed to load songs: {e}"),
+            }
+        })
+    };
+
+    let refresh_song_scenes = move |song_id: Uuid| {
+        spawn(async move {
+            let Some(ctl) = RIG_SERVICE.read().clone() else {
+                return;
+            };
+            match ctl.list_song_scenes(song_id).await {
+                Ok(scenes) => {
+                    let mut sorted = scenes;
+                    sorted.sort_by_key(|s| s.sort_order);
+                    song_scenes.set(sorted);
+                }
+                Err(e) => warn!("Failed to load song scenes: {e}"),
+            }
+        })
+    };
+
+    let refresh_setlists = move || {
+        spawn(async move {
+            let Some(ctl) = RIG_SERVICE.read().clone() else {
+                return;
+            };
+            match ctl.list_setlists().await {
+                Ok(setlists) => setlist_list.set(setlists),
+                Err(e) => warn!("Failed to load setlists: {e}"),
+            }
+        })
+    };
+
+    let refresh_setlist_songs = move |setlist_id: Uuid| {
+        spawn(async move {
+            let Some(ctl) = RIG_SERVICE.read().clone() else {
+                return;
+            };
+            match ctl.list_setlist_songs(setlist_id).await {
+                Ok(songs) => {
+                    let mut sorted = songs;
+                    sorted.sort_by_key(|s| s.sort_order);
+                    setlist_songs.set(sorted);
+                }
+                Err(e) => warn!("Failed to load setlist songs: {e}"),
+            }
+        })
+    };
+
+    let refresh_song_presets = move || {
+        spawn(async move {
+            let Some(ctl) = RIG_SERVICE.read().clone() else {
+                return;
+            };
+            match ctl.list_rig_presets().await {
+                Ok(presets) => song_available_presets.set(presets),
+                Err(e) => warn!("Failed to load presets: {e}"),
+            }
+        })
+    };
+
     // Load data on mount
     use_effect(move || {
-        spawn(async move {
-            refresh_songs().await;
-            refresh_setlists().await;
-            refresh_song_presets().await;
-        });
+        refresh_songs();
+        refresh_setlists();
+        refresh_song_presets();
     });
 
     // Load scenes when song selection changes
     use_effect(move || {
-        let sid = *SELECTED_SONG_ID.read();
+        let sid = *selected_song_id.read();
         if let Some(id) = sid {
-            spawn(async move {
-                refresh_song_scenes(id).await;
-            });
+            refresh_song_scenes(id);
         } else {
-            SONG_SCENES.write().clear();
+            song_scenes.write().clear();
         }
     });
 
     // Load setlist songs when setlist selection changes
     use_effect(move || {
-        let sid = *SELECTED_SETLIST_ID.read();
+        let sid = *selected_setlist_id.read();
         if let Some(id) = sid {
-            spawn(async move {
-                refresh_setlist_songs(id).await;
-            });
+            refresh_setlist_songs(id);
         } else {
-            SETLIST_SONGS.write().clear();
+            setlist_songs.write().clear();
         }
     });
 
-    let selected_song = selected_song_id.and_then(|id| songs.iter().find(|s| s.id == id));
+    // Clone data out of signals so read guards are dropped before event handlers.
+    let songs = song_list.cloned();
+    let sel_song_id = *selected_song_id.read();
+    let scenes = song_scenes.cloned();
+    let setlists = setlist_list.cloned();
+    let sel_setlist_id = *selected_setlist_id.read();
+    let setlist_songs_list = setlist_songs.cloned();
+    let presets = song_available_presets.cloned();
+    let status = song_status.cloned();
+    let current_tab = *browser_tab.read();
+
+    let selected_song = sel_song_id.and_then(|id| songs.iter().find(|s| s.id == id));
 
     rsx! {
-        div { class: "flex h-full w-full overflow-hidden bg-card",
-            // ══════════════════════════════════════════════════════════════
-            // LEFT PANEL — Song / Setlist Browser
-            // ══════════════════════════════════════════════════════════════
-            div { class: "w-56 flex flex-col border-r border-border/30 bg-zinc-900/20 flex-shrink-0 h-full",
+        EntityEditor {
+            left: rsx! {
                 // Tab toggle
                 div { class: "px-3 py-2 border-b border-border/30 flex-shrink-0",
                     div { class: "flex bg-zinc-800/80 rounded-lg p-0.5",
                         button {
-                            class: if browser_tab == BrowserTab::Songs {
+                            class: if current_tab == BrowserTab::Songs {
                                 "flex-1 px-3 py-1 rounded-md text-[10px] font-semibold bg-primary text-primary-foreground transition-colors"
                             } else {
                                 "flex-1 px-3 py-1 rounded-md text-[10px] font-semibold text-zinc-400 hover:text-zinc-200 transition-colors"
                             },
-                            onclick: move |_| *BROWSER_TAB.write() = BrowserTab::Songs,
+                            onclick: move |_| browser_tab.set(BrowserTab::Songs),
                             "Songs"
                         }
                         button {
-                            class: if browser_tab == BrowserTab::Setlists {
+                            class: if current_tab == BrowserTab::Setlists {
                                 "flex-1 px-3 py-1 rounded-md text-[10px] font-semibold bg-primary text-primary-foreground transition-colors"
                             } else {
                                 "flex-1 px-3 py-1 rounded-md text-[10px] font-semibold text-zinc-400 hover:text-zinc-200 transition-colors"
                             },
-                            onclick: move |_| *BROWSER_TAB.write() = BrowserTab::Setlists,
+                            onclick: move |_| browser_tab.set(BrowserTab::Setlists),
                             "Setlists"
                         }
                     }
@@ -179,12 +178,12 @@ pub fn SongEditorView() -> Element {
 
                 // List content
                 div { class: "flex-1 overflow-y-auto min-h-0",
-                    match browser_tab {
+                    match current_tab {
                         BrowserTab::Songs => rsx! {
                             for song in songs.iter() {
                                 {
                                     let sid = song.id;
-                                    let is_selected = selected_song_id == Some(sid);
+                                    let is_selected = sel_song_id == Some(sid);
                                     let sname = song.name.clone();
                                     let artist = song.artist.clone().unwrap_or_default();
                                     rsx! {
@@ -196,7 +195,7 @@ pub fn SongEditorView() -> Element {
                                                 "px-3 py-2.5 cursor-pointer border-l-2 border-transparent hover:bg-zinc-800/40 transition-colors"
                                             },
                                             onclick: move |_| {
-                                                *SELECTED_SONG_ID.write() = Some(sid);
+                                                selected_song_id.set(Some(sid));
                                             },
                                             div { class: "flex items-center justify-between",
                                                 div { class: "flex-1 min-w-0",
@@ -216,11 +215,11 @@ pub fn SongEditorView() -> Element {
                                                                 if let Err(e) = ctl.delete_song(sid).await {
                                                                     warn!("Delete song failed: {e}");
                                                                 }
-                                                                if *SELECTED_SONG_ID.read() == Some(sid) {
-                                                                    *SELECTED_SONG_ID.write() = None;
+                                                                if *selected_song_id.read() == Some(sid) {
+                                                                    selected_song_id.set(None);
                                                                 }
-                                                                refresh_songs().await;
                                                             });
+                                                            refresh_songs();
                                                         },
                                                         span { class: "text-[9px]", "\u{2715}" }
                                                     }
@@ -235,7 +234,7 @@ pub fn SongEditorView() -> Element {
                             for sl in setlists.iter() {
                                 {
                                     let slid = sl.id;
-                                    let is_selected = selected_setlist_id == Some(slid);
+                                    let is_selected = sel_setlist_id == Some(slid);
                                     let slname = sl.name.clone();
                                     rsx! {
                                         div {
@@ -246,7 +245,7 @@ pub fn SongEditorView() -> Element {
                                                 "px-3 py-2.5 cursor-pointer border-l-2 border-transparent hover:bg-zinc-800/40 transition-colors"
                                             },
                                             onclick: move |_| {
-                                                *SELECTED_SETLIST_ID.write() = Some(slid);
+                                                selected_setlist_id.set(Some(slid));
                                             },
                                             div { class: "flex items-center justify-between",
                                                 span { class: "text-xs font-medium text-zinc-200 truncate", "{slname}" }
@@ -261,11 +260,11 @@ pub fn SongEditorView() -> Element {
                                                                 if let Err(e) = ctl.delete_setlist(slid).await {
                                                                     warn!("Delete setlist failed: {e}");
                                                                 }
-                                                                if *SELECTED_SETLIST_ID.read() == Some(slid) {
-                                                                    *SELECTED_SETLIST_ID.write() = None;
+                                                                if *selected_setlist_id.read() == Some(slid) {
+                                                                    selected_setlist_id.set(None);
                                                                 }
-                                                                refresh_setlists().await;
                                                             });
+                                                            refresh_setlists();
                                                         },
                                                         span { class: "text-[9px]", "\u{2715}" }
                                                     }
@@ -281,7 +280,7 @@ pub fn SongEditorView() -> Element {
 
                 // New song/setlist button
                 div { class: "px-3 py-2 border-t border-border/30 flex-shrink-0",
-                    match browser_tab {
+                    match current_tab {
                         BrowserTab::Songs => rsx! {
                             if *show_new_song_dialog.read() {
                                 input {
@@ -300,12 +299,12 @@ pub fn SongEditorView() -> Element {
                                                     let Some(ctl) = RIG_SERVICE.read().clone() else { return };
                                                     match ctl.create_song(&val, None, false).await {
                                                         Ok(id) => {
-                                                            refresh_songs().await;
-                                                            *SELECTED_SONG_ID.write() = Some(id);
+                                                            selected_song_id.set(Some(id));
                                                         }
                                                         Err(e) => warn!("Create song failed: {e}"),
                                                     }
                                                 });
+                                                refresh_songs();
                                             }
                                         } else if evt.key() == Key::Escape {
                                             show_new_song_dialog.set(false);
@@ -343,12 +342,12 @@ pub fn SongEditorView() -> Element {
                                                     let Some(ctl) = RIG_SERVICE.read().clone() else { return };
                                                     match ctl.create_setlist(&val).await {
                                                         Ok(id) => {
-                                                            refresh_setlists().await;
-                                                            *SELECTED_SETLIST_ID.write() = Some(id);
+                                                            selected_setlist_id.set(Some(id));
                                                         }
                                                         Err(e) => warn!("Create setlist failed: {e}"),
                                                     }
                                                 });
+                                                refresh_setlists();
                                             }
                                         } else if evt.key() == Key::Escape {
                                             show_new_setlist_dialog.set(false);
@@ -370,13 +369,9 @@ pub fn SongEditorView() -> Element {
                         },
                     }
                 }
-            }
-
-            // ══════════════════════════════════════════════════════════════
-            // CENTER PANEL — Song Scenes / Setlist Songs
-            // ══════════════════════════════════════════════════════════════
-            div { class: "flex-1 flex flex-col min-h-0 min-w-0",
-                match browser_tab {
+            },
+            center: rsx! {
+                match current_tab {
                     BrowserTab::Songs => rsx! {
                         if let Some(song) = selected_song {
                             // Song header
@@ -412,8 +407,8 @@ pub fn SongEditorView() -> Element {
                                                 if let Err(e) = ctl.update_song(song_id, None, None, Some(!current), None, None).await {
                                                     warn!("Toggle auto-advance failed: {e}");
                                                 }
-                                                refresh_songs().await;
                                             });
+                                            refresh_songs();
                                         }
                                     },
                                     if song.auto_advance { "Auto \u{2713}" } else { "Auto" }
@@ -449,14 +444,14 @@ pub fn SongEditorView() -> Element {
                                                     let val = new_scene_name().trim().to_string();
                                                     if !val.is_empty() {
                                                         show_add_scene_dialog.set(false);
-                                                        let sort_order = SONG_SCENES.read().len() as i32;
+                                                        let sort_order = song_scenes.read().len() as i32;
                                                         spawn(async move {
                                                             let Some(ctl) = RIG_SERVICE.read().clone() else { return };
-                                                            match ctl.add_song_scene(song_id, &val, Uuid::nil(), None, sort_order).await {
-                                                                Ok(_) => refresh_song_scenes(song_id).await,
-                                                                Err(e) => warn!("Add scene failed: {e}"),
+                                                            if let Err(e) = ctl.add_song_scene(song_id, &val, Uuid::nil(), None, sort_order).await {
+                                                                warn!("Add scene failed: {e}");
                                                             }
                                                         });
+                                                        refresh_song_scenes(song_id);
                                                     }
                                                 } else if evt.key() == Key::Escape {
                                                     show_add_scene_dialog.set(false);
@@ -496,7 +491,7 @@ pub fn SongEditorView() -> Element {
                                                 .find(|p| p.id == preset_id)
                                                 .map(|p| p.name.as_str())
                                                 .unwrap_or(if preset_id == Uuid::nil() { "\u{2014} unassigned \u{2014}" } else { "Unknown" });
-                                            let song_id = selected_song_id.unwrap();
+                                            let song_id = sel_song_id.unwrap();
 
                                             rsx! {
                                                 div {
@@ -527,15 +522,15 @@ pub fn SongEditorView() -> Element {
                                                                 class: "p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 transition-colors",
                                                                 title: "Move up",
                                                                 onclick: move |_| {
-                                                                    let mut ids: Vec<Uuid> = SONG_SCENES.read().iter().map(|s| s.id).collect();
+                                                                    let mut ids: Vec<Uuid> = song_scenes.read().iter().map(|s| s.id).collect();
                                                                     ids.swap(idx, idx - 1);
                                                                     spawn(async move {
                                                                         let Some(ctl) = RIG_SERVICE.read().clone() else { return };
                                                                         if let Err(e) = ctl.reorder_song_scenes(song_id, &ids).await {
                                                                             warn!("Reorder failed: {e}");
                                                                         }
-                                                                        refresh_song_scenes(song_id).await;
                                                                     });
+                                                                    refresh_song_scenes(song_id);
                                                                 },
                                                                 span { class: "text-[9px]", "\u{2191}" }
                                                             }
@@ -548,15 +543,15 @@ pub fn SongEditorView() -> Element {
                                                                         class: "p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50 transition-colors",
                                                                         title: "Move down",
                                                                         onclick: move |_| {
-                                                                            let mut ids: Vec<Uuid> = SONG_SCENES.read().iter().map(|s| s.id).collect();
+                                                                            let mut ids: Vec<Uuid> = song_scenes.read().iter().map(|s| s.id).collect();
                                                                             ids.swap(idx, idx + 1);
                                                                             spawn(async move {
                                                                                 let Some(ctl) = RIG_SERVICE.read().clone() else { return };
                                                                                 if let Err(e) = ctl.reorder_song_scenes(song_id, &ids).await {
                                                                                     warn!("Reorder failed: {e}");
                                                                                 }
-                                                                                refresh_song_scenes(song_id).await;
                                                                             });
+                                                                            refresh_song_scenes(song_id);
                                                                         },
                                                                         span { class: "text-[9px]", "\u{2193}" }
                                                                     }
@@ -574,8 +569,8 @@ pub fn SongEditorView() -> Element {
                                                                     if let Err(e) = ctl.delete_song_scene(scene_id).await {
                                                                         warn!("Delete scene failed: {e}");
                                                                     }
-                                                                    refresh_song_scenes(song_id).await;
                                                                 });
+                                                                refresh_song_scenes(song_id);
                                                             },
                                                             span { class: "text-[9px]", "\u{2715}" }
                                                         }
@@ -599,7 +594,7 @@ pub fn SongEditorView() -> Element {
                         }
                     },
                     BrowserTab::Setlists => rsx! {
-                        if let Some(_setlist_id) = selected_setlist_id {
+                        if let Some(_setlist_id) = sel_setlist_id {
                             // Setlist song list
                             div { class: "px-4 py-2.5 border-b border-border/30 flex items-center gap-3 flex-shrink-0 bg-zinc-900/30",
                                 {
@@ -658,8 +653,8 @@ pub fn SongEditorView() -> Element {
                                                                     if let Err(e) = ctl.remove_song_from_setlist(ss_id).await {
                                                                         warn!("Remove from setlist failed: {e}");
                                                                     }
-                                                                    refresh_setlist_songs(setlist_id).await;
                                                                 });
+                                                                refresh_setlist_songs(setlist_id);
                                                             },
                                                             span { class: "text-[9px]", "\u{2715}" }
                                                         }
@@ -684,21 +679,11 @@ pub fn SongEditorView() -> Element {
                     },
                 }
 
-                // Status bar
-                if !status.is_empty() {
-                    div { class: "px-4 py-1 border-t border-border/30 flex-shrink-0",
-                        span { class: "text-[9px] text-zinc-600 font-mono", "{status}" }
-                    }
-                }
-            }
-
-            // ══════════════════════════════════════════════════════════════
-            // RIGHT PANEL — Presets / Add to Setlist
-            // ══════════════════════════════════════════════════════════════
-            div { class: "w-56 flex flex-col border-l border-border/30 bg-zinc-900/20 flex-shrink-0 h-full",
+            },
+            right: Some(rsx! {
                 div { class: "px-4 py-3 border-b border-border/30 flex-shrink-0",
                     span { class: "text-xs font-bold text-zinc-400 uppercase tracking-[0.15em]",
-                        match browser_tab {
+                        match current_tab {
                             BrowserTab::Songs => "Available Presets",
                             BrowserTab::Setlists => "Available Songs",
                         }
@@ -706,7 +691,7 @@ pub fn SongEditorView() -> Element {
                 }
 
                 div { class: "flex-1 overflow-y-auto min-h-0",
-                    match browser_tab {
+                    match current_tab {
                         BrowserTab::Songs => rsx! {
                             for preset in presets.iter() {
                                 {
@@ -718,7 +703,7 @@ pub fn SongEditorView() -> Element {
                                             class: "px-3 py-2 cursor-pointer hover:bg-zinc-800/40 border-b border-border/10 transition-colors",
                                             title: "Click to assign to selected scene",
                                             onclick: move |_| {
-                                                *SONG_STATUS.write() = format!("Selected: {pname}");
+                                                song_status.set(format!("Selected: {pname}"));
                                             },
                                             div { class: "flex items-center gap-2",
                                                 div { class: "w-2 h-2 rounded-full bg-amber-500/40 flex-shrink-0" }
@@ -740,15 +725,15 @@ pub fn SongEditorView() -> Element {
                                             class: "px-3 py-2 cursor-pointer hover:bg-zinc-800/40 border-b border-border/10 transition-colors",
                                             title: "Click to add to setlist",
                                             onclick: move |_| {
-                                                if let Some(setlist_id) = *SELECTED_SETLIST_ID.read() {
-                                                    let sort_order = SETLIST_SONGS.read().len() as i32;
+                                                if let Some(setlist_id) = *selected_setlist_id.read() {
+                                                    let sort_order = setlist_songs.read().len() as i32;
                                                     spawn(async move {
                                                         let Some(ctl) = RIG_SERVICE.read().clone() else { return };
-                                                        match ctl.add_song_to_setlist(setlist_id, sid, sort_order).await {
-                                                            Ok(_) => refresh_setlist_songs(setlist_id).await,
-                                                            Err(e) => warn!("Add to setlist failed: {e}"),
+                                                        if let Err(e) = ctl.add_song_to_setlist(setlist_id, sid, sort_order).await {
+                                                            warn!("Add to setlist failed: {e}");
                                                         }
                                                     });
+                                                    refresh_setlist_songs(setlist_id);
                                                 }
                                             },
                                             div { class: "flex items-center gap-2",
@@ -773,7 +758,12 @@ pub fn SongEditorView() -> Element {
                         p { class: "text-[9px] text-zinc-500", "4. Create setlists for shows" }
                     }
                 }
-            }
+            }),
+            status: rsx! {
+                if !status.is_empty() {
+                    span { class: "text-[9px] text-zinc-600 font-mono", "{status}" }
+                }
+            },
         }
     }
 }
