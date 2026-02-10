@@ -27,12 +27,14 @@ use uuid::Uuid;
 /// Main performance view component.
 #[component]
 pub fn PerformanceView() -> Element {
-    let songs = RIG_SETLIST_SONGS.read();
-    let current_song = RIG_CURRENT_SONG.read();
+    // Clone everything out of signals immediately so read guards are dropped
+    // before any event handlers can trigger writes (prevents AlreadyBorrowed panics).
+    let songs = RIG_SETLIST_SONGS.cloned();
+    let current_song = RIG_CURRENT_SONG.cloned();
     let song_index = *RIG_SONG_INDEX.read();
     let scene_index = *RIG_SCENE_INDEX.read();
-    let modules = RIG_MODULES.read();
-    let preset = RIG_CURRENT_PRESET.read();
+    let modules = RIG_MODULES.cloned();
+    let preset = RIG_CURRENT_PRESET.cloned();
     let active_snapshot_id = *RIG_CURRENT_PRESET_SNAPSHOT_ID.read();
 
     rsx! {
@@ -50,7 +52,7 @@ pub fn PerformanceView() -> Element {
                 // ── Module status grid (center) ──────────────────
                 div { class: "flex-1 overflow-y-auto p-4",
                     // Preset header
-                    if let Some(ref p) = *preset {
+                    if let Some(ref p) = preset {
                         div { class: "mb-4",
                             h2 { class: "text-2xl font-bold text-zinc-100", "{p.name}" }
                             if let Some(snap_id) = active_snapshot_id {
@@ -99,7 +101,7 @@ pub fn PerformanceView() -> Element {
                         }
                     }
                     div { class: "flex-1 overflow-y-auto",
-                        if let Some(ref p) = *preset {
+                        if let Some(ref p) = preset {
                             if p.scenes.is_empty() {
                                 div { class: "px-3 py-4 text-xs text-zinc-600 text-center",
                                     "No snapshots"
@@ -260,10 +262,15 @@ fn SongSceneNav(props: SongSceneNavProps) -> Element {
 }
 
 /// Update `RIG_CURRENT_SONG` to match the current `RIG_SONG_INDEX`.
+///
+/// Clones the song out before writing to avoid holding a read guard
+/// across the write (which would cause an `AlreadyBorrowed` panic).
 fn update_current_song() {
-    let idx = *RIG_SONG_INDEX.read();
-    let songs = RIG_SETLIST_SONGS.read();
-    let song = songs.get(idx).cloned();
+    let song = {
+        let idx = *RIG_SONG_INDEX.read();
+        let songs = RIG_SETLIST_SONGS.read();
+        songs.get(idx).cloned()
+    }; // read guards dropped here
     *RIG_CURRENT_SONG.write() = song;
 }
 
