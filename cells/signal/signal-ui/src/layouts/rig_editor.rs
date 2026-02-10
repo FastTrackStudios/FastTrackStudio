@@ -11,6 +11,7 @@
 use crate::components::advanced_inspector::AdvancedInspectorView;
 use crate::components::block_editor::BlockEditorView;
 use crate::components::module_editor::ModuleEditorView;
+use crate::components::performance::PerformanceView;
 use crate::components::preset_editor::PresetEditorView;
 use crate::components::profile_editor::ProfileEditorView;
 use crate::components::song_editor::SongEditorView;
@@ -47,16 +48,7 @@ pub fn RigEditorPanel() -> Element {
             div { class: "flex-1 flex flex-col min-h-0 overflow-hidden",
                 match active_tab {
                     RigEditorTab::Performance => rsx! {
-                        div { class: "h-full w-full flex items-center justify-center bg-card",
-                            div { class: "text-center",
-                                p { class: "text-lg font-semibold text-muted-foreground mb-2",
-                                    "Performance View"
-                                }
-                                p { class: "text-sm text-muted-foreground/60",
-                                    "Live performance mode — coming soon"
-                                }
-                            }
-                        }
+                        PerformanceView {}
                     },
                     RigEditorTab::Edit => rsx! {
                         crate::layouts::rig_layout::RigLayout {}

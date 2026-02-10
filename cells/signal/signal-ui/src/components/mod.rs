@@ -5,6 +5,7 @@ pub mod daw_snapshot_panel;
 pub mod fx_binding_status;
 pub mod module_editor;
 pub mod morph_slider;
+pub mod performance;
 pub mod preset_editor;
 pub mod profile_editor;
 pub mod rig_grid;
