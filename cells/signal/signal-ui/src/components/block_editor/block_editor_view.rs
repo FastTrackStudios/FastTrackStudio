@@ -135,8 +135,8 @@ pub fn BlockEditorView() -> Element {
     let snapshot_count = db_snapshots.len();
     let preset_plural = if preset_count != 1 { "s" } else { "" };
 
-    // Selected preset details
-    let selected_db_preset =
+    // Selected preset details (used by sub-components via signal reads)
+    let _selected_db_preset =
         selected_preset_id.and_then(|id| db_presets.iter().find(|p| p.id == id).cloned());
 
     rsx! {
@@ -183,7 +183,7 @@ pub fn BlockEditorView() -> Element {
                                                 let bt = def.block_type;
                                                 let display_name = def.display_name;
                                                 let color = def.color;
-                                                let description = def.description;
+                                                let _description = def.description;
                                                 let is_active = selected_type == Some(bt);
                                                 let type_key = bt.display_name().to_string();
                                                 let count = type_counts.get(&type_key).copied().unwrap_or(0);
@@ -336,8 +336,8 @@ pub fn BlockEditorView() -> Element {
                             }
                         }
 
-                        // ── Preset List (top) ────────────────────
-                        div { class: "flex-1 flex flex-col min-h-0 border-b border-border/20",
+                        // ── Preset List (top — fixed height proportion) ─
+                        div { class: "h-[45%] flex flex-col min-h-0 border-b border-border/20 flex-shrink-0",
                             div { class: "flex-1 overflow-y-auto min-h-0",
                                 if db_presets.is_empty() && library.iter().filter(|p| selected_type.map_or(false, |st| p.block_type == st)).count() == 0 {
                                     div { class: "flex items-center justify-center h-full px-6",
