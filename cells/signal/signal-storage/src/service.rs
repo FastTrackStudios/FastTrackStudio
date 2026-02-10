@@ -73,13 +73,14 @@ pub async fn rate_preset(
     }
 
     // -- Prevent self-rating: look up the preset's author
-    let preset_model = preset::Entity::find_by_id(preset_id)
-        .one(db)
-        .await?
-        .ok_or(StorageError::NotFound {
-            entity: "preset",
-            id: preset_id,
-        })?;
+    let preset_model =
+        preset::Entity::find_by_id(preset_id)
+            .one(db)
+            .await?
+            .ok_or(StorageError::NotFound {
+                entity: "preset",
+                id: preset_id,
+            })?;
 
     if preset_model.author_id == Some(user_id) {
         return Err(StorageError::BusinessRule(
@@ -232,6 +233,7 @@ mod tests {
             data: Set(serde_json::json!({})),
             is_public: Set(true),
             is_deleted: Set(false),
+            is_favorite: Set(false),
             version: Set(1),
             created_at: Set(now),
             updated_at: Set(now),
@@ -311,11 +313,10 @@ mod tests {
         // -- Exec & Check
         let err = rate_preset(&db, author, preset_id, 5, None).await;
         assert!(err.is_err());
-        assert!(
-            err.unwrap_err()
-                .to_string()
-                .contains("cannot rate your own preset")
-        );
+        assert!(err
+            .unwrap_err()
+            .to_string()
+            .contains("cannot rate your own preset"));
         Ok(())
     }
 

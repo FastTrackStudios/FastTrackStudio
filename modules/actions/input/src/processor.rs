@@ -6,7 +6,7 @@ use std::time::Duration;
 use crate::command::{ActionId, InputArgs, InputCommand};
 use crate::config::{
     mode_definition_from_config, parse_key_sequence, parse_leaf_action, parse_mouse_pattern,
-    parse_when_expr, ConfigError, KeymapConfig,
+    parse_scroll_pattern, parse_when_expr, ConfigError, KeymapConfig,
 };
 use crate::context::{ActionContext, WhenExpr};
 use crate::event::{InputEvent, KeyEvent, MouseEvent};
@@ -14,6 +14,7 @@ use crate::key::{KeyChord, KeyCode, Modifiers};
 use crate::macros::MacroRecorder;
 use crate::mode::{ModeDefinition, ModeId, ModeStack};
 use crate::mouse::MouseBindingTable;
+use crate::scroll::ScrollBindingTable;
 use crate::trie::{KeyTrie, LeafAction, TrieLookup};
 
 /// The core input processing state machine.
@@ -22,6 +23,7 @@ pub struct InputProcessor {
     keymaps: HashMap<ModeId, KeyTrie>,
     context_keymaps: HashMap<ModeId, Vec<(WhenExpr, KeyTrie)>>,
     mouse_bindings: HashMap<ModeId, MouseBindingTable>,
+    scroll_bindings: HashMap<ModeId, ScrollBindingTable>,
     sequence: Vec<KeyChord>,
     timeout: Duration,
     count_prefix: Option<u32>,
@@ -40,6 +42,7 @@ impl InputProcessor {
             keymaps: HashMap::new(),
             context_keymaps: HashMap::new(),
             mouse_bindings: HashMap::new(),
+            scroll_bindings: HashMap::new(),
             sequence: Vec::new(),
             timeout: Duration::from_millis(1000),
             count_prefix: None,
@@ -99,6 +102,16 @@ impl InputProcessor {
             proc.mouse_bindings.insert(mode, table);
         }
 
+        for (mode_name, bindings) in &config.scroll {
+            let mode = ModeId::new(mode_name);
+            let mut table = ScrollBindingTable::new();
+            for (pattern, action) in bindings {
+                let parsed = parse_scroll_pattern(pattern)?;
+                table.insert(parsed, WhenExpr::True, ActionId::new(action));
+            }
+            proc.scroll_bindings.insert(mode, table);
+        }
+
         Ok(proc)
     }
 
@@ -155,6 +168,7 @@ impl InputProcessor {
                 self.process_key_chord(chord, event, ctx, false)
             }
             InputEvent::Mouse(ref mouse_event) => self.process_mouse_event(mouse_event, ctx),
+            InputEvent::Scroll(ref scroll_event) => self.process_scroll_event(scroll_event, ctx),
             _ => vec![InputCommand::Unhandled(event)],
         }
     }
@@ -193,6 +207,27 @@ impl InputProcessor {
         }
 
         vec![InputCommand::Unhandled(InputEvent::Mouse(event.clone()))]
+    }
+
+    fn process_scroll_event(
+        &self,
+        event: &crate::event::ScrollEvent,
+        ctx: &ActionContext,
+    ) -> Vec<InputCommand> {
+        let mode = self.modes.current();
+        let action = self
+            .scroll_bindings
+            .get(mode)
+            .and_then(|table| table.match_event(event, ctx));
+
+        if let Some(action) = action {
+            return vec![InputCommand::ActionWithArgs {
+                action,
+                args: InputArgs::default(),
+            }];
+        }
+
+        vec![InputCommand::Unhandled(InputEvent::Scroll(event.clone()))]
     }
 
     fn process_key_chord(

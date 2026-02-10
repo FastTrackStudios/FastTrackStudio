@@ -15,6 +15,7 @@ pub mod macros;
 pub mod mode;
 pub mod mouse;
 pub mod processor;
+pub mod scroll;
 pub mod sequence;
 pub mod trie;
 
@@ -27,5 +28,6 @@ pub use macros::MacroRecorder;
 pub use mode::{ModeDefinition, ModeId, ModeStack};
 pub use mouse::{MouseBindingTable, MousePattern};
 pub use processor::InputProcessor;
+pub use scroll::{ScrollAxis, ScrollBindingTable, ScrollPattern};
 pub use sequence::{SequenceResult, SequenceState};
 pub use trie::{KeyTrie, LeafAction, TrieNode};

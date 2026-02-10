@@ -7,7 +7,6 @@
 //! with all module presets, presets, profiles, and songs.
 
 use crate::block::GlobalBlock;
-use crate::module_preset::ModulePreset;
 use crate::normalized::Order;
 use crate::performance::PerformanceSong;
 use crate::preset::Preset;

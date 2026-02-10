@@ -77,8 +77,8 @@ use keyflow_ui::{
 };
 use kurbo::Affine;
 use signal_ui::{
-    PresetBrowserPanel, ProfileBrowserPanel, RigGridPanel, SceneGridDockPanel, SongPartsPanel,
-    SongSelectorPanel,
+    PresetBrowserPanel, ProfileBrowserPanel, RigEditorPanel, RigGridPanel, SceneGridDockPanel,
+    SnapshotTestHarness, SongPartsPanel, SongSelectorPanel,
 };
 
 use dock_dioxus::{init_dock_presets, DockProvider, DockRoot, PanelRenderer, PresetBar};
@@ -228,14 +228,22 @@ fn main() {
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("fts_control_desktop=info".parse().unwrap())
                 .add_directive("session=info".parse().unwrap())
-                .add_directive("gateway_ws=info".parse().unwrap()),
+                .add_directive("gateway_ws=info".parse().unwrap())
+                // Snapshot/morph debugging — targeted debug for FX parameter pipeline
+                .add_directive(
+                    "signal_ui::components::snapshot_test_harness=debug"
+                        .parse()
+                        .unwrap(),
+                )
+                .add_directive("signal_control::daw_bridge=debug".parse().unwrap())
+                .add_directive("daw_control::fx=debug".parse().unwrap()),
         )
         .init();
 
     #[cfg(feature = "desktop")]
-    info!("Starting FTS Control Desktop (Wry/WebView + WGPU hybrid renderer)");
+    debug!("Starting FTS Control Desktop (Wry/WebView + WGPU hybrid renderer)");
     #[cfg(feature = "native")]
-    info!("Starting FTS Control Desktop (Blitz/Native renderer)");
+    debug!("Starting FTS Control Desktop (Blitz/Native renderer)");
 
     // Start async runtime for services (before UI)
     std::thread::spawn(|| {
@@ -358,6 +366,8 @@ fn App() -> Element {
             PanelId::FxChainTree => rsx! { FxChainTree {} },
             PanelId::TrackControlPanel => rsx! { TrackControlPanel {} },
             PanelId::ArrangementView => rsx! { ArrangementView {} },
+            PanelId::RigEditor => rsx! { RigEditorPanel {} },
+            PanelId::SnapshotTest => rsx! { SnapshotTestHarness {} },
             PanelId::Settings => rsx! { SettingsView {} },
             _ => rsx! {
                 div {
@@ -373,7 +383,7 @@ fn App() -> Element {
 
     // WGPU/Vello chart graphics context (desktop only)
     #[cfg(feature = "desktop")]
-    let graphics = consume_context::<Arc<std::sync::Mutex<ChartGraphics>>>();
+    let _graphics = consume_context::<Arc<std::sync::Mutex<ChartGraphics>>>();
 
     // Request initial redraw on mount (desktop only)
     #[cfg(feature = "desktop")]
@@ -413,7 +423,7 @@ fn App() -> Element {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
 
-        info!("Starting audio latency polling (Dioxus context)");
+        debug!("Starting audio latency polling (Dioxus context)");
 
         loop {
             // Fetch full audio latency info from DAW
@@ -479,7 +489,7 @@ fn App() -> Element {
 
         // Update connection state
         connection_state.set(ConnectionState::Connected);
-        info!("DAW connected, initializing...");
+        debug!("DAW connected, initializing...");
 
         let session = Session::get();
         let setlist_client = session.setlist();
@@ -511,7 +521,7 @@ fn App() -> Element {
                             let mut indices = ACTIVE_INDICES.write();
                             indices.song_index = Some(idx);
                             indices.section_index = Some(0);
-                            info!("Active song: {} (index {})", active_song.name, idx);
+                            debug!("Active song: {} (index {})", active_song.name, idx);
                         }
                     }
                     Ok(None) if !songs.is_empty() => {
@@ -523,23 +533,23 @@ fn App() -> Element {
                 }
                 refresh_session_chart_source();
             }
-            Ok(None) => info!("No setlist available"),
+            Ok(None) => debug!("No setlist available"),
             Err(e) => tracing::warn!("Failed to get setlist: {}", e),
         }
 
         // Subscribe to setlist events (transport updates, active song changes, etc.)
-        info!("Subscribing to setlist events...");
+        debug!("Subscribing to setlist events...");
         let (tx, mut rx) = roam::channel::<session_proto::SetlistEvent>();
 
         match setlist_client.subscribe(tx).await {
             Ok(()) => {
-                info!("Subscribed to SetlistService events (60Hz transport updates)");
+                debug!("Subscribed to SetlistService events (60Hz transport updates)");
 
                 // Process events continuously
                 while let Ok(Some(event)) = rx.recv().await {
                     match event {
                         session_proto::SetlistEvent::SetlistChanged(setlist) => {
-                            info!("Setlist changed: {} songs", setlist.songs.len());
+                            debug!("Setlist changed: {} songs", setlist.songs.len());
                             let valid_guids: std::collections::HashSet<String> = setlist
                                 .songs
                                 .iter()
@@ -2242,11 +2252,11 @@ async fn run_services() {
     use services::LocalServices;
     use session_ui::Session;
 
-    info!("Initializing services...");
+    debug!("Initializing services...");
 
     // 1. Create local session services
     let services = LocalServices::new();
-    info!("Local services initialized");
+    debug!("Local services initialized");
 
     // 2. Initialize Session singleton for UI components
     match services.create_setlist_client().await {
@@ -2254,7 +2264,7 @@ async fn run_services() {
             if let Err(e) = Session::init(setlist_client) {
                 tracing::warn!("Failed to initialize Session singleton: {}", e);
             } else {
-                info!("Session singleton initialized");
+                debug!("Session singleton initialized");
             }
         }
         Err(e) => {
@@ -2271,7 +2281,7 @@ async fn run_services() {
         loop {
             match daw_manager.connect_default().await {
                 Ok(conn) => {
-                    info!(
+                    debug!(
                         "Connected to DAW: {}",
                         conn.identity()
                             .map(|i| i.name.as_str())
@@ -2286,7 +2296,7 @@ async fn run_services() {
                     // Signal that DAW is connected - UI will fetch setlist
                     // Latency polling is handled by the Dioxus UI context (_latency_task)
                     DAW_CONNECTED.store(true, std::sync::atomic::Ordering::Relaxed);
-                    info!("DAW connection ready - UI can now fetch setlist");
+                    debug!("DAW connection ready - UI can now fetch setlist");
 
                     break;
                 }
@@ -2300,7 +2310,7 @@ async fn run_services() {
 
     // 5. Start WebSocket gateway for browser access
     let config = GatewayConfig::default();
-    info!("Starting gateway on {}", config.bind_addr);
+    debug!("Starting gateway on {}", config.bind_addr);
 
     if let Err(e) = start_gateway(dispatcher, &config.bind_addr, config.static_dir.as_deref()).await
     {

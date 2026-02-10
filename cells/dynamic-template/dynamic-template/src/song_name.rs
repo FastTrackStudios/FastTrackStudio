@@ -374,7 +374,7 @@ pub fn strip_song_names(input: &str, song_names: &HashSet<String>) -> String {
 
     for song_name in song_names {
         // Case-insensitive matching
-        let lower_result = result.to_lowercase();
+        let _lower_result = result.to_lowercase();
         let lower_song = song_name.to_lowercase();
 
         // Find any token in the input that contains the song name (for fuzzy matching)

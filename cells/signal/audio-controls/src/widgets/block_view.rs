@@ -5,7 +5,7 @@
 use crate::prelude::*;
 
 use crate::core::{
-    block::{BlockCategory, BlockDefinition, BlockInstance, BlockParameter},
+    block::{BlockDefinition, BlockInstance, BlockParameter},
     layout::{FormFactor, FormFactorCategory, LayoutConstraints, LevelOfDetail},
 };
 use crate::widgets::knob::Knob;

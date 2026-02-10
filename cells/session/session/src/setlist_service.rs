@@ -4,11 +4,11 @@ use crate::song_builder::SongBuilder;
 use daw_control::Daw;
 use roam::Tx;
 use roam::session::Context;
+use rustc_hash::{FxHashMap, FxHashSet};
 use session_proto::{
     ActiveIndices, MeasureInfo, QueuedTarget, Section, Setlist, SetlistEvent, SetlistService, Song,
     SongChartHydration, SongDetectedChord, SongTransportState,
 };
-use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -337,7 +337,10 @@ impl SetlistServiceImpl {
         }
     }
 
-    async fn fetch_midi_source_fingerprint(&self, project: &daw_control::Project) -> Option<String> {
+    async fn fetch_midi_source_fingerprint(
+        &self,
+        project: &daw_control::Project,
+    ) -> Option<String> {
         let support_state = *self.fingerprint_method_supported.read().await;
         if support_state == Some(false) {
             return None;
@@ -813,7 +816,8 @@ impl SetlistServiceImpl {
             return false;
         };
         if source_fingerprint.is_none()
-            && song_snapshot.chart_fingerprint.as_deref() == Some(chart_data.source_fingerprint.as_str())
+            && song_snapshot.chart_fingerprint.as_deref()
+                == Some(chart_data.source_fingerprint.as_str())
         {
             return false;
         }
@@ -837,7 +841,9 @@ impl SetlistServiceImpl {
         };
 
         if updated {
-            let _ = self.hydration_tx.send((song_index, updated_song_light.clone()));
+            let _ = self
+                .hydration_tx
+                .send((song_index, updated_song_light.clone()));
             self.emit_cached_chart_payload_for_song(song_index, &updated_song_light.project_guid)
                 .await;
             let project_name = project
@@ -1670,7 +1676,7 @@ impl SetlistService for SetlistServiceImpl {
     // =========================================================================
 
     async fn build_from_open_projects(&self, _cx: &Context) {
-        info!("Building setlist from open projects...");
+        debug!("Building setlist from open projects...");
 
         // Check if DAW is initialized (it may not be ready yet after cell startup)
         let Some(daw) = Daw::try_get() else {
@@ -1777,13 +1783,13 @@ impl SetlistService for SetlistServiceImpl {
 
         if let Some(active_song) = setlist.songs.get(focused_index) {
             *self.active_song_id.write().await = Some(active_song.id.clone());
-            info!(
+            debug!(
                 "Set initial active song to: {} ({})",
                 active_song.name, active_song.id
             );
         }
 
-        info!(
+        debug!(
             "Phase 1 complete: focused song ready, {} song names loaded",
             setlist.songs.len()
         );
@@ -1863,7 +1869,7 @@ impl SetlistService for SetlistServiceImpl {
     // =========================================================================
 
     async fn subscribe(&self, _cx: &Context, events: Tx<SetlistEvent>) {
-        info!("SetlistService::subscribe() - starting fully reactive event stream");
+        debug!("SetlistService::subscribe() - starting fully reactive event stream");
         // Clone self for the spawned task
         let this = self.clone();
 
@@ -1977,7 +1983,7 @@ impl SetlistService for SetlistServiceImpl {
             if events
                 .send(&SetlistEvent::TransportUpdate(initial_transports))
                 .await
-            .is_err()
+                .is_err()
             {
                 debug!("SetlistService::subscribe() - client disconnected");
                 return;
@@ -2471,7 +2477,7 @@ impl SetlistService for SetlistServiceImpl {
                             None => "unknown",
                         };
 
-                        info!(
+                        debug!(
                             "Setlist perf (5s): transport_ticks={}, transport_events={}, transport_song_updates={}, transport_avg_ms={:.2}, chart_checks={}, chart_updates={}, chart_avg_ms={:.2}, fingerprint={}",
                             transport_tick_count,
                             transport_events_sent,

@@ -8,7 +8,7 @@
 #![deny(unsafe_code)]
 
 use hello_world_proto::{GreetingRequest, GreetingResponse, Greeter};
-use tracing::{info, warn};
+use tracing::info;
 
 /// r[impl greeter.service]
 /// Simple greeter implementation.

@@ -54,7 +54,7 @@ pub mod standard {
 
 /// Layout definitions for top-level instrument groups
 pub mod groups {
-    use super::{LayoutName, TrackLayout};
+    use super::TrackLayout;
 
     // Primary instrument groups - use default layout for most
     pub const DRUMS: TrackLayout = TrackLayout::same("");

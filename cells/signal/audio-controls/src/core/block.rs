@@ -7,7 +7,7 @@
 //! - Bypass functionality
 
 use super::{
-    layout::{FormFactor, LayoutConstraints, LevelOfDetail},
+    layout::{FormFactor, LevelOfDetail},
     macro_curve::{MacroControl, ParameterMapping},
 };
 use std::collections::HashMap;

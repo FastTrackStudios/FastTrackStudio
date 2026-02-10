@@ -25,6 +25,8 @@
 
 pub mod daw_bridge;
 pub mod fx_binding;
+pub mod morph_engine;
+pub mod snapshot_ops;
 
 use std::sync::Arc;
 use uuid::Uuid;

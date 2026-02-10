@@ -5,12 +5,67 @@
 //! the `use_rig_subscription()` hook.
 
 use crate::prelude::*;
+use crate::components::rig_grid::node_graph::{Node, NodeParameter, NodePosition, ParameterType};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 // Re-export service types for convenience (signal-control re-exports at crate root)
 pub use signal_control::{
     PresetInfo, PresetSnapshotInfo, ProfileInfo, ProfileSceneInfo, RigInfo, SetlistInfo, SongInfo,
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rig Editor Sub-Tab
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Which sub-tab is active within the Rig Editor panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RigEditorTab {
+    /// Live performance view (future).
+    Performance,
+    /// Node graph + preset/profile/song browsers (current rig layout).
+    #[default]
+    Edit,
+    /// Individual DSP block editor with presets and snapshots.
+    BlockEditor,
+    /// Module editor — compose blocks into purpose-driven groups.
+    ModuleEditor,
+    /// Preset editor — compose modules into full rig presets.
+    PresetEditor,
+    /// Advanced inspector — raw chunk data, parameter tables, debug info.
+    Advanced,
+}
+
+impl RigEditorTab {
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Performance => "Performance",
+            Self::Edit => "Edit",
+            Self::BlockEditor => "Blocks",
+            Self::ModuleEditor => "Modules",
+            Self::PresetEditor => "Presets",
+            Self::Advanced => "Advanced",
+        }
+    }
+
+    pub const fn all() -> &'static [RigEditorTab] {
+        &[
+            RigEditorTab::Performance,
+            RigEditorTab::Edit,
+            RigEditorTab::BlockEditor,
+            RigEditorTab::ModuleEditor,
+            RigEditorTab::PresetEditor,
+            RigEditorTab::Advanced,
+        ]
+    }
+}
+
+/// Active rig editor sub-tab.
+pub static RIG_EDITOR_TAB: GlobalSignal<RigEditorTab> = Signal::global(RigEditorTab::default);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rig State
+// ─────────────────────────────────────────────────────────────────────────────
 
 /// Current profile loaded in the rig
 pub static RIG_PROFILE: GlobalSignal<Option<ProfileInfo>> = Signal::global(|| None);
@@ -61,6 +116,20 @@ pub static RIG_SCENE_INDEX: GlobalSignal<usize> = Signal::global(|| 0);
 pub static RIG_MODULES: GlobalSignal<Vec<signal_control::module::Module>> =
     Signal::global(Vec::new);
 
+/// Live bound FX chain used for parameter read/write round-trips.
+pub static RIG_FX_CHAIN: GlobalSignal<Option<daw_control::FxChain>> = Signal::global(|| None);
+
+/// Mapping from node graph node IDs to DAW plugin GUIDs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeFxBinding {
+    pub fx_guid: String,
+    pub module_name: String,
+    pub plugin_name: String,
+}
+
+pub static RIG_NODE_FX_BINDINGS: GlobalSignal<HashMap<Uuid, NodeFxBinding>> =
+    Signal::global(HashMap::new);
+
 /// The rig service client — stored globally so any dock panel can dispatch actions
 /// without needing a context provider wrapper.
 pub static RIG_SERVICE: GlobalSignal<Option<signal_control::SignalControl>> =
@@ -90,11 +159,13 @@ pub async fn bind_fx_chain(
     let n_unassigned = binding.unassigned().len();
 
     *RIG_MODULES.write() = modules;
+    *RIG_FX_CHAIN.write() = Some(chain.clone());
     *RIG_FX_BINDING_STATUS.write() = format!(
         "Bound: {} ({} modules, {} unassigned)",
         track_name, n_modules, n_unassigned
     );
     *RIG_FX_BINDING.write() = Some(binding);
+    sync_node_graph_from_binding(chain).await?;
     Ok(())
 }
 
@@ -115,18 +186,192 @@ pub async fn refresh_fx_binding(chain: &daw_control::FxChain) -> eyre::Result<()
     let track_guid = binding.track_guid.clone();
 
     *RIG_MODULES.write() = modules;
+    *RIG_FX_CHAIN.write() = Some(chain.clone());
     *RIG_FX_BINDING_STATUS.write() = format!(
         "Bound: {} ({} modules, {} unassigned)",
         track_guid, n_modules, n_unassigned
     );
     *RIG_FX_BINDING.write() = Some(binding);
+    sync_node_graph_from_binding(chain).await?;
     Ok(())
 }
 
 /// Unbind the FX chain, clearing the binding and its status.
 pub fn unbind_fx_chain() {
     *RIG_FX_BINDING.write() = None;
+    *RIG_FX_CHAIN.write() = None;
+    RIG_NODE_FX_BINDINGS.write().clear();
     *RIG_FX_BINDING_STATUS.write() = "Not bound".to_string();
+}
+
+/// Refresh a single node's parameter values from DAW.
+pub async fn refresh_node_parameters(node_id: Uuid) -> eyre::Result<()> {
+    let binding = match RIG_NODE_FX_BINDINGS.read().get(&node_id).cloned() {
+        Some(b) => b,
+        None => return Ok(()),
+    };
+    let Some(chain) = RIG_FX_CHAIN.read().clone() else {
+        return Ok(());
+    };
+    let Some(handle) = chain.by_guid(&binding.fx_guid).await? else {
+        return Ok(());
+    };
+    let params = handle.parameters().await.unwrap_or_default();
+    let params_simple: Vec<_> = params
+        .iter()
+        .map(|p| {
+            (
+                p.index,
+                p.name.clone(),
+                p.value,
+                p.is_toggle,
+                p.formatted.clone(),
+            )
+        })
+        .collect();
+    let mapped = map_fx_params_to_node_params(&params_simple);
+    let mut graph = RIG_NODE_GRAPH.write();
+    if let Some(node) = graph.find_node_mut(node_id) {
+        node.parameters = mapped;
+    }
+    Ok(())
+}
+
+async fn sync_node_graph_from_binding(chain: &daw_control::FxChain) -> eyre::Result<()> {
+    let Some(binding) = RIG_FX_BINDING.read().clone() else {
+        return Ok(());
+    };
+
+    let mut updates: Vec<ModuleSyncUpdate> = Vec::new();
+    for module in binding.modules() {
+        let mut plugins = Vec::new();
+        let mut stack: Vec<_> = module.blocks.iter().collect();
+        while let Some(block) = stack.pop() {
+            if block.children.is_empty() {
+                plugins.push(&block.fx);
+            } else {
+                stack.extend(block.children.iter());
+            }
+        }
+        let mut node_updates = Vec::new();
+        for plugin in plugins {
+            let params = match chain.by_guid(&plugin.guid).await? {
+                Some(handle) => handle.parameters().await.unwrap_or_default(),
+                None => Vec::new(),
+            };
+            let params_simple: Vec<_> = params
+                .iter()
+                .map(|p| {
+                    (
+                        p.index,
+                        p.name.clone(),
+                        p.value,
+                        p.is_toggle,
+                        p.formatted.clone(),
+                    )
+                })
+                .collect();
+            node_updates.push(NodeSyncUpdate {
+                fx_guid: plugin.guid.clone(),
+                plugin_name: plugin.name.clone(),
+                plugin_label: plugin.plugin_name.clone(),
+                enabled: plugin.enabled,
+                params: map_fx_params_to_node_params(&params_simple),
+            });
+        }
+        updates.push(ModuleSyncUpdate {
+            module_name: module.container_name.clone(),
+            module_key: module.module_type.display_name().to_ascii_uppercase(),
+            node_updates,
+        });
+    }
+
+    let mut graph = RIG_NODE_GRAPH.write();
+    let mut bindings = HashMap::new();
+    for update in updates {
+        let Some(module) = graph.modules.iter_mut().find(|m| {
+            m.name.eq_ignore_ascii_case(&update.module_name)
+                || m.name.eq_ignore_ascii_case(&update.module_key)
+        }) else {
+            continue;
+        };
+
+        let required = update.node_updates.len();
+        if required == 0 {
+            module.nodes.clear();
+            continue;
+        }
+
+        while module.nodes.len() < required {
+            let idx = module.nodes.len();
+            let offset_x = 12.0 + (idx as f64 * 210.0);
+            let pos = NodePosition::new(offset_x, 12.0);
+            module.add_node(Node::new("Plugin", module.block_type, pos));
+        }
+        module.nodes.truncate(required);
+
+        for (idx, node_update) in update.node_updates.into_iter().enumerate() {
+            if let Some(node) = module.nodes.get_mut(idx) {
+                node.name = if node_update.plugin_name.is_empty() {
+                    node_update.plugin_label.clone()
+                } else {
+                    node_update.plugin_name.clone()
+                };
+                node.bypassed = !node_update.enabled;
+                node.parameters = node_update.params;
+                bindings.insert(
+                    node.id,
+                    NodeFxBinding {
+                        fx_guid: node_update.fx_guid,
+                        module_name: module.name.clone(),
+                        plugin_name: node.name.clone(),
+                    },
+                );
+            }
+        }
+    }
+    *RIG_NODE_FX_BINDINGS.write() = bindings;
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct ModuleSyncUpdate {
+    module_name: String,
+    module_key: String,
+    node_updates: Vec<NodeSyncUpdate>,
+}
+
+#[derive(Debug, Clone)]
+struct NodeSyncUpdate {
+    fx_guid: String,
+    plugin_name: String,
+    plugin_label: String,
+    enabled: bool,
+    params: Vec<NodeParameter>,
+}
+
+fn map_fx_params_to_node_params(params: &[(u32, String, f64, bool, String)]) -> Vec<NodeParameter> {
+    params
+        .iter()
+        .map(|p| {
+            let id = format!("param_{}", p.0);
+            let mut np = NodeParameter::new(
+                id,
+                p.1.clone(),
+                signal_control::normalized::NormalizedF64::new(p.2),
+            );
+            if p.3 {
+                np = np.with_param_type(ParameterType::Toggle);
+            }
+            if !p.4.trim().is_empty() {
+                np = np.with_formatted_display(p.4.clone());
+            }
+            if p.4.contains('%') {
+                np = np.with_unit("%").with_range(0.0, 100.0);
+            }
+            np
+        })
+        .collect()
 }
 
 /// FX chain binding — when set, modules are populated from the live DAW FX chain

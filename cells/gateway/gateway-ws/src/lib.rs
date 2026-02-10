@@ -193,7 +193,7 @@ impl<D: ServiceDispatcher + Clone + Send + Sync + 'static> StandaloneGateway<D> 
 
         // Start the server
         let listener = TcpListener::bind(addr).await?;
-        info!("Standalone WebSocket gateway listening on ws://{}", addr);
+        debug!("Standalone WebSocket gateway listening on ws://{}", addr);
 
         axum::serve(listener, app).await?;
         Ok(())

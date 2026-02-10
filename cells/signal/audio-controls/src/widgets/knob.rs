@@ -4,8 +4,6 @@
 //! using CSS-based rendering for broad compatibility.
 
 use crate::prelude::*;
-use std::rc::Rc;
-use std::cell::RefCell;
 
 use crate::core::accessibility::{FocusState, KeyAction, KeyboardSteps};
 use crate::core::gesture::{GestureState, ScrollSensitivity};
@@ -83,7 +81,7 @@ pub fn Knob(
     let scaled_size = theme.scale(size);
 
     // Configuration
-    let sensitivity = DragSensitivity::DEFAULT;
+    let _sensitivity = DragSensitivity::DEFAULT;
     let scroll_sens = ScrollSensitivity::DEFAULT;
     let kb_steps = keyboard_steps.unwrap_or_default();
     let value_step = stepping.unwrap_or_default();

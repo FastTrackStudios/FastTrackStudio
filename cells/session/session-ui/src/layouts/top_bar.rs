@@ -92,6 +92,13 @@ pub fn TopBar(
                     }
 
                     NavTab {
+                        label: "FX",
+                        tab_id: "fx",
+                        is_active: active_tab == "fx",
+                        on_click: on_tab_click.clone(),
+                    }
+
+                    NavTab {
                         label: "Settings",
                         tab_id: "settings",
                         is_active: active_tab == "settings",

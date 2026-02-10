@@ -54,3 +54,7 @@ typed_id!(
     /// Identifies a saved dock preset (screenset).
     PresetId
 );
+typed_id!(
+    /// Identifies an OS window in a dock workspace.
+    WindowId
+);

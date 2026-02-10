@@ -8,7 +8,7 @@ use facet::Facet;
 
 use crate::block::{BlockType, PluginId};
 use crate::category::PresetCategory;
-use crate::id::{BlockId, GlobalBlockId, PatchId, PresetId, SectionId, SnapshotId, TagId, VariationId};
+use crate::id::{BlockId, GlobalBlockId, PatchId, PresetId, SectionId, SnapshotId, VariationId};
 use crate::layer::SendLevel;
 use crate::module::ModuleType;
 use crate::module_preset::ModuleAssignment;
@@ -23,7 +23,6 @@ pub mod config;
 pub mod snapshot_diff;
 
 pub use block_override::*;
-pub use config::*;
 pub use snapshot_diff::*;
 
 // ─────────────────────────────────────────────────────────────────────────────

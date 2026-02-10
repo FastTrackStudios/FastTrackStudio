@@ -42,7 +42,7 @@ impl CurveType {
             }
             Self::Exponential => {
                 // 2^x - 1 scaled to 0-1
-                (2.0_f32.powf(x) - 1.0)
+                2.0_f32.powf(x) - 1.0
             }
             Self::SCurve => {
                 // Smoothstep: 3x² - 2x³
@@ -96,7 +96,7 @@ fn cubic_bezier_y(x: f32, cx1: f32, cy1: f32, cx2: f32, cy2: f32) -> f32 {
         let t3 = t2 * t;
         let mt = 1.0 - t;
         let mt2 = mt * mt;
-        let mt3 = mt2 * mt;
+        let _mt3 = mt2 * mt;
 
         // Bezier x(t) = 3*mt²*t*cx1 + 3*mt*t²*cx2 + t³
         let bx = 3.0 * mt2 * t * cx1 + 3.0 * mt * t2 * cx2 + t3;
@@ -120,7 +120,7 @@ fn cubic_bezier_y(x: f32, cx1: f32, cy1: f32, cx2: f32, cy2: f32) -> f32 {
     let t3 = t2 * t;
     let mt = 1.0 - t;
     let mt2 = mt * mt;
-    let mt3 = mt2 * mt;
+    let _mt3 = mt2 * mt;
 
     3.0 * mt2 * t * cy1 + 3.0 * mt * t2 * cy2 + t3
 }

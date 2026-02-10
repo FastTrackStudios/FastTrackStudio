@@ -11,8 +11,12 @@ pub mod error;
 pub mod local_config;
 pub mod migration;
 pub mod persist;
+pub mod snapshot_service;
 
 pub use error::{StorageError, StorageResult};
 pub use local_config::LocalConfig;
 pub use migration::Migrator;
 pub use persist::{load_value, save_value, MemoryBackend, Persistable, SqliteBackend};
+
+// Re-export sea_orm types that consumers need
+pub use sea_orm::DatabaseConnection;

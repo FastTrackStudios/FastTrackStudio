@@ -175,7 +175,7 @@ pub fn HSlider(
     };
 
     // Step indicators for stepped variant
-    let step_indicators = if let SliderVariant::Stepped(steps) = &variant {
+    let step_indicators = if let SliderVariant::Stepped(_steps) = &variant {
         Some(value_step.all_steps().into_iter().map(|s| s * 100.0).collect::<Vec<_>>())
     } else {
         None

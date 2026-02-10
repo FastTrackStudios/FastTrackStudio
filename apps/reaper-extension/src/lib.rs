@@ -33,7 +33,8 @@ use std::time::Duration;
 use daw_proto::{
     AudioEngineServiceDispatcher, FxServiceDispatcher, MarkerServiceDispatcher,
     MidiAnalysisServiceDispatcher, MidiServiceDispatcher, ProjectServiceDispatcher,
-    RegionServiceDispatcher, TempoMapServiceDispatcher, TransportServiceDispatcher,
+    RegionServiceDispatcher, TempoMapServiceDispatcher, TrackServiceDispatcher,
+    TransportServiceDispatcher,
 };
 
 // ============================================================================
@@ -205,6 +206,7 @@ fn register_daw_dispatcher() {
     let midi = daw_reaper::ReaperMidi::new();
     let midi_analysis = daw_reaper::ReaperMidiAnalysis::new();
     let fx = daw_reaper::ReaperFx::new();
+    let track = daw_reaper::ReaperTrack::new();
 
     // Create dispatchers with telemetry middleware
     let transport_dispatcher =
@@ -220,7 +222,8 @@ fn register_daw_dispatcher() {
         MidiAnalysisServiceDispatcher::new(midi_analysis).with_middleware(telemetry.clone());
     let audio_engine_dispatcher =
         AudioEngineServiceDispatcher::new(audio_engine).with_middleware(telemetry.clone());
-    let fx_dispatcher = FxServiceDispatcher::new(fx).with_middleware(telemetry);
+    let fx_dispatcher = FxServiceDispatcher::new(fx).with_middleware(telemetry.clone());
+    let track_dispatcher = TrackServiceDispatcher::new(track).with_middleware(telemetry);
 
     // Compose all dispatchers together using RoutedDispatcher chaining
     // The RoutedDispatcher chains dispatchers: first tries left, falls through to right
@@ -231,7 +234,8 @@ fn register_daw_dispatcher() {
     let with_midi = RoutedDispatcher::new(with_tempo_map, midi_dispatcher);
     let with_midi_analysis = RoutedDispatcher::new(with_midi, midi_analysis_dispatcher);
     let with_audio_engine = RoutedDispatcher::new(with_midi_analysis, audio_engine_dispatcher);
-    let daw_dispatcher = RoutedDispatcher::new(with_audio_engine, fx_dispatcher);
+    let with_fx = RoutedDispatcher::new(with_audio_engine, fx_dispatcher);
+    let daw_dispatcher = RoutedDispatcher::new(with_fx, track_dispatcher);
 
     // Register with the Host
     Host::get().set_daw_dispatcher(Arc::new(daw_dispatcher));
@@ -245,7 +249,7 @@ fn register_daw_dispatcher() {
     });
 
     info!(
-        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx) with OTLP telemetry"
+        "DAW dispatcher registered (Transport, Project, Marker, Region, TempoMap, Midi, MidiAnalysis, AudioEngine, Fx, Track) with OTLP telemetry"
     );
     info!("daw-reaper marked as ready for in-process DAW calls");
 }
@@ -298,7 +302,8 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
+                .add_directive(tracing::Level::INFO.into())
+                .add_directive("roam_telemetry::exporter=error".parse().unwrap()),
         )
         .init();
 

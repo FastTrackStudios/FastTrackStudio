@@ -27,6 +27,14 @@ pub struct InputHandle {
 }
 
 impl InputHandle {
+    /// Reload the processor with a new config.
+    pub fn reload_config(&self, config: KeymapConfig) {
+        if self.processor.borrow_mut().reload_config(config).is_ok() {
+            self.sync_state();
+            self.schedule_timeout_if_needed();
+        }
+    }
+
     /// Convert and process a keyboard event.
     pub fn handle_key(&self, e: &KeyboardEvent) -> Vec<InputCommand> {
         let Some(event) = convert_keyboard_event(e) else {

@@ -486,7 +486,7 @@ pub fn EqGraph(
     let curve_fill = "rgba(212, 169, 50, 0.08)";
     let band_inactive_color = "#555555";
     let text_color = "#666666";
-    let remove_zone_color = "rgba(255, 60, 60, 0.12)";
+    let _remove_zone_color = "rgba(255, 60, 60, 0.12)";
 
     // Clone bands for the read in the iterator
     let bands_snapshot: Vec<EqBand> = bands.read().clone();
@@ -556,7 +556,7 @@ pub fn EqGraph(
                     if is_multi_drag {
                         // Multi-selection proportional scaling - copy values first
                         let drag_start_pos = { *drag_start.read() };
-                        if let Some((start_x, start_y)) = drag_start_pos {
+                        if let Some((_start_x, _start_y)) = drag_start_pos {
                             let start_bands = { drag_start_bands.read().clone() };
 
                             // Find the dragged band's original position
@@ -1296,7 +1296,7 @@ pub fn EqGraph(
                         let band_solo = band.solo;
                         let band_gain = band.gain;
                         let band_shape = band.shape;
-                        let band_stereo_mode = band.stereo_mode;
+                        let _band_stereo_mode = band.stereo_mode;
                         drop(bands_vec);
 
                         rsx! {
@@ -1865,7 +1865,7 @@ fn cascaded_magnitude_db(freq: f64, f0: f64, order: usize, filter_type: &EqBandS
 
     // For first-order (order 1), use a simple one-pole response
     if order == 1 {
-        let ratio = freq / f0;
+        let _ratio = freq / f0;
         let mag_sq = match filter_type {
             EqBandShape::LowCut | EqBandShape::HighCut => {
                 // First-order high-pass: H(s) = s / (s + w0)

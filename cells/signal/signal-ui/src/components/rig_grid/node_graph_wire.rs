@@ -103,10 +103,8 @@ pub(crate) fn resolve_all_wires(graph: &NodeGraph, compact: bool) -> Vec<Resolve
         }
     }
 
-    // 2. Resolve internal wires within each module (skip in compact mode — too cluttered)
-    if compact {
-        return resolved;
-    }
+    // 2. Resolve internal wires within each module.
+    // Compact mode still renders internal wires; only geometry differs.
     for module in &graph.modules {
         for wire in &module.internal_wires {
             let from_node = module.find_node(wire.from_node);

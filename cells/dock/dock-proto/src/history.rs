@@ -1,11 +1,7 @@
-//! Layout history — undo/redo for dock layout changes.
-//!
-//! Stores layout snapshots on undo/redo stacks so that every layout mutation
-//! can be reversed. When US-002 (layout diff/patch) is implemented, the
-//! internal representation can be swapped from full snapshots to compact diffs
-//! without changing the public API.
+//! Layout history — undo/redo based on compact layout diffs.
 
 use crate::layout::DockLayout;
+use crate::LayoutDiff;
 
 // region: --- LayoutHistory
 
@@ -34,16 +30,9 @@ use crate::layout::DockLayout;
 /// ```
 #[derive(Debug, Clone)]
 pub struct LayoutHistory {
-    undo_stack: Vec<HistoryEntry>,
-    redo_stack: Vec<HistoryEntry>,
+    undo_stack: Vec<LayoutDiff>,
+    redo_stack: Vec<LayoutDiff>,
     max_depth: usize,
-}
-
-/// A single history entry storing the before/after layout states.
-#[derive(Debug, Clone)]
-struct HistoryEntry {
-    before: DockLayout,
-    after: DockLayout,
 }
 
 impl LayoutHistory {
@@ -71,12 +60,13 @@ impl LayoutHistory {
     /// Record a layout change. Pushes the before/after state onto the undo
     /// stack and clears the redo stack (standard undo semantics).
     pub fn push(&mut self, before: &DockLayout, after: &DockLayout) {
-        self.redo_stack.clear();
+        let diff = DockLayout::diff(before, after);
+        if diff.is_empty() {
+            return;
+        }
 
-        self.undo_stack.push(HistoryEntry {
-            before: before.clone(),
-            after: after.clone(),
-        });
+        self.redo_stack.clear();
+        self.undo_stack.push(diff);
 
         // Trim oldest entries if we exceed max depth
         if self.undo_stack.len() > self.max_depth {
@@ -89,12 +79,12 @@ impl LayoutHistory {
     /// and moves the entry to the redo stack. Returns `true` if an undo
     /// was performed, `false` if the undo stack is empty.
     pub fn undo(&mut self, current: &mut DockLayout) -> bool {
-        let Some(entry) = self.undo_stack.pop() else {
+        let Some(diff) = self.undo_stack.pop() else {
             return false;
         };
 
-        *current = entry.before.clone();
-        self.redo_stack.push(entry);
+        current.apply(&diff.invert());
+        self.redo_stack.push(diff);
         true
     }
 
@@ -102,12 +92,12 @@ impl LayoutHistory {
     /// after-state and moves the entry back to the undo stack. Returns
     /// `true` if a redo was performed, `false` if the redo stack is empty.
     pub fn redo(&mut self, current: &mut DockLayout) -> bool {
-        let Some(entry) = self.redo_stack.pop() else {
+        let Some(diff) = self.redo_stack.pop() else {
             return false;
         };
 
-        *current = entry.after.clone();
-        self.undo_stack.push(entry);
+        current.apply(&diff);
+        self.undo_stack.push(diff);
         true
     }
 

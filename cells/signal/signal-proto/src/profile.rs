@@ -14,7 +14,6 @@ use crate::category::PresetCategory;
 use crate::id::{BlockId, GlobalBlockId, PresetId, ProfileId, RigId, SceneTemplateId, SectionId, SnapshotId, VariationId};
 use crate::module_preset::ModuleOverride;
 use crate::preset::BlockOverride;
-use crate::normalized::NormalizedF64;
 use crate::parameter::ParameterValue;
 use crate::tags::{Taggable, Tags};
 

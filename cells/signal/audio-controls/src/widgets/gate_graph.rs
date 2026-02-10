@@ -10,7 +10,7 @@
 
 use crate::prelude::*;
 
-use crate::widgets::knob::{Knob, KnobVariant};
+use crate::widgets::knob::Knob;
 use crate::theming::{ThemeContext, ThemeProvider};
 
 /// Gate operating mode.
@@ -413,7 +413,7 @@ pub fn GateGraph(props: GateGraphProps) -> Element {
     let range_color = "rgba(96, 165, 250, 0.2)";
     let gr_color = "#2563eb";
     let level_color = "#93c5fd";
-    let text_color = "rgba(255, 255, 255, 0.4)";
+    let _text_color = "rgba(255, 255, 255, 0.4)";
 
     // Value formatters
     let format_db = |v: f32| format!("{v:.0}dB");

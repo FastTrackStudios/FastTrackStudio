@@ -444,6 +444,7 @@ mod tests {
             data: Set(json!({"blocks": []})),
             is_public: Set(false),
             is_deleted: Set(false),
+            is_favorite: Set(false),
             version: Set(1),
             created_at: Set(now.into()),
             updated_at: Set(now.into()),
@@ -591,7 +592,12 @@ mod tests {
 
         // -- Exec
         let result = svc
-            .create_version(preset_id, json!({"gain": 0.5}), Some("Initial".into()), None)
+            .create_version(
+                preset_id,
+                json!({"gain": 0.5}),
+                Some("Initial".into()),
+                None,
+            )
             .await?;
 
         // -- Check
@@ -823,10 +829,8 @@ mod tests {
         assert_eq!(svc.version_count(preset_id).await?, 0);
 
         // -- Exec
-        svc.create_version(preset_id, json!({}), None, None)
-            .await?;
-        svc.create_version(preset_id, json!({}), None, None)
-            .await?;
+        svc.create_version(preset_id, json!({}), None, None).await?;
+        svc.create_version(preset_id, json!({}), None, None).await?;
 
         // -- Check
         assert_eq!(svc.version_count(preset_id).await?, 2);

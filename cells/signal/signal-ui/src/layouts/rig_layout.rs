@@ -43,6 +43,7 @@ pub fn RigLayout() -> Element {
     let mut rig_view_mode = use_signal(|| RigViewMode::Song);
     let mut module_browser_open = use_signal(|| false);
     let mut scene_grid_open = use_signal(|| false);
+    let mut snapshot_panel_open = use_signal(|| false);
 
     // Determine which right sidebar to show based on rig view mode
     let show_right_sidebar = matches!(rig_view_mode(), RigViewMode::Song | RigViewMode::Profile);
@@ -109,22 +110,53 @@ pub fn RigLayout() -> Element {
                     }
                 }
 
-                // Scene grid toggle bar + collapsible panel
+                // Bottom toggle bar + collapsible panels
                 div { class: "flex-shrink-0 border-t border-border bg-background",
-                    // Toggle button bar
-                    button {
-                        class: "w-full flex items-center justify-center gap-2 px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors",
-                        onclick: move |_| scene_grid_open.set(!scene_grid_open()),
-                        span { class: "text-[10px]",
-                            if scene_grid_open() { "\u{25BC}" } else { "\u{25B2}" }
+                    // Toggle buttons row
+                    div { class: "flex items-center justify-center gap-4",
+                        button {
+                            class: if scene_grid_open() {
+                                "flex items-center gap-2 px-3 py-1 text-xs font-medium text-foreground bg-muted/50 transition-colors"
+                            } else {
+                                "flex items-center gap-2 px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                            },
+                            onclick: move |_| {
+                                scene_grid_open.set(!scene_grid_open());
+                                if !scene_grid_open() { } else { snapshot_panel_open.set(false); }
+                            },
+                            span { class: "text-[10px]",
+                                if scene_grid_open() { "\u{25BC}" } else { "\u{25B2}" }
+                            }
+                            "Scenes"
                         }
-                        "Scenes"
+                        button {
+                            class: if snapshot_panel_open() {
+                                "flex items-center gap-2 px-3 py-1 text-xs font-medium text-foreground bg-muted/50 transition-colors"
+                            } else {
+                                "flex items-center gap-2 px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                            },
+                            onclick: move |_| {
+                                snapshot_panel_open.set(!snapshot_panel_open());
+                                if !snapshot_panel_open() { } else { scene_grid_open.set(false); }
+                            },
+                            span { class: "text-[10px]",
+                                if snapshot_panel_open() { "\u{25BC}" } else { "\u{25B2}" }
+                            }
+                            "Snapshots"
+                        }
                     }
 
                     // Collapsible scene grid
                     if scene_grid_open() {
                         div { class: "h-48 overflow-hidden",
                             SceneGridPanel { view_mode: rig_view_mode() }
+                        }
+                    }
+
+                    // Collapsible snapshot test harness
+                    if snapshot_panel_open() {
+                        div { class: "h-72 overflow-hidden",
+                            crate::components::snapshot_test_harness::SnapshotTestHarness {}
                         }
                     }
                 }

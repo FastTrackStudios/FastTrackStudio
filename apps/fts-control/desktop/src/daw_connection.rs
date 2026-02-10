@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use host_client::{HostConnection, HostConnector, HostIdentity};
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Unique identifier for a DAW connection
 pub type DawId = String;
@@ -62,7 +62,7 @@ impl DawConnectionManager {
         let path = socket_path.into();
         let connector = HostConnector::unix(&path);
 
-        info!("Connecting to DAW at: {}", path.display());
+        debug!("Connecting to DAW at: {}", path.display());
 
         let connection = connector
             .connect()
@@ -77,7 +77,7 @@ impl DawConnectionManager {
             .map(|i| i.name.clone())
             .unwrap_or_else(|| path.display().to_string());
 
-        info!("Connected to DAW: {}", id);
+        debug!("Connected to DAW: {}", id);
 
         self.connections
             .write()

@@ -15,10 +15,9 @@
 
 use std::marker::PhantomData;
 
-use crate::block::{BlockType, PluginId};
 use crate::category::PresetCategory;
 use crate::module_preset::ModuleAssignment;
-use crate::normalized::{Order, Rating};
+use crate::normalized::Rating;
 use crate::tags::Tags;
 
 use super::{

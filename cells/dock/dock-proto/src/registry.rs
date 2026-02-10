@@ -10,6 +10,8 @@
 use facet::Facet;
 use std::collections::HashMap;
 
+use crate::context::{ActionContext, WhenExpr};
+
 // region: --- Types
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
@@ -109,6 +111,8 @@ pub struct PanelDescriptor {
     pub default_position: DockPosition,
     /// Size constraints for layout negotiation.
     pub constraints: PanelConstraints,
+    /// Optional when-clause controlling contextual visibility.
+    pub visibility_when: Option<String>,
 }
 
 impl PanelDescriptor {
@@ -120,6 +124,7 @@ impl PanelDescriptor {
             category: String::new(),
             default_position: DockPosition::Center,
             constraints: PanelConstraints::default(),
+            visibility_when: None,
         }
     }
 
@@ -140,6 +145,11 @@ impl PanelDescriptor {
 
     pub fn with_constraints(mut self, constraints: PanelConstraints) -> Self {
         self.constraints = constraints;
+        self
+    }
+
+    pub fn with_visibility_when(mut self, when: impl Into<String>) -> Self {
+        self.visibility_when = Some(when.into());
         self
     }
 }
@@ -212,6 +222,29 @@ impl PanelRegistry {
     /// Check if a panel ID is registered.
     pub fn contains(&self, id: &str) -> bool {
         self.panels.contains_key(id)
+    }
+
+    /// Return IDs of panels visible in the given action context.
+    pub fn visible_panels(&self, ctx: &ActionContext) -> Vec<String> {
+        self.panels
+            .values()
+            .filter(|desc| {
+                desc.visibility_when
+                    .as_deref()
+                    .map(|expr| WhenExpr::parse(expr).evaluate(ctx))
+                    .unwrap_or(true)
+            })
+            .map(|desc| desc.id.clone())
+            .collect()
+    }
+
+    /// Return IDs of panels that have context visibility rules.
+    pub fn context_managed_panels(&self) -> Vec<String> {
+        self.panels
+            .values()
+            .filter(|desc| desc.visibility_when.is_some())
+            .map(|desc| desc.id.clone())
+            .collect()
     }
 }
 
@@ -341,6 +374,26 @@ mod tests {
         assert_eq!(reg.len(), 0);
         assert!(reg.all().is_empty());
         assert!(reg.by_category().is_empty());
+    }
+
+    #[test]
+    fn test_visible_panels_respects_when() {
+        let mut reg = PanelRegistry::new();
+        reg.register(
+            PanelDescriptor::new("transport", "Transport")
+                .with_visibility_when("tab:performance"),
+        );
+        reg.register(PanelDescriptor::new("settings", "Settings"));
+
+        let mut ctx = ActionContext::new();
+        ctx.set_tab("chart");
+        let visible = reg.visible_panels(&ctx);
+        assert!(visible.contains(&"settings".to_string()));
+        assert!(!visible.contains(&"transport".to_string()));
+
+        ctx.set_tab("performance");
+        let visible = reg.visible_panels(&ctx);
+        assert!(visible.contains(&"transport".to_string()));
     }
 
     #[test]

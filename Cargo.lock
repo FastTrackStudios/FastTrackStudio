@@ -2526,6 +2526,7 @@ name = "daw-reaper"
 version = "0.1.0"
 dependencies = [
  "daw-proto",
+ "dawfile-reaper",
  "keyflow",
  "reaper-high",
  "reaper-low",
@@ -2553,10 +2554,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-ui"
+version = "0.1.0"
+dependencies = [
+ "daw-control",
+ "daw-proto",
+ "dioxus",
+ "dioxus-native",
+ "eyre",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "dawfile-reaper"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "daw-proto",
  "nom 8.0.0",
  "serde",
  "thiserror 2.0.18",
@@ -3365,6 +3380,7 @@ dependencies = [
  "dock-proto",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
  "uuid",
 ]
@@ -3375,7 +3391,6 @@ version = "0.1.0"
 dependencies = [
  "facet",
  "facet-json",
- "serde",
  "uuid",
 ]
 
@@ -4262,6 +4277,7 @@ dependencies = [
  "anyrender_vello 0.7.1 (git+https://github.com/DioxusLabs/anyrender.git?branch=main)",
  "daw-control",
  "daw-proto",
+ "daw-ui",
  "dioxus",
  "dioxus-native",
  "dock-dioxus",
@@ -10563,6 +10579,7 @@ name = "signal"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "daw-proto",
  "facet",
  "roam",
  "signal-proto",
@@ -10574,8 +10591,15 @@ dependencies = [
 name = "signal-control"
 version = "0.1.0"
 dependencies = [
+ "daw-control",
+ "daw-proto",
+ "eyre",
+ "facet",
+ "facet-json",
  "roam",
+ "serde_json",
  "signal",
+ "signal-storage",
  "tokio",
  "tracing",
  "uuid",
@@ -10605,6 +10629,7 @@ dependencies = [
 name = "signal-proto"
 version = "0.1.0"
 dependencies = [
+ "daw-proto",
  "facet",
  "uuid",
 ]
@@ -10635,8 +10660,11 @@ name = "signal-ui"
 version = "0.1.0"
 dependencies = [
  "audio-controls",
+ "daw-control",
+ "daw-ui",
  "dioxus",
  "dioxus-native",
+ "eyre",
  "facet",
  "facet-json",
  "lucide-dioxus",

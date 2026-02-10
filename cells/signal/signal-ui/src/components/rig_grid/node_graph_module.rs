@@ -26,6 +26,9 @@ pub(crate) struct ModuleContainerProps {
     /// Compact mode: no widget visualizations, just labels.
     #[props(default)]
     pub compact: bool,
+    /// Performance mode: reduce chrome and hide module-edge ports while keeping node widgets.
+    #[props(default)]
+    pub performance_mode: bool,
     /// Whether this module is currently selected.
     #[props(default)]
     pub is_selected: bool,
@@ -86,7 +89,11 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
     };
 
     let title_cursor = if props.wire_draft_active { "crosshair" } else { "grab" };
-    let title_height = if props.compact { TITLE_BAR_HEIGHT_COMPACT } else { TITLE_BAR_HEIGHT };
+    let title_height = if props.compact || props.performance_mode {
+        TITLE_BAR_HEIGHT_COMPACT
+    } else {
+        TITLE_BAR_HEIGHT
+    };
     let port_size = if props.compact { 8.0 } else { port_size };
 
     rsx! {
@@ -169,7 +176,7 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
             }
 
             // Module-level input ports (left edge) — hidden in compact mode
-            if !props.compact {
+            if !props.compact && !props.performance_mode {
             for (idx, port) in module.inputs.iter().enumerate() {
                 {
                     let spacing = h / (module.inputs.len() + 1) as f64;
@@ -306,7 +313,7 @@ pub(crate) fn ModuleContainer(props: ModuleContainerProps) -> Element {
                     }
                 }
             }
-            } // end if !props.compact (ports)
+            } // end if !props.compact && !props.performance_mode (ports)
         }
     }
 }

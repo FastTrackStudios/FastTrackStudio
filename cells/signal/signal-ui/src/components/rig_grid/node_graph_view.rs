@@ -20,10 +20,12 @@
 use crate::prelude::*;
 use crate::signals::{RIG_NODE_GRAPH, RIG_SELECTED_ENTITY, SelectedEntity};
 use dioxus::prelude::dioxus_elements::geometry::WheelDelta;
+use serde_json::Value;
+use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
 use super::block_colors::block_type_color;
-use super::node_graph::{NodeGraph, NodePosition};
+use super::node_graph::{GraphModule, NodeGraph, NodePosition, NodeWidget};
 use super::node_graph_module::ModuleContainer;
 use super::node_graph_node::NodeBlock;
 use super::node_graph_wire::{resolve_all_wires, wire_path_d, WirePath};
@@ -63,6 +65,12 @@ enum DragMode {
         start_node_x: f64,
         start_node_y: f64,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CanvasViewMode {
+    Node,
+    Performance,
 }
 
 // ── Wire Draft ───────────────────────────────────────────────────────
@@ -114,11 +122,17 @@ pub struct NodeGraphViewProps {
 
 #[component]
 pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
+    const ROOT_ID: &str = "rig-node-graph-root";
+
     // ── Viewport state ───────────────────────────────────────────
     let mut pan_x = use_signal(|| 0.0f64);
     let mut pan_y = use_signal(|| 0.0f64);
     let mut zoom = use_signal(|| 1.0f64);
     let mut has_fitted = use_signal(|| false);
+    let mut viewport_left = use_signal(|| 0.0f64);
+    let mut viewport_top = use_signal(|| 0.0f64);
+    let mut viewport_w = use_signal(|| 1200.0f64);
+    let mut viewport_h = use_signal(|| 700.0f64);
 
     // ── Interaction state ────────────────────────────────────────
     let mut drag_mode = use_signal(|| DragMode::None);
@@ -127,8 +141,16 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
     let mut selection = use_signal(|| Selection::None);
     let mut snap_enabled = use_signal(|| true);
     let mut context_menu = use_signal(|| Option::<ContextMenu>::None);
+    let mut canvas_mode = use_signal(|| {
+        if props.compact {
+            CanvasViewMode::Performance
+        } else {
+            CanvasViewMode::Node
+        }
+    });
 
     let compact = props.compact;
+    let performance_mode = canvas_mode() == CanvasViewMode::Performance;
 
     // ── Sync local selection → global signal ─────────────────────
     // This lets the NodePropertyPanel (and other dock panels) react
@@ -143,25 +165,94 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
     });
 
     // ── Read graph from global signal ────────────────────────────
-    // Compact mode uses the same full-size graph, just auto-zoomed to fit.
     let current_graph = RIG_NODE_GRAPH.read().clone();
-    let wires = resolve_all_wires(&current_graph, false);
-    let (canvas_w, canvas_h) = calculate_canvas_bounds(&current_graph);
+    let render_graph = if performance_mode {
+        build_performance_graph(
+            &current_graph,
+            viewport_w().max(320.0),
+            viewport_h().max(220.0),
+        )
+    } else {
+        current_graph.clone()
+    };
+    let wires = resolve_all_wires(&render_graph, performance_mode || compact);
+    let (canvas_w, canvas_h) = calculate_canvas_bounds(&render_graph);
+
+    // Keep viewport rect in sync for accurate fit/zoom math inside docked panels.
+    use_future(move || async move {
+        loop {
+            let js = format!(
+                r#"(function() {{
+                    const el = document.getElementById('{ROOT_ID}');
+                    if (!el) return "null";
+                    const r = el.getBoundingClientRect();
+                    return JSON.stringify({{
+                        left: r.left,
+                        top: r.top,
+                        width: el.clientWidth,
+                        height: el.clientHeight
+                    }});
+                }})();"#
+            );
+
+            if let Ok(value) = document::eval(&js).await {
+                let raw = value
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| value.to_string());
+                if raw != "null" && raw != "\"null\"" {
+                    if let Ok(parsed) = serde_json::from_str::<Value>(&raw) {
+                        if let Some(v) = parsed.get("left").and_then(Value::as_f64) {
+                            viewport_left.set(v);
+                        }
+                        if let Some(v) = parsed.get("top").and_then(Value::as_f64) {
+                            viewport_top.set(v);
+                        }
+                        if let Some(v) = parsed.get("width").and_then(Value::as_f64) {
+                            viewport_w.set(v.max(1.0));
+                        }
+                        if let Some(v) = parsed.get("height").and_then(Value::as_f64) {
+                            viewport_h.set(v.max(1.0));
+                        }
+                    }
+                }
+            }
+
+            sleep(Duration::from_millis(250)).await;
+        }
+    });
 
     // ── Auto-fit on first render or when compact mode changes ────
     // Compact view always auto-fits the full-size graph to fill the viewport.
     let mut last_compact = use_signal(|| compact);
-    let should_fit = !has_fitted() || last_compact() != compact;
+    let mut last_mode = use_signal(|| canvas_mode());
+    let mut last_compact_viewport = use_signal(|| (0.0f64, 0.0f64));
+    let viewport_changed = {
+        let (last_w, last_h) = last_compact_viewport();
+        (last_w - viewport_w()).abs() > 1.0 || (last_h - viewport_h()).abs() > 1.0
+    };
+    let should_fit = !has_fitted()
+        || last_compact() != compact
+        || last_mode() != canvas_mode()
+        || (compact && viewport_changed);
     if should_fit {
         has_fitted.set(true);
         last_compact.set(compact);
-        let vp_w = 1200.0;
-        let vp_h = 700.0;
-        let (fit_zoom, fit_pan_x, fit_pan_y) =
-            calculate_fit(canvas_w, canvas_h, vp_w, vp_h);
-        zoom.set(fit_zoom);
-        pan_x.set(fit_pan_x);
-        pan_y.set(fit_pan_y);
+        last_mode.set(canvas_mode());
+        last_compact_viewport.set((viewport_w(), viewport_h()));
+        let vp_w = viewport_w();
+        let vp_h = viewport_h();
+        if compact {
+            let (fit_zoom, fit_pan_x, fit_pan_y) =
+                calculate_fit(canvas_w, canvas_h, vp_w, vp_h);
+            zoom.set(fit_zoom);
+            pan_x.set(fit_pan_x);
+            pan_y.set(fit_pan_y);
+        } else if performance_mode {
+            zoom.set(1.0);
+            pan_x.set(0.0);
+            pan_y.set(0.0);
+        }
     }
 
     let cw = canvas_w;
@@ -169,7 +260,9 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
 
     let is_dragging_anything = !matches!(drag_mode(), DragMode::None);
     let has_wire_draft = wire_draft().is_some();
-    let cursor = if has_wire_draft {
+    let cursor = if performance_mode {
+        "default"
+    } else if has_wire_draft {
         "crosshair"
     } else if is_dragging_anything {
         "grabbing"
@@ -179,7 +272,12 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
 
     rsx! {
         div {
-            class: "relative w-full h-full overflow-hidden select-none",
+            id: "{ROOT_ID}",
+            class: if performance_mode {
+                "relative w-full h-full overflow-y-auto overflow-x-hidden select-none"
+            } else {
+                "relative w-full h-full overflow-hidden select-none"
+            },
             style: "background-color: #0a0a0f; \
                     background-image: radial-gradient(circle, #1a1a2e 1px, transparent 1px); \
                     background-size: 20px 20px; \
@@ -216,10 +314,11 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                         hovered_port.set(None);
                     }
                     Key::Character(ref c) if c == "f" || c == "F" => {
+                        if performance_mode { return; }
                         let g = RIG_NODE_GRAPH.read();
                         let (cw, ch) = calculate_canvas_bounds(&g);
                         let (fit_zoom, fit_pan_x, fit_pan_y) =
-                            calculate_fit(cw, ch, 1200.0, 700.0);
+                            calculate_fit(cw, ch, viewport_w(), viewport_h());
                         zoom.set(fit_zoom);
                         pan_x.set(fit_pan_x);
                         pan_y.set(fit_pan_y);
@@ -249,6 +348,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
 
             // ── Mouse: pan start ─────────────────────────────
             onmousedown: move |evt| {
+                if performance_mode { return; }
                 evt.prevent_default();
                 context_menu.set(None);
                 selection.set(Selection::None);
@@ -318,8 +418,8 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
 
                 // Update wire draft endpoint
                 if let Some(mut draft) = wire_draft() {
-                    let canvas_x = (mx - pan_x()) / current_zoom;
-                    let canvas_y = (my - pan_y()) / current_zoom;
+                    let canvas_x = (mx - viewport_left() - pan_x()) / current_zoom;
+                    let canvas_y = (my - viewport_top() - pan_y()) / current_zoom;
                     draft.mouse_pos = NodePosition::new(canvas_x, canvas_y);
                     wire_draft.set(Some(draft));
                 }
@@ -360,31 +460,88 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
 
             // ── Zoom ─────────────────────────────────────────
             onwheel: move |evt| {
+                if performance_mode { return; }
+                evt.prevent_default();
                 let delta = evt.delta();
                 let dy = match delta {
                     WheelDelta::Pixels(p) => p.y,
                     WheelDelta::Lines(l) => l.y * 40.0,
                     WheelDelta::Pages(p) => p.y * 400.0,
                 };
+                let old_zoom = zoom();
                 let zoom_factor = if dy < 0.0 { 1.08 } else { 1.0 / 1.08 };
-                let new_zoom = (zoom() * zoom_factor).clamp(0.1, 3.0);
+                let new_zoom = (old_zoom * zoom_factor).clamp(0.1, 3.0);
+
+                // Zoom about cursor in local viewport space.
+                let local_x = evt.client_coordinates().x - viewport_left();
+                let local_y = evt.client_coordinates().y - viewport_top();
+                let canvas_x = (local_x - pan_x()) / old_zoom;
+                let canvas_y = (local_y - pan_y()) / old_zoom;
+                pan_x.set(local_x - canvas_x * new_zoom);
+                pan_y.set(local_y - canvas_y * new_zoom);
                 zoom.set(new_zoom);
             },
 
+            // ── Canvas Mode Toggles ─────────────────────────
+            if !compact {
+                div {
+                    class: "absolute top-3 right-3 z-30 flex gap-2 select-none",
+                    onmousedown: move |evt| evt.stop_propagation(),
+
+                    button {
+                        class: if canvas_mode() == CanvasViewMode::Node {
+                            "px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white"
+                        } else {
+                            "px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-300 hover:text-white"
+                        },
+                        style: if canvas_mode() == CanvasViewMode::Node {
+                            "backdrop-filter: blur(8px);"
+                        } else {
+                            "background-color: rgba(0,0,0,0.6); backdrop-filter: blur(8px);"
+                        },
+                        onclick: move |_| canvas_mode.set(CanvasViewMode::Node),
+                        "Node View"
+                    }
+
+                    button {
+                        class: if canvas_mode() == CanvasViewMode::Performance {
+                            "px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white"
+                        } else {
+                            "px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-300 hover:text-white"
+                        },
+                        style: if canvas_mode() == CanvasViewMode::Performance {
+                            "backdrop-filter: blur(8px);"
+                        } else {
+                            "background-color: rgba(0,0,0,0.6); backdrop-filter: blur(8px);"
+                        },
+                        onclick: move |_| canvas_mode.set(CanvasViewMode::Performance),
+                        "Performance View"
+                    }
+                }
+            }
+
             // ── Canvas Layer ─────────────────────────────────
             div {
-                style: "position: absolute; left: {pan_x()}px; top: {pan_y()}px; \
-                        zoom: {zoom()};",
+                style: if performance_mode {
+                    "position: relative; left: 0px; top: 0px; zoom: 1; width: 100%;"
+                } else {
+                    "position: absolute; left: {pan_x()}px; top: {pan_y()}px; \
+                            zoom: {zoom()};"
+                },
 
                 // HTML layer: modules and standalone nodes
                 div {
-                    style: "position: relative; \
-                            width: {canvas_w}px; height: {canvas_h}px;",
+                    style: if performance_mode {
+                        "position: relative; width: 100%; height: {canvas_h}px;"
+                    } else {
+                        "position: relative; width: {canvas_w}px; height: {canvas_h}px;"
+                    },
 
-                    for module in &current_graph.modules {
+                    for module in &render_graph.modules {
                         ModuleContainer {
                             key: "{module.id}",
                             module: module.clone(),
+                            performance_mode: performance_mode,
                             is_selected: matches!(selection(), Selection::Module(id) if id == module.id),
                             on_select: {
                                 let module_id = module.id;
@@ -398,7 +555,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                                 let module_x = module.position.x;
                                 let module_y = module.position.y;
                                 move |evt: MouseEvent| {
-                                    if compact { return; } // No drag in compact mode
+                                    if compact || performance_mode { return; } // No drag in compact/performance mode
                                     evt.stop_propagation();
                                     context_menu.set(None);
                                     selection.set(Selection::Module(module_id));
@@ -414,7 +571,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                             on_context_menu: {
                                 let module_id = module.id;
                                 move |evt: MouseEvent| {
-                                    if compact { return; }
+                                    if compact || performance_mode { return; }
                                     selection.set(Selection::Module(module_id));
                                     context_menu.set(Some(ContextMenu {
                                         x: evt.client_coordinates().x,
@@ -426,7 +583,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                             on_port_drag_start: {
                                 let module_clone = module.clone();
                                 move |(port_id, is_output): (String, bool)| {
-                                    if compact { return; }
+                                    if compact || performance_mode { return; }
                                     let is_input = !is_output;
                                     if let Some(pos) = module_clone.port_position(&port_id, is_input) {
                                         wire_draft.set(Some(WireDraft {
@@ -441,7 +598,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                             },
                             on_port_hover: {
                                 move |(entity_id, port_id, is_input): (Uuid, String, bool)| {
-                                    if compact { return; }
+                                    if compact || performance_mode { return; }
                                     if wire_draft().is_some() {
                                         hovered_port.set(Some((entity_id, port_id, is_input)));
                                     }
@@ -457,7 +614,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                         }
                     }
 
-                    for node in &current_graph.nodes {
+                    for node in &render_graph.nodes {
                         NodeBlock {
                             key: "{node.id}",
                             node: node.clone(),
@@ -474,6 +631,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                                 let node_x = node.position.x;
                                 let node_y = node.position.y;
                                 move |evt: MouseEvent| {
+                                    if performance_mode { return; }
                                     evt.stop_propagation();
                                     context_menu.set(None);
                                     selection.set(Selection::Node(node_id));
@@ -489,6 +647,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                             on_port_drag_start: {
                                 let node_clone = node.clone();
                                 move |(port_id, is_output): (String, bool)| {
+                                    if performance_mode { return; }
                                     let is_input = !is_output;
                                     if let Some(pos) = node_clone.port_position(&port_id, is_input) {
                                         wire_draft.set(Some(WireDraft {
@@ -519,53 +678,55 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                     }
                 }
 
-                // SVG wire layer
-                svg {
-                    style: "position: absolute; top: 0; left: 0; \
-                            pointer-events: none; overflow: visible;",
-                    width: "{canvas_w}",
-                    height: "{canvas_h}",
+                // SVG wire layer (hidden in performance mode to match compact rack presentation)
+                if !performance_mode {
+                    svg {
+                        style: "position: absolute; top: 0; left: 0; \
+                                pointer-events: none; overflow: visible;",
+                        width: "{canvas_w}",
+                        height: "{canvas_h}",
 
-                    for wire in &wires {
-                        WirePath {
-                            key: "{wire.wire_id}",
-                            from: wire.from,
-                            to: wire.to,
-                            color: wire.color.clone(),
-                            wire_id: wire.wire_id,
-                            is_selected: matches!(selection(), Selection::Wire(id) if id == wire.wire_id),
-                            on_click: {
-                                move |wire_id: Uuid| {
-                                    context_menu.set(None);
-                                    selection.set(Selection::Wire(wire_id));
-                                }
-                            },
+                        for wire in &wires {
+                            WirePath {
+                                key: "{wire.wire_id}",
+                                from: wire.from,
+                                to: wire.to,
+                                color: wire.color.clone(),
+                                wire_id: wire.wire_id,
+                                is_selected: matches!(selection(), Selection::Wire(id) if id == wire.wire_id),
+                                on_click: {
+                                    move |wire_id: Uuid| {
+                                        context_menu.set(None);
+                                        selection.set(Selection::Wire(wire_id));
+                                    }
+                                },
+                            }
                         }
-                    }
 
-                    // Draft wire
-                    if let Some(draft) = wire_draft() {
-                        {
-                            let (from, to) = if draft.is_from_output {
-                                (draft.from_pos, draft.mouse_pos)
-                            } else {
-                                (draft.mouse_pos, draft.from_pos)
-                            };
-                            let d = wire_path_d(&from, &to);
-                            let draft_color = if hovered_port().is_some() {
-                                "#22d3ee"
-                            } else {
-                                "#ffffff"
-                            };
-                            rsx! {
-                                path {
-                                    d: "{d}",
-                                    fill: "none",
-                                    stroke: "{draft_color}",
-                                    stroke_width: "2.5",
-                                    stroke_opacity: "0.8",
-                                    stroke_linecap: "round",
-                                    stroke_dasharray: "8 4",
+                        // Draft wire
+                        if let Some(draft) = wire_draft() {
+                            {
+                                let (from, to) = if draft.is_from_output {
+                                    (draft.from_pos, draft.mouse_pos)
+                                } else {
+                                    (draft.mouse_pos, draft.from_pos)
+                                };
+                                let d = wire_path_d(&from, &to);
+                                let draft_color = if hovered_port().is_some() {
+                                    "#22d3ee"
+                                } else {
+                                    "#ffffff"
+                                };
+                                rsx! {
+                                    path {
+                                        d: "{d}",
+                                        fill: "none",
+                                        stroke: "{draft_color}",
+                                        stroke_width: "2.5",
+                                        stroke_opacity: "0.8",
+                                        stroke_linecap: "round",
+                                        stroke_dasharray: "8 4",
+                                    }
                                 }
                             }
                         }
@@ -635,11 +796,13 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
             }
 
             // ── Minimap (bottom-left) ────────────────────────
-            if !compact {
+            if !compact && !performance_mode {
                 Minimap {
-                    graph: current_graph.clone(),
+                    graph: render_graph.clone(),
                     canvas_w: canvas_w,
                     canvas_h: canvas_h,
+                    viewport_w: viewport_w(),
+                    viewport_h: viewport_h(),
                     pan_x: pan_x(),
                     pan_y: pan_y(),
                     zoom: zoom(),
@@ -651,7 +814,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
             }
 
             // ── Controls overlay (bottom-right) ──────────────
-            if !compact {
+            if !compact && !performance_mode {
                 div {
                     class: "absolute bottom-4 right-4 flex items-center gap-2 select-none",
                     onmousedown: move |evt| evt.stop_propagation(),
@@ -675,7 +838,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                         title: "Fit all modules in view (F)",
                         onclick: move |_| {
                             let (fit_zoom, fit_pan_x, fit_pan_y) =
-                                calculate_fit(cw, ch, 1200.0, 700.0);
+                                calculate_fit(cw, ch, viewport_w(), viewport_h());
                             zoom.set(fit_zoom);
                             pan_x.set(fit_pan_x);
                             pan_y.set(fit_pan_y);
@@ -716,7 +879,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
             {
                 let info_text = match selection() {
                     Selection::Module(id) => {
-                        current_graph.find_module(id)
+                        render_graph.find_module(id)
                             .map(|m| {
                                 let bypass_status = if m.bypassed { " [BYPASSED]" } else { "" };
                                 format!("{}{} — Del: remove, B: bypass, Esc: deselect", m.name, bypass_status)
@@ -724,7 +887,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                             .unwrap_or_default()
                     }
                     Selection::Node(id) => {
-                        current_graph.find_node(id)
+                        render_graph.find_node(id)
                             .map(|n| {
                                 let bypass_status = if n.bypassed { " [BYPASSED]" } else { "" };
                                 format!("{}{} — Del: remove, B: bypass, Esc: deselect", n.name, bypass_status)
@@ -877,6 +1040,8 @@ struct MinimapProps {
     graph: NodeGraph,
     canvas_w: f64,
     canvas_h: f64,
+    viewport_w: f64,
+    viewport_h: f64,
     pan_x: f64,
     pan_y: f64,
     zoom: f64,
@@ -901,8 +1066,8 @@ fn Minimap(props: MinimapProps) -> Element {
 
     let vp_x = offset_x + (-props.pan_x / props.zoom) * scale;
     let vp_y = offset_y + (-props.pan_y / props.zoom) * scale;
-    let vp_w = (1200.0 / props.zoom) * scale;
-    let vp_h = (700.0 / props.zoom) * scale;
+    let vp_w = (props.viewport_w / props.zoom) * scale;
+    let vp_h = (props.viewport_h / props.zoom) * scale;
 
     let on_pan = props.on_pan.clone();
     let current_zoom = props.zoom;
@@ -920,8 +1085,8 @@ fn Minimap(props: MinimapProps) -> Element {
                 let rect_y = evt.element_coordinates().y;
                 let canvas_x = (rect_x - offset_x) / scale;
                 let canvas_y = (rect_y - offset_y) / scale;
-                let new_pan_x = -(canvas_x - 600.0 / current_zoom) * current_zoom;
-                let new_pan_y = -(canvas_y - 350.0 / current_zoom) * current_zoom;
+                let new_pan_x = -(canvas_x - props.viewport_w * 0.5 / current_zoom) * current_zoom;
+                let new_pan_y = -(canvas_y - props.viewport_h * 0.5 / current_zoom) * current_zoom;
                 on_pan.call((new_pan_x, new_pan_y));
             },
 
@@ -959,6 +1124,233 @@ fn Minimap(props: MinimapProps) -> Element {
 // ── Compact Graph Projection ────────────────────────────────────────
 
 // ── Helpers ──────────────────────────────────────────────────────────
+
+fn build_performance_graph(
+    original: &NodeGraph,
+    viewport_width: f64,
+    viewport_height: f64,
+) -> NodeGraph {
+    let mut graph = original.clone();
+    if graph.modules.is_empty() {
+        return graph;
+    }
+
+    // FastTrackStudio performance_view-style rack layout.
+    let mut ordered: Vec<usize> = (0..graph.modules.len()).collect();
+    ordered.sort_by(|a, b| {
+        graph.modules[*a]
+            .position
+            .y
+            .partial_cmp(&graph.modules[*b].position.y)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                graph.modules[*a]
+                    .position
+                    .x
+                    .partial_cmp(&graph.modules[*b].position.x)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+
+    let aspects: Vec<f64> = ordered
+        .iter()
+        .map(|idx| preferred_aspect_ratio(&graph.modules[*idx]))
+        .collect();
+    let viewport_aspect = (viewport_width / viewport_height).max(0.5);
+    let racks = layout_racks(&ordered, &aspects, viewport_aspect);
+
+    let outer_pad = 0.0;
+    let col_gap = 0.0;
+    let row_gap = 0.0;
+    let avail_w = (viewport_width - outer_pad * 2.0).max(300.0);
+
+    let mut y = outer_pad;
+    for rack in &racks {
+        let rack_h = 220.0;
+
+        let total_aspect = rack.total_aspect_ratio.max(0.001);
+        let mut x = outer_pad;
+        for (slot, idx) in rack.modules.iter().enumerate() {
+            let remaining = rack.modules.len().saturating_sub(slot + 1);
+            let a = preferred_aspect_ratio(&graph.modules[*idx]);
+            let mut w = (avail_w * (a / total_aspect)).max(150.0);
+            if remaining == 0 {
+                // Ensure each rack always fills to the right edge exactly.
+                w = (outer_pad + avail_w - x).max(60.0);
+            } else {
+                // Reserve minimum width for remaining modules to avoid overflow.
+                let reserve_for_rest = 60.0 * remaining as f64;
+                let max_w = (outer_pad + avail_w - x - reserve_for_rest).max(60.0);
+                w = w.clamp(60.0, max_w);
+            }
+
+            let module = &mut graph.modules[*idx];
+            module.position.x = x;
+            module.position.y = y;
+            module.size.width = w;
+            module.size.height = rack_h;
+
+            layout_module_nodes_for_performance(module, false);
+            x += w + col_gap;
+        }
+
+        y += rack_h + row_gap;
+    }
+
+    graph
+}
+
+#[derive(Debug, Clone)]
+struct Rack {
+    modules: Vec<usize>,
+    total_aspect_ratio: f64,
+}
+
+fn preferred_aspect_ratio(module: &GraphModule) -> f64 {
+    if module.nodes.len() == 1 {
+        let node = &module.nodes[0];
+        return match node.widget {
+            NodeWidget::CompressorGraph => 1.0,
+            NodeWidget::EqGraph => 1.5,
+            NodeWidget::Label => {
+                if module.name.to_lowercase().contains("volume") {
+                    0.5
+                } else {
+                    1.0
+                }
+            }
+            _ => 1.0,
+        };
+    }
+
+    let name = module.name.to_lowercase();
+    if name.contains("amp") || name.contains("cab") {
+        return 1.8;
+    }
+    if name.contains("special") || name.contains("drive") {
+        return 2.5;
+    }
+    1.5
+}
+
+fn layout_racks(ordered: &[usize], aspects: &[f64], viewport_aspect: f64) -> Vec<Rack> {
+    let mut racks = Vec::new();
+    let mut current = Rack {
+        modules: Vec::new(),
+        total_aspect_ratio: 0.0,
+    };
+
+    for (i, idx) in ordered.iter().enumerate() {
+        let a = aspects[i];
+        let can_fit =
+            current.modules.len() < 4 && current.total_aspect_ratio < viewport_aspect * 1.2;
+        if can_fit || current.modules.is_empty() {
+            current.modules.push(*idx);
+            current.total_aspect_ratio += a;
+        } else {
+            racks.push(current);
+            current = Rack {
+                modules: vec![*idx],
+                total_aspect_ratio: a,
+            };
+        }
+    }
+
+    if !current.modules.is_empty() {
+        racks.push(current);
+    }
+    racks
+}
+
+fn layout_module_nodes_for_performance(module: &mut GraphModule, fit_all: bool) {
+    if module.nodes.is_empty() {
+        return;
+    }
+
+    let content_title_h = 28.0;
+    let pad = if fit_all { 2.0 } else { 4.0 };
+    let content_w = (module.size.width - pad * 2.0).max(1.0);
+    let content_h = (module.size.height - content_title_h - pad * 2.0).max(1.0);
+
+    if module.nodes.len() == 1 {
+        let node = &mut module.nodes[0];
+        node.position.x = pad;
+        node.position.y = pad;
+        node.size.width = content_w;
+        node.size.height = content_h;
+        return;
+    }
+
+    // Match FastTrackStudio performance_view grouping by deriving logical row/column anchors.
+    let mut all_y_positions: Vec<f64> = module.nodes.iter().map(|n| n.position.y).collect();
+    all_y_positions.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    all_y_positions.dedup_by(|a, b| (*a - *b).abs() < 10.0);
+
+    let mut y_positions: Vec<f64> = all_y_positions
+        .iter()
+        .filter(|&&y| {
+            module
+                .nodes
+                .iter()
+                .filter(|n| (n.position.y - y).abs() < 10.0)
+                .count()
+                >= 2
+        })
+        .copied()
+        .collect();
+    if y_positions.is_empty() {
+        y_positions = all_y_positions;
+    }
+
+    let mut x_positions: Vec<f64> = module.nodes.iter().map(|n| n.position.x).collect();
+    x_positions.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    x_positions.dedup_by(|a, b| (*a - *b).abs() < 10.0);
+
+    let row_count = y_positions.len().max(1);
+    let col_count = x_positions.len().max(1);
+    let cell_w = content_w / col_count as f64;
+    let cell_h = content_h / row_count as f64;
+    let cell_gap = if fit_all { 1.0 } else { 2.0 };
+
+    for idx in 0..module.nodes.len() {
+        let node_y = module.nodes[idx].position.y;
+        let node_bottom = node_y + module.nodes[idx].size.height;
+        let node_x = module.nodes[idx].position.x;
+
+        let start_row = y_positions
+            .iter()
+            .position(|&y| node_y >= y - 10.0 && node_y <= y + 10.0)
+            .or_else(|| y_positions.iter().position(|&y| node_y >= y))
+            .unwrap_or(0);
+
+        let end_row = y_positions
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, y)| node_bottom >= *y + 10.0)
+            .map(|(i, _)| i + 1)
+            .unwrap_or(start_row + 1)
+            .clamp(start_row + 1, row_count);
+
+        let start_col = x_positions
+            .iter()
+            .position(|&x| (node_x - x).abs() < 10.0)
+            .unwrap_or(0)
+            .min(col_count.saturating_sub(1));
+
+        let span_rows = (end_row - start_row).max(1) as f64;
+        let width = (cell_w - cell_gap).max(if fit_all { 36.0 } else { 52.0 });
+        let height = (cell_h * span_rows - cell_gap).max(if fit_all { 28.0 } else { 36.0 });
+        let x = pad + start_col as f64 * cell_w;
+        let y = pad + start_row as f64 * cell_h;
+
+        let node = &mut module.nodes[idx];
+        node.position.x = x;
+        node.position.y = y;
+        node.size.width = width;
+        node.size.height = height;
+    }
+}
 
 fn calculate_canvas_bounds(graph: &NodeGraph) -> (f64, f64) {
     let mut max_x = 0.0f64;

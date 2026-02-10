@@ -81,7 +81,7 @@ pub use signal_flow_grid::SignalFlowGridView;
 pub use node_graph::{
     capture_module_snapshot, capture_node_parameters, capture_rig_snapshot, GraphModule,
     ModuleSnapshot, Node, NodeGraph, NodeParameter, NodePosition, NodeSize, NodeSnapshot,
-    NodeWidget, RigSnapshot, Wire,
+    NodeWidget, ParameterType, RigSnapshot, Wire,
 };
 pub use node_graph_view::NodeGraphView;
 pub use node_property_panel::NodePropertyPanel;

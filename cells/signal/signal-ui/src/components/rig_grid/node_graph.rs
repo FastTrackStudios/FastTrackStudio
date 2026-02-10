@@ -25,6 +25,27 @@ pub struct NodeParameter {
     pub name: String,
     /// Current normalized value in [0.0, 1.0].
     pub value: NormalizedF64,
+    /// Real-world minimum value for display conversion.
+    pub min: f64,
+    /// Real-world maximum value for display conversion.
+    pub max: f64,
+    /// Optional unit suffix (e.g. "dB", "%", "Hz").
+    pub unit: String,
+    /// Parameter interaction/display type.
+    pub param_type: ParameterType,
+    /// Optional DAW-provided formatted display text (e.g. "-12.5 dB").
+    pub formatted_display: Option<String>,
+}
+
+/// Parameter interaction type.
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq, Default, Facet)]
+pub enum ParameterType {
+    #[default]
+    Continuous,
+    Stepped,
+    Toggle,
+    Choice(Vec<String>),
 }
 
 impl NodeParameter {
@@ -34,6 +55,73 @@ impl NodeParameter {
             id: id.into(),
             name: name.into(),
             value,
+            min: 0.0,
+            max: 1.0,
+            unit: String::new(),
+            param_type: ParameterType::Continuous,
+            formatted_display: None,
+        }
+    }
+
+    /// Configure real-world display range.
+    pub fn with_range(mut self, min: f64, max: f64) -> Self {
+        self.min = min;
+        self.max = max;
+        self
+    }
+
+    /// Configure display unit suffix.
+    pub fn with_unit(mut self, unit: impl Into<String>) -> Self {
+        self.unit = unit.into();
+        self
+    }
+
+    /// Configure parameter interaction type.
+    pub fn with_param_type(mut self, param_type: ParameterType) -> Self {
+        self.param_type = param_type;
+        self
+    }
+
+    /// Set formatted display text provided by DAW.
+    pub fn with_formatted_display(mut self, formatted: impl Into<String>) -> Self {
+        self.formatted_display = Some(formatted.into());
+        self
+    }
+
+    /// Convert normalized value to UI text.
+    pub fn display_value(&self) -> String {
+        if let Some(formatted) = &self.formatted_display {
+            if !formatted.trim().is_empty() {
+                return formatted.clone();
+            }
+        }
+        match &self.param_type {
+            ParameterType::Toggle => {
+                if self.value.get() >= 0.5 {
+                    "On".to_string()
+                } else {
+                    "Off".to_string()
+                }
+            }
+            ParameterType::Choice(options) => {
+                if options.is_empty() {
+                    return format!("{:.1}", self.value.get());
+                }
+                let max_index = (options.len() - 1) as f64;
+                let index = (self.value.get().clamp(0.0, 1.0) * max_index).round() as usize;
+                options
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| format!("{:.1}", self.value.get()))
+            }
+            ParameterType::Continuous | ParameterType::Stepped => {
+                let real = self.min + (self.max - self.min) * self.value.get();
+                if self.unit.is_empty() {
+                    format!("{real:.1}")
+                } else {
+                    format!("{real:.1} {}", self.unit)
+                }
+            }
         }
     }
 }
@@ -1176,9 +1264,6 @@ impl NodeGraph {
         // Motion -> Master
         graph.connect(motion_id, "out_l", master_id, "in_l");
         graph.connect(motion_id, "out_r", master_id, "in_r");
-
-        // Auto-arrange modules so nothing overlaps
-        graph.compact_layout(30.0);
 
         graph
     }

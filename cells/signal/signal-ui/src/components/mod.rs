@@ -1,6 +1,13 @@
+pub mod advanced_inspector;
+pub mod block_editor;
+pub mod daw_preset_panel;
+pub mod daw_snapshot_panel;
 pub mod fx_binding_status;
+pub mod module_editor;
 pub mod morph_slider;
+pub mod preset_editor;
 pub mod rig_grid;
+pub mod snapshot_test_harness;
 
 // Re-export morph slider
 pub use morph_slider::MorphSlider;

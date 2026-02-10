@@ -332,7 +332,7 @@ fn PerformanceMainContent() -> Element {
     // Read indices - we need song_index and section_index
     let indices = ACTIVE_INDICES.read();
     let song_index = indices.song_index;
-    let section_index = indices.section_index;
+    let _section_index = indices.section_index;
     let queued_target = indices.queued_target.clone();
     drop(indices);
 

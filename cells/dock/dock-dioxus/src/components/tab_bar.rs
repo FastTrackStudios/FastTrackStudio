@@ -2,6 +2,7 @@
 
 use crate::hooks::use_dock_actions;
 use crate::prelude::*;
+use crate::signals::{ContextMenuState, DOCK_CONTEXT_MENU};
 use dock_proto::{NodeId, TabGroup};
 
 /// Horizontal tab bar shown when a tile has multiple panels.
@@ -17,6 +18,7 @@ pub fn DockTabBar(node_id: NodeId, tabs: TabGroup) -> Element {
                 {
                     let is_active = i == tabs.active_index;
                     let panel = *panel_id;
+                    let drag_source_id = format!("dock-drag-source-tab-{node_id}-{}", panel.as_str());
                     let bg = if is_active {
                         "bg-accent text-foreground border-b-2 border-b-blue-500"
                     } else {
@@ -24,12 +26,15 @@ pub fn DockTabBar(node_id: NodeId, tabs: TabGroup) -> Element {
                     };
                     rsx! {
                         div {
+                            id: "{drag_source_id}",
                             class: "flex items-center gap-1 px-3 py-1.5 cursor-pointer border-r border-border/50 {bg} transition-all duration-100 select-none",
                             draggable: "true",
                             ondragstart: {
                                 let actions = actions.clone();
+                                let drag_source_id = drag_source_id.clone();
                                 move |_: DragEvent| {
                                     actions.start_drag.call((panel, node_id));
+                                    crate::drag_ghost::start_drag_ghost(&drag_source_id, panel.display_name());
                                 }
                             },
                             ondragend: {
@@ -43,6 +48,16 @@ pub fn DockTabBar(node_id: NodeId, tabs: TabGroup) -> Element {
                                 move |_| {
                                     actions.switch_tab.call((node_id, i));
                                 }
+                            },
+                            oncontextmenu: move |e: MouseEvent| {
+                                e.prevent_default();
+                                let coords = e.client_coordinates();
+                                *DOCK_CONTEXT_MENU.write() = Some(ContextMenuState {
+                                    node_id,
+                                    panel_id: panel,
+                                    x: coords.x,
+                                    y: coords.y,
+                                });
                             },
                             span { class: "truncate max-w-[120px]", "{panel.display_name()}" }
                             // Close tab button (only show if more than 1 tab)

@@ -18,6 +18,7 @@ use crate::event::{MouseAction, MouseButton};
 use crate::key::{KeyChord, KeyCode, Modifiers};
 use crate::mode::{ModeDefinition, ModeId};
 use crate::mouse::MousePattern;
+use crate::scroll::{ScrollAxis, ScrollPattern};
 use crate::trie::LeafAction;
 
 #[derive(Debug, Error)]
@@ -32,6 +33,8 @@ pub enum ConfigError {
     InvalidKeyChord(String),
     #[error("invalid mouse pattern: {0}")]
     InvalidMousePattern(String),
+    #[error("invalid scroll pattern: {0}")]
+    InvalidScrollPattern(String),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -44,6 +47,8 @@ pub struct KeymapConfig {
     pub keymap_context: HashMap<String, Vec<ContextLayerConfig>>,
     #[serde(default)]
     pub mouse: HashMap<String, HashMap<String, String>>,
+    #[serde(default)]
+    pub scroll: HashMap<String, HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -116,6 +121,13 @@ impl KeymapConfig {
 
         for (mode, bindings) in user.mouse {
             let mode_map = merged.mouse.entry(mode).or_default();
+            for (pattern, action) in bindings {
+                mode_map.insert(pattern, action);
+            }
+        }
+
+        for (mode, bindings) in user.scroll {
+            let mode_map = merged.scroll.entry(mode).or_default();
             for (pattern, action) in bindings {
                 mode_map.insert(pattern, action);
             }
@@ -302,6 +314,37 @@ pub fn parse_mouse_pattern(input: &str) -> Result<MousePattern, ConfigError> {
     Ok(MousePattern::new(button, action, modifiers))
 }
 
+pub fn parse_scroll_pattern(input: &str) -> Result<ScrollPattern, ConfigError> {
+    let mut modifiers = Modifiers::NONE;
+    let mut parts: Vec<&str> = input.split('+').collect();
+    if parts.is_empty() {
+        return Err(ConfigError::InvalidScrollPattern(input.to_string()));
+    }
+
+    let axis_token = parts
+        .pop()
+        .ok_or_else(|| ConfigError::InvalidScrollPattern(input.to_string()))?;
+
+    for m in parts {
+        match m.trim().to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => modifiers.ctrl = true,
+            "alt" | "option" => modifiers.alt = true,
+            "shift" => modifiers.shift = true,
+            "cmd" | "meta" | "super" => modifiers.meta = true,
+            _ => return Err(ConfigError::InvalidScrollPattern(input.to_string())),
+        }
+    }
+
+    let axis = match axis_token.trim().to_ascii_lowercase().as_str() {
+        "scroll" | "wheel" => ScrollAxis::Any,
+        "scrollx" | "wheelx" | "hscroll" | "horizontal" => ScrollAxis::Horizontal,
+        "scrolly" | "wheely" | "vscroll" | "vertical" => ScrollAxis::Vertical,
+        _ => return Err(ConfigError::InvalidScrollPattern(input.to_string())),
+    };
+
+    Ok(ScrollPattern::new(axis, modifiers))
+}
+
 fn parse_mouse_button(token: &str) -> Result<MouseButton, ConfigError> {
     match token.to_ascii_lowercase().as_str() {
         "left" => Ok(MouseButton::Left),
@@ -354,6 +397,12 @@ mod tests {
                     "Left.Click": "mouse.primary",
                     "Ctrl+Left.DoubleClick": "mouse.ctrl_double"
                 }
+            },
+            "scroll": {
+                "normal": {
+                    "Ctrl+Scroll": "view.zoom",
+                    "Shift+ScrollX": "view.hscroll"
+                }
             }
         }"#
     }
@@ -378,6 +427,14 @@ mod tests {
         let pat = parse_mouse_pattern("Ctrl+Left.DoubleClick")?;
         assert_eq!(pat.button, MouseButton::Left);
         assert_eq!(pat.action, MouseAction::DoubleClick);
+        assert!(pat.modifiers.ctrl);
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_scroll_pattern_with_modifiers() -> Result<()> {
+        let pat = parse_scroll_pattern("Ctrl+ScrollX")?;
+        assert_eq!(pat.axis, ScrollAxis::Horizontal);
         assert!(pat.modifiers.ctrl);
         Ok(())
     }
@@ -415,6 +472,20 @@ mod tests {
             &ctx,
         );
         assert!(matches!(&cmds[0], crate::command::InputCommand::ActionWithArgs{action, ..} if action.as_str() == "mouse.primary"));
+
+        // Scroll binding should parse and dispatch.
+        let cmds = processor.process(
+            InputEvent::Scroll(crate::event::ScrollEvent {
+                delta_x: 0.0,
+                delta_y: -8.0,
+                modifiers: Modifiers {
+                    ctrl: true,
+                    ..Modifiers::NONE
+                },
+            }),
+            &ctx,
+        );
+        assert!(matches!(&cmds[0], crate::command::InputCommand::ActionWithArgs{action, ..} if action.as_str() == "view.zoom"));
         Ok(())
     }
 

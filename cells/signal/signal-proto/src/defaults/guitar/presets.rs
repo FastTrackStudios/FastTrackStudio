@@ -5,7 +5,6 @@
 //! presets that profiles and songs reference.
 
 use crate::category::{BaseTone, Genre, PresetCategory};
-use crate::module::ModuleType;
 use crate::module_preset::{ModuleAssignment, ModulePreset};
 use crate::normalized::Order;
 use crate::preset::{Credit, Inspiration, Preset, Snapshot};

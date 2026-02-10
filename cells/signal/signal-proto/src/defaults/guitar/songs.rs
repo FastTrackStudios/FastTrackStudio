@@ -180,7 +180,7 @@ pub fn girl_goodbye(presets: &GirlGoodbyePresets, modules: &GuitarModulePresets)
 /// "Movin' Out" by Sammy Rae & The Friends — 4 scenes.
 ///
 /// Scenes: Clean Intro, Verse, Chorus, Outro.
-pub fn movin_out(presets: &MovinOutPresets, modules: &GuitarModulePresets) -> PerformanceSong {
+pub fn movin_out(presets: &MovinOutPresets, _modules: &GuitarModulePresets) -> PerformanceSong {
     let mut song = PerformanceSong::new("Movin' Out")
         .with_artist("Sammy Rae & The Friends");
 

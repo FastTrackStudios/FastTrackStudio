@@ -62,38 +62,10 @@ pub fn default_presets() -> PresetCollection {
                 .build(),
         )
         .with_hotkey("F7"),
-        // F8: Rig — [preset browser / profile browser] | [rig grid / scene grid] | [song parts / song selector]
+        // F8: Rig — full-screen rig editor with sub-tabs (Blocks, Modules, Presets, etc.)
         DockPreset::builtin(
             "Rig",
-            B::horizontal()
-                .left(
-                    B::vertical()
-                        .top(B::tile(PresetBrowser))
-                        .bottom(B::tile(ProfileBrowser))
-                        .ratio(50.0)
-                        .build_node(),
-                )
-                .right(
-                    B::horizontal()
-                        .left(
-                            B::vertical()
-                                .top(B::tile(RigGrid))
-                                .bottom(B::tile(SceneGrid))
-                                .ratio(75.0)
-                                .build_node(),
-                        )
-                        .right(
-                            B::vertical()
-                                .top(B::tile(SongParts))
-                                .bottom(B::tile(SongSelector))
-                                .ratio(50.0)
-                                .build_node(),
-                        )
-                        .ratio(70.0)
-                        .build_node(),
-                )
-                .ratio(15.0)
-                .build(),
+            crate::layout::DockLayout::from_tree(B::tile(RigEditor)),
         )
         .with_hotkey("F8"),
         // F9: Mixer — FX chain tree + DAW mixer + FX parameter browser

@@ -8,7 +8,6 @@
 //!
 //! This metadata is useful for documentation but clutters display names.
 
-use std::borrow::Cow;
 
 /// Known microphone models and their variations
 ///

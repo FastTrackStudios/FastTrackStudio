@@ -838,7 +838,7 @@ impl MockRigControlService {
     /// Resolve a scene, applying song-level overrides when relevant.
     fn resolve_scene_for_load(
         &self,
-        preset: &Preset,
+        _preset: &Preset,
         scene: &Scene,
         song_overrides: &[crate::module_preset::ModuleOverride],
     ) -> Scene {

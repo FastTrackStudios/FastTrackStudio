@@ -22,7 +22,7 @@ use crate::preset::Preset;
 use crate::rig::Rig;
 
 use super::diff::{self, SlotState};
-use super::resolver::{self, ResolvedModules, ResolvedSlot};
+use super::resolver::{self, ResolvedModules};
 use super::rig_engine::{RigEngine, TransitionResult};
 use super::slot::{ActivateResult, LoadResult, ModuleSlot};
 

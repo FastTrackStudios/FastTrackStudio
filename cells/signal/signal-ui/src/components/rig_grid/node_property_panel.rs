@@ -12,6 +12,7 @@
 //! - Placeholder when nothing is selected
 
 use crate::prelude::*;
+use crate::hooks::rig_actions::use_rig_actions;
 use crate::signals::{SelectedEntity, RIG_NODE_GRAPH, RIG_SELECTED_ENTITY};
 use signal_control::block::BlockType;
 use uuid::Uuid;
@@ -83,6 +84,7 @@ struct NodePropertyContentProps {
 
 #[component]
 fn NodePropertyContent(props: NodePropertyContentProps) -> Element {
+    let actions = use_rig_actions();
     let node = &props.node;
     let color = block_type_color(node.block_type);
     let node_id = node.id;
@@ -147,13 +149,16 @@ fn NodePropertyContent(props: NodePropertyContentProps) -> Element {
                 if !node.parameters.is_empty() {
                     PropertySection { title: "Parameters" }
                     div { class: "px-3 pb-3 flex flex-col gap-2",
-                        for param in &node.parameters {
+                        for (idx, param) in node.parameters.iter().enumerate() {
                             ParameterSlider {
                                 key: "{param.id}",
                                 node_id: node_id,
+                                param_index: idx as u32,
                                 param_id: param.id.clone(),
                                 name: param.name.clone(),
                                 value: param.value.get(),
+                                display_value: param.display_value(),
+                                set_parameter: actions.set_parameter.clone(),
                             }
                         }
                     }
@@ -193,6 +198,7 @@ struct ModulePropertyContentProps {
 
 #[component]
 fn ModulePropertyContent(props: ModulePropertyContentProps) -> Element {
+    let actions = use_rig_actions();
     let module = &props.module;
     let color = block_type_color(module.block_type);
     let module_id = module.id;
@@ -263,6 +269,35 @@ fn ModulePropertyContent(props: ModulePropertyContentProps) -> Element {
                             InternalNodeItem {
                                 key: "{node.id}",
                                 node: node.clone(),
+                            }
+                        }
+                    }
+                }
+
+                if module.nodes.iter().any(|n| !n.parameters.is_empty()) {
+                    PropertySection { title: "Parameters by Node" }
+                    div { class: "px-3 pb-3 flex flex-col gap-3",
+                        for node in &module.nodes {
+                            if !node.parameters.is_empty() {
+                                div { class: "rounded-lg border border-border/60 bg-muted/20 p-2",
+                                    div { class: "text-xs font-semibold text-foreground mb-1",
+                                        "{node.name}"
+                                    }
+                                    div { class: "flex flex-col gap-2",
+                                        for (idx, param) in node.parameters.iter().enumerate() {
+                                            ParameterSlider {
+                                                key: "{node.id}-{param.id}",
+                                                node_id: node.id,
+                                                param_index: idx as u32,
+                                                param_id: param.id.clone(),
+                                                name: param.name.clone(),
+                                                value: param.value.get(),
+                                                display_value: param.display_value(),
+                                                set_parameter: actions.set_parameter.clone(),
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -356,22 +391,27 @@ fn BypassToggle(props: BypassToggleProps) -> Element {
 #[derive(Props, Clone, PartialEq)]
 struct ParameterSliderProps {
     node_id: Uuid,
+    param_index: u32,
     param_id: String,
     name: String,
     value: f64,
+    display_value: String,
+    set_parameter: Callback<(Uuid, u32, f64)>,
 }
 
 #[component]
 fn ParameterSlider(props: ParameterSliderProps) -> Element {
     let pct = props.value * 100.0;
     let node_id = props.node_id;
+    let param_index = props.param_index;
     let param_id = props.param_id.clone();
+    let set_parameter = props.set_parameter.clone();
 
     rsx! {
         div { class: "flex flex-col gap-0.5",
             div { class: "flex items-center justify-between",
                 span { class: "text-xs text-muted-foreground", "{props.name}" }
-                span { class: "text-[10px] font-mono text-foreground", "{pct:.0}%" }
+                span { class: "text-[10px] font-mono text-foreground", "{props.display_value}" }
             }
             // Slider track
             div { class: "relative h-1.5 rounded-full bg-muted overflow-hidden cursor-pointer",
@@ -382,8 +422,10 @@ fn ParameterSlider(props: ParameterSliderProps) -> Element {
                         RIG_NODE_GRAPH.write().find_node_mut(node_id).map(|n| {
                             if let Some(p) = n.parameters.iter_mut().find(|p| p.id == pid) {
                                 p.value = signal_control::normalized::NormalizedF64::new(clamped);
+                                p.formatted_display = None;
                             }
                         });
+                        set_parameter.call((node_id, param_index, clamped));
                     }
                 },
                 // Fill

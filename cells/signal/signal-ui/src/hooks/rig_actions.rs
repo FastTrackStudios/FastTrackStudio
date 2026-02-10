@@ -6,7 +6,7 @@
 use crate::prelude::*;
 use crate::signals::{
     RIG_CURRENT_PRESET, RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_LAST_APPLIED_SNAPSHOT, RIG_PROFILE,
-    RIG_SERVICE,
+    RIG_FX_CHAIN, RIG_NODE_FX_BINDINGS, RIG_SERVICE,
 };
 use signal_control::{PreloadPriority, RigControlCommand, SignalControl};
 use uuid::Uuid;
@@ -279,11 +279,38 @@ pub fn use_rig_actions() -> RigActions {
                 });
             })
         },
-        set_parameter: Callback::new(
-            move |(_module_id, _param_index, _value): (Uuid, u32, f64)| {
-                tracing::warn!("set_parameter: not yet implemented in signal-control");
-            },
-        ),
+        set_parameter: Callback::new(move |(node_id, param_index, value): (Uuid, u32, f64)| {
+            spawn(async move {
+                let binding = match RIG_NODE_FX_BINDINGS.read().get(&node_id).cloned() {
+                    Some(b) => b,
+                    None => {
+                        tracing::debug!("set_parameter: no DAW binding for node {}", node_id);
+                        return;
+                    }
+                };
+                let Some(chain) = RIG_FX_CHAIN.read().clone() else {
+                    tracing::debug!("set_parameter: no active FX chain binding");
+                    return;
+                };
+                let Ok(Some(handle)) = chain.by_guid(&binding.fx_guid).await else {
+                    tracing::warn!(
+                        "set_parameter: plugin {} not found in current chain",
+                        binding.fx_guid
+                    );
+                    return;
+                };
+
+                if let Err(e) = handle.param(param_index).set(value).await {
+                    tracing::warn!(
+                        "set_parameter: failed {}[{}] -> {:.3}: {}",
+                        binding.fx_guid,
+                        param_index,
+                        value,
+                        e
+                    );
+                }
+            });
+        }),
         set_block_parameter: Callback::new(
             move |(_module_id, _param_index, _value): (Uuid, u32, f32)| {
                 tracing::warn!("set_block_parameter: not yet implemented in signal-control");
