@@ -23,13 +23,30 @@ impl LocalConfig {
         }
     }
 
-    /// Create config using the platform-appropriate data directory.
+    /// Create config using the FastTrackStudio music directory.
+    ///
+    /// Resolves to: `~/Music/FastTrackStudio/signal.db`
+    ///
+    /// This is the primary storage location so presets persist across
+    /// projects and are easy to find alongside other music production data.
+    pub fn default_path() -> Result<Self, crate::error::StorageError> {
+        let home = dirs::home_dir().ok_or_else(|| {
+            crate::error::StorageError::Config("could not determine home directory".to_string())
+        })?;
+        let db_path = home.join("Music").join("FastTrackStudio").join("signal.db");
+        Ok(Self::new(db_path))
+    }
+
+    /// Create config using the platform-appropriate data directory (legacy).
     ///
     /// Resolves to:
     /// - Linux: `~/.local/share/signal/signal.db`
     /// - macOS: `~/Library/Application Support/signal/signal.db`
     /// - Windows: `C:\Users\<user>\AppData\Roaming\signal\signal.db`
-    pub fn default_path() -> Result<Self, crate::error::StorageError> {
+    ///
+    /// Kept for backward compatibility and testing. New code should use
+    /// [`default_path`](Self::default_path) instead.
+    pub fn platform_data_path() -> Result<Self, crate::error::StorageError> {
         let data_dir = dirs::data_dir().ok_or_else(|| {
             crate::error::StorageError::Config(
                 "could not determine platform data directory".to_string(),
@@ -46,9 +63,7 @@ impl LocalConfig {
 
     /// Get the parent directory of the database file.
     pub fn database_dir(&self) -> &Path {
-        self.database_path
-            .parent()
-            .unwrap_or(Path::new("."))
+        self.database_path.parent().unwrap_or(Path::new("."))
     }
 }
 
@@ -72,9 +87,25 @@ mod tests {
     }
 
     #[test]
-    fn default_path_resolves() {
-        // Should succeed on any desktop platform
+    fn default_path_resolves_to_fast_track_studio() {
         let config = LocalConfig::default_path();
+        assert!(config.is_ok());
+        let config = config.unwrap();
+        let path_str = config.database_path.to_string_lossy();
+        assert!(
+            path_str.contains("FastTrackStudio"),
+            "expected FastTrackStudio in path, got: {path_str}"
+        );
+        assert!(
+            path_str.ends_with("signal.db"),
+            "expected signal.db suffix, got: {path_str}"
+        );
+    }
+
+    #[test]
+    fn platform_data_path_resolves() {
+        // Legacy path should still work
+        let config = LocalConfig::platform_data_path();
         assert!(config.is_ok());
         let config = config.unwrap();
         assert!(config.database_path.to_string_lossy().contains("signal"));
