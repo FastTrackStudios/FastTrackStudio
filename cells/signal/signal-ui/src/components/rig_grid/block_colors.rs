@@ -61,7 +61,18 @@ pub const fn block_type_color(block_type: BlockType) -> BlockColor {
 
         // Modulation - Purple family
         BlockType::Modulation => BlockColor::new("#A855F7", "#FAF5FF", "#9333EA"),
+        BlockType::Chorus => BlockColor::new("#A855F7", "#FAF5FF", "#9333EA"),
+        BlockType::Flanger => BlockColor::new("#A855F7", "#FAF5FF", "#9333EA"),
+        BlockType::Phaser => BlockColor::new("#A855F7", "#FAF5FF", "#9333EA"),
+        BlockType::RingModulator => BlockColor::new("#9333EA", "#FAF5FF", "#7E22CE"),
+
+        // Motion - Lighter purple
         BlockType::Tremolo => BlockColor::new("#C084FC", "#FAF5FF", "#A855F7"),
+        BlockType::Panner => BlockColor::new("#C084FC", "#FAF5FF", "#A855F7"),
+        BlockType::Vibrato => BlockColor::new("#C084FC", "#FAF5FF", "#A855F7"),
+        BlockType::Rotary => BlockColor::new("#C084FC", "#FAF5FF", "#A855F7"),
+
+        // Special - Pink family
         BlockType::Pitch => BlockColor::new("#8B5CF6", "#FAF5FF", "#7C3AED"),
 
         // Time-based - Cyan/Sky family
@@ -71,8 +82,17 @@ pub const fn block_type_color(block_type: BlockType) -> BlockColor {
 
         // Special/Utility - Pink/Gray
         BlockType::Special => BlockColor::new("#EC4899", "#FDF2F8", "#DB2777"),
+        BlockType::Wah => BlockColor::new("#EC4899", "#FDF2F8", "#DB2777"),
+        BlockType::Filter => BlockColor::new("#EC4899", "#FDF2F8", "#DB2777"),
+        BlockType::Doubler => BlockColor::new("#EC4899", "#FDF2F8", "#DB2777"),
         BlockType::Tuner => BlockColor::new("#78716C", "#FAFAF9", "#57534E"),
         BlockType::Custom => BlockColor::new("#A8A29E", "#FAFAF9", "#78716C"),
+
+        // EQ subcategory - Green
+        BlockType::Crossover => BlockColor::new("#22C55E", "#F0FDF4", "#16A34A"),
+
+        // Drive subcategory - Orange
+        BlockType::Boost => BlockColor::new("#FB923C", "#FFF7ED", "#F97316"),
     }
 }
 
@@ -146,9 +166,7 @@ fn vary_hex_color(hex: &str, variation: i32) -> String {
     let b = i32::from_str_radix(&hex[4..6], 16).unwrap_or(0);
 
     // Apply variation with clamping
-    let adjust = |val: i32| -> u8 {
-        (val + variation * 3).clamp(0, 255) as u8
-    };
+    let adjust = |val: i32| -> u8 { (val + variation * 3).clamp(0, 255) as u8 };
 
     let new_r = adjust(r);
     let new_g = adjust(g);
@@ -186,6 +204,18 @@ mod tests {
             BlockType::DeEsser,
             BlockType::Saturator,
             BlockType::Tuner,
+            BlockType::Chorus,
+            BlockType::Flanger,
+            BlockType::Phaser,
+            BlockType::RingModulator,
+            BlockType::Wah,
+            BlockType::Filter,
+            BlockType::Doubler,
+            BlockType::Panner,
+            BlockType::Vibrato,
+            BlockType::Rotary,
+            BlockType::Crossover,
+            BlockType::Boost,
         ];
 
         for bt in types {

@@ -96,10 +96,10 @@ impl SignalControl {
         Self::new(signal::MockRigControlService::with_guitar_defaults())
     }
 
-    /// Connect to a SQLite database, run migrations, and create a
-    /// `SignalControl` with both mock rig service and persistent storage.
+    /// Connect to a SQLite database, run migrations, seed defaults if empty,
+    /// and create a `SignalControl` with both mock rig service and persistent storage.
     pub async fn connect_db(db_path: &str) -> eyre::Result<Self> {
-        let db = signal_storage::connect_and_migrate(db_path).await?;
+        let db = signal_storage::connect_migrate_and_seed(db_path).await?;
         tracing::info!("signal-control: connected to {db_path}");
         Ok(Self {
             service: Arc::new(signal::MockRigControlService::with_guitar_defaults()),

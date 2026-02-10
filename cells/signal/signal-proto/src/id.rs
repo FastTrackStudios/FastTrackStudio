@@ -40,6 +40,12 @@ macro_rules! typed_id {
                 write!(f, "{}", self.0)
             }
         }
+
+        impl From<$name> for Uuid {
+            fn from(id: $name) -> Uuid {
+                id.0
+            }
+        }
     };
 }
 

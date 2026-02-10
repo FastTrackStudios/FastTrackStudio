@@ -16,6 +16,7 @@ pub mod module_repo;
 pub mod persist;
 pub mod preset_repo;
 pub mod profile_repo;
+pub mod seed;
 pub mod setlist_repo;
 pub mod snapshot_service;
 pub mod song_repo;
@@ -52,5 +53,16 @@ pub async fn connect_and_migrate(db_path: &str) -> Result<DatabaseConnection, St
         .await
         .map_err(|e| StorageError::Config(format!("migration failed: {e}")))?;
 
+    Ok(db)
+}
+
+/// Connect to a SQLite database, run migrations, and seed with FTS-Guitar defaults
+/// if the database is empty.
+///
+/// This is the recommended entry point for production startup. Use
+/// [`connect_and_migrate`] directly if you want to skip seeding (e.g., in tests).
+pub async fn connect_migrate_and_seed(db_path: &str) -> Result<DatabaseConnection, StorageError> {
+    let db = connect_and_migrate(db_path).await?;
+    seed::seed_if_empty(&db).await?;
     Ok(db)
 }

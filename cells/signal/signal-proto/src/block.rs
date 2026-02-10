@@ -43,7 +43,11 @@ pub struct PluginId {
 
 impl PluginId {
     /// Create a new plugin identifier.
-    pub fn new(format: PluginFormat, uid: impl Into<String>, display_name: impl Into<String>) -> Self {
+    pub fn new(
+        format: PluginFormat,
+        uid: impl Into<String>,
+        display_name: impl Into<String>,
+    ) -> Self {
         Self {
             format,
             uid: uid.into(),
@@ -65,7 +69,6 @@ impl PluginId {
     pub fn js(uid: impl Into<String>, display_name: impl Into<String>) -> Self {
         Self::new(PluginFormat::Js, uid, display_name)
     }
-
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,6 +104,84 @@ pub enum BlockType {
     DeEsser,
     Saturator,
     Tuner,
+    // Fine-grained modulation
+    Chorus,
+    Flanger,
+    Phaser,
+    RingModulator,
+    // Fine-grained special
+    Wah,
+    Filter,
+    Doubler,
+    // Motion
+    Panner,
+    Vibrato,
+    Rotary,
+    // Utility
+    Crossover,
+    // Drive subcategory
+    Boost,
+}
+
+impl BlockType {
+    /// UI category grouping for block type selectors and filters.
+    pub fn category(&self) -> &'static str {
+        match self {
+            Self::Chorus
+            | Self::Flanger
+            | Self::Phaser
+            | Self::RingModulator
+            | Self::Modulation => "Modulation",
+            Self::Tremolo | Self::Panner | Self::Vibrato | Self::Rotary => "Motion",
+            Self::Delay | Self::Reverb | Self::Freeze => "Time",
+            Self::Wah | Self::Filter | Self::Pitch | Self::Doubler | Self::Special => "Special",
+            Self::Drive | Self::Boost | Self::Saturator => "Drive",
+            Self::Amp | Self::Cabinet => "Amp",
+            Self::Eq | Self::Crossover => "EQ",
+            Self::Compressor | Self::Gate | Self::Limiter | Self::DeEsser => "Dynamics",
+            Self::Volume | Self::Send | Self::Input | Self::Tuner => "Utility",
+            Self::Custom => "Other",
+        }
+    }
+
+    /// Human-readable display name for UI labels.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Input => "Input",
+            Self::Compressor => "Compressor",
+            Self::Drive => "Drive",
+            Self::Amp => "Amp",
+            Self::Cabinet => "Cabinet",
+            Self::Eq => "EQ",
+            Self::Modulation => "Modulation",
+            Self::Delay => "Delay",
+            Self::Reverb => "Reverb",
+            Self::Gate => "Gate",
+            Self::Volume => "Volume",
+            Self::Pitch => "Pitch",
+            Self::Tremolo => "Tremolo",
+            Self::Limiter => "Limiter",
+            Self::Send => "Send",
+            Self::Special => "Special",
+            Self::Freeze => "Freeze",
+            Self::Custom => "Custom",
+            Self::DeEsser => "De-Esser",
+            Self::Saturator => "Saturator",
+            Self::Tuner => "Tuner",
+            Self::Chorus => "Chorus",
+            Self::Flanger => "Flanger",
+            Self::Phaser => "Phaser",
+            Self::RingModulator => "Ring Modulator",
+            Self::Wah => "Wah",
+            Self::Filter => "Filter",
+            Self::Doubler => "Doubler",
+            Self::Panner => "Panner",
+            Self::Vibrato => "Vibrato",
+            Self::Rotary => "Rotary",
+            Self::Crossover => "Crossover",
+            Self::Boost => "Boost",
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -250,7 +331,11 @@ mod tests {
         block.set_parameter(0, 0.9);
 
         assert_eq!(block.get_parameter(0), Some(0.9));
-        assert_eq!(block.parameters.len(), 1, "should update in place, not append");
+        assert_eq!(
+            block.parameters.len(),
+            1,
+            "should update in place, not append"
+        );
     }
 
     #[test]
@@ -333,9 +418,12 @@ mod tests {
     #[test]
     fn global_block_holds_order() {
         let block = Block::new("Global EQ", PluginId::clap("eq", "EQ"));
-        let global = GlobalBlock { block, order: Order::new(3), tags: Tags::new() };
+        let global = GlobalBlock {
+            block,
+            order: Order::new(3),
+            tags: Tags::new(),
+        };
         assert_eq!(global.order.get(), 3);
         assert_eq!(global.block.name, "Global EQ");
     }
-
 }
