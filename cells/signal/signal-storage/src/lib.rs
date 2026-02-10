@@ -27,3 +27,30 @@ pub use persist::{load_value, save_value, MemoryBackend, Persistable, SqliteBack
 
 // Re-export sea_orm types that consumers need
 pub use sea_orm::DatabaseConnection;
+
+/// Connect to a SQLite database at the given path and run all pending migrations.
+///
+/// Creates the database file and parent directories if they don't exist.
+/// Returns the connected `DatabaseConnection` ready for use.
+pub async fn connect_and_migrate(db_path: &str) -> Result<DatabaseConnection, StorageError> {
+    use sea_orm::Database;
+    use sea_orm_migration::MigratorTrait;
+
+    // Ensure parent directory exists
+    if let Some(parent) = std::path::Path::new(db_path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            StorageError::Config(format!(
+                "failed to create db directory {}: {e}",
+                parent.display()
+            ))
+        })?;
+    }
+
+    let url = format!("sqlite://{}?mode=rwc", db_path);
+    let db = Database::connect(&url).await?;
+    Migrator::up(&db, None)
+        .await
+        .map_err(|e| StorageError::Config(format!("migration failed: {e}")))?;
+
+    Ok(db)
+}
