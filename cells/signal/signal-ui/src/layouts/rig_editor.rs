@@ -12,6 +12,8 @@ use crate::components::advanced_inspector::AdvancedInspectorView;
 use crate::components::block_editor::BlockEditorView;
 use crate::components::module_editor::ModuleEditorView;
 use crate::components::preset_editor::PresetEditorView;
+use crate::components::profile_editor::ProfileEditorView;
+use crate::components::song_editor::SongEditorView;
 use crate::hooks::rig_state::use_rig_subscription;
 use crate::prelude::*;
 use crate::signals::{init_rig_service, RigEditorTab, RIG_EDITOR_TAB};
@@ -67,6 +69,12 @@ pub fn RigEditorPanel() -> Element {
                     },
                     RigEditorTab::PresetEditor => rsx! {
                         PresetEditorView {}
+                    },
+                    RigEditorTab::ProfileEditor => rsx! {
+                        ProfileEditorView {}
+                    },
+                    RigEditorTab::SongEditor => rsx! {
+                        SongEditorView {}
                     },
                     RigEditorTab::Advanced => rsx! {
                         AdvancedInspectorView {}

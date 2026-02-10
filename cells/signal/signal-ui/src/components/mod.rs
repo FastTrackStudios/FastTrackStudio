@@ -6,8 +6,10 @@ pub mod fx_binding_status;
 pub mod module_editor;
 pub mod morph_slider;
 pub mod preset_editor;
+pub mod profile_editor;
 pub mod rig_grid;
 pub mod snapshot_test_harness;
+pub mod song_editor;
 
 // Re-export morph slider
 pub use morph_slider::MorphSlider;

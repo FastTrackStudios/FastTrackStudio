@@ -32,6 +32,10 @@ pub enum RigEditorTab {
     ModuleEditor,
     /// Preset editor — compose modules into full rig presets.
     PresetEditor,
+    /// Profile editor — manage profiles and their scene templates.
+    ProfileEditor,
+    /// Song/setlist editor — manage songs, scenes, and setlists.
+    SongEditor,
     /// Advanced inspector — raw chunk data, parameter tables, debug info.
     Advanced,
 }
@@ -44,6 +48,8 @@ impl RigEditorTab {
             Self::BlockEditor => "Blocks",
             Self::ModuleEditor => "Modules",
             Self::PresetEditor => "Presets",
+            Self::ProfileEditor => "Profiles",
+            Self::SongEditor => "Songs",
             Self::Advanced => "Advanced",
         }
     }
@@ -55,6 +61,8 @@ impl RigEditorTab {
             RigEditorTab::BlockEditor,
             RigEditorTab::ModuleEditor,
             RigEditorTab::PresetEditor,
+            RigEditorTab::ProfileEditor,
+            RigEditorTab::SongEditor,
             RigEditorTab::Advanced,
         ]
     }
