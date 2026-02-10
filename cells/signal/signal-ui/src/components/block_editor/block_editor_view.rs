@@ -159,7 +159,7 @@ pub fn BlockEditorView() -> Element {
                     }
 
                     // Scrollable type list grouped by category
-                    div { class: "flex-1 overflow-y-auto px-2 py-2",
+                    div { class: "flex-1 overflow-y-auto min-h-0 px-2 py-2",
                         for category in block_type_categories() {
                             {
                                 let cat_types: Vec<_> = block_types.read().iter()
