@@ -51,7 +51,7 @@ pub fn use_rig_subscription() {
             }
 
             let presets = ctl.get_available_presets().await;
-            tracing::debug!("{} presets available", presets.len());
+            tracing::debug!("{} presets available (mock)", presets.len());
             *RIG_AVAILABLE_PRESETS.write() = presets;
 
             if let Some(preset) = ctl.get_current_preset().await {
@@ -70,6 +70,11 @@ pub fn use_rig_subscription() {
             let setlists = ctl.get_available_setlists().await;
             tracing::info!("{} setlists available", setlists.len());
             *RIG_AVAILABLE_SETLISTS.write() = setlists;
+
+            // ── DB-backed sidebar data ───────────────────────────────
+            // If a database is connected, overlay DB presets/profiles/songs
+            // on top of mock data so the sidebars show persisted content.
+            populate_sidebars_from_db(&ctl).await;
 
             if let Some(setlist) = ctl.get_current_setlist().await {
                 tracing::info!(
@@ -177,6 +182,137 @@ async fn handle_event(ctl: &SignalControl, event: RigControlEvent) {
             *RIG_LOADING.write() = false;
         }
         _ => {}
+    }
+}
+
+/// Populate sidebar signals from the SQLite database.
+///
+/// Converts DB entity models into the `PresetInfo`/`ProfileInfo` types that
+/// the existing sidebar components already consume. This replaces mock data
+/// with real persisted content when a DB is available.
+async fn populate_sidebars_from_db(ctl: &SignalControl) {
+    use signal_control::{PresetInfo, PresetSnapshotInfo, ProfileInfo, ProfileSceneInfo};
+
+    // ── Presets ──────────────────────────────────────────────────
+    if let Ok(db_presets) = ctl.list_rig_presets().await {
+        if !db_presets.is_empty() {
+            let mut preset_infos: Vec<PresetInfo> = Vec::with_capacity(db_presets.len());
+
+            for p in &db_presets {
+                // Fetch snapshots for this preset
+                let snapshots = ctl
+                    .list_rig_preset_snapshots(p.id)
+                    .await
+                    .unwrap_or_default();
+                let scene_names: Vec<String> = snapshots.iter().map(|s| s.name.clone()).collect();
+                let scenes: Vec<PresetSnapshotInfo> = snapshots
+                    .iter()
+                    .map(|s| PresetSnapshotInfo {
+                        id: s.id,
+                        name: s.name.clone(),
+                    })
+                    .collect();
+
+                let category = p.category.as_str().unwrap_or("").to_string();
+
+                preset_infos.push(PresetInfo {
+                    id: p.id,
+                    name: p.name.clone(),
+                    category,
+                    rating: 0,
+                    description: p.description.clone(),
+                    scene_count: scenes.len(),
+                    scene_names,
+                    scenes,
+                });
+            }
+
+            tracing::info!(
+                "{} presets loaded from DB (replacing mock)",
+                preset_infos.len()
+            );
+            *RIG_AVAILABLE_PRESETS.write() = preset_infos;
+        }
+    }
+
+    // ── Profiles ─────────────────────────────────────────────────
+    if let Ok(db_profiles) = ctl.list_profiles().await {
+        if !db_profiles.is_empty() {
+            let mut profile_infos: Vec<ProfileInfo> = Vec::with_capacity(db_profiles.len());
+
+            for prof in &db_profiles {
+                let templates = ctl.list_scene_templates(prof.id).await.unwrap_or_default();
+                let scene_names: Vec<String> = templates.iter().map(|t| t.name.clone()).collect();
+                // Resolve preset names for scene display
+                let db_presets = RIG_AVAILABLE_PRESETS.read();
+                let scenes: Vec<ProfileSceneInfo> = templates
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| {
+                        let preset_name = db_presets
+                            .iter()
+                            .find(|p| p.id == t.preset_id)
+                            .map(|p| p.name.clone())
+                            .unwrap_or_else(|| "Unknown".to_string());
+                        let preset_snapshot_name = t.snapshot_id.and_then(|sid| {
+                            db_presets
+                                .iter()
+                                .find(|p| p.id == t.preset_id)
+                                .and_then(|p| p.scenes.iter().find(|s| s.id == sid))
+                                .map(|s| s.name.clone())
+                        });
+                        ProfileSceneInfo {
+                            index: i,
+                            name: t.name.clone(),
+                            preset_id: t.preset_id,
+                            preset_name,
+                            preset_snapshot_id: t.snapshot_id,
+                            preset_snapshot_name,
+                        }
+                    })
+                    .collect();
+
+                profile_infos.push(ProfileInfo {
+                    id: prof.id,
+                    name: prof.name.clone(),
+                    rig_id: prof.rig_id,
+                    scene_count: scenes.len(),
+                    scene_names,
+                    scenes,
+                    description: prof.description.clone(),
+                });
+            }
+
+            tracing::info!(
+                "{} profiles loaded from DB (replacing mock)",
+                profile_infos.len()
+            );
+            *RIG_AVAILABLE_PROFILES.write() = profile_infos;
+        }
+    }
+
+    // ── Songs ────────────────────────────────────────────────────
+    if let Ok(db_songs) = ctl.list_songs().await {
+        if !db_songs.is_empty() {
+            let mut song_infos: Vec<crate::signals::SongInfo> = Vec::with_capacity(db_songs.len());
+
+            for (idx, song) in db_songs.iter().enumerate() {
+                let scenes = ctl.list_song_scenes(song.id).await.unwrap_or_default();
+                let scene_names: Vec<String> = scenes.iter().map(|s| s.name.clone()).collect();
+
+                song_infos.push(crate::signals::SongInfo {
+                    index: idx,
+                    name: song.name.clone(),
+                    artist: song.artist.clone(),
+                    scene_count: scenes.len(),
+                    scene_names,
+                    current_scene_index: None,
+                });
+            }
+
+            tracing::info!("{} songs loaded from DB (replacing mock)", song_infos.len());
+            *RIG_SETLIST_SONGS.write() = song_infos;
+        }
     }
 }
 
