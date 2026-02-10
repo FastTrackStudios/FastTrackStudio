@@ -1389,11 +1389,12 @@ fn CaptureDialog(props: CaptureDialogProps) -> Element {
         div {
             class: "fixed inset-0 z-50 flex items-center justify-center bg-black/60",
             onclick: move |_| props.on_cancel.call(()),
-            // Modal card — stop click propagation so clicking inside doesn't close
+            // Modal card — stop propagation so events don't reach the root handler
             div {
                 class: "bg-zinc-900 border border-zinc-700/60 rounded-xl shadow-2xl shadow-black/40 \
                         w-full max-w-md mx-4 overflow-hidden",
                 onclick: move |evt| evt.stop_propagation(),
+                onkeydown: move |evt| evt.stop_propagation(),
                 // Header
                 div { class: "px-5 py-4 border-b border-zinc-800/60",
                     h3 { class: "text-sm font-semibold text-zinc-100", "{props.label}" }
