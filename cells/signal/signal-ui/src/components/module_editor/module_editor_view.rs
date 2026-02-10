@@ -252,11 +252,13 @@ pub fn ModuleEditorView() -> Element {
     let module_types = use_signal(guitar_module_types);
     let selected_type = *SELECTED_MODULE_TYPE.read();
     let selected_preset_id = *SELECTED_MODULE_PRESET_ID.read();
-    let presets = MODULE_PRESETS.read();
-    let snapshots = MODULE_SNAPSHOTS.read();
-    let type_counts = MODULE_TYPE_COUNTS.read();
-    let chain = COMPOSITION_CHAIN.read();
-    let status = MODULE_EDITOR_STATUS.read().clone();
+    // Clone data out of signals so read guards are dropped before event handlers
+    // can trigger writes (prevents AlreadyBorrowed panics during re-render).
+    let presets = MODULE_PRESETS.cloned();
+    let snapshots = MODULE_SNAPSHOTS.cloned();
+    let type_counts = MODULE_TYPE_COUNTS.cloned();
+    let chain = COMPOSITION_CHAIN.cloned();
+    let status = MODULE_EDITOR_STATUS.cloned();
     let selected_slot_id = *SELECTED_SLOT_ID.read();
     let show_add_picker = *SHOW_ADD_BLOCK_PICKER.read();
 

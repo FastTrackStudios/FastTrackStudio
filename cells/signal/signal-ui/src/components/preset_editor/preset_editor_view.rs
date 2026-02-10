@@ -160,12 +160,14 @@ async fn refresh_available_modules() {
 #[component]
 pub fn PresetEditorView() -> Element {
     let selected_id = *PRESET_SELECTED_ID.read();
-    let presets = PRESET_LIST.read();
-    let snapshots = PRESET_SNAPSHOTS.read();
-    let available_modules = AVAILABLE_MODULE_PRESETS.read();
-    let assignments = MODULE_ASSIGNMENTS.read();
-    let status = PRESET_EDITOR_STATUS.read().clone();
-    let search_text = PRESET_SEARCH.read().clone();
+    // Clone data out of signals so read guards are dropped before event handlers
+    // can trigger writes (prevents AlreadyBorrowed panics during re-render).
+    let presets = PRESET_LIST.cloned();
+    let snapshots = PRESET_SNAPSHOTS.cloned();
+    let available_modules = AVAILABLE_MODULE_PRESETS.cloned();
+    let assignments = MODULE_ASSIGNMENTS.cloned();
+    let status = PRESET_EDITOR_STATUS.cloned();
+    let search_text = PRESET_SEARCH.cloned();
 
     let mut show_new_dialog = use_signal(|| false);
     let mut new_name = use_signal(String::new);

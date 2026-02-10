@@ -57,11 +57,13 @@ async fn refresh_available_presets() {
 
 #[component]
 pub fn ProfileEditorView() -> Element {
-    let profiles = PROFILE_LIST.read();
+    // Clone data out of signals so read guards are dropped before event handlers
+    // can trigger writes (prevents AlreadyBorrowed panics during re-render).
+    let profiles = PROFILE_LIST.cloned();
     let selected_id = *SELECTED_PROFILE_ID.read();
-    let scenes = SCENE_TEMPLATES.read();
-    let presets = AVAILABLE_PRESETS.read();
-    let status = PROFILE_STATUS.read();
+    let scenes = SCENE_TEMPLATES.cloned();
+    let presets = AVAILABLE_PRESETS.cloned();
+    let status = PROFILE_STATUS.cloned();
 
     // Local state for dialogs
     let mut show_new_dialog = use_signal(|| false);

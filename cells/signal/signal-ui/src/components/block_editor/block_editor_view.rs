@@ -89,13 +89,14 @@ pub fn BlockEditorView() -> Element {
     let selected_preset_id = *SELECTED_BLOCK_PRESET.read();
     let status = BLOCK_EDITOR_STATUS.read().clone();
 
-    // DB-backed state
-    let db_presets = DB_BLOCK_PRESETS.read();
-    let db_snapshots = DB_BLOCK_SNAPSHOTS.read();
-    let type_counts = DB_BLOCK_TYPE_COUNTS.read();
+    // Clone data out of signals so read guards are dropped before event handlers
+    // can trigger writes (prevents AlreadyBorrowed panics during re-render).
+    let db_presets = DB_BLOCK_PRESETS.cloned();
+    let db_snapshots = DB_BLOCK_SNAPSHOTS.cloned();
+    let type_counts = DB_BLOCK_TYPE_COUNTS.cloned();
 
     // In-memory fallback for capture operations
-    let library = BLOCK_LIBRARY.read();
+    let library = BLOCK_LIBRARY.cloned();
 
     // Dialog state
     let mut show_capture_preset_dialog = use_signal(|| false);

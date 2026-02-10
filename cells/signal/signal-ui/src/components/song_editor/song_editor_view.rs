@@ -92,14 +92,16 @@ async fn refresh_song_presets() {
 
 #[component]
 pub fn SongEditorView() -> Element {
-    let songs = SONG_LIST.read();
+    // Clone data out of signals so read guards are dropped before event handlers
+    // can trigger writes (prevents AlreadyBorrowed panics during re-render).
+    let songs = SONG_LIST.cloned();
     let selected_song_id = *SELECTED_SONG_ID.read();
-    let scenes = SONG_SCENES.read();
-    let setlists = SETLIST_LIST.read();
+    let scenes = SONG_SCENES.cloned();
+    let setlists = SETLIST_LIST.cloned();
     let selected_setlist_id = *SELECTED_SETLIST_ID.read();
-    let setlist_songs_list = SETLIST_SONGS.read();
-    let presets = SONG_AVAILABLE_PRESETS.read();
-    let status = SONG_STATUS.read();
+    let setlist_songs_list = SETLIST_SONGS.cloned();
+    let presets = SONG_AVAILABLE_PRESETS.cloned();
+    let status = SONG_STATUS.cloned();
     let browser_tab = *BROWSER_TAB.read();
 
     // Local state
