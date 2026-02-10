@@ -95,19 +95,15 @@ pub fn PresetBar() -> Element {
                 class: "px-1.5 py-1 rounded-md bg-muted text-muted-foreground hover:bg-accent hover:text-foreground transition-colors",
                 title: "Previous preset",
                 onclick: move |_| {
-                    // Auto-save departing preset
-                    let current_layout = DOCK_LAYOUT.read().clone();
-                    let current_index = *DOCK_ACTIVE_PRESET_INDEX.read();
-                    let mut presets = DOCK_PRESETS.write();
-                    if let Some(departing) = presets.presets.get_mut(current_index) {
-                        departing.layout = current_layout;
+                    let (len, current) = {
+                        let presets = DOCK_PRESETS.read();
+                        (presets.presets.len(), presets.active_index)
+                    };
+                    if len == 0 {
+                        return;
                     }
-                    presets.cycle_prev();
-                    let idx = presets.active_index;
-                    if let Some(preset) = presets.presets.get(idx) {
-                        *DOCK_LAYOUT.write() = preset.layout.clone();
-                        *DOCK_ACTIVE_PRESET_INDEX.write() = idx;
-                    }
+                    let idx = if current == 0 { len - 1 } else { current - 1 };
+                    actions.load_preset.call(idx);
                 },
                 "\u{25C0}" // left triangle
             }
@@ -115,19 +111,15 @@ pub fn PresetBar() -> Element {
                 class: "px-1.5 py-1 rounded-md bg-muted text-muted-foreground hover:bg-accent hover:text-foreground transition-colors",
                 title: "Next preset",
                 onclick: move |_| {
-                    // Auto-save departing preset
-                    let current_layout = DOCK_LAYOUT.read().clone();
-                    let current_index = *DOCK_ACTIVE_PRESET_INDEX.read();
-                    let mut presets = DOCK_PRESETS.write();
-                    if let Some(departing) = presets.presets.get_mut(current_index) {
-                        departing.layout = current_layout;
+                    let (len, current) = {
+                        let presets = DOCK_PRESETS.read();
+                        (presets.presets.len(), presets.active_index)
+                    };
+                    if len == 0 {
+                        return;
                     }
-                    presets.cycle_next();
-                    let idx = presets.active_index;
-                    if let Some(preset) = presets.presets.get(idx) {
-                        *DOCK_LAYOUT.write() = preset.layout.clone();
-                        *DOCK_ACTIVE_PRESET_INDEX.write() = idx;
-                    }
+                    let idx = (current + 1) % len;
+                    actions.load_preset.call(idx);
                 },
                 "\u{25B6}" // right triangle
             }

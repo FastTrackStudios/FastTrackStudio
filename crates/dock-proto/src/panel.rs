@@ -25,6 +25,7 @@ pub enum PanelId {
     SongParts,
     SongSelector,
     SceneGrid,
+    RigEditor,
     FxBrowser,
 
     // DAW panels
@@ -37,6 +38,9 @@ pub enum PanelId {
     // Utility panels
     Navigator,
     Inspector,
+
+    // Test / development panels
+    SnapshotTest,
 }
 
 impl std::fmt::Display for PanelId {
@@ -67,6 +71,7 @@ impl PanelId {
             Self::SongParts => "song-parts",
             Self::SongSelector => "song-selector",
             Self::SceneGrid => "scene-grid",
+            Self::RigEditor => "rig-editor",
             Self::FxBrowser => "fx-browser",
             Self::Transport => "transport",
             Self::Mixer => "mixer",
@@ -75,6 +80,7 @@ impl PanelId {
             Self::ArrangementView => "arrangement-view",
             Self::Navigator => "navigator",
             Self::Inspector => "inspector",
+            Self::SnapshotTest => "snapshot-test",
         }
     }
 
@@ -94,6 +100,7 @@ impl PanelId {
             "song-parts" => Some(Self::SongParts),
             "song-selector" => Some(Self::SongSelector),
             "scene-grid" => Some(Self::SceneGrid),
+            "rig-editor" => Some(Self::RigEditor),
             "fx-browser" => Some(Self::FxBrowser),
             "transport" => Some(Self::Transport),
             "mixer" => Some(Self::Mixer),
@@ -102,6 +109,7 @@ impl PanelId {
             "arrangement-view" => Some(Self::ArrangementView),
             "navigator" => Some(Self::Navigator),
             "inspector" => Some(Self::Inspector),
+            "snapshot-test" => Some(Self::SnapshotTest),
             _ => None,
         }
     }
@@ -127,6 +135,7 @@ impl PanelId {
                 | Self::SongParts
                 | Self::SongSelector
                 | Self::SceneGrid
+                | Self::RigEditor
                 | Self::FxBrowser => "Signal",
                 Self::Transport
                 | Self::Mixer
@@ -134,6 +143,7 @@ impl PanelId {
                 | Self::TrackControlPanel
                 | Self::ArrangementView => "DAW",
                 Self::Navigator | Self::Inspector => "Utility",
+                Self::SnapshotTest => "Signal",
             };
 
             let default_position = match panel {
@@ -143,7 +153,10 @@ impl PanelId {
                 | Self::ProfileBrowser
                 | Self::TrackControlPanel => DockPosition::Left,
                 Self::Inspector | Self::FxBrowser => DockPosition::Right,
-                Self::Transport | Self::Mixer | Self::SceneGrid => DockPosition::Bottom,
+                Self::Transport | Self::Mixer | Self::SceneGrid | Self::SnapshotTest => {
+                    DockPosition::Bottom
+                }
+                Self::RigEditor => DockPosition::Center,
                 Self::FxChainTree => DockPosition::Left,
                 Self::ArrangementView => DockPosition::Center,
                 _ => DockPosition::Center,
@@ -177,6 +190,7 @@ impl PanelId {
             Self::SongParts => "Song Parts",
             Self::SongSelector => "Song Selector",
             Self::SceneGrid => "Scene Grid",
+            Self::RigEditor => "Rig Editor",
             Self::FxBrowser => "FX Parameters",
             Self::Transport => "Transport",
             Self::Mixer => "Mixer",
@@ -185,6 +199,7 @@ impl PanelId {
             Self::ArrangementView => "Arrangement",
             Self::Navigator => "Navigator",
             Self::Inspector => "Inspector",
+            Self::SnapshotTest => "Snapshot Test",
         }
     }
 
@@ -203,6 +218,7 @@ impl PanelId {
             Self::SongParts => "layers",
             Self::SongSelector => "list-music",
             Self::SceneGrid => "layout-grid",
+            Self::RigEditor => "guitar",
             Self::FxBrowser => "plug",
             Self::Transport => "disc",
             Self::Mixer => "sliders-horizontal",
@@ -211,6 +227,7 @@ impl PanelId {
             Self::ArrangementView => "layout-dashboard",
             Self::Navigator => "compass",
             Self::Inspector => "search",
+            Self::SnapshotTest => "camera",
         }
     }
 
@@ -228,6 +245,7 @@ impl PanelId {
             Self::SongParts,
             Self::SongSelector,
             Self::SceneGrid,
+            Self::RigEditor,
             Self::FxBrowser,
             Self::Transport,
             Self::Mixer,
@@ -236,6 +254,7 @@ impl PanelId {
             Self::ArrangementView,
             Self::Navigator,
             Self::Inspector,
+            Self::SnapshotTest,
             Self::Settings,
         ]
     }

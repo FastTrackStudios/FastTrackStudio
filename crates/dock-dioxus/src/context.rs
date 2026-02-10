@@ -4,6 +4,7 @@
 //! The consuming app registers a callback that maps PanelId -> Element.
 
 use crate::prelude::*;
+use crate::signals::DOCK_PANEL_RENDERER;
 use dock_proto::PanelId;
 use std::rc::Rc;
 
@@ -59,6 +60,11 @@ pub fn use_dock_context() -> DockContext {
 /// ```
 #[component]
 pub fn DockProvider(render_panel: PanelRenderer, children: Element) -> Element {
+    let renderer_for_signal = render_panel.clone();
+    use_effect(move || {
+        *DOCK_PANEL_RENDERER.write() = Some(renderer_for_signal.clone());
+    });
+
     use_context_provider(move || DockContext {
         render_panel: render_panel.clone(),
     });

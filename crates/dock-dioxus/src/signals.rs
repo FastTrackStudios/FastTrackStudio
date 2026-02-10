@@ -4,11 +4,42 @@
 //! for reactive layout updates.
 
 use crate::prelude::*;
-use dock_proto::{DockLayout, DropZone, NodeId, PanelId, PresetCollection};
+use crate::context::PanelRenderer;
+use crate::transition::LayoutTransition;
+use dock_proto::{
+    DockLayout, DockWorkspace, DropZone, NodeId, PanelId, PanelRegistry, PresetCollection,
+    WindowBounds, WindowId,
+};
+use std::collections::HashSet;
+
+fn default_workspace() -> DockWorkspace {
+    let mut registry = PanelRegistry::new();
+    PanelId::register_all(&mut registry);
+    DockWorkspace::with_main_window(
+        DockLayout::single(PanelId::Performance),
+        "Main",
+        WindowBounds::new(120.0, 120.0, 1400.0, 900.0, "main"),
+        registry,
+    )
+}
 
 /// The current active dock layout.
+#[deprecated(note = "Use DOCK_WORKSPACE (main window layout mirror only).")]
 pub static DOCK_LAYOUT: GlobalSignal<DockLayout> =
     Signal::global(|| DockLayout::single(PanelId::Performance));
+
+/// Full multi-window workspace state.
+pub static DOCK_WORKSPACE: GlobalSignal<DockWorkspace> = Signal::global(default_workspace);
+
+/// Window currently being rendered by the active `DockRoot`.
+pub static DOCK_ACTIVE_WINDOW: GlobalSignal<Option<WindowId>> = Signal::global(|| None);
+
+/// Floating workspace windows already opened at the OS level.
+pub static DOCK_OPENED_FLOATING_WINDOWS: GlobalSignal<HashSet<WindowId>> =
+    Signal::global(HashSet::new);
+
+/// Shared panel renderer used by additional desktop windows.
+pub static DOCK_PANEL_RENDERER: GlobalSignal<Option<PanelRenderer>> = Signal::global(|| None);
 
 /// All available dock presets (screensets).
 pub static DOCK_PRESETS: GlobalSignal<PresetCollection> =
@@ -26,6 +57,17 @@ pub static DOCK_MAXIMIZED_PANEL: GlobalSignal<Option<PanelId>> = Signal::global(
 /// State for drag-and-drop panel rearrangement.
 pub static DOCK_DRAG_STATE: GlobalSignal<DragState> = Signal::global(DragState::default);
 
+/// Active animated transition between two layouts, if any.
+pub static DOCK_LAYOUT_TRANSITION: GlobalSignal<Option<LayoutTransition>> = Signal::global(|| None);
+
+/// Default transition duration in milliseconds.
+pub static DOCK_TRANSITION_DURATION_MS: GlobalSignal<u64> = Signal::global(|| 200);
+
+/// Panel context menu UI state.
+pub static DOCK_CONTEXT_MENU: GlobalSignal<Option<ContextMenuState>> = Signal::global(|| None);
+/// True when current drag finished with a successful drop.
+pub static DOCK_DRAG_DROPPED: GlobalSignal<bool> = Signal::global(|| false);
+
 /// Tracks an in-progress panel drag operation.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DragState {
@@ -37,6 +79,14 @@ pub struct DragState {
     pub hover_target: Option<NodeId>,
     /// Which drop zone the cursor is in on the hover target.
     pub hover_zone: Option<DropZone>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContextMenuState {
+    pub node_id: NodeId,
+    pub panel_id: PanelId,
+    pub x: f64,
+    pub y: f64,
 }
 
 impl DragState {

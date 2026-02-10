@@ -26,6 +26,7 @@ pub fn TilePane(node_id: NodeId, tabs: TabGroup) -> Element {
 
     rsx! {
         div {
+            id: "dock-tile-{node_id}",
             class: "flex flex-col h-full w-full bg-background border border-border rounded-sm overflow-hidden relative",
 
             ondragover: {
@@ -94,6 +95,11 @@ pub fn TilePane(node_id: NodeId, tabs: TabGroup) -> Element {
 /// Visual overlays showing where a panel will be dropped.
 #[component]
 fn DropZoneOverlays(active_zone: Option<DropZone>) -> Element {
+    let dragged_panel_name = DOCK_DRAG_STATE
+        .read()
+        .dragging_panel
+        .map(|p| p.display_name().to_string())
+        .unwrap_or_else(|| "Panel".to_string());
     let zones = [
         (DropZone::Top, "top-0 left-0 right-0 h-[30%]"),
         (DropZone::Bottom, "bottom-0 left-0 right-0 h-[30%]"),
@@ -118,6 +124,28 @@ fn DropZoneOverlays(active_zone: Option<DropZone>) -> Element {
                     div {
                         class: "absolute {position_class} {bg} pointer-events-none rounded transition-all duration-150 z-10",
                     }
+                }
+            }
+        }
+
+        if active_zone == Some(DropZone::Center) {
+            div {
+                class: "absolute z-20 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-md border border-blue-400/80 bg-blue-950/80 px-3 py-1.5 text-[11px] text-blue-100 shadow-lg pointer-events-none",
+                "Merge tab: {dragged_panel_name}"
+            }
+        }
+
+        if let Some(zone) = active_zone {
+            if zone != DropZone::Center {
+                div {
+                    class: "absolute z-20 bg-blue-400/90 pointer-events-none animate-pulse",
+                    style: match zone {
+                        DropZone::Left => "left:30%; top:6%; bottom:6%; width:2px;",
+                        DropZone::Right => "right:30%; top:6%; bottom:6%; width:2px;",
+                        DropZone::Top => "top:30%; left:6%; right:6%; height:2px;",
+                        DropZone::Bottom => "bottom:30%; left:6%; right:6%; height:2px;",
+                        DropZone::Center => "",
+                    },
                 }
             }
         }

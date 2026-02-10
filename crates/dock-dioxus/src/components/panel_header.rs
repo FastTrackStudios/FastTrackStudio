@@ -6,6 +6,7 @@
 
 use crate::hooks::use_dock_actions;
 use crate::prelude::*;
+use crate::signals::{ContextMenuState, DOCK_CONTEXT_MENU};
 use dock_proto::{NodeId, PanelId, SplitDirection};
 
 /// Panel header component with drag handle and controls.
@@ -14,17 +15,21 @@ pub fn PanelHeader(node_id: NodeId, panel_id: PanelId) -> Element {
     let actions = use_dock_actions();
     let mut show_panel_menu = use_signal(|| false);
     let mut menu_direction = use_signal(|| SplitDirection::Horizontal);
+    let drag_source_id = format!("dock-drag-source-header-{node_id}-{}", panel_id.as_str());
 
     rsx! {
         div {
+            id: "{drag_source_id}",
             class: "flex items-center justify-between px-2 py-1 bg-zinc-950 border-b border-zinc-800 text-xs select-none cursor-grab active:cursor-grabbing",
 
             // Make the header draggable
             draggable: "true",
             ondragstart: {
                 let actions = actions.clone();
+                let drag_source_id = drag_source_id.clone();
                 move |_: DragEvent| {
                     actions.start_drag.call((panel_id, node_id));
+                    crate::drag_ghost::start_drag_ghost(&drag_source_id, panel_id.display_name());
                 }
             },
             ondragend: {
@@ -32,6 +37,16 @@ pub fn PanelHeader(node_id: NodeId, panel_id: PanelId) -> Element {
                 move |_: DragEvent| {
                     actions.cancel_drag.call(());
                 }
+            },
+            oncontextmenu: move |e: MouseEvent| {
+                e.prevent_default();
+                let coords = e.client_coordinates();
+                *DOCK_CONTEXT_MENU.write() = Some(ContextMenuState {
+                    node_id,
+                    panel_id,
+                    x: coords.x,
+                    y: coords.y,
+                });
             },
 
             // Panel name (left side)

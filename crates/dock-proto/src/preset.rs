@@ -3,6 +3,7 @@
 //! Equivalent to REAPER screensets: save/load/cycle complete layout configurations.
 
 use facet::Facet;
+use std::collections::HashMap;
 
 use crate::id::PresetId;
 use crate::layout::DockLayout;
@@ -17,6 +18,8 @@ pub struct DockPreset {
     pub hotkey_hint: Option<String>,
     /// Whether this preset was created by the user or is a built-in default.
     pub is_builtin: bool,
+    /// Opaque per-panel state blobs (panel_id -> JSON string).
+    pub panel_states: HashMap<String, String>,
 }
 
 impl DockPreset {
@@ -27,6 +30,7 @@ impl DockPreset {
             layout,
             hotkey_hint: None,
             is_builtin: false,
+            panel_states: HashMap::new(),
         }
     }
 
@@ -37,12 +41,48 @@ impl DockPreset {
             layout,
             hotkey_hint: None,
             is_builtin: true,
+            panel_states: HashMap::new(),
         }
     }
 
     pub fn with_hotkey(mut self, hotkey: impl Into<String>) -> Self {
         self.hotkey_hint = Some(hotkey.into());
         self
+    }
+
+    /// Save opaque panel state JSON for a panel ID.
+    pub fn save_panel_state(&mut self, panel_id: impl Into<String>, state_json: impl Into<String>) {
+        self.panel_states.insert(panel_id.into(), state_json.into());
+    }
+
+    /// Load panel state JSON if present.
+    pub fn load_panel_state(&self, panel_id: &str) -> Option<&str> {
+        self.panel_states.get(panel_id).map(String::as_str)
+    }
+
+    /// Capture panel states via callback before saving preset.
+    pub fn capture_panel_states<I, F>(&mut self, panel_ids: I, mut capture: F)
+    where
+        I: IntoIterator,
+        I::Item: AsRef<str>,
+        F: FnMut(&str) -> Option<String>,
+    {
+        for panel_id in panel_ids {
+            let panel_id = panel_id.as_ref();
+            if let Some(state) = capture(panel_id) {
+                self.save_panel_state(panel_id.to_string(), state);
+            }
+        }
+    }
+
+    /// Replay saved panel states to a callback after loading preset.
+    pub fn restore_panel_states<F>(&self, mut restore: F)
+    where
+        F: FnMut(&str, &str),
+    {
+        for (panel_id, state) in &self.panel_states {
+            restore(panel_id, state);
+        }
     }
 }
 
@@ -112,5 +152,56 @@ impl PresetCollection {
         if let Some(preset) = self.presets.get_mut(self.active_index) {
             preset.layout = layout;
         }
+    }
+
+    /// Save one panel's state into the active preset.
+    pub fn save_active_panel_state(
+        &mut self,
+        panel_id: impl Into<String>,
+        state_json: impl Into<String>,
+    ) {
+        if let Some(preset) = self.presets.get_mut(self.active_index) {
+            preset.save_panel_state(panel_id, state_json);
+        }
+    }
+
+    /// Load one panel's state from the active preset.
+    pub fn load_active_panel_state(&self, panel_id: &str) -> Option<&str> {
+        self.active_preset()?.load_panel_state(panel_id)
+    }
+
+    /// Capture panel states into active preset before save.
+    pub fn capture_active_panel_states<I, F>(&mut self, panel_ids: I, capture: F)
+    where
+        I: IntoIterator,
+        I::Item: AsRef<str>,
+        F: FnMut(&str) -> Option<String>,
+    {
+        if let Some(preset) = self.presets.get_mut(self.active_index) {
+            preset.capture_panel_states(panel_ids, capture);
+        }
+    }
+
+    /// Replay panel states from active preset after load.
+    pub fn restore_active_panel_states<F>(&self, restore: F)
+    where
+        F: FnMut(&str, &str),
+    {
+        if let Some(preset) = self.active_preset() {
+            preset.restore_panel_states(restore);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::DockLayout;
+    use crate::panel::PanelId;
+
+    #[test]
+    fn missing_panel_state_returns_none() {
+        let preset = DockPreset::new("Test", DockLayout::single(PanelId::Performance));
+        assert_eq!(preset.load_panel_state("panel.missing"), None);
     }
 }
