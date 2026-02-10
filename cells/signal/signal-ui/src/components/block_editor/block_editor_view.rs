@@ -1363,7 +1363,7 @@ fn FxSelector(props: FxSelectorProps) -> Element {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Capture Dialog (inline)
+// Capture Dialog (modal overlay)
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Props, Clone, PartialEq)]
@@ -1381,46 +1381,67 @@ fn CaptureDialog(props: CaptureDialogProps) -> Element {
     let value_for_key = props.value.clone();
     let value_for_btn = props.value.clone();
     let is_empty = props.value.trim().is_empty();
+    let placeholder = props.placeholder.clone();
+    let input_value = props.value.clone();
 
     rsx! {
-        div { class: "px-4 py-2.5 border-b border-border/30 bg-zinc-900/60 flex items-center gap-2.5 flex-shrink-0",
-            span { class: "text-[10px] text-zinc-500 font-medium whitespace-nowrap", "{props.label}:" }
-            input {
-                class: "flex-1 bg-zinc-800/80 border border-zinc-700/50 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 \
-                        outline-none focus:border-orange-500/40 focus:ring-1 focus:ring-orange-500/20 \
-                        placeholder:text-zinc-600 transition-all duration-150",
-                r#type: "text",
-                placeholder: "{props.placeholder}",
-                value: "{props.value}",
-                autofocus: true,
-                oninput: move |evt| props.on_input.call(evt.value().clone()),
-                onkeydown: move |evt| {
-                    if evt.key() == Key::Enter {
-                        let val = value_for_key.trim().to_string();
-                        if !val.is_empty() {
-                            props.on_submit.call(val);
-                        }
-                    } else if evt.key() == Key::Escape {
-                        props.on_cancel.call(());
+        // Backdrop
+        div {
+            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/60",
+            onclick: move |_| props.on_cancel.call(()),
+            // Modal card — stop click propagation so clicking inside doesn't close
+            div {
+                class: "bg-zinc-900 border border-zinc-700/60 rounded-xl shadow-2xl shadow-black/40 \
+                        w-full max-w-md mx-4 overflow-hidden",
+                onclick: move |evt| evt.stop_propagation(),
+                // Header
+                div { class: "px-5 py-4 border-b border-zinc-800/60",
+                    h3 { class: "text-sm font-semibold text-zinc-100", "{props.label}" }
+                }
+                // Body
+                div { class: "px-5 py-4",
+                    input {
+                        class: "w-full bg-zinc-800/80 border border-zinc-700/50 rounded-lg px-3.5 py-2.5 text-sm text-zinc-200 \
+                                outline-none focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/20 \
+                                placeholder:text-zinc-600 transition-all duration-150",
+                        r#type: "text",
+                        placeholder: placeholder,
+                        value: input_value,
+                        autofocus: true,
+                        oninput: move |evt| props.on_input.call(evt.value().clone()),
+                        onkeydown: move |evt| {
+                            if evt.key() == Key::Enter {
+                                let val = value_for_key.trim().to_string();
+                                if !val.is_empty() {
+                                    props.on_submit.call(val);
+                                }
+                            } else if evt.key() == Key::Escape {
+                                props.on_cancel.call(());
+                            }
+                        },
                     }
-                },
-            }
-            button {
-                class: "px-3 py-1.5 rounded-md text-[10px] font-semibold bg-orange-500/80 text-white \
-                        hover:bg-orange-500 transition-colors disabled:opacity-25",
-                disabled: is_empty,
-                onclick: move |_| {
-                    let val = value_for_btn.trim().to_string();
-                    if !val.is_empty() {
-                        props.on_submit.call(val);
+                }
+                // Footer
+                div { class: "px-5 py-3 border-t border-zinc-800/60 flex items-center justify-end gap-2",
+                    button {
+                        class: "px-4 py-2 rounded-lg text-xs font-medium text-zinc-400 \
+                                hover:text-zinc-200 hover:bg-zinc-800 transition-colors",
+                        onclick: move |_| props.on_cancel.call(()),
+                        "Cancel"
                     }
-                },
-                "Save"
-            }
-            button {
-                class: "px-2 py-1.5 rounded-md text-[10px] font-medium text-zinc-500 hover:text-zinc-300 transition-colors",
-                onclick: move |_| props.on_cancel.call(()),
-                "Cancel"
+                    button {
+                        class: "px-4 py-2 rounded-lg text-xs font-semibold bg-orange-500 text-white \
+                                hover:bg-orange-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed",
+                        disabled: is_empty,
+                        onclick: move |_| {
+                            let val = value_for_btn.trim().to_string();
+                            if !val.is_empty() {
+                                props.on_submit.call(val);
+                            }
+                        },
+                        "Save"
+                    }
+                }
             }
         }
     }
