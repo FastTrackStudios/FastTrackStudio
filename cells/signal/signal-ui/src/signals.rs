@@ -4,8 +4,8 @@
 //! can read and subscribe to. The signals are updated by the rig service via
 //! the `use_rig_subscription()` hook.
 
-use crate::prelude::*;
 use crate::components::rig_grid::node_graph::{Node, NodeParameter, NodePosition, ParameterType};
+use crate::prelude::*;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -135,13 +135,53 @@ pub static RIG_NODE_FX_BINDINGS: GlobalSignal<HashMap<Uuid, NodeFxBinding>> =
 pub static RIG_SERVICE: GlobalSignal<Option<signal_control::SignalControl>> =
     Signal::global(|| None);
 
-/// Initialize the rig service with a mock guitar rig.
-/// Call once at app startup before any rig panels render.
+/// Whether the DB connection upgrade has been attempted.
+/// Prevents multiple spawned tasks from racing.
+static DB_INIT_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Initialize the rig service.
+///
+/// Immediately sets `RIG_SERVICE` to a mock guitar rig so UI can render
+/// right away. Then spawns an async task to connect to SQLite at
+/// `~/Music/FastTrackStudio/signal.db`, run migrations, and upgrade
+/// `RIG_SERVICE` to a DB-backed `SignalControl`.
+///
+/// If the DB connection fails, the mock service stays in place and a
+/// warning is logged. Call this from any component that needs rig data —
+/// it's idempotent.
 pub fn init_rig_service() {
     if RIG_SERVICE.read().is_some() {
         return; // already initialized
     }
+    // Start with mock data immediately so UI can render
+    // (commented-out original: was the only line before DB support)
+    // *RIG_SERVICE.write() = Some(signal_control::SignalControl::mock_guitar());
     *RIG_SERVICE.write() = Some(signal_control::SignalControl::mock_guitar());
+
+    // Spawn DB connection upgrade (once)
+    if !DB_INIT_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        spawn(async move {
+            let db_path = match signal_storage::LocalConfig::default_path() {
+                Ok(config) => config.database_path.to_string_lossy().to_string(),
+                Err(e) => {
+                    tracing::warn!("Could not determine DB path, staying with mock data: {e}");
+                    return;
+                }
+            };
+
+            match signal_control::SignalControl::connect_db(&db_path).await {
+                Ok(ctl) => {
+                    tracing::info!("Upgraded RIG_SERVICE to DB-backed SignalControl");
+                    *RIG_SERVICE.write() = Some(ctl);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to connect to signal DB at {db_path}, using mock data: {e}"
+                    );
+                }
+            }
+        });
+    }
 }
 
 /// Bind the rig to a live DAW FX chain. Fetches the FxTree, runs discovery,
