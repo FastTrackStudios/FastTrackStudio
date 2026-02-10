@@ -834,6 +834,86 @@ impl NodeGraph {
         NodePosition::new(x, max_bottom + 40.0)
     }
 
+    /// Build a node graph from DB-backed module data.
+    ///
+    /// Creates a `GraphModule` for each `Module` in the list, with child
+    /// `Node`s for each block. Modules are laid out vertically with auto-sized
+    /// containers. Internal wires chain blocks in signal flow order.
+    pub fn build_from_modules(modules: &[signal_control::module::Module]) -> Self {
+        use signal_control::block::BlockType;
+        use signal_control::module::ModuleType;
+
+        fn module_type_to_block_type(mt: ModuleType) -> BlockType {
+            match mt {
+                ModuleType::Drive => BlockType::Drive,
+                ModuleType::Amp => BlockType::Amp,
+                ModuleType::Eq | ModuleType::PostEq => BlockType::Eq,
+                ModuleType::Dynamics => BlockType::Compressor,
+                ModuleType::Modulation | ModuleType::VocalModulation => BlockType::Modulation,
+                ModuleType::Time => BlockType::Delay,
+                ModuleType::Motion => BlockType::Tremolo,
+                ModuleType::Special | ModuleType::PreFx => BlockType::Special,
+                ModuleType::Master => BlockType::Volume,
+                _ => BlockType::Special,
+            }
+        }
+
+        let mut graph = Self::new();
+        let mut y_offset = 80.0;
+        let module_x = 50.0;
+        let module_width = 400.0;
+        let node_height = 60.0;
+        let node_gap = 10.0;
+        let header_height = 40.0;
+
+        let mut prev_module_id: Option<Uuid> = None;
+
+        for module in modules {
+            let bt = module_type_to_block_type(module.module_type);
+            let block_count = module.blocks.len();
+            let content_height =
+                header_height + (block_count as f64) * (node_height + node_gap) + 20.0;
+            let module_height = content_height.max(120.0);
+
+            let mut gm = GraphModule::new(
+                module.name.clone(),
+                bt,
+                NodePosition::new(module_x, y_offset),
+            )
+            .with_size(NodeSize::new(module_width, module_height));
+
+            // Add child nodes for each block
+            let mut prev_node_id: Option<Uuid> = None;
+            for (i, mb) in module.blocks.iter().enumerate() {
+                let node = Node::new(
+                    mb.block.name.clone(),
+                    bt,
+                    NodePosition::new(20.0, header_height + (i as f64) * (node_height + node_gap)),
+                )
+                .with_size(NodeSize::new(module_width - 40.0, node_height));
+                let node_id = gm.add_node(node);
+
+                // Chain internal wires
+                if let Some(prev) = prev_node_id {
+                    gm.add_wire(Wire::new(prev, "out_l", node_id, "in_l"));
+                }
+                prev_node_id = Some(node_id);
+            }
+
+            let module_id = graph.add_module(gm);
+
+            // Wire modules in sequence
+            if let Some(prev_mid) = prev_module_id {
+                graph.connect(prev_mid, "out_l", module_id, "in_l");
+            }
+            prev_module_id = Some(module_id);
+
+            y_offset += module_height + 30.0;
+        }
+
+        graph
+    }
+
     /// Create a comprehensive guitar rig node graph with all modules.
     pub fn sample_guitar_rig() -> Self {
         let mut graph = Self::new();
