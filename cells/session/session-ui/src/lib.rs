@@ -57,11 +57,13 @@ pub mod prelude {
 
 pub mod components;
 pub mod layouts;
+pub mod panel_registration;
 pub mod signals;
 
 // Re-export key types for convenience
 pub use layouts::top_bar::{ConnectionState, TopBar, VERSION};
 pub use layouts::{PerformanceLayout, PerformanceSidebar, TransportPanel};
+pub use panel_registration::register_panels;
 pub use signals::{
     ChartAreaBounds, LatencyAction, LatencyInfo, LatencyMeasurement, LatencyTracker,
     PerfChartViewport, Session, TransportState, ACTIVE_INDICES, ACTIVE_PLAYBACK_IS_PLAYING,

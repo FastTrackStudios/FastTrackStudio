@@ -11,6 +11,10 @@ session-proto = { workspace = true }
 # DAW types (for PlayState, etc.)
 daw-proto = { workspace = true }
 
+# Dock panel registration
+dock-dioxus = { path = "../../dock/dock-dioxus", default-features = false }
+dock-proto = { path = "../../dock/dock-proto" }
+
 # Dioxus UI framework - use dioxus-native when native feature is enabled
 dioxus = { version = "0.7.2", optional = true }
 dioxus-native = { workspace = true, optional = true }
@@ -27,9 +31,9 @@ eyre = "0.6"
 [features]
 default = ["web"]
 # Web/desktop (WebView-based) rendering
-web = ["dioxus"]
+web = ["dioxus", "dock-dioxus/web"]
 # Native GPU-accelerated rendering via Blitz
-native = ["dioxus-native"]
+native = ["dioxus-native", "dock-dioxus/native"]
 
 # WASM dependencies for timing
 [target.'cfg(target_arch = "wasm32")'.dependencies]

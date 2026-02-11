@@ -93,9 +93,7 @@
   },
   "scroll": {
     "normal": {
-      "Ctrl+Scroll": "view.zoom",
-      "Shift+Scroll": "view.scroll_horizontal",
-      "Scroll": "view.scroll_vertical"
+      "Ctrl+Scroll": "view.zoom"
     }
   }
 }

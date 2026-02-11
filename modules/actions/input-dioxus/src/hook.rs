@@ -4,8 +4,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use dioxus::prelude::{
-    spawn, use_hook, use_signal, GlobalSignal, KeyboardEvent, MouseEvent, ReadableExt, Signal,
-    WheelEvent, WritableExt,
+    GlobalSignal, KeyboardEvent, MouseEvent, ReadableExt, Signal, WheelEvent, WritableExt, spawn,
+    use_hook, use_signal,
 };
 use input::{
     ActionContext, InputCommand, InputEvent, InputProcessor, KeymapConfig, ModeId, MouseAction,
@@ -15,6 +15,11 @@ use crate::convert::{convert_keyboard_event, convert_mouse_event, convert_wheel_
 
 /// Global action context consumed by `use_input_processor`.
 pub static ACTION_CONTEXT: GlobalSignal<ActionContext> = Signal::global(ActionContext::new);
+
+/// When `true`, the root keyboard handler should skip action processing
+/// because a text input field has focus. Increment on focus, decrement on blur
+/// so nested inputs don't clobber each other.
+pub static TEXT_INPUT_FOCUS_COUNT: GlobalSignal<u32> = Signal::global(|| 0);
 
 /// Handle returned by `use_input_processor`.
 #[derive(Clone)]
