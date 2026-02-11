@@ -10,7 +10,7 @@ use crate::preset::{DockPreset, PresetCollection};
 /// - **Performance** (F5): Navigator + [Performance | ChartPreview] tabbed + Transport
 /// - **Chart Focus** (F6): Navigator + [ChartPreview | Performance] tabbed + Transport
 /// - **Edit** (F7): Setlist + ChartEditor / Transport
-/// - **Rig** (F8): PresetBrowser + RigGrid
+/// - **Mixer** (F8): FX chain tree + DAW mixer + FX parameter browser
 /// - **Full** (F9): Multi-panel overview with all key views
 pub fn default_presets() -> PresetCollection {
     PresetCollection::new(vec![
@@ -62,13 +62,7 @@ pub fn default_presets() -> PresetCollection {
                 .build(),
         )
         .with_hotkey("F7"),
-        // F8: Rig — full-screen rig editor with sub-tabs (Blocks, Modules, Presets, etc.)
-        DockPreset::builtin(
-            "Rig",
-            crate::layout::DockLayout::from_tree(B::tile(RigEditor)),
-        )
-        .with_hotkey("F8"),
-        // F9: Mixer — FX chain tree + DAW mixer + FX parameter browser
+        // F8: Mixer — FX chain tree + DAW mixer + FX parameter browser
         DockPreset::builtin(
             "Mixer",
             B::horizontal()
@@ -83,8 +77,8 @@ pub fn default_presets() -> PresetCollection {
                 .ratio(20.0)
                 .build(),
         )
-        .with_hotkey("F9"),
-        // F10: DAW — track control panel + arrangement + mixer
+        .with_hotkey("F8"),
+        // F9: DAW — track control panel + arrangement + mixer
         DockPreset::builtin(
             "DAW",
             B::vertical()
@@ -99,8 +93,8 @@ pub fn default_presets() -> PresetCollection {
                 .ratio(75.0)
                 .build(),
         )
-        .with_hotkey("F10"),
-        // F11: Full — multi-panel overview with all key views
+        .with_hotkey("F9"),
+        // F10: Full — multi-panel overview with all key views
         DockPreset::builtin(
             "Full",
             B::horizontal()
@@ -127,6 +121,57 @@ pub fn default_presets() -> PresetCollection {
                 .ratio(50.0)
                 .build(),
         )
-        .with_hotkey("F11"),
+        .with_hotkey("F10"),
+    ])
+}
+
+/// Rig-specific dock presets — screensets for the rig tab's own dock system.
+pub fn rig_presets() -> PresetCollection {
+    PresetCollection::new(vec![
+        // Rig Edit: Browser + Graph/Grid + Detail editor below
+        DockPreset::builtin(
+            "Edit",
+            B::vertical()
+                .top(
+                    B::horizontal()
+                        .left(B::tile(PresetBrowser))
+                        .right(B::tabbed(vec![RigNodeGraph, RigGridEditor]))
+                        .ratio(20.0)
+                        .build_node(),
+                )
+                .bottom(B::tile(RigDetailEditor))
+                .ratio(70.0)
+                .build(),
+        ),
+        // Rig Compact: Browser + Graph/Grid (no detail editor)
+        DockPreset::builtin(
+            "Compact",
+            B::horizontal()
+                .left(B::tile(PresetBrowser))
+                .right(B::tabbed(vec![RigNodeGraph, RigGridEditor]))
+                .ratio(20.0)
+                .build(),
+        ),
+        // Rig Full: Browser + Graph/Grid + Detail editor + Songs sidebar
+        DockPreset::builtin(
+            "Full",
+            B::vertical()
+                .top(
+                    B::horizontal()
+                        .left(B::tile(PresetBrowser))
+                        .right(
+                            B::horizontal()
+                                .left(B::tabbed(vec![RigNodeGraph, RigGridEditor]))
+                                .right(B::tabbed(vec![SongParts, SongSelector]))
+                                .ratio(75.0)
+                                .build_node(),
+                        )
+                        .ratio(20.0)
+                        .build_node(),
+                )
+                .bottom(B::tile(RigDetailEditor))
+                .ratio(70.0)
+                .build(),
+        ),
     ])
 }

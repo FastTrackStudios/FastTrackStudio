@@ -10,6 +10,7 @@ pub mod components;
 pub mod context;
 pub mod hooks;
 pub mod layouts;
+pub mod panel_registration;
 pub mod prelude;
 pub mod signals;
 
@@ -25,12 +26,16 @@ pub use components::fx_binding_status::FxBindingStatus;
 pub use components::snapshot_test_harness::SnapshotTestHarness;
 pub use components::MorphSlider;
 pub use context::rig::{use_rig_service, RigService, RigServiceProvider};
+pub use context::rig_grid::{use_rig_grid_state, RigGridState, RigGridStateProvider};
 pub use hooks::rig_actions::{use_rig_actions, RigActions};
 pub use hooks::rig_state::use_rig_subscription;
+pub use layouts::rig_dock_view::RigDockView;
 pub use layouts::rig_editor::RigEditorPanel;
 pub use layouts::rig_layout::{
-    NodePropertyDockPanel, PresetBrowserPanel, ProfileBrowserPanel, RigGridPanel, RigLayout,
-    SceneGridDockPanel, SongPartsPanel, SongSelectorPanel, VersionHistoryDockPanel,
+    NodePropertyDockPanel, PresetBrowserPanel, ProfileBrowserPanel, RigDetailEditorPanel,
+    RigGridEditorPanel, RigGridPanel, RigLayout, SceneGridDockPanel, SongPartsPanel,
+    SongSelectorPanel, VersionHistoryDockPanel,
 };
+pub use panel_registration::register_panels;
 pub use signal_control::SignalControl;
 pub use signals::*;

@@ -53,12 +53,10 @@ fn sync_main_layout_signal(workspace: &DockWorkspace) {
 }
 
 fn window_for_node(workspace: &DockWorkspace, node_id: NodeId) -> Option<WindowId> {
-    workspace.windows.iter().find_map(|(window_id, window)| {
-        window
-            .layout
-            .get_node(node_id)
-            .map(|_| *window_id)
-    })
+    workspace
+        .windows
+        .iter()
+        .find_map(|(window_id, window)| window.layout.get_node(node_id).map(|_| *window_id))
 }
 
 fn current_window_hint(workspace: &DockWorkspace) -> WindowId {
@@ -122,9 +120,12 @@ fn open_floating_window(window: DockWindow) {
     }
 
     spawn(async move {
-        let dom = VirtualDom::new_with_props(FloatingWindowRoot, FloatingWindowRootProps {
-            window_id: window.id,
-        });
+        let dom = VirtualDom::new_with_props(
+            FloatingWindowRoot,
+            FloatingWindowRootProps {
+                window_id: window.id,
+            },
+        );
 
         let builder = WindowBuilder::new()
             .with_title(window.title)
@@ -159,7 +160,11 @@ fn ensure_floating_windows_open() {
 
     let alive = {
         let workspace = DOCK_WORKSPACE.read();
-        workspace.windows.keys().copied().collect::<std::collections::HashSet<_>>()
+        workspace
+            .windows
+            .keys()
+            .copied()
+            .collect::<std::collections::HashSet<_>>()
     };
     DOCK_OPENED_FLOATING_WINDOWS
         .write()
@@ -268,13 +273,19 @@ pub fn use_dock_actions() -> DockActions {
 
             let target_layout = {
                 let presets = DOCK_PRESETS.read();
-                presets.presets.get(index).map(|preset| preset.layout.clone())
+                presets
+                    .presets
+                    .get(index)
+                    .map(|preset| preset.layout.clone())
             };
 
             if let Some(target_layout) = target_layout {
                 let duration_ms = *DOCK_TRANSITION_DURATION_MS.read();
-                let transition =
-                    crate::transition::compute_transition(&current_layout, &target_layout, duration_ms);
+                let transition = crate::transition::compute_transition(
+                    &current_layout,
+                    &target_layout,
+                    duration_ms,
+                );
 
                 if transition.is_empty() {
                     let main_window = DOCK_WORKSPACE.read().main_window;
@@ -391,7 +402,11 @@ pub fn use_dock_actions() -> DockActions {
                 return;
             };
 
-            let Some(source_bounds) = workspace.windows.get(&source_window).map(|w| w.bounds.clone()) else {
+            let Some(source_bounds) = workspace
+                .windows
+                .get(&source_window)
+                .map(|w| w.bounds.clone())
+            else {
                 return;
             };
 
@@ -438,6 +453,69 @@ pub fn use_dock_actions() -> DockActions {
             }
             sync_main_layout_signal(&workspace);
         }),
+    }
+}
+
+// ─── Rig Dock Functions ─────────────────────────────────────────────────
+
+/// Initialize the rig dock with its own window and presets.
+///
+/// Adds a rig window to `DOCK_WORKSPACE` and sets up rig-specific presets.
+/// Call once at startup after `init_dock_presets()`.
+pub fn init_rig_dock(presets: PresetCollection) {
+    let first_layout = presets
+        .presets
+        .first()
+        .map(|p| p.layout.clone())
+        .unwrap_or_else(|| DockLayout::single(PanelId::RigGrid));
+
+    let rig_window = DockWindow::new(
+        "Rig",
+        first_layout,
+        WindowBounds::new(0.0, 0.0, 1400.0, 900.0, "rig"),
+        false,
+    );
+    let rig_window_id = rig_window.id;
+
+    DOCK_WORKSPACE
+        .write()
+        .windows
+        .insert(rig_window_id, rig_window);
+    *RIG_DOCK_WINDOW_ID.write() = Some(rig_window_id);
+    *RIG_DOCK_PRESETS.write() = presets;
+    *RIG_DOCK_ACTIVE_PRESET_INDEX.write() = 0;
+}
+
+/// Switch the rig dock to a different preset (auto-saves the departing layout).
+pub fn load_rig_preset(index: usize) {
+    let Some(rig_window_id) = *RIG_DOCK_WINDOW_ID.read() else {
+        return;
+    };
+
+    // Save current rig layout to departing preset
+    let current_layout = {
+        let ws = DOCK_WORKSPACE.read();
+        ws.windows.get(&rig_window_id).map(|w| w.layout.clone())
+    };
+    if let Some(layout) = current_layout {
+        let current_index = *RIG_DOCK_ACTIVE_PRESET_INDEX.read();
+        let mut presets = RIG_DOCK_PRESETS.write();
+        if let Some(departing) = presets.presets.get_mut(current_index) {
+            departing.layout = layout;
+        }
+    }
+
+    // Load target preset
+    let target_layout = {
+        let presets = RIG_DOCK_PRESETS.read();
+        presets.presets.get(index).map(|p| p.layout.clone())
+    };
+    if let Some(target) = target_layout {
+        let mut workspace = DOCK_WORKSPACE.write();
+        if let Some(window) = workspace.windows.get_mut(&rig_window_id) {
+            window.layout = target;
+        }
+        *RIG_DOCK_ACTIVE_PRESET_INDEX.write() = index;
     }
 }
 
