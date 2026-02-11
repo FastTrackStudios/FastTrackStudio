@@ -9,6 +9,7 @@
 
 use super::capture;
 use super::library::*;
+use crate::components::shared::EntityEditor;
 use crate::prelude::*;
 use crate::signals::RIG_SERVICE;
 use signal_control::daw_bridge::{self, DawParamChange};
@@ -141,107 +142,100 @@ pub fn BlockEditorView() -> Element {
         selected_preset_id.and_then(|id| db_presets.iter().find(|p| p.id == id).cloned());
 
     rsx! {
-        div { class: "h-full w-full flex flex-col overflow-hidden",
-            // ── Accent strip at top ──────────────────────────────
-            div { class: "h-[2px] w-full bg-gradient-to-r from-orange-500 via-amber-400 to-cyan-500 flex-shrink-0" }
-
-            // ── Main content ─────────────────────────────────────
-            div { class: "flex-1 flex min-h-0 overflow-hidden",
-
-                // ══════════════════════════════════════════════════
-                // LEFT: Block Type Browser
-                // ══════════════════════════════════════════════════
-                div { class: "w-56 flex-shrink-0 border-r border-border/50 flex flex-col min-h-0 bg-zinc-950/50",
-                    // Header
-                    div { class: "px-4 py-3 border-b border-border/30 flex-shrink-0",
-                        h2 { class: "text-[11px] font-bold text-zinc-400 uppercase tracking-[0.15em]",
-                            "Block Types"
-                        }
+        EntityEditor {
+            accent_gradient: Some("from-orange-500 via-amber-400 to-cyan-500".to_string()),
+            left_width: "w-56".to_string(),
+            right_width: "w-72".to_string(),
+            left: rsx! {
+                // Header
+                div { class: "px-4 py-3 border-b border-border/30 flex-shrink-0",
+                    h2 { class: "text-[11px] font-bold text-zinc-400 uppercase tracking-[0.15em]",
+                        "Block Types"
                     }
+                }
 
-                    // Scrollable type list grouped by category
-                    div { class: "flex-1 overflow-y-auto min-h-0 px-2 py-2",
-                        for category in block_type_categories() {
-                            {
-                                let cat_types: Vec<_> = block_types.read().iter()
-                                    .filter(|d| d.category == category)
-                                    .cloned()
-                                    .collect();
-                                if cat_types.is_empty() {
-                                    return rsx! {};
-                                }
-                                rsx! {
-                                    div { class: "mb-3",
-                                        // Category label
-                                        div { class: "px-2 py-1",
-                                            span { class: "text-[9px] font-semibold text-zinc-600 uppercase tracking-[0.2em]",
-                                                "{category}"
-                                            }
+                // Scrollable type list grouped by category
+                div { class: "flex-1 overflow-y-auto min-h-0 px-2 py-2",
+                    for category in block_type_categories() {
+                        {
+                            let cat_types: Vec<_> = block_types.read().iter()
+                                .filter(|d| d.category == category)
+                                .cloned()
+                                .collect();
+                            if cat_types.is_empty() {
+                                return rsx! {};
+                            }
+                            rsx! {
+                                div { class: "mb-3",
+                                    // Category label
+                                    div { class: "px-2 py-1",
+                                        span { class: "text-[9px] font-semibold text-zinc-600 uppercase tracking-[0.2em]",
+                                            "{category}"
                                         }
-                                        // Types in this category
-                                        for def in cat_types.iter() {
-                                            {
-                                                let bt = def.block_type;
-                                                let display_name = def.display_name;
-                                                let color = def.color;
-                                                let _description = def.description;
-                                                let is_active = selected_type == Some(bt);
-                                                let type_key = bt.display_name().to_string();
-                                                let count = type_counts.get(&type_key).copied().unwrap_or(0);
-                                                // Also count in-memory presets
-                                                let mem_count = library.iter().filter(|p| p.block_type == bt).count();
-                                                let total_count = count + mem_count;
+                                    }
+                                    // Types in this category
+                                    for def in cat_types.iter() {
+                                        {
+                                            let bt = def.block_type;
+                                            let display_name = def.display_name;
+                                            let color = def.color;
+                                            let _description = def.description;
+                                            let is_active = selected_type == Some(bt);
+                                            let type_key = bt.display_name().to_string();
+                                            let count = type_counts.get(&type_key).copied().unwrap_or(0);
+                                            // Also count in-memory presets
+                                            let mem_count = library.iter().filter(|p| p.block_type == bt).count();
+                                            let total_count = count + mem_count;
 
-                                                rsx! {
-                                                    button {
-                                                        key: "{display_name}",
-                                                        class: if is_active {
-                                                            "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all duration-150 \
-                                                             bg-zinc-800/80 border border-zinc-600/50 shadow-sm shadow-black/20"
-                                                        } else {
-                                                            "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all duration-150 \
-                                                             hover:bg-zinc-800/40 border border-transparent"
-                                                        },
-                                                        onclick: move |_| {
-                                                            *SELECTED_BLOCK_TYPE.write() = Some(bt);
-                                                            *SELECTED_BLOCK_PRESET.write() = None;
-                                                            *SELECTED_BLOCK_SNAPSHOT.write() = None;
-                                                            DB_BLOCK_SNAPSHOTS.write().clear();
-                                                            let type_name = bt.display_name().to_string();
-                                                            *BLOCK_EDITOR_STATUS.write() = format!("Selected: {}", display_name);
-                                                            spawn(async move {
-                                                                refresh_presets_for_type(&type_name).await;
-                                                            });
-                                                        },
-                                                        // Color indicator bar
-                                                        {
-                                                            let opacity = if is_active { "1.0" } else { "0.4" };
-                                                            rsx! {
-                                                                div {
-                                                                    class: "w-1 h-6 rounded-full flex-shrink-0 {color}",
-                                                                    style: "background-color: currentColor; opacity: {opacity};",
-                                                                }
+                                            rsx! {
+                                                button {
+                                                    key: "{display_name}",
+                                                    class: if is_active {
+                                                        "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all duration-150 \
+                                                         bg-zinc-800/80 border border-zinc-600/50 shadow-sm shadow-black/20"
+                                                    } else {
+                                                        "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all duration-150 \
+                                                         hover:bg-zinc-800/40 border border-transparent"
+                                                    },
+                                                    onclick: move |_| {
+                                                        *SELECTED_BLOCK_TYPE.write() = Some(bt);
+                                                        *SELECTED_BLOCK_PRESET.write() = None;
+                                                        *SELECTED_BLOCK_SNAPSHOT.write() = None;
+                                                        DB_BLOCK_SNAPSHOTS.write().clear();
+                                                        let type_name = bt.display_name().to_string();
+                                                        *BLOCK_EDITOR_STATUS.write() = format!("Selected: {}", display_name);
+                                                        spawn(async move {
+                                                            refresh_presets_for_type(&type_name).await;
+                                                        });
+                                                    },
+                                                    // Color indicator bar
+                                                    {
+                                                        let opacity = if is_active { "1.0" } else { "0.4" };
+                                                        rsx! {
+                                                            div {
+                                                                class: "w-1 h-6 rounded-full flex-shrink-0 {color}",
+                                                                style: "background-color: currentColor; opacity: {opacity};",
                                                             }
                                                         }
-                                                        // Name + count
-                                                        div { class: "flex-1 min-w-0 flex items-center justify-between",
+                                                    }
+                                                    // Name + count
+                                                    div { class: "flex-1 min-w-0 flex items-center justify-between",
+                                                        span {
+                                                            class: if is_active {
+                                                                "text-xs font-semibold text-zinc-100 truncate"
+                                                            } else {
+                                                                "text-xs font-medium text-zinc-400 truncate"
+                                                            },
+                                                            "{display_name}"
+                                                        }
+                                                        if total_count > 0 {
                                                             span {
                                                                 class: if is_active {
-                                                                    "text-xs font-semibold text-zinc-100 truncate"
+                                                                    "text-[9px] font-mono text-zinc-300 bg-zinc-700/60 px-1.5 py-0.5 rounded flex-shrink-0"
                                                                 } else {
-                                                                    "text-xs font-medium text-zinc-400 truncate"
+                                                                    "text-[9px] font-mono text-zinc-500 bg-zinc-800/40 px-1.5 py-0.5 rounded flex-shrink-0"
                                                                 },
-                                                                "{display_name}"
-                                                            }
-                                                            if total_count > 0 {
-                                                                span {
-                                                                    class: if is_active {
-                                                                        "text-[9px] font-mono text-zinc-300 bg-zinc-700/60 px-1.5 py-0.5 rounded flex-shrink-0"
-                                                                    } else {
-                                                                        "text-[9px] font-mono text-zinc-500 bg-zinc-800/40 px-1.5 py-0.5 rounded flex-shrink-0"
-                                                                    },
-                                                                    "{total_count}"
-                                                                }
+                                                                "{total_count}"
                                                             }
                                                         }
                                                     }
@@ -254,11 +248,8 @@ pub fn BlockEditorView() -> Element {
                         }
                     }
                 }
-
-                // ══════════════════════════════════════════════════
-                // CENTER: Preset Manager + Snapshots
-                // ══════════════════════════════════════════════════
-                div { class: "flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden",
+            },
+            center: rsx! {
 
                     if selected_type.is_none() {
                         // Empty state
@@ -562,18 +553,11 @@ pub fn BlockEditorView() -> Element {
                             }
                         }
                     }
-                }
-
-                // ══════════════════════════════════════════════════
-                // RIGHT: FX Selector
-                // ══════════════════════════════════════════════════
-                div { class: "w-72 flex-shrink-0 border-l border-border/50 flex flex-col min-h-0",
-                    FxSelector { fx_list: daw_fx_list }
-                }
-            }
-
-            // ── Bottom: Status bar ───────────────────────────────
-            div { class: "px-4 py-1.5 border-t border-border/30 flex items-center gap-3 flex-shrink-0 bg-zinc-950/60",
+            },
+            right: Some(rsx! {
+                FxSelector { fx_list: daw_fx_list }
+            }),
+            status: rsx! {
                 // Connection indicator
                 div {
                     class: if is_connected {
@@ -590,7 +574,7 @@ pub fn BlockEditorView() -> Element {
                         "DAW offline"
                     }
                 }
-            }
+            },
         }
     }
 }

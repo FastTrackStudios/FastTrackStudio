@@ -3,12 +3,15 @@
 //! Wraps `SignalControl` methods into Dioxus `Callback`s that UI
 //! components can invoke directly (e.g. `actions.next_scene.call(())`).
 
+use crate::hooks::rig_state::refresh_presets_from_db;
 use crate::prelude::*;
 use crate::signals::{
     RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET,
     RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_CURRENT_SONG, RIG_FX_CHAIN, RIG_LAST_APPLIED_SNAPSHOT,
-    RIG_NODE_FX_BINDINGS, RIG_PROFILE, RIG_SERVICE, RIG_SETLIST_SONGS,
+    RIG_MODULES, RIG_NODE_FX_BINDINGS, RIG_NODE_GRAPH, RIG_PROFILE, RIG_SERVICE, RIG_SETLIST_SONGS,
 };
+use signal_control::defaults::templates;
+use signal_control::template::RigTemplate;
 use signal_control::{PreloadPriority, RigControlCommand, SignalControl};
 use uuid::Uuid;
 
@@ -19,6 +22,9 @@ pub struct CreateEntityData {
     pub category: String,
     pub description: String,
     pub tags: Vec<String>,
+    /// For presets: index into the known template list (None = blank).
+    /// 0 = Guitar Rig, 1 = Vocal Rig.
+    pub template_index: Option<usize>,
 }
 
 /// Collection of rig action callbacks for UI components.
@@ -146,10 +152,38 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |preset_id: Uuid| {
                 let ctl = ctl.clone();
                 spawn(async move {
-                    ctl.load_preset_with_scene(preset_id, 0).await;
-                    if let Some(preset) = ctl.get_current_preset().await {
-                        *RIG_CURRENT_PRESET.write() = Some(preset);
+                    tracing::info!("load_preset: loading preset {preset_id}");
+
+                    // 1. Set RIG_CURRENT_PRESET from the available presets list
+                    //    (fixes selected state immediately — same IDs as sidebar)
+                    let preset_info = RIG_AVAILABLE_PRESETS
+                        .read()
+                        .iter()
+                        .find(|p| p.id == preset_id)
+                        .cloned();
+                    if let Some(ref info) = preset_info {
+                        tracing::info!(
+                            "load_preset: selected '{}' ({} scenes)",
+                            info.name,
+                            info.scene_count
+                        );
+                        *RIG_CURRENT_PRESET.write() = Some(info.clone());
                     }
+
+                    // 2. Try to build modules from DB data
+                    let db_modules = build_modules_from_db(&ctl, preset_id).await;
+                    if !db_modules.is_empty() {
+                        tracing::info!("load_preset: built {} modules from DB", db_modules.len());
+                        *RIG_MODULES.write() = db_modules;
+                    } else {
+                        // Fall back to mock service for non-DB presets
+                        tracing::info!("load_preset: no DB modules, falling back to mock");
+                        ctl.load_preset_with_scene(preset_id, 0).await;
+                        *RIG_MODULES.write() = ctl.get_current_modules();
+                    }
+
+                    // 3. Rebuild node graph
+                    rebuild_node_graph();
                 });
             })
         },
@@ -158,10 +192,28 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |(preset_id, scene_index): (Uuid, usize)| {
                 let ctl = ctl.clone();
                 spawn(async move {
-                    ctl.load_preset_with_scene(preset_id, scene_index).await;
-                    if let Some(preset) = ctl.get_current_preset().await {
-                        *RIG_CURRENT_PRESET.write() = Some(preset);
+                    tracing::info!("load_preset_snapshot: preset={preset_id} scene={scene_index}");
+                    // Set selection from sidebar list
+                    let preset_info = RIG_AVAILABLE_PRESETS
+                        .read()
+                        .iter()
+                        .find(|p| p.id == preset_id)
+                        .cloned();
+                    if let Some(ref info) = preset_info {
+                        *RIG_CURRENT_PRESET.write() = Some(info.clone());
                     }
+                    *RIG_CURRENT_PRESET_SNAPSHOT_ID.write() =
+                        preset_info.and_then(|info| info.scenes.get(scene_index).map(|s| s.id));
+
+                    // Build modules from DB
+                    let db_modules = build_modules_from_db(&ctl, preset_id).await;
+                    if !db_modules.is_empty() {
+                        *RIG_MODULES.write() = db_modules;
+                    } else {
+                        ctl.load_preset_with_scene(preset_id, scene_index).await;
+                        *RIG_MODULES.write() = ctl.get_current_modules();
+                    }
+                    rebuild_node_graph();
                 });
             })
         },
@@ -170,10 +222,23 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |(preset_id, _snapshot_id): (Uuid, Uuid)| {
                 let ctl = ctl.clone();
                 spawn(async move {
-                    ctl.load_preset_with_scene(preset_id, 0).await;
-                    if let Some(preset) = ctl.get_current_preset().await {
-                        *RIG_CURRENT_PRESET.write() = Some(preset);
+                    let preset_info = RIG_AVAILABLE_PRESETS
+                        .read()
+                        .iter()
+                        .find(|p| p.id == preset_id)
+                        .cloned();
+                    if let Some(ref info) = preset_info {
+                        *RIG_CURRENT_PRESET.write() = Some(info.clone());
                     }
+
+                    let db_modules = build_modules_from_db(&ctl, preset_id).await;
+                    if !db_modules.is_empty() {
+                        *RIG_MODULES.write() = db_modules;
+                    } else {
+                        ctl.load_preset_with_scene(preset_id, 0).await;
+                        *RIG_MODULES.write() = ctl.get_current_modules();
+                    }
+                    rebuild_node_graph();
                 });
             })
         },
@@ -344,6 +409,18 @@ pub fn use_rig_actions() -> RigActions {
             Callback::new(move |data: CreateEntityData| {
                 let ctl = ctl.clone();
                 spawn(async move {
+                    tracing::info!(
+                        "create_preset: '{}' template={:?} category='{}' tags={:?}",
+                        data.name,
+                        data.template_index,
+                        data.category,
+                        data.tags
+                    );
+
+                    // Resolve selected template
+                    let template: Option<RigTemplate> =
+                        data.template_index.and_then(resolve_template_by_index);
+
                     let category = if data.category.is_empty() {
                         "Uncategorized".to_string()
                     } else {
@@ -356,25 +433,129 @@ pub fn use_rig_actions() -> RigActions {
                     } else {
                         Some(data.description.as_str())
                     };
-                    match ctl
-                        .create_rig_preset::<()>(
-                            &data.name,
-                            desc,
-                            serde_json::json!(category),
-                            serde_json::json!(tags_json),
-                            &(),
-                        )
-                        .await
-                    {
-                        Ok(id) => {
-                            tracing::info!("Created preset '{}' ({id})", data.name);
-                            *RIG_AVAILABLE_PRESETS.write() = ctl.get_available_presets().await;
-                            ctl.load_preset_with_scene(id, 0).await;
-                            if let Some(preset) = ctl.get_current_preset().await {
-                                *RIG_CURRENT_PRESET.write() = Some(preset);
+
+                    if let Some(tmpl) = &template {
+                        tracing::info!(
+                            "Creating preset '{}' from template '{}'",
+                            data.name,
+                            tmpl.name
+                        );
+
+                        // Instantiate template into domain objects
+                        let (mut preset, module_presets): (
+                            signal_control::preset::Preset,
+                            Vec<signal_control::module_preset::ModulePreset>,
+                        ) = tmpl.instantiate();
+                        preset.name = data.name.clone();
+
+                        // Create each module preset in the DB using the template-generated ID
+                        // so Preset.module_assignments can find them by ModulePresetId.
+                        for mp in &module_presets {
+                            let blocks_json = serde_json::json!(mp
+                                .blocks
+                                .iter()
+                                .map(|mb| {
+                                    serde_json::json!({
+                                        "block": {
+                                            "name": mb.block.name,
+                                            "block_type": format!("{:?}", mb.block.block_type),
+                                            "alias": mb.block.alias,
+                                            "description": mb.block.description,
+                                            "is_placeholder": mb.block.is_placeholder(),
+                                        },
+                                        "local_col": mb.local_col,
+                                        "local_row": mb.local_row,
+                                    })
+                                })
+                                .collect::<Vec<_>>());
+                            // Store grid dimensions as module-level metadata
+                            let macros_json = serde_json::json!({
+                                "grid_width": mp.grid_width,
+                                "grid_height": mp.grid_height,
+                            });
+                            if let Err(e) = ctl
+                                .create_module_preset_with_id(
+                                    mp.id.as_uuid(),
+                                    &mp.name,
+                                    mp.module_type.display_name(),
+                                    mp.description.as_deref(),
+                                    blocks_json,
+                                    macros_json,
+                                )
+                                .await
+                            {
+                                tracing::warn!("Failed to create module preset '{}': {e}", mp.name);
                             }
                         }
-                        Err(e) => tracing::error!("Failed to create preset: {e}"),
+
+                        // Create the rig preset with full Preset data (including module_assignments)
+                        match ctl
+                            .create_rig_preset::<signal_control::preset::Preset>(
+                                &data.name,
+                                desc,
+                                serde_json::json!(category),
+                                serde_json::json!(tags_json),
+                                &preset,
+                            )
+                            .await
+                        {
+                            Ok(id) => {
+                                tracing::info!(
+                                    "Created preset '{}' ({id}) from template",
+                                    data.name
+                                );
+                                refresh_presets_from_db(&ctl).await;
+                                // Select the new preset by finding it in the refreshed list
+                                let info = RIG_AVAILABLE_PRESETS
+                                    .read()
+                                    .iter()
+                                    .find(|p| p.id == id)
+                                    .cloned();
+                                if let Some(info) = info {
+                                    *RIG_CURRENT_PRESET.write() = Some(info);
+                                }
+                                // Build modules from DB
+                                let db_modules = build_modules_from_db(&ctl, id).await;
+                                if !db_modules.is_empty() {
+                                    *RIG_MODULES.write() = db_modules;
+                                }
+                                rebuild_node_graph();
+                            }
+                            Err(e) => tracing::error!("Failed to create preset: {e}"),
+                        }
+                    } else {
+                        // Blank preset — store a real Preset object (not null)
+                        let preset = signal_control::preset::Preset::new(
+                            &data.name,
+                            signal_control::category::PresetCategory::default(),
+                        );
+                        match ctl
+                            .create_rig_preset::<signal_control::preset::Preset>(
+                                &data.name,
+                                desc,
+                                serde_json::json!(category),
+                                serde_json::json!(tags_json),
+                                &preset,
+                            )
+                            .await
+                        {
+                            Ok(id) => {
+                                tracing::info!("Created blank preset '{}' ({id})", data.name);
+                                refresh_presets_from_db(&ctl).await;
+                                let info = RIG_AVAILABLE_PRESETS
+                                    .read()
+                                    .iter()
+                                    .find(|p| p.id == id)
+                                    .cloned();
+                                if let Some(info) = info {
+                                    *RIG_CURRENT_PRESET.write() = Some(info);
+                                }
+                                // Blank preset has no modules — clear
+                                *RIG_MODULES.write() = Vec::new();
+                                rebuild_node_graph();
+                            }
+                            Err(e) => tracing::error!("Failed to create preset: {e}"),
+                        }
                     }
                 });
             })
@@ -435,6 +616,197 @@ pub fn use_rig_actions() -> RigActions {
                 });
             })
         },
+    }
+}
+
+/// Rebuild RIG_NODE_GRAPH from the current RIG_MODULES.
+fn rebuild_node_graph() {
+    let modules = RIG_MODULES.read();
+    if !modules.is_empty() {
+        let graph =
+            crate::components::rig_grid::node_graph::NodeGraph::build_from_modules(&modules);
+        tracing::info!("Rebuilt node graph ({} modules)", graph.modules.len());
+        *RIG_NODE_GRAPH.write() = graph;
+    }
+}
+
+/// Log module details for debugging.
+fn log_modules(modules: &[signal_control::module::Module]) {
+    for m in modules {
+        let block_names: Vec<&str> = m.blocks.iter().map(|b| b.block.name.as_str()).collect();
+        let placeholder_count = m.blocks.iter().filter(|b| b.block.is_placeholder()).count();
+        tracing::info!(
+            "  module '{}' ({}): {} blocks {:?} ({} placeholder)",
+            m.name,
+            m.module_type.display_name(),
+            m.blocks.len(),
+            block_names,
+            placeholder_count
+        );
+    }
+}
+
+/// Build Module objects from DB data for a given preset ID.
+///
+/// Loads the Preset from the DB (Facet-deserialized), iterates its
+/// module_assignments, loads each ModulePreset from the DB, and
+/// reconstructs Module objects with blocks parsed from JSON.
+async fn build_modules_from_db(
+    ctl: &SignalControl,
+    preset_id: Uuid,
+) -> Vec<signal_control::module::Module> {
+    use signal_control::block::{Block, BlockType, PluginId};
+    use signal_control::module::{Module, ModuleBlock, ModuleType};
+    use signal_control::normalized::Order;
+
+    // Load the full Preset object from DB
+    let preset: Option<signal_control::preset::Preset> = match ctl
+        .get_rig_preset::<signal_control::preset::Preset>(preset_id)
+        .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("build_modules_from_db: failed to load preset: {e}");
+            return Vec::new();
+        }
+    };
+
+    let Some(preset) = preset else {
+        tracing::info!("build_modules_from_db: preset {preset_id} not in DB");
+        return Vec::new();
+    };
+
+    let mut modules = Vec::new();
+
+    for assignment in &preset.module_assignments {
+        if !assignment.enabled {
+            continue;
+        }
+
+        let mp_id = assignment.module_preset_id.as_uuid();
+        let mp_row = match ctl.get_module_preset(mp_id).await {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                tracing::warn!("build_modules_from_db: module preset {mp_id} not found in DB");
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!("build_modules_from_db: failed to load module preset {mp_id}: {e}");
+                continue;
+            }
+        };
+
+        let module_type =
+            ModuleType::from_container_name(&mp_row.module_type).unwrap_or(ModuleType::Custom);
+        let mut module = Module::new(&mp_row.name, module_type);
+
+        // Restore grid dimensions from macros metadata
+        if let Some(gw) = mp_row.macros.get("grid_width").and_then(|v| v.as_u64()) {
+            module.grid_width = Some(gw as usize);
+        }
+        if let Some(gh) = mp_row.macros.get("grid_height").and_then(|v| v.as_u64()) {
+            module.grid_height = Some(gh as usize);
+        }
+
+        // Parse blocks from JSON
+        if let Some(blocks_arr) = mp_row.blocks.as_array() {
+            for block_json in blocks_arr {
+                let block_obj = block_json.get("block").unwrap_or(block_json);
+                let name = block_obj
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown")
+                    .to_string();
+                let block_type_str = block_obj
+                    .get("block_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Custom");
+                let block_type = parse_block_type(block_type_str);
+                let alias = block_obj
+                    .get("alias")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                let description = block_obj
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+
+                let mut block =
+                    Block::new(name, PluginId::unassigned()).with_block_type(block_type);
+                block.alias = alias;
+                block.description = description;
+                let order = Order::new(module.blocks.len() as u8);
+                let mut mb = ModuleBlock::new(block, order);
+
+                // Restore 2D grid position
+                mb.local_col = block_json
+                    .get("local_col")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
+                mb.local_row = block_json
+                    .get("local_row")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
+
+                module.add_block(mb);
+            }
+        }
+
+        modules.push(module);
+    }
+
+    log_modules(&modules);
+    modules
+}
+
+/// Parse a BlockType from its Debug/variant name string.
+fn parse_block_type(s: &str) -> signal_control::block::BlockType {
+    use signal_control::block::BlockType;
+    match s {
+        "Input" => BlockType::Input,
+        "Compressor" => BlockType::Compressor,
+        "Drive" => BlockType::Drive,
+        "Amp" => BlockType::Amp,
+        "Cabinet" => BlockType::Cabinet,
+        "Eq" => BlockType::Eq,
+        "Modulation" => BlockType::Modulation,
+        "Delay" => BlockType::Delay,
+        "Reverb" => BlockType::Reverb,
+        "Gate" => BlockType::Gate,
+        "Volume" => BlockType::Volume,
+        "Pitch" => BlockType::Pitch,
+        "Tremolo" => BlockType::Tremolo,
+        "Limiter" => BlockType::Limiter,
+        "Send" => BlockType::Send,
+        "Special" => BlockType::Special,
+        "Freeze" => BlockType::Freeze,
+        "DeEsser" => BlockType::DeEsser,
+        "Saturator" => BlockType::Saturator,
+        "Tuner" => BlockType::Tuner,
+        "Chorus" => BlockType::Chorus,
+        "Flanger" => BlockType::Flanger,
+        "Phaser" => BlockType::Phaser,
+        "RingModulator" => BlockType::RingModulator,
+        "Wah" => BlockType::Wah,
+        "Filter" => BlockType::Filter,
+        "Doubler" => BlockType::Doubler,
+        "Panner" => BlockType::Panner,
+        "Vibrato" => BlockType::Vibrato,
+        "Rotary" => BlockType::Rotary,
+        "Crossover" => BlockType::Crossover,
+        "Boost" => BlockType::Boost,
+        _ => BlockType::Custom,
+    }
+}
+
+/// Look up a `RigTemplate` by index into the known built-in templates.
+///
+/// 0 = Guitar Rig, 1 = Vocal Rig. Returns None for out-of-bounds.
+fn resolve_template_by_index(index: usize) -> Option<RigTemplate> {
+    match index {
+        0 => Some(templates::guitar_rig_template()),
+        1 => Some(templates::vocal_rig_template()),
+        _ => None,
     }
 }
 

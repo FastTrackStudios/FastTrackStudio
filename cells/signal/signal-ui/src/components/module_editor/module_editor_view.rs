@@ -135,6 +135,12 @@ pub(crate) struct CompositionSlot {
     pub col: usize,
     /// Grid row position (0-indexed).
     pub row: usize,
+    /// Module group key — slots with the same key are grouped visually
+    /// behind a colored container in the grid view. `None` = ungrouped.
+    pub module_group: Option<String>,
+    /// Module type for coloring the group container. Only needed on the
+    /// first slot in each group (others inherit), but can be set on all.
+    pub module_type: Option<ModuleType>,
 }
 
 /// Chain view mode: Grid (2D) or List (horizontal strip).
@@ -237,6 +243,8 @@ fn parse_composition_from_model(
                 plugin_name: plugin,
                 col,
                 row,
+                module_group: None,
+                module_type: None,
             }
         })
         .collect();
