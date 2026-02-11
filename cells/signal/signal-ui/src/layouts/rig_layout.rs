@@ -10,6 +10,12 @@
 //! All panels read from global signals and use `use_rig_actions()` for
 //! dispatching commands — no context provider needed.
 
+use crate::components::module_editor::detail_panel::DetailPanel;
+use crate::components::module_editor::grid_view::{
+    BlockPickerDropdown, DynamicGridView, GridConnection, PICKER_CELL, PICKER_CLICK_POS,
+};
+use crate::components::module_editor::module_editor_view::CompositionSlot;
+use crate::components::module_editor::UnifiedGridEditor;
 use crate::components::rig_grid::guitar_rig_grid::GuitarRigGrid;
 use crate::components::rig_grid::left_sidebar::GuitarRigLeftSidebar;
 use crate::components::rig_grid::module_browser_modal::ModuleBrowserModal;
@@ -21,33 +27,53 @@ use crate::components::rig_grid::right_sidebar::{
 use crate::components::rig_grid::scene_grid::SceneGridPanel;
 use crate::components::rig_grid::version_history_panel::VersionHistoryPanel;
 use crate::components::rig_grid::view_mode::{ModuleViewMode, RigViewMode};
+use crate::components::shared::{CreateEntityModal, EntityKind};
+use crate::context::rig_grid::{use_rig_grid_state, RigGridStateProvider};
 use crate::hooks::rig_actions::use_rig_actions;
 use crate::hooks::rig_state::use_rig_subscription;
 use crate::prelude::*;
-use crate::signals::{init_rig_service, RIG_NODE_GRAPH, RIG_SELECTED_ENTITY};
+use crate::signals::{init_rig_service, RIG_GRID_SELECTED_SLOT, RIG_NODE_GRAPH};
+use uuid::Uuid;
 
 /// Main layout for the Rig tab (legacy monolithic view).
 ///
 /// Initializes the rig service, subscribes to events, and renders the
 /// full 3-panel layout. Kept for backwards compatibility — the dock
 /// system uses the individual panel components instead.
+///
+/// Wraps the subtree in a `RigGridStateProvider` so all descendant
+/// components can access rig grid selection state via `use_rig_grid_state()`.
 #[component]
 pub fn RigLayout() -> Element {
     init_rig_service();
     use_rig_subscription();
+
+    rsx! {
+        RigGridStateProvider {
+            RigLayoutInner {}
+        }
+    }
+}
+
+/// Inner layout body — separated so that `use_rig_grid_state()` can read
+/// from the context provided by `RigLayout`'s `RigGridStateProvider`.
+#[component]
+fn RigLayoutInner() -> Element {
     let actions = use_rig_actions();
+    let grid_state = use_rig_grid_state();
 
     // Page-level state
-    let mut sidebar_open = use_signal(|| true);
+    let mut sidebar_open = use_signal(|| false);
     let mut module_view_mode = use_signal(|| ModuleViewMode::Flow);
     let mut rig_view_mode = use_signal(|| RigViewMode::Song);
     let mut module_browser_open = use_signal(|| false);
     let mut scene_grid_open = use_signal(|| false);
     let mut snapshot_panel_open = use_signal(|| false);
+    let mut create_modal_kind = use_signal(|| None::<EntityKind>);
 
     // Determine which right sidebar to show based on rig view mode
     let show_right_sidebar = matches!(rig_view_mode(), RigViewMode::Song | RigViewMode::Profile);
-    let has_selection = RIG_SELECTED_ENTITY.read().is_some();
+    let has_selection = grid_state.has_selection();
 
     rsx! {
         div { class: "h-full w-full flex flex-col bg-background overflow-hidden",
@@ -75,10 +101,15 @@ pub fn RigLayout() -> Element {
                         on_preset_snapshot_select: Some(actions.load_preset_snapshot.clone()),
                         on_profile_select: actions.load_profile.clone(),
                         on_profile_scene_select: Some(actions.load_profile_scene.clone()),
+                        on_create_preset: Some(Callback::new(move |_| create_modal_kind.set(Some(EntityKind::Preset)))),
+                        on_create_profile: Some(Callback::new(move |_| create_modal_kind.set(Some(EntityKind::Profile)))),
                     }
 
                     div { class: "flex-1 overflow-hidden",
-                        GuitarRigGrid { view_mode: module_view_mode() }
+                        match module_view_mode() {
+                            ModuleViewMode::Grid => rsx! { UnifiedGridEditor {} },
+                            mode => rsx! { GuitarRigGrid { view_mode: mode } },
+                        }
                     }
 
                     // Right panel area: property panel when selected, otherwise sidebar
@@ -97,12 +128,15 @@ pub fn RigLayout() -> Element {
                                     on_prev_song: actions.prev_song.clone(),
                                     on_next_song: actions.next_song.clone(),
                                     on_setlist_change: actions.load_setlist.clone(),
+                                    on_create_song: Some(Callback::new(move |_| create_modal_kind.set(Some(EntityKind::Song)))),
+                                    on_create_scene: Some(Callback::new(move |_| create_modal_kind.set(Some(EntityKind::Scene)))),
                                 }
                             },
                             RigViewMode::Profile => rsx! {
                                 GuitarRigProfileSidebar {
                                     on_profile_select: actions.load_profile.clone(),
                                     on_profile_scene_select: Some(actions.load_profile_scene.clone()),
+                                    on_create_profile: Some(Callback::new(move |_| create_modal_kind.set(Some(EntityKind::Profile)))),
                                 }
                             },
                             _ => rsx! {},
@@ -174,6 +208,31 @@ pub fn RigLayout() -> Element {
                     module_browser_open.set(false);
                 },
             }
+
+            // Create entity modal (shared across all sidebar + buttons)
+            if let Some(kind) = *create_modal_kind.read() {
+                CreateEntityModal {
+                    kind,
+                    is_open: true,
+                    on_submit: {
+                        let create_preset = actions.create_preset.clone();
+                        let create_profile = actions.create_profile.clone();
+                        let create_song = actions.create_song.clone();
+                        let create_scene = actions.create_scene.clone();
+                        Callback::new(move |data| {
+                            match kind {
+                                EntityKind::Preset => create_preset.call(data),
+                                EntityKind::Profile => create_profile.call(data),
+                                EntityKind::Song => create_song.call(data),
+                                EntityKind::Scene => create_scene.call(data),
+                                EntityKind::Setlist => {}
+                            }
+                            create_modal_kind.set(None);
+                        })
+                    },
+                    on_close: Callback::new(move |_| create_modal_kind.set(None)),
+                }
+            }
         }
     }
 }
@@ -198,14 +257,17 @@ pub fn RigGridPanel() -> Element {
 /// Preset browser panel — fuzzy-searchable preset list.
 ///
 /// Standalone dock panel wrapper around the preset section of `GuitarRigLeftSidebar`.
+/// Owns modal state for creating new presets and profiles.
 #[component]
 pub fn PresetBrowserPanel() -> Element {
     init_rig_service();
     use_rig_subscription();
     let actions = use_rig_actions();
 
+    let mut modal_kind = use_signal(|| None::<EntityKind>);
+
     rsx! {
-        div { class: "h-full w-full overflow-hidden",
+        div { class: "h-full w-full overflow-hidden relative",
             GuitarRigLeftSidebar {
                 is_open: true,
                 rig_view_mode: RigViewMode::Preset,
@@ -213,6 +275,28 @@ pub fn PresetBrowserPanel() -> Element {
                 on_preset_snapshot_select: Some(actions.load_preset_snapshot),
                 on_profile_select: actions.load_profile,
                 on_profile_scene_select: Some(actions.load_profile_scene),
+                on_create_preset: Some(Callback::new(move |_| modal_kind.set(Some(EntityKind::Preset)))),
+                on_create_profile: Some(Callback::new(move |_| modal_kind.set(Some(EntityKind::Profile)))),
+            }
+
+            if let Some(kind) = *modal_kind.read() {
+                CreateEntityModal {
+                    kind,
+                    is_open: true,
+                    on_submit: {
+                        let create_preset = actions.create_preset.clone();
+                        let create_profile = actions.create_profile.clone();
+                        Callback::new(move |data| {
+                            match kind {
+                                EntityKind::Preset => create_preset.call(data),
+                                EntityKind::Profile => create_profile.call(data),
+                                _ => {}
+                            }
+                            modal_kind.set(None);
+                        })
+                    },
+                    on_close: Callback::new(move |_| modal_kind.set(None)),
+                }
             }
         }
     }
@@ -221,17 +305,34 @@ pub fn PresetBrowserPanel() -> Element {
 /// Profile browser panel — profile selector with expandable scenes.
 ///
 /// Standalone dock panel wrapper around `GuitarRigProfileSidebar`.
+/// Owns modal state for creating new profiles.
 #[component]
 pub fn ProfileBrowserPanel() -> Element {
     init_rig_service();
     use_rig_subscription();
     let actions = use_rig_actions();
 
+    let mut modal_open = use_signal(|| false);
+
     rsx! {
-        div { class: "h-full w-full overflow-hidden",
+        div { class: "h-full w-full overflow-hidden relative",
             GuitarRigProfileSidebar {
                 on_profile_select: actions.load_profile,
                 on_profile_scene_select: Some(actions.load_profile_scene),
+                on_create_profile: Some(Callback::new(move |_| modal_open.set(true))),
+            }
+
+            CreateEntityModal {
+                kind: EntityKind::Profile,
+                is_open: *modal_open.read(),
+                on_submit: {
+                    let create_profile = actions.create_profile.clone();
+                    Callback::new(move |data| {
+                        create_profile.call(data);
+                        modal_open.set(false);
+                    })
+                },
+                on_close: Callback::new(move |_| modal_open.set(false)),
             }
         }
     }
@@ -240,34 +341,72 @@ pub fn ProfileBrowserPanel() -> Element {
 /// Song parts panel — scenes list for the current song.
 ///
 /// Shows current song header, scene list, and prev/next navigation.
+/// Owns modal state for creating new scenes.
 #[component]
 pub fn SongPartsPanel() -> Element {
     init_rig_service();
     use_rig_subscription();
     let actions = use_rig_actions();
 
+    let mut modal_open = use_signal(|| false);
+
     rsx! {
-        SceneListPanel {
-            on_scene_click: actions.go_to_scene,
-            on_prev_scene: actions.prev_scene,
-            on_next_scene: actions.next_scene,
+        div { class: "h-full w-full relative",
+            SceneListPanel {
+                on_scene_click: actions.go_to_scene,
+                on_prev_scene: actions.prev_scene,
+                on_next_scene: actions.next_scene,
+                on_create_scene: Some(Callback::new(move |_| modal_open.set(true))),
+            }
+
+            CreateEntityModal {
+                kind: EntityKind::Scene,
+                is_open: *modal_open.read(),
+                on_submit: {
+                    let create_scene = actions.create_scene.clone();
+                    Callback::new(move |data| {
+                        create_scene.call(data);
+                        modal_open.set(false);
+                    })
+                },
+                on_close: Callback::new(move |_| modal_open.set(false)),
+            }
         }
     }
 }
 
 /// Song selector panel — setlist dropdown + song list + navigation.
+/// Owns modal state for creating new songs.
 #[component]
 pub fn SongSelectorPanel() -> Element {
     init_rig_service();
     use_rig_subscription();
     let actions = use_rig_actions();
 
+    let mut modal_open = use_signal(|| false);
+
     rsx! {
-        SongListPanel {
-            on_song_click: actions.go_to_song,
-            on_prev_song: actions.prev_song,
-            on_next_song: actions.next_song,
-            on_setlist_change: actions.load_setlist,
+        div { class: "h-full w-full relative",
+            SongListPanel {
+                on_song_click: actions.go_to_song,
+                on_prev_song: actions.prev_song,
+                on_next_song: actions.next_song,
+                on_setlist_change: actions.load_setlist,
+                on_create_song: Some(Callback::new(move |_| modal_open.set(true))),
+            }
+
+            CreateEntityModal {
+                kind: EntityKind::Song,
+                is_open: *modal_open.read(),
+                on_submit: {
+                    let create_song = actions.create_song.clone();
+                    Callback::new(move |data| {
+                        create_song.call(data);
+                        modal_open.set(false);
+                    })
+                },
+                on_close: Callback::new(move |_| modal_open.set(false)),
+            }
         }
     }
 }
@@ -275,7 +414,9 @@ pub fn SongSelectorPanel() -> Element {
 /// Node property panel — shows editable properties for the selected node/module.
 ///
 /// Standalone dock panel wrapper around `NodePropertyPanel`. Reads from
-/// `RIG_SELECTED_ENTITY` and `RIG_NODE_GRAPH` global signals.
+/// the rig grid context and `RIG_NODE_GRAPH` global signal.
+///
+/// Reads from `RIG_SELECTED_ENTITY` and `RIG_NODE_GRAPH` global signals directly.
 #[component]
 pub fn NodePropertyDockPanel() -> Element {
     init_rig_service();
@@ -311,5 +452,112 @@ pub fn SceneGridDockPanel() -> Element {
 
     rsx! {
         SceneGridPanel { view_mode: RigViewMode::Song }
+    }
+}
+
+/// Grid editor dock panel — the unified 2D block/module grid.
+///
+/// Standalone dock panel that owns its own chain/connections/selection state.
+/// Writes the selected slot to the rig grid context so the detail editor
+/// panel (in a separate dock tile) can read it.
+///
+/// Wraps its subtree in a `RigGridStateProvider` for dock-based usage
+/// (where `RigLayout` is not the ancestor).
+#[component]
+pub fn RigGridEditorPanel() -> Element {
+    init_rig_service();
+    use_rig_subscription();
+
+    rsx! {
+        RigGridStateProvider {
+            RigGridEditorPanelInner {}
+        }
+    }
+}
+
+/// Inner body of the grid editor panel — reads/writes the rig grid context.
+#[component]
+fn RigGridEditorPanelInner() -> Element {
+    let grid_state = use_rig_grid_state();
+
+    let mut chain = use_signal(Vec::<CompositionSlot>::new);
+    let mut connections = use_signal(Vec::<GridConnection>::new);
+    let mut selected_slot_id = use_signal(|| None::<Uuid>);
+
+    let chain_data = chain.cloned();
+    let conn_data = connections.cloned();
+    let sel_id = *selected_slot_id.read();
+
+    // Keep the global signal in sync with local selection so that
+    // RigDetailEditorPanel (in a separate dock tile) can read it.
+    use_effect(move || {
+        let id = *selected_slot_id.read();
+        let slot = id.and_then(|id| chain.read().iter().find(|s| s.id == id).cloned());
+        *RIG_GRID_SELECTED_SLOT.write() = slot.clone();
+        grid_state.set_selected_slot(slot);
+    });
+
+    rsx! {
+        div { class: "h-full w-full relative overflow-hidden",
+            DynamicGridView {
+                chain: chain_data.clone(),
+                selected_slot_id: sel_id,
+                connections: conn_data.clone(),
+                on_chain_change: move |new_chain: Vec<CompositionSlot>| {
+                    chain.set(new_chain);
+                },
+                on_connections_change: move |new_conns: Vec<GridConnection>| {
+                    connections.set(new_conns);
+                },
+                on_select: move |id: Option<Uuid>| {
+                    selected_slot_id.set(id);
+                },
+            }
+
+            // Block picker portal — rendered above CSS transform stacking context
+            if let Some((pc, pr)) = *PICKER_CELL.read() {
+                {
+                    let (click_x, click_y) = *PICKER_CLICK_POS.read();
+                    rsx! {
+                        BlockPickerDropdown {
+                            col: pc,
+                            row: pr,
+                            click_x: click_x,
+                            click_y: click_y,
+                            on_add_slot: move |new_slot: CompositionSlot| {
+                                chain.write().push(new_slot);
+                                *PICKER_CELL.write() = None;
+                            },
+                            on_close: move |_| {
+                                *PICKER_CELL.write() = None;
+                            },
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Detail editor dock panel — 3-column detail view for the selected block/module.
+///
+/// Reads the selected slot from the rig grid context (written by
+/// `RigGridEditorPanel`). Displays preset selector, macro/detail/advanced
+/// tabs, and reserved space for future features.
+///
+/// Reads the selected slot from the `RIG_GRID_SELECTED_SLOT` global signal
+/// (written by `RigGridEditorPanel`). Uses the global signal directly because
+/// dock panels are rendered in separate subtrees without a shared context provider.
+#[component]
+pub fn RigDetailEditorPanel() -> Element {
+    init_rig_service();
+    use_rig_subscription();
+
+    let selected_slot = RIG_GRID_SELECTED_SLOT.read().clone();
+
+    rsx! {
+        div { class: "h-full w-full overflow-hidden bg-zinc-950/40",
+            DetailPanel { selected_slot: selected_slot }
+        }
     }
 }

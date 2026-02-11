@@ -4,16 +4,13 @@
 //! - Top section: Preset browser with fuzzy search
 //! - Bottom section: Profile selector
 
+use crate::hooks::use_fuzzy_search;
 use crate::prelude::*;
 use crate::signals::{
     RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET,
     RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_PROFILE,
 };
 use crate::{PresetInfo, PresetSnapshotInfo, ProfileInfo, ProfileSceneInfo};
-use nucleo_matcher::{
-    pattern::{CaseMatching, Normalization, Pattern},
-    Config, Matcher, Utf32Str,
-};
 use signal_control::tags::{Tag, TagRegistry};
 use uuid::Uuid;
 
@@ -36,6 +33,12 @@ pub struct GuitarRigLeftSidebarProps {
     /// Callback when a profile + scene is selected (by scene index).
     #[props(default)]
     pub on_profile_scene_select: Option<Callback<(Uuid, usize)>>,
+    /// Callback to create a new preset.
+    #[props(default)]
+    pub on_create_preset: Option<Callback<()>>,
+    /// Callback to create a new profile.
+    #[props(default)]
+    pub on_create_profile: Option<Callback<()>>,
 }
 
 /// Left sidebar for the guitar rig page.
@@ -62,40 +65,13 @@ pub fn GuitarRigLeftSidebar(props: GuitarRigLeftSidebarProps) -> Element {
     let all_profiles = RIG_AVAILABLE_PROFILES.read();
     let current_profile = RIG_PROFILE.read();
 
+    // Memo that reads from the GlobalSignal so use_fuzzy_search can subscribe
+    let presets_memo = use_memo(move || RIG_AVAILABLE_PRESETS.read().clone());
+
     // Filter presets based on fuzzy search
-    let filtered_presets = use_memo(move || {
-        let query = search_query();
-        let presets = RIG_AVAILABLE_PRESETS.read().clone();
-        let registry = TagRegistry::with_defaults();
-
-        if query.is_empty() {
-            return presets;
-        }
-
-        // Use nucleo matcher for fuzzy search
-        let mut matcher = Matcher::new(Config::DEFAULT);
-        let pattern = Pattern::parse(&query, CaseMatching::Smart, Normalization::Smart);
-
-        let mut scored: Vec<(PresetInfo, u32)> = presets
-            .into_iter()
-            .filter_map(|preset| {
-                // Build searchable text: name + category + description
-                // TODO: Add tag names and scene names when rig-control supports them
-                let description = preset.description.as_deref().unwrap_or("");
-                let search_text = format!("{} {} {}", preset.name, preset.category, description);
-
-                let mut buf = Vec::new();
-                let haystack = Utf32Str::new(&search_text, &mut buf);
-
-                pattern
-                    .score(haystack, &mut matcher)
-                    .map(|score| (preset, score))
-            })
-            .collect();
-
-        // Sort by score descending
-        scored.sort_by(|a, b| b.1.cmp(&a.1));
-        scored.into_iter().map(|(p, _)| p).collect()
+    let filtered_presets = use_fuzzy_search(presets_memo, search_query, |preset| {
+        let description = preset.description.as_deref().unwrap_or("");
+        format!("{} {} {}", preset.name, preset.category, description)
     });
 
     let query_for_display = search_query();
@@ -121,11 +97,28 @@ pub fn GuitarRigLeftSidebar(props: GuitarRigLeftSidebarProps) -> Element {
                         h3 { class: "text-xs font-semibold text-zinc-500 uppercase tracking-wider",
                             "Presets"
                         }
-                        span { class: "text-xs text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded",
-                            if has_search {
-                                "{preset_count}/{total_count}"
-                            } else {
-                                "{preset_count}"
+                        div { class: "flex items-center gap-1.5",
+                            span { class: "text-xs text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded",
+                                if has_search {
+                                    "{preset_count}/{total_count}"
+                                } else {
+                                    "{preset_count}"
+                                }
+                            }
+                            if let Some(ref on_create) = props.on_create_preset {
+                                {
+                                    let on_create = on_create.clone();
+                                    rsx! {
+                                        button {
+                                            class: "w-5 h-5 flex items-center justify-center rounded \
+                                                    text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 \
+                                                    transition-colors text-sm leading-none",
+                                            title: "New Preset",
+                                            onclick: move |_| on_create.call(()),
+                                            "+"
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -185,8 +178,25 @@ pub fn GuitarRigLeftSidebar(props: GuitarRigLeftSidebarProps) -> Element {
             if show_split {
                 div { class: "flex-[2] border-t border-zinc-800 flex flex-col min-h-0",
                     div { class: "p-3 border-b border-zinc-800/50 flex-shrink-0",
-                        h3 { class: "text-xs font-semibold text-zinc-500 uppercase tracking-wider",
-                            "Profiles"
+                        div { class: "flex items-center justify-between",
+                            h3 { class: "text-xs font-semibold text-zinc-500 uppercase tracking-wider",
+                                "Profiles"
+                            }
+                            if let Some(ref on_create) = props.on_create_profile {
+                                {
+                                    let on_create = on_create.clone();
+                                    rsx! {
+                                        button {
+                                            class: "w-5 h-5 flex items-center justify-center rounded \
+                                                    text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 \
+                                                    transition-colors text-sm leading-none",
+                                            title: "New Profile",
+                                            onclick: move |_| on_create.call(()),
+                                            "+"
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     // Profile list (scrollable)

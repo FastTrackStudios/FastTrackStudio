@@ -18,6 +18,9 @@ pub struct GuitarRigProfileSidebarProps {
     /// Callback when a profile + scene is selected (by scene index).
     #[props(default)]
     pub on_profile_scene_select: Option<Callback<(Uuid, usize)>>,
+    /// Callback to create a new profile.
+    #[props(default)]
+    pub on_create_profile: Option<Callback<()>>,
 }
 
 /// Right sidebar for browsing and selecting profiles (Profile mode only).
@@ -42,8 +45,25 @@ pub fn GuitarRigProfileSidebar(props: GuitarRigProfileSidebarProps) -> Element {
                     h3 { class: "text-xs font-semibold text-zinc-500 uppercase tracking-wider",
                         "Profiles"
                     }
-                    span { class: "text-xs text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded",
-                        "{all_profiles.len()}"
+                    div { class: "flex items-center gap-1.5",
+                        span { class: "text-xs text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded",
+                            "{all_profiles.len()}"
+                        }
+                        if let Some(ref on_create) = props.on_create_profile {
+                            {
+                                let on_create = on_create.clone();
+                                rsx! {
+                                    button {
+                                        class: "w-5 h-5 flex items-center justify-center rounded \
+                                                text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 \
+                                                transition-colors text-sm leading-none",
+                                        title: "New Profile",
+                                        onclick: move |_| on_create.call(()),
+                                        "+"
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

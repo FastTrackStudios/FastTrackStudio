@@ -29,6 +29,12 @@ pub struct GuitarRigRightSidebarProps {
     pub on_next_song: Callback<()>,
     /// Callback when setlist is changed.
     pub on_setlist_change: Callback<Uuid>,
+    /// Callback to create a new song.
+    #[props(default)]
+    pub on_create_song: Option<Callback<()>>,
+    /// Callback to create a new scene.
+    #[props(default)]
+    pub on_create_scene: Option<Callback<()>>,
 }
 
 /// Right sidebar for the guitar rig page.
@@ -48,8 +54,25 @@ pub fn GuitarRigRightSidebar(props: GuitarRigRightSidebarProps) -> Element {
 
                 // Scene list
                 div { class: "flex-1 overflow-y-auto p-2",
-                    h3 { class: "text-xs font-semibold text-zinc-500 mb-2 px-2 uppercase tracking-wider",
-                        "Scenes"
+                    div { class: "flex items-center justify-between mb-2 px-2",
+                        h3 { class: "text-xs font-semibold text-zinc-500 uppercase tracking-wider",
+                            "Scenes"
+                        }
+                        if let Some(ref on_create) = props.on_create_scene {
+                            {
+                                let on_create = on_create.clone();
+                                rsx! {
+                                    button {
+                                        class: "w-5 h-5 flex items-center justify-center rounded \
+                                                text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 \
+                                                transition-colors text-sm leading-none",
+                                        title: "New Scene",
+                                        onclick: move |_| on_create.call(()),
+                                        "+"
+                                    }
+                                }
+                            }
+                        }
                     }
                     SceneList { on_scene_click: props.on_scene_click.clone() }
                 }
@@ -73,9 +96,30 @@ pub fn GuitarRigRightSidebar(props: GuitarRigRightSidebarProps) -> Element {
 
             // === SONGS PANEL (bottom) ===
             div { class: "flex-1 min-h-80 flex flex-col",
-                // Setlist header with dropdown
+                // Songs header with + button and setlist dropdown
                 div { class: "p-2 border-b border-zinc-800 bg-zinc-850",
                     div { class: "flex items-center gap-2 px-2",
+                        span { class: "text-xs font-semibold text-zinc-500 uppercase tracking-wider",
+                            "Songs"
+                        }
+                        div { class: "flex-1" }
+                        if let Some(ref on_create) = props.on_create_song {
+                            {
+                                let on_create = on_create.clone();
+                                rsx! {
+                                    button {
+                                        class: "w-5 h-5 flex items-center justify-center rounded \
+                                                text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 \
+                                                transition-colors text-sm leading-none",
+                                        title: "New Song",
+                                        onclick: move |_| on_create.call(()),
+                                        "+"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    div { class: "flex items-center gap-2 px-2 mt-1",
                         span { class: "text-xs font-semibold text-zinc-500 uppercase tracking-wider",
                             "Setlist:"
                         }
@@ -118,14 +162,32 @@ pub fn SceneListPanel(
     on_scene_click: Callback<usize>,
     on_prev_scene: Callback<()>,
     on_next_scene: Callback<()>,
+    #[props(default)] on_create_scene: Option<Callback<()>>,
 ) -> Element {
     rsx! {
         div { class: "h-full w-full flex flex-col bg-card",
             SongHeader {}
 
             div { class: "flex-1 overflow-y-auto p-2",
-                h3 { class: "text-xs font-semibold text-muted-foreground mb-2 px-2 uppercase tracking-wider",
-                    "Scenes"
+                div { class: "flex items-center justify-between mb-2 px-2",
+                    h3 { class: "text-xs font-semibold text-muted-foreground uppercase tracking-wider",
+                        "Scenes"
+                    }
+                    if let Some(ref on_create) = on_create_scene {
+                        {
+                            let on_create = on_create.clone();
+                            rsx! {
+                                button {
+                                    class: "w-5 h-5 flex items-center justify-center rounded \
+                                            text-muted-foreground hover:text-foreground hover:bg-accent \
+                                            transition-colors text-sm leading-none",
+                                    title: "New Scene",
+                                    onclick: move |_| on_create.call(()),
+                                    "+"
+                                }
+                            }
+                        }
+                    }
                 }
                 SceneList { on_scene_click: on_scene_click.clone() }
             }
@@ -157,12 +219,34 @@ pub fn SongListPanel(
     on_prev_song: Callback<()>,
     on_next_song: Callback<()>,
     on_setlist_change: Callback<Uuid>,
+    #[props(default)] on_create_song: Option<Callback<()>>,
 ) -> Element {
     rsx! {
         div { class: "h-full w-full flex flex-col bg-card",
             // Setlist header
             div { class: "p-2 border-b border-border",
                 div { class: "flex items-center gap-2 px-2",
+                    span { class: "text-xs font-semibold text-muted-foreground uppercase tracking-wider",
+                        "Songs"
+                    }
+                    div { class: "flex-1" }
+                    if let Some(ref on_create) = on_create_song {
+                        {
+                            let on_create = on_create.clone();
+                            rsx! {
+                                button {
+                                    class: "w-5 h-5 flex items-center justify-center rounded \
+                                            text-muted-foreground hover:text-foreground hover:bg-accent \
+                                            transition-colors text-sm leading-none",
+                                    title: "New Song",
+                                    onclick: move |_| on_create.call(()),
+                                    "+"
+                                }
+                            }
+                        }
+                    }
+                }
+                div { class: "flex items-center gap-2 px-2 mt-1",
                     span { class: "text-xs font-semibold text-muted-foreground uppercase tracking-wider",
                         "Setlist:"
                     }

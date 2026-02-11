@@ -9,11 +9,15 @@ pub mod performance;
 pub mod preset_editor;
 pub mod profile_editor;
 pub mod rig_grid;
+pub mod shared;
 pub mod snapshot_test_harness;
 pub mod song_editor;
 
 // Re-export morph slider
 pub use morph_slider::MorphSlider;
+
+// Re-export shared components
+pub use shared::{CreateEntityModal, EntityKind};
 
 // Re-export commonly used components
 pub use rig_grid::{

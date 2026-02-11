@@ -5,11 +5,21 @@
 
 use crate::prelude::*;
 use crate::signals::{
-    RIG_CURRENT_PRESET, RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_LAST_APPLIED_SNAPSHOT, RIG_PROFILE,
-    RIG_FX_CHAIN, RIG_NODE_FX_BINDINGS, RIG_SERVICE,
+    RIG_AVAILABLE_PRESETS, RIG_AVAILABLE_PROFILES, RIG_CURRENT_PRESET,
+    RIG_CURRENT_PRESET_SNAPSHOT_ID, RIG_CURRENT_SONG, RIG_FX_CHAIN, RIG_LAST_APPLIED_SNAPSHOT,
+    RIG_NODE_FX_BINDINGS, RIG_PROFILE, RIG_SERVICE, RIG_SETLIST_SONGS,
 };
 use signal_control::{PreloadPriority, RigControlCommand, SignalControl};
 use uuid::Uuid;
+
+/// Data submitted from the create entity modal.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateEntityData {
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub tags: Vec<String>,
+}
 
 /// Collection of rig action callbacks for UI components.
 #[derive(Clone)]
@@ -34,6 +44,10 @@ pub struct RigActions {
     pub toggle_block_bypass: Callback<Uuid>,
     pub toggle_section: Callback<Uuid>,
     pub load_setlist: Callback<Uuid>,
+    pub create_preset: Callback<CreateEntityData>,
+    pub create_profile: Callback<CreateEntityData>,
+    pub create_song: Callback<CreateEntityData>,
+    pub create_scene: Callback<CreateEntityData>,
 }
 
 /// Hook that provides rig action callbacks.
@@ -325,6 +339,102 @@ pub fn use_rig_actions() -> RigActions {
         load_setlist: Callback::new(move |_setlist_id: Uuid| {
             tracing::debug!("load_setlist: use song navigation instead");
         }),
+        create_preset: {
+            let ctl = ctl.clone();
+            Callback::new(move |data: CreateEntityData| {
+                let ctl = ctl.clone();
+                spawn(async move {
+                    let category = if data.category.is_empty() {
+                        "Uncategorized".to_string()
+                    } else {
+                        data.category.clone()
+                    };
+                    let tags_json: Vec<serde_json::Value> =
+                        data.tags.iter().map(|t| serde_json::json!(t)).collect();
+                    let desc = if data.description.is_empty() {
+                        None
+                    } else {
+                        Some(data.description.as_str())
+                    };
+                    match ctl
+                        .create_rig_preset::<()>(
+                            &data.name,
+                            desc,
+                            serde_json::json!(category),
+                            serde_json::json!(tags_json),
+                            &(),
+                        )
+                        .await
+                    {
+                        Ok(id) => {
+                            tracing::info!("Created preset '{}' ({id})", data.name);
+                            *RIG_AVAILABLE_PRESETS.write() = ctl.get_available_presets().await;
+                            ctl.load_preset_with_scene(id, 0).await;
+                            if let Some(preset) = ctl.get_current_preset().await {
+                                *RIG_CURRENT_PRESET.write() = Some(preset);
+                            }
+                        }
+                        Err(e) => tracing::error!("Failed to create preset: {e}"),
+                    }
+                });
+            })
+        },
+        create_profile: {
+            let ctl = ctl.clone();
+            Callback::new(move |data: CreateEntityData| {
+                let ctl = ctl.clone();
+                spawn(async move {
+                    let desc = if data.description.is_empty() {
+                        None
+                    } else {
+                        Some(data.description.as_str())
+                    };
+                    match ctl.create_profile(&data.name, Uuid::nil(), desc).await {
+                        Ok(id) => {
+                            tracing::info!("Created profile '{}' ({id})", data.name);
+                            *RIG_AVAILABLE_PROFILES.write() = ctl.get_available_profiles().await;
+                        }
+                        Err(e) => tracing::error!("Failed to create profile: {e}"),
+                    }
+                });
+            })
+        },
+        create_song: {
+            let ctl = ctl.clone();
+            Callback::new(move |data: CreateEntityData| {
+                let ctl = ctl.clone();
+                spawn(async move {
+                    match ctl.create_song(&data.name, None, false).await {
+                        Ok(id) => {
+                            tracing::info!("Created song '{}' ({id})", data.name);
+                            *RIG_SETLIST_SONGS.write() = ctl.get_setlist_songs().await;
+                        }
+                        Err(e) => tracing::warn!("create_song: {e} (requires database backend)"),
+                    }
+                });
+            })
+        },
+        create_scene: {
+            let ctl = ctl.clone();
+            Callback::new(move |data: CreateEntityData| {
+                let ctl = ctl.clone();
+                spawn(async move {
+                    let song = RIG_CURRENT_SONG.read().clone();
+                    let Some(song) = song else {
+                        tracing::warn!("create_scene: no current song");
+                        return;
+                    };
+                    tracing::info!(
+                        "create_scene: '{}' for song '{}' (index {})",
+                        data.name,
+                        song.name,
+                        song.index
+                    );
+                    // TODO: Wire up add_song_scene once SongInfo carries a UUID
+                    *RIG_SETLIST_SONGS.write() = ctl.get_setlist_songs().await;
+                });
+            })
+        },
     }
 }
 
