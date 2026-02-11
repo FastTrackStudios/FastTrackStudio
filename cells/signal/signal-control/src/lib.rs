@@ -46,6 +46,7 @@ use signal::RigControlService;
 pub use signal::{
     block, category, defaults, director, id, layer, module, module_preset, non_empty, normalized,
     parameter, patch, performance, preset, profile, rig, routing, section, selection, source, tags,
+    template,
 };
 
 // Re-export service/engine types that consumers need
@@ -341,6 +342,30 @@ impl SignalControl {
         let db = self.require_db()?;
         Ok(signal_storage::module_repo::create_module_preset(
             db,
+            name,
+            module_type,
+            description,
+            blocks,
+            macros,
+            serde_json::json!([]),
+        )
+        .await?)
+    }
+
+    /// Create a module preset with a specific ID (for linking to Preset.module_assignments).
+    pub async fn create_module_preset_with_id(
+        &self,
+        id: Uuid,
+        name: &str,
+        module_type: &str,
+        description: Option<&str>,
+        blocks: serde_json::Value,
+        macros: serde_json::Value,
+    ) -> eyre::Result<Uuid> {
+        let db = self.require_db()?;
+        Ok(signal_storage::module_repo::create_module_preset_with_id(
+            db,
+            id,
             name,
             module_type,
             description,

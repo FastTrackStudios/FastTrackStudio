@@ -33,6 +33,7 @@
 pub use signal_proto::{
     block, category, defaults, director, id, layer, module, module_preset, non_empty, normalized,
     parameter, patch, performance, preset, profile, rig, routing, section, selection, source, tags,
+    template,
 };
 
 // Re-export foundation types at crate root for convenience

@@ -790,6 +790,8 @@ impl MockRigControlService {
 
             if let Some(mp) = rig.get_module_preset(assignment.module_preset_id) {
                 let mut module = crate::module::Module::new(&mp.name, mp.module_type);
+                module.grid_width = mp.grid_width;
+                module.grid_height = mp.grid_height;
                 for block in &mp.blocks {
                     module.add_block(block.clone());
                 }

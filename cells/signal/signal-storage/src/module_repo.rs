@@ -24,7 +24,33 @@ pub async fn create_module_preset(
     macros: serde_json::Value,
     tags: serde_json::Value,
 ) -> StorageResult<Uuid> {
-    let id = Uuid::new_v4();
+    create_module_preset_with_id(
+        db,
+        Uuid::new_v4(),
+        name,
+        module_type,
+        description,
+        blocks,
+        macros,
+        tags,
+    )
+    .await
+}
+
+/// Create a module preset with a caller-specified ID.
+///
+/// Use this when the ID must match a foreign reference (e.g. a `ModulePresetId`
+/// in a `Preset.module_assignments` list created by template instantiation).
+pub async fn create_module_preset_with_id(
+    db: &DatabaseConnection,
+    id: Uuid,
+    name: &str,
+    module_type: &str,
+    description: Option<&str>,
+    blocks: serde_json::Value,
+    macros: serde_json::Value,
+    tags: serde_json::Value,
+) -> StorageResult<Uuid> {
     let now = Utc::now().fixed_offset();
 
     module_preset_entity::ActiveModel {

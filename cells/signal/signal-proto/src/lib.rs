@@ -33,6 +33,7 @@ pub mod selection;
 pub mod snapshot;
 pub mod source;
 pub mod tags;
+pub mod template;
 
 // Re-export foundation types at crate root for convenience
 pub use id::*;

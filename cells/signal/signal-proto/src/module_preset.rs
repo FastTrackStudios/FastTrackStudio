@@ -41,6 +41,8 @@ use crate::tags::{Taggable, Tags};
 pub struct ModulePreset {
     pub id: ModulePresetId,
     pub name: String,
+    /// Optional short alias shown in the node graph instead of `name`.
+    pub alias: Option<String>,
     pub module_type: ModuleType,
     pub description: Option<String>,
     pub blocks: Vec<ModuleBlock>,
@@ -48,6 +50,10 @@ pub struct ModulePreset {
     pub snapshots: Vec<ModuleSnapshot>,
     pub default_snapshot_id: Option<ModuleSnapshotId>,
     pub tags: Tags,
+    /// Internal grid width for 2D block layouts. `None` = linear chain.
+    pub grid_width: Option<usize>,
+    /// Internal grid height for 2D block layouts. `None` = 1 row.
+    pub grid_height: Option<usize>,
 }
 
 impl ModulePreset {
@@ -56,6 +62,7 @@ impl ModulePreset {
         Self {
             id: ModulePresetId::new(),
             name: name.into(),
+            alias: None,
             module_type,
             description: None,
             blocks: Vec::new(),
@@ -63,7 +70,16 @@ impl ModulePreset {
             snapshots: Vec::new(),
             default_snapshot_id: None,
             tags: Tags::new(),
+            grid_width: None,
+            grid_height: None,
         }
+    }
+
+    /// Set a short alias for display in the node graph (builder pattern).
+    #[must_use]
+    pub fn with_alias(mut self, alias: impl Into<String>) -> Self {
+        self.alias = Some(alias.into());
+        self
     }
 
     /// Set the description.
@@ -71,6 +87,11 @@ impl ModulePreset {
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
+    }
+
+    /// Returns the alias if set, otherwise the name.
+    pub fn display_name(&self) -> &str {
+        self.alias.as_deref().unwrap_or(&self.name)
     }
 
     /// Add a block to this module preset.
@@ -201,11 +222,7 @@ pub struct ModuleAssignment {
 
 impl ModuleAssignment {
     /// Create a new enabled module assignment.
-    pub fn new(
-        module_type: ModuleType,
-        module_preset_id: ModulePresetId,
-        order: Order,
-    ) -> Self {
+    pub fn new(module_type: ModuleType, module_preset_id: ModulePresetId, order: Order) -> Self {
         Self {
             module_type,
             module_preset_id,
@@ -325,10 +342,7 @@ pub struct GlobalModuleOverride {
 
 impl GlobalModuleOverride {
     /// Create a locked global override for a module type.
-    pub fn locked(
-        module_type: ModuleType,
-        module_preset_id: ModulePresetId,
-    ) -> Self {
+    pub fn locked(module_type: ModuleType, module_preset_id: ModulePresetId) -> Self {
         Self {
             module_type,
             module_preset_id,
@@ -381,7 +395,10 @@ mod tests {
     fn module_preset_with_description() {
         let preset = ModulePreset::new("Blues Stack", ModuleType::Drive)
             .with_description("Classic blues drive tones");
-        assert_eq!(preset.description.as_deref(), Some("Classic blues drive tones"));
+        assert_eq!(
+            preset.description.as_deref(),
+            Some("Classic blues drive tones")
+        );
     }
 
     #[test]
@@ -482,20 +499,17 @@ mod tests {
     fn module_assignment_with_snapshot() {
         let preset_id = ModulePresetId::new();
         let snap_id = ModuleSnapshotId::new();
-        let assignment = ModuleAssignment::new(ModuleType::Amp, preset_id, Order::new(0))
-            .with_snapshot(snap_id);
+        let assignment =
+            ModuleAssignment::new(ModuleType::Amp, preset_id, Order::new(0)).with_snapshot(snap_id);
 
         assert_eq!(assignment.module_snapshot_id, Some(snap_id));
     }
 
     #[test]
     fn module_assignment_disabled() {
-        let assignment = ModuleAssignment::new(
-            ModuleType::Special,
-            ModulePresetId::new(),
-            Order::new(0),
-        )
-        .disabled();
+        let assignment =
+            ModuleAssignment::new(ModuleType::Special, ModulePresetId::new(), Order::new(0))
+                .disabled();
         assert!(!assignment.enabled);
     }
 
@@ -561,5 +575,4 @@ mod tests {
         ov.unlock();
         assert!(!ov.locked);
     }
-
 }

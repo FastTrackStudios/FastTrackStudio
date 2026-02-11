@@ -106,6 +106,7 @@ pub fn container_name_from_module_type(module_type: ModuleType) -> &'static str 
         ModuleType::Correction => "CORRECTION",
         ModuleType::Tonal => "TONAL",
         ModuleType::VocalModulation => "VOCAL MODULATION",
+        ModuleType::Custom => "CUSTOM",
     }
 }
 

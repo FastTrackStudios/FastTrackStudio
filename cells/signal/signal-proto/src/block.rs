@@ -18,7 +18,7 @@ use crate::tags::{Taggable, Tags};
 
 /// Audio plugin format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
-#[repr(u8)]
+#[repr(C)]
 pub enum PluginFormat {
     Vst3,
     Clap,
@@ -69,6 +69,21 @@ impl PluginId {
     pub fn js(uid: impl Into<String>, display_name: impl Into<String>) -> Self {
         Self::new(PluginFormat::Js, uid, display_name)
     }
+
+    /// Sentinel value for blocks that have no plugin assigned yet
+    /// (template placeholders awaiting user assignment).
+    pub fn unassigned() -> Self {
+        Self {
+            format: PluginFormat::Vst3,
+            uid: String::new(),
+            display_name: "Unassigned".into(),
+        }
+    }
+
+    /// Whether this is the unassigned sentinel.
+    pub fn is_unassigned(&self) -> bool {
+        self.uid.is_empty()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,7 +94,7 @@ impl PluginId {
 ///
 /// Used for UI grouping, icon selection, and signal-chain validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet, Default)]
-#[repr(u8)]
+#[repr(C)]
 pub enum BlockType {
     Input,
     Compressor,
@@ -199,12 +214,19 @@ pub struct Block {
     pub id: BlockId,
     /// User-facing name (e.g. "Main Drive", "Room Reverb").
     pub name: String,
+    /// Optional short alias shown in the node graph instead of `name`
+    /// (e.g. "Rescue-EQ", "Verb").
+    pub alias: Option<String>,
+    /// Optional human-readable description of the block's purpose.
+    pub description: Option<String>,
     /// Plugin backing this block.
     pub plugin_id: PluginId,
     /// Optional preset name loaded in the plugin.
     pub plugin_preset: Option<String>,
     /// Whether the block is bypassed (signal passes through unprocessed).
     pub bypassed: bool,
+    /// The processing category this block belongs to (Drive, Amp, Delay, etc.).
+    pub block_type: BlockType,
     /// Current parameter values (sparse — only non-default values need storing).
     pub parameters: Vec<ParameterValue>,
     /// Tags for organizing and filtering.
@@ -219,12 +241,49 @@ impl Block {
         Self {
             id: BlockId::new(),
             name: name.into(),
+            alias: None,
+            description: None,
             plugin_id,
             plugin_preset: None,
             bypassed: false,
+            block_type: BlockType::Custom,
             parameters: Vec::new(),
             tags: Tags::new(),
         }
+    }
+
+    /// Set the block type category (builder pattern).
+    #[must_use]
+    pub fn with_block_type(mut self, block_type: BlockType) -> Self {
+        self.block_type = block_type;
+        self
+    }
+
+    /// Set a short alias for display in the node graph (builder pattern).
+    #[must_use]
+    pub fn with_alias(mut self, alias: impl Into<String>) -> Self {
+        self.alias = Some(alias.into());
+        self
+    }
+
+    /// Set a description of the block's purpose (builder pattern).
+    #[must_use]
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Returns the alias if set, otherwise the name.
+    ///
+    /// Use this for node graph labels where space is limited and the user
+    /// may have given a shorter alias.
+    pub fn display_name(&self) -> &str {
+        self.alias.as_deref().unwrap_or(&self.name)
+    }
+
+    /// Whether this block is a placeholder (no real plugin assigned yet).
+    pub fn is_placeholder(&self) -> bool {
+        self.plugin_id.is_unassigned()
     }
 
     /// Set a parameter value by index.

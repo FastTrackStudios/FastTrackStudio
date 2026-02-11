@@ -48,6 +48,7 @@ pub enum ModuleType {
     Time = 21,
     Motion = 22,
     Master = 23,
+    Custom = 99,
 }
 
 impl ModuleType {
@@ -72,6 +73,7 @@ impl ModuleType {
             Self::Time => "Time",
             Self::Motion => "Motion",
             Self::Master => "Master",
+            Self::Custom => "Custom",
         }
     }
 
@@ -181,6 +183,11 @@ pub struct ModuleBlock {
     /// When bound to a DAW FX chain, the FxNodeId of the plugin or
     /// nested container this block maps to.
     pub fx_node_id: Option<FxNodeId>,
+    /// Position within the module's internal 2D grid (column).
+    /// `None` = auto-layout (linear chain order).
+    pub local_col: Option<usize>,
+    /// Position within the module's internal 2D grid (row).
+    pub local_row: Option<usize>,
 }
 
 impl ModuleBlock {
@@ -193,6 +200,8 @@ impl ModuleBlock {
             midi_trigger: None,
             tags: Tags::new(),
             fx_node_id: None,
+            local_col: None,
+            local_row: None,
         }
     }
 
@@ -257,6 +266,10 @@ pub struct Module {
     /// When bound to a DAW FX chain, the FxNodeId of the container
     /// this module maps to.
     pub fx_node_id: Option<FxNodeId>,
+    /// Internal grid width for 2D block layouts. `None` = linear chain.
+    pub grid_width: Option<usize>,
+    /// Internal grid height for 2D block layouts. `None` = 1 row.
+    pub grid_height: Option<usize>,
 }
 
 impl Module {
@@ -274,6 +287,8 @@ impl Module {
             split_sync: false,
             tags: Tags::new(),
             fx_node_id: None,
+            grid_width: None,
+            grid_height: None,
         }
     }
 

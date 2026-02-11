@@ -121,6 +121,10 @@ typed_id!(
     /// Identifies a [`ModuleSnapshot`](crate::module_preset::ModuleSnapshot) within a module preset.
     ModuleSnapshotId
 );
+typed_id!(
+    /// Identifies a [`RigTemplate`](crate::template::RigTemplate).
+    RigTemplateId
+);
 
 #[cfg(test)]
 mod tests {
@@ -164,5 +168,4 @@ mod tests {
         let id = TagId::from_uuid(uuid);
         assert_eq!(id.to_string(), uuid.to_string());
     }
-
 }
