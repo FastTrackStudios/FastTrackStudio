@@ -29,9 +29,10 @@ pub mod workspace;
 // Re-export core types at crate root
 pub use builder::DockLayoutBuilder;
 pub use context::{ActionContext, WhenExpr};
-pub use defaults::default_presets;
+pub use defaults::{default_presets, rig_presets};
 pub use diff::{LayoutDiff, LayoutOp};
 pub use drop_zone::DropZone;
+pub use history::LayoutHistory;
 pub use id::*;
 pub use layout::{DockLayout, DockZoneMode, FlatNode, LayoutRegion};
 pub use panel::PanelId;
@@ -41,6 +42,5 @@ pub use persistence::{
 pub use preset::{DockPreset, PresetCollection};
 pub use registry::{DockPosition, PanelConstraints, PanelDescriptor, PanelRegistry};
 pub use tab_group::TabGroup;
-pub use history::LayoutHistory;
 pub use tree::{DockNode, SplitDirection};
 pub use workspace::{DockWindow, DockWorkspace, DockWorkspaceState, WindowBounds};

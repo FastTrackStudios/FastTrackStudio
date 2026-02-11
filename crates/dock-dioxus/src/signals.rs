@@ -3,8 +3,8 @@
 //! Global Dioxus signals for dock state. Components subscribe to these
 //! for reactive layout updates.
 
-use crate::prelude::*;
 use crate::context::PanelRenderer;
+use crate::prelude::*;
 use crate::transition::LayoutTransition;
 use dock_proto::{
     DockLayout, DockWorkspace, DropZone, NodeId, PanelId, PanelRegistry, PresetCollection,
@@ -67,6 +67,18 @@ pub static DOCK_TRANSITION_DURATION_MS: GlobalSignal<u64> = Signal::global(|| 20
 pub static DOCK_CONTEXT_MENU: GlobalSignal<Option<ContextMenuState>> = Signal::global(|| None);
 /// True when current drag finished with a successful drop.
 pub static DOCK_DRAG_DROPPED: GlobalSignal<bool> = Signal::global(|| false);
+
+// ─── Rig Dock Signals ───────────────────────────────────────────────────
+
+/// WindowId for the dedicated rig dock window within DOCK_WORKSPACE.
+pub static RIG_DOCK_WINDOW_ID: GlobalSignal<Option<WindowId>> = Signal::global(|| None);
+
+/// Rig-specific dock presets (rig screensets).
+pub static RIG_DOCK_PRESETS: GlobalSignal<PresetCollection> =
+    Signal::global(|| PresetCollection::new(Vec::new()));
+
+/// Index of the active rig preset.
+pub static RIG_DOCK_ACTIVE_PRESET_INDEX: GlobalSignal<usize> = Signal::global(|| 0);
 
 /// Tracks an in-progress panel drag operation.
 #[derive(Debug, Clone, Default, PartialEq)]
