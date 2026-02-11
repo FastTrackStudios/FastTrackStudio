@@ -11,10 +11,11 @@
 //! - Input/output port list with connection status
 //! - Placeholder when nothing is selected
 
-use crate::prelude::*;
 use crate::hooks::rig_actions::use_rig_actions;
-use crate::signals::{SelectedEntity, RIG_NODE_GRAPH, RIG_SELECTED_ENTITY};
+use crate::prelude::*;
+use crate::signals::{SelectedEntity, RIG_NODE_GRAPH, RIG_SELECTED_ENTITY, RIG_SERVICE};
 use signal_control::block::BlockType;
+use tracing::warn;
 use uuid::Uuid;
 
 use super::block_colors::block_type_color;
@@ -23,12 +24,14 @@ use super::node_graph::{GraphModule, Node, NodePort};
 // ── Public Component ────────────────────────────────────────────────
 
 /// Standalone property panel that reactively displays the currently selected
-/// node or module from `RIG_SELECTED_ENTITY`.
+/// node or module from the rig grid context.
 ///
 /// When nothing is selected, shows a placeholder message.
+///
+/// Reads from `RIG_SELECTED_ENTITY` global signal (written by `NodeGraphView`).
 #[component]
 pub fn NodePropertyPanel() -> Element {
-    let selected = RIG_SELECTED_ENTITY.read().clone();
+    let selected = *RIG_SELECTED_ENTITY.read();
     let graph = RIG_NODE_GRAPH.read();
 
     match selected {
@@ -89,6 +92,11 @@ fn NodePropertyContent(props: NodePropertyContentProps) -> Element {
     let color = block_type_color(node.block_type);
     let node_id = node.id;
 
+    // Plugin assignment state for placeholder nodes
+    let mut show_assign_picker = use_signal(|| false);
+    let mut assign_presets = use_signal(Vec::<signal_control::block_preset::Model>::new);
+    let is_placeholder = node.is_placeholder;
+
     rsx! {
         div { class: "h-full w-full flex flex-col bg-card border-l border-border overflow-hidden",
             // ── Header ──────────────────────────────────────
@@ -111,12 +119,25 @@ fn NodePropertyContent(props: NodePropertyContentProps) -> Element {
                         style: "background-color: {color.bg}30; color: {color.bg};",
                         "{node.block_type:?}"
                     }
+                    if node.is_placeholder {
+                        span {
+                            class: "px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider \
+                                    bg-zinc-500/20 text-zinc-400 border border-dashed border-zinc-500/30",
+                            "Placeholder"
+                        }
+                    }
                     if node.bypassed {
                         span {
                             class: "px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider \
                                     bg-red-500/20 text-red-400",
                             "Bypassed"
                         }
+                    }
+                }
+                // Description
+                if let Some(desc) = &node.description {
+                    div { class: "mt-2 text-xs text-muted-foreground leading-relaxed",
+                        "{desc}"
                     }
                 }
             }
@@ -133,6 +154,89 @@ fn NodePropertyContent(props: NodePropertyContentProps) -> Element {
                                 n.bypassed = !n.bypassed;
                             });
                         },
+                    }
+                }
+
+                // ── Plugin Assignment (placeholder blocks only) ──
+                if is_placeholder {
+                    PropertySection { title: "Plugin Assignment" }
+                    div { class: "px-3 pb-3 flex flex-col gap-2",
+                        if !show_assign_picker() {
+                            button {
+                                class: "w-full px-3 py-2 rounded-lg text-xs font-medium \
+                                        bg-amber-500/15 text-amber-300 border border-amber-500/25 \
+                                        hover:bg-amber-500/25 transition-colors",
+                                onclick: {
+                                    let block_type_name = format!("{:?}", node.block_type);
+                                    move |_| {
+                                        show_assign_picker.set(true);
+                                        let type_filter = block_type_name.clone();
+                                        spawn(async move {
+                                            let Some(ctl) = RIG_SERVICE.read().clone() else { return; };
+                                            match ctl.list_block_presets(Some(&type_filter)).await {
+                                                Ok(presets) => assign_presets.set(presets),
+                                                Err(e) => warn!("Failed to load block presets: {e}"),
+                                            }
+                                        });
+                                    }
+                                },
+                                "Assign Plugin..."
+                            }
+                        } else {
+                            // Preset picker list
+                            div { class: "flex items-center justify-between mb-1",
+                                span { class: "text-[10px] font-semibold text-zinc-400 uppercase tracking-wider",
+                                    "Block Presets"
+                                }
+                                button {
+                                    class: "text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors",
+                                    onclick: move |_| show_assign_picker.set(false),
+                                    "Cancel"
+                                }
+                            }
+                            if assign_presets.read().is_empty() {
+                                div { class: "text-[10px] text-zinc-600 italic py-2",
+                                    "No block presets found for this type. Create one in the Block Editor."
+                                }
+                            } else {
+                                div { class: "flex flex-col gap-1 max-h-48 overflow-y-auto",
+                                    for preset in assign_presets.read().iter() {
+                                        {
+                                            let preset_id = preset.id;
+                                            let preset_name = preset.name.clone();
+                                            let plugin_name = preset.plugin_preset_name.clone()
+                                                .unwrap_or_else(|| "No plugin".to_string());
+
+                                            rsx! {
+                                                button {
+                                                    key: "{preset_id}",
+                                                    class: "w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left \
+                                                            bg-zinc-800/40 border border-zinc-700/30 \
+                                                            hover:bg-zinc-700/40 hover:border-zinc-600/40 transition-all",
+                                                    onclick: move |_| {
+                                                        // Update the node graph — mark as no longer placeholder
+                                                        RIG_NODE_GRAPH.write().find_node_mut(node_id).map(|n| {
+                                                            n.is_placeholder = false;
+                                                            n.name = preset_name.clone();
+                                                        });
+                                                        show_assign_picker.set(false);
+                                                    },
+                                                    div { class: "flex-1 min-w-0",
+                                                        div { class: "text-xs font-medium text-zinc-200 truncate",
+                                                            "{preset_name}"
+                                                        }
+                                                        div { class: "text-[10px] text-zinc-500 truncate",
+                                                            "{plugin_name}"
+                                                        }
+                                                    }
+                                                    span { class: "text-[10px] text-amber-400/60 flex-shrink-0", "\u{2192}" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -595,7 +699,7 @@ fn PortItem(props: PortItemProps) -> Element {
 mod tests {
     use super::*;
     use crate::components::rig_grid::node_graph::*;
-    use signal_proto::normalized::NormalizedF64;
+    use signal_control::normalized::NormalizedF64;
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 

@@ -8,6 +8,8 @@ edition.workspace = true
 signal-control = { path = "../signal-control" }
 daw-control = { path = "../../daw/daw-control" }
 daw-ui = { path = "../../daw/daw-ui" }
+dock-dioxus = { path = "../../dock/dock-dioxus", default-features = false }
+dock-proto = { path = "../../dock/dock-proto" }
 audio-controls = { path = "../audio-controls" }
 eyre = { workspace = true }
 uuid = { version = "1.0", features = ["v4"] }
@@ -36,8 +38,8 @@ tokio = { version = "1", features = ["time"] }
 
 [features]
 default = ["web"]
-web = ["dep:dioxus", "dep:lucide-dioxus", "dep:nucleo-matcher", "dep:tracing", "audio-controls/web", "daw-ui/web"]
-native = ["dep:dioxus-native", "dep:lucide-dioxus", "dep:nucleo-matcher", "dep:tracing", "audio-controls/native", "daw-ui/native"]
+web = ["dep:dioxus", "dep:lucide-dioxus", "dep:nucleo-matcher", "dep:tracing", "audio-controls/web", "daw-ui/web", "dock-dioxus/web"]
+native = ["dep:dioxus-native", "dep:lucide-dioxus", "dep:nucleo-matcher", "dep:tracing", "audio-controls/native", "daw-ui/native", "dock-dioxus/native"]
 
 [lints]
 workspace = true

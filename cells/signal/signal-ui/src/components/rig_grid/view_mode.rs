@@ -59,6 +59,14 @@ pub enum ModuleViewMode {
     /// large as possible while ensuring everything is visible. Good for
     /// overview without scrolling or manual zoom.
     FlowCompact,
+
+    /// 2D block placement grid with module containers.
+    ///
+    /// Unified editing surface where blocks and modules can be placed,
+    /// dragged, and wired together. Module containers wrap tightly around
+    /// their block regions. Detail panel below shows preset/snapshot
+    /// selection and parameter editing.
+    Grid,
 }
 
 impl ModuleViewMode {
@@ -67,19 +75,25 @@ impl ModuleViewMode {
         match self {
             Self::Flow => "Flow",
             Self::FlowCompact => "Compact",
+            Self::Grid => "Grid",
         }
     }
 
     /// Get a short icon/symbol for this view mode.
     pub const fn icon(self) -> &'static str {
         match self {
-            Self::Flow => "⬡",
-            Self::FlowCompact => "⬢",
+            Self::Flow => "\u{2B21}",
+            Self::FlowCompact => "\u{2B22}",
+            Self::Grid => "\u{25A6}",
         }
     }
 
     /// Get all view modes in display order.
     pub const fn all() -> &'static [ModuleViewMode] {
-        &[ModuleViewMode::Flow, ModuleViewMode::FlowCompact]
+        &[
+            ModuleViewMode::Flow,
+            ModuleViewMode::FlowCompact,
+            ModuleViewMode::Grid,
+        ]
     }
 }

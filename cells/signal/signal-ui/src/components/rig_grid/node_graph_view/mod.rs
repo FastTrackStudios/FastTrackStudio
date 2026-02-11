@@ -1,4 +1,4 @@
-//! Node graph view — main canvas component with pan/zoom and full interactions.
+//! Node graph view -- main canvas component with pan/zoom and full interactions.
 //!
 //! Features:
 //! - Module containers with child node blocks (HTML layer)
@@ -17,98 +17,31 @@
 //! The graph lives in `RIG_NODE_GRAPH` (GlobalSignal). This allows the module
 //! browser, rig layout, and other components to share the same graph state.
 
+mod context_menu;
+mod drag_handler;
+mod minimap;
+mod performance_layout;
+mod wire_renderer;
+
 use crate::prelude::*;
-use crate::signals::{RIG_NODE_GRAPH, RIG_SELECTED_ENTITY, SelectedEntity};
+use crate::signals::{SelectedEntity, RIG_NODE_GRAPH, RIG_SELECTED_ENTITY};
 use dioxus::prelude::dioxus_elements::geometry::WheelDelta;
 use serde_json::Value;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
-use super::block_colors::block_type_color;
-use super::node_graph::{GraphModule, NodeGraph, NodePosition, NodeWidget};
+use super::node_graph::{NodeGraph, NodePosition};
 use super::node_graph_module::ModuleContainer;
 use super::node_graph_node::NodeBlock;
-use super::node_graph_wire::{resolve_all_wires, wire_path_d, WirePath};
+use super::node_graph_wire::resolve_all_wires;
 
-// ── Selection ────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq)]
-enum Selection {
-    None,
-    Module(Uuid),
-    Node(Uuid),
-    Wire(Uuid),
-}
-
-// ── Drag ─────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq)]
-enum DragMode {
-    None,
-    Pan {
-        start_mouse_x: f64,
-        start_mouse_y: f64,
-        start_pan_x: f64,
-        start_pan_y: f64,
-    },
-    Module {
-        module_id: Uuid,
-        start_mouse_x: f64,
-        start_mouse_y: f64,
-        start_module_x: f64,
-        start_module_y: f64,
-    },
-    Node {
-        node_id: Uuid,
-        start_mouse_x: f64,
-        start_mouse_y: f64,
-        start_node_x: f64,
-        start_node_y: f64,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CanvasViewMode {
-    Node,
-    Performance,
-}
-
-// ── Wire Draft ───────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq)]
-struct WireDraft {
-    from_entity: Uuid,
-    from_port: String,
-    from_pos: NodePosition,
-    is_from_output: bool,
-    mouse_pos: NodePosition,
-}
-
-// ── Context Menu ─────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq)]
-struct ContextMenu {
-    /// Screen position for the menu popup.
-    x: f64,
-    y: f64,
-    /// What was right-clicked.
-    target: ContextMenuTarget,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ContextMenuTarget {
-    Module(Uuid),
-    Node(Uuid),
-    Canvas,
-}
-
-// ── Snap to Grid ─────────────────────────────────────────────────────
-
-const GRID_SNAP: f64 = 20.0;
-
-fn snap_to_grid(val: f64) -> f64 {
-    (val / GRID_SNAP).round() * GRID_SNAP
-}
+use context_menu::{ContextMenu, ContextMenuPopup, ContextMenuTarget};
+use drag_handler::{
+    calculate_canvas_bounds, calculate_fit, snap_to_grid, CanvasViewMode, DragMode, Selection,
+};
+use minimap::Minimap;
+use performance_layout::build_performance_graph;
+use wire_renderer::{WireDraft, WireLayer};
 
 // ── Props ────────────────────────────────────────────────────────────
 
@@ -152,14 +85,12 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
     let compact = props.compact;
     let performance_mode = canvas_mode() == CanvasViewMode::Performance;
 
-    // ── Sync local selection → global signal ─────────────────────
-    // This lets the NodePropertyPanel (and other dock panels) react
-    // to what the user clicked on the canvas.
+    // ── Sync local selection -> global signal ────────────────────
     use_effect(move || {
         let entity = match selection() {
             Selection::Module(id) => Some(SelectedEntity::Module(id)),
-            Selection::Node(id)   => Some(SelectedEntity::Node(id)),
-            _                     => None,
+            Selection::Node(id) => Some(SelectedEntity::Node(id)),
+            _ => None,
         };
         *RIG_SELECTED_ENTITY.write() = entity;
     });
@@ -223,7 +154,6 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
     });
 
     // ── Auto-fit on first render or when compact mode changes ────
-    // Compact view always auto-fits the full-size graph to fill the viewport.
     let mut last_compact = use_signal(|| compact);
     let mut last_mode = use_signal(|| canvas_mode());
     let mut last_compact_viewport = use_signal(|| (0.0f64, 0.0f64));
@@ -243,8 +173,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
         let vp_w = viewport_w();
         let vp_h = viewport_h();
         if compact {
-            let (fit_zoom, fit_pan_x, fit_pan_y) =
-                calculate_fit(canvas_w, canvas_h, vp_w, vp_h);
+            let (fit_zoom, fit_pan_x, fit_pan_y) = calculate_fit(canvas_w, canvas_h, vp_w, vp_h);
             zoom.set(fit_zoom);
             pan_x.set(fit_pan_x);
             pan_y.set(fit_pan_y);
@@ -270,6 +199,12 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
         "grab"
     };
 
+    // Pre-compute selected wire id for the wire layer
+    let selected_wire_id = match selection() {
+        Selection::Wire(id) => Some(id),
+        _ => None,
+    };
+
     rsx! {
         div {
             id: "{ROOT_ID}",
@@ -286,9 +221,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
 
             // ── Keyboard ─────────────────────────────────────
             onkeydown: move |evt| {
-                // Close context menu on any key
                 context_menu.set(None);
-
                 let key = evt.key();
                 match key {
                     Key::Delete | Key::Backspace => {
@@ -327,7 +260,6 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                         snap_enabled.set(!snap_enabled());
                     }
                     Key::Character(ref c) if c == "b" || c == "B" => {
-                        // Toggle bypass on selected module/node
                         match selection() {
                             Selection::Module(module_id) => {
                                 RIG_NODE_GRAPH.write().find_module_mut(module_id).map(|m| {
@@ -364,7 +296,6 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
             oncontextmenu: move |evt| {
                 evt.prevent_default();
                 evt.stop_propagation();
-                // No context menu for background (could add "paste module" later)
                 context_menu.set(None);
             },
 
@@ -472,7 +403,6 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                 let zoom_factor = if dy < 0.0 { 1.08 } else { 1.0 / 1.08 };
                 let new_zoom = (old_zoom * zoom_factor).clamp(0.1, 3.0);
 
-                // Zoom about cursor in local viewport space.
                 let local_x = evt.client_coordinates().x - viewport_left();
                 let local_y = evt.client_coordinates().y - viewport_top();
                 let canvas_x = (local_x - pan_x()) / old_zoom;
@@ -555,7 +485,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                                 let module_x = module.position.x;
                                 let module_y = module.position.y;
                                 move |evt: MouseEvent| {
-                                    if compact || performance_mode { return; } // No drag in compact/performance mode
+                                    if compact || performance_mode { return; }
                                     evt.stop_propagation();
                                     context_menu.set(None);
                                     selection.set(Selection::Module(module_id));
@@ -678,58 +608,19 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                     }
                 }
 
-                // SVG wire layer (hidden in performance mode to match compact rack presentation)
+                // SVG wire layer (hidden in performance mode)
                 if !performance_mode {
-                    svg {
-                        style: "position: absolute; top: 0; left: 0; \
-                                pointer-events: none; overflow: visible;",
-                        width: "{canvas_w}",
-                        height: "{canvas_h}",
-
-                        for wire in &wires {
-                            WirePath {
-                                key: "{wire.wire_id}",
-                                from: wire.from,
-                                to: wire.to,
-                                color: wire.color.clone(),
-                                wire_id: wire.wire_id,
-                                is_selected: matches!(selection(), Selection::Wire(id) if id == wire.wire_id),
-                                on_click: {
-                                    move |wire_id: Uuid| {
-                                        context_menu.set(None);
-                                        selection.set(Selection::Wire(wire_id));
-                                    }
-                                },
-                            }
-                        }
-
-                        // Draft wire
-                        if let Some(draft) = wire_draft() {
-                            {
-                                let (from, to) = if draft.is_from_output {
-                                    (draft.from_pos, draft.mouse_pos)
-                                } else {
-                                    (draft.mouse_pos, draft.from_pos)
-                                };
-                                let d = wire_path_d(&from, &to);
-                                let draft_color = if hovered_port().is_some() {
-                                    "#22d3ee"
-                                } else {
-                                    "#ffffff"
-                                };
-                                rsx! {
-                                    path {
-                                        d: "{d}",
-                                        fill: "none",
-                                        stroke: "{draft_color}",
-                                        stroke_width: "2.5",
-                                        stroke_opacity: "0.8",
-                                        stroke_linecap: "round",
-                                        stroke_dasharray: "8 4",
-                                    }
-                                }
-                            }
-                        }
+                    WireLayer {
+                        canvas_w: canvas_w,
+                        canvas_h: canvas_h,
+                        wires: wires.clone(),
+                        wire_draft: wire_draft(),
+                        hovered_port: hovered_port(),
+                        selected_wire_id: selected_wire_id,
+                        on_wire_click: move |wire_id: Uuid| {
+                            context_menu.set(None);
+                            selection.set(Selection::Wire(wire_id));
+                        },
                     }
                 }
             }
@@ -776,14 +667,12 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                                 if let Some(original) = graph.find_module(id) {
                                     let mut dup = original.clone();
                                     dup.id = Uuid::new_v4();
-                                    // Offset position so it doesn't overlap
                                     dup.position.x += 40.0;
                                     dup.position.y += 40.0;
-                                    // Give new IDs to all internal nodes and wires
                                     for node in &mut dup.nodes {
                                         node.id = Uuid::new_v4();
                                     }
-                                    dup.internal_wires.clear(); // Wires reference old node IDs
+                                    dup.internal_wires.clear();
                                     drop(graph);
                                     let new_id = RIG_NODE_GRAPH.write().add_module(dup);
                                     selection.set(Selection::Module(new_id));
@@ -882,7 +771,7 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                         render_graph.find_module(id)
                             .map(|m| {
                                 let bypass_status = if m.bypassed { " [BYPASSED]" } else { "" };
-                                format!("{}{} — Del: remove, B: bypass, Esc: deselect", m.name, bypass_status)
+                                format!("{}{} -- Del: remove, B: bypass, Esc: deselect", m.name, bypass_status)
                             })
                             .unwrap_or_default()
                     }
@@ -890,11 +779,11 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
                         render_graph.find_node(id)
                             .map(|n| {
                                 let bypass_status = if n.bypassed { " [BYPASSED]" } else { "" };
-                                format!("{}{} — Del: remove, B: bypass, Esc: deselect", n.name, bypass_status)
+                                format!("{}{} -- Del: remove, B: bypass, Esc: deselect", n.name, bypass_status)
                             })
                             .unwrap_or_default()
                     }
-                    Selection::Wire(_) => "Wire — Del: remove, Esc: deselect".to_string(),
+                    Selection::Wire(_) => "Wire -- Del: remove, Esc: deselect".to_string(),
                     Selection::None => String::new(),
                 };
                 if !info_text.is_empty() {
@@ -912,486 +801,4 @@ pub fn NodeGraphView(props: NodeGraphViewProps) -> Element {
             }
         }
     }
-}
-
-// ── Context Menu Popup ───────────────────────────────────────────────
-
-#[derive(Props, Clone, PartialEq)]
-struct ContextMenuPopupProps {
-    menu: ContextMenu,
-    on_close: Callback<()>,
-    on_bypass: Callback<Uuid>,
-    on_delete: Callback<Uuid>,
-    on_duplicate: Callback<Uuid>,
-}
-
-#[component]
-fn ContextMenuPopup(props: ContextMenuPopupProps) -> Element {
-    let x = props.menu.x;
-    let y = props.menu.y;
-
-    let entity_id = match &props.menu.target {
-        ContextMenuTarget::Module(id) | ContextMenuTarget::Node(id) => *id,
-        ContextMenuTarget::Canvas => return rsx! {},
-    };
-
-    let is_module = matches!(props.menu.target, ContextMenuTarget::Module(_));
-
-    // Check current bypass state
-    let is_bypassed = {
-        let graph = RIG_NODE_GRAPH.read();
-        match &props.menu.target {
-            ContextMenuTarget::Module(id) => graph.find_module(*id).map_or(false, |m| m.bypassed),
-            ContextMenuTarget::Node(id) => graph.find_node(*id).map_or(false, |n| n.bypassed),
-            _ => false,
-        }
-    };
-
-    let bypass_label = if is_bypassed { "Enable" } else { "Bypass" };
-
-    let on_close = props.on_close.clone();
-    let on_bypass = props.on_bypass.clone();
-    let on_delete = props.on_delete.clone();
-    let on_duplicate = props.on_duplicate.clone();
-
-    rsx! {
-        // Backdrop to close menu
-        div {
-            class: "fixed inset-0 z-40",
-            onclick: move |_| on_close.call(()),
-            oncontextmenu: move |evt| {
-                evt.prevent_default();
-                on_close.call(());
-            },
-        }
-
-        // Menu popup
-        div {
-            class: "fixed z-50 py-1 rounded-lg shadow-xl border border-zinc-700 min-w-[160px]",
-            style: "left: {x}px; top: {y}px; \
-                    background-color: #1c1c2e; \
-                    backdrop-filter: blur(12px);",
-
-            // Bypass
-            ContextMenuItem {
-                label: bypass_label,
-                shortcut: "B",
-                on_click: move |_| on_bypass.call(entity_id),
-            }
-
-            // Duplicate (modules only)
-            if is_module {
-                ContextMenuItem {
-                    label: "Duplicate",
-                    shortcut: "",
-                    on_click: move |_| on_duplicate.call(entity_id),
-                }
-            }
-
-            // Separator
-            div { class: "my-1 border-t border-zinc-700" }
-
-            // Delete
-            ContextMenuItem {
-                label: "Delete",
-                shortcut: "Del",
-                danger: true,
-                on_click: move |_| on_delete.call(entity_id),
-            }
-        }
-    }
-}
-
-#[derive(Props, Clone, PartialEq)]
-struct ContextMenuItemProps {
-    label: &'static str,
-    #[props(default)]
-    shortcut: &'static str,
-    #[props(default)]
-    danger: bool,
-    on_click: EventHandler<()>,
-}
-
-#[component]
-fn ContextMenuItem(props: ContextMenuItemProps) -> Element {
-    let text_class = if props.danger {
-        "text-red-400 hover:text-red-300"
-    } else {
-        "text-zinc-300 hover:text-white"
-    };
-
-    rsx! {
-        button {
-            class: "w-full flex items-center justify-between px-3 py-1.5 text-xs \
-                    hover:bg-zinc-700/50 transition-colors {text_class}",
-            onclick: move |_| props.on_click.call(()),
-            span { "{props.label}" }
-            if !props.shortcut.is_empty() {
-                span { class: "text-zinc-500 text-[10px] ml-4", "{props.shortcut}" }
-            }
-        }
-    }
-}
-
-// ── Minimap Component ────────────────────────────────────────────────
-
-#[derive(Props, Clone, PartialEq)]
-struct MinimapProps {
-    graph: NodeGraph,
-    canvas_w: f64,
-    canvas_h: f64,
-    viewport_w: f64,
-    viewport_h: f64,
-    pan_x: f64,
-    pan_y: f64,
-    zoom: f64,
-    on_pan: Callback<(f64, f64)>,
-}
-
-#[component]
-fn Minimap(props: MinimapProps) -> Element {
-    let minimap_w = 180.0;
-    let minimap_h = 120.0;
-
-    if props.canvas_w <= 0.0 || props.canvas_h <= 0.0 {
-        return rsx! {};
-    }
-
-    let scale_x = minimap_w / props.canvas_w;
-    let scale_y = minimap_h / props.canvas_h;
-    let scale = scale_x.min(scale_y) * 0.9;
-
-    let offset_x = (minimap_w - props.canvas_w * scale) / 2.0;
-    let offset_y = (minimap_h - props.canvas_h * scale) / 2.0;
-
-    let vp_x = offset_x + (-props.pan_x / props.zoom) * scale;
-    let vp_y = offset_y + (-props.pan_y / props.zoom) * scale;
-    let vp_w = (props.viewport_w / props.zoom) * scale;
-    let vp_h = (props.viewport_h / props.zoom) * scale;
-
-    let on_pan = props.on_pan.clone();
-    let current_zoom = props.zoom;
-
-    rsx! {
-        div {
-            class: "absolute bottom-4 left-4 rounded-lg overflow-hidden select-none",
-            style: "width: {minimap_w}px; height: {minimap_h}px; \
-                    background-color: rgba(0,0,0,0.75); \
-                    border: 1px solid rgba(255,255,255,0.1); \
-                    backdrop-filter: blur(4px);",
-            onmousedown: move |evt| {
-                evt.stop_propagation();
-                let rect_x = evt.element_coordinates().x;
-                let rect_y = evt.element_coordinates().y;
-                let canvas_x = (rect_x - offset_x) / scale;
-                let canvas_y = (rect_y - offset_y) / scale;
-                let new_pan_x = -(canvas_x - props.viewport_w * 0.5 / current_zoom) * current_zoom;
-                let new_pan_y = -(canvas_y - props.viewport_h * 0.5 / current_zoom) * current_zoom;
-                on_pan.call((new_pan_x, new_pan_y));
-            },
-
-            for module in &props.graph.modules {
-                {
-                    let mx = offset_x + module.position.x * scale;
-                    let my = offset_y + module.position.y * scale;
-                    let mw = module.size.width * scale;
-                    let mh = module.size.height * scale;
-                    let color = block_type_color(module.block_type);
-                    rsx! {
-                        div {
-                            key: "mm-{module.id}",
-                            class: "absolute rounded-sm",
-                            style: "left: {mx}px; top: {my}px; \
-                                    width: {mw}px; height: {mh}px; \
-                                    background-color: {color.bg}60; \
-                                    border: 1px solid {color.bg}80;",
-                        }
-                    }
-                }
-            }
-
-            div {
-                class: "absolute rounded-sm",
-                style: "left: {vp_x}px; top: {vp_y}px; \
-                        width: {vp_w}px; height: {vp_h}px; \
-                        border: 1.5px solid rgba(255,255,255,0.5); \
-                        background-color: rgba(255,255,255,0.05);",
-            }
-        }
-    }
-}
-
-// ── Compact Graph Projection ────────────────────────────────────────
-
-// ── Helpers ──────────────────────────────────────────────────────────
-
-fn build_performance_graph(
-    original: &NodeGraph,
-    viewport_width: f64,
-    viewport_height: f64,
-) -> NodeGraph {
-    let mut graph = original.clone();
-    if graph.modules.is_empty() {
-        return graph;
-    }
-
-    // FastTrackStudio performance_view-style rack layout.
-    let mut ordered: Vec<usize> = (0..graph.modules.len()).collect();
-    ordered.sort_by(|a, b| {
-        graph.modules[*a]
-            .position
-            .y
-            .partial_cmp(&graph.modules[*b].position.y)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                graph.modules[*a]
-                    .position
-                    .x
-                    .partial_cmp(&graph.modules[*b].position.x)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-    });
-
-    let aspects: Vec<f64> = ordered
-        .iter()
-        .map(|idx| preferred_aspect_ratio(&graph.modules[*idx]))
-        .collect();
-    let viewport_aspect = (viewport_width / viewport_height).max(0.5);
-    let racks = layout_racks(&ordered, &aspects, viewport_aspect);
-
-    let outer_pad = 0.0;
-    let col_gap = 0.0;
-    let row_gap = 0.0;
-    let avail_w = (viewport_width - outer_pad * 2.0).max(300.0);
-
-    let mut y = outer_pad;
-    for rack in &racks {
-        let rack_h = 220.0;
-
-        let total_aspect = rack.total_aspect_ratio.max(0.001);
-        let mut x = outer_pad;
-        for (slot, idx) in rack.modules.iter().enumerate() {
-            let remaining = rack.modules.len().saturating_sub(slot + 1);
-            let a = preferred_aspect_ratio(&graph.modules[*idx]);
-            let mut w = (avail_w * (a / total_aspect)).max(150.0);
-            if remaining == 0 {
-                // Ensure each rack always fills to the right edge exactly.
-                w = (outer_pad + avail_w - x).max(60.0);
-            } else {
-                // Reserve minimum width for remaining modules to avoid overflow.
-                let reserve_for_rest = 60.0 * remaining as f64;
-                let max_w = (outer_pad + avail_w - x - reserve_for_rest).max(60.0);
-                w = w.clamp(60.0, max_w);
-            }
-
-            let module = &mut graph.modules[*idx];
-            module.position.x = x;
-            module.position.y = y;
-            module.size.width = w;
-            module.size.height = rack_h;
-
-            layout_module_nodes_for_performance(module, false);
-            x += w + col_gap;
-        }
-
-        y += rack_h + row_gap;
-    }
-
-    graph
-}
-
-#[derive(Debug, Clone)]
-struct Rack {
-    modules: Vec<usize>,
-    total_aspect_ratio: f64,
-}
-
-fn preferred_aspect_ratio(module: &GraphModule) -> f64 {
-    if module.nodes.len() == 1 {
-        let node = &module.nodes[0];
-        return match node.widget {
-            NodeWidget::CompressorGraph => 1.0,
-            NodeWidget::EqGraph => 1.5,
-            NodeWidget::Label => {
-                if module.name.to_lowercase().contains("volume") {
-                    0.5
-                } else {
-                    1.0
-                }
-            }
-            _ => 1.0,
-        };
-    }
-
-    let name = module.name.to_lowercase();
-    if name.contains("amp") || name.contains("cab") {
-        return 1.8;
-    }
-    if name.contains("special") || name.contains("drive") {
-        return 2.5;
-    }
-    1.5
-}
-
-fn layout_racks(ordered: &[usize], aspects: &[f64], viewport_aspect: f64) -> Vec<Rack> {
-    let mut racks = Vec::new();
-    let mut current = Rack {
-        modules: Vec::new(),
-        total_aspect_ratio: 0.0,
-    };
-
-    for (i, idx) in ordered.iter().enumerate() {
-        let a = aspects[i];
-        let can_fit =
-            current.modules.len() < 4 && current.total_aspect_ratio < viewport_aspect * 1.2;
-        if can_fit || current.modules.is_empty() {
-            current.modules.push(*idx);
-            current.total_aspect_ratio += a;
-        } else {
-            racks.push(current);
-            current = Rack {
-                modules: vec![*idx],
-                total_aspect_ratio: a,
-            };
-        }
-    }
-
-    if !current.modules.is_empty() {
-        racks.push(current);
-    }
-    racks
-}
-
-fn layout_module_nodes_for_performance(module: &mut GraphModule, fit_all: bool) {
-    if module.nodes.is_empty() {
-        return;
-    }
-
-    let content_title_h = 28.0;
-    let pad = if fit_all { 2.0 } else { 4.0 };
-    let content_w = (module.size.width - pad * 2.0).max(1.0);
-    let content_h = (module.size.height - content_title_h - pad * 2.0).max(1.0);
-
-    if module.nodes.len() == 1 {
-        let node = &mut module.nodes[0];
-        node.position.x = pad;
-        node.position.y = pad;
-        node.size.width = content_w;
-        node.size.height = content_h;
-        return;
-    }
-
-    // Match FastTrackStudio performance_view grouping by deriving logical row/column anchors.
-    let mut all_y_positions: Vec<f64> = module.nodes.iter().map(|n| n.position.y).collect();
-    all_y_positions.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    all_y_positions.dedup_by(|a, b| (*a - *b).abs() < 10.0);
-
-    let mut y_positions: Vec<f64> = all_y_positions
-        .iter()
-        .filter(|&&y| {
-            module
-                .nodes
-                .iter()
-                .filter(|n| (n.position.y - y).abs() < 10.0)
-                .count()
-                >= 2
-        })
-        .copied()
-        .collect();
-    if y_positions.is_empty() {
-        y_positions = all_y_positions;
-    }
-
-    let mut x_positions: Vec<f64> = module.nodes.iter().map(|n| n.position.x).collect();
-    x_positions.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    x_positions.dedup_by(|a, b| (*a - *b).abs() < 10.0);
-
-    let row_count = y_positions.len().max(1);
-    let col_count = x_positions.len().max(1);
-    let cell_w = content_w / col_count as f64;
-    let cell_h = content_h / row_count as f64;
-    let cell_gap = if fit_all { 1.0 } else { 2.0 };
-
-    for idx in 0..module.nodes.len() {
-        let node_y = module.nodes[idx].position.y;
-        let node_bottom = node_y + module.nodes[idx].size.height;
-        let node_x = module.nodes[idx].position.x;
-
-        let start_row = y_positions
-            .iter()
-            .position(|&y| node_y >= y - 10.0 && node_y <= y + 10.0)
-            .or_else(|| y_positions.iter().position(|&y| node_y >= y))
-            .unwrap_or(0);
-
-        let end_row = y_positions
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, y)| node_bottom >= *y + 10.0)
-            .map(|(i, _)| i + 1)
-            .unwrap_or(start_row + 1)
-            .clamp(start_row + 1, row_count);
-
-        let start_col = x_positions
-            .iter()
-            .position(|&x| (node_x - x).abs() < 10.0)
-            .unwrap_or(0)
-            .min(col_count.saturating_sub(1));
-
-        let span_rows = (end_row - start_row).max(1) as f64;
-        let width = (cell_w - cell_gap).max(if fit_all { 36.0 } else { 52.0 });
-        let height = (cell_h * span_rows - cell_gap).max(if fit_all { 28.0 } else { 36.0 });
-        let x = pad + start_col as f64 * cell_w;
-        let y = pad + start_row as f64 * cell_h;
-
-        let node = &mut module.nodes[idx];
-        node.position.x = x;
-        node.position.y = y;
-        node.size.width = width;
-        node.size.height = height;
-    }
-}
-
-fn calculate_canvas_bounds(graph: &NodeGraph) -> (f64, f64) {
-    let mut max_x = 0.0f64;
-    let mut max_y = 0.0f64;
-
-    for module in &graph.modules {
-        max_x = max_x.max(module.position.x + module.size.width);
-        max_y = max_y.max(module.position.y + module.size.height);
-    }
-
-    for node in &graph.nodes {
-        max_x = max_x.max(node.position.x + node.size.width);
-        max_y = max_y.max(node.position.y + node.size.height);
-    }
-
-    (max_x + 100.0, max_y + 100.0)
-}
-
-fn calculate_fit(
-    canvas_w: f64,
-    canvas_h: f64,
-    viewport_w: f64,
-    viewport_h: f64,
-) -> (f64, f64, f64) {
-    if canvas_w <= 0.0 || canvas_h <= 0.0 {
-        return (1.0, 0.0, 0.0);
-    }
-
-    let padding = 20.0;
-
-    let available_w = viewport_w - padding * 2.0;
-    let available_h = viewport_h - padding * 2.0;
-
-    let zoom_x = available_w / canvas_w;
-    let zoom_y = available_h / canvas_h;
-    let fit_zoom = zoom_x.min(zoom_y).clamp(0.1, 2.0);
-
-    let scaled_w = canvas_w * fit_zoom;
-    let scaled_h = canvas_h * fit_zoom;
-    let pan_x = (viewport_w - scaled_w) / 2.0;
-    let pan_y = (viewport_h - scaled_h) / 2.0;
-
-    (fit_zoom, pan_x, pan_y)
 }

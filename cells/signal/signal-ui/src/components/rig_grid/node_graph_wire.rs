@@ -15,7 +15,7 @@ const MODULE_TITLE_BAR_HEIGHT: f64 = 40.0;
 const MODULE_TITLE_BAR_HEIGHT_COMPACT: f64 = 28.0;
 
 /// A wire with resolved absolute canvas coordinates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ResolvedWire {
     pub from: NodePosition,
     pub to: NodePosition,

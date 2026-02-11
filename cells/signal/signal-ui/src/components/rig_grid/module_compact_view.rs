@@ -77,20 +77,28 @@ fn CompactBlockPill(props: CompactBlockPillProps) -> Element {
         block_type_style(block_type)
     };
 
-    // Truncate name for compact display
-    let display_name = truncate_name(&block.block.name, 10);
+    // Use alias if set, otherwise truncate name for compact display
+    let display_name = truncate_name(block.block.display_name(), 10);
+    let is_placeholder = block.block.is_placeholder();
 
     let on_toggle = props.on_toggle_bypass.clone();
+
+    // Placeholder blocks get a dashed border and muted colors
+    let placeholder_class = if is_placeholder {
+        " border-dashed opacity-50"
+    } else {
+        ""
+    };
 
     rsx! {
         button {
             class: "flex items-center justify-between px-2 py-1.5 rounded text-xs font-medium \
-                    border transition-all cursor-pointer hover:brightness-110 active:brightness-90",
+                    border transition-all cursor-pointer hover:brightness-110 active:brightness-90{placeholder_class}",
             style: "{style}",
             onclick: move |_| on_toggle.call(block_id),
             title: "{block.block.name}",
 
-            // Block name
+            // Block name (alias or truncated name)
             span { class: "truncate", "{display_name}" }
 
             // Bypass indicator dot
@@ -126,16 +134,23 @@ pub fn infer_block_type(name: &str) -> BlockType {
         BlockType::Cabinet
     } else if lower.contains("eq") || lower.contains("filter") || lower.contains("tone") {
         BlockType::Eq
-    } else if lower.contains("chorus") || lower.contains("flang") || lower.contains("phase")
-        || lower.contains("mod") || lower.contains("vibe") || lower.contains("rotary")
+    } else if lower.contains("chorus")
+        || lower.contains("flang")
+        || lower.contains("phase")
+        || lower.contains("mod")
+        || lower.contains("vibe")
+        || lower.contains("rotary")
     {
         BlockType::Modulation
     } else if lower.contains("trem") {
         BlockType::Tremolo
     } else if lower.contains("delay") || lower.contains("echo") {
         BlockType::Delay
-    } else if lower.contains("rev") || lower.contains("verb") || lower.contains("hall")
-        || lower.contains("room") || lower.contains("plate")
+    } else if lower.contains("rev")
+        || lower.contains("verb")
+        || lower.contains("hall")
+        || lower.contains("room")
+        || lower.contains("plate")
     {
         BlockType::Reverb
     } else if lower.contains("pitch") || lower.contains("harm") || lower.contains("oct") {

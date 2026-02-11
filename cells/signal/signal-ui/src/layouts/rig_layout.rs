@@ -32,7 +32,7 @@ use crate::context::rig_grid::{use_rig_grid_state, RigGridStateProvider};
 use crate::hooks::rig_actions::use_rig_actions;
 use crate::hooks::rig_state::use_rig_subscription;
 use crate::prelude::*;
-use crate::signals::{init_rig_service, RIG_GRID_SELECTED_SLOT, RIG_NODE_GRAPH};
+use crate::signals::{init_rig_service, RIG_GRID_SELECTED_SLOT, RIG_MODULES, RIG_NODE_GRAPH};
 use uuid::Uuid;
 
 /// Main layout for the Rig tab (legacy monolithic view).
@@ -476,26 +476,37 @@ pub fn RigGridEditorPanel() -> Element {
 }
 
 /// Inner body of the grid editor panel — reads/writes the rig grid context.
+///
+/// Reads `RIG_MODULES` to build the composition chain reactively.
+/// When modules change (preset loaded, etc.), the grid updates automatically.
 #[component]
 fn RigGridEditorPanelInner() -> Element {
+    use crate::components::module_editor::unified_grid_editor::modules_to_composition_chain;
+
     let grid_state = use_rig_grid_state();
 
-    let mut chain = use_signal(Vec::<CompositionSlot>::new);
     let mut connections = use_signal(Vec::<GridConnection>::new);
     let mut selected_slot_id = use_signal(|| None::<Uuid>);
 
-    let chain_data = chain.cloned();
+    // Build chain from RIG_MODULES — reactive via GlobalSignal read
+    let modules = RIG_MODULES.read();
+    let chain_data = modules_to_composition_chain(&modules);
+    drop(modules);
+
     let conn_data = connections.cloned();
     let sel_id = *selected_slot_id.read();
 
     // Keep the global signal in sync with local selection so that
     // RigDetailEditorPanel (in a separate dock tile) can read it.
-    use_effect(move || {
-        let id = *selected_slot_id.read();
-        let slot = id.and_then(|id| chain.read().iter().find(|s| s.id == id).cloned());
-        *RIG_GRID_SELECTED_SLOT.write() = slot.clone();
-        grid_state.set_selected_slot(slot);
-    });
+    {
+        let chain_for_effect = chain_data.clone();
+        use_effect(move || {
+            let id = *selected_slot_id.read();
+            let slot = id.and_then(|id| chain_for_effect.iter().find(|s| s.id == id).cloned());
+            *RIG_GRID_SELECTED_SLOT.write() = slot.clone();
+            grid_state.set_selected_slot(slot);
+        });
+    }
 
     rsx! {
         div { class: "h-full w-full relative overflow-hidden",
@@ -503,14 +514,22 @@ fn RigGridEditorPanelInner() -> Element {
                 chain: chain_data.clone(),
                 selected_slot_id: sel_id,
                 connections: conn_data.clone(),
-                on_chain_change: move |new_chain: Vec<CompositionSlot>| {
-                    chain.set(new_chain);
+                on_chain_change: move |_new_chain: Vec<CompositionSlot>| {
+                    // Local edits not persisted yet — just accept
                 },
                 on_connections_change: move |new_conns: Vec<GridConnection>| {
                     connections.set(new_conns);
                 },
                 on_select: move |id: Option<Uuid>| {
                     selected_slot_id.set(id);
+                },
+                on_group_reorder: move |(from_name, to_name): (String, String)| {
+                    let mut modules = RIG_MODULES.write();
+                    let from_idx = modules.iter().position(|m| m.module_type.display_name() == from_name);
+                    let to_idx = modules.iter().position(|m| m.module_type.display_name() == to_name);
+                    if let (Some(a), Some(b)) = (from_idx, to_idx) {
+                        modules.swap(a, b);
+                    }
                 },
             }
 
@@ -524,8 +543,7 @@ fn RigGridEditorPanelInner() -> Element {
                             row: pr,
                             click_x: click_x,
                             click_y: click_y,
-                            on_add_slot: move |new_slot: CompositionSlot| {
-                                chain.write().push(new_slot);
+                            on_add_slot: move |_new_slot: CompositionSlot| {
                                 *PICKER_CELL.write() = None;
                             },
                             on_close: move |_| {

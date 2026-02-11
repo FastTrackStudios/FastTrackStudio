@@ -49,7 +49,7 @@ pub fn ModuleGroup(props: ModuleGroupProps) -> Element {
 
     // Calculate width class based on view mode
     let width_class = match props.view_mode {
-        ModuleViewMode::Flow | ModuleViewMode::FlowCompact => "w-full",
+        ModuleViewMode::Flow | ModuleViewMode::FlowCompact | ModuleViewMode::Grid => "w-full",
     };
 
     // Container styling based on enabled state

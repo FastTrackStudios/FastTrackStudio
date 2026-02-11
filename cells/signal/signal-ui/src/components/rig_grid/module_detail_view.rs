@@ -99,7 +99,10 @@ fn BlockDetailCard(props: BlockDetailCardProps) -> Element {
                         class: "w-3 h-3 rounded-full",
                         style: "background-color: {color.bg};",
                     }
-                    span { class: "font-medium text-sm", "{block.block.name}" }
+                    span { class: "font-medium text-sm", "{block.block.display_name()}" }
+                    if block.block.alias.is_some() {
+                        span { class: "text-xs text-muted-foreground", "({block.block.name})" }
+                    }
                 }
 
                 // Bypass toggle button
@@ -111,6 +114,13 @@ fn BlockDetailCard(props: BlockDetailCardProps) -> Element {
                     },
                     onclick: move |_| on_toggle.call(block_id),
                     if is_bypassed { "Bypassed" } else { "Active" }
+                }
+            }
+
+            // Description (if present)
+            if let Some(desc) = &block.block.description {
+                div { class: "px-3 py-2 text-xs text-muted-foreground border-b border-border/30",
+                    "{desc}"
                 }
             }
 
@@ -289,4 +299,3 @@ fn MiniKnob(props: MiniKnobProps) -> Element {
         }
     }
 }
-

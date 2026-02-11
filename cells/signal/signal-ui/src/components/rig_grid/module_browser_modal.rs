@@ -5,6 +5,7 @@
 //! - Category filter tabs
 //! - Grid of available modules with add buttons
 
+use crate::hooks::use_fuzzy_search;
 use crate::prelude::*;
 use signal_control::block::BlockType;
 
@@ -35,8 +36,18 @@ pub fn ModuleBrowserModal(props: ModuleBrowserModalProps) -> Element {
     let mut search_query = use_signal(String::new);
     let mut selected_category = use_signal(|| ModuleCategory::All);
 
-    // Get modules filtered by search and category
-    let filtered_modules = get_filtered_modules(search_query(), selected_category());
+    // First filter by category, then apply fuzzy search on the result
+    let category_filtered = use_memo(move || {
+        let category = selected_category();
+        get_all_modules()
+            .into_iter()
+            .filter(|m| category.matches(m.block_type))
+            .collect::<Vec<_>>()
+    });
+
+    let filtered_modules = use_fuzzy_search(category_filtered, search_query, |m| {
+        format!("{} {}", m.name, m.description)
+    });
 
     rsx! {
         // Backdrop
@@ -104,13 +115,13 @@ pub fn ModuleBrowserModal(props: ModuleBrowserModalProps) -> Element {
 
                 // Module grid
                 div { class: "flex-1 overflow-y-auto p-4",
-                    if filtered_modules.is_empty() {
+                    if filtered_modules.read().is_empty() {
                         div { class: "flex items-center justify-center h-32 text-zinc-500",
                             "No modules found"
                         }
                     } else {
                         div { class: "grid grid-cols-2 gap-3",
-                            for module in filtered_modules {
+                            for module in filtered_modules.read().iter() {
                                 ModuleCard {
                                     key: "{module.name}",
                                     module: module.clone(),
@@ -172,7 +183,10 @@ impl ModuleCategory {
                 block_type,
                 BlockType::Modulation | BlockType::Pitch | BlockType::Tremolo
             ),
-            Self::Time => matches!(block_type, BlockType::Delay | BlockType::Reverb | BlockType::Freeze),
+            Self::Time => matches!(
+                block_type,
+                BlockType::Delay | BlockType::Reverb | BlockType::Freeze
+            ),
             Self::Utility => matches!(
                 block_type,
                 BlockType::Compressor
@@ -338,33 +352,6 @@ fn get_all_modules() -> Vec<ModuleInfo> {
             icon: "↗️",
         },
     ]
-}
-
-/// Filter modules by search query and category.
-fn get_filtered_modules(query: String, category: ModuleCategory) -> Vec<ModuleInfo> {
-    let all_modules = get_all_modules();
-    let query_lower = query.to_lowercase();
-
-    all_modules
-        .into_iter()
-        .filter(|m| {
-            // Filter by category
-            if !category.matches(m.block_type) {
-                return false;
-            }
-
-            // Filter by search query
-            if !query_lower.is_empty() {
-                let name_lower = m.name.to_lowercase();
-                let desc_lower = m.description.to_lowercase();
-                if !name_lower.contains(&query_lower) && !desc_lower.contains(&query_lower) {
-                    return false;
-                }
-            }
-
-            true
-        })
-        .collect()
 }
 
 /// Props for category tab.

@@ -21,19 +21,11 @@ pub use signal_control::{
 /// Which sub-tab is active within the Rig Editor panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RigEditorTab {
-    /// Live performance view (future).
+    /// Live performance view.
     Performance,
-    /// Node graph + preset/profile/song browsers (current rig layout).
+    /// Unified editor — node graph (Flow/Compact) or block grid (Grid).
     #[default]
     Edit,
-    /// Individual DSP block editor with presets and snapshots.
-    BlockEditor,
-    /// Module editor — compose blocks into purpose-driven groups.
-    ModuleEditor,
-    /// Preset editor — compose modules into full rig presets.
-    PresetEditor,
-    /// Profile editor — manage profiles and their scene templates.
-    ProfileEditor,
     /// Song/setlist editor — manage songs, scenes, and setlists.
     SongEditor,
     /// Advanced inspector — raw chunk data, parameter tables, debug info.
@@ -45,10 +37,6 @@ impl RigEditorTab {
         match self {
             Self::Performance => "Performance",
             Self::Edit => "Edit",
-            Self::BlockEditor => "Blocks",
-            Self::ModuleEditor => "Modules",
-            Self::PresetEditor => "Presets",
-            Self::ProfileEditor => "Profiles",
             Self::SongEditor => "Songs",
             Self::Advanced => "Advanced",
         }
@@ -58,10 +46,6 @@ impl RigEditorTab {
         &[
             RigEditorTab::Performance,
             RigEditorTab::Edit,
-            RigEditorTab::BlockEditor,
-            RigEditorTab::ModuleEditor,
-            RigEditorTab::PresetEditor,
-            RigEditorTab::ProfileEditor,
             RigEditorTab::SongEditor,
             RigEditorTab::Advanced,
         ]
@@ -446,6 +430,15 @@ pub static RIG_NODE_GRAPH: GlobalSignal<crate::components::rig_grid::node_graph:
 /// Saved rig snapshots — captured parameter states that can be recalled later.
 pub static RIG_SNAPSHOTS: GlobalSignal<Vec<crate::components::rig_grid::node_graph::RigSnapshot>> =
     Signal::global(Vec::new);
+
+/// Currently selected slot in the grid editor dock panel.
+///
+/// Written by `RigGridEditorPanel` when the user clicks a block/module;
+/// read by `RigDetailEditorPanel` to show the detail view. Uses the full
+/// `CompositionSlot` so the detail panel has all the info it needs.
+pub static RIG_GRID_SELECTED_SLOT: GlobalSignal<
+    Option<crate::components::module_editor::module_editor_view::CompositionSlot>,
+> = Signal::global(|| None);
 
 /// Currently selected entity on the node graph canvas.
 ///

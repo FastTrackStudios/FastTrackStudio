@@ -24,41 +24,6 @@ use std::collections::HashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-// ─── Global state ───────────────────────────────────────────────────
-
-/// Status log — shows last action taken.
-static PANEL_STATUS: GlobalSignal<String> = Signal::global(|| "Waiting for DAW...".to_string());
-
-/// In-memory cache: snapshot UUID → serialized DawParameterSnapshot JSON.
-static SNAPSHOT_CACHE: GlobalSignal<HashMap<Uuid, String>> = Signal::global(HashMap::new);
-
-/// In-memory cache: preset UUID → serialized DawStateChunkSnapshot JSON.
-static PRESET_CACHE: GlobalSignal<HashMap<Uuid, String>> = Signal::global(HashMap::new);
-
-/// Currently tracked REAPER track GUID.
-static TRACKED_TRACK_GUID: GlobalSignal<Option<String>> = Signal::global(|| None);
-
-/// Currently tracked REAPER track name.
-static TRACKED_TRACK_NAME: GlobalSignal<Option<String>> = Signal::global(|| None);
-
-/// Whether the DAW connection is live.
-static DAW_CONNECTED: GlobalSignal<bool> = Signal::global(|| false);
-
-/// FX count on current track (for display).
-static TRACKED_FX_COUNT: GlobalSignal<usize> = Signal::global(|| 0);
-
-/// FX plugin names on current track (for dialog display).
-static TRACKED_FX_NAMES: GlobalSignal<Vec<String>> = Signal::global(Vec::new);
-
-/// Full FX info list on current track (for the FX list sidebar).
-static TRACKED_FX_LIST: GlobalSignal<Vec<daw_control::Fx>> = Signal::global(Vec::new);
-
-/// FX tree for current track (for tree preview).
-static TRACKED_FX_TREE: GlobalSignal<FxTree> = Signal::global(FxTree::new);
-
-/// Selected FX index in the list sidebar.
-static SELECTED_FX_INDICES: GlobalSignal<Vec<usize>> = Signal::global(Vec::new);
-
 // ─── Morph diff state ───────────────────────────────────────────────
 
 /// A single parameter difference between morph snapshots A and B.
@@ -72,114 +37,149 @@ struct MorphDiffEntry {
     value_b: f64,
 }
 
-/// Computed diff entries between morph A and B.
-static MORPH_DIFF: GlobalSignal<Vec<MorphDiffEntry>> = Signal::global(Vec::new);
-
-/// Cached deserialized snapshot for morph A.
-static MORPH_SNAP_A: GlobalSignal<Option<DawParameterSnapshot>> = Signal::global(|| None);
-
-/// Cached deserialized snapshot for morph B.
-static MORPH_SNAP_B: GlobalSignal<Option<DawParameterSnapshot>> = Signal::global(|| None);
-
-/// Name of morph A snapshot.
-static MORPH_NAME_A: GlobalSignal<Option<String>> = Signal::global(|| None);
-
-/// Name of morph B snapshot.
-static MORPH_NAME_B: GlobalSignal<Option<String>> = Signal::global(|| None);
-
-/// Live current values for diff params: keyed by (fx_guid, param_index).
-/// Updated periodically when morph diff is active.
-static LIVE_PARAM_VALUES: GlobalSignal<HashMap<(String, u32), f64>> = Signal::global(HashMap::new);
-
 // ─── Helper ─────────────────────────────────────────────────────────
 
 /// Resolve the current track's FxChain handle.
-async fn get_tracked_fx_chain() -> Option<daw_control::FxChain> {
+async fn get_tracked_fx_chain(tracked_track_guid: &Option<String>) -> Option<daw_control::FxChain> {
     let daw = daw_control::Daw::try_get()?;
-    let guid = TRACKED_TRACK_GUID.read().clone()?;
+    let guid = tracked_track_guid.as_ref()?;
     let project = daw.current_project().await.ok()?;
-    let track = project.tracks().by_guid(&guid).await.ok()??;
+    let track = project.tracks().by_guid(guid).await.ok()??;
     Some(track.fx_chain())
-}
-
-/// Recompute the morph diff from current MORPH_SLOT_A/B → SNAPSHOT_CACHE → MORPH_DIFF.
-fn recompute_morph_diff() {
-    let slot_a = *MORPH_SLOT_A.read();
-    let slot_b = *MORPH_SLOT_B.read();
-
-    // Resolve slot A → snapshot UUID → cached JSON → deserialized
-    let snap_a = slot_a.and_then(|(page, idx)| {
-        let slots = DAW_SNAPSHOT_SLOTS.read();
-        let slot = slots.pages.get(page)?.get(idx)?;
-        let id = slot.snapshot_id?;
-        let cache = SNAPSHOT_CACHE.read();
-        let json = cache.get(&id)?;
-        facet_json::from_str::<DawParameterSnapshot>(json).ok()
-    });
-
-    let snap_b = slot_b.and_then(|(page, idx)| {
-        let slots = DAW_SNAPSHOT_SLOTS.read();
-        let slot = slots.pages.get(page)?.get(idx)?;
-        let id = slot.snapshot_id?;
-        let cache = SNAPSHOT_CACHE.read();
-        let json = cache.get(&id)?;
-        facet_json::from_str::<DawParameterSnapshot>(json).ok()
-    });
-
-    // Store names for display
-    *MORPH_NAME_A.write() = snap_a.as_ref().map(|s| s.name.clone());
-    *MORPH_NAME_B.write() = snap_b.as_ref().map(|s| s.name.clone());
-
-    // Compute diff if both exist
-    if let (Some(ref a), Some(ref b)) = (&snap_a, &snap_b) {
-        let raw_diffs = daw_bridge::diff_parameter_snapshots(a, b);
-
-        // Build FX GUID → name lookup from snapshot B (target)
-        let fx_names: HashMap<&str, &str> = b
-            .fx_states
-            .iter()
-            .map(|s| (s.fx_guid.as_str(), s.plugin_name.as_str()))
-            .collect();
-
-        // Also check snapshot A for FX names not in B
-        let fx_names_a: HashMap<&str, &str> = a
-            .fx_states
-            .iter()
-            .map(|s| (s.fx_guid.as_str(), s.plugin_name.as_str()))
-            .collect();
-
-        let entries: Vec<MorphDiffEntry> = raw_diffs
-            .iter()
-            .map(|d| {
-                let fx_name = fx_names
-                    .get(d.fx_guid.as_str())
-                    .or_else(|| fx_names_a.get(d.fx_guid.as_str()))
-                    .unwrap_or(&"Unknown FX")
-                    .to_string();
-                MorphDiffEntry {
-                    fx_guid: d.fx_guid.clone(),
-                    fx_name,
-                    param_index: d.param_index,
-                    param_name: d.param_name.clone(),
-                    value_a: d.from_value,
-                    value_b: d.to_value,
-                }
-            })
-            .collect();
-
-        *MORPH_DIFF.write() = entries;
-    } else {
-        MORPH_DIFF.write().clear();
-    }
-
-    *MORPH_SNAP_A.write() = snap_a;
-    *MORPH_SNAP_B.write() = snap_b;
 }
 
 // ─── Component ──────────────────────────────────────────────────────
 
 #[component]
 pub fn SnapshotTestHarness() -> Element {
+    // ── Component-local state signals (converted from GlobalSignal) ──
+
+    /// Status log — shows last action taken.
+    let mut panel_status = use_signal(|| "Waiting for DAW...".to_string());
+
+    /// In-memory cache: snapshot UUID → serialized DawParameterSnapshot JSON.
+    let mut snapshot_cache = use_signal(HashMap::<Uuid, String>::new);
+
+    /// In-memory cache: preset UUID → serialized DawStateChunkSnapshot JSON.
+    let mut preset_cache = use_signal(HashMap::<Uuid, String>::new);
+
+    /// Currently tracked REAPER track GUID.
+    let mut tracked_track_guid = use_signal(|| None::<String>);
+
+    /// Currently tracked REAPER track name.
+    let mut tracked_track_name = use_signal(|| None::<String>);
+
+    /// Whether the DAW connection is live.
+    let mut daw_connected = use_signal(|| false);
+
+    /// FX count on current track (for display).
+    let mut tracked_fx_count = use_signal(|| 0usize);
+
+    /// FX plugin names on current track (for dialog display).
+    let mut tracked_fx_names = use_signal(Vec::<String>::new);
+
+    /// Full FX info list on current track (for the FX list sidebar).
+    let mut tracked_fx_list = use_signal(Vec::<daw_control::Fx>::new);
+
+    /// FX tree for current track (for tree preview).
+    let mut tracked_fx_tree = use_signal(FxTree::new);
+
+    /// Selected FX index in the list sidebar.
+    let mut selected_fx_indices = use_signal(Vec::<usize>::new);
+
+    /// Computed diff entries between morph A and B.
+    let mut morph_diff = use_signal(Vec::<MorphDiffEntry>::new);
+
+    /// Cached deserialized snapshot for morph A.
+    let mut morph_snap_a = use_signal(|| None::<DawParameterSnapshot>);
+
+    /// Cached deserialized snapshot for morph B.
+    let mut morph_snap_b = use_signal(|| None::<DawParameterSnapshot>);
+
+    /// Name of morph A snapshot.
+    let mut morph_name_a = use_signal(|| None::<String>);
+
+    /// Name of morph B snapshot.
+    let mut morph_name_b = use_signal(|| None::<String>);
+
+    /// Live current values for diff params: keyed by (fx_guid, param_index).
+    /// Updated periodically when morph diff is active.
+    let mut live_param_values = use_signal(HashMap::<(String, u32), f64>::new);
+
+    // ── Recompute morph diff closure ─────────────────────────────
+    let mut recompute_morph_diff = move || {
+        let slot_a = *MORPH_SLOT_A.read();
+        let slot_b = *MORPH_SLOT_B.read();
+
+        // Resolve slot A → snapshot UUID → cached JSON → deserialized
+        let snap_a = slot_a.and_then(|(page, idx)| {
+            let slots = DAW_SNAPSHOT_SLOTS.read();
+            let slot = slots.pages.get(page)?.get(idx)?;
+            let id = slot.snapshot_id?;
+            let cache = snapshot_cache.read();
+            let json = cache.get(&id)?;
+            facet_json::from_str::<DawParameterSnapshot>(json).ok()
+        });
+
+        let snap_b = slot_b.and_then(|(page, idx)| {
+            let slots = DAW_SNAPSHOT_SLOTS.read();
+            let slot = slots.pages.get(page)?.get(idx)?;
+            let id = slot.snapshot_id?;
+            let cache = snapshot_cache.read();
+            let json = cache.get(&id)?;
+            facet_json::from_str::<DawParameterSnapshot>(json).ok()
+        });
+
+        // Store names for display
+        morph_name_a.set(snap_a.as_ref().map(|s| s.name.clone()));
+        morph_name_b.set(snap_b.as_ref().map(|s| s.name.clone()));
+
+        // Compute diff if both exist
+        if let (Some(ref a), Some(ref b)) = (&snap_a, &snap_b) {
+            let raw_diffs = daw_bridge::diff_parameter_snapshots(a, b);
+
+            // Build FX GUID → name lookup from snapshot B (target)
+            let fx_names: HashMap<&str, &str> = b
+                .fx_states
+                .iter()
+                .map(|s| (s.fx_guid.as_str(), s.plugin_name.as_str()))
+                .collect();
+
+            // Also check snapshot A for FX names not in B
+            let fx_names_a: HashMap<&str, &str> = a
+                .fx_states
+                .iter()
+                .map(|s| (s.fx_guid.as_str(), s.plugin_name.as_str()))
+                .collect();
+
+            let entries: Vec<MorphDiffEntry> = raw_diffs
+                .iter()
+                .map(|d| {
+                    let fx_name = fx_names
+                        .get(d.fx_guid.as_str())
+                        .or_else(|| fx_names_a.get(d.fx_guid.as_str()))
+                        .unwrap_or(&"Unknown FX")
+                        .to_string();
+                    MorphDiffEntry {
+                        fx_guid: d.fx_guid.clone(),
+                        fx_name,
+                        param_index: d.param_index,
+                        param_name: d.param_name.clone(),
+                        value_a: d.from_value,
+                        value_b: d.to_value,
+                    }
+                })
+                .collect();
+
+            morph_diff.set(entries);
+        } else {
+            morph_diff.write().clear();
+        }
+
+        morph_snap_a.set(snap_a);
+        morph_snap_b.set(snap_b);
+    };
+
     // ── DAW polling loop ─────────────────────────────────────────
     use_future(move || async move {
         loop {
@@ -189,8 +189,8 @@ pub fn SnapshotTestHarness() -> Element {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         }
 
-        *DAW_CONNECTED.write() = true;
-        *PANEL_STATUS.write() = "Connected — select a track in REAPER".to_string();
+        daw_connected.set(true);
+        panel_status.set("Connected — select a track in REAPER".to_string());
 
         let daw = daw_control::Daw::get();
 
@@ -203,42 +203,42 @@ pub fn SnapshotTestHarness() -> Element {
                     let guid = th.guid().to_string();
                     let name = th.info().await.map(|t| t.name).unwrap_or_default();
 
-                    let prev_guid = TRACKED_TRACK_GUID.read().clone();
+                    let prev_guid = tracked_track_guid.read().clone();
                     let track_changed = prev_guid.as_deref() != Some(&guid);
 
-                    *TRACKED_TRACK_GUID.write() = Some(guid.clone());
-                    *TRACKED_TRACK_NAME.write() = Some(name);
+                    tracked_track_guid.set(Some(guid.clone()));
+                    tracked_track_name.set(Some(name));
 
                     if track_changed {
-                        SELECTED_FX_INDICES.write().clear();
+                        selected_fx_indices.write().clear();
                     }
 
                     // Always refresh FX list and tree (not just on track change)
                     if let Ok(Some(track_handle)) = project.tracks().by_guid(&guid).await {
                         let chain = track_handle.fx_chain();
                         if let Ok(fx_list) = chain.all().await {
-                            *TRACKED_FX_COUNT.write() = fx_list.len();
-                            *TRACKED_FX_NAMES.write() =
-                                fx_list.iter().map(|fx| fx.plugin_name.clone()).collect();
-                            *TRACKED_FX_LIST.write() = fx_list.clone();
+                            tracked_fx_count.set(fx_list.len());
+                            tracked_fx_names
+                                .set(fx_list.iter().map(|fx| fx.plugin_name.clone()).collect());
+                            tracked_fx_list.set(fx_list.clone());
                             if track_changed {
-                                *PANEL_STATUS.write() =
-                                    format!("Tracking: {} FX on chain", fx_list.len());
+                                panel_status
+                                    .set(format!("Tracking: {} FX on chain", fx_list.len()));
                             }
                         }
                         if let Ok(tree) = chain.tree().await {
-                            *TRACKED_FX_TREE.write() = tree;
+                            tracked_fx_tree.set(tree);
                         }
                     }
-                } else if TRACKED_TRACK_GUID.read().is_some() {
-                    *TRACKED_TRACK_GUID.write() = None;
-                    *TRACKED_TRACK_NAME.write() = None;
-                    *TRACKED_FX_COUNT.write() = 0;
-                    TRACKED_FX_NAMES.write().clear();
-                    TRACKED_FX_LIST.write().clear();
-                    *TRACKED_FX_TREE.write() = FxTree::new();
-                    SELECTED_FX_INDICES.write().clear();
-                    *PANEL_STATUS.write() = "No track selected in REAPER".to_string();
+                } else if tracked_track_guid.read().is_some() {
+                    tracked_track_guid.set(None);
+                    tracked_track_name.set(None);
+                    tracked_fx_count.set(0);
+                    tracked_fx_names.write().clear();
+                    tracked_fx_list.write().clear();
+                    tracked_fx_tree.set(FxTree::new());
+                    selected_fx_indices.write().clear();
+                    panel_status.set("No track selected in REAPER".to_string());
                 }
             }
 
@@ -259,20 +259,21 @@ pub fn SnapshotTestHarness() -> Element {
             last_pos = pos;
 
             // Need both snapshots loaded
-            let has_both = MORPH_SNAP_A.peek().is_some() && MORPH_SNAP_B.peek().is_some();
+            let has_both = morph_snap_a.peek().is_some() && morph_snap_b.peek().is_some();
             if !has_both {
                 continue;
             }
 
             let easing = *MORPH_EASING.peek();
             let eased_t = easing.apply(pos);
-            let diffs = MORPH_DIFF.peek().clone();
+            let diffs = morph_diff.peek().clone();
 
             if diffs.is_empty() {
                 continue;
             }
 
-            let Some(chain) = get_tracked_fx_chain().await else {
+            let guid = tracked_track_guid.peek().clone();
+            let Some(chain) = get_tracked_fx_chain(&guid).await else {
                 warn!("Morph: could not get tracked FX chain");
                 continue;
             };
@@ -322,7 +323,7 @@ pub fn SnapshotTestHarness() -> Element {
                 );
             }
 
-            *PANEL_STATUS.write() = if not_found > 0 {
+            let status = if not_found > 0 {
                 format!(
                     "Morph {:.0}% — {}/{} params ({} FX not found)",
                     pos * 100.0,
@@ -347,6 +348,7 @@ pub fn SnapshotTestHarness() -> Element {
                     diffs.len()
                 )
             };
+            panel_status.set(status);
         }
     });
 
@@ -356,12 +358,13 @@ pub fn SnapshotTestHarness() -> Element {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-            let diffs = MORPH_DIFF.peek().clone();
+            let diffs = morph_diff.peek().clone();
             if diffs.is_empty() {
                 continue;
             }
 
-            let Some(chain) = get_tracked_fx_chain().await else {
+            let guid = tracked_track_guid.peek().clone();
+            let Some(chain) = get_tracked_fx_chain(&guid).await else {
                 continue;
             };
 
@@ -375,7 +378,7 @@ pub fn SnapshotTestHarness() -> Element {
             }
 
             if !live_values.is_empty() {
-                *LIVE_PARAM_VALUES.write() = live_values;
+                live_param_values.set(live_values);
             }
         }
     });
@@ -385,7 +388,7 @@ pub fn SnapshotTestHarness() -> Element {
     let _slot_a = *MORPH_SLOT_A.read();
     let _slot_b = *MORPH_SLOT_B.read();
     // Also react to snapshot cache changes (new captures)
-    let _cache_len = SNAPSHOT_CACHE.read().len();
+    let _cache_len = snapshot_cache.read().len();
     use_effect(move || {
         recompute_morph_diff();
     });
@@ -394,13 +397,13 @@ pub fn SnapshotTestHarness() -> Element {
     let mut show_module_save_dialog = use_signal(|| false);
     let mut module_save_name = use_signal(String::new);
 
-    // ── Read reactive state ──────────────────────────────────────
-    let connected = *DAW_CONNECTED.read();
-    let track_name = TRACKED_TRACK_NAME.read().clone();
-    let track_available = TRACKED_TRACK_GUID.read().is_some();
-    let fx_count = *TRACKED_FX_COUNT.read();
-    let fx_names = TRACKED_FX_NAMES.read().clone();
-    let status = PANEL_STATUS.read().clone();
+    // ── Read reactive state for RSX ──────────────────────────────
+    let connected = *daw_connected.read();
+    let track_name = tracked_track_name.cloned();
+    let track_available = tracked_track_guid.read().is_some();
+    let fx_count = *tracked_fx_count.read();
+    let fx_names = tracked_fx_names.cloned();
+    let status = panel_status.cloned();
 
     // Count filled snapshot slots for the module save dialog
     let filled_snapshot_count = {
@@ -413,14 +416,14 @@ pub fn SnapshotTestHarness() -> Element {
             .count()
     };
 
-    let morph_diffs = MORPH_DIFF.read().clone();
+    let morph_diffs = morph_diff.cloned();
     let morph_pos = *MORPH_POSITION.read();
     let morph_easing = *MORPH_EASING.read();
-    let morph_name_a = MORPH_NAME_A.read().clone();
-    let morph_name_b = MORPH_NAME_B.read().clone();
-    let has_morph = morph_name_a.is_some() && morph_name_b.is_some();
+    let morph_name_a_val = morph_name_a.cloned();
+    let morph_name_b_val = morph_name_b.cloned();
+    let has_morph = morph_name_a_val.is_some() && morph_name_b_val.is_some();
     let eased_t = morph_easing.apply(morph_pos);
-    let live_values = LIVE_PARAM_VALUES.read().clone();
+    let live_values = live_param_values.cloned();
 
     // Group diffs by FX name for display
     let grouped_diffs: Vec<(String, Vec<&MorphDiffEntry>)> = {
@@ -439,8 +442,9 @@ pub fn SnapshotTestHarness() -> Element {
 
     let snap_on_save = Callback::new(move |(slot_index, name): (usize, String)| {
         spawn(async move {
-            let Some(chain) = get_tracked_fx_chain().await else {
-                *PANEL_STATUS.write() = "No track available for capture".to_string();
+            let guid = tracked_track_guid.peek().clone();
+            let Some(chain) = get_tracked_fx_chain(&guid).await else {
+                panel_status.set("No track available for capture".to_string());
                 return;
             };
 
@@ -471,23 +475,23 @@ pub fn SnapshotTestHarness() -> Element {
                     let id = Uuid::new_v4();
 
                     if let Ok(json) = facet_json::to_string(&snapshot) {
-                        SNAPSHOT_CACHE.write().insert(id, json);
+                        snapshot_cache.write().insert(id, json);
                     }
 
                     DAW_SNAPSHOT_SLOTS
                         .write()
                         .save_to_slot(slot_index, id, display_name.clone());
 
-                    *PANEL_STATUS.write() = format!(
+                    panel_status.set(format!(
                         "Captured '{}' → slot {} ({} FX, {} params)",
                         display_name,
                         slot_index + 1,
                         fx_count,
                         param_count
-                    );
+                    ));
                 }
                 Err(e) => {
-                    *PANEL_STATUS.write() = format!("Capture failed: {e}");
+                    panel_status.set(format!("Capture failed: {e}"));
                 }
             }
         });
@@ -495,18 +499,19 @@ pub fn SnapshotTestHarness() -> Element {
 
     let snap_on_recall = Callback::new(move |id: Uuid| {
         spawn(async move {
-            let Some(chain) = get_tracked_fx_chain().await else {
-                *PANEL_STATUS.write() = "No track available for recall".to_string();
+            let guid = tracked_track_guid.peek().clone();
+            let Some(chain) = get_tracked_fx_chain(&guid).await else {
+                panel_status.set("No track available for recall".to_string());
                 return;
             };
 
             let json = {
-                let cache = SNAPSHOT_CACHE.read();
+                let cache = snapshot_cache.read();
                 cache.get(&id).cloned()
             };
 
             let Some(json) = json else {
-                *PANEL_STATUS.write() = format!("Snapshot {} not in cache", &id.to_string()[..8]);
+                panel_status.set(format!("Snapshot {} not in cache", &id.to_string()[..8]));
                 return;
             };
 
@@ -548,10 +553,10 @@ pub fn SnapshotTestHarness() -> Element {
                                 let mut remapped = snapshot.clone();
                                 daw_bridge::remap_snapshot_guids(&mut remapped, &result.guid_remap);
                                 if let Ok(updated_json) = facet_json::to_string(&remapped) {
-                                    SNAPSHOT_CACHE.write().insert(id, updated_json);
+                                    snapshot_cache.write().insert(id, updated_json);
                                 }
                             }
-                            let status = if !result.guid_remap.is_empty() {
+                            let status_text = if !result.guid_remap.is_empty() {
                                 format!(
                                     "Recalled '{}' — {} params changed ({} cross-track remapped)",
                                     snapshot.name,
@@ -565,17 +570,17 @@ pub fn SnapshotTestHarness() -> Element {
                                     result.changes.len()
                                 )
                             };
-                            *PANEL_STATUS.write() = status;
+                            panel_status.set(status_text);
                         }
                         Err(e) => {
                             warn!("Recall failed: {e}");
-                            *PANEL_STATUS.write() = format!("Recall failed: {e}");
+                            panel_status.set(format!("Recall failed: {e}"));
                         }
                     }
                 }
                 Err(e) => {
                     warn!("Snapshot deserialize error: {e}");
-                    *PANEL_STATUS.write() = format!("Deserialize error: {e}");
+                    panel_status.set(format!("Deserialize error: {e}"));
                 }
             }
         });
@@ -587,17 +592,18 @@ pub fn SnapshotTestHarness() -> Element {
     });
 
     let snap_on_delete = Callback::new(move |(slot_index, id): (usize, Uuid)| {
-        SNAPSHOT_CACHE.write().remove(&id);
+        snapshot_cache.write().remove(&id);
         DAW_SNAPSHOT_SLOTS.write().clear_slot(slot_index);
-        *PANEL_STATUS.write() = format!("Deleted snapshot from slot {}", slot_index + 1);
+        panel_status.set(format!("Deleted snapshot from slot {}", slot_index + 1));
     });
 
     // ── Preset callbacks ─────────────────────────────────────────
 
     let preset_on_save = Callback::new(move |name: String| {
         spawn(async move {
-            let Some(chain) = get_tracked_fx_chain().await else {
-                *PANEL_STATUS.write() = "No track available for preset capture".to_string();
+            let guid = tracked_track_guid.peek().clone();
+            let Some(chain) = get_tracked_fx_chain(&guid).await else {
+                panel_status.set("No track available for preset capture".to_string());
                 return;
             };
 
@@ -609,7 +615,7 @@ pub fn SnapshotTestHarness() -> Element {
                     // Bundle current snapshot slots into the preset
                     let snapshot_slots = {
                         let slots_state = DAW_SNAPSHOT_SLOTS.read();
-                        let cache = SNAPSHOT_CACHE.read();
+                        let cache = snapshot_cache.read();
                         let mut bundled = Vec::new();
                         for (page_idx, page) in slots_state.pages.iter().enumerate() {
                             for (slot_idx, slot) in page.iter().enumerate() {
@@ -642,7 +648,7 @@ pub fn SnapshotTestHarness() -> Element {
                     };
 
                     if let Ok(json) = facet_json::to_string(&full_preset) {
-                        PRESET_CACHE.write().insert(id, json);
+                        preset_cache.write().insert(id, json);
                     }
 
                     DAW_PRESETS.write().push(DawPresetEntry {
@@ -654,13 +660,13 @@ pub fn SnapshotTestHarness() -> Element {
                         is_module: false,
                     });
 
-                    *PANEL_STATUS.write() = format!(
+                    panel_status.set(format!(
                         "Saved preset '{}' ({} FX, {} snapshots)",
                         name, chunk_count, snap_count
-                    );
+                    ));
                 }
                 Err(e) => {
-                    *PANEL_STATUS.write() = format!("Preset capture failed: {e}");
+                    panel_status.set(format!("Preset capture failed: {e}"));
                 }
             }
         });
@@ -668,18 +674,19 @@ pub fn SnapshotTestHarness() -> Element {
 
     let preset_on_recall = Callback::new(move |id: Uuid| {
         spawn(async move {
-            let Some(chain) = get_tracked_fx_chain().await else {
-                *PANEL_STATUS.write() = "No track available for preset recall".to_string();
+            let guid = tracked_track_guid.peek().clone();
+            let Some(chain) = get_tracked_fx_chain(&guid).await else {
+                panel_status.set("No track available for preset recall".to_string());
                 return;
             };
 
             let json = {
-                let cache = PRESET_CACHE.read();
+                let cache = preset_cache.read();
                 cache.get(&id).cloned()
             };
 
             let Some(json) = json else {
-                *PANEL_STATUS.write() = format!("Preset {} not in cache", &id.to_string()[..8]);
+                panel_status.set(format!("Preset {} not in cache", &id.to_string()[..8]));
                 return;
             };
 
@@ -697,7 +704,7 @@ pub fn SnapshotTestHarness() -> Element {
                         let snap_count = full_preset.snapshot_slots.len();
                         if snap_count > 0 {
                             let mut slots_state = DAW_SNAPSHOT_SLOTS.write();
-                            let mut cache = SNAPSHOT_CACHE.write();
+                            let mut cache = snapshot_cache.write();
                             let spp = slots_state.slots_per_page;
 
                             for bundled_slot in &full_preset.snapshot_slots {
@@ -734,7 +741,7 @@ pub fn SnapshotTestHarness() -> Element {
                         }
 
                         *DAW_ACTIVE_PRESET.write() = Some(id);
-                        let status = if remap_count > 0 {
+                        let status_text = if remap_count > 0 {
                             format!(
                                 "Recalled '{}' ({} FX, {} cross-track remapped, {} snapshots)",
                                 full_preset.name, chunk_count, remap_count, snap_count
@@ -745,10 +752,10 @@ pub fn SnapshotTestHarness() -> Element {
                                 full_preset.name, chunk_count, snap_count
                             )
                         };
-                        *PANEL_STATUS.write() = status;
+                        panel_status.set(status_text);
                     }
                     Err(e) => {
-                        *PANEL_STATUS.write() = format!("Preset recall failed: {e}");
+                        panel_status.set(format!("Preset recall failed: {e}"));
                     }
                 }
             } else if let Ok(legacy) = facet_json::from_str::<DawStateChunkSnapshot>(&json) {
@@ -757,7 +764,7 @@ pub fn SnapshotTestHarness() -> Element {
                     Ok(guid_remap) => {
                         let remap_count = guid_remap.len();
                         *DAW_ACTIVE_PRESET.write() = Some(id);
-                        let status = if remap_count > 0 {
+                        let status_text = if remap_count > 0 {
                             format!(
                                 "Recalled '{}' ({} FX, {} cross-track remapped)",
                                 legacy.name,
@@ -771,14 +778,14 @@ pub fn SnapshotTestHarness() -> Element {
                                 legacy.chunks.len()
                             )
                         };
-                        *PANEL_STATUS.write() = status;
+                        panel_status.set(status_text);
                     }
                     Err(e) => {
-                        *PANEL_STATUS.write() = format!("Preset recall failed: {e}");
+                        panel_status.set(format!("Preset recall failed: {e}"));
                     }
                 }
             } else {
-                *PANEL_STATUS.write() = "Deserialize error: unrecognized preset format".to_string();
+                panel_status.set("Deserialize error: unrecognized preset format".to_string());
             }
         });
     });
@@ -788,24 +795,25 @@ pub fn SnapshotTestHarness() -> Element {
         if let Some(p) = presets.iter_mut().find(|p| p.id == id) {
             p.name = new_name.clone();
         }
-        *PANEL_STATUS.write() = format!("Renamed preset → '{new_name}'");
+        panel_status.set(format!("Renamed preset → '{new_name}'"));
     });
 
     let preset_on_delete = Callback::new(move |id: Uuid| {
         DAW_PRESETS.write().retain(|p| p.id != id);
-        PRESET_CACHE.write().remove(&id);
+        preset_cache.write().remove(&id);
         if *DAW_ACTIVE_PRESET.read() == Some(id) {
             *DAW_ACTIVE_PRESET.write() = None;
         }
-        *PANEL_STATUS.write() = "Deleted preset".to_string();
+        panel_status.set("Deleted preset".to_string());
     });
 
     // ── Action bar buttons ───────────────────────────────────────
 
     let capture_snapshot = move |_| {
         spawn(async move {
-            let Some(chain) = get_tracked_fx_chain().await else {
-                *PANEL_STATUS.write() = "No track available".to_string();
+            let guid = tracked_track_guid.peek().clone();
+            let Some(chain) = get_tracked_fx_chain(&guid).await else {
+                panel_status.set("No track available".to_string());
                 return;
             };
 
@@ -817,21 +825,25 @@ pub fn SnapshotTestHarness() -> Element {
                     let id = Uuid::new_v4();
 
                     if let Ok(json) = facet_json::to_string(&snapshot) {
-                        SNAPSHOT_CACHE.write().insert(id, json);
+                        snapshot_cache.write().insert(id, json);
                     }
 
                     let mut state = DAW_SNAPSHOT_SLOTS.write();
                     let empty_idx = state.current_slots().iter().position(|s| !s.is_filled());
                     if let Some(idx) = empty_idx {
                         state.save_to_slot(idx, id, name.clone());
-                        *PANEL_STATUS.write() =
-                            format!("Captured '{}' → slot {} ({} FX)", name, idx + 1, fx_count);
+                        panel_status.set(format!(
+                            "Captured '{}' → slot {} ({} FX)",
+                            name,
+                            idx + 1,
+                            fx_count
+                        ));
                     } else {
-                        *PANEL_STATUS.write() = "All slots full — go to next page".to_string();
+                        panel_status.set("All slots full — go to next page".to_string());
                     }
                 }
                 Err(e) => {
-                    *PANEL_STATUS.write() = format!("Capture failed: {e}");
+                    panel_status.set(format!("Capture failed: {e}"));
                 }
             }
         });
@@ -839,8 +851,9 @@ pub fn SnapshotTestHarness() -> Element {
 
     let save_preset = move |_| {
         spawn(async move {
-            let Some(chain) = get_tracked_fx_chain().await else {
-                *PANEL_STATUS.write() = "No track available".to_string();
+            let guid = tracked_track_guid.peek().clone();
+            let Some(chain) = get_tracked_fx_chain(&guid).await else {
+                panel_status.set("No track available".to_string());
                 return;
             };
 
@@ -854,7 +867,7 @@ pub fn SnapshotTestHarness() -> Element {
                     // Bundle snapshots (same logic as preset_on_save)
                     let snapshot_slots = {
                         let slots_state = DAW_SNAPSHOT_SLOTS.read();
-                        let cache = SNAPSHOT_CACHE.read();
+                        let cache = snapshot_cache.read();
                         let mut bundled = Vec::new();
                         for (page_idx, page) in slots_state.pages.iter().enumerate() {
                             for (slot_idx, slot) in page.iter().enumerate() {
@@ -886,7 +899,7 @@ pub fn SnapshotTestHarness() -> Element {
                     };
 
                     if let Ok(json) = facet_json::to_string(&full_preset) {
-                        PRESET_CACHE.write().insert(id, json);
+                        preset_cache.write().insert(id, json);
                     }
 
                     DAW_PRESETS.write().push(DawPresetEntry {
@@ -898,13 +911,13 @@ pub fn SnapshotTestHarness() -> Element {
                         is_module: false,
                     });
 
-                    *PANEL_STATUS.write() = format!(
+                    panel_status.set(format!(
                         "Saved preset '{}' ({} FX, {} snapshots)",
                         name, chunk_count, snap_count
-                    );
+                    ));
                 }
                 Err(e) => {
-                    *PANEL_STATUS.write() = format!("Preset save failed: {e}");
+                    panel_status.set(format!("Preset save failed: {e}"));
                 }
             }
         });
@@ -913,8 +926,9 @@ pub fn SnapshotTestHarness() -> Element {
     // Diagnostic: directly test setting a param on the first FX
     let test_set_param = move |_| {
         spawn(async move {
-            let Some(chain) = get_tracked_fx_chain().await else {
-                *PANEL_STATUS.write() = "Test: No track chain available".to_string();
+            let guid = tracked_track_guid.peek().clone();
+            let Some(chain) = get_tracked_fx_chain(&guid).await else {
+                panel_status.set("Test: No track chain available".to_string());
                 return;
             };
 
@@ -922,7 +936,7 @@ pub fn SnapshotTestHarness() -> Element {
             match chain.all().await {
                 Ok(fx_list) => {
                     if fx_list.is_empty() {
-                        *PANEL_STATUS.write() = "Test: No FX on track".to_string();
+                        panel_status.set("Test: No FX on track".to_string());
                         return;
                     }
 
@@ -952,54 +966,52 @@ pub fn SnapshotTestHarness() -> Element {
                                             // Read back to confirm
                                             match handle.param(0).get().await {
                                                 Ok(readback) => {
-                                                    *PANEL_STATUS.write() = format!(
+                                                    panel_status.set(format!(
                                                         "Test SET: {} param0 {:.3} → {:.3} (readback: {:.3})",
                                                         first_fx.plugin_name,
                                                         current_val,
                                                         new_val,
                                                         readback
-                                                    );
+                                                    ));
                                                     info!(
                                                         "Test: readback={:.4} (expected {:.4})",
                                                         readback, new_val
                                                     );
                                                 }
                                                 Err(e) => {
-                                                    *PANEL_STATUS.write() = format!(
+                                                    panel_status.set(format!(
                                                         "Test: set OK but readback failed: {e}"
-                                                    );
+                                                    ));
                                                 }
                                             }
                                         }
                                         Err(e) => {
                                             warn!("Test: set param failed: {e}");
-                                            *PANEL_STATUS.write() =
-                                                format!("Test: set failed: {e}");
+                                            panel_status.set(format!("Test: set failed: {e}"));
                                         }
                                     }
                                 }
                                 Err(e) => {
                                     warn!("Test: get param failed: {e}");
-                                    *PANEL_STATUS.write() =
-                                        format!("Test: get param 0 failed: {e}");
+                                    panel_status.set(format!("Test: get param 0 failed: {e}"));
                                 }
                             }
                         }
                         Ok(None) => {
                             warn!("Test: FX not found by GUID '{}'", first_fx.guid);
-                            *PANEL_STATUS.write() = format!(
+                            panel_status.set(format!(
                                 "Test: FX '{}' not found by GUID '{}'",
                                 first_fx.plugin_name, first_fx.guid
-                            );
+                            ));
                         }
                         Err(e) => {
                             warn!("Test: by_guid error: {e}");
-                            *PANEL_STATUS.write() = format!("Test: by_guid error: {e}");
+                            panel_status.set(format!("Test: by_guid error: {e}"));
                         }
                     }
                 }
                 Err(e) => {
-                    *PANEL_STATUS.write() = format!("Test: chain.all() failed: {e}");
+                    panel_status.set(format!("Test: chain.all() failed: {e}"));
                 }
             }
         });
@@ -1008,25 +1020,25 @@ pub fn SnapshotTestHarness() -> Element {
     // Diagnostic: directly load the first preset with verbose logging
     let load_preset_debug = move |_| {
         spawn(async move {
-            let Some(chain) = get_tracked_fx_chain().await else {
-                *PANEL_STATUS.write() = "Load Preset: No track chain available".to_string();
+            let guid = tracked_track_guid.peek().clone();
+            let Some(chain) = get_tracked_fx_chain(&guid).await else {
+                panel_status.set("Load Preset: No track chain available".to_string());
                 return;
             };
 
             // Find the first available preset
             let (preset_id, preset_json) = {
                 let presets = DAW_PRESETS.read();
-                let cache = PRESET_CACHE.read();
+                let cache = preset_cache.read();
                 if let Some(entry) = presets.first() {
                     if let Some(json) = cache.get(&entry.id) {
                         (entry.id, json.clone())
                     } else {
-                        *PANEL_STATUS.write() =
-                            format!("Load Preset: '{}' not in cache", entry.name);
+                        panel_status.set(format!("Load Preset: '{}' not in cache", entry.name));
                         return;
                     }
                 } else {
-                    *PANEL_STATUS.write() = "Load Preset: No presets saved yet".to_string();
+                    panel_status.set("Load Preset: No presets saved yet".to_string());
                     return;
                 }
             };
@@ -1078,7 +1090,7 @@ pub fn SnapshotTestHarness() -> Element {
                         let snap_count = full_preset.snapshot_slots.len();
                         if snap_count > 0 {
                             let mut slots_state = DAW_SNAPSHOT_SLOTS.write();
-                            let mut cache = SNAPSHOT_CACHE.write();
+                            let mut cache = snapshot_cache.write();
                             let spp = slots_state.slots_per_page;
 
                             for bundled_slot in &full_preset.snapshot_slots {
@@ -1126,17 +1138,17 @@ pub fn SnapshotTestHarness() -> Element {
                         }
 
                         *DAW_ACTIVE_PRESET.write() = Some(preset_id);
-                        *PANEL_STATUS.write() = format!(
+                        panel_status.set(format!(
                             "Loaded '{}' ({} FX, {} remapped, {} snaps)",
                             full_preset.name,
                             full_preset.state_chunks.chunks.len(),
                             guid_remap.len(),
                             snap_count
-                        );
+                        ));
                     }
                     Err(e) => {
                         warn!("Load Preset: apply failed: {e}");
-                        *PANEL_STATUS.write() = format!("Load Preset failed: {e}");
+                        panel_status.set(format!("Load Preset failed: {e}"));
                     }
                 }
             } else if let Ok(legacy) = facet_json::from_str::<DawStateChunkSnapshot>(&preset_json) {
@@ -1148,19 +1160,19 @@ pub fn SnapshotTestHarness() -> Element {
                 match daw_bridge::apply_state_chunks_cross_track(&chain, &legacy).await {
                     Ok(guid_remap) => {
                         *DAW_ACTIVE_PRESET.write() = Some(preset_id);
-                        *PANEL_STATUS.write() = format!(
+                        panel_status.set(format!(
                             "Loaded legacy '{}' ({} FX, {} remapped)",
                             legacy.name,
                             legacy.chunks.len(),
                             guid_remap.len()
-                        );
+                        ));
                     }
                     Err(e) => {
-                        *PANEL_STATUS.write() = format!("Load Preset failed: {e}");
+                        panel_status.set(format!("Load Preset failed: {e}"));
                     }
                 }
             } else {
-                *PANEL_STATUS.write() = "Load Preset: unrecognized format".to_string();
+                panel_status.set("Load Preset: unrecognized format".to_string());
             }
         });
     };
@@ -1174,14 +1186,15 @@ pub fn SnapshotTestHarness() -> Element {
     // 4. Store the container block as chunk_text in DawModulePreset
     let save_module_preset = move |container_name: String| {
         spawn(async move {
-            let Some(chain) = get_tracked_fx_chain().await else {
-                *PANEL_STATUS.write() = "No track available for module capture".to_string();
+            let guid = tracked_track_guid.peek().clone();
+            let Some(chain) = get_tracked_fx_chain(&guid).await else {
+                panel_status.set("No track available for module capture".to_string());
                 return;
             };
 
             let upper_name = container_name.trim().to_uppercase();
             if upper_name.is_empty() {
-                *PANEL_STATUS.write() = "Module name cannot be empty".to_string();
+                panel_status.set("Module name cannot be empty".to_string());
                 return;
             }
 
@@ -1193,13 +1206,13 @@ pub fn SnapshotTestHarness() -> Element {
             let tree = match chain.tree().await {
                 Ok(t) => t,
                 Err(e) => {
-                    *PANEL_STATUS.write() = format!("Failed to read FX tree: {e}");
+                    panel_status.set(format!("Failed to read FX tree: {e}"));
                     return;
                 }
             };
 
             if tree.nodes.is_empty() {
-                *PANEL_STATUS.write() = "No FX on track to save as module".to_string();
+                panel_status.set("No FX on track to save as module".to_string());
                 return;
             }
 
@@ -1225,7 +1238,7 @@ pub fn SnapshotTestHarness() -> Element {
                         );
                     }
                     Err(e) => {
-                        *PANEL_STATUS.write() = format!("Failed to create container: {e}");
+                        panel_status.set(format!("Failed to create container: {e}"));
                         return;
                     }
                 }
@@ -1237,7 +1250,7 @@ pub fn SnapshotTestHarness() -> Element {
             let fxchain_text = match chain.fx_chain_chunk_text().await {
                 Ok(text) => text,
                 Err(e) => {
-                    *PANEL_STATUS.write() = format!("Module capture failed: {e}");
+                    panel_status.set(format!("Module capture failed: {e}"));
                     return;
                 }
             };
@@ -1255,8 +1268,8 @@ pub fn SnapshotTestHarness() -> Element {
                         block
                     }
                     None => {
-                        *PANEL_STATUS.write() =
-                            "Failed to find <CONTAINER block in FXCHAIN chunk".to_string();
+                        panel_status
+                            .set("Failed to find <CONTAINER block in FXCHAIN chunk".to_string());
                         return;
                     }
                 };
@@ -1266,7 +1279,7 @@ pub fn SnapshotTestHarness() -> Element {
             // Bundle current snapshot slots
             let snapshot_slots = {
                 let slots_state = DAW_SNAPSHOT_SLOTS.read();
-                let cache = SNAPSHOT_CACHE.read();
+                let cache = snapshot_cache.read();
                 let mut bundled = Vec::new();
                 for (page_idx, page) in slots_state.pages.iter().enumerate() {
                     for (slot_idx, slot) in page.iter().enumerate() {
@@ -1300,7 +1313,7 @@ pub fn SnapshotTestHarness() -> Element {
             };
 
             if let Ok(json) = facet_json::to_string(&module_preset) {
-                PRESET_CACHE.write().insert(id, json);
+                preset_cache.write().insert(id, json);
             }
 
             DAW_PRESETS.write().push(DawPresetEntry {
@@ -1316,35 +1329,35 @@ pub fn SnapshotTestHarness() -> Element {
                 "Saved module preset '{}' ({} bytes chunk, {} snapshots)",
                 upper_name, chunk_len, snap_count
             );
-            *PANEL_STATUS.write() = format!(
+            panel_status.set(format!(
                 "Saved module '{}' ({} bytes, {} snapshots)",
                 upper_name, chunk_len, snap_count
-            );
+            ));
         });
     };
 
     // Diagnostic: load the first module preset with verbose logging
     let load_module_preset_debug = move |_| {
         spawn(async move {
-            let Some(chain) = get_tracked_fx_chain().await else {
-                *PANEL_STATUS.write() = "Load Module: No track chain available".to_string();
+            let guid = tracked_track_guid.peek().clone();
+            let Some(chain) = get_tracked_fx_chain(&guid).await else {
+                panel_status.set("Load Module: No track chain available".to_string());
                 return;
             };
 
             // Find the first module preset
             let (preset_id, preset_json) = {
                 let presets = DAW_PRESETS.read();
-                let cache = PRESET_CACHE.read();
+                let cache = preset_cache.read();
                 if let Some(entry) = presets.iter().find(|p| p.is_module) {
                     if let Some(json) = cache.get(&entry.id) {
                         (entry.id, json.clone())
                     } else {
-                        *PANEL_STATUS.write() =
-                            format!("Load Module: '{}' not in cache", entry.name);
+                        panel_status.set(format!("Load Module: '{}' not in cache", entry.name));
                         return;
                     }
                 } else {
-                    *PANEL_STATUS.write() = "Load Module: No module presets saved yet".to_string();
+                    panel_status.set("Load Module: No module presets saved yet".to_string());
                     return;
                 }
             };
@@ -1381,7 +1394,7 @@ pub fn SnapshotTestHarness() -> Element {
                             let snap_count = module_preset.snapshot_slots.len();
                             if snap_count > 0 {
                                 let mut slots_state = DAW_SNAPSHOT_SLOTS.write();
-                                let mut cache = SNAPSHOT_CACHE.write();
+                                let mut cache = snapshot_cache.write();
                                 let spp = slots_state.slots_per_page;
 
                                 for bundled_slot in &module_preset.snapshot_slots {
@@ -1426,22 +1439,22 @@ pub fn SnapshotTestHarness() -> Element {
                             }
 
                             *DAW_ACTIVE_PRESET.write() = Some(preset_id);
-                            *PANEL_STATUS.write() = format!(
+                            panel_status.set(format!(
                                 "Loaded module '{}' ({} bytes chunk, {} snaps)",
                                 module_preset.container_name,
                                 module_preset.chunk_text.len(),
                                 snap_count
-                            );
+                            ));
                         }
                         Err(e) => {
                             warn!("Load Module: apply failed: {e}");
-                            *PANEL_STATUS.write() = format!("Load Module failed: {e}");
+                            panel_status.set(format!("Load Module failed: {e}"));
                         }
                     }
                 }
                 Err(e) => {
                     warn!("Load Module: deserialize failed: {e}");
-                    *PANEL_STATUS.write() = format!("Load Module: deserialize error: {e}");
+                    panel_status.set(format!("Load Module: deserialize error: {e}"));
                 }
             }
         });
@@ -1451,17 +1464,17 @@ pub fn SnapshotTestHarness() -> Element {
         *DAW_SNAPSHOT_SLOTS.write() = Default::default();
         DAW_PRESETS.write().clear();
         *DAW_ACTIVE_PRESET.write() = None;
-        SNAPSHOT_CACHE.write().clear();
-        PRESET_CACHE.write().clear();
+        snapshot_cache.write().clear();
+        preset_cache.write().clear();
         *MORPH_POSITION.write() = 0.0;
         *MORPH_EASING.write() = EasingCurve::Linear;
-        *MORPH_SNAP_A.write() = None;
-        *MORPH_SNAP_B.write() = None;
-        *MORPH_NAME_A.write() = None;
-        *MORPH_NAME_B.write() = None;
-        MORPH_DIFF.write().clear();
-        LIVE_PARAM_VALUES.write().clear();
-        *PANEL_STATUS.write() = "Cleared all snapshots and presets".to_string();
+        morph_snap_a.set(None);
+        morph_snap_b.set(None);
+        morph_name_a.set(None);
+        morph_name_b.set(None);
+        morph_diff.write().clear();
+        live_param_values.write().clear();
+        panel_status.set("Cleared all snapshots and presets".to_string());
     };
 
     // ── Render ───────────────────────────────────────────────────
@@ -1550,8 +1563,8 @@ pub fn SnapshotTestHarness() -> Element {
                     },
                     disabled: btn_disabled,
                     onclick: move |_| {
-                        *module_save_name.write() = String::new();
-                        *show_module_save_dialog.write() = true;
+                        module_save_name.set(String::new());
+                        show_module_save_dialog.set(true);
                     },
                     "Save Module"
                 }
@@ -1583,7 +1596,7 @@ pub fn SnapshotTestHarness() -> Element {
             }
 
             // ── Module save dialog (inline) ──────────────────────
-            if show_module_save_dialog() {
+            if *show_module_save_dialog.read() {
                 div { class: "border-b border-border bg-zinc-900/60 px-3 py-2 flex-shrink-0",
                     div { class: "flex items-center gap-2 mb-2",
                         span { class: "text-[10px] font-semibold text-teal-400 uppercase tracking-wider",
@@ -1599,16 +1612,16 @@ pub fn SnapshotTestHarness() -> Element {
                             placeholder: "e.g. TIME, DRIVE, MODULATION...",
                             autofocus: true,
                             value: "{module_save_name}",
-                            oninput: move |evt| { *module_save_name.write() = evt.value(); },
+                            oninput: move |evt| { module_save_name.set(evt.value()); },
                             onkeydown: move |evt| {
                                 if evt.key() == Key::Enter {
-                                    let name = module_save_name().trim().to_string();
+                                    let name = module_save_name.peek().trim().to_string();
                                     if !name.is_empty() {
                                         save_module_preset(name);
-                                        *show_module_save_dialog.write() = false;
+                                        show_module_save_dialog.set(false);
                                     }
                                 } else if evt.key() == Key::Escape {
-                                    *show_module_save_dialog.write() = false;
+                                    show_module_save_dialog.set(false);
                                 }
                             },
                         }
@@ -1616,12 +1629,12 @@ pub fn SnapshotTestHarness() -> Element {
                             class: "px-2 py-1.5 rounded text-[10px] font-medium bg-teal-900/40 \
                                     text-teal-400 border border-teal-800/40 hover:bg-teal-800/50 \
                                     transition-colors disabled:opacity-30",
-                            disabled: module_save_name().trim().is_empty(),
+                            disabled: module_save_name.read().trim().is_empty(),
                             onclick: move |_| {
-                                let name = module_save_name().trim().to_string();
+                                let name = module_save_name.peek().trim().to_string();
                                 if !name.is_empty() {
                                     save_module_preset(name);
-                                    *show_module_save_dialog.write() = false;
+                                    show_module_save_dialog.set(false);
                                 }
                             },
                             "Save"
@@ -1629,7 +1642,7 @@ pub fn SnapshotTestHarness() -> Element {
                         button {
                             class: "px-2 py-1.5 rounded text-[10px] font-medium text-zinc-400 \
                                     hover:text-zinc-200 transition-colors",
-                            onclick: move |_| { *show_module_save_dialog.write() = false; },
+                            onclick: move |_| { show_module_save_dialog.set(false); },
                             "Cancel"
                         }
                     }

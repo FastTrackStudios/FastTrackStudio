@@ -1,19 +1,14 @@
-//! Rig Editor Panel — sub-tab host for Block, Module, and Preset editors.
+//! Rig Editor Panel — sub-tab host for the unified editor and supporting views.
 //!
 //! Replaces the old SnapshotTest panel in the F8 screenset. Provides a sub-tab
 //! bar that switches between:
-//! - Performance (placeholder)
-//! - Edit (existing RigLayout)
-//! - Block Editor
-//! - Module Editor
-//! - Preset Editor
+//! - Performance
+//! - Edit (unified: node graph Flow/Compact or block Grid)
+//! - Songs
+//! - Advanced
 
 use crate::components::advanced_inspector::AdvancedInspectorView;
-use crate::components::block_editor::BlockEditorView;
-use crate::components::module_editor::ModuleEditorView;
 use crate::components::performance::PerformanceView;
-use crate::components::preset_editor::PresetEditorView;
-use crate::components::profile_editor::ProfileEditorView;
 use crate::components::song_editor::SongEditorView;
 use crate::hooks::rig_state::use_rig_subscription;
 use crate::prelude::*;
@@ -52,18 +47,6 @@ pub fn RigEditorPanel() -> Element {
                     },
                     RigEditorTab::Edit => rsx! {
                         crate::layouts::rig_layout::RigLayout {}
-                    },
-                    RigEditorTab::BlockEditor => rsx! {
-                        BlockEditorView {}
-                    },
-                    RigEditorTab::ModuleEditor => rsx! {
-                        ModuleEditorView {}
-                    },
-                    RigEditorTab::PresetEditor => rsx! {
-                        PresetEditorView {}
-                    },
-                    RigEditorTab::ProfileEditor => rsx! {
-                        ProfileEditorView {}
                     },
                     RigEditorTab::SongEditor => rsx! {
                         SongEditorView {}

@@ -62,10 +62,19 @@ pub fn use_rig_subscription() {
                 *RIG_CURRENT_PRESET.write() = Some(preset);
             }
 
-            // Materialize modules from the current preset for UI display
-            let modules = ctl.get_current_modules();
-            tracing::info!("{} modules resolved for UI", modules.len());
-            *RIG_MODULES.write() = modules;
+            // Materialize modules from the current preset for UI display —
+            // but only if RIG_MODULES hasn't already been populated by a
+            // user action (e.g. load_preset from DB).
+            if RIG_MODULES.read().is_empty() {
+                let modules = ctl.get_current_modules();
+                tracing::info!("{} modules resolved for UI (initial)", modules.len());
+                *RIG_MODULES.write() = modules;
+            } else {
+                tracing::info!(
+                    "Skipping initial module load — {} modules already present",
+                    RIG_MODULES.read().len()
+                );
+            }
 
             let setlists = ctl.get_available_setlists().await;
             tracing::info!("{} setlists available", setlists.len());
@@ -146,13 +155,44 @@ async fn handle_event(ctl: &SignalControl, event: RigControlEvent) {
             preset,
             scene_index,
         } => {
-            tracing::info!("Preset loaded: '{}' (scene {})", preset.name, scene_index);
+            tracing::info!(
+                "Preset loaded event: '{}' (scene {})",
+                preset.name,
+                scene_index
+            );
             let scene_id = preset.scenes.get(scene_index).map(|s| s.id);
             if let Some(id) = scene_id {
                 *RIG_CURRENT_PRESET_SNAPSHOT_ID.write() = Some(id);
             }
             *RIG_CURRENT_PRESET.write() = Some(preset);
-            *RIG_MODULES.write() = ctl.get_current_modules();
+
+            // Only overwrite modules from mock if RIG_MODULES is currently
+            // empty. When load_preset already populated DB modules, the
+            // mock event arrives AFTER and would clobber them.
+            if RIG_MODULES.read().is_empty() {
+                let modules = ctl.get_current_modules();
+                tracing::info!("PresetLoaded: setting {} mock modules", modules.len());
+                *RIG_MODULES.write() = modules;
+
+                // Rebuild node graph so grid/node views update
+                let modules = crate::signals::RIG_MODULES.read();
+                if !modules.is_empty() {
+                    let graph =
+                        crate::components::rig_grid::node_graph::NodeGraph::build_from_modules(
+                            &modules,
+                        );
+                    tracing::info!(
+                        "Rebuilt node graph from event ({} modules)",
+                        graph.modules.len()
+                    );
+                    *crate::signals::RIG_NODE_GRAPH.write() = graph;
+                }
+            } else {
+                tracing::info!(
+                    "PresetLoaded: skipping mock overwrite — {} modules already loaded",
+                    RIG_MODULES.read().len()
+                );
+            }
         }
         RigControlEvent::SongChanged { song_index } => {
             tracing::info!("Song changed to index {}", song_index);
@@ -170,7 +210,20 @@ async fn handle_event(ctl: &SignalControl, event: RigControlEvent) {
             if let Some(preset) = ctl.get_current_preset().await {
                 *RIG_CURRENT_PRESET.write() = Some(preset);
             }
-            *RIG_MODULES.write() = ctl.get_current_modules();
+
+            // Only overwrite modules from mock if empty (same guard as PresetLoaded)
+            if RIG_MODULES.read().is_empty() {
+                *RIG_MODULES.write() = ctl.get_current_modules();
+
+                let modules = crate::signals::RIG_MODULES.read();
+                if !modules.is_empty() {
+                    let graph =
+                        crate::components::rig_grid::node_graph::NodeGraph::build_from_modules(
+                            &modules,
+                        );
+                    *crate::signals::RIG_NODE_GRAPH.write() = graph;
+                }
+            }
         }
         RigControlEvent::PreloadCompleted { handle: _ } => {
             tracing::debug!("Preload completed");
@@ -185,21 +238,19 @@ async fn handle_event(ctl: &SignalControl, event: RigControlEvent) {
     }
 }
 
-/// Populate sidebar signals from the SQLite database.
+/// Refresh `RIG_AVAILABLE_PRESETS` from the SQLite database.
 ///
-/// Converts DB entity models into the `PresetInfo`/`ProfileInfo` types that
-/// the existing sidebar components already consume. This replaces mock data
-/// with real persisted content when a DB is available.
-async fn populate_sidebars_from_db(ctl: &SignalControl) {
-    use signal_control::{PresetInfo, PresetSnapshotInfo, ProfileInfo, ProfileSceneInfo};
+/// Converts DB entity models into the `PresetInfo` types that sidebar
+/// components consume. Call this after creating/deleting presets to keep
+/// the sidebar in sync with the database.
+pub(crate) async fn refresh_presets_from_db(ctl: &SignalControl) {
+    use signal_control::{PresetInfo, PresetSnapshotInfo};
 
-    // ── Presets ──────────────────────────────────────────────────
     if let Ok(db_presets) = ctl.list_rig_presets().await {
         if !db_presets.is_empty() {
             let mut preset_infos: Vec<PresetInfo> = Vec::with_capacity(db_presets.len());
 
             for p in &db_presets {
-                // Fetch snapshots for this preset
                 let snapshots = ctl
                     .list_rig_preset_snapshots(p.id)
                     .await
@@ -227,13 +278,22 @@ async fn populate_sidebars_from_db(ctl: &SignalControl) {
                 });
             }
 
-            tracing::info!(
-                "{} presets loaded from DB (replacing mock)",
-                preset_infos.len()
-            );
+            tracing::info!("{} presets loaded from DB", preset_infos.len());
             *RIG_AVAILABLE_PRESETS.write() = preset_infos;
         }
     }
+}
+
+/// Populate sidebar signals from the SQLite database.
+///
+/// Converts DB entity models into the `PresetInfo`/`ProfileInfo` types that
+/// the existing sidebar components already consume. This replaces mock data
+/// with real persisted content when a DB is available.
+async fn populate_sidebars_from_db(ctl: &SignalControl) {
+    use signal_control::{ProfileInfo, ProfileSceneInfo};
+
+    // ── Presets ──────────────────────────────────────────────────
+    refresh_presets_from_db(ctl).await;
 
     // ── Profiles ─────────────────────────────────────────────────
     if let Ok(db_profiles) = ctl.list_profiles().await {
@@ -288,6 +348,21 @@ async fn populate_sidebars_from_db(ctl: &SignalControl) {
                 profile_infos.len()
             );
             *RIG_AVAILABLE_PROFILES.write() = profile_infos;
+        }
+    }
+
+    // ── Node Graph from Modules ─────────────────────────────────
+    {
+        let modules = crate::signals::RIG_MODULES.read();
+        if !modules.is_empty() {
+            let graph =
+                crate::components::rig_grid::node_graph::NodeGraph::build_from_modules(&modules);
+            tracing::info!(
+                "Built node graph from {} DB modules ({} graph modules)",
+                modules.len(),
+                graph.modules.len()
+            );
+            *crate::signals::RIG_NODE_GRAPH.write() = graph;
         }
     }
 

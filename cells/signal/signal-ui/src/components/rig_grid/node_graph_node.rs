@@ -80,7 +80,11 @@ pub(crate) fn NodeBlock(props: NodeBlockProps) -> Element {
     let on_select = props.on_select.clone();
     let on_dbl_click = props.on_double_click.clone();
     let node_id = node.id;
-    let header_cursor = if props.wire_draft_active { "crosshair" } else { "grab" };
+    let header_cursor = if props.wire_draft_active {
+        "crosshair"
+    } else {
+        "grab"
+    };
 
     // Selection glow
     let selection_style = if props.is_selected {
@@ -89,7 +93,13 @@ pub(crate) fn NodeBlock(props: NodeBlockProps) -> Element {
         ""
     };
 
-    let node_class = if props.compact {
+    let node_class = if node.is_placeholder {
+        if props.compact {
+            "absolute rounded overflow-hidden border border-dashed transition-shadow duration-150 opacity-50"
+        } else {
+            "absolute rounded-lg overflow-hidden shadow-md border-2 border-dashed transition-shadow duration-150 opacity-50"
+        }
+    } else if props.compact {
         "absolute rounded overflow-hidden border transition-shadow duration-150"
     } else {
         "absolute rounded-lg overflow-hidden shadow-md border-2 transition-shadow duration-150"
@@ -227,7 +237,11 @@ struct PortCircleProps {
 #[component]
 fn PortCircle(props: PortCircleProps) -> Element {
     let base_size = 10.0;
-    let port_size = if props.is_hovered { base_size + 4.0 } else { base_size };
+    let port_size = if props.is_hovered {
+        base_size + 4.0
+    } else {
+        base_size
+    };
     let size_offset = if props.is_hovered { -2.0 } else { 0.0 };
 
     let spacing = props.node_height / (props.total + 1) as f64;
@@ -239,11 +253,7 @@ fn PortCircle(props: PortCircleProps) -> Element {
         props.node_width - base_size / 2.0 + size_offset
     };
 
-    let color = props
-        .port
-        .color
-        .as_deref()
-        .unwrap_or("#ffffff");
+    let color = props.port.color.as_deref().unwrap_or("#ffffff");
 
     let glow = if props.is_hovered {
         "0 0 8px 3px #22d3ee"
